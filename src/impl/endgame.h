@@ -401,6 +401,16 @@ static inline void endgame_args_fill(
                                         : (AnalysisProgressListener){0};
 }
 
+// Score-weighted fraction (0.0..1.0) of player_idx's rack that is "stuck" at
+// the current position: tiles no legal move can play. Public shim over the
+// solver's internal stuck-tile detector for analysis tools. move_list is
+// scratch used for TILES_PLAYED move generation (create with
+// move_list_create_small). Requires valid cross-sets (true after
+// game_load_cgp / play_move); temporarily sets player-on-turn to player_idx and
+// restores it before returning.
+float endgame_player_stuck_fraction(Game *game, MoveList *move_list,
+                                    int player_idx);
+
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
                            TranspositionTable *tt, int solving_player,
                            int max_depth);
