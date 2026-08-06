@@ -1,0 +1,148 @@
+{
+  "analysis": {
+    "artifact_kind": "rule_zero_prospective_analysis",
+    "complete_game_inference_units": 320,
+    "equal_slice_judged_missed_value": {
+      "ci95": [
+        -0.0003940371078302714,
+        0.00022923158038652144
+      ],
+      "mean": -8.240276372187501e-05,
+      "observations": 320
+    },
+    "equal_slice_landmark_mismatch": {
+      "events": 4,
+      "one_sided_95_upper": 0.0283750179980361,
+      "rate": 0.0125,
+      "trials": 320
+    },
+    "full_horizon_judged_missed_value": {
+      "ci95": [
+        -0.0003940371078302714,
+        0.00022923158038652144
+      ],
+      "mean": -8.240276372187501e-05,
+      "observations": 320
+    },
+    "full_horizon_mismatch": {
+      "events": 4,
+      "one_sided_95_upper": 0.0283750179980361,
+      "rate": 0.0125,
+      "trials": 320
+    },
+    "gates": {
+      "matched_subset_no_harmful_bias": true,
+      "panel_pass": true,
+      "primary_judged_missed_value_upper_at_most_0.001": true,
+      "secondary_mismatch_reported_not_gated": {
+        "equal_slice_one_sided_95_upper": 0.0283750179980361,
+        "full_horizon_one_sided_95_upper": 0.0283750179980361
+      },
+      "usefulness_floor_stop_rate_0.30_savings_0.25_at_landmark": true
+    },
+    "historical_minimum_landmark_mismatch_sensitivity": {
+      "events": 4,
+      "one_sided_95_upper": 0.0283750179980361,
+      "rate": 0.0125,
+      "trials": 320
+    },
+    "judged_roots": 38,
+    "live_allocation": "disabled_pending_separate_terminal_game_gate",
+    "matched_optional_stopping_bias": {
+      "ci95": [
+        -0.00010781041241637114,
+        0.00020462691828553004
+      ],
+      "mean": 4.8408252934579444e-05,
+      "observations": 107
+    },
+    "node_savings_at_gate_landmark": {
+      "ci95": [
+        0.877980676229094,
+        0.9328065756899344
+      ],
+      "mean": 0.9053936259595142,
+      "observations": 320
+    },
+    "node_savings_vs_full_horizon": {
+      "ci95": [
+        0.9084693928830396,
+        0.9495947901888397
+      ],
+      "mean": 0.9290320915359397,
+      "observations": 320
+    },
+    "random_audit_roots": 32,
+    "roots": 320,
+    "shadow_checkpoint_rows": 0,
+    "stop_full_horizon_rank_in_risk_set": {
+      "in_risk_set": 305,
+      "out_of_risk_set_mismatches": 4,
+      "rate": 0.9870550161812298,
+      "stops": 309
+    },
+    "stop_rate": 0.965625,
+    "stopped_early": 309,
+    "strata": {
+      "playchooser-g3000ms|early_61_100": {
+        "events": 0,
+        "one_sided_95_upper": 0.07215752450551438,
+        "rate": 0.0,
+        "trials": 40
+      },
+      "playchooser-g3000ms|late_5_15": {
+        "events": 2,
+        "one_sided_95_upper": 0.14915196127321273,
+        "rate": 0.05,
+        "trials": 40
+      },
+      "playchooser-g3000ms|middle_early_36_60": {
+        "events": 0,
+        "one_sided_95_upper": 0.07215752450551438,
+        "rate": 0.0,
+        "trials": 40
+      },
+      "playchooser-g3000ms|middle_late_16_35": {
+        "events": 1,
+        "one_sided_95_upper": 0.11318836094473747,
+        "rate": 0.025,
+        "trials": 40
+      },
+      "static|early_61_100": {
+        "events": 1,
+        "one_sided_95_upper": 0.11318836094473747,
+        "rate": 0.025,
+        "trials": 40
+      },
+      "static|late_5_15": {
+        "events": 0,
+        "one_sided_95_upper": 0.07215752450551438,
+        "rate": 0.0,
+        "trials": 40
+      },
+      "static|middle_early_36_60": {
+        "events": 0,
+        "one_sided_95_upper": 0.07215752450551438,
+        "rate": 0.0,
+        "trials": 40
+      },
+      "static|middle_late_16_35": {
+        "events": 0,
+        "one_sided_95_upper": 0.07215752450551438,
+        "rate": 0.0,
+        "trials": 40
+      }
+    }
+  },
+  "artifact_kind": "rule_zero_exact_topology_certification_results",
+  "provenance": {
+    "binary_sha256": "fb5508fb6af1d51d24046a1d89779ac4f6797c1030607e5dbeacda58d25a0b80",
+    "generation_chunks": 20,
+    "git_commit": "f8b621a74906c81dd5ba37bf70cad128d6280aff",
+    "preregistration": "notes/rule_zero_exact_topology_preregistration.json",
+    "preregistration_sha256": "0dd1b16536313e2355662ccdcb29437b67ceb5fa42c99adc62225b9aa0bac5b7",
+    "primary_gate": "judged_missed_value_upper_at_most_0.001",
+    "run_completed_utc": "2026-08-06T18:10:00+00:00",
+    "secondary_reported_not_gated": "landmark_mismatch_counts"
+  }
+}
