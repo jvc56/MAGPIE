@@ -62,6 +62,7 @@
 #include "spread_forecast_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
+#include "stuck_endgame_sampler_test.h"
 #include "thinking_curve_test.h"
 #include "time_manager_test.h"
 #include "transposition_table_test.h"
@@ -196,6 +197,7 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"klv3oracle", test_klv3_sim_oracle},
+    {"stucksample", test_stuck_endgame_sampler},
     {"pcbench", test_play_chooser_benchmark},
     {"thinkingcurve", test_thinking_curve},
     {"ap_rit", test_autoplay_rit_correctness},

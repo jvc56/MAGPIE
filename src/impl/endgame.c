@@ -669,6 +669,19 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
   return movegen_result;
 }
 
+// Public shim over the internal detector for analysis tools (e.g. the
+// stuck-endgame sampler). Returns the score-weighted fraction of player_idx's
+// rack that is stuck (0.0..1.0) at the current position. move_list is scratch
+// for TILES_PLAYED move generation. Requires valid cross-sets (true after
+// game_load_cgp / play_move). pruned_kwg=NULL selects the effective KWG and
+// solver=NULL disables the interrupt check, both matching
+// compute_initial_stuck_fraction.
+float endgame_player_stuck_fraction(Game *game, MoveList *move_list,
+                                    int player_idx) {
+  return compute_opp_stuck_fraction(game, move_list, NULL, player_idx, NULL,
+                                    NULL);
+}
+
 // Compute the initial stuck-tile fraction for the opponent at the root.
 // Duplicates the game to avoid modifying the original.
 static float compute_initial_stuck_fraction(const EndgameCtx *solver,
