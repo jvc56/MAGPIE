@@ -23,6 +23,11 @@ except ModuleNotFoundError:  # Direct execution from tools/.
     )
     from extract_time_value_positions import fields  # type: ignore[no-redef]
 
+# Historical-minimum equal-slice landmark (preregistered): reported mismatch
+# sensitivity only, never gated. The 6M gate landmark and 8M full horizon come
+# from the harness's own equal_horizon and full points.
+SENSITIVITY_LANDMARK_NODES = 3652554
+
 
 def clopper_pearson_upper(events: int, trials: int, confidence: float = 0.95) -> float:
     """Exact one-sided binomial upper confidence limit."""
@@ -92,9 +97,15 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
     points: dict[int, dict[str, dict[str, str]]] = defaultdict(dict)
     done: dict[int, dict[str, str]] = {}
     shadow_rows = 0
+    checkpoint_marks: dict[int, list[tuple[int, int]]] = defaultdict(list)
     with log.open(encoding="utf-8") as stream:
         for line in stream:
-            if line.startswith("THINKING_CURVE_RULE_ZERO "):
+            if line.startswith("THINKING_CURVE_RULE_ZERO_CHECKPOINT "):
+                row = fields(line)
+                checkpoint_marks[int(row["source_index"])].append(
+                    (int(row["nodes"]), int(row["selected_rank"]))
+                )
+            elif line.startswith("THINKING_CURVE_RULE_ZERO "):
                 row = fields(line)
                 source = int(row["source_index"])
                 if source in rules:
@@ -126,6 +137,8 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
     horizon_missed_values: list[float] = []
     equal_missed_values: list[float] = []
     node_savings: list[float] = []
+    landmark_savings: list[float] = []
+    sensitivity_mismatches: list[int] = []
     matched_bias: list[float] = []
     stopped_early = 0
     judged = 0
@@ -160,6 +173,25 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
         if full_nodes <= 0:
             raise ValueError("full arm has no work")
         node_savings.append(1.0 - int(stopped["nodes"]) / full_nodes)
+        equal_nodes = int(equal["nodes"])
+        if equal_nodes <= 0:
+            raise ValueError("equal-slice landmark has no work")
+        # Usefulness-floor savings are measured against the 6M gate landmark
+        # (the equal-slice point), not the full 8M horizon.
+        landmark_savings.append(1.0 - int(stopped["nodes"]) / equal_nodes)
+        # Reported sensitivity: mismatch against the historical-minimum
+        # landmark, derived from checkpoint rows with the same first-
+        # checkpoint-at-or-past-target rule the harness uses for landmarks.
+        marks = sorted(checkpoint_marks.get(source, []))
+        sensitivity_rank = int(full["selected_rank"])
+        if SENSITIVITY_LANDMARK_NODES < full_nodes:
+            for mark_nodes, mark_rank in marks:
+                if mark_nodes >= SENSITIVITY_LANDMARK_NODES:
+                    sensitivity_rank = mark_rank
+                    break
+        sensitivity_mismatches.append(
+            int(int(stopped["selected_rank"]) != sensitivity_rank)
+        )
         stopped_early += int(rule["capped"]) == 0
         judged += int(rule["judge_performed"])
         audit += int(rule["audit_selected"])
@@ -186,14 +218,15 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
 
     horizon = mismatch_summary(horizon_mismatches)
     equal = mismatch_summary(equal_mismatches)
+    sensitivity = mismatch_summary(sensitivity_mismatches)
     horizon_value = mean_interval(horizon_missed_values)
     equal_value = mean_interval(equal_missed_values)
     savings = mean_interval(node_savings)
+    savings_at_landmark = mean_interval(landmark_savings)
     matched = mean_interval(matched_bias)
-    mismatch_gate = (
-        float(horizon["one_sided_95_upper"]) <= 0.015
-        and float(equal["one_sided_95_upper"]) <= 0.015
-    )
+    # Primary gate (notes/rule_zero_primary_gate_decision.md): judged missed
+    # value at the 0.001 threshold. Mismatch counts are reported secondaries
+    # with exact bounds and are never gated.
     value_gate = (
         float(horizon_value["ci95"][1]) <= 0.001
         and float(equal_value["ci95"][1]) <= 0.001
@@ -202,7 +235,12 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
         float(matched["ci95"][0]) <= 0.0 <= float(matched["ci95"][1])
         and float(matched["ci95"][1]) <= 0.001
     )
-    savings_gate = float(savings["mean"]) >= 0.50
+    # Usefulness floor (packet section 7.2): the rule must stop at least 30%
+    # of roots and save at least 25% of nodes at the 6M gate landmark.
+    stop_rate = stopped_early / len(roots)
+    usefulness_floor = (
+        stop_rate >= 0.30 and float(savings_at_landmark["mean"]) >= 0.25
+    )
     return {
         "artifact_kind": "rule_zero_prospective_analysis",
         "roots": len(roots),
@@ -217,25 +255,32 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
             "rate": stop_in_risk_set / stopped_early if stopped_early else None,
             "out_of_risk_set_mismatches": stop_out_of_risk_set_mismatches,
         },
-        "horizon_3m_mismatch": horizon,
+        "full_horizon_mismatch": horizon,
         "equal_slice_landmark_mismatch": equal,
-        "horizon_3m_judged_missed_value": horizon_value,
+        "historical_minimum_landmark_mismatch_sensitivity": sensitivity,
+        "full_horizon_judged_missed_value": horizon_value,
         "equal_slice_judged_missed_value": equal_value,
-        "node_savings": savings,
+        "node_savings_vs_full_horizon": savings,
+        "node_savings_at_gate_landmark": savings_at_landmark,
+        "stop_rate": stop_rate,
         "matched_optional_stopping_bias": matched,
         "strata": {
             "|".join(key): mismatch_summary(values)
             for key, values in sorted(strata.items())
         },
         "gates": {
-            "mismatch_upper_at_most_0.015": mismatch_gate,
-            "judged_missed_value_upper_at_most_0.001": value_gate,
-            "mean_node_savings_at_least_0.50": savings_gate,
+            "primary_judged_missed_value_upper_at_most_0.001": value_gate,
+            "usefulness_floor_stop_rate_0.30_savings_0.25_at_landmark": (
+                usefulness_floor
+            ),
             "matched_subset_no_harmful_bias": matched_gate,
-            "surrogate_pass": mismatch_gate
-            and value_gate
-            and savings_gate
-            and matched_gate,
+            "secondary_mismatch_reported_not_gated": {
+                "full_horizon_one_sided_95_upper": horizon[
+                    "one_sided_95_upper"
+                ],
+                "equal_slice_one_sided_95_upper": equal["one_sided_95_upper"],
+            },
+            "panel_pass": value_gate and usefulness_floor and matched_gate,
         },
         "live_allocation": "disabled_pending_separate_terminal_game_gate",
     }

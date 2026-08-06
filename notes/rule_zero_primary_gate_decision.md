@@ -37,3 +37,11 @@ Decision date: 2026-08-06. Decided by the owner; recorded verbatim:
   the 0.001 primary; the secondary imposes no sizing requirement.
 - All other packet section 7 conditions (usefulness floor of >=30% stops and
   >=25% node savings at the 6M landmark, freezes, review) are unchanged.
+
+## Applied by
+
+- notes/rule_zero_exact_topology_preregistration.json — the fresh section 7.2
+  exact-topology certification panel preregistration (fresh seeds 8404001 /
+  8504001; primary judged-missed-value gate; secondary mismatch reported;
+  usefulness floor at the 6M landmark; risk-set telemetry required at
+  progress schema >= 7).
