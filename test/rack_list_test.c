@@ -100,7 +100,11 @@ void test_rack_list(void) {
   }
 
   KLV *leaves_klv = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21_ab");
+  const uint64_t mutation_counter_before_write =
+      klv_get_mutation_counter(leaves_klv);
   rack_list_write_to_klv(rack_list, ld, leaves_klv);
+  assert(klv_get_mutation_counter(leaves_klv) ==
+         mutation_counter_before_write + 1);
 
   for (int rack_index = 0; rack_index < num_racks; rack_index++) {
     rack_set_to_string(ld, &rack, rack_strs[rack_index]);

@@ -1206,7 +1206,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "per line, that restricts which racks are ever forced as rare (used "
           "to run a distributed leavegen worker on a fixed set of "
           "externally-provided racks). See -writerackequitycsv for a way to "
-          "dump each generation's rack data to a CSV.";
+          "dump each generation's rack data to a CSV. Rack info tables are "
+          "automatically disabled because they cache leave values that become "
+          "stale during generation.";
       break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
@@ -5798,8 +5800,8 @@ void config_load_lexicon_dependent_data(
     const bool use_wmp_has_value, const bool p1_use_wmp_has_value,
     const bool p2_use_wmp_has_value, const bool use_rit_has_value,
     const bool p1_use_rit_has_value, const bool p2_use_rit_has_value,
-    const bool use_mmap_for_rit_has_value, const bool is_loading_game_history,
-    ErrorStack *error_stack) {
+    const bool use_mmap_for_rit_has_value, const bool disable_rit,
+    const bool is_loading_game_history, ErrorStack *error_stack) {
   // Lexical player data
 
   // For both the kwg and klv, we disallow any non-NULL -> NULL transitions.
@@ -5922,6 +5924,13 @@ void config_load_lexicon_dependent_data(
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+  }
+
+  // Rack info tables cache KLV-derived leave values. Leave generation updates
+  // the KLV after every generation, so an RIT would become stale immediately.
+  if (disable_rit) {
+    p1_rit_use_when_available = false;
+    p2_rit_use_when_available = false;
   }
 
   players_data_set_use_when_available(config->players_data,
@@ -6181,9 +6190,9 @@ void config_load_game_history(Config *config, const GameHistory *game_history,
       game_history_get_board_layout_name(game_history);
   const game_variant_t game_variant =
       game_history_get_game_variant(game_history);
-  config_load_lexicon_dependent_data(config, lexicon, NULL, NULL, NULL, NULL,
-                                     NULL, ld_name, false, false, false, false,
-                                     false, false, false, true, error_stack);
+  config_load_lexicon_dependent_data(
+      config, lexicon, NULL, NULL, NULL, NULL, NULL, ld_name, false, false,
+      false, false, false, false, false, false, true, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -7687,7 +7696,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       config, new_lexicon_name, new_p1_lexicon_name, new_p2_lexicon_name,
       new_leaves_name, new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
       use_wmp, p1_use_wmp, p2_use_wmp, use_rit, p1_use_rit, p2_use_rit,
-      use_mmap_for_rit, false, error_stack);
+      use_mmap_for_rit, config->exec_parg_token == ARG_TOKEN_LEAVE_GEN, false,
+      error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
