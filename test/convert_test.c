@@ -1,15 +1,19 @@
 #include "../src/ent/conversion_results.h"
 #include "../src/ent/data_filepaths.h"
+#include "../src/ent/dictionary_word.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/convert.h"
+#include "../src/impl/kwg_maker.h"
 #include "../src/util/io_util.h"
+#include "kwg_maker_test.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -187,7 +191,68 @@ void test_convert_success(void) {
   error_stack_destroy(error_stack);
 }
 
+// The convert commands must sort: text files carry no ordering guarantee, and
+// unordered input inflates the DAWG and can overrun the tail-merge serializer.
+// This writes a length-ordered list and checks it matches the sorted build.
+void test_convert_unsorted_input(void) {
+  const char *sorted_name = "./testdata/lexica/CSW21_sorted_input.txt";
+  const char *unsorted_name =
+      "./testdata/lexica/CSW21_length_ordered_input.txt";
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(sorted_name, "w", "AA\nAAH\nAB\nABA\nBA\nBAA\nBAH\n",
+                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  // Same words, grouped by length: exactly what a malformed KWG dumps.
+  write_string_to_file(unsorted_name, "w", "AA\nAB\nBA\nAAH\nABA\nBAA\nBAH\n",
+                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+
+  Config *config = config_create_or_die("set -lex CSW21");
+  const char *merge_commands[] = {"convert text2kwg",
+                                  "convert text2kwgtailmerge"};
+  for (size_t merge_idx = 0;
+       merge_idx < sizeof(merge_commands) / sizeof(merge_commands[0]);
+       merge_idx++) {
+    char *sorted_command = get_formatted_string("%s CSW21_sorted_input",
+                                                merge_commands[merge_idx]);
+    char *unsorted_command = get_formatted_string(
+        "%s CSW21_length_ordered_input", merge_commands[merge_idx]);
+    // Before the fix the tail-merge form crashed outright here.
+    load_and_exec_config_or_die(config, sorted_command);
+    load_and_exec_config_or_die(config, unsorted_command);
+    free(sorted_command);
+    free(unsorted_command);
+
+    ErrorStack *load_error_stack = error_stack_create();
+    KWG *from_sorted = kwg_create(DEFAULT_TEST_DATA_PATH, "CSW21_sorted_input",
+                                  load_error_stack);
+    KWG *from_unsorted = kwg_create(
+        DEFAULT_TEST_DATA_PATH, "CSW21_length_ordered_input", load_error_stack);
+    assert(error_stack_is_empty(load_error_stack));
+    error_stack_destroy(load_error_stack);
+
+    assert(kwg_get_number_of_nodes(from_unsorted) ==
+           kwg_get_number_of_nodes(from_sorted));
+
+    DictionaryWordList *sorted_words = dictionary_word_list_create();
+    DictionaryWordList *unsorted_words = dictionary_word_list_create();
+    kwg_write_words(from_sorted, kwg_get_dawg_root_node_index(from_sorted),
+                    sorted_words, NULL);
+    kwg_write_words(from_unsorted, kwg_get_dawg_root_node_index(from_unsorted),
+                    unsorted_words, NULL);
+    assert_word_lists_are_equal(sorted_words, unsorted_words);
+
+    dictionary_word_list_destroy(unsorted_words);
+    dictionary_word_list_destroy(sorted_words);
+    kwg_destroy(from_unsorted);
+    kwg_destroy(from_sorted);
+  }
+  config_destroy(config);
+}
+
 void test_convert(void) {
   test_convert_error();
   test_convert_success();
+  test_convert_unsorted_input();
 }
