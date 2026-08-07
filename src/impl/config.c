@@ -3136,7 +3136,7 @@ void impl_gen_and_sim(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
+  impl_sim(config, ARG_TOKEN_GEN_AND_SIM, 0, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

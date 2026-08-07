@@ -72,6 +72,33 @@ void test_sim_error_cases(void) {
   config_destroy(config);
 }
 
+// A known opponent rack that cannot actually be drawn from the bag (either
+// because the letters are already spoken for by the player's own rack or
+// board tiles, or because the letter distribution simply doesn't have
+// enough of them) must be rejected with an error rather than reaching
+// set_random_rack() during simulation, which fatally crashes the process.
+void test_sim_opp_rack_not_in_bag(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 15 -plies "
+                           "2 -threads 1 -iter 1 -scond none");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AAADERW");
+  load_and_exec_config_or_die(config, "gen");
+
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
+  // Only a single Z exists in the English tile distribution, so requesting
+  // two of them for the opponent's known rack is impossible.
+  rack_set_to_string(config_get_ld(config), &known_opp_rack, "ZZ");
+
+  error_code_t status = config_simulate_and_return_status(
+      config, NULL, &known_opp_rack, config_get_sim_results(config));
+  assert(status == ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+  config_destroy(config);
+}
+
 void test_sim_single_iteration(void) {
   Config *config =
       config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
@@ -1234,6 +1261,7 @@ void test_sim(void) {
     test_similar_play_consistency(1);
     test_similar_play_consistency(10);
     test_sim_error_cases();
+    test_sim_opp_rack_not_in_bag();
     test_sim_single_iteration();
     test_sim_threshold();
     test_sim_time_limit();

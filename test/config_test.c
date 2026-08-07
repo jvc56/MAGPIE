@@ -705,6 +705,40 @@ void test_config_exec_parse_args(void) {
   config_destroy(config);
 }
 
+// Confirms that an opponent rack specified for the "sim"/"gsimulate"/
+// "rgsimulate" commands is validated against the bag the same way the
+// player's own rack is. Before this check existed, an opponent rack that
+// was not actually available in the bag (e.g. requesting tiles already
+// held by the player or already exhausted from the bag) would reach
+// set_random_rack() during simulation and log_fatal(), crashing the
+// process instead of returning an error.
+void test_config_sim_opp_rack_not_in_bag(void) {
+  Config *config = config_create_default_test();
+
+  // Only a single Z exists in the English tile distribution, and OPENING_CGP
+  // does not place one on the board or in either player's rack, so asking
+  // for two Z's in the opponent's rack is impossible.
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim ZZ -it 1",
+                            ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gsim ZZ -it 1",
+                            ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rgs RETINAS ZZ -it 1",
+                            ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+
+  // A legitimate opponent rack still works.
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim HIJKLM? -it 1", ERROR_STATUS_SUCCESS);
+
+  config_destroy(config);
+}
+
 void test_config_wmp(void) {
   ErrorStack *error_stack = error_stack_create();
   Config *config = config_create_or_die(
@@ -2571,6 +2605,7 @@ void test_config(void) {
   test_config_load_error_cases();
   test_config_load_success();
   test_config_exec_parse_args();
+  test_config_sim_opp_rack_not_in_bag();
   test_config_lexical_data();
   test_config_wmp();
   test_config_note_move_interpolation();

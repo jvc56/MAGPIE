@@ -10,13 +10,16 @@
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/move.h"
+#include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
+#include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bai.h"
+#include "gameplay.h"
 #include "inference.h"
 #include "move_gen.h"
 #include "random_variable.h"
@@ -61,6 +64,25 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
         error_stack, ERROR_STATUS_SIM_GAME_OVER,
         string_duplicate("cannot simulate when the game is already over"));
     return;
+  }
+
+  const Rack *known_opp_rack = sim_args->known_opp_rack;
+  if (known_opp_rack && !rack_is_empty(known_opp_rack)) {
+    const int player_off_turn_index =
+        1 - game_get_player_on_turn_index(sim_args->game);
+    if (!rack_is_drawable(sim_args->game, player_off_turn_index,
+                          known_opp_rack)) {
+      const LetterDistribution *ld = game_get_ld(sim_args->game);
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_string(sb, "opponent rack '");
+      string_builder_add_rack(sb, known_opp_rack, ld, false);
+      string_builder_add_string(sb, "' is not available in the bag");
+      char *err_msg = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      error_stack_push(error_stack, ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG,
+                       err_msg);
+      return;
+    }
   }
 
   // If the bag is empty, set sample_limit to the number of moves and
