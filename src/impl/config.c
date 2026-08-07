@@ -98,6 +98,7 @@ typedef enum {
   ARG_TOKEN_SIM,
   ARG_TOKEN_SNOPRUNE,
   ARG_TOKEN_GEN_AND_SIM,
+  ARG_TOKEN_RACK_AND_GEN,
   ARG_TOKEN_RACK_AND_GEN_AND_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_ENDGAME,
@@ -1118,6 +1119,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "ABCD";
       examples[2] = "-";
       text = "Generates moves for the current position and runs a simulation.";
+      break;
+    case ARG_TOKEN_RACK_AND_GEN:
+      usages[0] = "<player_rack>";
+      examples[0] = "ABCD";
+      text = "Sets the current player rack and generates moves for the "
+             "current position.";
       break;
     case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
       usages[0] = "<player_rack> [<opponent_known_rack>]";
@@ -2225,6 +2232,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_INFER,                /* infer */
         ARG_TOKEN_LEAVE_GEN,            /* leavegen */
         ARG_TOKEN_PEG,                  /* peg */
+        ARG_TOKEN_RACK_AND_GEN,         /* rg */
         ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
         ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
         ARG_TOKEN_SHOW_GAME,            /* shgame */
@@ -2639,6 +2647,16 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
   impl_move_gen_override_record_type(
       config, player_get_move_record_type(game_get_player(
                   config->game, game_get_player_on_turn_index(config->game))));
+}
+
+// Rack and gen
+
+void impl_rack_and_gen(Config *config, ErrorStack *error_stack) {
+  impl_set_rack(config, ARG_TOKEN_RACK_AND_GEN, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  impl_move_gen(config, error_stack);
 }
 
 // Inference
@@ -7879,6 +7897,22 @@ char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_rack_and_gen(Config *config, ErrorStack *error_stack) {
+  impl_rack_and_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_moves_or_sim_results(config, error_stack);
+}
+
+char *str_api_rack_and_gen(Config *config, ErrorStack *error_stack) {
+  impl_rack_and_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
+}
+
 void execute_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_rack_and_gen_and_sim(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8605,6 +8639,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SNOPRUNE, "snoprune", 0, 1, snoprune, snoprune, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
       false);
+  cmd(ARG_TOKEN_RACK_AND_GEN, "rg", 1, 1, rack_and_gen, generic, false);
   cmd(ARG_TOKEN_RACK_AND_GEN_AND_SIM, "rgsimulate", 1, 2, rack_and_gen_and_sim,
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
@@ -8956,6 +8991,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_SNOPRUNE:
     case ARG_TOKEN_GEN_AND_SIM:
+    case ARG_TOKEN_RACK_AND_GEN:
     case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:

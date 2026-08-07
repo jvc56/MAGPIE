@@ -705,6 +705,39 @@ void test_config_exec_parse_args(void) {
   config_destroy(config);
 }
 
+// Confirms the "rg" command sets the player rack and generates moves (like
+// "rack" followed by "generate"), without running a simulation like
+// "rgsimulate"/"rgs" does. Also confirms "rg" resolves to itself rather
+// than being treated as an ambiguous abbreviation of "rgsimulate": the full
+// command name is "rg" so the exact-match check in get_token_from_string
+// wins before "rg" is ever considered a prefix of "rgsimulate".
+void test_config_rack_and_gen(void) {
+  Config *config = config_create_default_test();
+
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
+
+  // Malformed and unavailable racks are rejected the same way "rack"
+  // rejects them.
+  assert_config_exec_status(config, "rg AB3C",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rg ABCZZZ",
+                            ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
+
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rg AEINRST", ERROR_STATUS_SUCCESS);
+
+  const Game *game = config_get_game(config);
+  const Rack *player_on_turn_rack = player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game)));
+  assert_rack_equals_string(config_get_ld(config), player_on_turn_rack,
+                            "AEINRST");
+  assert(move_list_get_count(config_get_move_list(config)) > 0);
+  // Unlike "rgsimulate"/"rgs", "rg" must not run a simulation.
+  assert(sim_results_get_number_of_plays(config_get_sim_results(config)) == 0);
+
+  config_destroy(config);
+}
+
 // Runs the given opponent known rack argument through the "sim", "gsim",
 // and "rgs" commands and asserts each returns expected_status. The game is
 // reloaded from OPENING_CGP before every invocation so that each command
@@ -2639,6 +2672,7 @@ void test_config(void) {
   test_config_load_error_cases();
   test_config_load_success();
   test_config_exec_parse_args();
+  test_config_rack_and_gen();
   test_config_sim_opp_rack_not_in_bag();
   test_config_lexical_data();
   test_config_wmp();
