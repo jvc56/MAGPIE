@@ -1791,7 +1791,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "seed, with player one going first in one game and player two going "
           "first in the other game. Since the games are deterministic for a "
           "given starting seed, if both players make the exact same decision "
-          "for each corresponding play, the games will be identical.";
+          "for each corresponding play, the games will be identical. This "
+          "does not hold when a player runs on a PlayChooser clock (-pc1 / "
+          "-pc2): move choice then depends on how much search fits in the "
+          "budget, so the paired games are no longer a controlled comparison "
+          "over identical draws.";
       break;
     case ARG_TOKEN_USE_SMALL_PLAYS:
       usages[0] = "<true_or_false>";
@@ -2109,7 +2113,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Enables PlayChooser for player 1 or 2 during autoplay and sets "
              "that player's total per-game clock in milliseconds. -1 "
              "disables PlayChooser for the player (the default); 0 enables "
-             "it without a clock.";
+             "it without a clock. A clocked player's games are not "
+             "reproducible from the seed: how much search fits in the budget "
+             "varies with machine load, thread count, and build, so move "
+             "choice and the overtime penalty vary between runs of the same "
+             "seed. Read the aggregate results (win%, spread, penalty "
+             "points), which are meaningful across enough games; individual "
+             "games are not intended to replay identically.";
       break;
     case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
       usages[0] = "<points>";

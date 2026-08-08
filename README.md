@@ -85,6 +85,19 @@ magpie> autoplay games 100 -pc1 5000 -pc2 5000 -otpenalty 1 -otperiod 1000 -hr t
 When at least one player uses PlayChooser, the final report includes clock
 usage, overtime, and deducted penalty points for each active player.
 
+Games with a clocked player are **not reproducible from the seed**. How much
+search fits in the budget varies with machine load, thread count, and build, so
+the same `-seed` will not replay the same moves, and the overtime penalty itself
+varies between runs. This is inherent to timed play rather than a defect, but it
+is worth knowing because the rest of autoplay *is* seed-deterministic. The
+intended output is the aggregate: win percentage, spread, and penalty points
+over enough games. Individual games are not meant to be replayed.
+
+For the same reason, game pairs (`-gp`) lose their variance-reduction property
+when combined with a clock. Pairs work by having both games see identical draws
+so that only the players' decisions differ; with timing on, the two games can
+diverge for reasons unrelated to strategy.
+
 All commands and settings can be specified by the shortest unambiguous string. For example, the generate command can be specified by any of the following strings:
 
 ```
