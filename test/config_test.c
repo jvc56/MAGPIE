@@ -89,6 +89,18 @@ void test_config_load_error_cases(void) {
   test_config_load_error(config, "set -seed -2",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
                          error_stack);
+  test_config_load_error(config, "set -pc1 -2",
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+                         error_stack);
+  test_config_load_error(config, "set -pc2 nope",
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+  test_config_load_error(config, "set -otpenalty -1",
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
+  test_config_load_error(config, "set -otperiod 0",
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -lex CSW21 -it 1000 -plies",
                          ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
                          error_stack);
