@@ -9,6 +9,7 @@
 #include "../ent/bag.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
