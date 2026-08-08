@@ -98,6 +98,21 @@ when combined with a clock. Pairs work by having both games see identical draws
 so that only the players' decisions differ; with timing on, the two games can
 diverge for reasons unrelated to strategy.
 
+How much search a clock buys also depends on the threading mode, so the same
+`-pc1` value is not comparable across `-mtmode` settings:
+
+- Per-game parallelism (`-mtmode pgp`, the default) runs `-threads` games at
+  once and gives each game's PlayChooser a single thread. Raising `-threads`
+  finishes the run sooner but does not give any player more search per second
+  of clock — until the thread count exceeds the machine's available cores, at
+  which point games contend for CPU and the same budget buys measurably less.
+- Intra-game parallelism (`-mtmode igp`) plays one game at a time and gives
+  that game's PlayChooser every thread, so the same clock buys roughly
+  `-threads` times as much search per move.
+
+Compare timed runs only against other runs with the same `-mtmode` and
+`-threads`.
+
 All commands and settings can be specified by the shortest unambiguous string. For example, the generate command can be specified by any of the following strings:
 
 ```

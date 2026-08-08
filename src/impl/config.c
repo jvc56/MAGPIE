@@ -2119,7 +2119,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "choice and the overtime penalty vary between runs of the same "
              "seed. Read the aggregate results (win%, spread, penalty "
              "points), which are meaningful across enough games; individual "
-             "games are not intended to replay identically.";
+             "games are not intended to replay identically. How much search "
+             "the clock buys also depends on -mtmode: pgp (the default) "
+             "gives each concurrent game's chooser one thread, while igp "
+             "plays one game at a time and gives that chooser every thread. "
+             "Compare timed runs only against runs with the same -mtmode and "
+             "-threads.";
       break;
     case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
       usages[0] = "<points>";
