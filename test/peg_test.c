@@ -236,6 +236,41 @@ static void test_peg_main_4bag_single(void) {
                          PEG_OPP_RATIONAL, /*out_spread=*/NULL);
 }
 
+// A short clock must bound the whole PEG solve, including worker setup and an
+// in-flight stage-0 scenario. This 4-in-bag position has enough candidates and
+// bag orderings to run well past the budget without the inner cancellation
+// checks; the generous wall-clock assertion avoids scheduler flakes while
+// still catching unbounded setup or scenario completion.
+static void test_peg_short_budget_interrupts(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+      "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
+      "12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24");
+  ErrorStack *error_stack = error_stack_create();
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = config_get_game(config);
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 4;
+  args.time_budget_seconds = 0.05;
+  args.opp_model = PEG_OPP_RATIONAL;
+
+  Timer timer;
+  ctimer_start(&timer);
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  ctimer_stop(&timer);
+
+  assert(error_stack_is_empty(error_stack));
+  assert(ctimer_elapsed_seconds(&timer) < 1.0);
+  peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // Opponent modeling: rational vs pessimistic. Uses the 4-in-bag position with a
 // single pinned bag ordering; the top candidate leaves the bag non-empty, so
 // the opponent still draws and the opponent model actually drives the playout.
@@ -1283,6 +1318,7 @@ void test_peg(void) {
   test_peg_main_2bag_single();
   test_peg_main_3bag_single();
   test_peg_main_4bag_single();
+  test_peg_short_budget_interrupts();
   test_peg_main_opp_models();
   test_peg_main_pnoprune();
   test_peg_main_progress_detail();

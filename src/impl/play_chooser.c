@@ -47,6 +47,13 @@ enum {
 static const double PLAY_CHOOSER_DEFAULT_UNTIMED_MOVE_SECONDS = 5.0;
 static const double PLAY_CHOOSER_DEFAULT_CHALLENGE_SECONDS = 5.0;
 static const double PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS = 0.05;
+static const double PLAY_CHOOSER_MIN_ENDGAME_BUDGET_SECONDS = 0.25;
+// Hold back enough clock for static fallbacks and solver teardown. During
+// overtime, also reserve one percent of the penalty period so normal timing
+// jitter cannot start the next period.
+static const double PLAY_CHOOSER_CLOCK_RESERVE_SECONDS = 0.05;
+static const double PLAY_CHOOSER_OVERTIME_RESERVE_FRACTION = 0.01;
+static const double PLAY_CHOOSER_RESERVE_PER_PLAY_SECONDS = 0.002;
 // Minimum budget for the null-window solve that resolves a challenge
 // decision after the sibling branch produced an exact value; the warm
 // shared transposition table makes these solves cheap.
@@ -176,21 +183,7 @@ play_chooser_get_eval_for_phase(const PlayChooserStrategy *strategy,
   return strategy->pre_endgame_eval;
 }
 
-// Budget for the on-turn player's current move: a flat budget when
-// configured, otherwise the player's remaining clock split evenly across
-// an estimate of their remaining plays.
-static double
-play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
-                                  const Game *game) {
-  if (strategy->fixed_seconds_per_move > 0.0) {
-    return strategy->fixed_seconds_per_move;
-  }
-  const GameTimer *game_timer = strategy->game_timer;
-  const int player_on_turn_index = game_get_player_on_turn_index(game);
-  if (game_timer == NULL ||
-      game_timer_player_is_untimed(game_timer, player_on_turn_index)) {
-    return PLAY_CHOOSER_DEFAULT_UNTIMED_MOVE_SECONDS;
-  }
+static int play_chooser_estimated_plays_remaining(const Game *game) {
   const int total_unplayed_tiles =
       bag_get_letters(game_get_bag(game)) +
       rack_get_total_letters(player_get_rack(game_get_player(game, 0))) +
@@ -201,14 +194,79 @@ play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
   if (plays_remaining_for_player < 1) {
     plays_remaining_for_player = 1;
   }
+  return plays_remaining_for_player;
+}
+
+// Seconds already covered by the currently started overtime penalty period.
+// At exact flag fall no period has started yet, so the first full period is
+// available. At an exact later boundary, no time remains before the next
+// penalty.
+static double
+play_chooser_get_overtime_window(const PlayChooserStrategy *strategy,
+                                 const GameTimer *game_timer,
+                                 int player_on_turn_index) {
+  const double period_seconds = strategy->overtime_period_seconds;
+  if (period_seconds <= 0.0) {
+    return 0.0;
+  }
+  const double overtime_seconds =
+      game_timer_get_overtime_seconds(game_timer, player_on_turn_index);
+  if (overtime_seconds <= 0.0) {
+    return period_seconds;
+  }
+  const double started_periods = ceil(overtime_seconds / period_seconds);
+  const double window_seconds =
+      started_periods * period_seconds - overtime_seconds;
+  return window_seconds > 0.0 ? window_seconds : 0.0;
+}
+
+// Budget for the on-turn player's current move: a flat budget when
+// configured, otherwise the safely spendable part of the player's remaining
+// clock (or current overtime period) split across their estimated plays.
+double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
+                                         const Game *game) {
+  if (strategy->fixed_seconds_per_move > 0.0) {
+    return strategy->fixed_seconds_per_move;
+  }
+  const GameTimer *game_timer = strategy->game_timer;
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  if (game_timer == NULL ||
+      game_timer_player_is_untimed(game_timer, player_on_turn_index)) {
+    return PLAY_CHOOSER_DEFAULT_UNTIMED_MOVE_SECONDS;
+  }
+  const int plays_remaining_for_player =
+      play_chooser_estimated_plays_remaining(game);
   const double seconds_remaining =
       game_timer_get_seconds_remaining(game_timer, player_on_turn_index);
-  double budget_seconds =
-      seconds_remaining / (double)plays_remaining_for_player;
+  const bool in_overtime = seconds_remaining <= 0.0;
+  const double spendable_window_seconds =
+      in_overtime ? play_chooser_get_overtime_window(strategy, game_timer,
+                                                     player_on_turn_index)
+                  : seconds_remaining;
+  double reserve_seconds = PLAY_CHOOSER_CLOCK_RESERVE_SECONDS;
+  if (in_overtime) {
+    reserve_seconds =
+        fmax(reserve_seconds, strategy->overtime_period_seconds *
+                                  PLAY_CHOOSER_OVERTIME_RESERVE_FRACTION);
+  }
+  reserve_seconds += (double)plays_remaining_for_player *
+                     PLAY_CHOOSER_RESERVE_PER_PLAY_SECONDS;
+  if (spendable_window_seconds <= reserve_seconds) {
+    return 0.0;
+  }
+  const double budget_seconds = (spendable_window_seconds - reserve_seconds) /
+                                (double)plays_remaining_for_player;
   if (budget_seconds < PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS) {
-    budget_seconds = PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS;
+    return 0.0;
   }
   return budget_seconds;
+}
+
+static double play_chooser_get_min_budget_for_eval(play_chooser_eval_t eval) {
+  if (eval == PLAY_CHOOSER_EVAL_ENDGAME) {
+    return PLAY_CHOOSER_MIN_ENDGAME_BUDGET_SECONDS;
+  }
+  return PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS;
 }
 
 static void play_chooser_choose_static_move(PlayChooser *play_chooser,
@@ -331,6 +389,10 @@ static bool play_chooser_run_endgame(
     ThreadControl *external_thread_control, bool use_window,
     int32_t window_alpha, int32_t window_beta, Move *out_move,
     int32_t *out_value, ErrorStack *error_stack) {
+  const int64_t deadline_ns =
+      budget_seconds > 0.0
+          ? ctimer_monotonic_ns() + (int64_t)(budget_seconds * 1.0e9)
+          : 0;
   ThreadControl *thread_control = external_thread_control;
   if (thread_control == NULL) {
     thread_control = thread_control_create();
@@ -350,7 +412,7 @@ static bool play_chooser_run_endgame(
       /*hard_time_limit=*/budget_seconds, strategy->seed,
       /*skip_word_pruning=*/false, shared_tt, /*max_workers=*/0,
       /*first_win=*/false, /*first_win_fallback_moves=*/0, use_window,
-      window_alpha, window_beta, /*external_deadline_ns=*/0,
+      window_alpha, window_beta, deadline_ns,
       /*actual_move=*/NULL, &endgame_args);
 
   endgame_solve(endgame_ctx, &endgame_args, endgame_results, error_stack);
@@ -505,6 +567,11 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
       play_chooser_get_eval_for_phase(strategy, game);
   const double budget_seconds =
       play_chooser_get_seconds_for_move(strategy, game);
+  if (eval != PLAY_CHOOSER_EVAL_STATIC &&
+      budget_seconds < play_chooser_get_min_budget_for_eval(eval)) {
+    play_chooser_choose_static_move(play_chooser, game, out_move);
+    return;
+  }
   bool chose_move = false;
   switch (eval) {
   case PLAY_CHOOSER_EVAL_STATIC:
