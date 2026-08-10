@@ -1,6 +1,7 @@
 .vscode
 bin
 obj
+obj-*
 cov
 covhtml
 *.gcda

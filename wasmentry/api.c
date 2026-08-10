@@ -7,8 +7,6 @@
 #include <string.h>
 
 static Magpie *wasm_magpie = NULL;
-static pthread_t command_handler_thread;
-static bool command_handler_running = false;
 
 // Thread argument for async command execution
 typedef struct {
@@ -108,6 +106,29 @@ char *wasm_get_status(void) {
     return NULL;
   }
   return magpie_get_last_command_status_message(wasm_magpie);
+}
+
+// JSON state views for the web UI. Each returns a malloc'd string the JS side
+// reads with UTF8ToString then releases with _free.
+char *wasm_get_state_json(void) {
+  if (!wasm_magpie) {
+    return NULL;
+  }
+  return magpie_get_state_json(wasm_magpie);
+}
+
+char *wasm_get_moves_json(void) {
+  if (!wasm_magpie) {
+    return NULL;
+  }
+  return magpie_get_moves_json(wasm_magpie);
+}
+
+char *wasm_get_endgame_json(void) {
+  if (!wasm_magpie) {
+    return NULL;
+  }
+  return magpie_get_endgame_json(wasm_magpie);
 }
 
 // Returns 0=uninitialized, 1=started, 2=user_interrupt, 3=finished
