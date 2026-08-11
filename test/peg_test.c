@@ -681,7 +681,7 @@ static void test_peg_bag_emptying_move_split(void) {
       config, "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
               "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
               "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21");
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
   assert(bag_get_letters(game_get_bag(game)) == 3);
 
   MoveList *move_list = move_list_create(10000);
@@ -758,7 +758,7 @@ static void test_peg_pegonly_empty_no_moves(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
   assert(bag_get_letters(game_get_bag(game)) == 1);
 
   // Empty the mover's rack directly (bypassing the CGP text parser's tile
