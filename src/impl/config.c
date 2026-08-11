@@ -3427,14 +3427,28 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
 // Generates the full root candidate move list for the current game state and
 // filters it down to the moves that would empty the bag: those playing at
 // least as many tiles as remain in the bag. Backs the peg command's "empty"
-// positional value. On success returns the owning MoveList (caller destroys
-// with move_list_destroy) and writes the filtered Move-pointer array (caller
-// free()s it) to *moves_out and the count to *n_out. If no generated move
-// empties the bag, pushes onto error_stack and returns NULL.
+// positional value. "The bag" is the PEG-effective bag
+// (peg_effective_bag_size): the game bag minus the opponent's unknown tiles,
+// which the game stores in the bag when the position gives a partial (or
+// empty) opponent rack. On success returns the owning MoveList (caller
+// destroys with move_list_destroy) and writes the filtered Move-pointer array
+// (caller free()s it) to *moves_out and the count to *n_out. If the bag is
+// outside the solvable PEG range or no generated move empties it, pushes onto
+// error_stack and returns NULL.
 static MoveList *
 config_generate_peg_bag_emptying_moves(const Config *config,
                                        const Move ***moves_out, int *n_out,
                                        ErrorStack *error_stack) {
+  const int bag_size = peg_effective_bag_size(config->game);
+  if (bag_size < PEG_MIN_BAG || bag_size > PEG_MAX_BAG) {
+    // Out of PEG range: report the canonical range error (matching peg_solve)
+    // rather than a misleading "no move empties the N-tile bag".
+    error_stack_push(
+        error_stack, ERROR_STATUS_PEG_BAG_OUT_OF_RANGE,
+        get_formatted_string("PEG requires a bag of %d..%d tiles, but found %d",
+                             PEG_MIN_BAG, PEG_MAX_BAG, bag_size));
+    return NULL;
+  }
   MoveList *move_list = move_list_create(PEG_CAND_LIST_CAP);
   const MoveGenArgs gen_args = {
       .game = config->game,
@@ -3450,7 +3464,6 @@ config_generate_peg_bag_emptying_moves(const Config *config,
   };
   generate_moves(&gen_args);
 
-  const int bag_size = bag_get_letters(game_get_bag(config->game));
   const int num_moves = move_list_get_count(move_list);
   const Move **moves = malloc_or_die((size_t)num_moves * sizeof(Move *));
   int num_kept = 0;
@@ -3463,12 +3476,11 @@ config_generate_peg_bag_emptying_moves(const Config *config,
   if (num_kept == 0) {
     free(moves);
     move_list_destroy(move_list);
-    error_stack_push(
-        error_stack, ERROR_STATUS_PEG_EMPTY_NO_MOVES,
-        get_formatted_string(
-            "pegonly 'empty' found no generated move that empties the "
-            "%d-tile bag",
-            bag_size));
+    error_stack_push(error_stack, ERROR_STATUS_PEG_EMPTY_NO_MOVES,
+                     get_formatted_string(
+                         "peg 'empty' found no generated move that empties the "
+                         "%d-tile bag",
+                         bag_size));
     return NULL;
   }
   *moves_out = moves;

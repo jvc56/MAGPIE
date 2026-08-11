@@ -778,6 +778,83 @@ static void test_peg_pegonly_empty_no_moves(void) {
   config_destroy(config);
 }
 
+// The game bag stores the opponent's unknown tiles when the CGP gives a
+// partial (or empty) opponent rack, so the raw bag count overstates the bag
+// the PEG solver reasons about. peg_effective_bag_size must subtract those
+// unknown tiles; anything keyed off bag_get_letters instead (this has bitten
+// several times) sees a bag of 8 or 5 on these 1-in-bag positions.
+static void test_peg_effective_bag_size(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  const char *onyx_rows =
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7";
+
+  // Fully known opponent rack: raw and effective bag agree.
+  char *full_cgp = get_formatted_string(
+      "%s ENOSTXY/ACEISUY 356/378 0 -lex NWL20", onyx_rows);
+  load_and_exec_config_or_die(config, full_cgp);
+  free(full_cgp);
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 1);
+  assert(peg_effective_bag_size(game) == 1);
+
+  // Empty opponent rack: all 7 unknown opponent tiles sit in the bag.
+  char *empty_cgp =
+      get_formatted_string("%s ENOSTXY/ 356/378 0 -lex NWL20", onyx_rows);
+  load_and_exec_config_or_die(config, empty_cgp);
+  free(empty_cgp);
+  game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 8);
+  assert(peg_effective_bag_size(game) == 1);
+
+  // Partial opponent rack: the 4 unknown opponent tiles sit in the bag.
+  char *partial_cgp =
+      get_formatted_string("%s ENOSTXY/ACE 356/378 0 -lex NWL20", onyx_rows);
+  load_and_exec_config_or_die(config, partial_cgp);
+  free(partial_cgp);
+  game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 5);
+  assert(peg_effective_bag_size(game) == 1);
+
+  config_destroy(config);
+}
+
+// `peg empty` must filter against the PEG-effective bag, not the raw game
+// bag. With an empty (unknown) opponent rack all 7 opponent tiles sit in the
+// game bag, so this 1-in-bag board shows a raw count of 8: an 8-tile
+// threshold is unreachable from a 7-tile rack, so a raw-bag filter rejects
+// every move with ERROR_STATUS_PEG_EMPTY_NO_MOVES and the command dies here,
+// while the correct effective 1-tile threshold accepts the mover's tile
+// plays and the solve proceeds. A small time budget keeps the solve cheap:
+// budget expiry returns partial results, never an error, so command success
+// stays a deterministic signal however far the solve gets.
+static void test_peg_pegonly_empty_unknown_opp_rack(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 8);
+  assert(peg_effective_bag_size(game) == 1);
+
+  load_and_exec_config_or_die(config, "set -pegtlim 1");
+  load_and_exec_config_or_die(config, "peg empty");
+  const PegResult *result = config_get_peg_result(config);
+  // The budget may cut the solve before any stage completes; whatever was
+  // published must be a bag-emptying (1+ tile) play.
+  for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+    assert(move_get_tiles_played(&result->top_cands[cand_idx].move) >= 1);
+  }
+  for (int cand_idx = 0; cand_idx < result->n_graded; cand_idx++) {
+    assert(move_get_tiles_played(&result->graded_cands[cand_idx].move) >= 1);
+  }
+
+  config_destroy(config);
+}
+
 // ----- progress callbacks + per-scenario detail -----------------------------
 
 // user_data for the progress callbacks: thread-safe event counters, since the
@@ -1576,6 +1653,8 @@ void test_peg(void) {
   test_peg_bag_emptying_move_split();
   test_peg_pegonly_empty();
   test_peg_pegonly_empty_no_moves();
+  test_peg_effective_bag_size();
+  test_peg_pegonly_empty_unknown_opp_rack();
   // Opp-rack bag adjustment fix: empty and partial opp racks.
   test_peg_opp_rack_sizes();
   test_peg_opp_rack_sizes_cli();

@@ -490,6 +490,17 @@ void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n);
 
 // ----- Entry points -----------------------------------------------------
 
+// The bag size the PEG solver reasons about. The game bag holds the real
+// remaining bag tiles plus any opponent tiles unknown to the mover: when a
+// position gives a partial (or empty) opponent rack, the (RACK_SIZE -
+// opp_rack_size) tiles the mover cannot see are stored in the bag as the
+// opponent's assumed holdings. This returns the raw bag count minus those
+// unknown opponent tiles. Every PEG bag quantity — the 1..4-tile solvable
+// range, "empties the bag", scenario enumeration — refers to this effective
+// size; using bag_get_letters directly is wrong whenever the opponent rack
+// may be partially specified.
+int peg_effective_bag_size(const Game *game);
+
 // Solve PEG analysis for args->game. Fills *out. Caller owns out->top_cands
 // and out->per_scenario; free via peg_result_destroy. Pushes onto error_stack
 // on failure (game out of PEG range, alloc fail, etc.).
