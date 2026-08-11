@@ -1170,15 +1170,19 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PEG:
       usages[0] = "";
       usages[1] = "<moves>";
+      usages[2] = "empty";
       examples[0] = "11J.MEH,1F.VENeY";
       examples[1] = "8D.WORD,pass";
-      text = "Runs the pre-endgame (PEG) solver on the current position (1..4 "
-             "tiles in the bag). With no argument, evaluates every generated "
-             "move. An optional positional argument restricts the root "
-             "candidates to a fixed set of moves instead: comma-separated "
-             "space-free UCGI moves (coordinate and tiles joined by a period, "
-             "e.g. 11J.MEH, and pass as pass; exchanges are not valid PEG "
-             "moves).";
+      examples[2] = "empty";
+      text =
+          "Runs the pre-endgame (PEG) solver on the current position (1..4 "
+          "tiles in the bag). With no argument, evaluates every generated "
+          "move. An optional positional argument restricts the root "
+          "candidates: comma-separated space-free UCGI moves (coordinate and "
+          "tiles joined by a period, e.g. 11J.MEH, and pass as pass; "
+          "exchanges are not valid PEG moves), or the case-insensitive word "
+          "'empty' to restrict to every generated move that would empty the "
+          "bag (plays at least as many tiles as remain in the bag).";
       break;
     case ARG_TOKEN_AUTOPLAY:
       usages[0] = "<type1> <num_games>";
@@ -3420,6 +3424,58 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
   return vms;
 }
 
+// Generates the full root candidate move list for the current game state and
+// filters it down to the moves that would empty the bag: those playing at
+// least as many tiles as remain in the bag. Backs the peg command's "empty"
+// positional value. On success returns the owning MoveList (caller destroys
+// with move_list_destroy) and writes the filtered Move-pointer array (caller
+// free()s it) to *moves_out and the count to *n_out. If no generated move
+// empties the bag, pushes onto error_stack and returns NULL.
+static MoveList *
+config_generate_peg_bag_emptying_moves(const Config *config,
+                                       const Move ***moves_out, int *n_out,
+                                       ErrorStack *error_stack) {
+  MoveList *move_list = move_list_create(PEG_CAND_LIST_CAP);
+  const MoveGenArgs gen_args = {
+      .game = config->game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = move_list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&gen_args);
+
+  const int bag_size = bag_get_letters(game_get_bag(config->game));
+  const int num_moves = move_list_get_count(move_list);
+  const Move **moves = malloc_or_die((size_t)num_moves * sizeof(Move *));
+  int num_kept = 0;
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_tiles_played(move) >= bag_size) {
+      moves[num_kept++] = move;
+    }
+  }
+  if (num_kept == 0) {
+    free(moves);
+    move_list_destroy(move_list);
+    error_stack_push(
+        error_stack, ERROR_STATUS_PEG_EMPTY_NO_MOVES,
+        get_formatted_string(
+            "pegonly 'empty' found no generated move that empties the "
+            "%d-tile bag",
+            bag_size));
+    return NULL;
+  }
+  *moves_out = moves;
+  *n_out = num_kept;
+  return move_list;
+}
+
 void config_peg(Config *config, ErrorStack *error_stack) {
   // Free any prior ranking before overwriting it.
   peg_result_destroy(&config->peg_result);
@@ -3433,16 +3489,28 @@ void config_peg(Config *config, ErrorStack *error_stack) {
   // Optional "only solve" set: evaluate exactly these moves as the
   // candidates. This is a per-invocation positional argument on the peg
   // command itself (not a persisted setting), so it is read straight off
-  // ARG_TOKEN_PEG rather than a config field.
+  // ARG_TOKEN_PEG rather than a config field. "empty" (case-insensitive)
+  // restricts to every generated move that would empty the bag; anything
+  // else is parsed as a space-free UCGI move list.
   ValidatedMoves *only_vms = NULL;
+  MoveList *only_ml = NULL;
   const Move **only_moves = NULL;
   const char *peg_only_str = config_get_parg_value(config, ARG_TOKEN_PEG, 0);
   if (peg_only_str && !is_string_empty_or_whitespace(peg_only_str) &&
       !strings_equal(peg_only_str, "-")) {
-    only_vms = config_parse_peg_move_list(config, peg_only_str, &only_moves,
-                                          &peg_args.n_only_moves, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    if (strings_iequal(peg_only_str, "empty")) {
+      only_ml = config_generate_peg_bag_emptying_moves(
+          config, &only_moves, &peg_args.n_only_moves, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    } else {
+      only_vms =
+          config_parse_peg_move_list(config, peg_only_str, &only_moves,
+                                     &peg_args.n_only_moves, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
     }
     peg_args.only_moves = only_moves;
   }
@@ -3458,6 +3526,7 @@ void config_peg(Config *config, ErrorStack *error_stack) {
     if (!error_stack_is_empty(error_stack)) {
       free(only_moves);
       validated_moves_destroy(only_vms);
+      move_list_destroy(only_ml);
       return;
     }
     peg_args.protect_moves = protect_moves;
@@ -3467,6 +3536,7 @@ void config_peg(Config *config, ErrorStack *error_stack) {
 
   free(only_moves);
   validated_moves_destroy(only_vms);
+  move_list_destroy(only_ml);
   free(protect_moves);
   validated_moves_destroy(protect_vms);
 }

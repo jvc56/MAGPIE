@@ -399,6 +399,14 @@ valid PEG moves):
 magpie> peg 13L.ONYX,13L.OXY
 ```
 
+The case-insensitive word `empty` restricts the search to every generated
+move that would empty the bag (plays at least as many tiles as remain in the
+bag):
+
+```
+magpie> peg empty
+```
+
 Several settings tune the search further; see `help peg`, `help pnoprune`,
 etc. for full descriptions:
 
