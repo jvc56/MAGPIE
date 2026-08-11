@@ -143,7 +143,6 @@ typedef enum {
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
-  ARG_TOKEN_PEG_ONLY,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_NESTED,
@@ -306,10 +305,10 @@ struct Config {
   // chart is written to a timestamped file under data/pegcharts/.
   int peg_out_width;
   int peg_out_lines;
-  // PEG "only solve" / "never prune" move lists (space-free UCGI, comma-
-  // separated), persisted across commands since pargs reset each parse. NULL =
-  // solve all moves / no protected moves.
-  char *peg_only_str;
+  // PEG "never prune" move list (space-free UCGI, comma-separated), persisted
+  // across commands since pargs reset each parse. NULL = no protected moves.
+  // The "only solve" restriction is instead a per-invocation positional
+  // argument on the peg command itself (see ARG_TOKEN_PEG).
   char *peg_noprune_str;
   uint64_t max_iterations;
   uint64_t min_play_iterations;
@@ -1170,8 +1169,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_PEG:
       usages[0] = "";
+      usages[1] = "<moves>";
+      examples[0] = "11J.MEH,1F.VENeY";
+      examples[1] = "8D.WORD,pass";
       text = "Runs the pre-endgame (PEG) solver on the current position (1..4 "
-             "tiles in the bag).";
+             "tiles in the bag). With no argument, evaluates every generated "
+             "move. An optional positional argument restricts the root "
+             "candidates to a fixed set of moves instead: comma-separated "
+             "space-free UCGI moves (coordinate and tiles joined by a period, "
+             "e.g. 11J.MEH, and pass as pass; exchanges are not valid PEG "
+             "moves).";
       break;
     case ARG_TOKEN_AUTOPLAY:
       usages[0] = "<type1> <num_games>";
@@ -1663,17 +1670,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "preserve the expected aggregate (faster, approximate). Default "
              "(<= 1) is full enumeration. Ignored for bag <= 2.";
       break;
-    case ARG_TOKEN_PEG_ONLY:
-      usages[0] = "<moves>";
-      examples[0] = "11J.MEH,1F.VENeY";
-      examples[1] = "8D.WORD,pass";
-      text =
-          "Restricts the PEG solver to a fixed set of root candidate moves "
-          "instead of generating all moves. Comma-separated UCGI moves with "
-          "no spaces: coordinate and tiles joined by a period (e.g. 11J.MEH), "
-          "and pass as pass. Exchanges are not valid PEG moves. Use '-' to "
-          "clear.";
-      break;
     case ARG_TOKEN_PEG_NOPRUNE:
       usages[0] = "<moves>";
       examples[0] = "11J.MEH";
@@ -1681,7 +1677,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Protects a set of moves from being pruned by the PEG cascade "
              "(like the simmer's snoprune): each stage carries them to the "
              "deepest fidelity even when their win%% rank falls below the cut. "
-             "Same space-free UCGI format as pegonly. Use '-' to clear.";
+             "Same space-free UCGI format as the peg command's move-list "
+             "positional argument. Use '-' to clear.";
       break;
     case ARG_TOKEN_PEG_PESSIMISTIC:
       usages[0] = "<true/false>";
@@ -2355,7 +2352,6 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
         ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
-        ARG_TOKEN_PEG_ONLY,                /* pegonly */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
         ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
         ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
@@ -3434,13 +3430,17 @@ void config_peg(Config *config, ErrorStack *error_stack) {
   config_fill_peg_args(config, &peg_args);
   peg_args.poll = config->peg_poll;
 
-  // Optional "only solve" set: evaluate exactly these moves as the candidates.
+  // Optional "only solve" set: evaluate exactly these moves as the
+  // candidates. This is a per-invocation positional argument on the peg
+  // command itself (not a persisted setting), so it is read straight off
+  // ARG_TOKEN_PEG rather than a config field.
   ValidatedMoves *only_vms = NULL;
   const Move **only_moves = NULL;
-  if (config->peg_only_str) {
-    only_vms =
-        config_parse_peg_move_list(config, config->peg_only_str, &only_moves,
-                                   &peg_args.n_only_moves, error_stack);
+  const char *peg_only_str = config_get_parg_value(config, ARG_TOKEN_PEG, 0);
+  if (peg_only_str && !is_string_empty_or_whitespace(peg_only_str) &&
+      !strings_equal(peg_only_str, "-")) {
+    only_vms = config_parse_peg_move_list(config, peg_only_str, &only_moves,
+                                          &peg_args.n_only_moves, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -6930,18 +6930,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  // PEG "only solve" / "never prune" lists persist across commands (pargs reset
-  // each parse). Update only when given this parse; an empty value or "-"
-  // clears the restriction.
-  if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_ONLY) > 0) {
-    const char *peg_only = config_get_parg_value(config, ARG_TOKEN_PEG_ONLY, 0);
-    free(config->peg_only_str);
-    config->peg_only_str = NULL;
-    if (peg_only && !is_string_empty_or_whitespace(peg_only) &&
-        !strings_equal(peg_only, "-")) {
-      config->peg_only_str = string_duplicate(peg_only);
-    }
-  }
+  // PEG "never prune" list persists across commands (pargs reset each parse).
+  // Update only when given this parse; an empty value or "-" clears the
+  // restriction.
   if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_NOPRUNE) > 0) {
     const char *peg_noprune =
         config_get_parg_value(config, ARG_TOKEN_PEG_NOPRUNE, 0);
@@ -8758,7 +8749,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
-  cmd(ARG_TOKEN_PEG, "peg", 0, 0, peg, peg, false);
+  cmd(ARG_TOKEN_PEG, "peg", 0, 1, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 3, leave_gen, generic, false);
@@ -8803,7 +8794,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
-  arg(ARG_TOKEN_PEG_ONLY, "pegonly", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
   arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
@@ -8931,7 +8921,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_show_outcomes = true;
   config->peg_out_width = 100;
   config->peg_out_lines = 1;
-  config->peg_only_str = NULL;
   config->peg_noprune_str = NULL;
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
@@ -9042,7 +9031,6 @@ void config_destroy(Config *config) {
   endgame_results_destroy(config->endgame_results);
   peg_result_destroy(&config->peg_result);
   peg_poll_destroy(config->peg_poll);
-  free(config->peg_only_str);
   free(config->peg_noprune_str);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
@@ -9118,7 +9106,6 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
     case ARG_TOKEN_PEG:
-    case ARG_TOKEN_PEG_ONLY:
     case ARG_TOKEN_PEG_NOPRUNE:
     case ARG_TOKEN_PEG_OUTCOMES:
     case ARG_TOKEN_AUTOPLAY:
@@ -9303,9 +9290,10 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     case ARG_TOKEN_PEG_TOP_K:
       // Serialize the raw -pegtopk value (e.g. "32,16,8,4,2") if set, so the
-      // halving schedule round-trips like -pegstride / -pegpess. -pegonly and
-      // -pnoprune stay unserialized: they are transient per-run move lists,
-      // like the simmer's -snoprune.
+      // halving schedule round-trips like -pegstride / -pegpess. -pnoprune
+      // stays unserialized: it is a transient per-run move list, like the
+      // simmer's -snoprune. The peg command's own move-list positional
+      // argument is per-invocation and never persisted at all.
       config_add_string_setting_to_string_builder(
           config, sb, arg_token,
           config_get_parg_value(config, ARG_TOKEN_PEG_TOP_K, 0));

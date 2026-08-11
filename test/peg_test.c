@@ -598,8 +598,8 @@ static void test_peg_main_pnoprune(void) {
 }
 
 // Drives the `peg` CLI command end to end through the config command path
-// (load_and_exec_config_or_die), exercising the -pegonly / -pegpess /
-// -pegstride knobs and config_get_peg_result. The onyx board with -pegonly
+// (load_and_exec_config_or_die), exercising the pegonly positional / -pegpess
+// / -pegstride knobs and config_get_peg_result. The onyx board with pegonly
 // restricted to ONYX + OXY must publish 13L ONYX (the studied 7.5/8 = 0.9375
 // verdict).
 static void test_peg_main_cli(void) {
@@ -609,9 +609,10 @@ static void test_peg_main_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
-  // -pegonly takes space-free UCGI moves; the period is the in-move separator.
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX,13L.OXY");
-  load_and_exec_config_or_die(config, "peg");
+  // pegonly is a positional argument on the peg command itself: space-free
+  // UCGI moves, the period is the in-move separator. It is per-invocation
+  // (not persisted), so every `peg` call below repeats it.
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
 
   const Game *game = config_get_game(config);
   const PegResult *result = config_get_peg_result(config);
@@ -628,10 +629,45 @@ static void test_peg_main_cli(void) {
   // to the two pegonly candidates, so this stays fast).
   load_and_exec_config_or_die(config,
                               "set -pegpess true -pegstride 1 -pegtopk 4,2");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
 
   printf("[peg_cli] pegonly best=13L ONYX win=%.4f\n", onyx_win);
+  config_destroy(config);
+}
+
+// pegonly moved from the persistent -pegonly option to a positional argument
+// on the peg command itself: `-pegonly` as a standalone option must no longer
+// parse, and the restriction it applies must not persist to a later `peg`
+// call that omits it.
+static void test_peg_pegonly_positional_arg(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+
+  // The old persistent option is gone; it should be an unrecognized arg now.
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "set -pegonly 13L.ONYX", error_stack);
+  assert(error_stack_top(error_stack) ==
+         ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  error_stack_destroy(error_stack);
+
+  // Restricted to the two onyx candidates: at most 2 candidates ever enter a
+  // halving stage.
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  assert(config_get_peg_result(config)->n_graded <= 2);
+
+  // A later `peg` call with no positional argument must not inherit the
+  // restriction from the previous call: with the full board's moves in play,
+  // many more than 2 candidates enter the halving stages.
+  load_and_exec_config_or_die(config, "peg");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  assert(config_get_peg_result(config)->n_graded > 2);
+
   config_destroy(config);
 }
 
@@ -1272,7 +1308,7 @@ static void test_peg_opp_rack_sizes(void) {
 }
 
 // Verifies the opp-rack bag adjustment fix through the CLI command path
-// (config / cgp / set -pegonly / peg), exercising both the empty and partial
+// (config / cgp / peg <pegonly>), exercising both the empty and partial
 // opp-rack cases on the same 1-in-bag ONYX board.
 static void test_peg_opp_rack_sizes_cli(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score");
@@ -1285,8 +1321,7 @@ static void test_peg_opp_rack_sizes_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   printf("[peg_cli_opp_empty] accepted: win=%.4f\n",
          config_get_peg_result(config)->best_win);
@@ -1299,8 +1334,7 @@ static void test_peg_opp_rack_sizes_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACE 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   printf("[peg_cli_opp_partial] accepted: win=%.4f\n",
          config_get_peg_result(config)->best_win);
@@ -1431,6 +1465,7 @@ void test_peg(void) {
   test_peg_macondo_pah_slice();
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
+  test_peg_pegonly_positional_arg();
   // Opp-rack bag adjustment fix: empty and partial opp racks.
   test_peg_opp_rack_sizes();
   test_peg_opp_rack_sizes_cli();
