@@ -3,7 +3,9 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
@@ -19,12 +21,17 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/peg.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+enum { PEG_GREEDY_MAX_ONLY_MOVES = 16 };
 
 void test_time_manager_match_replay(void) {
   const char *seed_text = getenv("TM_REPLAY_GAME_SEED");
@@ -269,5 +276,114 @@ void test_pass_peg_oracle_eval_move(void) {
   printf("Aggregated: win%%=%.4f  mean_spread=%+0.4f  weight=%d\n", q_win,
          q_spread, weight_sum);
 
+  config_destroy(config);
+}
+
+void test_peg_greedy_candidate_dump(void) {
+  const char *cgp = getenv("PEG_GREEDY_CGP");
+  if (cgp == NULL) {
+    log_fatal("peg greedy dump requires PEG_GREEDY_CGP");
+    return;
+  }
+  const char *lexicon = getenv("PEG_GREEDY_LEX");
+  if (lexicon == NULL) {
+    lexicon = "CSW24";
+  }
+  const char *highlight = getenv("PEG_GREEDY_HIGHLIGHT");
+  const char *threads_text = getenv("PEG_GREEDY_THREADS");
+  const int num_threads = threads_text != NULL ? atoi(threads_text) : 4;
+
+  Config *config = config_create_or_die("set -s1 equity -s2 equity");
+  char load_cmd[10240];
+  (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex %s -wmp true", cgp,
+                 lexicon);
+  load_and_exec_config_or_die(config, load_cmd);
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  // Stage 0 scores the entire candidate field, so a greedy-only solve reports
+  // the exact ranking the halving stages cut against. That makes a play's
+  // greedy win% and its rank directly comparable with the deep win% it would
+  // have received had it survived the cut.
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = num_threads > 0 ? num_threads : 1;
+  args.greedy_seed_only = true;
+  args.opp_model = PEG_OPP_RATIONAL;
+
+  ErrorStack *error_stack = error_stack_create();
+  // The published ranking retains only the leading candidates, so probing a
+  // play the cut discarded means restricting the field to it: an only-moves
+  // greedy solve reports that play's own stage-0 win% rather than its absence.
+  const char *only_text = getenv("PEG_GREEDY_ONLY");
+  ValidatedMoves *only_validated[PEG_GREEDY_MAX_ONLY_MOVES] = {0};
+  const Move *only_moves[PEG_GREEDY_MAX_ONLY_MOVES] = {0};
+  int num_only_moves = 0;
+  char *only_copy = NULL;
+  if (only_text != NULL) {
+    only_copy = string_duplicate(only_text);
+    char *only_saveptr = NULL;
+    for (char *token = strtok_r(only_copy, ";", &only_saveptr); token != NULL;
+         token = strtok_r(NULL, ";", &only_saveptr)) {
+      if (num_only_moves >= PEG_GREEDY_MAX_ONLY_MOVES) {
+        log_fatal("peg greedy dump: too many PEG_GREEDY_ONLY moves");
+      }
+      only_validated[num_only_moves] = validated_moves_create(
+          game, game_get_player_on_turn_index(game), token,
+          /*allow_phonies=*/false, /*allow_playthrough=*/true, error_stack);
+      if (!error_stack_is_empty(error_stack) ||
+          validated_moves_get_number_of_moves(only_validated[num_only_moves]) !=
+              1) {
+        error_stack_print_and_reset(error_stack);
+        log_fatal("peg greedy dump: could not parse move '%s'", token);
+      }
+      only_moves[num_only_moves] =
+          validated_moves_get_move(only_validated[num_only_moves], 0);
+      num_only_moves++;
+    }
+    args.only_moves = only_moves;
+    args.n_only_moves = num_only_moves;
+  }
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  thread_control_set_status(args.thread_control, THREAD_CONTROL_STATUS_STARTED);
+  peg_solve(&args, &result, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("peg greedy dump: solve failed");
+  }
+
+  printf("PEG_GREEDY_DUMP candidates=%d\n", result.n_top_cands);
+  StringBuilder *move_sb = string_builder_create();
+  for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+    const PegRankedCand *cand = &result.top_cands[cand_idx];
+    string_builder_clear(move_sb);
+    string_builder_add_move(move_sb, board, &cand->move, ld, false);
+    const char *move_text = string_builder_peek(move_sb);
+    bool marked = false;
+    if (highlight != NULL) {
+      char *targets = string_duplicate(highlight);
+      char *saveptr = NULL;
+      for (const char *token = strtok_r(targets, ",", &saveptr);
+           token != NULL && !marked; token = strtok_r(NULL, ",", &saveptr)) {
+        marked = strstr(move_text, token) != NULL;
+      }
+      free(targets);
+    }
+    printf("PEG_GREEDY_CAND rank=%d move=%s win=%.4f spread=%+.3f "
+           "scenarios=%d marked=%d\n",
+           cand_idx + 1, move_text, cand->win_pct, cand->mean_spread,
+           cand->n_scenarios, marked ? 1 : 0);
+  }
+  string_builder_destroy(move_sb);
+  for (int move_idx = 0; move_idx < num_only_moves; move_idx++) {
+    validated_moves_destroy(only_validated[move_idx]);
+  }
+  free(only_copy);
+  error_stack_destroy(error_stack);
+  peg_result_destroy(&result);
   config_destroy(config);
 }

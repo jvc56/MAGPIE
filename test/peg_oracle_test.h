@@ -27,4 +27,16 @@ void test_pass_peg_oracle_eval_move(void);
 //   TM_REPLAY_MOVES     — pipe-separated UCGI moves before the target root.
 void test_time_manager_match_replay(void);
 
+// Dumps the PEG greedy seed's ranking of the entire candidate field. Stage 0
+// scores every generated move, so this shows the exact win% and rank the
+// halving stages cut against -- the view needed when a strong play never
+// reaches endgame fidelity.
+//
+// Env knobs:
+//   PEG_GREEDY_CGP       — position (required).
+//   PEG_GREEDY_LEX       — lexicon (default CSW24).
+//   PEG_GREEDY_HIGHLIGHT — comma-separated substrings to flag in the dump.
+//   PEG_GREEDY_THREADS   — worker threads (default 4).
+void test_peg_greedy_candidate_dump(void);
+
 #endif // PEG_ORACLE_TEST_H

@@ -174,6 +174,7 @@ static TestEntry on_demand_test_table[] = {
     {"genegcurve", test_generate_endgame_curve_cgps},
     {"genpegcgps", test_generate_peg_cgps},
     {"pegstage", test_peg_stage_stability},
+    {"peggreedydump", test_peg_greedy_candidate_dump},
     {"pegab", test_peg_strength_ab},
     {"genpegfresh", test_gen_peg_fresh},
     {"pegcurve", test_peg_strength_curve},
