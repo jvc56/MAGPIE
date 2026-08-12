@@ -47,7 +47,7 @@
 
 enum {
   ANALYZE_NOTE_TRUNCATE_LEN = 40,
-  ANALYZE_SUMMARY_COLS = 10,
+  ANALYZE_SUMMARY_COLS_BASE = 10,
   ANALYZE_SUMMARY_COL_PADDING = 2,
 };
 
@@ -68,6 +68,25 @@ typedef enum {
   ANALYSIS_TYPE_SIM,
   ANALYSIS_TYPE_ENDGAME,
 } analysis_type_t;
+
+// Discrete mistake-size grading, standard across post-game Scrabble analysis
+// tools. Pre-endgame turns (sim or PEG, i.e. win% is available) are graded on
+// win% lost (WPL); endgame turns are graded on point spread lost, since exact
+// win/loss is already known there. Static-analysis turns (no win% available)
+// are always MISTAKE_NONE.
+typedef enum {
+  MISTAKE_NONE,
+  MISTAKE_SMALL,
+  MISTAKE_MEDIUM,
+  MISTAKE_LARGE,
+} mistake_size_t;
+
+#define MISTAKE_WPL_SMALL_MIN 0.5
+#define MISTAKE_WPL_MEDIUM_MIN 3.0
+#define MISTAKE_WPL_LARGE_MIN 7.0
+#define MISTAKE_PTS_SMALL_MIN 1.0
+#define MISTAKE_PTS_MEDIUM_MIN 7.0
+#define MISTAKE_PTS_LARGE_MIN 15.0
 
 // Per-move data for best or actual play, used to print them side by side.
 // rank_idx is the 0-based rank in the final sorted move list; -1 when
@@ -139,6 +158,89 @@ static double compute_win_pct_lost(const TurnResult *tr) {
     return 0.0; // static analysis: no meaningful win% difference
   }
   return tr->best.win_pct - tr->actual.win_pct;
+}
+
+// Grades a turn into a discrete mistake size. Endgame turns are graded on
+// point spread lost, with any play that turns a winning best-play spread
+// into a non-winning actual-play spread always graded large regardless of
+// point size (this is "blowing a winning position"). Pre-endgame turns
+// (sim/PEG) are graded on WPL. Static-analysis turns (no win% available)
+// are always MISTAKE_NONE.
+static mistake_size_t compute_mistake_size(const TurnResult *tr) {
+  if (tr->was_endgame) {
+    const int best_spread = tr->best.endgame_spread;
+    const int actual_spread = tr->actual.endgame_spread;
+    if (best_spread > 0 && actual_spread <= 0) {
+      return MISTAKE_LARGE;
+    }
+    const double points_lost = best_spread - actual_spread;
+    if (points_lost < MISTAKE_PTS_SMALL_MIN) {
+      return MISTAKE_NONE;
+    }
+    if (points_lost < MISTAKE_PTS_MEDIUM_MIN) {
+      return MISTAKE_SMALL;
+    }
+    if (points_lost < MISTAKE_PTS_LARGE_MIN) {
+      return MISTAKE_MEDIUM;
+    }
+    return MISTAKE_LARGE;
+  }
+  if (tr->actual.win_pct < 0.0) {
+    return MISTAKE_NONE; // static analysis: no meaningful win% difference
+  }
+  const double win_pct_lost = compute_win_pct_lost(tr);
+  if (win_pct_lost < MISTAKE_WPL_SMALL_MIN) {
+    return MISTAKE_NONE;
+  }
+  if (win_pct_lost < MISTAKE_WPL_MEDIUM_MIN) {
+    return MISTAKE_SMALL;
+  }
+  if (win_pct_lost < MISTAKE_WPL_LARGE_MIN) {
+    return MISTAKE_MEDIUM;
+  }
+  return MISTAKE_LARGE;
+}
+
+static double mistake_size_to_index(mistake_size_t size) {
+  switch (size) {
+  case MISTAKE_SMALL:
+    return 0.2;
+  case MISTAKE_MEDIUM:
+    return 0.5;
+  case MISTAKE_LARGE:
+    return 1.0;
+  case MISTAKE_NONE:
+  default:
+    return 0.0;
+  }
+}
+
+static const char *mistake_size_to_label(mistake_size_t size) {
+  switch (size) {
+  case MISTAKE_SMALL:
+    return "Sm";
+  case MISTAKE_MEDIUM:
+    return "Med";
+  case MISTAKE_LARGE:
+    return "Lg";
+  case MISTAKE_NONE:
+  default:
+    return "-";
+  }
+}
+
+static const char *mistake_size_to_csv_label(mistake_size_t size) {
+  switch (size) {
+  case MISTAKE_SMALL:
+    return "small";
+  case MISTAKE_MEDIUM:
+    return "medium";
+  case MISTAKE_LARGE:
+    return "large";
+  case MISTAKE_NONE:
+  default:
+    return "none";
+  }
 }
 
 // See the WPL_TO_EQL_CONVERSION_FACTOR comment above for what this adjusts
@@ -301,7 +403,8 @@ static void add_move_comparison_row(StringGrid *move_sg, int row,
                                     char *move_str, char *leave_str,
                                     char *score_str, char *spread_str,
                                     char *wp_str, char *eq_str, char *steq_str,
-                                    int wp_col, bool is_endgame) {
+                                    char *mist_str, int wp_col, bool is_endgame,
+                                    bool show_mistakes) {
   int curr_col = 0;
   string_grid_set_cell(move_sg, row, curr_col++, string_duplicate(label));
   string_grid_set_cell(move_sg, row, curr_col++, rank_str);
@@ -317,6 +420,11 @@ static void add_move_comparison_row(StringGrid *move_sg, int row,
   string_grid_set_cell(move_sg, row, curr_col++, wp_str);
   string_grid_set_cell(move_sg, row, curr_col++, eq_str);
   string_grid_set_cell(move_sg, row, curr_col, steq_str);
+  if (show_mistakes) {
+    string_grid_set_cell(move_sg, row, curr_col + 1, mist_str);
+  } else {
+    free(mist_str);
+  }
 }
 
 // Fills rows 1 (Best), 2 (Actual), and 3 (Diff) of a 4-row move comparison
@@ -324,7 +432,8 @@ static void add_move_comparison_row(StringGrid *move_sg, int row,
 static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
                                      const Board *board,
                                      const LetterDistribution *ld,
-                                     bool is_endgame, int num_display_plies) {
+                                     bool is_endgame, int num_display_plies,
+                                     bool show_mistakes) {
   const TurnResultMove *best_trm = &tr->best;
   const TurnResultMove *actual_trm = &tr->actual;
   const Rack *rack = &tr->rack;
@@ -335,6 +444,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
 
   const double equity_lost = tr->best.equity - tr->actual.equity;
   const double win_pct_lost = compute_win_pct_lost(tr);
+  const mistake_size_t mistake_size = compute_mistake_size(tr);
 
   StringBuilder *sb = string_builder_create();
 
@@ -356,7 +466,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
                                : string_duplicate("-"),
       is_endgame ? string_duplicate("-")
                  : get_formatted_string("%.2f", best_st_eq),
-      wp_col, is_endgame);
+      string_duplicate("-"), wp_col, is_endgame, show_mistakes);
 
   // Actual row (row 2).
   string_builder_add_move_leave(sb, rack, &actual_trm->move, ld);
@@ -380,10 +490,10 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
           : string_duplicate("-"),
       is_endgame ? string_duplicate("-")
                  : get_formatted_string("%.2f", actual_st_eq),
-      wp_col, is_endgame);
+      string_duplicate("-"), wp_col, is_endgame, show_mistakes);
 
   // Diff row (row 3): dashes for R/Mv/Lv; score diff for S[/Spr]; diffs for
-  // Wp/Eq/StEq.
+  // Wp/Eq/StEq; mistake grade for Mist.
   const int score_diff = equity_to_int(move_get_score(&best_trm->move)) -
                          equity_to_int(move_get_score(&actual_trm->move));
   add_move_comparison_row(
@@ -396,10 +506,13 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
       get_formatted_string("%.2f", equity_lost),
       is_endgame ? string_duplicate("-")
                  : get_formatted_string("%.2f", best_st_eq - actual_st_eq),
-      wp_col, is_endgame);
+      get_formatted_string("%s (%.2f)", mistake_size_to_label(mistake_size),
+                           mistake_size_to_index(mistake_size)),
+      wp_col, is_endgame, show_mistakes);
 
   // Ply columns: P1-S, P1-BP, P2-S, P2-BP, ...
-  const int ply_start_col = wp_col + 3; // after Wp, Eq, StEq
+  // After Wp, Eq, StEq, plus Mist when shown.
+  const int ply_start_col = wp_col + (show_mistakes ? 4 : 3);
   for (int ply_idx = 0; ply_idx < num_display_plies; ply_idx++) {
     const int score_col = ply_start_col + ply_idx * 2;
     const int bingo_col = score_col + 1;
@@ -432,7 +545,7 @@ static void write_per_turn_human_readable(
     const TurnResult *turn_result, const GameHistory *game_history,
     const LetterDistribution *ld, const char *report_path,
     const AnalyzeCtx *ctx, int max_num_display_plays, int max_num_display_plies,
-    ErrorStack *error_stack) {
+    bool show_mistakes, ErrorStack *error_stack) {
   const char *player_name =
       game_history_player_get_nickname(game_history, turn_result->player_index);
 
@@ -453,16 +566,18 @@ static void write_per_turn_human_readable(
       !is_endgame && !is_peg && turn_result->actual.win_pct >= 0.0;
 
   // Per-turn move grid: label, R, Mv, Lv, S, [Spr (endgame only),] Wp, Eq,
-  // StEq, [P1-S, P1-BP, P2-S, P2-BP, ... (sim only, up to
-  // max_num_display_plies)]. 4 rows: header + best + actual + diff. For
-  // endgames: Spr at col 5 (final spread); StEq shows '-'; no ply cols.
+  // StEq, [Mist (when show_mistakes),] [P1-S, P1-BP, P2-S, P2-BP, ... (sim
+  // only, up to max_num_display_plies)]. 4 rows: header + best + actual +
+  // diff. For endgames: Spr at col 5 (final spread); StEq shows '-'; no ply
+  // cols.
   const int num_plies = turn_result->best.num_plies;
   int num_display_plies = 0;
   if (is_sim) {
     num_display_plies =
         max_num_display_plies < num_plies ? max_num_display_plies : num_plies;
   }
-  const int num_grid_cols = (is_endgame ? 9 : 8) + num_display_plies * 2;
+  const int num_grid_cols =
+      (is_endgame ? 9 : 8) + (show_mistakes ? 1 : 0) + num_display_plies * 2;
   StringGrid *move_sg = string_grid_create(4, num_grid_cols, 2);
 
   // Header row.
@@ -480,6 +595,10 @@ static void write_per_turn_human_readable(
   string_grid_set_cell(move_sg, curr_row, curr_col++, string_duplicate("Wp"));
   string_grid_set_cell(move_sg, curr_row, curr_col++, string_duplicate("Eq"));
   string_grid_set_cell(move_sg, curr_row, curr_col++, string_duplicate("StEq"));
+  if (show_mistakes) {
+    string_grid_set_cell(move_sg, curr_row, curr_col++,
+                         string_duplicate("Mist"));
+  }
   for (int ply_idx = 0; ply_idx < num_display_plies; ply_idx++) {
     string_grid_set_cell(move_sg, curr_row, curr_col++,
                          get_formatted_string("P%d-S", ply_idx + 1));
@@ -488,7 +607,7 @@ static void write_per_turn_human_readable(
   }
 
   add_move_comparison_rows(move_sg, turn_result, board, ld, is_endgame,
-                           num_display_plies);
+                           num_display_plies, show_mistakes);
 
   string_builder_add_string_grid(sb, move_sg, false);
   string_builder_add_string(sb, "\n");
@@ -548,12 +667,16 @@ static void write_per_turn_csv(const TurnResult *turn_result,
                                const GameHistory *game_history,
                                const LetterDistribution *ld,
                                const char *report_path, bool is_first_turn,
-                               ErrorStack *error_stack) {
+                               bool show_mistakes, ErrorStack *error_stack) {
   StringBuilder *sb = string_builder_create();
 
   if (is_first_turn) {
     string_builder_add_string(sb, "turn,player,rack,actual,best,equity_lost,"
-                                  "win_pct_lost,adjusted_equity_lost\n");
+                                  "win_pct_lost,adjusted_equity_lost");
+    if (show_mistakes) {
+      string_builder_add_string(sb, ",mistake_size,mistake_index");
+    }
+    string_builder_add_string(sb, "\n");
   }
 
   const char *player_name =
@@ -568,10 +691,17 @@ static void write_per_turn_csv(const TurnResult *turn_result,
                       &adjusted_equity_lost);
 
   string_builder_add_formatted_string(
-      sb, "%d,%s,%s,%s,%s,%.2f,%.2f,%.2f\n", turn_result->turn_number,
+      sb, "%d,%s,%s,%s,%s,%.2f,%.2f,%.2f", turn_result->turn_number,
       player_name, rack_str, turn_result->actual.display_move,
       turn_result->actual.rank_idx != 0 ? turn_result->best.display_move : "-",
       equity_lost, win_pct_lost, adjusted_equity_lost);
+  if (show_mistakes) {
+    const mistake_size_t mistake_size = compute_mistake_size(turn_result);
+    string_builder_add_formatted_string(sb, ",%s,%.2f",
+                                        mistake_size_to_csv_label(mistake_size),
+                                        mistake_size_to_index(mistake_size));
+  }
+  string_builder_add_string(sb, "\n");
 
   free(rack_str);
 
@@ -588,7 +718,8 @@ static void add_summary_event_row(
     StringGrid *sg, int row, const TurnResult *tr, GameHistory *game_history,
     Game *game, const LetterDistribution *ld, int player_turn_number,
     double *total_equity_lost, double *total_win_pct_lost,
-    double *total_adjusted_equity_lost, ErrorStack *error_stack) {
+    double *total_adjusted_equity_lost, double *total_mistake_index,
+    bool show_mistakes, ErrorStack *error_stack) {
   game_play_n_events(game_history, game, tr->event_idx, false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     log_fatal("unexpected error replaying game history events for summary "
@@ -609,6 +740,8 @@ static void add_summary_event_row(
   double equity_lost;
   double adjusted_equity_lost;
   compute_turn_losses(tr, &win_pct_lost, &equity_lost, &adjusted_equity_lost);
+  const double mistake_index =
+      show_mistakes ? mistake_size_to_index(compute_mistake_size(tr)) : 0.0;
 
   int curr_col = 0;
   string_grid_set_cell(sg, row, curr_col++,
@@ -629,6 +762,10 @@ static void add_summary_event_row(
                        get_formatted_string("%.2f", equity_lost));
   string_grid_set_cell(sg, row, curr_col++,
                        get_formatted_string("%.2f", adjusted_equity_lost));
+  if (show_mistakes) {
+    string_grid_set_cell(sg, row, curr_col++,
+                         get_formatted_string("%.2f", mistake_index));
+  }
 
   if (tr->note_str) {
     char *trimmed_note = string_duplicate(tr->note_str);
@@ -651,18 +788,18 @@ static void add_summary_event_row(
   *total_equity_lost += equity_lost;
   *total_win_pct_lost += win_pct_lost;
   *total_adjusted_equity_lost += adjusted_equity_lost;
+  *total_mistake_index += mistake_index;
 }
 
 // Writes a game summary table for turns matching player_filter.
 // player_filter == -1 means include all players (combined summary).
 // matching_count is pre-computed by the caller from per-game turn tracking.
-static void write_analysis_summary(GameHistory *game_history,
-                                   const LetterDistribution *ld,
-                                   const TurnResult *turn_results,
-                                   int num_turn_results,
-                                   const char *report_path, int player_filter,
-                                   int matching_count, Game *game,
-                                   ErrorStack *error_stack) {
+static void
+write_analysis_summary(GameHistory *game_history, const LetterDistribution *ld,
+                       const TurnResult *turn_results, int num_turn_results,
+                       const char *report_path, int player_filter,
+                       int matching_count, Game *game, bool show_mistakes,
+                       ErrorStack *error_stack) {
   if (matching_count == 0) {
     return;
   }
@@ -685,8 +822,9 @@ static void write_analysis_summary(GameHistory *game_history,
   }
 
   const int num_rows = matching_count + 3; // header + data rows + Total + Avg
-  StringGrid *sg = string_grid_create(num_rows, ANALYZE_SUMMARY_COLS,
-                                      ANALYZE_SUMMARY_COL_PADDING);
+  const int num_cols = ANALYZE_SUMMARY_COLS_BASE + (show_mistakes ? 1 : 0);
+  StringGrid *sg =
+      string_grid_create(num_rows, num_cols, ANALYZE_SUMMARY_COL_PADDING);
 
   int curr_row = 0;
   int curr_col = 0;
@@ -699,11 +837,16 @@ static void write_analysis_summary(GameHistory *game_history,
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("WPL"));
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("EqL"));
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("AEqL"));
+  if (show_mistakes) {
+    string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("MI"));
+  }
   string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("Note"));
 
   double total_equity_lost = 0;
   double total_win_pct_lost = 0.0;
   double total_adjusted_equity_lost = 0.0;
+  double total_mistake_index = 0.0;
+  int mistake_counts[4] = {0, 0, 0, 0}; // indexed by mistake_size_t
   int grid_row = 1;
   int player_turn_counts[2] = {0, 0};
 
@@ -713,10 +856,14 @@ static void write_analysis_summary(GameHistory *game_history,
     if (player_filter != -1 && tr->player_index != player_filter) {
       continue;
     }
+    if (show_mistakes) {
+      mistake_counts[compute_mistake_size(tr)]++;
+    }
     add_summary_event_row(sg, grid_row, tr, game_history, game, ld,
                           player_turn_counts[tr->player_index],
                           &total_equity_lost, &total_win_pct_lost,
-                          &total_adjusted_equity_lost, error_stack);
+                          &total_adjusted_equity_lost, &total_mistake_index,
+                          show_mistakes, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       log_fatal("unexpected error adding row to analysis summary grid: %s",
                 error_stack_top(error_stack));
@@ -728,8 +875,10 @@ static void write_analysis_summary(GameHistory *game_history,
   const double avg_win_pct = total_win_pct_lost / (double)matching_count;
   const double avg_adjusted_equity =
       total_adjusted_equity_lost / (double)matching_count;
+  const double avg_mistake_index = total_mistake_index / (double)matching_count;
 
-  // Total row: label in Best column, values in WPL, EqL, and AEqL columns.
+  // Total row: label in Best column, values in WPL, EqL, AEqL, and (when
+  // shown) MI columns.
   curr_row = matching_count + 1;
   curr_col = 5;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Total"));
@@ -737,10 +886,19 @@ static void write_analysis_summary(GameHistory *game_history,
                        get_formatted_string("%.2f", total_win_pct_lost));
   string_grid_set_cell(sg, curr_row, curr_col++,
                        get_formatted_string("%.2f", total_equity_lost));
-  string_grid_set_cell(
-      sg, curr_row, curr_col,
-      get_formatted_string("%.2f", total_adjusted_equity_lost));
-  // Avg row: label in Best column, values in WPL, EqL, and AEqL columns.
+  if (show_mistakes) {
+    string_grid_set_cell(
+        sg, curr_row, curr_col++,
+        get_formatted_string("%.2f", total_adjusted_equity_lost));
+    string_grid_set_cell(sg, curr_row, curr_col,
+                         get_formatted_string("%.2f", total_mistake_index));
+  } else {
+    string_grid_set_cell(
+        sg, curr_row, curr_col,
+        get_formatted_string("%.2f", total_adjusted_equity_lost));
+  }
+  // Avg row: label in Best column, values in WPL, EqL, AEqL, and (when
+  // shown) MI columns.
   curr_row++;
   curr_col = 5;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Avg"));
@@ -748,12 +906,24 @@ static void write_analysis_summary(GameHistory *game_history,
                        get_formatted_string("%.2f", avg_win_pct));
   string_grid_set_cell(sg, curr_row, curr_col++,
                        get_formatted_string("%.2f", avg_equity));
-  string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%.2f", avg_adjusted_equity));
+  if (show_mistakes) {
+    string_grid_set_cell(sg, curr_row, curr_col++,
+                         get_formatted_string("%.2f", avg_adjusted_equity));
+    string_grid_set_cell(sg, curr_row, curr_col,
+                         get_formatted_string("%.2f", avg_mistake_index));
+  } else {
+    string_grid_set_cell(sg, curr_row, curr_col,
+                         get_formatted_string("%.2f", avg_adjusted_equity));
+  }
 
   StringBuilder *sb = string_builder_create();
   string_builder_add_string_grid(sb, sg, false);
-  string_builder_add_string(sb, "\n");
+  if (show_mistakes) {
+    string_builder_add_formatted_string(
+        sb, "\nMistakes: %d small, %d medium, %d large (MI %.2f)\n",
+        mistake_counts[MISTAKE_SMALL], mistake_counts[MISTAKE_MEDIUM],
+        mistake_counts[MISTAKE_LARGE], total_mistake_index);
+  }
   char *section = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   append_string_to_file(report_path, section, error_stack);
@@ -844,7 +1014,7 @@ static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
                                 const LetterDistribution *ld,
                                 const char *report_path, AnalyzeCtx *ctx,
                                 int max_num_display_plays, bool human_readable,
-                                bool is_first_analyzed_turn,
+                                bool show_mistakes, bool is_first_analyzed_turn,
                                 bool vertical_opening_is_transposable,
                                 ErrorStack *error_stack) {
   const ValidatedMoves *vms = game_event_get_vms(event);
@@ -894,10 +1064,11 @@ static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
 
   if (human_readable) {
     write_per_turn_human_readable(turn_result, game_history, ld, report_path,
-                                  ctx, max_num_display_plays, 0, error_stack);
+                                  ctx, max_num_display_plays, 0, show_mistakes,
+                                  error_stack);
   } else {
     write_per_turn_csv(turn_result, game_history, ld, report_path,
-                       is_first_analyzed_turn, error_stack);
+                       is_first_analyzed_turn, show_mistakes, error_stack);
   }
 }
 
@@ -1087,10 +1258,11 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
     write_per_turn_human_readable(turn_result, game_history, ld, report_path,
                                   ctx, args->max_num_display_plays,
                                   args->sim_args.max_num_display_plies,
-                                  error_stack);
+                                  args->show_mistakes, error_stack);
   } else {
     write_per_turn_csv(turn_result, game_history, ld, report_path,
-                       is_first_analyzed_turn, error_stack);
+                       is_first_analyzed_turn, args->show_mistakes,
+                       error_stack);
   }
 }
 
@@ -1203,10 +1375,11 @@ static void analyze_with_endgame(const GameEvent *event,
 
   if (args->human_readable) {
     write_per_turn_human_readable(turn_result, game_history, ld, report_path,
-                                  ctx, 0, 0, error_stack);
+                                  ctx, 0, 0, args->show_mistakes, error_stack);
   } else {
     write_per_turn_csv(turn_result, game_history, ld, report_path,
-                       is_first_analyzed_turn, error_stack);
+                       is_first_analyzed_turn, args->show_mistakes,
+                       error_stack);
   }
 }
 
@@ -1290,10 +1463,11 @@ static void analyze_with_peg(const GameEvent *event, TurnResult *turn_result,
   if (args->human_readable) {
     write_per_turn_human_readable(turn_result, game_history, ld, report_path,
                                   ctx, args->max_num_display_plays, 0,
-                                  error_stack);
+                                  args->show_mistakes, error_stack);
   } else {
     write_per_turn_csv(turn_result, game_history, ld, report_path,
-                       is_first_analyzed_turn, error_stack);
+                       is_first_analyzed_turn, args->show_mistakes,
+                       error_stack);
   }
 }
 
@@ -1412,7 +1586,8 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     if (analyze_args->sim_args.num_plies == 0) {
       analyze_with_static(event, &turn_result, game_history, ld, report_path,
                           ctx, analyze_args->max_num_display_plays,
-                          analyze_args->human_readable, is_first_analyzed_turn,
+                          analyze_args->human_readable,
+                          analyze_args->show_mistakes, is_first_analyzed_turn,
                           vertical_opening_is_transposable, error_stack);
     } else if (mover_rack_size == RACK_SIZE &&
                unseen_for_peg >= RACK_SIZE + PEG_MIN_BAG &&
@@ -1460,7 +1635,7 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
         write_analysis_summary(game_history, ld, ctx->turn_results,
                                ctx->turn_results_count, report_path, player_idx,
                                player_turn_counts[player_idx], ctx->game,
-                               error_stack);
+                               analyze_args->show_mistakes, error_stack);
         if (!error_stack_is_empty(error_stack)) {
           break;
         }
@@ -1469,10 +1644,10 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     // Write combined summary only when both players were analyzed.
     if (error_stack_is_empty(error_stack) && player_has_turns[0] &&
         player_has_turns[1]) {
-      write_analysis_summary(game_history, ld, ctx->turn_results,
-                             ctx->turn_results_count, report_path, -1,
-                             player_turn_counts[0] + player_turn_counts[1],
-                             ctx->game, error_stack);
+      write_analysis_summary(
+          game_history, ld, ctx->turn_results, ctx->turn_results_count,
+          report_path, -1, player_turn_counts[0] + player_turn_counts[1],
+          ctx->game, analyze_args->show_mistakes, error_stack);
     }
   }
 
@@ -1493,6 +1668,8 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     double total_win_pct_lost = 0.0;
     double total_equity_lost = 0.0;
     double total_adjusted_equity_lost = 0.0;
+    double total_mistake_index = 0.0;
+    int mistake_counts[4] = {0, 0, 0, 0}; // indexed by mistake_size_t
     for (int result_idx = 0; result_idx < ctx->turn_results_count;
          result_idx++) {
       double win_pct_lost;
@@ -1503,11 +1680,29 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
       total_win_pct_lost += win_pct_lost;
       total_equity_lost += equity_lost;
       total_adjusted_equity_lost += adjusted_equity_lost;
+      if (analyze_args->show_mistakes) {
+        const mistake_size_t mistake_size =
+            compute_mistake_size(&ctx->turn_results[result_idx]);
+        mistake_counts[mistake_size]++;
+        total_mistake_index += mistake_size_to_index(mistake_size);
+      }
     }
-    char *trailer = get_formatted_string(
-        "\n=== Analysis Complete: turns=%d wpl=%.2f eql=%.2f aeql=%.2f ===\n",
-        ctx->turn_results_count, total_win_pct_lost, total_equity_lost,
-        total_adjusted_equity_lost);
+    char *trailer;
+    if (analyze_args->show_mistakes) {
+      trailer = get_formatted_string(
+          "\n=== Analysis Complete: turns=%d wpl=%.2f eql=%.2f aeql=%.2f "
+          "small=%d medium=%d large=%d mi=%.2f ===\n",
+          ctx->turn_results_count, total_win_pct_lost, total_equity_lost,
+          total_adjusted_equity_lost, mistake_counts[MISTAKE_SMALL],
+          mistake_counts[MISTAKE_MEDIUM], mistake_counts[MISTAKE_LARGE],
+          total_mistake_index);
+    } else {
+      trailer = get_formatted_string(
+          "\n=== Analysis Complete: turns=%d wpl=%.2f eql=%.2f aeql=%.2f "
+          "===\n",
+          ctx->turn_results_count, total_win_pct_lost, total_equity_lost,
+          total_adjusted_equity_lost);
+    }
     append_string_to_file(report_path, trailer, error_stack);
     free(trailer);
   }

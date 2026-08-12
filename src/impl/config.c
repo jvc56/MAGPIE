@@ -164,6 +164,7 @@ typedef enum {
   ARG_TOKEN_USE_HEAT_MAP,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
+  ARG_TOKEN_SHOW_MISTAKES,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INTERVAL,
@@ -322,6 +323,7 @@ struct Config {
   Equity eq_margin_movegen;
   bool use_game_pairs;
   bool human_readable;
+  bool show_mistakes;
   bool use_small_plays;
   bool sim_with_inference;
   bool use_heat_map;
@@ -596,6 +598,10 @@ bool config_get_human_readable(const Config *config) {
 
 void config_set_human_readable(Config *config, bool human_readable) {
   config->human_readable = human_readable;
+}
+
+bool config_get_show_mistakes(const Config *config) {
+  return config->show_mistakes;
 }
 
 bool config_get_show_prompt(const Config *config) {
@@ -1851,6 +1857,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to use a human readable move format for "
              "printing results.";
       break;
+    case ARG_TOKEN_SHOW_MISTAKES:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether analyze grades each turn into a discrete "
+             "mistake size (small/medium/large) and includes mistake counts "
+             "and the mistake index (MI) in its output. Off by default.";
+      break;
     case ARG_TOKEN_RANDOM_SEED:
       usages[0] = "<random_seed>";
       examples[0] = "0";
@@ -2348,6 +2362,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
         ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
         ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
+        ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
         ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
         ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
         ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
@@ -7091,6 +7106,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Show mistakes
+
+  config_load_bool(config, ARG_TOKEN_SHOW_MISTAKES, &config->show_mistakes,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Print boards
 
   config_load_bool(config, ARG_TOKEN_PRINT_BOARDS, &config->print_boards,
@@ -8206,6 +8229,7 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
   }
   config_fill_peg_args(config, &analyze_args->peg_args);
   analyze_args->human_readable = config->human_readable;
+  analyze_args->show_mistakes = config->show_mistakes;
   analyze_args->max_num_display_plays = config->max_num_display_plays;
 }
 
@@ -8215,6 +8239,7 @@ typedef struct AnalyzeSummary {
   int skipped_count; // already-complete reports left untouched this run
   int not_started_count;
   bool interrupted;
+  bool show_mistakes; // mirrors AnalyzeArgs.show_mistakes for this run
   // "<gcg filename>: <error>\n" per failed game; NULL until the first error.
   StringBuilder *error_details;
   // Tournament aggregate accumulated across every game in this directory
@@ -8224,8 +8249,16 @@ typedef struct AnalyzeSummary {
   double total_win_pct_lost;
   double total_equity_lost;
   double total_adjusted_equity_lost;
+  int total_small_mistakes;
+  int total_medium_mistakes;
+  int total_large_mistakes;
+  double total_mistake_index;
   int turn_count;
   int game_count;
+  // Per-player "Game Summary" text for a single-game (non-directory) run;
+  // NULL for directory runs or when the run wasn't human-readable. Owned by
+  // whichever of execute_analyze/str_api_analyze consumes it.
+  char *dialog_summary;
 } AnalyzeSummary;
 
 // Advances *str past literal if str starts with it, and returns true.
@@ -8241,13 +8274,20 @@ static bool consume_literal(const char **str, const char *literal) {
 
 // Reads report_path and, if it ends in a "=== Analysis Complete: ..."
 // trailer (written unconditionally by analyze_game on a clean run), parses
-// the turn count and clamped WPL/EqL/AEqL totals out of it. Returns false
-// (leaving the outputs untouched) if the file is missing or has no such
-// trailer, e.g. because it doesn't exist yet or a previous run crashed or
-// errored partway through.
+// the turn count and clamped WPL/EqL/AEqL totals out of it, plus the
+// small/medium/large mistake counts and mistake index (MI) if present.
+// Reports written before mistake grading was added lack those fields; in
+// that case the four mistake outputs are left at 0 rather than failing the
+// whole parse, so directory-mode resume tolerates a mix of old and new
+// report files. Returns false (leaving all outputs untouched) if the file is
+// missing or has no trailer at all, e.g. because it doesn't exist yet or a
+// previous run crashed or errored partway through.
 static bool read_report_completion_stats(const char *report_path, int *turns,
-                                         double *wpl, double *eql,
-                                         double *aeql) {
+                                         double *wpl, double *eql, double *aeql,
+                                         int *small_mistakes,
+                                         int *medium_mistakes,
+                                         int *large_mistakes,
+                                         double *mistake_index) {
   ErrorStack *probe_error_stack = error_stack_create();
   char *content = get_string_from_file(report_path, probe_error_stack);
   const bool file_exists = error_stack_is_empty(probe_error_stack);
@@ -8261,6 +8301,10 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
   double parsed_wpl = 0.0;
   double parsed_eql = 0.0;
   double parsed_aeql = 0.0;
+  int parsed_small = 0;
+  int parsed_medium = 0;
+  int parsed_large = 0;
+  double parsed_mi = 0.0;
   if (marker) {
     ErrorStack *parse_error_stack = error_stack_create();
     const char *pos = marker;
@@ -8287,8 +8331,44 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
     if (ok) {
       parsed_aeql = string_to_double_prefix(pos, &end, parse_error_stack);
       pos = end;
-      ok = error_stack_is_empty(parse_error_stack) &&
-           consume_literal(&pos, " ===");
+      ok = error_stack_is_empty(parse_error_stack);
+    }
+    if (ok) {
+      const char *mistake_pos = pos;
+      bool has_mistake_fields = consume_literal(&mistake_pos, " small=");
+      if (has_mistake_fields) {
+        parsed_small =
+            string_to_int_prefix(mistake_pos, &end, parse_error_stack);
+        mistake_pos = end;
+        has_mistake_fields = error_stack_is_empty(parse_error_stack) &&
+                             consume_literal(&mistake_pos, " medium=");
+      }
+      if (has_mistake_fields) {
+        parsed_medium =
+            string_to_int_prefix(mistake_pos, &end, parse_error_stack);
+        mistake_pos = end;
+        has_mistake_fields = error_stack_is_empty(parse_error_stack) &&
+                             consume_literal(&mistake_pos, " large=");
+      }
+      if (has_mistake_fields) {
+        parsed_large =
+            string_to_int_prefix(mistake_pos, &end, parse_error_stack);
+        mistake_pos = end;
+        has_mistake_fields = error_stack_is_empty(parse_error_stack) &&
+                             consume_literal(&mistake_pos, " mi=");
+      }
+      if (has_mistake_fields) {
+        parsed_mi =
+            string_to_double_prefix(mistake_pos, &end, parse_error_stack);
+        mistake_pos = end;
+        has_mistake_fields = error_stack_is_empty(parse_error_stack);
+      }
+      // Older reports go straight from aeql to "===" with no mistake
+      // fields; only advance pos past them when they were actually present.
+      if (has_mistake_fields) {
+        pos = mistake_pos;
+      }
+      ok = consume_literal(&pos, " ===");
     }
     error_stack_destroy(parse_error_stack);
   }
@@ -8298,6 +8378,10 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
     *wpl = parsed_wpl;
     *eql = parsed_eql;
     *aeql = parsed_aeql;
+    *small_mistakes = parsed_small;
+    *medium_mistakes = parsed_medium;
+    *large_mistakes = parsed_large;
+    *mistake_index = parsed_mi;
   }
   return ok;
 }
@@ -8396,6 +8480,92 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
 // summary's aggregate fields. Rebuilding is skipped when nothing in the
 // directory changed this run (no game was freshly (re)analyzed) and a
 // summary file already exists, to avoid needless rewrites.
+// Scans content for "=== Game Summary: <player> ===" blocks (the
+// "Combined Game Summary" block has a different header and is skipped) and
+// appends each one to sb, prefixed with "--- <label> ---" when label is
+// non-NULL. content must contain a leading '\n' before each such marker,
+// true of every report analyze.c writes.
+static void extract_game_summary_blocks(const char *content, const char *label,
+                                        StringBuilder *sb) {
+  const int content_length = (int)string_length(content);
+  const char *cursor = content;
+  while ((cursor = strstr(cursor, "\n=== Game Summary: ")) != NULL) {
+    cursor++; // skip the leading '\n' so the block itself starts at "==="
+    const char *next_marker = strstr(cursor + 1, "\n=== ");
+    const int block_start = (int)(cursor - content);
+    const int block_end =
+        next_marker ? (int)(next_marker - content) : content_length;
+    char *block = get_substring(content, block_start, block_end);
+    if (label) {
+      string_builder_add_formatted_string(sb, "--- %s ---\n", label);
+    }
+    string_builder_add_string(sb, block);
+    string_builder_add_string(sb, "\n");
+    free(block);
+    cursor = next_marker ? next_marker : content + content_length;
+  }
+}
+
+// Appends the "=== Tournament Averages ===" block (games/turns analyzed,
+// average WPL/EqL/AEqL per turn and per game, and mistake totals/averages)
+// to sb. Shared between the tournament_summary.txt file and the dialog
+// output for directory-mode runs.
+static void append_tournament_averages(StringBuilder *sb,
+                                       const AnalyzeSummary *summary) {
+  const double avg_wpl_per_turn =
+      summary->turn_count ? summary->total_win_pct_lost / summary->turn_count
+                          : 0.0;
+  const double avg_eql_per_turn =
+      summary->turn_count ? summary->total_equity_lost / summary->turn_count
+                          : 0.0;
+  const double avg_aeql_per_turn =
+      summary->turn_count
+          ? summary->total_adjusted_equity_lost / summary->turn_count
+          : 0.0;
+  const double avg_mi_per_turn =
+      summary->turn_count ? summary->total_mistake_index / summary->turn_count
+                          : 0.0;
+  const double avg_wpl_per_game =
+      summary->game_count ? summary->total_win_pct_lost / summary->game_count
+                          : 0.0;
+  const double avg_eql_per_game =
+      summary->game_count ? summary->total_equity_lost / summary->game_count
+                          : 0.0;
+  const double avg_aeql_per_game =
+      summary->game_count
+          ? summary->total_adjusted_equity_lost / summary->game_count
+          : 0.0;
+  const double avg_mi_per_game =
+      summary->game_count ? summary->total_mistake_index / summary->game_count
+                          : 0.0;
+
+  string_builder_add_string(sb, "=== Tournament Averages ===\n");
+  string_builder_add_formatted_string(sb, "Games: %d\n", summary->game_count);
+  string_builder_add_formatted_string(sb, "Turns: %d\n", summary->turn_count);
+  string_builder_add_formatted_string(sb, "Average WPL per turn: %.2f\n",
+                                      avg_wpl_per_turn);
+  string_builder_add_formatted_string(sb, "Average EqL per turn: %.2f\n",
+                                      avg_eql_per_turn);
+  string_builder_add_formatted_string(sb, "Average AEqL per turn: %.2f\n",
+                                      avg_aeql_per_turn);
+  string_builder_add_formatted_string(sb, "Average WPL per game: %.2f\n",
+                                      avg_wpl_per_game);
+  string_builder_add_formatted_string(sb, "Average EqL per game: %.2f\n",
+                                      avg_eql_per_game);
+  string_builder_add_formatted_string(sb, "Average AEqL per game: %.2f\n",
+                                      avg_aeql_per_game);
+  if (summary->show_mistakes) {
+    string_builder_add_formatted_string(
+        sb, "Mistakes: %d small, %d medium, %d large (MI %.2f)\n",
+        summary->total_small_mistakes, summary->total_medium_mistakes,
+        summary->total_large_mistakes, summary->total_mistake_index);
+    string_builder_add_formatted_string(sb, "Average MI per turn: %.2f\n",
+                                        avg_mi_per_turn);
+    string_builder_add_formatted_string(sb, "Average MI per game: %.2f\n",
+                                        avg_mi_per_game);
+  }
+}
+
 static void write_tournament_summary(const char *dir_path, char **gcg_files,
                                      int num_gcg_files,
                                      const AnalyzeSummary *summary,
@@ -8437,61 +8607,11 @@ static void write_tournament_summary(const char *dir_path, char **gcg_files,
       continue;
     }
 
-    const int content_length = (int)string_length(content);
-    const char *cursor = content;
-    while ((cursor = strstr(cursor, "\n=== Game Summary: ")) != NULL) {
-      cursor++; // skip the leading '\n' so the block itself starts at "==="
-      const char *next_marker = strstr(cursor + 1, "\n=== ");
-      const int block_start = (int)(cursor - content);
-      const int block_end =
-          next_marker ? (int)(next_marker - content) : content_length;
-      char *block = get_substring(content, block_start, block_end);
-      string_builder_add_formatted_string(sb, "--- %s ---\n",
-                                          gcg_files[file_idx]);
-      string_builder_add_string(sb, block);
-      string_builder_add_string(sb, "\n");
-      free(block);
-      cursor = next_marker ? next_marker : content + content_length;
-    }
+    extract_game_summary_blocks(content, gcg_files[file_idx], sb);
     free(content);
   }
 
-  const double avg_wpl_per_turn =
-      summary->turn_count ? summary->total_win_pct_lost / summary->turn_count
-                          : 0.0;
-  const double avg_eql_per_turn =
-      summary->turn_count ? summary->total_equity_lost / summary->turn_count
-                          : 0.0;
-  const double avg_aeql_per_turn =
-      summary->turn_count
-          ? summary->total_adjusted_equity_lost / summary->turn_count
-          : 0.0;
-  const double avg_wpl_per_game =
-      summary->game_count ? summary->total_win_pct_lost / summary->game_count
-                          : 0.0;
-  const double avg_eql_per_game =
-      summary->game_count ? summary->total_equity_lost / summary->game_count
-                          : 0.0;
-  const double avg_aeql_per_game =
-      summary->game_count
-          ? summary->total_adjusted_equity_lost / summary->game_count
-          : 0.0;
-
-  string_builder_add_string(sb, "=== Tournament Averages ===\n");
-  string_builder_add_formatted_string(sb, "Games: %d\n", summary->game_count);
-  string_builder_add_formatted_string(sb, "Turns: %d\n", summary->turn_count);
-  string_builder_add_formatted_string(sb, "Average WPL per turn: %.2f\n",
-                                      avg_wpl_per_turn);
-  string_builder_add_formatted_string(sb, "Average EqL per turn: %.2f\n",
-                                      avg_eql_per_turn);
-  string_builder_add_formatted_string(sb, "Average AEqL per turn: %.2f\n",
-                                      avg_aeql_per_turn);
-  string_builder_add_formatted_string(sb, "Average WPL per game: %.2f\n",
-                                      avg_wpl_per_game);
-  string_builder_add_formatted_string(sb, "Average EqL per game: %.2f\n",
-                                      avg_eql_per_game);
-  string_builder_add_formatted_string(sb, "Average AEqL per game: %.2f\n",
-                                      avg_aeql_per_game);
+  append_tournament_averages(sb, summary);
 
   char *summary_str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
@@ -8562,6 +8682,7 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   config_fill_analyze_args(config, &analyze_args, &target_played_tiles,
                            &nontarget_known_tiles,
                            &target_known_inference_tiles);
+  summary->show_mistakes = analyze_args.show_mistakes;
   ThreadControl *thread_control = analyze_args.sim_args.thread_control;
   AnalyzeCtx *ctx = NULL;
   if (arg0_is_directory) {
@@ -8585,15 +8706,36 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       double wpl = 0.0;
       double eql = 0.0;
       double aeql = 0.0;
-      if (read_report_completion_stats(report_path, &turns, &wpl, &eql,
-                                       &aeql)) {
+      int small_mistakes = 0;
+      int medium_mistakes = 0;
+      int large_mistakes = 0;
+      double mistake_index = 0.0;
+      if (read_report_completion_stats(report_path, &turns, &wpl, &eql, &aeql,
+                                       &small_mistakes, &medium_mistakes,
+                                       &large_mistakes, &mistake_index)) {
         summary->skipped_count++;
         summary->success_count++;
         summary->turn_count += turns;
         summary->total_win_pct_lost += wpl;
         summary->total_equity_lost += eql;
         summary->total_adjusted_equity_lost += aeql;
+        summary->total_small_mistakes += small_mistakes;
+        summary->total_medium_mistakes += medium_mistakes;
+        summary->total_large_mistakes += large_mistakes;
+        summary->total_mistake_index += mistake_index;
         summary->game_count++;
+        if (analyze_args.show_mistakes) {
+          thread_control_print_formatted(
+              thread_control,
+              "  [%d/%d] %s: %d turns, WPL %.2f, Mistakes S:%d M:%d L:%d (MI "
+              "%.2f) [skipped]\n",
+              file_idx + 1, num_gcg_files, gcg_files[file_idx], turns, wpl,
+              small_mistakes, medium_mistakes, large_mistakes, mistake_index);
+        } else {
+          thread_control_print_formatted(
+              thread_control, "  [%d/%d] %s: %d turns, WPL %.2f [skipped]\n",
+              file_idx + 1, num_gcg_files, gcg_files[file_idx], turns, wpl);
+        }
         free(report_path);
         free(gcg_path);
         continue;
@@ -8615,13 +8757,30 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       } else {
         summary->success_count++;
         any_reanalyzed = true;
-        if (read_report_completion_stats(report_path, &turns, &wpl, &eql,
-                                         &aeql)) {
+        if (read_report_completion_stats(report_path, &turns, &wpl, &eql, &aeql,
+                                         &small_mistakes, &medium_mistakes,
+                                         &large_mistakes, &mistake_index)) {
           summary->turn_count += turns;
           summary->total_win_pct_lost += wpl;
           summary->total_equity_lost += eql;
           summary->total_adjusted_equity_lost += aeql;
+          summary->total_small_mistakes += small_mistakes;
+          summary->total_medium_mistakes += medium_mistakes;
+          summary->total_large_mistakes += large_mistakes;
+          summary->total_mistake_index += mistake_index;
           summary->game_count++;
+          if (analyze_args.show_mistakes) {
+            thread_control_print_formatted(
+                thread_control,
+                "  [%d/%d] %s: %d turns, WPL %.2f, Mistakes S:%d M:%d L:%d "
+                "(MI %.2f)\n",
+                file_idx + 1, num_gcg_files, gcg_files[file_idx], turns, wpl,
+                small_mistakes, medium_mistakes, large_mistakes, mistake_index);
+          } else {
+            thread_control_print_formatted(
+                thread_control, "  [%d/%d] %s: %d turns, WPL %.2f\n",
+                file_idx + 1, num_gcg_files, gcg_files[file_idx], turns, wpl);
+          }
         }
       }
       free(report_path);
@@ -8645,6 +8804,26 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       summary->error_count++;
     } else {
       summary->success_count++;
+      // Surface each player's Game Summary in the dialog, not just the
+      // report file. Only human-readable reports contain these blocks.
+      if (analyze_args.human_readable) {
+        const char *gcg_filename =
+            game_history_get_gcg_filename(config->game_history);
+        char *base = cut_off_after_last_char(gcg_filename, '.');
+        char *report_path = get_formatted_string("%s_report.txt", base);
+        free(base);
+        ErrorStack *read_error_stack = error_stack_create();
+        char *content = get_string_from_file(report_path, read_error_stack);
+        if (error_stack_is_empty(read_error_stack)) {
+          StringBuilder *dialog_sb = string_builder_create();
+          extract_game_summary_blocks(content, NULL, dialog_sb);
+          summary->dialog_summary = string_builder_dump(dialog_sb, NULL);
+          string_builder_destroy(dialog_sb);
+        }
+        error_stack_destroy(read_error_stack);
+        free(content);
+        free(report_path);
+      }
     }
   }
   analyze_ctx_destroy(ctx);
@@ -8699,11 +8878,24 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
   AnalyzeSummary summary = {0};
   impl_analyze(config, &summary, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    free(summary.dialog_summary);
     return;
   }
-  char *summary_str = analyze_summary_to_string(&summary);
+  StringBuilder *summary_sb = string_builder_create();
+  if (summary.dialog_summary) {
+    string_builder_add_string(summary_sb, summary.dialog_summary);
+  }
+  if (summary.game_count > 0) {
+    append_tournament_averages(summary_sb, &summary);
+  }
+  char *grid_str = analyze_summary_to_string(&summary);
+  string_builder_add_string(summary_sb, grid_str);
+  free(grid_str);
+  char *summary_str = string_builder_dump(summary_sb, NULL);
+  string_builder_destroy(summary_sb);
   thread_control_print(config->thread_control, summary_str);
   free(summary_str);
+  free(summary.dialog_summary);
 }
 
 char *str_api_analyze(Config *config, ErrorStack *error_stack) {
@@ -8715,7 +8907,19 @@ char *str_api_analyze(Config *config, ErrorStack *error_stack) {
     }
     return empty_string();
   }
-  return analyze_summary_to_string(&summary);
+  if (summary.dialog_summary) {
+    return summary.dialog_summary;
+  }
+  StringBuilder *sb = string_builder_create();
+  if (summary.game_count > 0) {
+    append_tournament_averages(sb, &summary);
+  }
+  char *grid_str = analyze_summary_to_string(&summary);
+  string_builder_add_string(sb, grid_str);
+  free(grid_str);
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
 }
 
 Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
@@ -8863,6 +9067,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
+  arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
@@ -8993,6 +9198,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = true;
+  config->show_mistakes = false;
   config->sim_with_inference = true;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
@@ -9508,6 +9714,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_HUMAN_READABLE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->human_readable);
+      break;
+    case ARG_TOKEN_SHOW_MISTAKES:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->show_mistakes);
       break;
     case ARG_TOKEN_RANDOM_SEED:
       // Do not save the seed in the settings.
