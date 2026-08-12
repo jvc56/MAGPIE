@@ -940,13 +940,14 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
       player_get_rack(game_get_player(ctx->game, 1 - player_on_turn_index));
 
   // Suppress inference when the opponent's rack is already fully known, or
-  // when the opponent just played a full rack (their leave was empty so there
-  // is nothing to infer from).
+  // when the opponent's most recent move left nothing to infer from: a full
+  // rack played (empty leave) or a pass (no tiles played or exchanged --
+  // inference_worker itself rejects that combination, see inference.c).
   const bool opp_rack_fully_known =
       rack_get_total_letters(known_opp_rack) == RACK_SIZE;
 
   const int opponent_index = 1 - player_on_turn_index;
-  bool opp_played_full_rack = false;
+  bool opp_left_nothing_to_infer = false;
   for (int search_idx = turn_result->event_idx - 1; search_idx >= 0;
        search_idx--) {
     const GameEvent *opp_event =
@@ -963,7 +964,10 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
     if (opp_event_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       const ValidatedMoves *opp_vms = game_event_get_vms(opp_event);
       const Move *opp_move = validated_moves_get_move(opp_vms, 0);
-      opp_played_full_rack = (move_get_tiles_played(opp_move) == RACK_SIZE);
+      opp_left_nothing_to_infer =
+          (move_get_tiles_played(opp_move) == RACK_SIZE);
+    } else if (opp_event_type == GAME_EVENT_PASS) {
+      opp_left_nothing_to_infer = true;
     }
     break;
   }
@@ -976,7 +980,7 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
   const bool original_infer_arg = args->sim_args.use_inference;
   const bool use_inference_for_this_turn =
       original_infer_arg && turn_result->event_idx > 0 &&
-      !opp_rack_fully_known && !opp_played_full_rack;
+      !opp_rack_fully_known && !opp_left_nothing_to_infer;
   args->sim_args.use_inference = use_inference_for_this_turn;
 
   // When inference is enabled, pre-set nontarget_known_rack to the current
