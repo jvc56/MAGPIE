@@ -23,6 +23,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
+#include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -385,5 +386,235 @@ void test_peg_greedy_candidate_dump(void) {
   free(only_copy);
   error_stack_destroy(error_stack);
   peg_result_destroy(&result);
+  config_destroy(config);
+}
+
+// Replays the greedy seed's rollout for named candidates and prints, for every
+// bag ordering, the exact move sequence the rollout chose. peg_greedy_playout
+// keeps no move history, so this mirrors its policy: generate the single best
+// move, sorted by equity while the bag has tiles and by score once it is
+// empty, until the game ends. The aggregate win% is printed alongside so the
+// replica can be checked against the solver's own stage-0 number for the same
+// move; a mismatch means the mirror has drifted and its sequences are not
+// evidence.
+void test_peg_greedy_scenario_trace(void) {
+  const char *cgp = getenv("PEG_TRACE_CGP");
+  const char *moves_text = getenv("PEG_TRACE_MOVES");
+  if (cgp == NULL || moves_text == NULL) {
+    log_fatal("peg greedy trace requires PEG_TRACE_CGP and PEG_TRACE_MOVES");
+    return;
+  }
+  const char *lexicon = getenv("PEG_TRACE_LEX");
+  if (lexicon == NULL) {
+    lexicon = "CSW24";
+  }
+
+  Config *config = config_create_or_die("set -s1 equity -s2 equity -threads 1");
+  char load_cmd[10240];
+  (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex %s -wmp true", cgp,
+                 lexicon);
+  load_and_exec_config_or_die(config, load_cmd);
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const int opp_idx = 1 - mover_idx;
+
+  // Unseen pool = distribution minus the board minus the mover's own rack.
+  uint8_t unseen[MAX_ALPHABET_SIZE] = {0};
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] = (uint8_t)ld_get_dist(ld, ml);
+  }
+  const Rack *mover_start = player_get_rack(game_get_player(game, mover_idx));
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] -= (uint8_t)rack_get_letter(mover_start, (MachineLetter)ml);
+  }
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const MachineLetter on_board = board_get_letter(board, row, col);
+      if (on_board == ALPHABET_EMPTY_SQUARE_MARKER) {
+        continue;
+      }
+      const MachineLetter eff =
+          get_is_blanked(on_board) ? BLANK_MACHINE_LETTER : on_board;
+      if (unseen[eff] > 0) {
+        unseen[eff]--;
+      }
+    }
+  }
+  MachineLetter pool[MAX_ALPHABET_SIZE * 2];
+  int pool_size = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int count = 0; count < (int)unseen[ml]; count++) {
+      pool[pool_size++] = (MachineLetter)ml;
+    }
+  }
+  // A PEG CGP commonly leaves the opponent rack blank, so the literal bag
+  // holds the whole unseen pool. peg_solve reconstructs the real split the
+  // same way: the opponent is owed a full rack and the remainder is the bag.
+  const int bag_size = pool_size - RACK_SIZE;
+  if (bag_size != 1 && bag_size != 2) {
+    log_fatal("peg greedy trace supports a 1- or 2-tile bag, got %d", bag_size);
+  }
+  printf("PEG_TRACE_POOL unseen=%d bag=%d\n", pool_size, bag_size);
+
+  StringBuilder *text_sb = string_builder_create();
+  ErrorStack *error_stack = error_stack_create();
+  MoveList *playout_ml = move_list_create(1);
+  char *moves_copy = string_duplicate(moves_text);
+  char *moves_saveptr = NULL;
+  for (char *move_text = strtok_r(moves_copy, ";", &moves_saveptr);
+       move_text != NULL; move_text = strtok_r(NULL, ";", &moves_saveptr)) {
+    ValidatedMoves *validated = validated_moves_create(
+        game, mover_idx, move_text, /*allow_phonies=*/false,
+        /*allow_playthrough=*/true, error_stack);
+    if (!error_stack_is_empty(error_stack) ||
+        validated_moves_get_number_of_moves(validated) != 1) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("peg greedy trace: could not parse '%s'", move_text);
+    }
+    const Move *cand = validated_moves_get_move(validated, 0);
+    const int tiles_played = move_get_tiles_played(cand);
+    const int drawn_count = tiles_played < bag_size ? tiles_played : bag_size;
+
+    string_builder_clear(text_sb);
+    string_builder_add_move(text_sb, board, cand, ld, false);
+    printf("PEG_TRACE_MOVE move=%s tiles_played=%d draws=%d\n",
+           string_builder_peek(text_sb), tiles_played, drawn_count);
+
+    int64_t weight = 0;
+    int64_t wins = 0;
+    int64_t ties = 0;
+    int scenario_idx = 0;
+    for (int first = 0; first < pool_size; first++) {
+      for (int second = 0; second < pool_size; second++) {
+        if (first == second) {
+          continue;
+        }
+        // A one-tile bag has no second draw; collapse the inner loop so each
+        // ordering is visited once.
+        if (bag_size == 1 && second != (first == 0 ? 1 : 0)) {
+          continue;
+        }
+        Game *scenario = game_duplicate(game);
+        game_set_backup_mode(scenario, BACKUP_MODE_OFF);
+        play_move_without_drawing_tiles(cand, scenario);
+        game_set_game_end_reason(scenario, GAME_END_REASON_NONE);
+
+        Bag *bag = game_get_bag(scenario);
+        for (int ml = 0; ml < ld_size; ml++) {
+          while (bag_get_letter(bag, (MachineLetter)ml) > 0) {
+            (void)bag_draw_letter(bag, (MachineLetter)ml, 0);
+          }
+        }
+        // The ordering's first tiles go to the mover as draws; whatever the
+        // play was too short to draw stays in the bag in the same order.
+        const MachineLetter ordering[2] = {pool[first], pool[second]};
+        Rack *mover_rack =
+            player_get_rack(game_get_player(scenario, mover_idx));
+        for (int draw_idx = 0; draw_idx < drawn_count; draw_idx++) {
+          rack_add_letter(mover_rack, ordering[draw_idx]);
+        }
+        for (int bag_idx = drawn_count; bag_idx < bag_size; bag_idx++) {
+          bag_add_letter(bag, ordering[bag_idx], 0);
+        }
+        Rack *opp_rack = player_get_rack(game_get_player(scenario, opp_idx));
+        rack_reset(opp_rack);
+        for (int pool_idx = 0; pool_idx < pool_size; pool_idx++) {
+          const bool in_bag =
+              pool_idx == first || (bag_size == 2 && pool_idx == second);
+          if (!in_bag) {
+            rack_add_letter(opp_rack, pool[pool_idx]);
+          }
+        }
+
+        string_builder_clear(text_sb);
+        for (int draw_idx = 0; draw_idx < bag_size; draw_idx++) {
+          string_builder_add_string(text_sb,
+                                    ld->ld_ml_to_hl[ordering[draw_idx]]);
+        }
+        printf("PEG_TRACE_SCENARIO idx=%d bag_order=%s", scenario_idx,
+               string_builder_peek(text_sb));
+        string_builder_clear(text_sb);
+        string_builder_add_rack(text_sb, mover_rack, ld, false);
+        printf(" mover_rack=%s", string_builder_peek(text_sb));
+        string_builder_clear(text_sb);
+        string_builder_add_rack(text_sb, opp_rack, ld, false);
+        printf(" opp_rack=%s\n", string_builder_peek(text_sb));
+
+        // Mirror of peg_greedy_playout, recording each chosen move.
+        for (int ply = 0; ply < 64; ply++) {
+          if (game_get_game_end_reason(scenario) != GAME_END_REASON_NONE) {
+            break;
+          }
+          const bool bag_has_tiles =
+              bag_get_letters(game_get_bag(scenario)) > 0;
+          const MoveGenArgs gen_args = {
+              .game = scenario,
+              .move_record_type = MOVE_RECORD_BEST,
+              .move_sort_type =
+                  bag_has_tiles ? MOVE_SORT_EQUITY : MOVE_SORT_SCORE,
+              .override_kwg = NULL,
+              .eq_margin_movegen = 0,
+              .target_equity = EQUITY_MAX_VALUE,
+              .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+              .move_list = playout_ml,
+              .tiles_played_bv = NULL,
+              .initial_tiles_bv = 0,
+          };
+          generate_moves(&gen_args);
+          if (move_list_get_count(playout_ml) == 0) {
+            break;
+          }
+          const Move *best = move_list_get_move(playout_ml, 0);
+          const int on_turn = game_get_player_on_turn_index(scenario);
+          string_builder_clear(text_sb);
+          string_builder_add_move(text_sb, game_get_board(scenario), best, ld,
+                                  false);
+          printf("PEG_TRACE_PLY ply=%d mover=%d move=%s score=%d\n", ply,
+                 on_turn == mover_idx ? 1 : 0, string_builder_peek(text_sb),
+                 equity_to_int(move_get_score(best)));
+          play_move(best, scenario, NULL);
+        }
+
+        const Player *me = game_get_player(scenario, mover_idx);
+        const Player *op = game_get_player(scenario, opp_idx);
+        int32_t spread =
+            equity_to_int(player_get_score(me) - player_get_score(op));
+        const bool game_over =
+            game_get_game_end_reason(scenario) != GAME_END_REASON_NONE;
+        if (!game_over) {
+          spread -= equity_to_int(rack_get_score(ld, player_get_rack(me)));
+          spread += equity_to_int(rack_get_score(ld, player_get_rack(op)));
+        }
+        const char *outcome =
+            spread > 0 ? "win" : (spread == 0 ? "tie" : "loss");
+        printf("PEG_TRACE_RESULT idx=%d spread=%+d outcome=%s ended=%d\n",
+               scenario_idx, spread, outcome, game_over ? 1 : 0);
+        weight++;
+        if (spread > 0) {
+          wins++;
+        } else if (spread == 0) {
+          ties++;
+        }
+        scenario_idx++;
+        game_destroy(scenario);
+      }
+    }
+    const double win_pct =
+        weight > 0 ? ((double)wins + 0.5 * (double)ties) / (double)weight : 0.0;
+    string_builder_clear(text_sb);
+    string_builder_add_move(text_sb, board, cand, ld, false);
+    printf("PEG_TRACE_SUMMARY move=%s scenarios=%d wins=%lld ties=%lld "
+           "win_pct=%.4f\n",
+           string_builder_peek(text_sb), scenario_idx, (long long)wins,
+           (long long)ties, win_pct);
+    validated_moves_destroy(validated);
+  }
+  free(moves_copy);
+  move_list_destroy(playout_ml);
+  error_stack_destroy(error_stack);
+  string_builder_destroy(text_sb);
   config_destroy(config);
 }

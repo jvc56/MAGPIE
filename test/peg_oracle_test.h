@@ -39,4 +39,14 @@ void test_time_manager_match_replay(void);
 //   PEG_GREEDY_THREADS   — worker threads (default 4).
 void test_peg_greedy_candidate_dump(void);
 
+// Replays the greedy seed's rollout for named candidates and prints the full
+// move sequence per bag ordering, plus the aggregate win% for cross-checking
+// against the solver's own stage-0 number.
+//
+// Env knobs:
+//   PEG_TRACE_CGP   — position (required).
+//   PEG_TRACE_MOVES — semicolon-separated moves (required).
+//   PEG_TRACE_LEX   — lexicon (default CSW24).
+void test_peg_greedy_scenario_trace(void);
+
 #endif // PEG_ORACLE_TEST_H
