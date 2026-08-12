@@ -33,6 +33,7 @@
 #include <string.h>
 
 enum { PEG_GREEDY_MAX_ONLY_MOVES = 16 };
+enum { PEG_GREEDY_FULL_FIELD_CAP = 100000 };
 
 void test_time_manager_match_replay(void) {
   const char *seed_text = getenv("TM_REPLAY_GAME_SEED");
@@ -314,6 +315,15 @@ void test_peg_greedy_candidate_dump(void) {
   args.num_threads = num_threads > 0 ? num_threads : 1;
   args.greedy_seed_only = true;
   args.opp_model = PEG_OPP_RATIONAL;
+  // The published field is capped at the first halving stage's top-K, so the
+  // ranking normally stops at 32 and a play the cut discarded simply is not in
+  // it. A single oversized stage widens the publish cap without enabling any
+  // deeper stage: greedy_seed_only still forces the stage count to zero.
+  const int full_field_cap[1] = {PEG_GREEDY_FULL_FIELD_CAP};
+  if (getenv("PEG_GREEDY_FULL") != NULL) {
+    args.stage_top_k = full_field_cap;
+    args.num_stages = 1;
+  }
 
   ErrorStack *error_stack = error_stack_create();
   // The published ranking retains only the leading candidates, so probing a
