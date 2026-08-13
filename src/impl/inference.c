@@ -600,15 +600,11 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
     total_unseen_count -= num_letter_i_on_nontarget_rack;
   }
 
+  // The zero-played-and-zero-exchanged (pass) case is handled by the caller
+  // (infer_with_initialized_ctx) before verify_inference_args is ever
+  // reached, so it can't occur here.
   const int num_played_letters =
       rack_get_total_letters(args->target_played_tiles);
-
-  if (num_played_letters == 0 && args->target_num_exch == 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_INFERENCE_NO_TILES_PLAYED,
-        string_duplicate("cannot infer when no tiles are played or exchanged"));
-    return;
-  }
 
   if (num_played_letters != 0 && args->target_num_exch != 0) {
     error_stack_push(error_stack, ERROR_STATUS_INFERENCE_BOTH_PLAY_AND_EXCHANGE,
@@ -780,6 +776,20 @@ void infer_with_initialized_ctx(InferenceArgs *args, InferenceCtx *ctx,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+  }
+
+  // A target move with zero played and zero exchanged tiles is a pass:
+  // there is no evidence to infer a leave from. This isn't an error (a pass
+  // is a perfectly ordinary move to hand to inference, e.g. from analyze or
+  // annotation mode replaying a whole game) -- just return an empty, valid
+  // result instead of running verify_inference_args, which would otherwise
+  // reject it.
+  if (rack_get_total_letters(args->target_played_tiles) == 0 &&
+      args->target_num_exch == 0) {
+    const int ld_size = ld_get_size(game_get_ld(ctx->game));
+    inference_results_reset(results, 1, ld_size);
+    inference_results_set_valid_for_current_game_state(results, true);
+    return;
   }
 
   verify_inference_args(args, ctx->game, error_stack);
