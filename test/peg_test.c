@@ -598,8 +598,8 @@ static void test_peg_main_pnoprune(void) {
 }
 
 // Drives the `peg` CLI command end to end through the config command path
-// (load_and_exec_config_or_die), exercising the -pegonly / -pegpess /
-// -pegstride knobs and config_get_peg_result. The onyx board with -pegonly
+// (load_and_exec_config_or_die), exercising the pegonly positional / -pegpess
+// / -pegstride knobs and config_get_peg_result. The onyx board with pegonly
 // restricted to ONYX + OXY must publish 13L ONYX (the studied 7.5/8 = 0.9375
 // verdict).
 static void test_peg_main_cli(void) {
@@ -609,9 +609,10 @@ static void test_peg_main_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
-  // -pegonly takes space-free UCGI moves; the period is the in-move separator.
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX,13L.OXY");
-  load_and_exec_config_or_die(config, "peg");
+  // pegonly is a positional argument on the peg command itself: space-free
+  // UCGI moves, the period is the in-move separator. It is per-invocation
+  // (not persisted), so every `peg` call below repeats it.
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
 
   const Game *game = config_get_game(config);
   const PegResult *result = config_get_peg_result(config);
@@ -628,10 +629,152 @@ static void test_peg_main_cli(void) {
   // to the two pegonly candidates, so this stays fast).
   load_and_exec_config_or_die(config,
                               "set -pegpess true -pegstride 1 -pegtopk 4,2");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
 
   printf("[peg_cli] pegonly best=13L ONYX win=%.4f\n", onyx_win);
+  config_destroy(config);
+}
+
+// pegonly moved from the persistent -pegonly option to a positional argument
+// on the peg command itself: `-pegonly` as a standalone option must no longer
+// parse, and the restriction it applies must not persist to a later `peg`
+// call that omits it.
+static void test_peg_pegonly_positional_arg(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+
+  // The old persistent option is gone; it should be an unrecognized arg now.
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "set -pegonly 13L.ONYX", error_stack);
+  assert(error_stack_top(error_stack) ==
+         ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  error_stack_destroy(error_stack);
+
+  // Restricted to the two onyx candidates: at most 2 candidates ever enter a
+  // halving stage.
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  assert(config_get_peg_result(config)->n_graded <= 2);
+
+  // A later `peg` call with no positional argument must not inherit the
+  // restriction from the previous call: with the full board's moves in play,
+  // many more than 2 candidates enter the halving stages.
+  load_and_exec_config_or_die(config, "peg");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  assert(config_get_peg_result(config)->n_graded > 2);
+
+  config_destroy(config);
+}
+
+// Confirms, by generating the full root move list directly (no solve, so this
+// stays cheap even though the board's move list is large), that "empties the
+// bag" is a genuine, non-trivial restriction on a real 3-in-bag position:
+// some generated moves play fewer than 3 tiles and some play 3 or more.
+static void test_peg_bag_emptying_move_split(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
+              "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
+              "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21");
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 3);
+
+  MoveList *move_list = move_list_create(10000);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = move_list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&gen_args);
+
+  bool found_short_move = false;
+  bool found_bag_emptying_move = false;
+  const int num_moves = move_list_get_count(move_list);
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    const int tiles_played =
+        move_get_tiles_played(move_list_get_move(move_list, move_idx));
+    if (tiles_played < 3) {
+      found_short_move = true;
+    } else {
+      found_bag_emptying_move = true;
+    }
+  }
+  assert(found_short_move);
+  assert(found_bag_emptying_move);
+
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// The pegonly positional argument's case-insensitive "empty" value restricts
+// the root candidates to every generated move that would empty the bag. On
+// the 1-in-bag onyx board, that is every generated move except pass (0
+// tiles played); pass is a genuine generated candidate here (it is exercised
+// as such by test_peg_main_pnoprune), so this is a real restriction rather
+// than incidentally the full move list.
+static void test_peg_pegonly_empty(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) == 1);
+
+  // Case-insensitive: mixed case still matches.
+  load_and_exec_config_or_die(config, "peg EmptY");
+  const PegResult *result = config_get_peg_result(config);
+  assert(result->last_completed_stage >= 0);
+  assert(result->n_top_cands > 0);
+  for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+    assert(move_get_tiles_played(&result->top_cands[cand_idx].move) >= 1);
+  }
+  for (int cand_idx = 0; cand_idx < result->n_graded; cand_idx++) {
+    assert(move_get_tiles_played(&result->graded_cands[cand_idx].move) >= 1);
+  }
+
+  config_destroy(config);
+}
+
+// "empty" with no move that empties the bag is a solver error, not a silent
+// empty result: the 1-in-bag forced-pass board's only generated move is
+// "pass" (0 tiles played), which never reaches the 1-tile bag threshold.
+static void test_peg_pegonly_empty_no_moves(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 1);
+
+  // Empty the mover's rack directly (bypassing the CGP text parser's tile
+  // accounting, which would otherwise reject a rack this short): with no
+  // tiles to place, the only generated move is pass (0 tiles played), which
+  // never reaches the 1-tile bag threshold, so no candidate empties the bag.
+  const int mover_idx = game_get_player_on_turn_index(game);
+  rack_reset(player_get_rack(game_get_player(game, mover_idx)));
+
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "peg empty", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_execute_command(config, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_EMPTY_NO_MOVES);
+  error_stack_destroy(error_stack);
+
   config_destroy(config);
 }
 
@@ -1272,7 +1415,7 @@ static void test_peg_opp_rack_sizes(void) {
 }
 
 // Verifies the opp-rack bag adjustment fix through the CLI command path
-// (config / cgp / set -pegonly / peg), exercising both the empty and partial
+// (config / cgp / peg <pegonly>), exercising both the empty and partial
 // opp-rack cases on the same 1-in-bag ONYX board.
 static void test_peg_opp_rack_sizes_cli(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score");
@@ -1285,8 +1428,7 @@ static void test_peg_opp_rack_sizes_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   printf("[peg_cli_opp_empty] accepted: win=%.4f\n",
          config_get_peg_result(config)->best_win);
@@ -1299,8 +1441,7 @@ static void test_peg_opp_rack_sizes_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACE 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   printf("[peg_cli_opp_partial] accepted: win=%.4f\n",
          config_get_peg_result(config)->best_win);
@@ -1431,6 +1572,10 @@ void test_peg(void) {
   test_peg_macondo_pah_slice();
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
+  test_peg_pegonly_positional_arg();
+  test_peg_bag_emptying_move_split();
+  test_peg_pegonly_empty();
+  test_peg_pegonly_empty_no_moves();
   // Opp-rack bag adjustment fix: empty and partial opp racks.
   test_peg_opp_rack_sizes();
   test_peg_opp_rack_sizes_cli();
