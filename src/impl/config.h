@@ -63,6 +63,7 @@ bool config_get_use_game_pairs(const Config *config);
 bool config_get_use_small_plays(const Config *config);
 bool config_get_human_readable(const Config *config);
 void config_set_human_readable(Config *config, bool human_readable);
+bool config_get_show_mistakes(const Config *config);
 bool config_get_show_prompt(const Config *config);
 bool config_get_save_settings(const Config *config);
 bool config_get_fg_required(const Config *config);
