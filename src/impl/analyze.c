@@ -941,7 +941,8 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
 
   // Suppress inference when the opponent's rack is already fully known, or
   // when the opponent just played a full rack (their leave was empty so there
-  // is nothing to infer from).
+  // is nothing to infer from). A pass doesn't need to be special-cased here:
+  // infer() returns an empty, valid result for it (see inference.c).
   const bool opp_rack_fully_known =
       rack_get_total_letters(known_opp_rack) == RACK_SIZE;
 
