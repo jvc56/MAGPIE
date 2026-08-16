@@ -484,7 +484,7 @@ magpie> convert text2kwg CSW60
 magpie> convert text2wordmap CSW60
 ```
 
-both text file must contain one word per line in all uppercase. Once converted, you can run the `autoplay` command
+both text file must contain one word per line in all uppercase. The words do not need to be in any particular order: the convert commands sort them before building. That matters because the DAWG builder requires lexicographic order and does not check for it, and unordered input silently produces a much larger graph encoding the same words. Once converted, you can run the `autoplay` command
 
 ```
 magpie> autoplay games 10000 -l1 CSW50 -l2 CSW60 -leaves CSW21 -gp true -hr true -pfreq 10000
