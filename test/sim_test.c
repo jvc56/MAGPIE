@@ -72,6 +72,60 @@ void test_sim_error_cases(void) {
   config_destroy(config);
 }
 
+// Builds a known opponent rack from opp_rack_str (NULL means leave it
+// empty/unknown), runs simulate() through config_simulate_and_return_status,
+// and asserts the resulting status matches expected_status.
+static void
+assert_simulate_known_opp_rack_status(Config *config, const char *opp_rack_str,
+                                      error_code_t expected_status) {
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
+  if (opp_rack_str) {
+    rack_set_to_string(config_get_ld(config), &known_opp_rack, opp_rack_str);
+  }
+  error_code_t status = config_simulate_and_return_status(
+      config, NULL, &known_opp_rack, config_get_sim_results(config));
+  assert(status == expected_status);
+}
+
+// A known opponent rack that cannot actually be drawn from the bag (either
+// because the letters are already spoken for by the player's own rack or
+// board tiles, or because the letter distribution simply doesn't have
+// enough of them) must be rejected with an error rather than reaching
+// set_random_rack() during simulation, which fatally crashes the process.
+// Covers an empty, a partially known, and a fully known opponent rack, each
+// with both a drawable (pass) and an undrawable (fail) case.
+void test_sim_opp_rack_not_in_bag(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 15 -plies "
+                           "2 -threads 1 -iter 1 -scond none");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AAADERW");
+  load_and_exec_config_or_die(config, "gen");
+
+  // Empty: bypasses the bag check entirely, so it must always succeed.
+  assert_simulate_known_opp_rack_status(config, NULL, ERROR_STATUS_SUCCESS);
+
+  // Partially known (fewer than RACK_SIZE letters).
+  assert_simulate_known_opp_rack_status(config, "BC", ERROR_STATUS_SUCCESS);
+  // Only a single Z exists in the English tile distribution, so requesting
+  // two of them for the opponent's known rack is impossible.
+  assert_simulate_known_opp_rack_status(config, "ZZ",
+                                        ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+
+  // Fully known (RACK_SIZE letters).
+  assert_simulate_known_opp_rack_status(config, "BCFGHIL",
+                                        ERROR_STATUS_SUCCESS);
+  // The rack AAADERW already claimed 3 of the 9 A's, leaving only 6, so 7
+  // A's for the opponent can never be drawn.
+  assert_simulate_known_opp_rack_status(config, "AAAAAAA",
+                                        ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+
+  config_destroy(config);
+}
+
 void test_sim_single_iteration(void) {
   Config *config =
       config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
@@ -1234,6 +1288,7 @@ void test_sim(void) {
     test_similar_play_consistency(1);
     test_similar_play_consistency(10);
     test_sim_error_cases();
+    test_sim_opp_rack_not_in_bag();
     test_sim_single_iteration();
     test_sim_threshold();
     test_sim_time_limit();

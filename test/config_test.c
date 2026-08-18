@@ -89,6 +89,18 @@ void test_config_load_error_cases(void) {
   test_config_load_error(config, "set -seed -2",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
                          error_stack);
+  test_config_load_error(config, "set -pc1 -2",
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+                         error_stack);
+  test_config_load_error(config, "set -pc2 nope",
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+  test_config_load_error(config, "set -otpenalty -1",
+                         ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+                         error_stack);
+  test_config_load_error(config, "set -otperiod 0",
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
+                         error_stack);
   test_config_load_error(config, "sim -lex CSW21 -it 1000 -plies",
                          ERROR_STATUS_CONFIG_LOAD_INSUFFICIENT_NUMBER_OF_VALUES,
                          error_stack);
@@ -699,6 +711,107 @@ void test_config_exec_parse_args(void) {
                             ERROR_STATUS_GAME_HISTORY_INDEX_OUT_OF_RANGE);
   assert_config_exec_status(config6, "previous", ERROR_STATUS_SUCCESS);
   config_destroy(config6);
+
+  config_destroy(config);
+}
+
+// Confirms the "rg" command sets the player rack and generates moves (like
+// "rack" followed by "generate"), without running a simulation like
+// "rgsimulate"/"rgs" does. Also confirms "rg" resolves to itself rather
+// than being treated as an ambiguous abbreviation of "rgsimulate": the full
+// command name is "rg" so the exact-match check in get_token_from_string
+// wins before "rg" is ever considered a prefix of "rgsimulate".
+void test_config_rack_and_gen(void) {
+  Config *config = config_create_default_test();
+
+  assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
+
+  // Malformed and unavailable racks are rejected the same way "rack"
+  // rejects them.
+  assert_config_exec_status(config, "rg AB3C",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  assert_config_exec_status(config, "rg ABCZZZ",
+                            ERROR_STATUS_CONFIG_LOAD_RACK_NOT_IN_BAG);
+
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rg AEINRST", ERROR_STATUS_SUCCESS);
+
+  const Game *game = config_get_game(config);
+  const Rack *player_on_turn_rack = player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game)));
+  assert_rack_equals_string(config_get_ld(config), player_on_turn_rack,
+                            "AEINRST");
+  assert(move_list_get_count(config_get_move_list(config)) > 0);
+  // Unlike "rgsimulate"/"rgs", "rg" must not run a simulation.
+  assert(sim_results_get_number_of_plays(config_get_sim_results(config)) == 0);
+
+  config_destroy(config);
+}
+
+// Runs the given opponent known rack argument through the "sim", "gsim",
+// and "rgs" commands and asserts each returns expected_status. The game is
+// reloaded from OPENING_CGP before every invocation so that each command
+// sees the same bag/rack state regardless of what a previous simulation
+// left behind.
+//
+// Under OPENING_CGP, player 1 (the opponent) holds HIJKLM? and the bag
+// holds everything else: A:8 B:1 C:1 D:3 E:11 F:1 G:2 H:1 I:8 J:0 K:0 L:3
+// M:1 N:6 O:8 P:2 Q:1 R:6 S:4 T:6 U:4 V:2 W:2 X:1 Y:2 Z:1 blank:1 (opp_rack
+// counts add back on top of the bag when checking drawability, so e.g. H is
+// drawable even though the bag alone only has 1 left of the 2 total).
+static void assert_sim_family_opp_rack_status(Config *config,
+                                              const char *opp_rack_arg,
+                                              error_code_t expected_status) {
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen -numplays 2", ERROR_STATUS_SUCCESS);
+  char *sim_cmd = get_formatted_string("sim %s -it 1", opp_rack_arg);
+  assert_config_exec_status(config, sim_cmd, expected_status);
+  free(sim_cmd);
+
+  // gsimulate and rgsimulate generate their own moves, so no prior "gen" is
+  // needed.
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  char *gsim_cmd = get_formatted_string("gsim %s -it 1", opp_rack_arg);
+  assert_config_exec_status(config, gsim_cmd, expected_status);
+  free(gsim_cmd);
+
+  assert_config_exec_status(config, "cgp " OPENING_CGP, ERROR_STATUS_SUCCESS);
+  char *rgs_cmd = get_formatted_string("rgs RETINAS %s -it 1", opp_rack_arg);
+  assert_config_exec_status(config, rgs_cmd, expected_status);
+  free(rgs_cmd);
+}
+
+// Confirms that an opponent rack specified for the "sim"/"gsimulate"/
+// "rgsimulate" commands is validated against the bag the same way the
+// player's own rack is, across an empty, partially known, and fully known
+// opponent rack. Before this check existed, an opponent rack that was not
+// actually available in the bag (e.g. requesting tiles already held by the
+// player or already exhausted from the bag) would reach set_random_rack()
+// during simulation and log_fatal(), crashing the process instead of
+// returning an error.
+void test_config_sim_opp_rack_not_in_bag(void) {
+  Config *config = config_create_default_test();
+
+  // Empty: '-' forces an unknown/random opponent rack, which skips the bag
+  // check entirely, so it must always succeed.
+  assert_sim_family_opp_rack_status(config, "-", ERROR_STATUS_SUCCESS);
+
+  // Partially known (fewer than RACK_SIZE letters).
+  assert_sim_family_opp_rack_status(config, "AB", ERROR_STATUS_SUCCESS);
+  // Only a single Z exists in the English tile distribution, and
+  // OPENING_CGP does not place one on the board or in either player's
+  // rack, so asking for two Z's in the opponent's rack is impossible.
+  assert_sim_family_opp_rack_status(config, "ZZ",
+                                    ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+
+  // Fully known (RACK_SIZE letters).
+  // A rack the bag can actually supply.
+  assert_sim_family_opp_rack_status(config, "BCFGHIL", ERROR_STATUS_SUCCESS);
+  // The opponent's own currently held rack is trivially drawable.
+  assert_sim_family_opp_rack_status(config, "HIJKLM?", ERROR_STATUS_SUCCESS);
+  // Only 1 Z exists in total, so 7 of them can never be drawn.
+  assert_sim_family_opp_rack_status(config, "ZZZZZZZ",
+                                    ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
 
   config_destroy(config);
 }
@@ -2817,6 +2930,8 @@ void test_config(void) {
   test_config_load_error_cases();
   test_config_load_success();
   test_config_exec_parse_args();
+  test_config_rack_and_gen();
+  test_config_sim_opp_rack_not_in_bag();
   test_config_lexical_data();
   test_config_wmp();
   test_config_note_move_interpolation();

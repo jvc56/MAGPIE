@@ -186,10 +186,11 @@ play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
     return strategy->fixed_seconds_per_move;
   }
   const GameTimer *game_timer = strategy->game_timer;
-  if (game_timer == NULL || game_timer_is_untimed(game_timer)) {
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  if (game_timer == NULL ||
+      game_timer_player_is_untimed(game_timer, player_on_turn_index)) {
     return PLAY_CHOOSER_DEFAULT_UNTIMED_MOVE_SECONDS;
   }
-  const int player_on_turn_index = game_get_player_on_turn_index(game);
   const int total_unplayed_tiles =
       bag_get_letters(game_get_bag(game)) +
       rack_get_total_letters(player_get_rack(game_get_player(game, 0))) +

@@ -64,6 +64,7 @@
 #include "inference.h"
 #include "move_gen.h"
 #include "peg.h"
+#include "play_chooser.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -98,6 +99,7 @@ typedef enum {
   ARG_TOKEN_SIM,
   ARG_TOKEN_SNOPRUNE,
   ARG_TOKEN_GEN_AND_SIM,
+  ARG_TOKEN_RACK_AND_GEN,
   ARG_TOKEN_RACK_AND_GEN_AND_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_ENDGAME,
@@ -162,6 +164,7 @@ typedef enum {
   ARG_TOKEN_USE_HEAT_MAP,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
+  ARG_TOKEN_SHOW_MISTAKES,
   ARG_TOKEN_RANDOM_SEED,
   ARG_TOKEN_NUMBER_OF_THREADS,
   ARG_TOKEN_PRINT_INTERVAL,
@@ -223,6 +226,10 @@ typedef enum {
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
+  ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
+  ARG_TOKEN_P2_PLAY_CHOOSER_TIME,
+  ARG_TOKEN_OVERTIME_PENALTY_POINTS,
+  ARG_TOKEN_OVERTIME_PERIOD,
   ARG_TOKEN_P1_THRESHOLD,
   ARG_TOKEN_P2_THRESHOLD,
   ARG_TOKEN_P1_SAMPLING_RULE,
@@ -316,6 +323,7 @@ struct Config {
   Equity eq_margin_movegen;
   bool use_game_pairs;
   bool human_readable;
+  bool show_mistakes;
   bool use_small_plays;
   bool sim_with_inference;
   bool use_heat_map;
@@ -360,6 +368,12 @@ struct Config {
   bool p2_sim_with_inference;
   double p1_time_limit_seconds;
   double p2_time_limit_seconds;
+  // Milliseconds per game. Negative disables PlayChooser; zero enables it
+  // without a clock.
+  double p1_play_chooser_time_ms;
+  double p2_play_chooser_time_ms;
+  int overtime_penalty_points;
+  double overtime_period_ms;
   bai_threshold_t p1_threshold;
   bai_threshold_t p2_threshold;
   bai_sampling_rule_t p1_sampling_rule;
@@ -588,6 +602,14 @@ bool config_get_use_small_plays(const Config *config) {
 
 bool config_get_human_readable(const Config *config) {
   return config->human_readable;
+}
+
+void config_set_human_readable(Config *config, bool human_readable) {
+  config->human_readable = human_readable;
+}
+
+bool config_get_show_mistakes(const Config *config) {
+  return config->show_mistakes;
 }
 
 bool config_get_show_prompt(const Config *config) {
@@ -1127,6 +1149,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "ABCD";
       examples[2] = "-";
       text = "Generates moves for the current position and runs a simulation.";
+      break;
+    case ARG_TOKEN_RACK_AND_GEN:
+      usages[0] = "<player_rack>";
+      examples[0] = "ABCD";
+      text = "Sets the current player rack and generates moves for the "
+             "current position.";
       break;
     case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
       usages[0] = "<player_rack> [<opponent_known_rack>]";
@@ -1695,10 +1723,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       text =
           "When true, adds a per-play outcomes column to the graded table: the "
-          "shorter of the winning / losing draws (the other is implied by the "
-          "counts). A draw is a sorted multiset (FGHI) when order is "
-          "irrelevant, or a slash-joined sequence (F/G/H/I) when it matters; "
-          "each carries an xN labeled-ordering weight. Default false.";
+          "largest of the winning / losing / tying draw lists is implied by "
+          "the "
+          "counts and the smaller ones are shown, comma-separated with "
+          "W:/L:/T: "
+          "labels. The implied list is named (\", otherwise wins/loses/ties\") "
+          "only when the cell is otherwise ambiguous: ties are the implied "
+          "majority, or the tie list is the only one shown. A draw is a sorted "
+          "multiset (FGHI) when order is irrelevant, or a slash-joined "
+          "sequence "
+          "(F/G/H/I) when it matters; each carries an xN labeled-ordering "
+          "weight. Default false.";
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       usages[0] = "<columns>";
@@ -1789,7 +1824,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "seed, with player one going first in one game and player two going "
           "first in the other game. Since the games are deterministic for a "
           "given starting seed, if both players make the exact same decision "
-          "for each corresponding play, the games will be identical.";
+          "for each corresponding play, the games will be identical. This "
+          "does not hold when a player runs on a PlayChooser clock (-pc1 / "
+          "-pc2): move choice then depends on how much search fits in the "
+          "budget, so the paired games are no longer a controlled comparison "
+          "over identical draws.";
       break;
     case ARG_TOKEN_USE_SMALL_PLAYS:
       usages[0] = "<true_or_false>";
@@ -1826,6 +1865,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "false";
       text = "Specifies whether or not to use a human readable move format for "
              "printing results.";
+      break;
+    case ARG_TOKEN_SHOW_MISTAKES:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether analyze grades each turn into a discrete "
+             "mistake size (small/medium/large) and includes mistake counts "
+             "and the mistake index (MI) in its output. Off by default.";
       break;
     case ARG_TOKEN_RANDOM_SEED:
       usages[0] = "<random_seed>";
@@ -2099,6 +2146,42 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the time limit in seconds for simulation for player "
              "1 or 2 during autoplay. Fractional values supported.";
       break;
+    case ARG_TOKEN_P1_PLAY_CHOOSER_TIME:
+    case ARG_TOKEN_P2_PLAY_CHOOSER_TIME:
+      usages[0] = "<milliseconds>";
+      examples[0] = "30000";
+      examples[1] = "-1";
+      text = "Enables PlayChooser for player 1 or 2 during autoplay and sets "
+             "that player's total per-game clock in milliseconds. -1 "
+             "disables PlayChooser for the player (the default); 0 enables "
+             "it without a clock. A clocked player's games are not "
+             "reproducible from the seed: how much search fits in the budget "
+             "varies with machine load, thread count, and build, so move "
+             "choice and the overtime penalty vary between runs of the same "
+             "seed. Read the aggregate results (win%, spread, penalty "
+             "points), which are meaningful across enough games; individual "
+             "games are not intended to replay identically. How much search "
+             "the clock buys also depends on -mtmode: pgp (the default) "
+             "gives each concurrent game's chooser one thread, while igp "
+             "plays one game at a time and gives that chooser every thread. "
+             "Compare timed runs only against runs with the same -mtmode and "
+             "-threads.";
+      break;
+    case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
+      usages[0] = "<points>";
+      examples[0] = "10";
+      examples[1] = "1";
+      text = "Points deducted for each started overtime period in timed "
+             "PlayChooser autoplay. Defaults to 10.";
+      break;
+    case ARG_TOKEN_OVERTIME_PERIOD:
+      usages[0] = "<milliseconds>";
+      examples[0] = "60000";
+      examples[1] = "1000";
+      text = "Length in milliseconds of each started overtime penalty "
+             "period. Defaults to 60000 (one minute); use 1000 with "
+             "-otpenalty 1 for one point per started second.";
+      break;
     case ARG_TOKEN_P1_THRESHOLD:
     case ARG_TOKEN_P2_THRESHOLD:
       usages[0] = "<threshold>";
@@ -2227,6 +2310,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_INFER,                /* infer */
         ARG_TOKEN_LEAVE_GEN,            /* leavegen */
         ARG_TOKEN_PEG,                  /* peg */
+        ARG_TOKEN_RACK_AND_GEN,         /* rg */
         ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
         ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
         ARG_TOKEN_SHOW_GAME,            /* shgame */
@@ -2287,12 +2371,17 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
         ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
         ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
+        ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
         ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
         ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
         ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
+        ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
+        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
@@ -2642,6 +2731,16 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
   impl_move_gen_override_record_type(
       config, player_get_move_record_type(game_get_player(
                   config->game, game_get_player_on_turn_index(config->game))));
+}
+
+// Rack and gen
+
+void impl_rack_and_gen(Config *config, ErrorStack *error_stack) {
+  impl_set_rack(config, ARG_TOKEN_RACK_AND_GEN, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  impl_move_gen(config, error_stack);
 }
 
 // Inference
@@ -3143,7 +3242,7 @@ void impl_gen_and_sim(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
+  impl_sim(config, ARG_TOKEN_GEN_AND_SIM, 0, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -3506,12 +3605,28 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
+  const double play_chooser_time_ms[2] = {config->p1_play_chooser_time_ms,
+                                          config->p2_play_chooser_time_ms};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    autoplay_args->use_play_chooser[player_index] =
+        autoplay_type == AUTOPLAY_TYPE_DEFAULT &&
+        play_chooser_time_ms[player_index] >= 0.0;
+    autoplay_args->time_control_seconds[player_index] =
+        autoplay_args->use_play_chooser[player_index]
+            ? play_chooser_time_ms[player_index] / 1000.0
+            : 0.0;
+  }
+  autoplay_args->overtime_penalty_points = config->overtime_penalty_points;
+  autoplay_args->overtime_period_seconds = config->overtime_period_ms / 1000.0;
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
+  const bool any_player_uses_play_chooser =
+      autoplay_args->use_play_chooser[0] || autoplay_args->use_play_chooser[1];
   if (autoplay_args->multi_threading_mode ==
           MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM &&
-      (config->p1_sim_plies > 0 || config->p2_sim_plies > 0)) {
+      (config->p1_sim_plies > 0 || config->p2_sim_plies > 0 ||
+       any_player_uses_play_chooser)) {
     autoplay_args->num_threads = 1;
     num_worker_threads_per_sim = config->num_threads;
   }
@@ -3582,6 +3697,26 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
       config->p2_utility_spread_scale, &p2_inference_args,
       &autoplay_args->p2_sim_args);
+
+  const double utility_win_pct[2] = {config->p1_utility_w_winpct,
+                                     config->p2_utility_w_winpct};
+  const double utility_spread[2] = {config->p1_utility_w_spread,
+                                    config->p2_utility_w_spread};
+  const double utility_spread_scale[2] = {config->p1_utility_spread_scale,
+                                          config->p2_utility_spread_scale};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    autoplay_args->play_chooser_strategies[player_index] =
+        (PlayChooserStrategy){
+            .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+            .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+            .win_pcts = config->win_pcts,
+            .num_threads = num_worker_threads_per_sim,
+            .peg_scenario_stride = config->peg_scenario_stride,
+            .utility_w_winpct = utility_win_pct[player_index],
+            .utility_w_spread = utility_spread[player_index],
+            .utility_spread_scale = utility_spread_scale[player_index],
+        };
+  }
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
@@ -3606,7 +3741,9 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
+  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0 ||
+      config->p1_play_chooser_time_ms >= 0.0 ||
+      config->p2_play_chooser_time_ms >= 0.0) {
     config_load_win_pcts(config, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
@@ -6550,7 +6687,7 @@ void config_load_parsed_args(Config *config,
         // Add the rest of the remaining string to the next parg value,
         // which basically treats the rest of the string after the command
         // as a single argument.
-        char *cmd_content = strchr(cmd, ' ');
+        const char *cmd_content = strchr(cmd, ' ');
         if (cmd_content) {
           cmd_content = cmd_content + 1;
         }
@@ -7098,6 +7235,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Show mistakes
+
+  config_load_bool(config, ARG_TOKEN_SHOW_MISTAKES, &config->show_mistakes,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Print boards
 
   config_load_bool(config, ARG_TOKEN_PRINT_BOARDS, &config->print_boards,
@@ -7605,6 +7750,27 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_double(config, ARG_TOKEN_P1_PLAY_CHOOSER_TIME, -1, 1e12,
+                     &config->p1_play_chooser_time_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_double(config, ARG_TOKEN_P2_PLAY_CHOOSER_TIME, -1, 1e12,
+                     &config->p2_play_chooser_time_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_OVERTIME_PENALTY_POINTS, 0, INT_MAX,
+                  &config->overtime_penalty_points, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_double(config, ARG_TOKEN_OVERTIME_PERIOD, 1, 1e12,
+                     &config->overtime_period_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   if (config_get_parg_value(config, ARG_TOKEN_THRESHOLD, 0) != NULL) {
     config->p1_threshold = config->threshold;
     config->p2_threshold = config->threshold;
@@ -7848,6 +8014,7 @@ void config_load_command(Config *config, const char *cmd,
   // If the command is empty, consider this a set options
   // command where zero options are set and return without error.
   if (is_string_empty_or_whitespace(cmd)) {
+    config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
     return;
   }
 
@@ -7879,6 +8046,8 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
 bool config_run_str_api_command(Config *config, ErrorStack *error_stack,
                                 char **output) {
   if (!config_exec_parg_is_set(config)) {
+    thread_control_set_status(config_get_thread_control(config),
+                              THREAD_CONTROL_STATUS_FINISHED);
     return false;
   }
   *output = config_get_parg_api_func(config, config->exec_parg_token)(
@@ -7972,7 +8141,10 @@ void execute_sim(Config *config, ErrorStack *error_stack) {
 
 char *str_api_sim(Config *config, ErrorStack *error_stack) {
   impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_snoprune(Config *config, ErrorStack *error_stack) {
@@ -7985,7 +8157,10 @@ void execute_snoprune(Config *config, ErrorStack *error_stack) {
 
 char *str_api_snoprune(Config *config, ErrorStack *error_stack) {
   impl_snoprune(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
@@ -7998,7 +8173,26 @@ void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
 
 char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_gen_and_sim(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
+}
+
+void execute_rack_and_gen(Config *config, ErrorStack *error_stack) {
+  impl_rack_and_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_moves_or_sim_results(config, error_stack);
+}
+
+char *str_api_rack_and_gen(Config *config, ErrorStack *error_stack) {
+  impl_rack_and_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
@@ -8011,7 +8205,10 @@ void execute_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
 
 char *str_api_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_rack_and_gen_and_sim(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_infer(Config *config, ErrorStack *error_stack) {
@@ -8024,7 +8221,10 @@ void execute_infer(Config *config, ErrorStack *error_stack) {
 
 char *str_api_infer(Config *config, ErrorStack *error_stack) {
   impl_infer(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_inference(config, error_stack);
 }
 
 void execute_endgame(Config *config, ErrorStack *error_stack) {
@@ -8037,7 +8237,10 @@ void execute_endgame(Config *config, ErrorStack *error_stack) {
 
 char *str_api_endgame(Config *config, ErrorStack *error_stack) {
   impl_endgame(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_endgame(config, error_stack);
 }
 
 void execute_peg(Config *config, ErrorStack *error_stack) {
@@ -8052,7 +8255,10 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
 
 char *str_api_peg(Config *config, ErrorStack *error_stack) {
   impl_peg(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_peg(config, error_stack);
 }
 
 void execute_autoplay(Config *config, ErrorStack *error_stack) {
@@ -8152,6 +8358,7 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
   }
   config_fill_peg_args(config, &analyze_args->peg_args);
   analyze_args->human_readable = config->human_readable;
+  analyze_args->show_mistakes = config->show_mistakes;
   analyze_args->max_num_display_plays = config->max_num_display_plays;
 }
 
@@ -8161,6 +8368,7 @@ typedef struct AnalyzeSummary {
   int skipped_count; // already-complete reports left untouched this run
   int not_started_count;
   bool interrupted;
+  bool show_mistakes; // mirrors AnalyzeArgs.show_mistakes for this run
   // "<gcg filename>: <error>\n" per failed game; NULL until the first error.
   StringBuilder *error_details;
   // Tournament aggregate accumulated across every game in this directory
@@ -8170,8 +8378,16 @@ typedef struct AnalyzeSummary {
   double total_win_pct_lost;
   double total_equity_lost;
   double total_adjusted_equity_lost;
+  int total_small_mistakes;
+  int total_medium_mistakes;
+  int total_large_mistakes;
+  double total_mistake_index;
   int turn_count;
   int game_count;
+  // Per-player "Game Summary" text for a single-game (non-directory) run;
+  // NULL for directory runs or when the run wasn't human-readable. Owned by
+  // whichever of execute_analyze/str_api_analyze consumes it.
+  char *dialog_summary;
 } AnalyzeSummary;
 
 // Advances *str past literal if str starts with it, and returns true.
@@ -8187,13 +8403,20 @@ static bool consume_literal(const char **str, const char *literal) {
 
 // Reads report_path and, if it ends in a "=== Analysis Complete: ..."
 // trailer (written unconditionally by analyze_game on a clean run), parses
-// the turn count and clamped WPL/EqL/AEqL totals out of it. Returns false
-// (leaving the outputs untouched) if the file is missing or has no such
-// trailer, e.g. because it doesn't exist yet or a previous run crashed or
-// errored partway through.
+// the turn count and clamped WPL/EqL/AEqL totals out of it, plus the
+// small/medium/large mistake counts and mistake index (MI) if present.
+// Reports written before mistake grading was added lack those fields; in
+// that case the four mistake outputs are left at 0 rather than failing the
+// whole parse, so directory-mode resume tolerates a mix of old and new
+// report files. Returns false (leaving all outputs untouched) if the file is
+// missing or has no trailer at all, e.g. because it doesn't exist yet or a
+// previous run crashed or errored partway through.
 static bool read_report_completion_stats(const char *report_path, int *turns,
-                                         double *wpl, double *eql,
-                                         double *aeql) {
+                                         double *wpl, double *eql, double *aeql,
+                                         int *small_mistakes,
+                                         int *medium_mistakes,
+                                         int *large_mistakes,
+                                         double *mistake_index) {
   ErrorStack *probe_error_stack = error_stack_create();
   char *content = get_string_from_file(report_path, probe_error_stack);
   const bool file_exists = error_stack_is_empty(probe_error_stack);
@@ -8207,6 +8430,10 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
   double parsed_wpl = 0.0;
   double parsed_eql = 0.0;
   double parsed_aeql = 0.0;
+  int parsed_small = 0;
+  int parsed_medium = 0;
+  int parsed_large = 0;
+  double parsed_mi = 0.0;
   if (marker) {
     ErrorStack *parse_error_stack = error_stack_create();
     const char *pos = marker;
@@ -8233,8 +8460,44 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
     if (ok) {
       parsed_aeql = string_to_double_prefix(pos, &end, parse_error_stack);
       pos = end;
-      ok = error_stack_is_empty(parse_error_stack) &&
-           consume_literal(&pos, " ===");
+      ok = error_stack_is_empty(parse_error_stack);
+    }
+    if (ok) {
+      const char *mistake_pos = pos;
+      bool has_mistake_fields = consume_literal(&mistake_pos, " small=");
+      if (has_mistake_fields) {
+        parsed_small =
+            string_to_int_prefix(mistake_pos, &end, parse_error_stack);
+        mistake_pos = end;
+        has_mistake_fields = error_stack_is_empty(parse_error_stack) &&
+                             consume_literal(&mistake_pos, " medium=");
+      }
+      if (has_mistake_fields) {
+        parsed_medium =
+            string_to_int_prefix(mistake_pos, &end, parse_error_stack);
+        mistake_pos = end;
+        has_mistake_fields = error_stack_is_empty(parse_error_stack) &&
+                             consume_literal(&mistake_pos, " large=");
+      }
+      if (has_mistake_fields) {
+        parsed_large =
+            string_to_int_prefix(mistake_pos, &end, parse_error_stack);
+        mistake_pos = end;
+        has_mistake_fields = error_stack_is_empty(parse_error_stack) &&
+                             consume_literal(&mistake_pos, " mi=");
+      }
+      if (has_mistake_fields) {
+        parsed_mi =
+            string_to_double_prefix(mistake_pos, &end, parse_error_stack);
+        mistake_pos = end;
+        has_mistake_fields = error_stack_is_empty(parse_error_stack);
+      }
+      // Older reports go straight from aeql to "===" with no mistake
+      // fields; only advance pos past them when they were actually present.
+      if (has_mistake_fields) {
+        pos = mistake_pos;
+      }
+      ok = consume_literal(&pos, " ===");
     }
     error_stack_destroy(parse_error_stack);
   }
@@ -8244,6 +8507,10 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
     *wpl = parsed_wpl;
     *eql = parsed_eql;
     *aeql = parsed_aeql;
+    *small_mistakes = parsed_small;
+    *medium_mistakes = parsed_medium;
+    *large_mistakes = parsed_large;
+    *mistake_index = parsed_mi;
   }
   return ok;
 }
@@ -8342,6 +8609,92 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
 // summary's aggregate fields. Rebuilding is skipped when nothing in the
 // directory changed this run (no game was freshly (re)analyzed) and a
 // summary file already exists, to avoid needless rewrites.
+// Scans content for "=== Game Summary: <player> ===" blocks (the
+// "Combined Game Summary" block has a different header and is skipped) and
+// appends each one to sb, prefixed with "--- <label> ---" when label is
+// non-NULL. content must contain a leading '\n' before each such marker,
+// true of every report analyze.c writes.
+static void extract_game_summary_blocks(const char *content, const char *label,
+                                        StringBuilder *sb) {
+  const int content_length = (int)string_length(content);
+  const char *cursor = content;
+  while ((cursor = strstr(cursor, "\n=== Game Summary: ")) != NULL) {
+    cursor++; // skip the leading '\n' so the block itself starts at "==="
+    const char *next_marker = strstr(cursor + 1, "\n=== ");
+    const int block_start = (int)(cursor - content);
+    const int block_end =
+        next_marker ? (int)(next_marker - content) : content_length;
+    char *block = get_substring(content, block_start, block_end);
+    if (label) {
+      string_builder_add_formatted_string(sb, "--- %s ---\n", label);
+    }
+    string_builder_add_string(sb, block);
+    string_builder_add_string(sb, "\n");
+    free(block);
+    cursor = next_marker ? next_marker : content + content_length;
+  }
+}
+
+// Appends the "=== Tournament Averages ===" block (games/turns analyzed,
+// average WPL/EqL/AEqL per turn and per game, and mistake totals/averages)
+// to sb. Shared between the tournament_summary.txt file and the dialog
+// output for directory-mode runs.
+static void append_tournament_averages(StringBuilder *sb,
+                                       const AnalyzeSummary *summary) {
+  const double avg_wpl_per_turn =
+      summary->turn_count ? summary->total_win_pct_lost / summary->turn_count
+                          : 0.0;
+  const double avg_eql_per_turn =
+      summary->turn_count ? summary->total_equity_lost / summary->turn_count
+                          : 0.0;
+  const double avg_aeql_per_turn =
+      summary->turn_count
+          ? summary->total_adjusted_equity_lost / summary->turn_count
+          : 0.0;
+  const double avg_mi_per_turn =
+      summary->turn_count ? summary->total_mistake_index / summary->turn_count
+                          : 0.0;
+  const double avg_wpl_per_game =
+      summary->game_count ? summary->total_win_pct_lost / summary->game_count
+                          : 0.0;
+  const double avg_eql_per_game =
+      summary->game_count ? summary->total_equity_lost / summary->game_count
+                          : 0.0;
+  const double avg_aeql_per_game =
+      summary->game_count
+          ? summary->total_adjusted_equity_lost / summary->game_count
+          : 0.0;
+  const double avg_mi_per_game =
+      summary->game_count ? summary->total_mistake_index / summary->game_count
+                          : 0.0;
+
+  string_builder_add_string(sb, "=== Tournament Averages ===\n");
+  string_builder_add_formatted_string(sb, "Games: %d\n", summary->game_count);
+  string_builder_add_formatted_string(sb, "Turns: %d\n", summary->turn_count);
+  string_builder_add_formatted_string(sb, "Average WPL per turn: %.2f\n",
+                                      avg_wpl_per_turn);
+  string_builder_add_formatted_string(sb, "Average EqL per turn: %.2f\n",
+                                      avg_eql_per_turn);
+  string_builder_add_formatted_string(sb, "Average AEqL per turn: %.2f\n",
+                                      avg_aeql_per_turn);
+  string_builder_add_formatted_string(sb, "Average WPL per game: %.2f\n",
+                                      avg_wpl_per_game);
+  string_builder_add_formatted_string(sb, "Average EqL per game: %.2f\n",
+                                      avg_eql_per_game);
+  string_builder_add_formatted_string(sb, "Average AEqL per game: %.2f\n",
+                                      avg_aeql_per_game);
+  if (summary->show_mistakes) {
+    string_builder_add_formatted_string(
+        sb, "Mistakes: %d small, %d medium, %d large (MI %.2f)\n",
+        summary->total_small_mistakes, summary->total_medium_mistakes,
+        summary->total_large_mistakes, summary->total_mistake_index);
+    string_builder_add_formatted_string(sb, "Average MI per turn: %.2f\n",
+                                        avg_mi_per_turn);
+    string_builder_add_formatted_string(sb, "Average MI per game: %.2f\n",
+                                        avg_mi_per_game);
+  }
+}
+
 static void write_tournament_summary(const char *dir_path, char **gcg_files,
                                      int num_gcg_files,
                                      const AnalyzeSummary *summary,
@@ -8383,61 +8736,11 @@ static void write_tournament_summary(const char *dir_path, char **gcg_files,
       continue;
     }
 
-    const int content_length = (int)string_length(content);
-    const char *cursor = content;
-    while ((cursor = strstr(cursor, "\n=== Game Summary: ")) != NULL) {
-      cursor++; // skip the leading '\n' so the block itself starts at "==="
-      const char *next_marker = strstr(cursor + 1, "\n=== ");
-      const int block_start = (int)(cursor - content);
-      const int block_end =
-          next_marker ? (int)(next_marker - content) : content_length;
-      char *block = get_substring(content, block_start, block_end);
-      string_builder_add_formatted_string(sb, "--- %s ---\n",
-                                          gcg_files[file_idx]);
-      string_builder_add_string(sb, block);
-      string_builder_add_string(sb, "\n");
-      free(block);
-      cursor = next_marker ? next_marker : content + content_length;
-    }
+    extract_game_summary_blocks(content, gcg_files[file_idx], sb);
     free(content);
   }
 
-  const double avg_wpl_per_turn =
-      summary->turn_count ? summary->total_win_pct_lost / summary->turn_count
-                          : 0.0;
-  const double avg_eql_per_turn =
-      summary->turn_count ? summary->total_equity_lost / summary->turn_count
-                          : 0.0;
-  const double avg_aeql_per_turn =
-      summary->turn_count
-          ? summary->total_adjusted_equity_lost / summary->turn_count
-          : 0.0;
-  const double avg_wpl_per_game =
-      summary->game_count ? summary->total_win_pct_lost / summary->game_count
-                          : 0.0;
-  const double avg_eql_per_game =
-      summary->game_count ? summary->total_equity_lost / summary->game_count
-                          : 0.0;
-  const double avg_aeql_per_game =
-      summary->game_count
-          ? summary->total_adjusted_equity_lost / summary->game_count
-          : 0.0;
-
-  string_builder_add_string(sb, "=== Tournament Averages ===\n");
-  string_builder_add_formatted_string(sb, "Games: %d\n", summary->game_count);
-  string_builder_add_formatted_string(sb, "Turns: %d\n", summary->turn_count);
-  string_builder_add_formatted_string(sb, "Average WPL per turn: %.2f\n",
-                                      avg_wpl_per_turn);
-  string_builder_add_formatted_string(sb, "Average EqL per turn: %.2f\n",
-                                      avg_eql_per_turn);
-  string_builder_add_formatted_string(sb, "Average AEqL per turn: %.2f\n",
-                                      avg_aeql_per_turn);
-  string_builder_add_formatted_string(sb, "Average WPL per game: %.2f\n",
-                                      avg_wpl_per_game);
-  string_builder_add_formatted_string(sb, "Average EqL per game: %.2f\n",
-                                      avg_eql_per_game);
-  string_builder_add_formatted_string(sb, "Average AEqL per game: %.2f\n",
-                                      avg_aeql_per_game);
+  append_tournament_averages(sb, summary);
 
   char *summary_str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
@@ -8508,6 +8811,7 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   config_fill_analyze_args(config, &analyze_args, &target_played_tiles,
                            &nontarget_known_tiles,
                            &target_known_inference_tiles);
+  summary->show_mistakes = analyze_args.show_mistakes;
   ThreadControl *thread_control = analyze_args.sim_args.thread_control;
   AnalyzeCtx *ctx = NULL;
   if (arg0_is_directory) {
@@ -8531,15 +8835,36 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       double wpl = 0.0;
       double eql = 0.0;
       double aeql = 0.0;
-      if (read_report_completion_stats(report_path, &turns, &wpl, &eql,
-                                       &aeql)) {
+      int small_mistakes = 0;
+      int medium_mistakes = 0;
+      int large_mistakes = 0;
+      double mistake_index = 0.0;
+      if (read_report_completion_stats(report_path, &turns, &wpl, &eql, &aeql,
+                                       &small_mistakes, &medium_mistakes,
+                                       &large_mistakes, &mistake_index)) {
         summary->skipped_count++;
         summary->success_count++;
         summary->turn_count += turns;
         summary->total_win_pct_lost += wpl;
         summary->total_equity_lost += eql;
         summary->total_adjusted_equity_lost += aeql;
+        summary->total_small_mistakes += small_mistakes;
+        summary->total_medium_mistakes += medium_mistakes;
+        summary->total_large_mistakes += large_mistakes;
+        summary->total_mistake_index += mistake_index;
         summary->game_count++;
+        if (analyze_args.show_mistakes) {
+          thread_control_print_formatted(
+              thread_control,
+              "  [%d/%d] %s: %d turns, WPL %.2f, Mistakes S:%d M:%d L:%d (MI "
+              "%.2f) [skipped]\n",
+              file_idx + 1, num_gcg_files, gcg_files[file_idx], turns, wpl,
+              small_mistakes, medium_mistakes, large_mistakes, mistake_index);
+        } else {
+          thread_control_print_formatted(
+              thread_control, "  [%d/%d] %s: %d turns, WPL %.2f [skipped]\n",
+              file_idx + 1, num_gcg_files, gcg_files[file_idx], turns, wpl);
+        }
         free(report_path);
         free(gcg_path);
         continue;
@@ -8561,13 +8886,30 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       } else {
         summary->success_count++;
         any_reanalyzed = true;
-        if (read_report_completion_stats(report_path, &turns, &wpl, &eql,
-                                         &aeql)) {
+        if (read_report_completion_stats(report_path, &turns, &wpl, &eql, &aeql,
+                                         &small_mistakes, &medium_mistakes,
+                                         &large_mistakes, &mistake_index)) {
           summary->turn_count += turns;
           summary->total_win_pct_lost += wpl;
           summary->total_equity_lost += eql;
           summary->total_adjusted_equity_lost += aeql;
+          summary->total_small_mistakes += small_mistakes;
+          summary->total_medium_mistakes += medium_mistakes;
+          summary->total_large_mistakes += large_mistakes;
+          summary->total_mistake_index += mistake_index;
           summary->game_count++;
+          if (analyze_args.show_mistakes) {
+            thread_control_print_formatted(
+                thread_control,
+                "  [%d/%d] %s: %d turns, WPL %.2f, Mistakes S:%d M:%d L:%d "
+                "(MI %.2f)\n",
+                file_idx + 1, num_gcg_files, gcg_files[file_idx], turns, wpl,
+                small_mistakes, medium_mistakes, large_mistakes, mistake_index);
+          } else {
+            thread_control_print_formatted(
+                thread_control, "  [%d/%d] %s: %d turns, WPL %.2f\n",
+                file_idx + 1, num_gcg_files, gcg_files[file_idx], turns, wpl);
+          }
         }
       }
       free(report_path);
@@ -8591,66 +8933,122 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       summary->error_count++;
     } else {
       summary->success_count++;
+      // Surface each player's Game Summary in the dialog, not just the
+      // report file. Only human-readable reports contain these blocks.
+      if (analyze_args.human_readable) {
+        const char *gcg_filename =
+            game_history_get_gcg_filename(config->game_history);
+        char *base = cut_off_after_last_char(gcg_filename, '.');
+        char *report_path = get_formatted_string("%s_report.txt", base);
+        free(base);
+        ErrorStack *read_error_stack = error_stack_create();
+        char *content = get_string_from_file(report_path, read_error_stack);
+        if (error_stack_is_empty(read_error_stack)) {
+          StringBuilder *dialog_sb = string_builder_create();
+          extract_game_summary_blocks(content, NULL, dialog_sb);
+          summary->dialog_summary = string_builder_dump(dialog_sb, NULL);
+          string_builder_destroy(dialog_sb);
+        }
+        error_stack_destroy(read_error_stack);
+        free(content);
+        free(report_path);
+      }
     }
   }
   analyze_ctx_destroy(ctx);
   error_stack_destroy(analyze_error_stack);
 }
 
-void execute_analyze(Config *config, ErrorStack *error_stack) {
-  AnalyzeSummary summary = {0};
-  impl_analyze(config, &summary, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
+// Builds the display string for an analyze summary, consuming the
+// summary's error_details string builder.
+char *analyze_summary_to_string(AnalyzeSummary *summary) {
   int curr_row = 0;
   int curr_col = 0;
   StringGrid *sg = string_grid_create(4, 2, 1);
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Success"));
   string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%d", summary.success_count));
+                       get_formatted_string("%d", summary->success_count));
   curr_row++;
   curr_col = 0;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Skipped"));
   string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%d", summary.skipped_count));
+                       get_formatted_string("%d", summary->skipped_count));
   curr_row++;
   curr_col = 0;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Error"));
   string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%d", summary.error_count));
+                       get_formatted_string("%d", summary->error_count));
   curr_row++;
   curr_col = 0;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Unstarted"));
   string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%d", summary.not_started_count));
+                       get_formatted_string("%d", summary->not_started_count));
   StringBuilder *summary_sb = string_builder_create();
   string_builder_add_string(summary_sb, "\n");
   string_builder_add_string_grid(summary_sb, sg, false);
   string_grid_destroy(sg);
   string_builder_add_string(
-      summary_sb, summary.interrupted ? "\nFinished (user interrupt)\n"
-                                      : "\nFinished (all games analyzed)\n");
-  if (summary.error_details) {
+      summary_sb, summary->interrupted ? "\nFinished (user interrupt)\n"
+                                       : "\nFinished (all games analyzed)\n");
+  if (summary->error_details) {
     string_builder_add_string(summary_sb, "\n=== Errors ===\n");
-    char *error_details_str = string_builder_dump(summary.error_details, NULL);
+    char *error_details_str = string_builder_dump(summary->error_details, NULL);
     string_builder_add_string(summary_sb, error_details_str);
     free(error_details_str);
-    string_builder_destroy(summary.error_details);
+    string_builder_destroy(summary->error_details);
+    summary->error_details = NULL;
   }
+  char *summary_str = string_builder_dump(summary_sb, NULL);
+  string_builder_destroy(summary_sb);
+  return summary_str;
+}
+
+void execute_analyze(Config *config, ErrorStack *error_stack) {
+  AnalyzeSummary summary = {0};
+  impl_analyze(config, &summary, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(summary.dialog_summary);
+    return;
+  }
+  StringBuilder *summary_sb = string_builder_create();
+  if (summary.dialog_summary) {
+    string_builder_add_string(summary_sb, summary.dialog_summary);
+  }
+  if (summary.game_count > 0) {
+    append_tournament_averages(summary_sb, &summary);
+  }
+  char *grid_str = analyze_summary_to_string(&summary);
+  string_builder_add_string(summary_sb, grid_str);
+  free(grid_str);
   char *summary_str = string_builder_dump(summary_sb, NULL);
   string_builder_destroy(summary_sb);
   thread_control_print(config->thread_control, summary_str);
   free(summary_str);
+  free(summary.dialog_summary);
 }
 
 char *str_api_analyze(Config *config, ErrorStack *error_stack) {
   AnalyzeSummary summary = {0};
   impl_analyze(config, &summary, error_stack);
-  if (summary.error_details) {
-    string_builder_destroy(summary.error_details);
+  if (!error_stack_is_empty(error_stack)) {
+    if (summary.error_details) {
+      string_builder_destroy(summary.error_details);
+    }
+    return empty_string();
   }
-  return empty_string();
+  if (summary.dialog_summary) {
+    return summary.dialog_summary;
+  }
+  StringBuilder *sb = string_builder_create();
+  if (summary.game_count > 0) {
+    append_tournament_averages(sb, &summary);
+  }
+  char *grid_str = analyze_summary_to_string(&summary);
+  string_builder_add_string(sb, grid_str);
+  free(grid_str);
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
 }
 
 Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
@@ -8679,6 +9077,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
         error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
         string_duplicate(
             "encountered an error loading the default board layout"));
+    config_destroy(config);
     return NULL;
   }
 
@@ -8727,6 +9126,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SNOPRUNE, "snoprune", 0, 1, snoprune, snoprune, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
       false);
+  cmd(ARG_TOKEN_RACK_AND_GEN, "rg", 1, 1, rack_and_gen, generic, false);
   cmd(ARG_TOKEN_RACK_AND_GEN_AND_SIM, "rgsimulate", 1, 2, rack_and_gen_and_sim,
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
@@ -8796,6 +9196,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
+  arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
   arg(ARG_TOKEN_WRITE_BUFFER_SIZE, "wb", 1, 1);
   arg(ARG_TOKEN_RANDOM_SEED, "seed", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_THREADS, "threads", 1, 1);
@@ -8829,6 +9230,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
+  arg(ARG_TOKEN_P1_PLAY_CHOOSER_TIME, "pc1", 1, 1);
+  arg(ARG_TOKEN_P2_PLAY_CHOOSER_TIME, "pc2", 1, 1);
+  arg(ARG_TOKEN_OVERTIME_PENALTY_POINTS, "otpenalty", 1, 1);
+  arg(ARG_TOKEN_OVERTIME_PERIOD, "otperiod", 1, 1);
   arg(ARG_TOKEN_P1_THRESHOLD, "th1", 1, 1);
   arg(ARG_TOKEN_P2_THRESHOLD, "th2", 1, 1);
   arg(ARG_TOKEN_P1_SAMPLING_RULE, "sa1", 1, 1);
@@ -8897,7 +9302,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;
-  config->peg_show_outcomes = false;
+  config->peg_show_outcomes = true;
   config->peg_out_width = 100;
   config->peg_out_lines = 1;
   config->peg_only_str = NULL;
@@ -8922,6 +9327,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = true;
+  config->show_mistakes = false;
   config->sim_with_inference = true;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
@@ -8937,6 +9343,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_sim_with_inference = config->sim_with_inference;
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
+  config->p1_play_chooser_time_ms = -1.0;
+  config->p2_play_chooser_time_ms = -1.0;
+  config->overtime_penalty_points = 10;
+  config->overtime_period_ms = 60000.0;
   config->p1_threshold = config->threshold;
   config->p2_threshold = config->threshold;
   config->p1_sampling_rule = config->sampling_rule;
@@ -9078,6 +9488,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM:
     case ARG_TOKEN_SNOPRUNE:
     case ARG_TOKEN_GEN_AND_SIM:
+    case ARG_TOKEN_RACK_AND_GEN:
     case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
@@ -9433,6 +9844,10 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->human_readable);
       break;
+    case ARG_TOKEN_SHOW_MISTAKES:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->show_mistakes);
+      break;
     case ARG_TOKEN_RANDOM_SEED:
       // Do not save the seed in the settings.
       // The seed should be explicitly set by the user if they want to
@@ -9466,6 +9881,22 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->p2_time_limit_seconds);
+      break;
+    case ARG_TOKEN_P1_PLAY_CHOOSER_TIME:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p1_play_chooser_time_ms);
+      break;
+    case ARG_TOKEN_P2_PLAY_CHOOSER_TIME:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p2_play_chooser_time_ms);
+      break;
+    case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->overtime_penalty_points);
+      break;
+    case ARG_TOKEN_OVERTIME_PERIOD:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->overtime_period_ms);
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",
