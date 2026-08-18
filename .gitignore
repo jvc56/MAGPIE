@@ -17,6 +17,7 @@ testdata
 versioned-tarballs
 quackle
 *.gcg
+*report.txt
 oprofile_data
 cppcheck_*
 TODO

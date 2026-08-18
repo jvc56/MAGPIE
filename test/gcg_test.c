@@ -176,8 +176,12 @@ void test_error_cases(GameHistory *game_history) {
                          ERROR_STATUS_GCG_PARSE_PLAYED_LETTERS_NOT_IN_RACK);
   test_single_error_case("exchange_not_in_rack", config, game_history,
                          ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
+  // The rack in this fixture ("AEEG.TTV") uses "." where the file's author
+  // intended a malformed character; since "." is now a valid alias for "?"
+  // (blank), it parses as a well-formed 8-letter rack and instead fails
+  // later, when that rack doesn't match the tracked game state.
   test_single_error_case("exchange_malformed", config, game_history,
-                         ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
+                         ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
   test_single_error_case("pass_rack_malformed", config, game_history,
                          ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   test_single_error_case("challenge_bonus_rack_malformed", config, game_history,

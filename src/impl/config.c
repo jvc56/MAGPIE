@@ -270,43 +270,7 @@ typedef struct ParsedArg {
 } ParsedArg;
 
 struct Config {
-  ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
   char *data_paths;
-  arg_token_t exec_parg_token;
-  bool ld_changed;
-  exec_mode_t exec_mode;
-  int bingo_bonus;
-  int challenge_bonus;
-  int num_plays;
-  int max_num_display_plays;
-  int num_small_plays;
-  int plies;
-  int shplies;
-  // Show the blended utility (BU) column when printing sim results.
-  bool show_bu;
-  int endgame_plies;
-  int endgame_top_k;
-  // PEG per-stage candidate counts (halving stages 1..N), parsed from -pegtopk.
-  // peg_num_stages == 0 means "use the solver's built-in default schedule".
-  // CONFIG_PEG_MAX_STAGES bounds only the CLI parse buffer, not the solver.
-  int peg_stage_top_k[CONFIG_PEG_MAX_STAGES];
-  int peg_num_stages;
-  // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver
-  // default.
-  int peg_scenario_stride;
-  // PEG pessimistic opponent model (-pegpess); else rational (the default).
-  bool peg_pessimistic;
-  // PEG nested inner-peg lookahead for non-emptier leaves (-pegnested). On by
-  // default (depth 1); off restores the flat greedy/pessimistic rollout.
-  bool peg_nested;
-  // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
-  bool peg_show_outcomes;
-  // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
-  // the cell always fits the label + a worst-case token) and max wrapped lines
-  // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
-  // chart is written to a timestamped file under data/pegcharts/.
-  int peg_out_width;
-  int peg_out_lines;
   // PEG "only solve" / "never prune" move lists (space-free UCGI, comma-
   // separated), persisted across commands since pargs reset each parse. NULL =
   // solve all moves / no protected moves.
@@ -319,8 +283,108 @@ struct Config {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  char *record_filepath;
+  char *settings_filename;
+  double tt_fraction_of_mem;
+  double time_limit_seconds;
+  // 0 = fall back to time_limit_seconds.
+  double endgame_time_limit_seconds;
+  double peg_time_limit_seconds;
+  uint64_t seed;
+  double p1_stop_cond_pct;
+  double p2_stop_cond_pct;
+  uint64_t p1_max_iterations;
+  uint64_t p2_max_iterations;
+  uint64_t p1_min_play_iterations;
+  uint64_t p2_min_play_iterations;
+  double p1_time_limit_seconds;
+  double p2_time_limit_seconds;
+  // Milliseconds per game. Negative disables PlayChooser; zero enables it
+  // without a clock.
+  double p1_play_chooser_time_ms;
+  double p2_play_chooser_time_ms;
+  double overtime_period_ms;
+  double p1_utility_w_winpct;
+  double p2_utility_w_winpct;
+  double p1_utility_w_spread;
+  double p2_utility_w_spread;
+  double p1_utility_spread_scale;
+  double p2_utility_spread_scale;
+  WinPct *win_pcts;
+  BoardLayout *board_layout;
+  LetterDistribution *ld;
+  PlayersData *players_data;
+  ThreadControl *thread_control;
+  Game *game;
+  Game *game_backup;
+  GameHistory *game_history;
+  GameHistory *game_history_backup;
+  MoveList *move_list;
+  EndgameCtx *endgame_ctx;
+  SimResults *sim_results;
+  InferenceResults *inference_results;
+  EndgameResults *endgame_results;
+  PegPoll *peg_poll;
+  AutoplayResults *autoplay_results;
+  ConversionResults *conversion_results;
+  GameStringOptions *game_string_options;
+  GetGCGResult gcg_result;
+  PegResult peg_result;
+  ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
+  arg_token_t exec_parg_token;
+  exec_mode_t exec_mode;
+  int bingo_bonus;
+  int challenge_bonus;
+  int num_plays;
+  int max_num_display_plays;
+  int num_small_plays;
+  int plies;
+  int shplies;
+  int endgame_plies;
+  int endgame_top_k;
+  // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver
+  // default.
+  int peg_num_stages;
+  int peg_scenario_stride;
+  // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
+  // the cell always fits the label + a worst-case token) and max wrapped lines
+  // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
+  // chart is written to a timestamped file under data/pegcharts/.
+  int peg_out_width;
+  int peg_out_lines;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
+  int num_threads;
+  int print_interval;
+  bai_sampling_rule_t sampling_rule;
+  bai_threshold_t threshold;
+  game_variant_t game_variant;
+  int p1_sim_plies;
+  int p2_sim_plies;
+  int p1_num_plays;
+  int p2_num_plays;
+  int overtime_penalty_points;
+  bai_threshold_t p1_threshold;
+  bai_threshold_t p2_threshold;
+  bai_sampling_rule_t p1_sampling_rule;
+  bai_sampling_rule_t p2_sampling_rule;
+  Equity p1_eq_margin_inference;
+  Equity p2_eq_margin_inference;
+  multi_threading_mode_t multi_threading_mode;
+  // PEG per-stage candidate counts (halving stages 1..N), parsed from -pegtopk.
+  // peg_num_stages == 0 means "use the solver's built-in default schedule".
+  // CONFIG_PEG_MAX_STAGES bounds only the CLI parse buffer, not the solver.
+  int peg_stage_top_k[CONFIG_PEG_MAX_STAGES];
+  bool ld_changed;
+  // Show the blended utility (BU) column when printing sim results.
+  bool show_bu;
+  // PEG pessimistic opponent model (-pegpess); else rational (the default).
+  bool peg_pessimistic;
+  // PEG nested inner-peg lookahead for non-emptier leaves (-pegnested). On by
+  // default (depth 1); off restores the flat greedy/pessimistic rollout.
+  bool peg_nested;
+  // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
+  bool peg_show_outcomes;
   bool use_game_pairs;
   bool human_readable;
   bool show_mistakes;
@@ -341,72 +405,16 @@ struct Config {
   // rack_list_write_rack_equity_csv). Independent of whether a
   // forceracksfile restriction is in use.
   bool write_rack_equity_csv;
-  char *record_filepath;
-  char *settings_filename;
-  double tt_fraction_of_mem;
-  double time_limit_seconds;
-  // 0 = fall back to time_limit_seconds.
-  double endgame_time_limit_seconds;
-  double peg_time_limit_seconds;
-  int num_threads;
-  int print_interval;
-  uint64_t seed;
-  bai_sampling_rule_t sampling_rule;
-  bai_threshold_t threshold;
-  game_variant_t game_variant;
-  int p1_sim_plies;
-  int p2_sim_plies;
-  int p1_num_plays;
-  int p2_num_plays;
-  double p1_stop_cond_pct;
-  double p2_stop_cond_pct;
-  uint64_t p1_max_iterations;
-  uint64_t p2_max_iterations;
-  uint64_t p1_min_play_iterations;
-  uint64_t p2_min_play_iterations;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
-  double p1_time_limit_seconds;
-  double p2_time_limit_seconds;
-  // Milliseconds per game. Negative disables PlayChooser; zero enables it
-  // without a clock.
-  double p1_play_chooser_time_ms;
-  double p2_play_chooser_time_ms;
-  int overtime_penalty_points;
-  double overtime_period_ms;
-  bai_threshold_t p1_threshold;
-  bai_threshold_t p2_threshold;
-  bai_sampling_rule_t p1_sampling_rule;
-  bai_sampling_rule_t p2_sampling_rule;
-  double p1_utility_w_winpct;
-  double p2_utility_w_winpct;
-  double p1_utility_w_spread;
-  double p2_utility_w_spread;
-  double p1_utility_spread_scale;
-  double p2_utility_spread_scale;
-  Equity p1_eq_margin_inference;
-  Equity p2_eq_margin_inference;
-  multi_threading_mode_t multi_threading_mode;
-  WinPct *win_pcts;
-  BoardLayout *board_layout;
-  LetterDistribution *ld;
-  PlayersData *players_data;
-  ThreadControl *thread_control;
-  Game *game;
-  Game *game_backup;
-  GameHistory *game_history;
-  GameHistory *game_history_backup;
-  MoveList *move_list;
-  EndgameCtx *endgame_ctx;
-  SimResults *sim_results;
-  InferenceResults *inference_results;
-  EndgameResults *endgame_results;
-  PegResult peg_result;
-  PegPoll *peg_poll;
-  AutoplayResults *autoplay_results;
-  ConversionResults *conversion_results;
-  GameStringOptions *game_string_options;
-  GetGCGResult gcg_result;
+  // Set when the most recent sim ran inference internally and it completed
+  // (not interrupted). Separate from inference_results's own valid flag,
+  // which a sim-driven inference deliberately does not set so that an
+  // explicit "infer" command's display isn't clobbered by a sim side
+  // effect; this flag lets config_save_live_results_to_game_event still
+  // archive that inference alongside the sim's results. Cleared whenever
+  // sim_results is invalidated.
+  bool sim_used_valid_inference;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
@@ -745,6 +753,7 @@ void config_reset_move_list_and_invalidate_sim_results(Config *config) {
     move_list_set_rack(config->move_list, &new_move_list_rack);
   }
   sim_results_set_valid_for_current_game_state(config->sim_results, false);
+  config->sim_used_valid_inference = false;
 }
 
 void config_init_move_list(Config *config, int capacity) {
@@ -2707,6 +2716,7 @@ void impl_move_gen_override_record_type(Config *config,
   generate_moves_for_game_override_record_type(&args, move_record_type);
   move_list_sort_moves(config->move_list);
   sim_results_set_valid_for_current_game_state(config->sim_results, false);
+  config->sim_used_valid_inference = false;
 }
 
 void impl_move_gen(Config *config, ErrorStack *error_stack) {
@@ -3046,6 +3056,8 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
     inference_results_set_valid_for_current_game_state(
         config->inference_results, prev_inference_valid);
   }
+  config->sim_used_valid_inference =
+      use_inference_for_this_run && sim_results_valid;
   sim_results_set_valid_for_current_game_state(config->sim_results,
                                                sim_results_valid);
 }
@@ -3205,6 +3217,8 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
     inference_results_set_valid_for_current_game_state(
         config->inference_results, prev_inference_valid_snoprune);
   }
+  config->sim_used_valid_inference =
+      use_inference_for_this_run && sim_results_valid;
   sim_results_set_valid_for_current_game_state(config->sim_results,
                                                sim_results_valid);
 }
@@ -3961,17 +3975,62 @@ static bool parse_move_coord(const char *str, int *row, int *col,
   return false;
 }
 
+// The GameEvent the game is currently positioned at (i.e. wherever
+// "goto"/"next"/"prev" navigation last left num_played_events), or NULL
+// if no events have been played yet. This is where per-turn results
+// (see config_save_live_results_to_game_event) are looked up when
+// nothing's currently live.
+static const GameEvent *config_get_current_game_event(const Config *config) {
+  if (!config->game_history) {
+    return NULL;
+  }
+  const int num_played_events =
+      game_history_get_num_played_events(config->game_history);
+  if (num_played_events <= 0) {
+    return NULL;
+  }
+  return game_history_get_event(config->game_history, num_played_events - 1);
+}
+
 char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot show game without lexicon"));
     return empty_string();
   }
-  if (!config->game || !config->move_list ||
-      move_list_get_count(config->move_list) == 0) {
+  if (!config->game) {
     error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
                      string_duplicate("no moves to show"));
     return empty_string();
+  }
+
+  bool use_sim_results =
+      sim_results_get_valid_for_current_game_state(config->sim_results);
+  MoveList *display_move_list = config->move_list;
+  SimResults *display_sim_results = config->sim_results;
+  const bool have_live_results =
+      use_sim_results ||
+      (config->move_list && move_list_get_count(config->move_list) > 0);
+  if (!have_live_results) {
+    // Nothing live to show; fall back to whatever was generated/simmed
+    // for the game event the history is currently positioned at, if
+    // anything was saved for it.
+    const GameEvent *current_event = config_get_current_game_event(config);
+    SimResults *event_sim_results =
+        current_event ? game_event_get_sim_results(current_event) : NULL;
+    MoveList *event_move_list =
+        current_event ? game_event_get_move_list(current_event) : NULL;
+    if (event_sim_results) {
+      use_sim_results = true;
+      display_sim_results = event_sim_results;
+    } else if (event_move_list && move_list_get_count(event_move_list) > 0) {
+      use_sim_results = false;
+      display_move_list = event_move_list;
+    } else {
+      error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
+                       string_duplicate("no moves to show"));
+      return empty_string();
+    }
   }
 
   const char *arg0 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
@@ -4062,15 +4121,15 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   }
 
   char *result = NULL;
-  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+  if (use_sim_results) {
     result = sim_results_get_string(
-        config->game, config->sim_results, max_num_display_plays,
+        config->game, display_sim_results, max_num_display_plays,
         config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
         exclude_tile_placement_moves, !config->human_readable, config->show_bu,
         board_display_start);
   } else {
     result = move_list_get_string(
-        config->move_list, game_get_board(config->game), config->ld,
+        display_move_list, game_get_board(config->game), config->ld,
         max_num_display_plays, filter_row, filter_col, prefix_mls, prefix_len,
         exclude_tile_placement_moves, !config->human_readable,
         board_display_start);
@@ -4096,11 +4155,27 @@ char *str_api_show_moves_or_sim_results(Config *config,
 // Show inference results
 
 char *impl_show_inference(Config *config, ErrorStack *error_stack) {
-  if (!config->game || !inference_results_get_valid_for_current_game_state(
-                           config->inference_results)) {
+  if (!config->game) {
     error_stack_push(error_stack, ERROR_STATUS_NO_INFERENCE_TO_SHOW,
                      string_duplicate("no inference results to show"));
     return empty_string();
+  }
+
+  InferenceResults *display_inference_results = config->inference_results;
+  if (!inference_results_get_valid_for_current_game_state(
+          config->inference_results)) {
+    // Nothing live to show; fall back to whatever was inferred for the
+    // game event the history is currently positioned at, if anything was
+    // saved for it.
+    const GameEvent *current_event = config_get_current_game_event(config);
+    InferenceResults *event_inference_results =
+        current_event ? game_event_get_inference_results(current_event) : NULL;
+    if (!event_inference_results) {
+      error_stack_push(error_stack, ERROR_STATUS_NO_INFERENCE_TO_SHOW,
+                       string_duplicate("no inference results to show"));
+      return empty_string();
+    }
+    display_inference_results = event_inference_results;
   }
 
   const char *max_num_display_leaves_str =
@@ -4117,7 +4192,7 @@ char *impl_show_inference(Config *config, ErrorStack *error_stack) {
     }
   }
 
-  return inference_result_get_string(config->inference_results, config->ld,
+  return inference_result_get_string(display_inference_results, config->ld,
                                      max_num_display_leaves,
                                      !config->human_readable);
 }
@@ -4137,22 +4212,38 @@ char *str_api_show_inference(Config *config, ErrorStack *error_stack) {
 // Show endgame
 
 char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
-  if (!config->game || !endgame_results_get_valid_for_current_game_state(
-                           config->endgame_results)) {
+  if (!config->game) {
     error_stack_push(error_stack, ERROR_STATUS_NO_ENDGAME_TO_SHOW,
                      string_duplicate("no endgame results to show"));
     return empty_string();
   }
 
+  EndgameResults *display_endgame_results = config->endgame_results;
+  if (!endgame_results_get_valid_for_current_game_state(
+          config->endgame_results)) {
+    // Nothing live to show; fall back to whatever was solved for the
+    // game event the history is currently positioned at, if anything was
+    // saved for it.
+    const GameEvent *current_event = config_get_current_game_event(config);
+    EndgameResults *event_endgame_results =
+        current_event ? game_event_get_endgame_results(current_event) : NULL;
+    if (!event_endgame_results) {
+      error_stack_push(error_stack, ERROR_STATUS_NO_ENDGAME_TO_SHOW,
+                       string_duplicate("no endgame results to show"));
+      return empty_string();
+    }
+    display_endgame_results = event_endgame_results;
+  }
+
   const char *pv_index_str =
       config_get_parg_value(config, ARG_TOKEN_SHOW_ENDGAME, 0);
   if (!pv_index_str) {
-    return endgame_results_get_string(config->endgame_results, config->game,
+    return endgame_results_get_string(display_endgame_results, config->game,
                                       config->game_history);
   }
 
   // Optional pv_index: show a single PV line in full move-by-move detail.
-  const int num_pvs = endgame_results_get_num_pvs(config->endgame_results);
+  const int num_pvs = endgame_results_get_num_pvs(display_endgame_results);
   int pv_index;
   string_to_int_or_push_error("pv index", pv_index_str, 1, num_pvs,
                               ERROR_STATUS_ENDGAME_PV_INDEX_OUT_OF_RANGE,
@@ -4164,13 +4255,13 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
   pv_index--;
 
   const Game *source_game =
-      endgame_results_get_start_game(config->endgame_results);
+      endgame_results_get_start_game(display_endgame_results);
   if (!source_game) {
     source_game = config->game;
   }
 
   StringBuilder *sb = string_builder_create();
-  string_builder_endgame_single_pv(sb, config->endgame_results, source_game,
+  string_builder_endgame_single_pv(sb, display_endgame_results, source_game,
                                    config->game_history, pv_index);
   char *result = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
@@ -4690,6 +4781,43 @@ void config_add_end_rack_points(Config *config, const int player_index,
   game_history_next(config->game_history, error_stack);
 }
 
+// Duplicates whatever's currently live and valid (move_list/sim_results/
+// inference_results/endgame_results) onto game_event, which represents the
+// position that analysis was actually computed for. Called right before
+// the position changes, so results stay associated with the turn they
+// belong to rather than only the most recently played one. Display-only
+// snapshots: never a basis for a new sim/commit (see
+// config_reset_move_list_and_invalidate_sim_results, which still governs
+// the live config->move_list/config->sim_results).
+void config_save_live_results_to_game_event(const Config *config,
+                                            GameEvent *game_event) {
+  if (config->move_list && move_list_get_count(config->move_list) > 0 &&
+      !config_get_use_small_plays(config)) {
+    game_event_set_move_list(game_event,
+                             move_list_duplicate(config->move_list));
+  }
+  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    game_event_set_sim_results(game_event,
+                               sim_results_duplicate(config->sim_results));
+  }
+  // A sim that ran inference internally leaves inference_results's own
+  // valid flag restored to its pre-sim state (so an explicit "infer"
+  // command's display isn't clobbered by a sim side effect), so also check
+  // sim_used_valid_inference to still archive that inference alongside the
+  // sim's results on this event.
+  if (inference_results_get_valid_for_current_game_state(
+          config->inference_results) ||
+      config->sim_used_valid_inference) {
+    game_event_set_inference_results(
+        game_event, inference_results_duplicate(config->inference_results));
+  }
+  if (endgame_results_get_valid_for_current_game_state(
+          config->endgame_results)) {
+    game_event_set_endgame_results(
+        game_event, endgame_results_duplicate(config->endgame_results));
+  }
+}
+
 void config_add_game_event(Config *config, const int player_index,
                            game_event_t game_event_type, const Move *move,
                            const char *ucgi_move_string,
@@ -4798,6 +4926,7 @@ void config_add_game_event(Config *config, const int player_index,
     game_event_set_cumulative_score(game_event, cumulative_score);
     game_event_set_move_score(game_event, move_score);
     rack_copy(game_event_get_rack(game_event), &game_event_rack);
+    config_save_live_results_to_game_event(config, game_event);
 
     game_history_next(config->game_history, error_stack);
 

@@ -659,6 +659,49 @@ void run_short_autoplay(const char *initial_cmd) {
   command_test_reset_stream_in();
 }
 
+void run_short_autoplay_with_terminate_command(const char *initial_cmd,
+                                               const char *terminate_command) {
+  char *test_input_filename = get_test_filename("input");
+
+  // Reset the contents of input
+  unlink(test_input_filename);
+
+  FILE *input_writer = fopen_or_die(test_input_filename, "w+");
+  FILE *input_reader = fopen_or_die(test_input_filename, "r");
+  command_test_set_stream_in(input_reader);
+
+  ProcessArgs *process_args =
+      process_args_create(initial_cmd, "autoplay games 2", 0, "");
+
+  cpthread_t cmd_execution_thread;
+  cpthread_create(&cmd_execution_thread, test_process_command_async,
+                  process_args);
+  cpthread_detach(cmd_execution_thread);
+
+  write_to_stream(input_writer, "autoplay games 1\n");
+  fprintf_or_die(input_writer, "%s\n", terminate_command);
+  fclose_or_die(input_writer);
+
+  // Wait for magpie to quit
+  block_for_process_command(process_args, 5);
+
+  fclose_or_die(input_reader);
+  delete_fifo(test_input_filename);
+  process_args_destroy(process_args);
+  free(test_input_filename);
+  command_test_reset_stream_in();
+}
+
+// "exit" and "q" should terminate the sync command loop just like "quit".
+void test_exec_quit_aliases(void) {
+  run_short_autoplay_with_terminate_command(
+      "set -mode sync -lex CSW21 -bb 73 -gp true -hr false",
+      TERMINATE_KEYWORD_ALIAS_EXIT);
+  run_short_autoplay_with_terminate_command(
+      "set -mode sync -lex CSW21 -bb 73 -gp true -hr false",
+      TERMINATE_KEYWORD_ALIAS_SHORT);
+}
+
 void test_save_settings(void) {
   const int remove_result = remove(DEFAULT_TEST_SETTINGS_FILENAME);
   if (remove_result != 0) {
@@ -689,6 +732,7 @@ void test_command(void) {
   test_command_execution();
   test_exec_async_command();
   test_exec_sync_command();
+  test_exec_quit_aliases();
   test_save_settings();
   command_test_reset_stream_out();
   command_test_reset_stream_err();
