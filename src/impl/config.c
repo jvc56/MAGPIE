@@ -3992,7 +3992,120 @@ static const GameEvent *config_get_current_game_event(const Config *config) {
   return game_history_get_event(config->game_history, num_played_events - 1);
 }
 
-char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
+// The GameEvent that "prev"/"goto" most recently backed away from, if any.
+// "prev" and "goto" only move the num_played_events cursor; they don't
+// delete anything, so the event describing the move that was undone (the
+// one that used to be "current") is still physically present at
+// events[num_played_events] until either a new move is committed from here
+// (game_history_truncate_to_played_events discards it then) or "next"
+// re-plays it. Its buffered move_list/sim_results are exactly the analysis
+// that produced that undone move, which is what should be reused when the
+// user backs up and wants to commit a *different* move from the same
+// analysis. Returns NULL if there's no such pending event.
+static const GameEvent *config_get_redo_game_event(const Config *config) {
+  if (!config->game_history) {
+    return NULL;
+  }
+  const int num_played_events =
+      game_history_get_num_played_events(config->game_history);
+  if (num_played_events >= game_history_get_num_events(config->game_history)) {
+    return NULL;
+  }
+  return game_history_get_event(config->game_history, num_played_events);
+}
+
+// Resolves which move_list/sim_results represent "the current candidate
+// moves": the live config->move_list/sim_results if either has anything in
+// it, otherwise whatever was buffered on the GameEvent the history is
+// currently positioned at (see config_save_live_results_to_game_event).
+// Used by "shmoves"; deliberately does NOT consult a pending redo event
+// (config_get_redo_game_event) at the very start of history (position 0
+// with nothing played) reads as "nothing to show," not "show me what I'm
+// about to redo" -- see test_config_game_event_results_follow_navigation
+// and the "goto start" cases in test_config_anno.
+// Returns false (leaving the outputs untouched) if neither live nor
+// buffered results are available.
+static bool config_resolve_current_results(const Config *config,
+                                           bool *use_sim_results_out,
+                                           MoveList **move_list_out,
+                                           SimResults **sim_results_out) {
+  bool use_sim_results =
+      sim_results_get_valid_for_current_game_state(config->sim_results);
+  MoveList *move_list = config->move_list;
+  SimResults *sim_results = config->sim_results;
+  const bool have_live_results =
+      use_sim_results ||
+      (config->move_list && move_list_get_count(config->move_list) > 0);
+  if (!have_live_results) {
+    const GameEvent *current_event = config_get_current_game_event(config);
+    SimResults *event_sim_results =
+        current_event ? game_event_get_sim_results(current_event) : NULL;
+    MoveList *event_move_list =
+        current_event ? game_event_get_move_list(current_event) : NULL;
+    if (event_sim_results) {
+      use_sim_results = true;
+      sim_results = event_sim_results;
+    } else if (event_move_list && move_list_get_count(event_move_list) > 0) {
+      use_sim_results = false;
+      move_list = event_move_list;
+    } else {
+      return false;
+    }
+  }
+  *use_sim_results_out = use_sim_results;
+  *move_list_out = move_list;
+  *sim_results_out = sim_results;
+  return true;
+}
+
+// Resolves which move_list/sim_results to commit a move by index from:
+// the live config->move_list/sim_results if either has anything in it,
+// otherwise a pending redo event (see config_get_redo_game_event). Unlike
+// config_resolve_current_results, this deliberately does NOT fall back to
+// config_get_current_game_event (the last-played event): that buffer holds
+// the analysis that already produced the current position, generated for a
+// board state that's since moved on, so re-committing from it would try to
+// play tiles onto squares that event's own move already filled. Only a
+// redo event's buffer -- generated for the position the game is *still
+// sitting at* because "prev"/"goto" backed away from it -- is safe to
+// commit from. This is what lets "prev" (undoing a just-committed move)
+// followed by "com <a different index>" reuse the same candidates that
+// were just shown.
+// Returns false (leaving the outputs untouched) if no such results exist.
+static bool config_resolve_current_results_for_commit(
+    const Config *config, bool *use_sim_results_out, MoveList **move_list_out,
+    SimResults **sim_results_out) {
+  bool use_sim_results =
+      sim_results_get_valid_for_current_game_state(config->sim_results);
+  MoveList *move_list = config->move_list;
+  SimResults *sim_results = config->sim_results;
+  const bool have_live_results =
+      use_sim_results ||
+      (config->move_list && move_list_get_count(config->move_list) > 0);
+  if (!have_live_results) {
+    const GameEvent *redo_event = config_get_redo_game_event(config);
+    SimResults *event_sim_results =
+        redo_event ? game_event_get_sim_results(redo_event) : NULL;
+    MoveList *event_move_list =
+        redo_event ? game_event_get_move_list(redo_event) : NULL;
+    if (event_sim_results) {
+      use_sim_results = true;
+      sim_results = event_sim_results;
+    } else if (event_move_list && move_list_get_count(event_move_list) > 0) {
+      use_sim_results = false;
+      move_list = event_move_list;
+    } else {
+      return false;
+    }
+  }
+  *use_sim_results_out = use_sim_results;
+  *move_list_out = move_list;
+  *sim_results_out = sim_results;
+  return true;
+}
+
+char *impl_show_moves_or_sim_results(const Config *config,
+                                     ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot show game without lexicon"));
@@ -4004,33 +4117,14 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  bool use_sim_results =
-      sim_results_get_valid_for_current_game_state(config->sim_results);
-  MoveList *display_move_list = config->move_list;
-  SimResults *display_sim_results = config->sim_results;
-  const bool have_live_results =
-      use_sim_results ||
-      (config->move_list && move_list_get_count(config->move_list) > 0);
-  if (!have_live_results) {
-    // Nothing live to show; fall back to whatever was generated/simmed
-    // for the game event the history is currently positioned at, if
-    // anything was saved for it.
-    const GameEvent *current_event = config_get_current_game_event(config);
-    SimResults *event_sim_results =
-        current_event ? game_event_get_sim_results(current_event) : NULL;
-    MoveList *event_move_list =
-        current_event ? game_event_get_move_list(current_event) : NULL;
-    if (event_sim_results) {
-      use_sim_results = true;
-      display_sim_results = event_sim_results;
-    } else if (event_move_list && move_list_get_count(event_move_list) > 0) {
-      use_sim_results = false;
-      display_move_list = event_move_list;
-    } else {
-      error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
-                       string_duplicate("no moves to show"));
-      return empty_string();
-    }
+  bool use_sim_results = false;
+  MoveList *display_move_list = NULL;
+  SimResults *display_sim_results = NULL;
+  if (!config_resolve_current_results(
+          config, &use_sim_results, &display_move_list, &display_sim_results)) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
+                     string_duplicate("no moves to show"));
+    return empty_string();
   }
 
   const char *arg0 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
@@ -4982,11 +5076,16 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
                                commit_pos_arg_3));
       return;
     }
-    int num_moves = 0;
-    if (config->move_list) {
-      num_moves = move_list_get_count(config->move_list);
-    }
-    if (num_moves == 0) {
+    // Prefer the live move_list/sim_results; if a position change (e.g.
+    // "prev" after committing the wrong move) invalidated them, fall back
+    // to whatever's buffered on the current or pending-redo GameEvent so a
+    // move can still be committed by index from the same candidates that
+    // were shown.
+    bool use_sim_results = false;
+    MoveList *commit_move_list = NULL;
+    SimResults *commit_sim_results = NULL;
+    if (!config_resolve_current_results_for_commit(
+            config, &use_sim_results, &commit_move_list, &commit_sim_results)) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
           get_formatted_string(
@@ -4994,6 +5093,9 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
               commit_pos_arg_1));
       return;
     }
+    const int num_moves =
+        use_sim_results ? sim_results_get_number_of_plays(commit_sim_results)
+                        : move_list_get_count(commit_move_list);
     // If no second arg is provided and the first arg is all digits, the
     // digits represent the rank of the move to commit.
 
@@ -5006,21 +5108,11 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     }
     // Convert from 1-indexed user input to 0-indexed internal representation
     commit_move_index--;
-    // If there are valid sim results, prefer to use them for the move index
-    // lookup.
-    if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
-      const SimResults *sim_results = config->sim_results;
-      const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
-      if (num_simmed_plays != num_moves) {
-        log_fatal("encountered unexpected discrepancy between number of "
-                  "generated plays (%d) and the number of simmed plays (%d)\n",
-                  num_moves, num_simmed_plays);
-      }
+    if (use_sim_results) {
       move_copy(&move, simmed_play_get_move(sim_results_get_display_simmed_play(
-                           config->sim_results, commit_move_index)));
+                           commit_sim_results, commit_move_index)));
     } else {
-      move_copy(&move,
-                move_list_get_move(config->move_list, commit_move_index));
+      move_copy(&move, move_list_get_move(commit_move_list, commit_move_index));
     }
 
     if (move_get_type(&move) != GAME_EVENT_EXCHANGE && commit_pos_arg_2) {
