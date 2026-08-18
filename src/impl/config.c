@@ -270,43 +270,7 @@ typedef struct ParsedArg {
 } ParsedArg;
 
 struct Config {
-  ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
   char *data_paths;
-  arg_token_t exec_parg_token;
-  bool ld_changed;
-  exec_mode_t exec_mode;
-  int bingo_bonus;
-  int challenge_bonus;
-  int num_plays;
-  int max_num_display_plays;
-  int num_small_plays;
-  int plies;
-  int shplies;
-  // Show the blended utility (BU) column when printing sim results.
-  bool show_bu;
-  int endgame_plies;
-  int endgame_top_k;
-  // PEG per-stage candidate counts (halving stages 1..N), parsed from -pegtopk.
-  // peg_num_stages == 0 means "use the solver's built-in default schedule".
-  // CONFIG_PEG_MAX_STAGES bounds only the CLI parse buffer, not the solver.
-  int peg_stage_top_k[CONFIG_PEG_MAX_STAGES];
-  int peg_num_stages;
-  // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver
-  // default.
-  int peg_scenario_stride;
-  // PEG pessimistic opponent model (-pegpess); else rational (the default).
-  bool peg_pessimistic;
-  // PEG nested inner-peg lookahead for non-emptier leaves (-pegnested). On by
-  // default (depth 1); off restores the flat greedy/pessimistic rollout.
-  bool peg_nested;
-  // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
-  bool peg_show_outcomes;
-  // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
-  // the cell always fits the label + a worst-case token) and max wrapped lines
-  // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
-  // chart is written to a timestamped file under data/pegcharts/.
-  int peg_out_width;
-  int peg_out_lines;
   // PEG "only solve" / "never prune" move lists (space-free UCGI, comma-
   // separated), persisted across commands since pargs reset each parse. NULL =
   // solve all moves / no protected moves.
@@ -319,8 +283,108 @@ struct Config {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  char *record_filepath;
+  char *settings_filename;
+  double tt_fraction_of_mem;
+  double time_limit_seconds;
+  // 0 = fall back to time_limit_seconds.
+  double endgame_time_limit_seconds;
+  double peg_time_limit_seconds;
+  uint64_t seed;
+  double p1_stop_cond_pct;
+  double p2_stop_cond_pct;
+  uint64_t p1_max_iterations;
+  uint64_t p2_max_iterations;
+  uint64_t p1_min_play_iterations;
+  uint64_t p2_min_play_iterations;
+  double p1_time_limit_seconds;
+  double p2_time_limit_seconds;
+  // Milliseconds per game. Negative disables PlayChooser; zero enables it
+  // without a clock.
+  double p1_play_chooser_time_ms;
+  double p2_play_chooser_time_ms;
+  double overtime_period_ms;
+  double p1_utility_w_winpct;
+  double p2_utility_w_winpct;
+  double p1_utility_w_spread;
+  double p2_utility_w_spread;
+  double p1_utility_spread_scale;
+  double p2_utility_spread_scale;
+  WinPct *win_pcts;
+  BoardLayout *board_layout;
+  LetterDistribution *ld;
+  PlayersData *players_data;
+  ThreadControl *thread_control;
+  Game *game;
+  Game *game_backup;
+  GameHistory *game_history;
+  GameHistory *game_history_backup;
+  MoveList *move_list;
+  EndgameCtx *endgame_ctx;
+  SimResults *sim_results;
+  InferenceResults *inference_results;
+  EndgameResults *endgame_results;
+  PegPoll *peg_poll;
+  AutoplayResults *autoplay_results;
+  ConversionResults *conversion_results;
+  GameStringOptions *game_string_options;
+  GetGCGResult gcg_result;
+  PegResult peg_result;
+  ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
+  arg_token_t exec_parg_token;
+  exec_mode_t exec_mode;
+  int bingo_bonus;
+  int challenge_bonus;
+  int num_plays;
+  int max_num_display_plays;
+  int num_small_plays;
+  int plies;
+  int shplies;
+  int endgame_plies;
+  int endgame_top_k;
+  // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver
+  // default.
+  int peg_num_stages;
+  int peg_scenario_stride;
+  // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
+  // the cell always fits the label + a worst-case token) and max wrapped lines
+  // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
+  // chart is written to a timestamped file under data/pegcharts/.
+  int peg_out_width;
+  int peg_out_lines;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
+  int num_threads;
+  int print_interval;
+  bai_sampling_rule_t sampling_rule;
+  bai_threshold_t threshold;
+  game_variant_t game_variant;
+  int p1_sim_plies;
+  int p2_sim_plies;
+  int p1_num_plays;
+  int p2_num_plays;
+  int overtime_penalty_points;
+  bai_threshold_t p1_threshold;
+  bai_threshold_t p2_threshold;
+  bai_sampling_rule_t p1_sampling_rule;
+  bai_sampling_rule_t p2_sampling_rule;
+  Equity p1_eq_margin_inference;
+  Equity p2_eq_margin_inference;
+  multi_threading_mode_t multi_threading_mode;
+  // PEG per-stage candidate counts (halving stages 1..N), parsed from -pegtopk.
+  // peg_num_stages == 0 means "use the solver's built-in default schedule".
+  // CONFIG_PEG_MAX_STAGES bounds only the CLI parse buffer, not the solver.
+  int peg_stage_top_k[CONFIG_PEG_MAX_STAGES];
+  bool ld_changed;
+  // Show the blended utility (BU) column when printing sim results.
+  bool show_bu;
+  // PEG pessimistic opponent model (-pegpess); else rational (the default).
+  bool peg_pessimistic;
+  // PEG nested inner-peg lookahead for non-emptier leaves (-pegnested). On by
+  // default (depth 1); off restores the flat greedy/pessimistic rollout.
+  bool peg_nested;
+  // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
+  bool peg_show_outcomes;
   bool use_game_pairs;
   bool human_readable;
   bool show_mistakes;
@@ -341,65 +405,8 @@ struct Config {
   // rack_list_write_rack_equity_csv). Independent of whether a
   // forceracksfile restriction is in use.
   bool write_rack_equity_csv;
-  char *record_filepath;
-  char *settings_filename;
-  double tt_fraction_of_mem;
-  double time_limit_seconds;
-  // 0 = fall back to time_limit_seconds.
-  double endgame_time_limit_seconds;
-  double peg_time_limit_seconds;
-  int num_threads;
-  int print_interval;
-  uint64_t seed;
-  bai_sampling_rule_t sampling_rule;
-  bai_threshold_t threshold;
-  game_variant_t game_variant;
-  int p1_sim_plies;
-  int p2_sim_plies;
-  int p1_num_plays;
-  int p2_num_plays;
-  double p1_stop_cond_pct;
-  double p2_stop_cond_pct;
-  uint64_t p1_max_iterations;
-  uint64_t p2_max_iterations;
-  uint64_t p1_min_play_iterations;
-  uint64_t p2_min_play_iterations;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
-  double p1_time_limit_seconds;
-  double p2_time_limit_seconds;
-  // Milliseconds per game. Negative disables PlayChooser; zero enables it
-  // without a clock.
-  double p1_play_chooser_time_ms;
-  double p2_play_chooser_time_ms;
-  int overtime_penalty_points;
-  double overtime_period_ms;
-  bai_threshold_t p1_threshold;
-  bai_threshold_t p2_threshold;
-  bai_sampling_rule_t p1_sampling_rule;
-  bai_sampling_rule_t p2_sampling_rule;
-  double p1_utility_w_winpct;
-  double p2_utility_w_winpct;
-  double p1_utility_w_spread;
-  double p2_utility_w_spread;
-  double p1_utility_spread_scale;
-  double p2_utility_spread_scale;
-  Equity p1_eq_margin_inference;
-  Equity p2_eq_margin_inference;
-  multi_threading_mode_t multi_threading_mode;
-  WinPct *win_pcts;
-  BoardLayout *board_layout;
-  LetterDistribution *ld;
-  PlayersData *players_data;
-  ThreadControl *thread_control;
-  Game *game;
-  Game *game_backup;
-  GameHistory *game_history;
-  GameHistory *game_history_backup;
-  MoveList *move_list;
-  EndgameCtx *endgame_ctx;
-  SimResults *sim_results;
-  InferenceResults *inference_results;
   // Set when the most recent sim ran inference internally and it completed
   // (not interrupted). Separate from inference_results's own valid flag,
   // which a sim-driven inference deliberately does not set so that an
@@ -408,13 +415,6 @@ struct Config {
   // archive that inference alongside the sim's results. Cleared whenever
   // sim_results is invalidated.
   bool sim_used_valid_inference;
-  EndgameResults *endgame_results;
-  PegResult peg_result;
-  PegPoll *peg_poll;
-  AutoplayResults *autoplay_results;
-  ConversionResults *conversion_results;
-  GameStringOptions *game_string_options;
-  GetGCGResult gcg_result;
 };
 
 void parsed_arg_create(Config *config, arg_token_t arg_token, const char *name,
