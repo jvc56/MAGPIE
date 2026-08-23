@@ -4047,7 +4047,8 @@ static bool config_resolve_current_moves(const Config *config,
   return true;
 }
 
-char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
+char *impl_show_moves_or_sim_results(const Config *config,
+                                     ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot show game without lexicon"));
