@@ -3975,21 +3975,76 @@ static bool parse_move_coord(const char *str, int *row, int *col,
   return false;
 }
 
-// The GameEvent the game is currently positioned at (i.e. wherever
-// "goto"/"next"/"prev" navigation last left num_played_events), or NULL
-// if no events have been played yet. This is where per-turn results
-// (see config_save_live_results_to_game_event) are looked up when
-// nothing's currently live.
+// The GameEvent for the turn the game is currently positioned to play next
+// (i.e. wherever "goto"/"next"/"prev" navigation last left
+// num_played_events), or NULL if that turn's event doesn't exist yet (we're
+// at the live frontier, past the end of recorded history). This is where
+// per-turn results (see config_save_live_results_to_game_event) are looked
+// up when nothing's currently live.
+//
+// This must be the event at index num_played_events, not
+// num_played_events - 1: the player on turn right now, at this exact
+// position, is whoever is about to play that event, using that event's own
+// recorded rack. The event at num_played_events - 1 is the turn that was
+// *just* played to reach this position, whose own rack belongs to the
+// player who moved before us, not the current on-turn player, so falling
+// back to it would show analysis for a rack that no longer matches what's
+// on screen.
 static const GameEvent *config_get_current_game_event(const Config *config) {
   if (!config->game_history) {
     return NULL;
   }
   const int num_played_events =
       game_history_get_num_played_events(config->game_history);
-  if (num_played_events <= 0) {
+  const int num_events = game_history_get_num_events(config->game_history);
+  if (num_played_events < 0 || num_played_events >= num_events) {
     return NULL;
   }
-  return game_history_get_event(config->game_history, num_played_events - 1);
+  return game_history_get_event(config->game_history, num_played_events);
+}
+
+// Resolves the move_list/sim_results that count as "the current results"
+// right now: whatever's live, or (if nothing's live) whatever was
+// generated/simmed for the game event the history is currently positioned
+// at, if anything was saved for it. Shared by "shmoves" (so it has
+// something to display) and by "commit by index" (so the move it commits
+// is guaranteed to be the same move being displayed, even right after
+// navigating to a past position with nothing live). Returns false, with
+// both outputs left NULL, if there is nothing to fall back to either.
+static bool config_resolve_current_moves(const Config *config,
+                                         MoveList **out_move_list,
+                                         SimResults **out_sim_results) {
+  *out_move_list = NULL;
+  *out_sim_results = NULL;
+  bool use_sim_results =
+      sim_results_get_valid_for_current_game_state(config->sim_results);
+  MoveList *move_list = config->move_list;
+  SimResults *sim_results = config->sim_results;
+  const bool have_live_results =
+      use_sim_results ||
+      (config->move_list && move_list_get_count(config->move_list) > 0);
+  if (!have_live_results) {
+    const GameEvent *current_event = config_get_current_game_event(config);
+    SimResults *event_sim_results =
+        current_event ? game_event_get_sim_results(current_event) : NULL;
+    MoveList *event_move_list =
+        current_event ? game_event_get_move_list(current_event) : NULL;
+    if (event_sim_results) {
+      use_sim_results = true;
+      sim_results = event_sim_results;
+    } else if (event_move_list && move_list_get_count(event_move_list) > 0) {
+      use_sim_results = false;
+      move_list = event_move_list;
+    } else {
+      return false;
+    }
+  }
+  if (use_sim_results) {
+    *out_sim_results = sim_results;
+  } else {
+    *out_move_list = move_list;
+  }
+  return true;
 }
 
 char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
@@ -4004,34 +4059,15 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  bool use_sim_results =
-      sim_results_get_valid_for_current_game_state(config->sim_results);
-  MoveList *display_move_list = config->move_list;
-  SimResults *display_sim_results = config->sim_results;
-  const bool have_live_results =
-      use_sim_results ||
-      (config->move_list && move_list_get_count(config->move_list) > 0);
-  if (!have_live_results) {
-    // Nothing live to show; fall back to whatever was generated/simmed
-    // for the game event the history is currently positioned at, if
-    // anything was saved for it.
-    const GameEvent *current_event = config_get_current_game_event(config);
-    SimResults *event_sim_results =
-        current_event ? game_event_get_sim_results(current_event) : NULL;
-    MoveList *event_move_list =
-        current_event ? game_event_get_move_list(current_event) : NULL;
-    if (event_sim_results) {
-      use_sim_results = true;
-      display_sim_results = event_sim_results;
-    } else if (event_move_list && move_list_get_count(event_move_list) > 0) {
-      use_sim_results = false;
-      display_move_list = event_move_list;
-    } else {
-      error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
-                       string_duplicate("no moves to show"));
-      return empty_string();
-    }
+  MoveList *display_move_list = NULL;
+  SimResults *display_sim_results = NULL;
+  if (!config_resolve_current_moves(config, &display_move_list,
+                                    &display_sim_results)) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
+                     string_duplicate("no moves to show"));
+    return empty_string();
   }
+  const bool use_sim_results = display_sim_results != NULL;
 
   const char *arg0 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
   const char *arg1 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 1);
@@ -4982,10 +5018,18 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
                                commit_pos_arg_3));
       return;
     }
-    int num_moves = 0;
-    if (config->move_list) {
-      num_moves = move_list_get_count(config->move_list);
-    }
+    // Falls back to whatever's saved for the position we're at, same as
+    // "shmoves", so committing by index commits the move actually being
+    // displayed even when nothing is live -- e.g. right after navigating
+    // back to a past position with no fresh gen/sim of its own.
+    MoveList *commit_move_list = NULL;
+    SimResults *commit_sim_results = NULL;
+    config_resolve_current_moves(config, &commit_move_list,
+                                 &commit_sim_results);
+    const int num_moves =
+        commit_sim_results ? sim_results_get_number_of_plays(commit_sim_results)
+        : commit_move_list ? move_list_get_count(commit_move_list)
+                           : 0;
     if (num_moves == 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
@@ -5006,21 +5050,11 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     }
     // Convert from 1-indexed user input to 0-indexed internal representation
     commit_move_index--;
-    // If there are valid sim results, prefer to use them for the move index
-    // lookup.
-    if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
-      const SimResults *sim_results = config->sim_results;
-      const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
-      if (num_simmed_plays != num_moves) {
-        log_fatal("encountered unexpected discrepancy between number of "
-                  "generated plays (%d) and the number of simmed plays (%d)\n",
-                  num_moves, num_simmed_plays);
-      }
+    if (commit_sim_results) {
       move_copy(&move, simmed_play_get_move(sim_results_get_display_simmed_play(
-                           config->sim_results, commit_move_index)));
+                           commit_sim_results, commit_move_index)));
     } else {
-      move_copy(&move,
-                move_list_get_move(config->move_list, commit_move_index));
+      move_copy(&move, move_list_get_move(commit_move_list, commit_move_index));
     }
 
     if (move_get_type(&move) != GAME_EVENT_EXCHANGE && commit_pos_arg_2) {

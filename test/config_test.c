@@ -1847,26 +1847,37 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
-  // The move that was just committed is still visible for one more
-  // "shmoves" (a one-turn buffer), consuming the buffered view.
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  // We're now at the live frontier, past the turn that was just
+  // committed: nothing's been generated for the new on-turn player yet,
+  // and there's no future turn recorded to fall back to, so shmoves
+  // correctly shows nothing rather than that committed turn's own
+  // (now stale, wrong-rack) analysis.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
 
   // if a rack is present but there are no moves, moves should be automatically
   // generated to find the top play
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  // Back at the position the BARCHAN turn above was decided from: its
+  // auto-generated move_list (used to pick that top play) is shown again.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
-  // Buffered from the auto-generated top play that was just committed.
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  // Same as above: we're past the just-committed turn again, with
+  // nothing generated for the new position, so nothing to show.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
 
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  // Shows the (re-auto-generated) move_list from the "t" just above,
+  // saved on this same position.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack BARCHAN -numplays 7",
                             ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  // Setting a fresh rack to explore this same position again clears the
+  // live move list, but doesn't touch the saved historical one, so it's
+  // still shown until something new is actually generated.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
@@ -2698,7 +2709,9 @@ void test_config_move_list_saved_to_game_event(void) {
   assert(move_list_get_count(config_get_move_list(config)) == 0);
 
   // The move_list that was live just before the commit is now saved on
-  // the GameEvent that commit created.
+  // the GameEvent that commit created -- it belongs to the turn that was
+  // just decided (and the rack that turn was decided from), not to the
+  // new position that's on screen now.
   const GameHistory *game_history = config_get_game_history(config);
   const GameEvent *committed_event = game_history_get_event(
       game_history, game_history_get_num_played_events(game_history) - 1);
@@ -2706,20 +2719,82 @@ void test_config_move_list_saved_to_game_event(void) {
   assert(saved_move_list && move_list_get_count(saved_move_list) > 1);
   assert(!game_event_get_sim_results(committed_event));
 
-  // shmoves falls back to that saved move_list, as a real object, so
-  // ordinary filter args (a max-count filter, here) still work against
-  // it...
+  // Right after the commit, nothing is live for the new on-turn player
+  // (nothing generated yet for their rack), and there's no future event to
+  // fall back to either, so shmoves correctly finds nothing to show.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  // Navigating back to the position the committed move was actually chosen
+  // from finds its saved move_list, as a real object, so ordinary filter
+  // args (a max-count filter, here) still work against it...
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves 1", ERROR_STATUS_SUCCESS);
 
   // ...and viewing it doesn't consume/clear it, so a second (unfiltered)
   // "shmoves" still shows it too.
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
-  // A second position change with nothing freshly generated finds
-  // nothing live to save onto the new GameEvent, so shmoves (now
-  // falling back to that new, empty-handed event) reports nothing.
+  config_destroy(config);
+}
+
+// A move committed by rank ("com 9") must resolve against whatever's
+// actually being shown right now, exactly like "shmoves" does: after
+// navigating back to a past position with nothing freshly generated, the
+// move at that rank should come from the position's own saved move_list
+// instead of failing with "no generated moves".
+void test_config_commit_by_index_uses_saved_move_list(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 15 -mode sync");
+  assert_config_exec_status(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/HIJKLM? "
+      "0/0 0",
+      ERROR_STATUS_SUCCESS);
+
+  // Turn 1: gen (many possible openings for ABCDEFG on an empty board),
+  // then commit a pass instead of one of the generated moves. The
+  // generated move_list -- not the pass that was actually played -- is
+  // what gets saved onto this turn's event.
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  const int num_turn_1_moves =
+      move_list_get_count(config_get_move_list(config));
+  assert(num_turn_1_moves >= 9);
+  // Pick a non-top rank so this can't pass by accident via some other
+  // "always commit rank 1" code path.
+  const int chosen_rank = 9;
+  Move chosen_move;
+  move_copy(&chosen_move,
+            move_list_get_move(config_get_move_list(config), chosen_rank - 1));
   assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  // Right after committing, nothing is live and we're at the live
+  // frontier, so committing by index fails cleanly.
+  StringBuilder *commit_cmd_sb = string_builder_create();
+  string_builder_add_formatted_string(commit_cmd_sb, "com %d", chosen_rank);
+  char *commit_cmd = string_builder_dump(commit_cmd_sb, NULL);
+  string_builder_destroy(commit_cmd_sb);
+  assert_config_exec_status(config, commit_cmd,
+                            ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
+
+  // Navigate back to the position turn 1 was decided from (the start of
+  // the game): nothing is live here either, but its own saved move_list
+  // is available (the same one "shmoves" would fall back to).
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
+  assert(move_list_get_count(config_get_move_list(config)) == 0);
+
+  const Game *game = config_get_game(config);
+  const int player_on_turn = game_get_player_on_turn_index(game);
+  const Equity score_before =
+      player_get_score(game_get_player(game, player_on_turn));
+
+  // Committing by that same rank now commits the move from that saved
+  // list rather than failing with "no generated moves".
+  assert_config_exec_status(config, commit_cmd, ERROR_STATUS_SUCCESS);
+  const Equity score_after =
+      player_get_score(game_get_player(game, player_on_turn));
+  assert(score_after == score_before + move_get_score(&chosen_move));
+  free(commit_cmd);
 
   config_destroy(config);
 }
@@ -2756,7 +2831,8 @@ void test_config_sim_results_saved_to_game_event(void) {
 
   // The sim_results that were live and valid just before the commit are
   // now saved (as an independent deep copy, not the same object) on the
-  // GameEvent that commit created.
+  // GameEvent that commit created -- again, the turn that was just
+  // decided, not the new position now on screen.
   const GameHistory *game_history = config_get_game_history(config);
   const GameEvent *committed_event = game_history_get_event(
       game_history, game_history_get_num_played_events(game_history) - 1);
@@ -2766,24 +2842,26 @@ void test_config_sim_results_saved_to_game_event(void) {
   assert(sim_results_get_number_of_plays(saved_sim_results) ==
          num_simmed_plays);
 
-  // The saved sim results are a real, independent SimResults object, so
-  // an ordinary shmoves max-count filter still works against them.
+  // Right after the commit, nothing is live for the new on-turn player and
+  // there's no future event to fall back to, so shmoves finds nothing.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  // Navigating back to the position the sim was actually run from finds
+  // the saved sim results, a real independent SimResults object, so an
+  // ordinary shmoves max-count filter still works against them.
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
-
-  // A second position change with nothing freshly simmed finds nothing
-  // live to save onto the new GameEvent, so shmoves (now falling back to
-  // that new, empty-handed event) reports nothing.
-  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
 
   config_destroy(config);
 }
 
 // The whole point of saving results per GameEvent rather than in a
 // single "last turn" slot: navigating game history backward/forward
-// shows the analysis that was actually done for each specific turn, not
-// just whatever was most recently committed.
+// shows the analysis that was actually done for whichever turn is about
+// to be played from the current position -- i.e. the turn whose rack
+// matches what's actually on screen -- not whatever was most recently
+// committed and not the turn that was just played to get here.
 void test_config_game_event_results_follow_navigation(void) {
   // -sinfer false: this test is only about move_list/sim_results, and
   // sim-with-inference (the default) can fail outright once a turn passes
@@ -2818,23 +2896,31 @@ void test_config_game_event_results_follow_navigation(void) {
   // move_list).
   assert(game_event_get_sim_results(event_2));
 
-  // Right after committing turn 2, shmoves shows turn 2's (sim) results.
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  // Right after committing turn 2, we're at the live frontier (no turn 3
+  // recorded yet) with nothing freshly generated, so shmoves finds
+  // nothing -- turn 2's own results belong to the position it was
+  // decided from, not to the new position on screen now.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
 
-  // Navigating back to turn 1 shows turn 1's (plain move_list) results
-  // instead of turn 2's, and instead of nothing.
+  // Stepping back to the position turn 2 was actually decided from shows
+  // turn 2's (sim) results: that's the turn about to be played here.
   assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
-  // Navigating forward again shows turn 2's results once more.
-  assert_config_exec_status(config, "next", ERROR_STATUS_SUCCESS);
+  // Stepping back once more, to the position turn 1 was decided from,
+  // shows turn 1's (plain move_list) results instead of turn 2's.
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
-  // Navigating all the way back to the start (before any turn was
-  // played) has no per-event results to fall back to.
+  // "goto start" lands on that same position (before turn 1 was played),
+  // so it shows turn 1's results too, not nothing.
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+
+  // "goto end" returns to the live frontier, where there's nothing to
+  // fall back to again.
   assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
 
   // Turn 3: "gen" (no sim) before committing.
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
@@ -2860,20 +2946,20 @@ void test_config_game_event_results_follow_navigation(void) {
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
 
   const GameEvent *event_4 = game_history_get_event(game_history, 3);
-  const GameEvent *event_6 = game_history_get_event(game_history, 5);
   assert(game_event_get_sim_results(event_4));
-  assert(game_event_get_sim_results(event_6));
 
-  // Currently positioned at turn 6 (just committed). "goto 4" jumps back
-  // more than 2 turns (6 -> 4): turn 4's sim results are still shown, not
-  // just whatever's 1 or 2 turns away.
-  assert_config_exec_status(config, "goto 4", ERROR_STATUS_SUCCESS);
+  // Currently positioned at the live frontier, just after committing turn
+  // 6. "goto 3" jumps back to the position turn 4 was decided from (3
+  // turns already played, turn 4 next): turn 4's sim results are shown,
+  // matching the rack actually on screen at that position.
+  assert_config_exec_status(config, "goto 3", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
-  // From turn 4, "goto 6" jumps forward more than 2 turns (4 -> 6): turn
-  // 6's sim results are shown too, not just the nearer turn 4/5.
-  assert_config_exec_status(config, "goto 6", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+  // From there, "goto end" jumps forward to the live frontier again,
+  // past turn 6 (the last recorded turn), where there's nothing to fall
+  // back to.
+  assert_config_exec_status(config, "goto end", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
 
   config_destroy(config);
 }
@@ -2910,8 +2996,10 @@ void test_config_sim_with_inference_results_saved_to_game_event(void) {
   assert(game_event_get_sim_results(event_2));
   assert(game_event_get_inference_results(event_2));
 
-  // Both are shown for turn 2's position: shmoves for the sim results, and
-  // shinfer falling back to the inference results saved alongside them.
+  // Stepping back to the position turn 2 was decided from shows both:
+  // shmoves for the sim results, and shinfer falling back to the
+  // inference results saved alongside them.
+  assert_config_exec_status(config, "prev", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
 
@@ -2939,6 +3027,7 @@ void test_config(void) {
   test_config_exchange_blank();
   test_config_utility_blend();
   test_config_move_list_saved_to_game_event();
+  test_config_commit_by_index_uses_saved_move_list();
   test_config_sim_results_saved_to_game_event();
   test_config_game_event_results_follow_navigation();
   test_config_sim_with_inference_results_saved_to_game_event();
