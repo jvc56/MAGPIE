@@ -5026,10 +5026,12 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
     SimResults *commit_sim_results = NULL;
     config_resolve_current_moves(config, &commit_move_list,
                                  &commit_sim_results);
-    const int num_moves =
-        commit_sim_results ? sim_results_get_number_of_plays(commit_sim_results)
-        : commit_move_list ? move_list_get_count(commit_move_list)
-                           : 0;
+    int num_moves = 0;
+    if (commit_sim_results) {
+      num_moves = sim_results_get_number_of_plays(commit_sim_results);
+    } else if (commit_move_list) {
+      num_moves = move_list_get_count(commit_move_list);
+    }
     if (num_moves == 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE,
