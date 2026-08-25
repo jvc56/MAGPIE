@@ -1385,13 +1385,27 @@ static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
   if (move_get_type(solver->actual_move) == GAME_EVENT_PASS) {
     small_move_set_as_pass(actual_sm);
   } else {
-    small_move_set_all(
-        actual_sm, solver->actual_move->tiles, 0,
-        solver->actual_move->tiles_length - 1, solver->actual_move->score,
-        solver->actual_move->row_start, solver->actual_move->col_start,
-        solver->actual_move->tiles_played,
-        board_is_dir_vertical(solver->actual_move->dir),
-        solver->actual_move->move_type);
+    const bool is_vertical = board_is_dir_vertical(solver->actual_move->dir);
+    // Move.row_start/col_start are stored pre-swapped for vertical plays
+    // (see move_gen.c's move_set_row_start/move_set_col_start swap when
+    // building a vertical Move), but small_move_set_all expects raw,
+    // unswapped row/col and performs that same swap itself. Passing the
+    // already-swapped Move fields straight through double-swaps the
+    // position, silently encoding the wrong square, so the solver could
+    // never find the actual move among its root moves. Undo the Move's
+    // swap here before calling small_move_set_all.
+    int row_start = solver->actual_move->row_start;
+    int col_start = solver->actual_move->col_start;
+    if (is_vertical) {
+      const int swap = row_start;
+      row_start = col_start;
+      col_start = swap;
+    }
+    small_move_set_all(actual_sm, solver->actual_move->tiles, 0,
+                       solver->actual_move->tiles_length - 1,
+                       solver->actual_move->score, row_start, col_start,
+                       solver->actual_move->tiles_played, is_vertical,
+                       solver->actual_move->move_type);
   }
   return move_count + 1;
 }

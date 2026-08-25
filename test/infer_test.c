@@ -240,6 +240,11 @@ void test_infer_rack_overflow(void) {
   config_destroy(config);
 }
 
+// A target move with zero played and zero exchanged tiles is a pass: there
+// is no evidence to infer a leave from. This isn't an error -- callers like
+// analyze or annotation mode replay whole games including passes, and
+// shouldn't have to special-case them -- so infer returns an empty, valid
+// result instead.
 void test_infer_no_tiles_played_rack_empty(void) {
   Config *config =
       config_create_or_die("set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 "
@@ -250,7 +255,10 @@ void test_infer_no_tiles_played_rack_empty(void) {
   InferenceResults *inference_results = inference_results_create(NULL);
   error_code_t status =
       infer_for_test(NULL, config, 0, 0, 0, "", "", "", inference_results);
-  assert(status == ERROR_STATUS_INFERENCE_NO_TILES_PLAYED);
+  assert(status == ERROR_STATUS_SUCCESS);
+  assert(inference_results_get_valid_for_current_game_state(inference_results));
+  assert(leave_rack_list_get_count(
+             inference_results_get_leave_rack_list(inference_results)) == 0);
 
   error_stack_destroy(error_stack);
   inference_results_destroy(inference_results);
