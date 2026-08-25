@@ -397,20 +397,29 @@ magpie> peg
 ```
 
 By default the solver generates all root moves and assumes a **rational**
-opponent (it replies with its best-equity move). Several settings tune the
-search; see `help peg`, `help pegonly`, etc. for full descriptions:
+opponent (it replies with its best-equity move). An optional positional
+argument restricts the search to a fixed set of root candidates instead of
+generating all moves. Moves are comma-separated UCGI with no spaces —
+coordinate and tiles joined by a period, pass as `pass` (exchanges are not
+valid PEG moves):
+
+```
+magpie> peg 13L.ONYX,13L.OXY
+```
+
+The case-insensitive word `empty` restricts the search to every generated
+move that would empty the bag (plays at least as many tiles as remain in the
+bag):
+
+```
+magpie> peg empty
+```
+
+Several settings tune the search further; see `help peg`, `help pnoprune`,
+etc. for full descriptions:
 
 - `-pegpess true` switches to the **pessimistic** opponent model (the opponent
   plays the worst-for-you reply) — i.e. guaranteed-win analysis.
-- `-pegonly <moves>` restricts the search to a fixed set of root candidates
-  instead of generating all moves. Moves are comma-separated UCGI with no
-  spaces — coordinate and tiles joined by a period, pass as `pass` (exchanges
-  are not valid PEG moves):
-
-  ```
-  magpie> peg -pegonly 13L.ONYX,13L.OXY
-  ```
-
 - `-pnoprune <moves>` protects moves from being cut by the halving cascade so
   they are evaluated at full fidelity even if their win% rank falls below the cut.
 - `-pegtopk <count1>,<count2>,...` overrides the per-stage halving counts
@@ -423,7 +432,7 @@ search; see `help peg`, `help pegonly`, etc. for full descriptions:
   `-pegstride`).
 - `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
 
-Use `-` to clear `pegonly` or `pnoprune`.
+Use `-` to clear `pnoprune`.
 
 #### Speed vs. accuracy
 
