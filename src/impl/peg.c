@@ -35,6 +35,7 @@
 #include "peg_combinatorics.h"
 #include "peg_pool.h"
 #include "word_prune.h"
+#include <assert.h>
 #include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -1288,6 +1289,14 @@ static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
   const int bag = bag_get_letters(game_get_bag(parent_game));
   const int tiles_played = move_get_tiles_played(cand);
   const int k_drawn = tiles_played < bag ? tiles_played : bag;
+  // PegNestScenarioJob's mover_drawn/bag_remaining (and the locals below) are
+  // sized PEG_MAX_BAG + 1, not PEG_SCENARIO_ARRAY_CAP + 1: this nested-peg
+  // path is only reachable from a non-relaxed (bag <= PEG_MAX_BAG) top-level
+  // solve, since peg_solve's bag-emptying-guarantee exception (relaxed bag up
+  // to RACK_SIZE) makes every candidate empty the bag outright, leaving no
+  // inner peg to nest into. Guard the invariant here rather than relying on
+  // it silently holding.
+  assert(k_drawn <= PEG_MAX_BAG);
   const int bag_rem = bag - k_drawn;
   // The template (cand played + cross-sets) is read concurrently by the
   // scenario jobs, so it is held on its own frame for the lifetime of the
@@ -2423,12 +2432,8 @@ int peg_compute_bag_size(const Game *game) {
   return raw_bag_size - opp_unknown;
 }
 
-// True when playing `move` is guaranteed to empty a bag of `bag_size` tiles:
-// a tile placement that plays at least bag_size tiles draws the whole bag on
-// replenishment. A pass never touches the bag, and an exchange draws
-// replacements but then returns the exchanged tiles to the bag, so neither
-// ever empties it regardless of tiles played.
-static bool peg_move_empties_bag(const Move *move, int bag_size) {
+// See peg.h for the contract.
+bool peg_move_empties_bag(const Move *move, int bag_size) {
   return move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
          move_get_tiles_played(move) >= bag_size;
 }
@@ -2467,7 +2472,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // never empties the bag, so without only_moves the guarantee can never
     // hold and there is nothing to check.
     bool bag_emptying_guaranteed =
-        bag_size <= RACK_SIZE && args->n_only_moves > 0;
+        bag_size > PEG_MAX_BAG && args->n_only_moves > 0;
     for (int cand_idx = 0;
          bag_emptying_guaranteed && cand_idx < args->n_only_moves; cand_idx++) {
       if (!peg_move_empties_bag(args->only_moves[cand_idx], bag_size)) {

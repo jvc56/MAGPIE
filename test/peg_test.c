@@ -1051,6 +1051,35 @@ static void test_peg_pegonly_empty_above_max_bag_cli(void) {
   config_destroy(config);
 }
 
+// End-to-end through "peg empty" at bag_size == RACK_SIZE (7), the same board
+// as test_peg_bag_emptying_guarantee_rejects_exchange: movegen's exchange gate
+// (raw bag + known opp rack >= 2*RACK_SIZE) is exactly effective bag >= 7, so
+// this is the one bag size in the relaxed range where generate_moves actually
+// produces an exchange, and this board's only 7-tiles-played move is that
+// "exchange everything" move (no tile placement here plays all 7). Before
+// config_generate_peg_bag_emptying_moves filtered by peg_move_empties_bag
+// (move-type aware) instead of a bare tiles_played >= bag_size check, it kept
+// that exchange as the sole only_move, and peg_solve rejected it as
+// ERROR_STATUS_PEG_BAG_OUT_OF_RANGE (a confusing error from a command whose
+// whole job is to filter to bag-emptying moves). With the fix, the exchange
+// is excluded before reaching peg_solve, so config_generate_peg_bag_emptying_
+// moves itself correctly reports no move empties the bag.
+static void test_peg_pegonly_empty_at_rack_size_cli(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_7BAG_CGP);
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) ==
+         14); // opp_unknown=7 -> bag_size=7
+
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "peg empty", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_execute_command(config, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_EMPTY_NO_MOVES);
+  error_stack_destroy(error_stack);
+
+  config_destroy(config);
+}
+
 #undef PEG_5BAG_CGP
 #undef PEG_7BAG_CGP
 
@@ -1861,4 +1890,5 @@ void test_peg(void) {
   test_peg_bag_emptying_guarantee_rejects_exchange();
   test_peg_bag_emptying_guarantee_no_only_moves_rejects();
   test_peg_pegonly_empty_above_max_bag_cli();
+  test_peg_pegonly_empty_at_rack_size_cli();
 }
