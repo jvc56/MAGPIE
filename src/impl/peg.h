@@ -488,6 +488,13 @@ void peg_poll_copy_outcomes(PegPoll *poll, PegCandOutcomes **out, int *n_out);
 // Free an array of PegCandOutcomes (each rows[] then the array).
 void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n);
 
+// The effective PEG bag size for `game`: the real remaining bag tiles plus
+// any opponent tiles unknown to the mover (see peg.c for the derivation).
+// Exposed so a caller that pre-filters candidate moves (e.g. the pegonly
+// "empty" positional value) can match exactly the bag size peg_solve itself
+// will compute, rather than the raw (unadjusted) bag_get_letters count.
+int peg_compute_bag_size(const Game *game);
+
 // ----- Entry points -----------------------------------------------------
 
 // Solve PEG analysis for args->game. Fills *out. Caller owns out->top_cands

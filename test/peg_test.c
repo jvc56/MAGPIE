@@ -778,6 +778,281 @@ static void test_peg_pegonly_empty_no_moves(void) {
   config_destroy(config);
 }
 
+// ----- bag-emptying-guarantee exception (bag above PEG_MAX_BAG) ------------
+
+// The macondo "pond" board (see test_peg_4bag_pond) with one board tile
+// erased (the isolated Q at row 8), so one extra tile falls back into the
+// unseen pool: bag_size goes from the board's natural 4 to 5, one past
+// PEG_MAX_BAG. Both racks stay full (opp rack is genuinely empty, absorbed
+// into the bag), so this is a real, if synthetic, 5-in-bag position; among
+// its generated moves, exactly 8 tile placements play all 5 tiles the mover
+// holds that also appear in the board's remaining word spots, and no move
+// plays more.
+#define PEG_5BAG_CGP                                                           \
+  "cgp 12D2/1U10O2/1p10L2/1R1C3KANJIS2/1I1O3A2U4/1G1T3I2I4/1H1E3Z2C1LOO/"      \
+  "1TED3E1BYWORD/7N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/V1E5LOURY2/"            \
+  "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20"
+
+// Same board with two more board tiles erased (the isolated V and the Z),
+// so bag_size is 7 == RACK_SIZE: the largest bag the guarantee can ever cover.
+// At this size the mover's rack (bag >= RACK_SIZE) also makes exchanges
+// legal, including a 7-tile "exchange everything" move -- tiles_played == 7
+// == bag_size, but an exchange never empties the bag (it returns what it
+// drew), so it must not qualify.
+#define PEG_7BAG_CGP                                                           \
+  "cgp 12D2/1U10O2/1p10L2/1R1C3KANJIS2/1I1O3A2U4/1G1T3I2I4/1H1E6C1LOO/"        \
+  "1TED3E1BYWORD/7N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/2E5LOURY2/"             \
+  "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20"
+
+// Root-generates every move on `cgp`, filters to the tile placements that
+// play exactly `tiles_played` tiles, and writes up to `cap` of their Move
+// pointers to `out`. Returns the count and hands the owning MoveList back via
+// *out_ml (caller destroys after `out` is no longer needed).
+static int peg_collect_moves_with_tiles_played(const Game *game,
+                                               int tiles_played, int cap,
+                                               const Move **out,
+                                               MoveList **out_ml) {
+  MoveList *move_list = move_list_create(10000);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = move_list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&gen_args);
+  int n_found = 0;
+  const int num_moves = move_list_get_count(move_list);
+  for (int move_idx = 0; move_idx < num_moves && n_found < cap; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        move_get_tiles_played(move) == tiles_played) {
+      out[n_found++] = move;
+    }
+  }
+  *out_ml = move_list;
+  return n_found;
+}
+
+// A bag above PEG_MAX_BAG (here 5) is accepted when only_moves is restricted
+// to moves that all empty it (play >= bag_size tiles): the enumeration only
+// ever needs the emptier (bag_remaining == 0) machinery, regardless of how
+// large bag_size is above PEG_MAX_BAG.
+static void test_peg_bag_emptying_guarantee_only_moves(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_5BAG_CGP);
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) ==
+         12); // opp_unknown=7 -> bag_size=5
+
+  const Move *only_moves[16];
+  MoveList *move_list = NULL;
+  const int n_only =
+      peg_collect_moves_with_tiles_played(game, 5, 16, only_moves, &move_list);
+  assert(n_only > 0);
+
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 4;
+  args.time_budget_seconds = 60.0;
+  args.only_moves = only_moves;
+  args.n_only_moves = n_only;
+
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    char *err = error_stack_get_string_and_reset(error_stack);
+    log_fatal("peg_solve unexpectedly rejected a guaranteed-emptying 5-bag "
+              "only_moves set: %s",
+              err);
+  }
+  assert(result.n_top_cands > 0);
+  for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+    assert(move_get_tiles_played(&result.top_cands[cand_idx].move) >= 5);
+    assert(result.top_cands[cand_idx].win_pct >= 0.0 &&
+           result.top_cands[cand_idx].win_pct <= 1.0);
+  }
+  printf(
+      "[peg_bag_emptying_only_moves] n_only=%d n_top_cands=%d best_win=%.4f\n",
+      n_only, result.n_top_cands, result.best_win);
+
+  peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// Mixing a single move that does NOT empty the bag into only_moves still
+// rejects the whole solve: the guarantee requires every candidate under
+// consideration to empty the bag, not just some of them.
+static void test_peg_bag_emptying_guarantee_rejects_short_move(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_5BAG_CGP);
+  const Game *game = config_get_game(config);
+
+  const Move *emptying_moves[16];
+  MoveList *emptying_ml = NULL;
+  const int n_emptying = peg_collect_moves_with_tiles_played(
+      game, 5, 16, emptying_moves, &emptying_ml);
+  assert(n_emptying > 0);
+  const Move *short_moves[1];
+  MoveList *short_ml = NULL;
+  const int n_short =
+      peg_collect_moves_with_tiles_played(game, 1, 1, short_moves, &short_ml);
+  assert(n_short == 1); // a 1-tile play exists and never reaches the 5-bag
+
+  const Move *only_moves[2] = {emptying_moves[0], short_moves[0]};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 1;
+  args.only_moves = only_moves;
+  args.n_only_moves = 2;
+
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
+
+  error_stack_destroy(error_stack);
+  peg_result_destroy(&result);
+  move_list_destroy(emptying_ml);
+  move_list_destroy(short_ml);
+  config_destroy(config);
+}
+
+// At bag_size == RACK_SIZE (7), an exchange becomes a legal move (the real
+// Scrabble rule requires bag >= RACK_SIZE to exchange) and can play as many
+// tiles as a tile placement, but it never empties the bag -- the exchanged
+// tiles go back in. only_moves of just the "exchange everything" move must be
+// rejected, not silently treated as bag-emptying.
+static void test_peg_bag_emptying_guarantee_rejects_exchange(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_7BAG_CGP);
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) ==
+         14); // opp_unknown=7 -> bag_size=7
+
+  MoveList *move_list = move_list_create(10000);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = move_list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&gen_args);
+  const Move *full_exchange = NULL;
+  const int num_moves = move_list_get_count(move_list);
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_type(move) == GAME_EVENT_EXCHANGE &&
+        move_get_tiles_played(move) == 7) {
+      full_exchange = move;
+      break;
+    }
+  }
+  assert(full_exchange != NULL); // the "exchange all 7" move must be legal here
+
+  const Move *only_moves[1] = {full_exchange};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 1;
+  args.only_moves = only_moves;
+  args.n_only_moves = 1;
+
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
+
+  error_stack_destroy(error_stack);
+  peg_result_destroy(&result);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// Without only_moves, the guarantee is checked against the full root move
+// list (config_peg's pegonly "empty" keyword is the intended way to actually
+// satisfy it; see test_peg_pegonly_empty_above_max_bag_cli below). The full
+// list on a real board always contains pass (0 tiles played) and often
+// shorter plays too, so this exercises the no-only_moves branch's rejection
+// path -- it must reject cleanly, not crash or silently widen the enumeration.
+static void test_peg_bag_emptying_guarantee_no_only_moves_rejects(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_5BAG_CGP);
+  const Game *game = config_get_game(config);
+
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 1;
+
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
+
+  error_stack_destroy(error_stack);
+  peg_result_destroy(&result);
+  config_destroy(config);
+}
+
+// End-to-end through the peg command's pegonly "empty" positional argument
+// (config_generate_peg_bag_emptying_moves): on the same 5-in-bag board, this
+// is exactly how a real user reaches the guarantee -- no direct-API only_moves
+// construction needed.
+static void test_peg_pegonly_empty_above_max_bag_cli(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_5BAG_CGP);
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) == 12);
+
+  load_and_exec_config_or_die(config, "peg empty");
+  const PegResult *result = config_get_peg_result(config);
+  assert(result->last_completed_stage >= 0);
+  assert(result->n_top_cands > 0);
+  for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+    assert(move_get_tiles_played(&result->top_cands[cand_idx].move) >= 5);
+  }
+  printf("[peg_empty_above_max_bag] n_top_cands=%d best_win=%.4f\n",
+         result->n_top_cands, result->best_win);
+
+  // The same board with no pegonly restriction (full move generation) must
+  // still reject: not every generated move empties this 5-tile bag.
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "peg", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_execute_command(config, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
+  error_stack_destroy(error_stack);
+
+  config_destroy(config);
+}
+
+#undef PEG_5BAG_CGP
+#undef PEG_7BAG_CGP
+
 // ----- progress callbacks + per-scenario detail -----------------------------
 
 // user_data for the progress callbacks: thread-safe event counters, since the
@@ -1579,4 +1854,10 @@ void test_peg(void) {
   // Opp-rack bag adjustment fix: empty and partial opp racks.
   test_peg_opp_rack_sizes();
   test_peg_opp_rack_sizes_cli();
+  // Bag-emptying-guarantee exception: bag above PEG_MAX_BAG.
+  test_peg_bag_emptying_guarantee_only_moves();
+  test_peg_bag_emptying_guarantee_rejects_short_move();
+  test_peg_bag_emptying_guarantee_rejects_exchange();
+  test_peg_bag_emptying_guarantee_no_only_moves_rejects();
+  test_peg_pegonly_empty_above_max_bag_cli();
 }
