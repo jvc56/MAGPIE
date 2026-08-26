@@ -2460,48 +2460,18 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // returns what it drew), and no tile placement can play more than
     // RACK_SIZE tiles, so the guarantee is only reachable for bag_size in
     // (PEG_MAX_BAG, RACK_SIZE].
-    bool bag_emptying_guaranteed = bag_size <= RACK_SIZE;
-    if (bag_emptying_guaranteed) {
-      if (args->n_only_moves > 0) {
-        for (int cand_idx = 0; cand_idx < args->n_only_moves; cand_idx++) {
-          if (!peg_move_empties_bag(args->only_moves[cand_idx], bag_size)) {
-            bag_emptying_guaranteed = false;
-            break;
-          }
-        }
-      } else {
-        // No caller-supplied candidate set: generate the full root move list
-        // here (a plain, unpruned generate_moves -- cheap relative to the
-        // pruned-KWG + cross-set setup below, and only paid on this rare
-        // large-bag path) purely to check whether every legal move empties
-        // the bag. If so, the real candidate generation further down
-        // produces the identical set.
-        MoveList *check_ml = move_list_create(PEG_CAND_LIST_CAP);
-        const MoveGenArgs check_gen_args = {
-            .game = game,
-            .move_record_type = MOVE_RECORD_ALL,
-            .move_sort_type = MOVE_SORT_EQUITY,
-            .override_kwg = NULL,
-            .eq_margin_movegen = 0,
-            .target_equity = EQUITY_MAX_VALUE,
-            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-            .move_list = check_ml,
-            .tiles_played_bv = NULL,
-            .initial_tiles_bv = 0,
-        };
-        generate_moves(&check_gen_args);
-        const int n_check_moves = move_list_get_count(check_ml);
-        if (n_check_moves == 0) {
-          bag_emptying_guaranteed = false;
-        }
-        for (int move_idx = 0; move_idx < n_check_moves; move_idx++) {
-          if (!peg_move_empties_bag(move_list_get_move(check_ml, move_idx),
-                                    bag_size)) {
-            bag_emptying_guaranteed = false;
-            break;
-          }
-        }
-        move_list_destroy(check_ml);
+    //
+    // This can only ever be satisfied via a caller-supplied only_moves set
+    // (e.g. the pegonly "empty" positional value): the full root move list
+    // always includes a pass (0 tiles played, see gen_record_pass), which
+    // never empties the bag, so without only_moves the guarantee can never
+    // hold and there is nothing to check.
+    bool bag_emptying_guaranteed =
+        bag_size <= RACK_SIZE && args->n_only_moves > 0;
+    for (int cand_idx = 0;
+         bag_emptying_guaranteed && cand_idx < args->n_only_moves; cand_idx++) {
+      if (!peg_move_empties_bag(args->only_moves[cand_idx], bag_size)) {
+        bag_emptying_guaranteed = false;
       }
     }
     if (!bag_emptying_guaranteed) {

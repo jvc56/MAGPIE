@@ -991,12 +991,12 @@ static void test_peg_bag_emptying_guarantee_rejects_exchange(void) {
   config_destroy(config);
 }
 
-// Without only_moves, the guarantee is checked against the full root move
-// list (config_peg's pegonly "empty" keyword is the intended way to actually
-// satisfy it; see test_peg_pegonly_empty_above_max_bag_cli below). The full
-// list on a real board always contains pass (0 tiles played) and often
-// shorter plays too, so this exercises the no-only_moves branch's rejection
-// path -- it must reject cleanly, not crash or silently widen the enumeration.
+// Without only_moves, the guarantee can never hold: the full root move list
+// always contains pass (0 tiles played, see gen_record_pass), which never
+// empties the bag, so peg_solve rejects immediately rather than generating
+// the full list to discover the same thing. config_peg's pegonly "empty"
+// keyword is the intended way to actually satisfy the guarantee; see
+// test_peg_pegonly_empty_above_max_bag_cli below.
 static void test_peg_bag_emptying_guarantee_no_only_moves_rejects(void) {
   Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
   load_and_exec_config_or_die(config, PEG_5BAG_CGP);
