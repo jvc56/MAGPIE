@@ -1,5 +1,6 @@
 #include "get_gcg.h"
 
+#include "../compat/chttp.h"
 #include "../ent/data_filepaths.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -19,6 +20,41 @@ enum {
   WOOGLES_URL_LENGTH = sizeof(WOOGLES_URL) - 1,
   MAX_GAME_ID_LENGTH = 30,
 };
+
+// Fetches a URL and returns the body, or NULL on any failure. Replaces three
+// sites that shelled out to the `curl` binary through popen: those built shell
+// command strings partly out of caller-supplied identifiers, and depended on
+// curl being installed. The compat HTTP layer needs neither.
+static char *fetch_url(const char *url, const char *body,
+                       const char *const *headers, int num_headers) {
+  ChttpRequest request;
+  request.method = body ? CHTTP_POST : CHTTP_GET;
+  request.url = url;
+  request.headers = headers;
+  request.num_headers = num_headers;
+  request.body = body;
+  request.body_length = body ? string_length(body) : 0;
+  request.timeout_seconds = 60;
+
+  ChttpResponse response;
+  ErrorStack *errors = error_stack_create();
+  chttp_request(&request, &response, errors);
+  const bool failed = !error_stack_is_empty(errors);
+  error_stack_reset(errors);
+  error_stack_destroy(errors);
+  if (failed) {
+    return NULL;
+  }
+  if (response.status_code < 200 || response.status_code >= 300) {
+    chttp_response_destroy(&response);
+    return NULL;
+  }
+  char *content = response.body;
+  // Ownership moves to the caller.
+  response.body = NULL;
+  chttp_response_destroy(&response);
+  return content;
+}
 
 // Returns the basename of path with the .gcg extension stripped if present.
 static char *get_file_id(const char *path) {
@@ -84,13 +120,11 @@ static void get_xt_gcg(const char *identifier, GetGCGResult *result,
     first_three[i] = game_id_str[i];
   }
 
-  // Build the curl command
-  char *curl_cmd = get_formatted_string(
-      "curl -s -L \"https://cross-tables.com/annotated/selfgcg/%s/anno%s.gcg\"",
-      first_three, game_id_str);
-
-  char *gcg_content = get_process_output(curl_cmd);
-  free(curl_cmd);
+  char *url = get_formatted_string(
+      "https://cross-tables.com/annotated/selfgcg/%s/anno%s.gcg", first_three,
+      game_id_str);
+  char *gcg_content = fetch_url(url, NULL, NULL, 0);
+  free(url);
 
   if (!gcg_content) {
     error_stack_push(error_stack, ERROR_STATUS_INVALID_GCG_URL,
@@ -152,15 +186,13 @@ static void get_woogles_gcg(const char *identifier, GetGCGResult *result,
     game_id_str[game_id_str_len] = '\0';
   }
 
-  // Use woogles API to get GCG content
-  char *curl_cmd = get_formatted_string(
-      "curl -s -H 'Content-Type: application/json' "
-      "https://woogles.io/api/game_service.GameMetadataService/GetGCG "
-      "-d '{\"game_id\":\"%s\"}'",
-      game_id_str);
-
-  char *response = get_process_output(curl_cmd);
-  free(curl_cmd);
+  char *request_body =
+      get_formatted_string("{\"game_id\":\"%s\"}", game_id_str);
+  static const char *const headers[] = {"Content-Type: application/json"};
+  char *response =
+      fetch_url("https://woogles.io/api/game_service.GameMetadataService/GetGCG",
+                request_body, headers, 1);
+  free(request_body);
 
   if (!response) {
     error_stack_push(
@@ -207,9 +239,7 @@ static void get_url_gcg(const char *identifier, GetGCGResult *result,
     return;
   }
 
-  char *curl_cmd = get_formatted_string("curl -s -L \"%s\"", identifier);
-  char *gcg_content = get_process_output(curl_cmd);
-  free(curl_cmd);
+  char *gcg_content = fetch_url(identifier, NULL, NULL, 0);
 
   if (!gcg_content) {
     error_stack_push(error_stack, ERROR_STATUS_INVALID_GCG_URL,

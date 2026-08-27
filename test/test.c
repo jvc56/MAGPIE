@@ -19,6 +19,7 @@
 #include "cmd_api_test.h"
 #include "command_test.h"
 #include "config_test.h"
+#include "contribute_test.h"
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
@@ -116,6 +117,7 @@ static TestEntry test_table[] = {
     {"gcg", test_gcg},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},
+    {"contribute", test_contribute},
     {"words", test_words},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},

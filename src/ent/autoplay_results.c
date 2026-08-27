@@ -1523,6 +1523,28 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
   cpthread_mutex_unlock(&primary->mutex);
 }
 
+bool autoplay_results_get_game_summary(const AutoplayResults *autoplay_results,
+                                       bool divergent,
+                                       AutoplayGameSummary *summary) {
+  const Recorder *recorder =
+      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_GAME];
+  if (!recorder) {
+    return false;
+  }
+  const GameDataSets *sets = (const GameDataSets *)recorder->data;
+  const GameData *gd = divergent ? sets->divergent_games : sets->all_games;
+
+  summary->games = gd->total_games;
+  summary->p0_wins = gd->p0_wins;
+  summary->p0_losses = gd->p0_losses;
+  summary->p0_ties = gd->p0_ties;
+  summary->p0_score_mean = stat_get_mean(gd->p0_score);
+  summary->p0_score_stdev = stat_get_stdev(gd->p0_score);
+  summary->p1_score_mean = stat_get_mean(gd->p1_score);
+  summary->p1_score_stdev = stat_get_stdev(gd->p1_score);
+  return true;
+}
+
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent) {
   StringBuilder *ar_sb = string_builder_create();

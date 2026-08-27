@@ -45,6 +45,30 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
                                            const AutoplayGameTiming *timing);
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary);
+// A finished autoplay run's game counts and score moments, read straight out
+// of the recorder rather than parsed back out of its formatted output. This is
+// what the contribution client submits.
+typedef struct AutoplayGameSummary {
+  uint64_t games;
+  uint64_t p0_wins;
+  uint64_t p0_losses;
+  uint64_t p0_ties;
+  double p0_score_mean;
+  double p0_score_stdev;
+  double p1_score_mean;
+  double p1_score_stdev;
+} AutoplayGameSummary;
+
+// Fills `summary` from the game recorder. When `divergent` is true the summary
+// covers only game pairs whose two games did not play identically -- pairs that
+// played identically are guaranteed ties carrying no information, so that
+// subset is where a paired run's signal lives.
+//
+// Returns false if the game recorder is not enabled, leaving `summary` untouched.
+bool autoplay_results_get_game_summary(const AutoplayResults *autoplay_results,
+                                       bool divergent,
+                                       AutoplayGameSummary *summary);
+
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);
 char *autoplay_results_get_status(AutoplayResults *autoplay_results);

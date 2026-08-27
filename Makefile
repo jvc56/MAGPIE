@@ -88,6 +88,14 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
+# The HTTP compat layer resolves libcurl with dlopen at runtime rather than
+# linking it, so a machine without libcurl still runs every offline command.
+# glibc before 2.34 keeps dlopen in a separate libdl; macOS and newer glibc
+# have it in libc.
+ifeq ($(shell uname -s),Linux)
+  LDLIBS += -ldl
+endif
+
 .PHONY: all clean iwyu libmagpie examples
 
 all: magpie magpie_test

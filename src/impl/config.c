@@ -56,6 +56,7 @@
 #include "analyze.h"
 #include "autoplay.h"
 #include "cgp.h"
+#include "contribute.h"
 #include "convert.h"
 #include "endgame.h"
 #include "gameplay.h"
@@ -106,6 +107,7 @@ typedef enum {
   ARG_TOKEN_PEG,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
+  ARG_TOKEN_CONTRIBUTE,
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
@@ -948,6 +950,8 @@ char *str_api_fatal(Config *config,
 }
 
 #define MAGPIE_VERSION "0.0.0"
+
+const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
 void execute_version(Config *config,
                      ErrorStack __attribute__((unused)) * error_stack) {
@@ -2326,6 +2330,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_AUTOPLAY,    /* autoplay */
         ARG_TOKEN_CGP,         /* cgp */
         ARG_TOKEN_CONVERT,     /* convert */
+        ARG_TOKEN_CONTRIBUTE,  /* contribute */
         ARG_TOKEN_CREATE_DATA, /* createdata */
         ARG_TOKEN_HELP,        /* help */
         ARG_TOKEN_SET,         /* setoptions */
@@ -8368,6 +8373,16 @@ char *str_api_autoplay(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_contribute(Config *config, ErrorStack *error_stack) {
+  impl_contribute(config, config_get_parg_value(config, ARG_TOKEN_CONTRIBUTE, 0),
+                  error_stack);
+}
+
+char *str_api_contribute(Config *config, ErrorStack *error_stack) {
+  execute_contribute(config, error_stack);
+  return empty_string();
+}
+
 void execute_convert(Config *config, ErrorStack *error_stack) {
   impl_convert(config, error_stack);
 }
@@ -9232,6 +9247,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_PEG, "peg", 0, 1, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
+  cmd(ARG_TOKEN_CONTRIBUTE, "contribute", 0, 1, contribute, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 3, leave_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);

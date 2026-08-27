@@ -32,6 +32,9 @@ typedef struct ConfigArgs {
 } ConfigArgs;
 
 // Constructors and Destructors
+// This build's version, for the contribution client's version negotiation.
+const char *config_get_magpie_version(void);
+
 Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 
