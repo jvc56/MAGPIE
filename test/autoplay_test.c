@@ -218,6 +218,44 @@ void test_autoplay_divergent_games(void) {
   config_destroy(csw_config);
 }
 
+// Regression test: static (non-simming) autoplay must respect each player's
+// configured move_sort_type ("s1"/"s2"). Before this was fixed, static play
+// always used get_top_equity_move regardless of the configured sort type, so
+// the "s1"/"s2" args had no effect on play and game pairs never diverged.
+void test_autoplay_sort_type_divergence(void) {
+  Config *csw_config = config_create_or_die("set -lex CSW21");
+
+  // With one player sorting moves by score and the other by equity, the two
+  // players in a game pair should almost always choose different moves, so
+  // essentially every game pair should be recorded as divergent.
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 score -gp true");
+
+  char *ar_diff_sort_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false, true);
+  assert_autoplay_output(
+      ar_diff_sort_str, 2,
+      (const char *[]){"autoplay games 100", "autoplay games 100"});
+
+  free(ar_diff_sort_str);
+
+  // Sanity check: with both players using the same sort type, the games
+  // should not diverge (mirrors the same-lexicon case in
+  // test_autoplay_divergent_games).
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 equity -gp true");
+
+  char *ar_same_sort_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false, true);
+  assert_autoplay_output(
+      ar_same_sort_str, 2,
+      (const char *[]){"autoplay games 100", "autoplay games 0"});
+
+  free(ar_same_sort_str);
+
+  config_destroy(csw_config);
+}
+
 void test_autoplay_win_pct_record(void) {
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
@@ -560,6 +598,7 @@ void test_autoplay_remaining(void) {
   test_odds_that_player_is_better();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
+  test_autoplay_sort_type_divergence();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
   test_autoplay_leavegen_force_racks();
