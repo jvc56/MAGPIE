@@ -7,6 +7,8 @@
 #include "game.h"
 #include "klv.h"
 #include "move.h"
+#include "sim_results.h"
+#include "../util/string_util.h"
 #include <stdbool.h>
 
 typedef enum {
@@ -35,47 +37,30 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   ErrorStack *error_stack);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
-// One ranked candidate at a captured position.
-typedef struct AutoplayPositionMove {
-  char *move;
-  int score;
-  double equity;
-} AutoplayPositionMove;
-
-// A position analysed during a game, kept by the `positions` recorder. A player
-// analyses a position on every turn anyway; this is that analysis, retained
-// rather than discarded.
-typedef struct AutoplayPosition {
-  char *cgp;
-  char *rack;
-  int game_number;
-  int pair_game_number;
-  int turn_number;
-  // How many moves were ranked, before truncation to the recorder's cap.
-  int num_moves;
-  AutoplayPositionMove *moves;
-  int num_stored_moves;
-} AutoplayPosition;
-
-// The positions captured by the last run, or NULL with *count 0 when the
-// recorder is not enabled. Borrowed: owned by the recorder and valid until the
-// next autoplay run.
+// Writes the positions captured by the last run as a JSON array field.
+//
+// Kept as a writer rather than an accessor returning structs: a position's data
+// lives in the SimResults the simulation already produced, and copying it into a
+// parallel set of public structs would be a second representation to keep in
+// step. The same reason autoplay_results_write_game_summary writes rather than
+// returns.
 //
 // Positions are recorded per worker thread and merged, so they are *not* in
 // game or turn order -- each carries its own game and turn number.
-const AutoplayPosition *
-autoplay_results_get_positions(const AutoplayResults *autoplay_results,
-                               int *count);
+void autoplay_results_write_positions(const AutoplayResults *autoplay_results,
+                                      StringBuilder *sb, const char *key,
+                                      bool *first);
 
-// Ranked moves to keep per captured position. Set before the run.
-void autoplay_results_set_position_move_cap(AutoplayResults *autoplay_results,
+// Ranked plays to report per captured position. Set before the run; this is the
+// job's num_plays_recorded, which is not how many the player simulated.
+void autoplay_results_set_position_play_cap(AutoplayResults *autoplay_results,
                                             int cap);
 
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
                                const Rack *leave, const MoveList *move_list,
-                               int game_number, int pair_game_number,
-                               int turn_number);
+                               const SimResults *sim_results, int game_number,
+                               int pair_game_number, int turn_number);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);

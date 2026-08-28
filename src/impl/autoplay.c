@@ -794,6 +794,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
 
   const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
+  const SimArgs *sim_args_for_player =
+      (game_get_player_on_turn_index(game_runner->game) == 0)
+          ? &autoplay_worker->args.p1_sim_args
+          : &autoplay_worker->args.p2_sim_args;
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -807,6 +811,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       &rare_rack_or_move_leave,
       autoplay_worker->move_lists[game_get_player_on_turn_index(
           game_runner->game)],
+      // Only when this player actually simmed: sim_results holds whatever the
+      // last simulation produced, so passing it on a static player's turn
+      // would attribute the other player's analysis to this one.
+      (sim_args_for_player->num_plies > 0) ? autoplay_worker->sim_results : NULL,
       (int)game_runner->game_number, game_runner->pair_game_number,
       game_runner->turn_number);
 
