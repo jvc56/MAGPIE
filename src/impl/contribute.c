@@ -1,17 +1,23 @@
 #include "contribute.h"
 
+#include "../compat/chttp.h"
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
+#include "../def/cpthread_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/client_state.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/thread_control.h"
 #include "../str/move_string.h"
 #include "../util/http_client.h"
+#include "../util/io_util.h"
 #include "../util/json.h"
 #include "../util/string_util.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -611,13 +617,15 @@ void contribute_run(const ContributeConfigApi *config_api,
 
   ThreadControl *thread_control =
       config_api->get_thread_control(config_api->config);
+  const char *identity_description = "a new anonymous worker";
+  if (state->api_key) {
+    identity_description = "an authenticated worker";
+  } else if (state->worker_uuid) {
+    identity_description = state->worker_uuid;
+  }
   thread_control_print_formatted(
       thread_control, "contributing to %s as %s (%d threads)\n",
-      state->server_url,
-      state->api_key       ? "an authenticated worker"
-      : state->worker_uuid ? state->worker_uuid
-                           : "a new anonymous worker",
-      threads);
+      state->server_url, identity_description, threads);
 
   int completed = 0;
   int consecutive_failures = 0;

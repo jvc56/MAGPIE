@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 
 static void chttp_response_reset(ChttpResponse *response) {

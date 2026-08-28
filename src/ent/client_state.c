@@ -1,5 +1,6 @@
 #include "client_state.h"
 
+#include "../util/io_util.h"
 #include "../util/string_util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,8 +44,8 @@ static void append_uuid_line(const char *path, const char *uuid) {
   if (!stream) {
     return;
   }
-  fprintf(stream, "\nuuid %s\n", uuid);
-  fclose(stream);
+  (void)fprintf(stream, "\nuuid %s\n", uuid);
+  (void)fclose(stream);
 }
 
 ClientState *client_state_load(const char *path, ErrorStack *error_stack) {

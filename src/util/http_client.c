@@ -1,6 +1,8 @@
 #include "http_client.h"
 
+#include "../compat/chttp.h"
 #include "../compat/ctime.h"
+#include "io_util.h"
 #include "string_util.h"
 #include <stdlib.h>
 #include <string.h>

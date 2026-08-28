@@ -1,6 +1,9 @@
 #include "json.h"
 
 #include "../compat/cjson.h"
+#include "io_util.h"
+#include "string_util.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -8,11 +11,9 @@
 // cJSON's types or conventions.
 struct JsonValue;
 
-static cJSON *as_cjson(const JsonValue *value) {
-  return (cJSON *)(void *)(uintptr_t)value;
-}
+static cJSON *as_cjson(const JsonValue *value) { return (cJSON *)value; }
 
-static JsonValue *as_json(cJSON *value) { return (JsonValue *)(void *)value; }
+static JsonValue *as_json(cJSON *value) { return (JsonValue *)value; }
 
 JsonValue *json_parse(const char *text, ErrorStack *error_stack) {
   cJSON *parsed = cJSON_Parse(text);

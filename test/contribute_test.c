@@ -2,10 +2,12 @@
 
 #include "../src/ent/client_state.h"
 #include "../src/impl/contribute.h"
+#include "../src/util/io_util.h"
 #include "../src/util/json.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,8 +104,8 @@ static void test_json_serialization(void) {
 static void write_settings_file(const char *path, const char *contents) {
   FILE *stream = fopen(path, "we");
   assert(stream);
-  fputs(contents, stream);
-  fclose(stream);
+  (void)fputs(contents, stream);
+  (void)fclose(stream);
 }
 
 static void test_client_state(void) {
@@ -162,7 +164,7 @@ static void test_client_state(void) {
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
 
-  remove(path);
+  (void)remove(path);
   error_stack_destroy(error_stack);
 }
 
