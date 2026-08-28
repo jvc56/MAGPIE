@@ -4,18 +4,25 @@
 // Portable request construction and retry policy over the compat HTTP layer.
 // Nothing here is platform-aware; see src/compat/chttp.h for that.
 
-#include <stdbool.h>
-
 #include "../compat/chttp.h"
 #include "io_util.h"
+#include <stdbool.h>
 
 typedef struct HttpClient HttpClient;
 
-// `api_key` may be NULL, in which case requests identify with the worker UUID.
-// Neither string is retained; both are copied.
+// `api_key` and `worker_uuid` may each be NULL. Neither string is retained;
+// both are copied. If both are NULL, requests carry no identity header at
+// all -- the normal state for a worker that has never contributed before, and
+// the server assigns a UUID in response to its first claimed task (see
+// http_client_set_worker_uuid).
 HttpClient *http_client_create(const char *base_url, const char *api_key,
                                const char *worker_uuid);
 void http_client_destroy(HttpClient *client);
+
+// Records a worker UUID the server assigned mid-run so every later request
+// identifies with it. No-op on a client with an API key, which never
+// identifies by UUID.
+void http_client_set_worker_uuid(HttpClient *client, const char *worker_uuid);
 
 // `path` is appended to the base URL. `response` must be destroyed by the
 // caller with chttp_response_destroy on success.

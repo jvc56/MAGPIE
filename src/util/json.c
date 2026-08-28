@@ -1,9 +1,8 @@
 #include "json.h"
 
+#include "../compat/cjson.h"
 #include <stdlib.h>
 #include <string.h>
-
-#include "cjson.h"
 
 // JsonValue is cJSON behind an opaque name so the rest of MAGPIE never sees
 // cJSON's types or conventions.
@@ -28,7 +27,7 @@ JsonValue *json_parse(const char *text, ErrorStack *error_stack) {
   return as_json(parsed);
 }
 
-void json_destroy(JsonValue *value) {
+void json_destroy(const JsonValue *value) {
   if (value) {
     cJSON_Delete(as_cjson(value));
   }

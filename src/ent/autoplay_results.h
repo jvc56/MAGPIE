@@ -64,7 +64,8 @@ typedef struct AutoplayGameSummary {
 // played identically are guaranteed ties carrying no information, so that
 // subset is where a paired run's signal lives.
 //
-// Returns false if the game recorder is not enabled, leaving `summary` untouched.
+// Returns false if the game recorder is not enabled, leaving `summary`
+// untouched.
 bool autoplay_results_get_game_summary(const AutoplayResults *autoplay_results,
                                        bool divergent,
                                        AutoplayGameSummary *summary);

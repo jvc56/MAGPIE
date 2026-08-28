@@ -189,9 +189,9 @@ static void get_woogles_gcg(const char *identifier, GetGCGResult *result,
   char *request_body =
       get_formatted_string("{\"game_id\":\"%s\"}", game_id_str);
   static const char *const headers[] = {"Content-Type: application/json"};
-  char *response =
-      fetch_url("https://woogles.io/api/game_service.GameMetadataService/GetGCG",
-                request_body, headers, 1);
+  char *response = fetch_url(
+      "https://woogles.io/api/game_service.GameMetadataService/GetGCG",
+      request_body, headers, 1);
   free(request_body);
 
   if (!response) {

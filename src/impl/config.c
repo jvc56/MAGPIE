@@ -1217,6 +1217,19 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "game pairs option is set to true, autoplay will run <num_games> "
              "game pairs resulting in a total of 2 * <num_games> games.";
       break;
+    case ARG_TOKEN_CONTRIBUTE:
+      usages[0] = "[<settings_path>]";
+      examples[0] = "";
+      examples[1] = "my_contribute.txt";
+      text =
+          "Contributes to birdtest: claims tasks, executes them with MAGPIE's "
+          "own command API, and submits the results, repeating until the "
+          "server has no more work or the settings file's maxtasks is "
+          "reached. Settings (server, apikey, threads, ...) come from the "
+          "given file, or contribute.txt in the working directory if no path "
+          "is given -- never from the command line, since an API key there "
+          "ends up in shell history and ps output.";
+      break;
     case ARG_TOKEN_CONVERT:
       usages[0] = "<type> <input_name_without_extension> "
                   "[<output_name_without_extension>]";
@@ -3846,6 +3859,74 @@ char *status_autoplay(Config *config) {
     return string_duplicate("autoplay has not been initialized");
   }
   return autoplay_results_get_status(autoplay_results);
+}
+
+// Contribute
+//
+// contribute.c re-enters this file's own command interpreter -- a task
+// becomes a command string built from whatever the server sent, executed via
+// config_load_command/config_execute_command, with the result read back out
+// of Config's result structs. contribute.h cannot include config.h to call
+// these directly (config.c already includes contribute.h to dispatch the
+// `contribute` command, and the two headers including each other is a
+// circular dependency), so these thin wrappers are its ContributeConfigApi
+// instead.
+
+static void contribute_config_load_command(void *config, const char *command,
+                                           ErrorStack *error_stack) {
+  config_load_command((Config *)config, command, error_stack);
+}
+
+static void contribute_config_execute_command(void *config,
+                                              ErrorStack *error_stack) {
+  config_execute_command((Config *)config, error_stack);
+}
+
+static const char *contribute_config_get_data_paths(void *config) {
+  return config_get_data_paths((const Config *)config);
+}
+
+static int contribute_config_get_num_threads(void *config) {
+  return config_get_num_threads((const Config *)config);
+}
+
+static ThreadControl *contribute_config_get_thread_control(void *config) {
+  return config_get_thread_control((const Config *)config);
+}
+
+static const AutoplayResults *
+contribute_config_get_autoplay_results(void *config) {
+  return config_get_autoplay_results((const Config *)config);
+}
+
+static const MoveList *contribute_config_get_move_list(void *config) {
+  return config_get_move_list((const Config *)config);
+}
+
+static const Game *contribute_config_get_game(void *config) {
+  return config_get_game((const Config *)config);
+}
+
+static const LetterDistribution *contribute_config_get_ld(void *config) {
+  return config_get_ld((const Config *)config);
+}
+
+void impl_contribute(Config *config, const char *settings_path,
+                     ErrorStack *error_stack) {
+  const ContributeConfigApi config_api = {
+      .config = config,
+      .load_command = contribute_config_load_command,
+      .execute_command = contribute_config_execute_command,
+      .get_data_paths = contribute_config_get_data_paths,
+      .get_magpie_version = config_get_magpie_version,
+      .get_num_threads = contribute_config_get_num_threads,
+      .get_thread_control = contribute_config_get_thread_control,
+      .get_autoplay_results = contribute_config_get_autoplay_results,
+      .get_move_list = contribute_config_get_move_list,
+      .get_game = contribute_config_get_game,
+      .get_ld = contribute_config_get_ld,
+  };
+  contribute_run(&config_api, settings_path, error_stack);
 }
 
 // Conversion
@@ -8374,7 +8455,8 @@ char *str_api_autoplay(Config *config, ErrorStack *error_stack) {
 }
 
 void execute_contribute(Config *config, ErrorStack *error_stack) {
-  impl_contribute(config, config_get_parg_value(config, ARG_TOKEN_CONTRIBUTE, 0),
+  impl_contribute(config,
+                  config_get_parg_value(config, ARG_TOKEN_CONTRIBUTE, 0),
                   error_stack);
 }
 
@@ -9607,6 +9689,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_NOPRUNE:
     case ARG_TOKEN_PEG_OUTCOMES:
     case ARG_TOKEN_AUTOPLAY:
+    case ARG_TOKEN_CONTRIBUTE:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
     case ARG_TOKEN_CREATE_DATA:

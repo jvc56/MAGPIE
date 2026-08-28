@@ -1,15 +1,14 @@
 #include "contribute_test.h"
 
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "../src/ent/client_state.h"
 #include "../src/impl/contribute.h"
 #include "../src/util/json.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 static void test_version_comparison(void) {
   assert(contribute_compare_versions("1.4.0", "1.4.0") == 0);
@@ -32,10 +31,10 @@ static void test_version_comparison(void) {
 static void test_json_wrapper(void) {
   ErrorStack *error_stack = error_stack_create();
 
-  JsonValue *value = json_parse(
-      "{\"a\":1,\"b\":\"text\",\"c\":2.5,\"d\":null,\"e\":[1,2,3],"
-      "\"seed\":\"18446744073709551615\",\"f\":true}",
-      error_stack);
+  JsonValue *value =
+      json_parse("{\"a\":1,\"b\":\"text\",\"c\":2.5,\"d\":null,\"e\":[1,2,3],"
+                 "\"seed\":\"18446744073709551615\",\"f\":true}",
+                 error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(value);
 
@@ -88,7 +87,7 @@ static void test_json_serialization(void) {
   // Round-tripping is the real assertion: escaping that looks right but does
   // not parse would be caught here rather than by the server.
   ErrorStack *error_stack = error_stack_create();
-  JsonValue *parsed = json_parse(text, error_stack);
+  const JsonValue *const parsed = json_parse(text, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(json_get_int(parsed, "games", error_stack) == 20);
   assert(json_get_double(parsed, "mean", error_stack) == 429.5);
@@ -101,7 +100,7 @@ static void test_json_serialization(void) {
 }
 
 static void write_settings_file(const char *path, const char *contents) {
-  FILE *stream = fopen(path, "w");
+  FILE *stream = fopen(path, "we");
   assert(stream);
   fputs(contents, stream);
   fclose(stream);
@@ -111,14 +110,14 @@ static void test_client_state(void) {
   const char *path = "contribute_test_settings.txt";
   ErrorStack *error_stack = error_stack_create();
 
-  // A file with no uuid gets one generated and appended.
-  write_settings_file(path,
-                      "# a comment\n"
-                      "server   https://birdtest.example\n"
-                      "apikey   bt_secret\n"
-                      "threads  3\n"
-                      "maxtasks 7\n"
-                      "idlewait 11\n");
+  // A file with no uuid leaves worker_uuid unset: the client never invents
+  // one, the server assigns it on the first claimed task.
+  write_settings_file(path, "# a comment\n"
+                            "server   https://birdtest.example\n"
+                            "apikey   bt_secret\n"
+                            "threads  3\n"
+                            "maxtasks 7\n"
+                            "idlewait 11\n");
   ClientState *state = client_state_load(path, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(state);
@@ -127,20 +126,23 @@ static void test_client_state(void) {
   assert(state->threads == 3);
   assert(state->max_tasks == 7);
   assert(state->idle_wait_seconds == 11);
-  assert(string_length(state->worker_uuid) == 36);
-  char *generated_uuid = string_duplicate(state->worker_uuid);
+  assert(state->worker_uuid == NULL);
+
+  // Once the server assigns a UUID, it is appended rather than rewritten, so
+  // the comment survives, and a later load reads it back.
+  client_state_set_worker_uuid(state, "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
+  assert_strings_equal(state->worker_uuid,
+                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
   client_state_destroy(state);
 
-  // Reloading gets the same identity back, so a contributor keeps their
-  // history across runs. The comment must have survived the append.
   state = client_state_load(path, error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert_strings_equal(state->worker_uuid, generated_uuid);
+  assert_strings_equal(state->worker_uuid,
+                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
   client_state_destroy(state);
   char *contents = get_string_from_file(path, error_stack);
   assert(strstr(contents, "# a comment"));
   free(contents);
-  free(generated_uuid);
 
   // An unknown key is an error: a typo'd apikey must not silently downgrade
   // someone to anonymous.

@@ -4,17 +4,16 @@
 // ErrorStack-aware wrapper over the vendored cJSON. Nothing outside this file
 // includes cjson.h, so swapping the parser touches one translation unit.
 
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "io_util.h"
 #include "string_util.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 typedef struct JsonValue JsonValue;
 
 // Parses `text`. Returns NULL and pushes onto the stack on malformed input.
 JsonValue *json_parse(const char *text, ErrorStack *error_stack);
-void json_destroy(JsonValue *value);
+void json_destroy(const JsonValue *value);
 
 const JsonValue *json_object_get(const JsonValue *object, const char *key);
 bool json_is_null(const JsonValue *value);
@@ -35,7 +34,7 @@ double json_get_double(const JsonValue *object, const char *key,
 // `seed` crosses the wire as a decimal string because it is a full uint64 and
 // JSON numbers are doubles, which lose precision above 2^53.
 uint64_t json_get_uint64_string(const JsonValue *object, const char *key,
-                               ErrorStack *error_stack);
+                                ErrorStack *error_stack);
 
 // Absent or null yields the fallback rather than an error, for optional fields.
 bool json_get_bool_or(const JsonValue *object, const char *key, bool fallback);

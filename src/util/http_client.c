@@ -1,10 +1,9 @@
 #include "http_client.h"
 
+#include "../compat/ctime.h"
+#include "string_util.h"
 #include <stdlib.h>
 #include <string.h>
-
-#include "../compat/csleep.h"
-#include "string_util.h"
 
 enum {
   MAX_RATE_LIMIT_RETRIES = 5,
@@ -17,9 +16,30 @@ struct HttpClient {
   char *base_url;
   char *api_key;
   char *worker_uuid;
-  // Built once; every request carries the same identity.
+  // Rebuilt whenever the identity changes (see http_client_set_worker_uuid).
+  // NULL when neither an API key nor a worker UUID is known yet, in which
+  // case a request carries no identity header at all.
   char *auth_header;
 };
+
+static void rebuild_auth_header(HttpClient *client) {
+  free(client->auth_header);
+  // An API key attributes work to an account; without one the server tracks
+  // the anonymous UUID. Exactly one of the two is sent, never both. A worker
+  // that has neither yet -- it has never contributed before, and the server
+  // rather than the client assigns the UUID -- sends no identity header, and
+  // the server hands one back with the first task (see
+  // http_client_set_worker_uuid).
+  if (client->api_key) {
+    client->auth_header =
+        get_formatted_string("Authorization: Bearer %s", client->api_key);
+  } else if (client->worker_uuid) {
+    client->auth_header =
+        get_formatted_string("X-Worker-UUID: %s", client->worker_uuid);
+  } else {
+    client->auth_header = NULL;
+  }
+}
 
 HttpClient *http_client_create(const char *base_url, const char *api_key,
                                const char *worker_uuid) {
@@ -32,17 +52,15 @@ HttpClient *http_client_create(const char *base_url, const char *api_key,
   }
   client->api_key = api_key ? string_duplicate(api_key) : NULL;
   client->worker_uuid = worker_uuid ? string_duplicate(worker_uuid) : NULL;
-
-  // An API key attributes work to an account; without one the server tracks
-  // the anonymous UUID. Exactly one of the two is sent, never both.
-  if (client->api_key) {
-    client->auth_header =
-        get_formatted_string("Authorization: Bearer %s", client->api_key);
-  } else {
-    client->auth_header =
-        get_formatted_string("X-Worker-UUID: %s", client->worker_uuid);
-  }
+  client->auth_header = NULL;
+  rebuild_auth_header(client);
   return client;
+}
+
+void http_client_set_worker_uuid(HttpClient *client, const char *worker_uuid) {
+  free(client->worker_uuid);
+  client->worker_uuid = string_duplicate(worker_uuid);
+  rebuild_auth_header(client);
 }
 
 void http_client_destroy(HttpClient *client) {
@@ -63,7 +81,9 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
 
   const char *headers[MAX_HEADERS];
   int num_headers = 0;
-  headers[num_headers++] = client->auth_header;
+  if (client->auth_header) {
+    headers[num_headers++] = client->auth_header;
+  }
   if (body) {
     headers[num_headers++] = "Content-Type: application/json";
   }
@@ -92,7 +112,7 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
       if (transient_retries < MAX_TRANSIENT_RETRIES) {
         transient_retries++;
         error_stack_destroy(attempt_errors);
-        csleep_seconds(backoff_seconds);
+        ctime_nap(backoff_seconds);
         backoff_seconds *= 2;
         continue;
       }
@@ -110,11 +130,10 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
     if (response->status_code == 429 &&
         rate_limit_retries < MAX_RATE_LIMIT_RETRIES) {
       rate_limit_retries++;
-      const int wait = response->retry_after_seconds > 0
-                           ? response->retry_after_seconds
-                           : 1;
+      const int wait =
+          response->retry_after_seconds > 0 ? response->retry_after_seconds : 1;
       chttp_response_destroy(response);
-      csleep_seconds(wait);
+      ctime_nap(wait);
       continue;
     }
 
@@ -122,7 +141,7 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
         transient_retries < MAX_TRANSIENT_RETRIES) {
       transient_retries++;
       chttp_response_destroy(response);
-      csleep_seconds(backoff_seconds);
+      ctime_nap(backoff_seconds);
       backoff_seconds *= 2;
       continue;
     }

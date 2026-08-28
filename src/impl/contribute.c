@@ -1,10 +1,7 @@
 #include "contribute.h"
 
-#include <stdlib.h>
-#include <string.h>
-
 #include "../compat/cpthread.h"
-#include "../compat/csleep.h"
+#include "../compat/ctime.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/client_state.h"
 #include "../ent/data_filepaths.h"
@@ -15,7 +12,8 @@
 #include "../util/http_client.h"
 #include "../util/json.h"
 #include "../util/string_util.h"
-#include "config.h"
+#include <stdlib.h>
+#include <string.h>
 
 enum {
   HEARTBEAT_INTERVAL_SECONDS = 30,
@@ -72,7 +70,7 @@ static void *heartbeat_worker(void *arg) {
     // Poll the stop flag on a short interval so stopping is responsive even
     // though the heartbeat itself is infrequent.
     for (int i = 0; i < HEARTBEAT_INTERVAL_SECONDS; i++) {
-      csleep_seconds(1.0);
+      ctime_nap(1.0);
       cpthread_mutex_lock(&heartbeat->mutex);
       const bool stop = heartbeat->stop;
       cpthread_mutex_unlock(&heartbeat->mutex);
@@ -151,9 +149,8 @@ static void append_player_args(StringBuilder *sb, const JsonValue *player,
 
   const JsonValue *iterations = json_object_get(player, "max_iterations");
   if (iterations && !json_is_null(iterations)) {
-    string_builder_add_formatted_string(sb, " -i%d %d", slot,
-                                        json_get_int_or(player,
-                                                        "max_iterations", 0));
+    string_builder_add_formatted_string(
+        sb, " -i%d %d", slot, json_get_int_or(player, "max_iterations", 0));
   }
   const JsonValue *plies = json_object_get(player, "plies");
   if (plies && !json_is_null(plies)) {
@@ -232,9 +229,9 @@ static bool validate_common(const JsonValue *request, const char **lexicon,
 // uses one. They are never transmitted -- roughly ten times the size of
 // everything else MAGPIE ships -- so the client derives them from the .kwg it
 // already has. The whole chain costs about a second per lexicon, once.
-static void ensure_wordmap(Config *config, const char *lexicon,
-                           ErrorStack *error_stack) {
-  const char *data_paths = config_get_data_paths(config);
+static void ensure_wordmap(const ContributeConfigApi *config_api,
+                           const char *lexicon, ErrorStack *error_stack) {
+  const char *data_paths = config_api->get_data_paths(config_api->config);
 
   char *wmp_path = data_filepaths_get_readable_filename(
       data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
@@ -252,24 +249,24 @@ static void ensure_wordmap(Config *config, const char *lexicon,
   } else {
     error_stack_reset(error_stack);
     char *command = get_formatted_string("convert dawg2text %s", lexicon);
-    config_load_command(config, command, error_stack);
+    config_api->load_command(config_api->config, command, error_stack);
     free(command);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    config_execute_command(config, error_stack);
+    config_api->execute_command(config_api->config, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
 
   char *command = get_formatted_string("convert text2wordmap %s", lexicon);
-  config_load_command(config, command, error_stack);
+  config_api->load_command(config_api->config, command, error_stack);
   free(command);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  config_execute_command(config, error_stack);
+  config_api->execute_command(config_api->config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -316,9 +313,9 @@ static void write_game_summary(StringBuilder *sb, const char *key,
   json_write_object_end(sb);
 }
 
-static char *execute_games(Config *config, const JsonValue *request,
-                           bool game_pairs, int threads,
-                           ErrorStack *error_stack) {
+static char *execute_games(const ContributeConfigApi *config_api,
+                           const JsonValue *request, bool game_pairs,
+                           int threads, ErrorStack *error_stack) {
   const char *lexicon = NULL;
   const char *variant = NULL;
   if (!validate_common(request, &lexicon, &variant, error_stack)) {
@@ -338,7 +335,7 @@ static char *execute_games(Config *config, const JsonValue *request,
     return NULL;
   }
 
-  ensure_wordmap(config, lexicon, error_stack);
+  ensure_wordmap(config_api, lexicon, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -361,17 +358,18 @@ static char *execute_games(Config *config, const JsonValue *request,
   char *command_string = string_builder_dump(command, NULL);
   string_builder_destroy(command);
 
-  config_load_command(config, command_string, error_stack);
+  config_api->load_command(config_api->config, command_string, error_stack);
   free(command_string);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
-  config_execute_command(config, error_stack);
+  config_api->execute_command(config_api->config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
 
-  AutoplayResults *results = config_get_autoplay_results(config);
+  const AutoplayResults *results =
+      config_api->get_autoplay_results(config_api->config);
   AutoplayGameSummary all_games;
   if (!autoplay_results_get_game_summary(results, false, &all_games)) {
     error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -396,8 +394,9 @@ static char *execute_games(Config *config, const JsonValue *request,
   return string_builder_dump(sb, NULL);
 }
 
-static char *execute_opening_rack(Config *config, const JsonValue *request,
-                                  int threads, ErrorStack *error_stack) {
+static char *execute_opening_rack(const ContributeConfigApi *config_api,
+                                  const JsonValue *request, int threads,
+                                  ErrorStack *error_stack) {
   const char *lexicon = NULL;
   const char *variant = NULL;
   if (!validate_common(request, &lexicon, &variant, error_stack)) {
@@ -408,7 +407,7 @@ static char *execute_opening_rack(Config *config, const JsonValue *request,
     return NULL;
   }
 
-  ensure_wordmap(config, lexicon, error_stack);
+  ensure_wordmap(config_api, lexicon, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -425,28 +424,29 @@ static char *execute_opening_rack(Config *config, const JsonValue *request,
   char *load_command = string_builder_dump(command, NULL);
   string_builder_destroy(command);
 
-  config_load_command(config, load_command, error_stack);
+  config_api->load_command(config_api->config, load_command, error_stack);
   free(load_command);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
-  config_execute_command(config, error_stack);
+  config_api->execute_command(config_api->config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
 
-  config_load_command(config, simming ? "simulate" : "generate", error_stack);
+  config_api->load_command(config_api->config,
+                           simming ? "simulate" : "generate", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
-  config_execute_command(config, error_stack);
+  config_api->execute_command(config_api->config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
 
-  const MoveList *moves = config_get_move_list(config);
-  const Game *game = config_get_game(config);
-  const LetterDistribution *ld = config_get_ld(config);
+  const MoveList *moves = config_api->get_move_list(config_api->config);
+  const Game *game = config_api->get_game(config_api->config);
+  const LetterDistribution *ld = config_api->get_ld(config_api->config);
   const int count = move_list_get_count(moves);
   if (count == 0) {
     error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -475,9 +475,8 @@ static char *execute_opening_rack(Config *config, const JsonValue *request,
 
     json_write_int_field(sb, "score", equity_to_int(move_get_score(move)),
                          &move_first);
-    json_write_double_field(sb, "equity",
-                            equity_to_double(move_get_equity(move)),
-                            &move_first);
+    json_write_double_field(
+        sb, "equity", equity_to_double(move_get_equity(move)), &move_first);
     json_write_object_end(sb);
   }
   json_write_array_end(sb);
@@ -485,8 +484,10 @@ static char *execute_opening_rack(Config *config, const JsonValue *request,
   return string_builder_dump(sb, NULL);
 }
 
-static char *execute_leave_gen(Config *config, const JsonValue *request,
-                               int threads, ErrorStack *error_stack) {
+static char *execute_leave_gen(const ContributeConfigApi *config_api,
+                               const JsonValue *request, int threads,
+                               ErrorStack *error_stack) {
+  (void)config_api;
   (void)threads;
   const char *lexicon = NULL;
   const char *variant = NULL;
@@ -572,8 +573,25 @@ static void submit_result(HttpClient *client, const char *claim_token,
   chttp_response_destroy(&response);
 }
 
-void impl_contribute(Config *config, const char *settings_path,
-                     ErrorStack *error_stack) {
+// A worker with neither an API key nor a UUID sends no identity at all --
+// the server mints one and hands it back the first time it actually assigns a
+// task (see claim_task). This persists that assignment for the rest of the
+// run and to the settings file for every run after.
+static void adopt_server_assigned_uuid(ClientState *state, HttpClient *client,
+                                       const JsonValue *assignment) {
+  if (state->api_key || state->worker_uuid) {
+    return;
+  }
+  const char *worker_uuid = json_get_string_or_null(assignment, "worker_uuid");
+  if (!worker_uuid) {
+    return;
+  }
+  client_state_set_worker_uuid(state, worker_uuid);
+  http_client_set_worker_uuid(client, worker_uuid);
+}
+
+void contribute_run(const ContributeConfigApi *config_api,
+                    const char *settings_path, ErrorStack *error_stack) {
   ClientState *state = client_state_load(settings_path, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -584,32 +602,39 @@ void impl_contribute(Config *config, const char *settings_path,
     // Leave the machine usable. Contributing is a background activity someone
     // opts into on their daily driver, and one that makes the machine
     // unresponsive is one they turn off.
-    const int cores = config_get_num_threads(config);
+    const int cores = config_api->get_num_threads(config_api->config);
     threads = cores > 1 ? cores - 1 : 1;
   }
 
-  HttpClient *client = http_client_create(state->server_url, state->api_key,
-                                          state->worker_uuid);
+  HttpClient *client =
+      http_client_create(state->server_url, state->api_key, state->worker_uuid);
 
+  ThreadControl *thread_control =
+      config_api->get_thread_control(config_api->config);
   thread_control_print_formatted(
-      config_get_thread_control(config),
-      "contributing to %s as %s (%d threads)\n", state->server_url,
-      state->api_key ? "an authenticated worker" : state->worker_uuid, threads);
+      thread_control, "contributing to %s as %s (%d threads)\n",
+      state->server_url,
+      state->api_key       ? "an authenticated worker"
+      : state->worker_uuid ? state->worker_uuid
+                           : "a new anonymous worker",
+      threads);
 
   int completed = 0;
   int consecutive_failures = 0;
   char *last_failure = NULL;
   while (state->max_tasks == 0 || completed < state->max_tasks) {
     JsonValue *assignment = NULL;
-    const claim_outcome_t outcome = claim_task(client, &assignment,
-                                               error_stack);
+    const claim_outcome_t outcome =
+        claim_task(client, &assignment, error_stack);
     if (outcome == CLAIM_FAILED) {
       break;
     }
     if (outcome == CLAIM_NO_WORK) {
-      csleep_seconds(state->idle_wait_seconds);
+      ctime_nap(state->idle_wait_seconds);
       continue;
     }
+
+    adopt_server_assigned_uuid(state, client, assignment);
 
     const char *claim_token =
         json_get_string(assignment, "claim_token", error_stack);
@@ -627,14 +652,14 @@ void impl_contribute(Config *config, const char *settings_path,
     // timeout and another worker picks it up.
     const char *min_version =
         json_get_string_or_null(assignment, "min_magpie_version");
-    if (min_version &&
-        contribute_compare_versions(config_get_magpie_version(), min_version) < 0) {
+    if (min_version && contribute_compare_versions(
+                           config_api->get_magpie_version(), min_version) < 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_MAGPIE_TOO_OLD,
           get_formatted_string(
               "this job requires MAGPIE %s but this build is %s. Update MAGPIE "
               "to continue contributing.",
-              min_version, config_get_magpie_version()));
+              min_version, config_api->get_magpie_version()));
       json_destroy(assignment);
       break;
     }
@@ -649,13 +674,17 @@ void impl_contribute(Config *config, const char *settings_path,
     ErrorStack *task_errors = error_stack_create();
     char *result_json = NULL;
     if (strings_equal(job_type, "games")) {
-      result_json = execute_games(config, request, false, threads, task_errors);
+      result_json =
+          execute_games(config_api, request, false, threads, task_errors);
     } else if (strings_equal(job_type, "game_pairs")) {
-      result_json = execute_games(config, request, true, threads, task_errors);
+      result_json =
+          execute_games(config_api, request, true, threads, task_errors);
     } else if (strings_equal(job_type, "opening_rack_analysis")) {
-      result_json = execute_opening_rack(config, request, threads, task_errors);
+      result_json =
+          execute_opening_rack(config_api, request, threads, task_errors);
     } else if (strings_equal(job_type, "leave_generation")) {
-      result_json = execute_leave_gen(config, request, threads, task_errors);
+      result_json =
+          execute_leave_gen(config_api, request, threads, task_errors);
     } else {
       // A job type this build does not recognise means the server is newer
       // than this MAGPIE, which is the same situation as a version mismatch.
@@ -669,12 +698,12 @@ void impl_contribute(Config *config, const char *settings_path,
 
     heartbeat_stop(&heartbeat);
 
-    const bool fatal =
-        error_stack_top(task_errors) == ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE;
+    const bool fatal = error_stack_top(task_errors) ==
+                       ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE;
     if (!error_stack_is_empty(task_errors)) {
       char *message = error_stack_get_string_and_reset(task_errors);
-      thread_control_print_formatted(config_get_thread_control(config),
-                                     "task failed: %s\n", message);
+      thread_control_print_formatted(thread_control, "task failed: %s\n",
+                                     message);
       consecutive_failures++;
       free(last_failure);
       last_failure = message;
@@ -690,8 +719,8 @@ void impl_contribute(Config *config, const char *settings_path,
       free(result_json);
       completed++;
       consecutive_failures = 0;
-      thread_control_print_formatted(config_get_thread_control(config),
-                                     "completed %d task(s)\n", completed);
+      thread_control_print_formatted(thread_control, "completed %d task(s)\n",
+                                     completed);
     }
 
     free(claim_token_copy);

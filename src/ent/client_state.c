@@ -1,37 +1,13 @@
 #include "client_state.h"
 
+#include "../util/string_util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "../compat/cfile.h"
-#include "../compat/crandom.h"
-#include "../util/string_util.h"
-
 enum {
-  UUID_BYTES = 16,
   DEFAULT_IDLE_WAIT_SECONDS = 5,
 };
-
-// A v4 UUID in canonical 8-4-4-4-12 lowercase hex.
-static char *generate_worker_uuid(ErrorStack *error_stack) {
-  uint8_t bytes[UUID_BYTES];
-  crandom_bytes(bytes, UUID_BYTES, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  // Version 4 and the RFC 4122 variant.
-  bytes[6] = (uint8_t)((bytes[6] & 0x0F) | 0x40);
-  bytes[8] = (uint8_t)((bytes[8] & 0x3F) | 0x80);
-
-  char *uuid = (char *)malloc_or_die(37);
-  snprintf(uuid, 37,
-           "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-           bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6],
-           bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
-           bytes[13], bytes[14], bytes[15]);
-  return uuid;
-}
 
 static char *trim(char *text) {
   while (*text == ' ' || *text == '\t') {
@@ -45,8 +21,25 @@ static char *trim(char *text) {
   return text;
 }
 
+// Parses an integer-valued setting, pushing a message naming the file, line
+// and key on failure rather than atoi's silent zero.
+static int parse_setting_int(const char *value, const char *key,
+                             const char *settings_path, int line_number,
+                             ErrorStack *error_stack) {
+  ErrorStack *conversion_errors = error_stack_create();
+  const int result = string_to_int(value, conversion_errors);
+  if (!error_stack_is_empty(conversion_errors)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+        get_formatted_string("%s line %d: '%s' is not a valid integer for '%s'",
+                             settings_path, line_number, value, key));
+  }
+  error_stack_destroy(conversion_errors);
+  return result;
+}
+
 static void append_uuid_line(const char *path, const char *uuid) {
-  FILE *stream = fopen(path, "a");
+  FILE *stream = fopen(path, "ae");
   if (!stream) {
     return;
   }
@@ -101,7 +94,7 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
         *space = '\0';
       }
       char *key = line;
-      char *value = has_value ? trim(space + 1) : (char *)"";
+      const char *const value = has_value ? trim(space + 1) : "";
 
       if (strings_equal(key, "server")) {
         free(state->server_url);
@@ -113,11 +106,14 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
         free(state->worker_uuid);
         state->worker_uuid = string_duplicate(value);
       } else if (strings_equal(key, "threads")) {
-        state->threads = atoi(value);
+        state->threads = parse_setting_int(value, key, settings_path,
+                                           line_number, error_stack);
       } else if (strings_equal(key, "maxtasks")) {
-        state->max_tasks = atoi(value);
+        state->max_tasks = parse_setting_int(value, key, settings_path,
+                                             line_number, error_stack);
       } else if (strings_equal(key, "idlewait")) {
-        state->idle_wait_seconds = atoi(value);
+        state->idle_wait_seconds = parse_setting_int(value, key, settings_path,
+                                                     line_number, error_stack);
       } else {
         // A typo'd 'apikey' must not silently downgrade someone to anonymous.
         error_stack_push(
@@ -126,6 +122,11 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
                 "%s line %d: unknown setting '%s' (expected one of: server, "
                 "apikey, uuid, threads, maxtasks, idlewait)",
                 settings_path, line_number, key));
+        free(contents);
+        client_state_destroy(state);
+        return NULL;
+      }
+      if (!error_stack_is_empty(error_stack)) {
         free(contents);
         client_state_destroy(state);
         return NULL;
@@ -149,23 +150,9 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
     state->api_key = NULL;
   }
 
-  // The file holds a bearer credential once an API key is present.
-  if (state->api_key && cfile_is_world_readable(settings_path)) {
-    ErrorStack *chmod_errors = error_stack_create();
-    cfile_restrict_to_owner(settings_path, chmod_errors);
-    error_stack_destroy(chmod_errors);
-  }
-
-  if (!state->worker_uuid || string_length(state->worker_uuid) == 0) {
+  if (state->worker_uuid && string_length(state->worker_uuid) == 0) {
     free(state->worker_uuid);
-    state->worker_uuid = generate_worker_uuid(error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      client_state_destroy(state);
-      return NULL;
-    }
-    // Appended rather than rewritten so the contributor's comments, ordering
-    // and formatting survive.
-    append_uuid_line(settings_path, state->worker_uuid);
+    state->worker_uuid = NULL;
   }
 
   if (state->idle_wait_seconds <= 0) {
@@ -173,6 +160,14 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   }
 
   return state;
+}
+
+void client_state_set_worker_uuid(ClientState *state, const char *uuid) {
+  free(state->worker_uuid);
+  state->worker_uuid = string_duplicate(uuid);
+  // Appended rather than rewritten so the contributor's comments, ordering
+  // and formatting survive.
+  append_uuid_line(state->settings_path, uuid);
 }
 
 void client_state_destroy(ClientState *state) {
