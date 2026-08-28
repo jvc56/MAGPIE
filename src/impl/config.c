@@ -23,6 +23,7 @@
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
+#include "../ent/data_filepaths.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -52,6 +53,7 @@
 #include "../str/sim_string.h"
 #include "../str/validated_moves_string.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/string_util.h"
 #include "analyze.h"
 #include "autoplay.h"
@@ -87,6 +89,8 @@ enum {
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
+  // Sanity bound on a contribute task's requested game count.
+  CONTRIBUTE_MAX_BATCH_GAMES = 1000000,
 };
 
 typedef enum {
@@ -3861,74 +3865,6 @@ char *status_autoplay(Config *config) {
   return autoplay_results_get_status(autoplay_results);
 }
 
-// Contribute
-//
-// contribute.c re-enters this file's own command interpreter -- a task
-// becomes a command string built from whatever the server sent, executed via
-// config_load_command/config_execute_command, with the result read back out
-// of Config's result structs. contribute.h cannot include config.h to call
-// these directly (config.c already includes contribute.h to dispatch the
-// `contribute` command, and the two headers including each other is a
-// circular dependency), so these thin wrappers are its ContributeConfigApi
-// instead.
-
-static void contribute_config_load_command(void *config, const char *command,
-                                           ErrorStack *error_stack) {
-  config_load_command((Config *)config, command, error_stack);
-}
-
-static void contribute_config_execute_command(void *config,
-                                              ErrorStack *error_stack) {
-  config_execute_command((Config *)config, error_stack);
-}
-
-static const char *contribute_config_get_data_paths(void *config) {
-  return config_get_data_paths((const Config *)config);
-}
-
-static int contribute_config_get_num_threads(void *config) {
-  return config_get_num_threads((const Config *)config);
-}
-
-static ThreadControl *contribute_config_get_thread_control(void *config) {
-  return config_get_thread_control((const Config *)config);
-}
-
-static const AutoplayResults *
-contribute_config_get_autoplay_results(void *config) {
-  return config_get_autoplay_results((const Config *)config);
-}
-
-static const MoveList *contribute_config_get_move_list(void *config) {
-  return config_get_move_list((const Config *)config);
-}
-
-static const Game *contribute_config_get_game(void *config) {
-  return config_get_game((const Config *)config);
-}
-
-static const LetterDistribution *contribute_config_get_ld(void *config) {
-  return config_get_ld((const Config *)config);
-}
-
-void impl_contribute(Config *config, const char *settings_path,
-                     ErrorStack *error_stack) {
-  const ContributeConfigApi config_api = {
-      .config = config,
-      .load_command = contribute_config_load_command,
-      .execute_command = contribute_config_execute_command,
-      .get_data_paths = contribute_config_get_data_paths,
-      .get_magpie_version = config_get_magpie_version,
-      .get_num_threads = contribute_config_get_num_threads,
-      .get_thread_control = contribute_config_get_thread_control,
-      .get_autoplay_results = contribute_config_get_autoplay_results,
-      .get_move_list = contribute_config_get_move_list,
-      .get_game = contribute_config_get_game,
-      .get_ld = contribute_config_get_ld,
-  };
-  contribute_run(&config_api, settings_path, error_stack);
-}
-
 // Conversion
 
 void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
@@ -6972,6 +6908,551 @@ void string_builder_add_move_record_type(StringBuilder *sb,
   case MOVE_RECORD_BEST_SMALL:
     log_fatal("cannot serialize internal move record type: %d", record_type);
   }
+}
+
+// Contribute
+//
+// contribute.c owns only the birdtest HTTP/JSON protocol (claiming,
+// heartbeating, submitting); it knows nothing of Config. Between a claim and
+// its matching submit, impl_contribute is what a task actually becomes:
+// reading the claimed job's JSON fields, driving MAGPIE with the same direct
+// methods every other command uses (config_autoplay, game_load_cgp, ...) --
+// never a command string -- and reading the result back out of Config's own
+// result structs, the same way impl_load_gcg does for a downloaded GCG.
+
+// Every field of a task request is untrusted: it becomes file paths and
+// allocation sizes. Lexicon and variant reach data_filepaths, so they must not
+// be able to escape the data directory.
+static bool contribute_is_safe_data_name(const char *name) {
+  if (!name || *name == '\0') {
+    return false;
+  }
+  for (const char *c = name; *c; c++) {
+    const bool allowed = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+                         (*c >= '0' && *c <= '9') || *c == '_' || *c == '-';
+    if (!allowed) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool contribute_validate_common(const JsonValue *request,
+                                       const char **lexicon,
+                                       const char **variant,
+                                       ErrorStack *error_stack) {
+  *lexicon = json_get_string(request, "lexicon", error_stack);
+  *variant = json_get_string(request, "variant", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  if (!contribute_is_safe_data_name(*lexicon) ||
+      !contribute_is_safe_data_name(*variant)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string(
+            "server sent an unusable lexicon or variant name: '%s' / '%s'",
+            *lexicon, *variant));
+    return false;
+  }
+  return true;
+}
+
+// Wordmaps make game play dramatically faster, so a contributing client always
+// uses one. They are never transmitted -- roughly ten times the size of
+// everything else MAGPIE ships -- so the client derives them from the .kwg it
+// already has. The whole chain costs about a second per lexicon, once.
+static void config_contribute_ensure_wordmap(Config *config,
+                                             const char *lexicon,
+                                             ErrorStack *error_stack) {
+  const char *data_paths = config_get_data_paths(config);
+
+  char *wmp_path = data_filepaths_get_readable_filename(
+      data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    free(wmp_path);
+    return;
+  }
+  // Absent, which is the normal first-run case rather than a failure.
+  error_stack_reset(error_stack);
+
+  char *txt_path = data_filepaths_get_readable_filename(
+      data_paths, lexicon, DATA_FILEPATH_TYPE_LEXICON, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    free(txt_path);
+  } else {
+    error_stack_reset(error_stack);
+    const ConversionArgs dawg2text_args = {
+        .conversion_type_string = "dawg2text",
+        .data_paths = data_paths,
+        .input_and_output_name = lexicon,
+        .ld_name = NULL,
+        .num_threads = config_get_num_threads(config),
+    };
+    convert(&dawg2text_args, config->conversion_results, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  const ConversionArgs text2wordmap_args = {
+      .conversion_type_string = "text2wordmap",
+      .data_paths = data_paths,
+      .input_and_output_name = lexicon,
+      .ld_name = NULL,
+      .num_threads = config_get_num_threads(config),
+  };
+  convert(&text2wordmap_args, config->conversion_results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // `convert` reports failures on the error stack but can still leave no file
+  // behind, so the output's existence is the real check.
+  wmp_path = data_filepaths_get_readable_filename(
+      data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_reset(error_stack);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
+        get_formatted_string(
+            "could not build a wordmap for %s. The data directory must be "
+            "writable; contributing requires a wordmap.",
+            lexicon));
+    return;
+  }
+  free(wmp_path);
+}
+
+// Sets the lexicon, variant and (for each player) leaves that config_autoplay
+// or game_load_cgp then need already loaded, always with the wordmap on --
+// the direct-value equivalent of "-lex/-var/-k1/-k2", never a command string.
+static void config_contribute_load_lexicon_and_variant(
+    Config *config, const char *lexicon, const char *variant,
+    const char *p1_leaves, const char *p2_leaves, ErrorStack *error_stack) {
+  config_load_game_variant(config, variant, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_lexicon_dependent_data(
+      config, lexicon, NULL, NULL, NULL, p1_leaves, p2_leaves, NULL,
+      /*use_wmp_has_value=*/false, /*p1_use_wmp_has_value=*/false,
+      /*p2_use_wmp_has_value=*/false, /*use_rit_has_value=*/false,
+      /*p1_use_rit_has_value=*/false, /*p2_use_rit_has_value=*/false,
+      /*use_mmap_for_rit_has_value=*/false, /*is_loading_game_history=*/false,
+      error_stack);
+}
+
+// Applies one player's settings from a task request's "player1"/"player2"/
+// "player" object. A field absent from the JSON is left at whatever it
+// already was, matching how an omitted CLI flag leaves a value unchanged.
+static void config_contribute_apply_player_settings(Config *config,
+                                                    const JsonValue *player,
+                                                    int player_index,
+                                                    ErrorStack *error_stack) {
+  uint64_t *max_iterations = player_index == 0 ? &config->p1_max_iterations
+                                               : &config->p2_max_iterations;
+  int *sim_plies =
+      player_index == 0 ? &config->p1_sim_plies : &config->p2_sim_plies;
+  int *num_plays =
+      player_index == 0 ? &config->p1_num_plays : &config->p2_num_plays;
+  double *stop_cond_pct =
+      player_index == 0 ? &config->p1_stop_cond_pct : &config->p2_stop_cond_pct;
+  bool *sim_with_inference = player_index == 0 ? &config->p1_sim_with_inference
+                                               : &config->p2_sim_with_inference;
+  double *time_limit_seconds = player_index == 0
+                                   ? &config->p1_time_limit_seconds
+                                   : &config->p2_time_limit_seconds;
+
+  const char *recorder = json_get_string_or_null(player, "recorder_type");
+  if (recorder) {
+    config_load_record_type(config, recorder, player_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  const char *sort = json_get_string_or_null(player, "sort_strategy");
+  if (sort) {
+    config_load_sort_type(config, sort, player_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  const JsonValue *iterations = json_object_get(player, "max_iterations");
+  if (iterations && !json_is_null(iterations)) {
+    const int64_t value = json_get_int_or(player, "max_iterations", 0);
+    if (value < 1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid max_iterations: %lld",
+                               (long long)value));
+      return;
+    }
+    *max_iterations = (uint64_t)value;
+  }
+  const JsonValue *plies = json_object_get(player, "plies");
+  if (plies && !json_is_null(plies)) {
+    const int64_t value = json_get_int_or(player, "plies", 0);
+    if (value < 0 || value > MAX_PLIES) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid plies: %lld",
+                               (long long)value));
+      return;
+    }
+    *sim_plies = (int)value;
+  }
+  const JsonValue *top_plays = json_object_get(player, "top_plays");
+  if (top_plays && !json_is_null(top_plays)) {
+    const int64_t value = json_get_int_or(player, "top_plays", 0);
+    if (value < 1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid top_plays: %lld",
+                               (long long)value));
+      return;
+    }
+    *num_plays = (int)value;
+  }
+  const JsonValue *stopping = json_object_get(player, "stopping_pct");
+  if (stopping && !json_is_null(stopping)) {
+    const double value = json_get_double_or(player, "stopping_pct", 0.0);
+    if (!isfinite(value) || value <= 0 || value >= 100) {
+      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                       get_formatted_string(
+                           "server sent an invalid stopping_pct: %f", value));
+      return;
+    }
+    *stop_cond_pct = value;
+  }
+  const JsonValue *inference = json_object_get(player, "use_inference");
+  if (inference && !json_is_null(inference)) {
+    *sim_with_inference = json_get_bool_or(player, "use_inference", false);
+  }
+  const JsonValue *time_limit = json_object_get(player, "time_limit_secs");
+  if (time_limit && !json_is_null(time_limit)) {
+    const double value = json_get_double_or(player, "time_limit_secs", 0.0);
+    if (!isfinite(value) || value < 0 || value > 1e9) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid time_limit_secs: %f",
+                               value));
+      return;
+    }
+    *time_limit_seconds = value;
+  }
+}
+
+static void
+config_contribute_write_game_summary(StringBuilder *sb, const char *key,
+                                     const AutoplayGameSummary *summary,
+                                     bool *outer_first) {
+  json_write_raw_key(sb, key, outer_first);
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_int_field(sb, "games", (int64_t)summary->games, &first);
+  json_write_int_field(sb, "wins", (int64_t)summary->p0_wins, &first);
+  json_write_int_field(sb, "losses", (int64_t)summary->p0_losses, &first);
+  json_write_int_field(sb, "ties", (int64_t)summary->p0_ties, &first);
+  json_write_double_field(sb, "p1_score_mean", summary->p0_score_mean, &first);
+  json_write_double_field(sb, "p1_score_sd", summary->p0_score_stdev, &first);
+  json_write_double_field(sb, "p2_score_mean", summary->p1_score_mean, &first);
+  json_write_double_field(sb, "p2_score_sd", summary->p1_score_stdev, &first);
+  json_write_object_end(sb);
+}
+
+static char *config_contribute_games(Config *config, const JsonValue *request,
+                                     bool game_pairs, int threads,
+                                     ErrorStack *error_stack) {
+  const char *lexicon = NULL;
+  const char *variant = NULL;
+  if (!contribute_validate_common(request, &lexicon, &variant, error_stack)) {
+    return NULL;
+  }
+
+  const uint64_t seed = json_get_uint64_string(request, "seed", error_stack);
+  const int64_t num_games = json_get_int(request, "num_games", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  if (num_games <= 0 || num_games > CONTRIBUTE_MAX_BATCH_GAMES) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "server asked for an unreasonable batch size: %lld",
+                         (long long)num_games));
+    return NULL;
+  }
+
+  config_contribute_ensure_wordmap(config, lexicon, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  const JsonValue *player1 = json_object_get(request, "player1");
+  const JsonValue *player2 = json_object_get(request, "player2");
+  config_contribute_load_lexicon_and_variant(
+      config, lexicon, variant, json_get_string_or_null(player1, "leaves"),
+      json_get_string_or_null(player2, "leaves"), error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  config->seed = seed;
+  config->num_threads = threads;
+  config->human_readable = false;
+  config->print_on_finish = false;
+  config->use_game_pairs = game_pairs;
+  config_contribute_apply_player_settings(config, player1, 0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config_contribute_apply_player_settings(config, player2, 1, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot autoplay without lexicon"));
+    return NULL;
+  }
+  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
+    config_load_win_pcts(config, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  char *num_games_str = get_formatted_string("%lld", (long long)num_games);
+  config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_DEFAULT,
+                  num_games_str, 0, /*force_racks_filename=*/NULL, error_stack);
+  free(num_games_str);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  const AutoplayResults *results = config->autoplay_results;
+  AutoplayGameSummary all_games;
+  if (!autoplay_results_get_game_summary(results, false, &all_games)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     string_duplicate("autoplay produced no game results"));
+    return NULL;
+  }
+
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  config_contribute_write_game_summary(sb, "all_games", &all_games, &first);
+  if (game_pairs) {
+    // The divergent subset is where a paired run's signal lives: pairs whose
+    // two games played identically are guaranteed ties carrying no
+    // information, and the server computes the LLR from this.
+    AutoplayGameSummary divergent;
+    if (autoplay_results_get_game_summary(results, true, &divergent)) {
+      config_contribute_write_game_summary(sb, "divergent_games", &divergent,
+                                           &first);
+    }
+  }
+  json_write_object_end(sb);
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
+}
+
+static char *config_contribute_opening_rack(Config *config,
+                                            const JsonValue *request,
+                                            int threads,
+                                            ErrorStack *error_stack) {
+  const char *lexicon = NULL;
+  const char *variant = NULL;
+  if (!contribute_validate_common(request, &lexicon, &variant, error_stack)) {
+    return NULL;
+  }
+  const char *position = json_get_string(request, "position", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  config_contribute_ensure_wordmap(config, lexicon, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  const JsonValue *player = json_object_get(request, "player");
+  config_contribute_load_lexicon_and_variant(
+      config, lexicon, variant, json_get_string_or_null(player, "leaves"), NULL,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  config->num_threads = threads;
+  config->human_readable = false;
+  config_contribute_apply_player_settings(config, player, 0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot load cgp without lexicon"));
+    return NULL;
+  }
+  config_init_game(config);
+
+  // First duplicate the game so that a malformed position from the server
+  // can't corrupt it.
+  Game *game_dupe = game_duplicate(config->game);
+  game_load_cgp(game_dupe, position, error_stack);
+  game_destroy(game_dupe);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  game_load_cgp(config->game, position, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config_reset_move_list_and_invalidate_sim_results(config);
+
+  const JsonValue *iterations = json_object_get(player, "max_iterations");
+  const bool simming = iterations && !json_is_null(iterations);
+  // Simulating needs a move list to simulate over; the CLI's "simulate"
+  // command relies on the user already having run "generate", but a task
+  // request has no such prior step to reuse.
+  impl_move_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  if (simming) {
+    impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+
+  const MoveList *moves = config->move_list;
+  const Game *game = config->game;
+  const LetterDistribution *ld = config->ld;
+  const int count = move_list_get_count(moves);
+  if (count == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     string_duplicate("move generation produced no moves"));
+    return NULL;
+  }
+
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_array_start(sb, "moves", &first);
+  for (int i = 0; i < count; i++) {
+    const Move *move = move_list_get_move(moves, i);
+    if (i > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    bool move_first = true;
+    json_write_object_start(sb);
+
+    StringBuilder *move_sb = string_builder_create();
+    string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
+    char *move_string = string_builder_dump(move_sb, NULL);
+    string_builder_destroy(move_sb);
+    json_write_string_field(sb, "move", move_string, &move_first);
+    free(move_string);
+
+    json_write_int_field(sb, "score", equity_to_int(move_get_score(move)),
+                         &move_first);
+    json_write_double_field(
+        sb, "equity", equity_to_double(move_get_equity(move)), &move_first);
+    json_write_object_end(sb);
+  }
+  json_write_array_end(sb);
+  json_write_object_end(sb);
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
+}
+
+static char *config_contribute_leave_gen(Config *config,
+                                         const JsonValue *request, int threads,
+                                         ErrorStack *error_stack) {
+  (void)config;
+  (void)threads;
+  const char *lexicon = NULL;
+  const char *variant = NULL;
+  if (!contribute_validate_common(request, &lexicon, &variant, error_stack)) {
+    return NULL;
+  }
+  // Leave generation needs the previous generation's KLV fetched over HTTP and
+  // the rack-equity table read back out of RackList. Neither is wired up yet.
+  error_stack_push(
+      error_stack, ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE,
+      string_duplicate(
+          "leave_generation tasks are not implemented in this build yet"));
+  return NULL;
+}
+
+void impl_contribute(Config *config, const char *settings_path,
+                     ErrorStack *error_stack) {
+  ContributeState *state = NULL;
+  while (!contribute_should_stop(state)) {
+    const char *job_type = NULL;
+    const JsonValue *request = NULL;
+    const contribute_claim_outcome_t outcome = contribute_claim_task(
+        &state, settings_path, config_get_magpie_version(),
+        config_get_thread_control(config), &job_type, &request, error_stack);
+    if (outcome == CONTRIBUTE_CLAIM_FAILED) {
+      break;
+    }
+    if (outcome == CONTRIBUTE_CLAIM_NO_WORK) {
+      continue;
+    }
+
+    const int threads = contribute_get_threads(state);
+    char *result_json = NULL;
+    bool fatal = false;
+    if (strings_equal(job_type, "games")) {
+      result_json =
+          config_contribute_games(config, request, false, threads, error_stack);
+    } else if (strings_equal(job_type, "game_pairs")) {
+      result_json =
+          config_contribute_games(config, request, true, threads, error_stack);
+    } else if (strings_equal(job_type, "opening_rack_analysis")) {
+      result_json =
+          config_contribute_opening_rack(config, request, threads, error_stack);
+    } else if (strings_equal(job_type, "leave_generation")) {
+      result_json =
+          config_contribute_leave_gen(config, request, threads, error_stack);
+    } else {
+      // A job type this build does not recognise means the server is newer
+      // than this MAGPIE, which is the same situation as a version mismatch.
+      fatal = true;
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE,
+          get_formatted_string(
+              "this MAGPIE does not know the job type '%s'. Update MAGPIE to "
+              "continue contributing.",
+              job_type));
+    }
+    // execute_leave_gen and the unknown-job-type branch both push
+    // ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE; either way this run cannot
+    // make progress on this class of job, so treat it as fatal.
+    fatal = fatal || error_stack_top(error_stack) ==
+                         ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE;
+
+    char *error_message = NULL;
+    if (!error_stack_is_empty(error_stack)) {
+      error_message = error_stack_get_string_and_reset(error_stack);
+    }
+    contribute_submit_result(state, config_get_thread_control(config),
+                             result_json, error_message, fatal, error_stack);
+    free(result_json);
+    free(error_message);
+  }
+  contribute_state_destroy(state);
 }
 
 void string_builder_add_exec_mode_type(StringBuilder *sb,
