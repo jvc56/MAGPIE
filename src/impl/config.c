@@ -7144,24 +7144,6 @@ static void config_contribute_apply_player_settings(Config *config,
   }
 }
 
-static void
-config_contribute_write_game_summary(StringBuilder *sb, const char *key,
-                                     const AutoplayGameSummary *summary,
-                                     bool *outer_first) {
-  json_write_raw_key(sb, key, outer_first);
-  bool first = true;
-  json_write_object_start(sb);
-  json_write_int_field(sb, "games", (int64_t)summary->games, &first);
-  json_write_int_field(sb, "wins", (int64_t)summary->p0_wins, &first);
-  json_write_int_field(sb, "losses", (int64_t)summary->p0_losses, &first);
-  json_write_int_field(sb, "ties", (int64_t)summary->p0_ties, &first);
-  json_write_double_field(sb, "p1_score_mean", summary->p0_score_mean, &first);
-  json_write_double_field(sb, "p1_score_sd", summary->p0_score_stdev, &first);
-  json_write_double_field(sb, "p2_score_mean", summary->p1_score_mean, &first);
-  json_write_double_field(sb, "p2_score_sd", summary->p1_score_stdev, &first);
-  json_write_object_end(sb);
-}
-
 static char *config_contribute_games(Config *config, const JsonValue *request,
                                      bool game_pairs, int threads,
                                      ErrorStack *error_stack) {
@@ -7236,26 +7218,22 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   }
 
   const AutoplayResults *results = config->autoplay_results;
-  AutoplayGameSummary all_games;
-  if (!autoplay_results_get_game_summary(results, false, &all_games)) {
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  if (!autoplay_results_write_game_summary(results, sb, "all_games", false,
+                                           &first)) {
+    string_builder_destroy(sb);
     error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
                      string_duplicate("autoplay produced no game results"));
     return NULL;
   }
-
-  StringBuilder *sb = string_builder_create();
-  bool first = true;
-  json_write_object_start(sb);
-  config_contribute_write_game_summary(sb, "all_games", &all_games, &first);
   if (game_pairs) {
     // The divergent subset is where a paired run's signal lives: pairs whose
     // two games played identically are guaranteed ties carrying no
     // information, and the server computes the LLR from this.
-    AutoplayGameSummary divergent;
-    if (autoplay_results_get_game_summary(results, true, &divergent)) {
-      config_contribute_write_game_summary(sb, "divergent_games", &divergent,
-                                           &first);
-    }
+    autoplay_results_write_game_summary(results, sb, "divergent_games", true,
+                                        &first);
   }
   json_write_object_end(sb);
   char *result = string_builder_dump(sb, NULL);
@@ -7263,6 +7241,10 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   return result;
 }
 
+// Writes the moves generated (and, if simming, simmed) for the rack already
+// Analyzes one opening rack -- always the empty board, since an opening rack
+// is by definition the start of the game, so the request sends just the rack
+// to analyze rather than a full position.
 static char *config_contribute_opening_rack(Config *config,
                                             const JsonValue *request,
                                             int threads,
@@ -7272,7 +7254,7 @@ static char *config_contribute_opening_rack(Config *config,
   if (!contribute_validate_common(request, &lexicon, &variant, error_stack)) {
     return NULL;
   }
-  const char *position = json_get_string(request, "position", error_stack);
+  const char *rack_str = json_get_string(request, "rack", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -7299,24 +7281,18 @@ static char *config_contribute_opening_rack(Config *config,
 
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-                     string_duplicate("cannot load cgp without lexicon"));
+                     string_duplicate("cannot analyze a rack without lexicon"));
     return NULL;
   }
   config_init_game(config);
-
-  // First duplicate the game so that a malformed position from the server
-  // can't corrupt it.
-  Game *game_dupe = game_duplicate(config->game);
-  game_load_cgp(game_dupe, position, error_stack);
-  game_destroy(game_dupe);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  game_load_cgp(config->game, position, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
+  game_reset(config->game);
   config_reset_move_list_and_invalidate_sim_results(config);
+  if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an unusable rack: '%s'", rack_str));
+    return NULL;
+  }
 
   const JsonValue *iterations = json_object_get(player, "max_iterations");
   const bool simming = iterations && !json_is_null(iterations);

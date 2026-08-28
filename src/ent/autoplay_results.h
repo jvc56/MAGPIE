@@ -2,6 +2,7 @@
 #define AUTOPLAY_RESULTS_H
 
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/string_util.h"
 #include "game.h"
 #include "klv.h"
@@ -45,30 +46,21 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
                                            const AutoplayGameTiming *timing);
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary);
-// A finished autoplay run's game counts and score moments, read straight out
-// of the recorder rather than parsed back out of its formatted output. This is
-// what the contribution client submits.
-typedef struct AutoplayGameSummary {
-  uint64_t games;
-  uint64_t p0_wins;
-  uint64_t p0_losses;
-  uint64_t p0_ties;
-  double p0_score_mean;
-  double p0_score_stdev;
-  double p1_score_mean;
-  double p1_score_stdev;
-} AutoplayGameSummary;
-
-// Fills `summary` from the game recorder. When `divergent` is true the summary
-// covers only game pairs whose two games did not play identically -- pairs that
-// played identically are guaranteed ties carrying no information, so that
-// subset is where a paired run's signal lives.
+// Writes a finished autoplay run's game counts and score moments -- read
+// straight out of the recorder rather than parsed back out of its formatted
+// output -- as a JSON object under `key` into `sb`. This is what the
+// contribution client submits. `first` guards comma placement, as with the
+// other json_write_* helpers.
 //
-// Returns false if the game recorder is not enabled, leaving `summary`
-// untouched.
-bool autoplay_results_get_game_summary(const AutoplayResults *autoplay_results,
-                                       bool divergent,
-                                       AutoplayGameSummary *summary);
+// When `divergent` is true the summary covers only game pairs whose two games
+// did not play identically -- pairs that played identically are guaranteed
+// ties carrying no information, so that subset is where a paired run's signal
+// lives.
+//
+// Returns false (writing nothing) if the game recorder is not enabled.
+bool autoplay_results_write_game_summary(
+    const AutoplayResults *autoplay_results, StringBuilder *sb, const char *key,
+    bool divergent, bool *first);
 
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);

@@ -9,6 +9,7 @@
 #include "../def/rack_defs.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "bag.h"
@@ -1523,9 +1524,9 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
   cpthread_mutex_unlock(&primary->mutex);
 }
 
-bool autoplay_results_get_game_summary(const AutoplayResults *autoplay_results,
-                                       bool divergent,
-                                       AutoplayGameSummary *summary) {
+bool autoplay_results_write_game_summary(
+    const AutoplayResults *autoplay_results, StringBuilder *sb, const char *key,
+    bool divergent, bool *first) {
   const Recorder *recorder =
       autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_GAME];
   if (!recorder) {
@@ -1534,14 +1535,22 @@ bool autoplay_results_get_game_summary(const AutoplayResults *autoplay_results,
   const GameDataSets *sets = (const GameDataSets *)recorder->data;
   const GameData *gd = divergent ? sets->divergent_games : sets->all_games;
 
-  summary->games = gd->total_games;
-  summary->p0_wins = gd->p0_wins;
-  summary->p0_losses = gd->p0_losses;
-  summary->p0_ties = gd->p0_ties;
-  summary->p0_score_mean = stat_get_mean(gd->p0_score);
-  summary->p0_score_stdev = stat_get_stdev(gd->p0_score);
-  summary->p1_score_mean = stat_get_mean(gd->p1_score);
-  summary->p1_score_stdev = stat_get_stdev(gd->p1_score);
+  json_write_raw_key(sb, key, first);
+  bool object_first = true;
+  json_write_object_start(sb);
+  json_write_int_field(sb, "games", (int64_t)gd->total_games, &object_first);
+  json_write_int_field(sb, "wins", (int64_t)gd->p0_wins, &object_first);
+  json_write_int_field(sb, "losses", (int64_t)gd->p0_losses, &object_first);
+  json_write_int_field(sb, "ties", (int64_t)gd->p0_ties, &object_first);
+  json_write_double_field(sb, "p1_score_mean", stat_get_mean(gd->p0_score),
+                          &object_first);
+  json_write_double_field(sb, "p1_score_sd", stat_get_stdev(gd->p0_score),
+                          &object_first);
+  json_write_double_field(sb, "p2_score_mean", stat_get_mean(gd->p1_score),
+                          &object_first);
+  json_write_double_field(sb, "p2_score_sd", stat_get_stdev(gd->p1_score),
+                          &object_first);
+  json_write_object_end(sb);
   return true;
 }
 
