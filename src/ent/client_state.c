@@ -10,18 +10,6 @@ enum {
   DEFAULT_IDLE_WAIT_SECONDS = 5,
 };
 
-static char *trim(char *text) {
-  while (*text == ' ' || *text == '\t') {
-    text++;
-  }
-  size_t length = string_length(text);
-  while (length > 0 && (text[length - 1] == ' ' || text[length - 1] == '\t' ||
-                        text[length - 1] == '\r' || text[length - 1] == '\n')) {
-    text[--length] = '\0';
-  }
-  return text;
-}
-
 // Parses an integer-valued setting, pushing a message naming the file, line
 // and key on failure rather than atoi's silent zero.
 static int parse_setting_int(const char *value, const char *key,

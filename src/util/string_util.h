@@ -90,6 +90,7 @@ const char *get_base_filename(const char *filepath);
 // Inplace string functions
 void trim_whitespace(char *str);
 void trim_char(char *str, char c);
+char *trim(char *str);
 
 // String conversions
 int string_to_int(const char *str, ErrorStack *error_stack);

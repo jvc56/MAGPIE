@@ -806,6 +806,25 @@ void trim_whitespace(char *str) { trim_internal(str, 0, true); }
 
 void trim_char(char *str, const char c) { trim_internal(str, c, false); }
 
+// Trims leading and trailing whitespace from str in place and returns a
+// pointer to the trimmed start. Unlike trim_whitespace(), which memmoves the
+// trimmed text back to the start of the buffer, this only advances the
+// returned pointer past leading whitespace and NUL-terminates before any
+// trailing whitespace -- everything before the returned pointer is left
+// untouched. Useful for trimming a substring that shares a buffer with other
+// data the caller still needs, e.g. splitting a "key value" line and trimming
+// each half without disturbing the other.
+char *trim(char *str) {
+  while (isspace((unsigned char)*str)) {
+    str++;
+  }
+  size_t length = string_length(str);
+  while (length > 0 && isspace((unsigned char)str[length - 1])) {
+    str[--length] = '\0';
+  }
+  return str;
+}
+
 int string_to_int(const char *str, ErrorStack *error_stack) {
   const char *str_copy = str;
   char *endptr;

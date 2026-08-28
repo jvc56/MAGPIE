@@ -37,24 +37,37 @@ enum {
 // Compares dotted numeric versions. Returns <0, 0 or >0. Missing components
 // count as zero, so "1.4" and "1.4.0" compare equal.
 int contribute_compare_versions(const char *left, const char *right) {
-  while (*left != '\0' || *right != '\0') {
-    char *left_end = NULL;
-    char *right_end = NULL;
-    const long left_part = strtol(left, &left_end, 10);
-    const long right_part = strtol(right, &right_end, 10);
+  StringSplitter *left_parts = split_string(left, '.', true);
+  StringSplitter *right_parts = split_string(right, '.', true);
+  const int left_count = string_splitter_get_number_of_items(left_parts);
+  const int right_count = string_splitter_get_number_of_items(right_parts);
+  const int num_parts = left_count > right_count ? left_count : right_count;
+
+  ErrorStack *conversion_errors = error_stack_create();
+  int result = 0;
+  for (int part_idx = 0; part_idx < num_parts; part_idx++) {
+    // Missing components count as zero, so "1.4" and "1.4.0" compare equal.
+    const int left_part =
+        part_idx < left_count
+            ? string_to_int(string_splitter_get_item(left_parts, part_idx),
+                            conversion_errors)
+            : 0;
+    const int right_part =
+        part_idx < right_count
+            ? string_to_int(string_splitter_get_item(right_parts, part_idx),
+                            conversion_errors)
+            : 0;
+    error_stack_reset(conversion_errors);
     if (left_part != right_part) {
-      return left_part < right_part ? -1 : 1;
-    }
-    left = left_end;
-    right = right_end;
-    if (*left == '.') {
-      left++;
-    }
-    if (*right == '.') {
-      right++;
+      result = left_part < right_part ? -1 : 1;
+      break;
     }
   }
-  return 0;
+
+  error_stack_destroy(conversion_errors);
+  string_splitter_destroy(left_parts);
+  string_splitter_destroy(right_parts);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,30 +85,34 @@ typedef struct Heartbeat {
 
 static void *heartbeat_worker(void *arg) {
   Heartbeat *heartbeat = (Heartbeat *)arg;
+  StringBuilder *sb = string_builder_create();
+  ErrorStack *errors = error_stack_create();
   while (true) {
     // Poll the stop flag on a short interval so stopping is responsive even
     // though the heartbeat itself is infrequent.
+    bool stop = false;
     for (int i = 0; i < HEARTBEAT_INTERVAL_SECONDS; i++) {
       ctime_nap(1.0);
       cpthread_mutex_lock(&heartbeat->mutex);
-      const bool stop = heartbeat->stop;
+      stop = heartbeat->stop;
       cpthread_mutex_unlock(&heartbeat->mutex);
       if (stop) {
-        return NULL;
+        break;
       }
     }
+    if (stop) {
+      break;
+    }
 
-    StringBuilder *sb = string_builder_create();
     bool first = true;
     json_write_object_start(sb);
     json_write_string_field(sb, "claim_token", heartbeat->claim_token, &first);
     json_write_object_end(sb);
     char *body = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    string_builder_clear(sb);
 
     // A failed heartbeat is not actionable here: the server treats a missed
     // one as a lapsed claim and reassigns the task, which is the design.
-    ErrorStack *errors = error_stack_create();
     ChttpResponse response;
     http_client_post_json(heartbeat->client, "/api/worker/heartbeat", body,
                           &response, errors);
@@ -103,9 +120,12 @@ static void *heartbeat_worker(void *arg) {
       chttp_response_destroy(&response);
     }
     error_stack_reset(errors);
-    error_stack_destroy(errors);
     free(body);
   }
+
+  string_builder_destroy(sb);
+  error_stack_destroy(errors);
+  return NULL;
 }
 
 static void heartbeat_start(Heartbeat *heartbeat, HttpClient *client,
