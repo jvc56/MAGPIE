@@ -7454,7 +7454,7 @@ void impl_contribute(Config *config, const char *settings_path,
     } else if (strings_equal(job_type, "game_pairs")) {
       result_json =
           config_contribute_games(config, request, true, threads, error_stack);
-    } else if (strings_equal(job_type, "opening_rack_analysis")) {
+    } else if (strings_equal(job_type, "opening_rack")) {
       result_json =
           config_contribute_opening_rack(config, request, threads, error_stack);
     } else if (strings_equal(job_type, "leave_generation")) {
