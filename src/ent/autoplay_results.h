@@ -14,6 +14,7 @@ typedef enum {
   AUTOPLAY_RECORDER_TYPE_FJ,
   AUTOPLAY_RECORDER_TYPE_WIN_PCT,
   AUTOPLAY_RECORDER_TYPE_LEAVES,
+  AUTOPLAY_RECORDER_TYPE_POSITION,
   NUMBER_OF_AUTOPLAY_RECORDERS,
 } autoplay_recorder_t;
 
@@ -34,9 +35,47 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   ErrorStack *error_stack);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
+// One ranked candidate at a captured position.
+typedef struct AutoplayPositionMove {
+  char *move;
+  int score;
+  double equity;
+} AutoplayPositionMove;
+
+// A position analysed during a game, kept by the `positions` recorder. A player
+// analyses a position on every turn anyway; this is that analysis, retained
+// rather than discarded.
+typedef struct AutoplayPosition {
+  char *cgp;
+  char *rack;
+  int game_number;
+  int pair_game_number;
+  int turn_number;
+  // How many moves were ranked, before truncation to the recorder's cap.
+  int num_moves;
+  AutoplayPositionMove *moves;
+  int num_stored_moves;
+} AutoplayPosition;
+
+// The positions captured by the last run, or NULL with *count 0 when the
+// recorder is not enabled. Borrowed: owned by the recorder and valid until the
+// next autoplay run.
+//
+// Positions are recorded per worker thread and merged, so they are *not* in
+// game or turn order -- each carries its own game and turn number.
+const AutoplayPosition *
+autoplay_results_get_positions(const AutoplayResults *autoplay_results,
+                               int *count);
+
+// Ranked moves to keep per captured position. Set before the run.
+void autoplay_results_set_position_move_cap(AutoplayResults *autoplay_results,
+                                            int cap);
+
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave);
+                               const Rack *leave, const MoveList *move_list,
+                               int game_number, int pair_game_number,
+                               int turn_number);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);

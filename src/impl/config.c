@@ -7205,7 +7205,18 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       return NULL;
     }
   }
-  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  // A worker analyses a position on every turn regardless; the job decides
+  // whether those analyses are kept rather than discarded.
+  const bool capture_positions =
+      json_get_bool_or(request, "capture_positions", false);
+  const int capture_top_moves = json_get_int_or(request, "capture_top_moves", 10);
+  autoplay_results_set_options(config->autoplay_results,
+                               capture_positions ? "games,positions" : "games",
+                               error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    autoplay_results_set_position_move_cap(config->autoplay_results,
+                                           capture_top_moves);
+  }
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -7235,6 +7246,54 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
     autoplay_results_write_game_summary(results, sb, "divergent_games", true,
                                         &first);
   }
+  
+  // Captured positions, when the job asked for them. Absent otherwise, which
+  // keeps the submission the same shape every existing server expects.
+  if (capture_positions) {
+    int position_count = 0;
+    const AutoplayPosition *positions =
+        autoplay_results_get_positions(results, &position_count);
+    json_write_array_start(sb, "positions", &first);
+    for (int i = 0; i < position_count; i++) {
+      const AutoplayPosition *position = &positions[i];
+      if (i > 0) {
+        string_builder_add_string(sb, ",");
+      }
+      bool position_first = true;
+      json_write_object_start(sb);
+      // pair_game_number is 0 for an unpaired game and 1 or 2 within a pair, so
+      // the batch-wide index the server keys on is derived rather than assumed.
+      const int game_index =
+          position->pair_game_number > 0
+              ? position->game_number * 2 + (position->pair_game_number - 1)
+              : position->game_number;
+      json_write_int_field(sb, "game_index", game_index, &position_first);
+      json_write_int_field(sb, "turn_number", position->turn_number,
+                           &position_first);
+      json_write_string_field(sb, "rack", position->rack, &position_first);
+      json_write_string_field(sb, "position", position->cgp, &position_first);
+      json_write_int_field(sb, "num_moves", position->num_moves,
+                           &position_first);
+      json_write_array_start(sb, "moves", &position_first);
+      for (int m = 0; m < position->num_stored_moves; m++) {
+        if (m > 0) {
+          string_builder_add_string(sb, ",");
+        }
+        bool move_first = true;
+        json_write_object_start(sb);
+        json_write_string_field(sb, "move", position->moves[m].move,
+                                &move_first);
+        json_write_int_field(sb, "score", position->moves[m].score, &move_first);
+        json_write_double_field(sb, "equity", position->moves[m].equity,
+                                &move_first);
+        json_write_object_end(sb);
+      }
+      json_write_array_end(sb);
+      json_write_object_end(sb);
+    }
+    json_write_array_end(sb);
+  }
+
   json_write_object_end(sb);
   char *result = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);

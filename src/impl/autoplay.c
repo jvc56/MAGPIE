@@ -800,8 +800,15 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        equity_to_double(move_get_equity(move)));
   }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
-  autoplay_results_add_move(autoplay_worker->autoplay_results,
-                            game_runner->game, move, &rare_rack_or_move_leave);
+  // The move list holds the candidates this turn; it is reused next turn, so a
+  // recorder that keeps them must copy.
+  autoplay_results_add_move(
+      autoplay_worker->autoplay_results, game_runner->game, move,
+      &rare_rack_or_move_leave,
+      autoplay_worker->move_lists[game_get_player_on_turn_index(
+          game_runner->game)],
+      (int)game_runner->game_number, game_runner->pair_game_number,
+      game_runner->turn_number);
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {
@@ -1110,12 +1117,18 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
   if (options == 0) {
     return;
   }
-  if (options != autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME) &&
-      args->use_game_pairs) {
+  // The other recorders accumulate per-leave or per-rack statistics that game
+  // pairs would double-count. The positions recorder does not: it records each
+  // turn independently and carries its own game and pair numbers, so it is
+  // meaningful alongside pairing.
+  const uint64_t pairable_options =
+      autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME) |
+      autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_POSITION);
+  if ((options & ~pairable_options) != 0 && args->use_game_pairs) {
     error_stack_push(
         error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
-        string_duplicate(
-            "the game pairs setting can only be used with the games recorder"));
+        string_duplicate("the game pairs setting can only be used with the "
+                         "games and positions recorders"));
     return;
   }
 }

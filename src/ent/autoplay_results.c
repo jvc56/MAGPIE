@@ -1,5 +1,7 @@
 #include "autoplay_results.h"
 
+#include "../impl/cgp.h"
+
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
@@ -35,6 +37,12 @@ enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
 typedef struct RecorderArgs {
   const Game *game;
   const Move *move;
+  // The ranked candidates this turn, not just the one chosen. Reused across
+  // turns by the caller, so a recorder must copy rather than retain it.
+  const MoveList *move_list;
+  int game_number;
+  int pair_game_number;
+  int turn_number;
   const Rack *leave;
   int number_of_turns;
   uint64_t seed;
@@ -1297,6 +1305,162 @@ void autoplay_results_set_recorder(
   }
 }
 
+// --- positions recorder ------------------------------------------------------
+//
+// A player analyses a position on every turn regardless; this keeps that
+// analysis instead of discarding it. Enabled with the `positions` autoplay
+// option.
+
+enum { POSITIONS_INITIAL_CAPACITY = 256 };
+
+typedef struct PositionsData {
+  AutoplayPosition *positions;
+  int count;
+  int capacity;
+  int move_cap;
+  cpthread_mutex_t mutex;
+} PositionsData;
+
+static void positions_data_free_contents(PositionsData *data) {
+  for (int i = 0; i < data->count; i++) {
+    AutoplayPosition *position = &data->positions[i];
+    free(position->cgp);
+    free(position->rack);
+    for (int j = 0; j < position->num_stored_moves; j++) {
+      free(position->moves[j].move);
+    }
+    free(position->moves);
+  }
+  data->count = 0;
+}
+
+void positions_data_reset(Recorder *recorder) {
+  PositionsData *data = (PositionsData *)recorder->data;
+  positions_data_free_contents(data);
+}
+
+void positions_data_create(Recorder *recorder) {
+  PositionsData *data = malloc_or_die(sizeof(PositionsData));
+  data->capacity = POSITIONS_INITIAL_CAPACITY;
+  data->positions =
+      malloc_or_die(sizeof(AutoplayPosition) * (size_t)data->capacity);
+  data->count = 0;
+  // Overwritten by autoplay_results_set_position_move_cap before a run.
+  data->move_cap = 10;
+  cpthread_mutex_init(&data->mutex);
+  recorder->data = data;
+  recorder->thread_shared_data = NULL;
+}
+
+void positions_data_destroy(Recorder *recorder) {
+  PositionsData *data = (PositionsData *)recorder->data;
+  positions_data_free_contents(data);
+  free(data->positions);
+  free(data);
+}
+
+void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  PositionsData *data = (PositionsData *)recorder->data;
+  if (!args->move_list) {
+    return;
+  }
+
+  const Game *game = args->game;
+  const LetterDistribution *ld = game_get_ld(game);
+  const int player_on_turn = game_get_player_on_turn_index(game);
+  const Rack *rack = player_get_rack(game_get_player(game, player_on_turn));
+
+  const int ranked = move_list_get_count(args->move_list);
+  int stored = ranked;
+  if (stored > data->move_cap) {
+    stored = data->move_cap;
+  }
+
+  AutoplayPosition position;
+  position.cgp = game_get_cgp(game, false);
+  StringBuilder *rack_sb = string_builder_create();
+  string_builder_add_rack(rack_sb, rack, ld, false);
+  position.rack = string_builder_dump(rack_sb, NULL);
+  string_builder_destroy(rack_sb);
+  position.game_number = args->game_number;
+  position.pair_game_number = args->pair_game_number;
+  position.turn_number = args->turn_number;
+  position.num_moves = ranked;
+  position.num_stored_moves = stored;
+  position.moves =
+      stored > 0 ? malloc_or_die(sizeof(AutoplayPositionMove) * (size_t)stored)
+                 : NULL;
+
+  for (int i = 0; i < stored; i++) {
+    const Move *move = move_list_get_move(args->move_list, i);
+    StringBuilder *move_sb = string_builder_create();
+    string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
+    position.moves[i].move = string_builder_dump(move_sb, NULL);
+    string_builder_destroy(move_sb);
+    // A pass carries a sentinel equity that cannot be converted; reporting
+    // zeros keeps the whole ranked list serializable.
+    const Equity score = move_get_score(move);
+    const Equity equity = move_get_equity(move);
+    position.moves[i].score = equity_is_convertible(score) ? equity_to_int(score) : 0;
+    position.moves[i].equity =
+        equity_is_convertible(equity) ? equity_to_double(equity) : 0.0;
+  }
+
+  cpthread_mutex_lock(&data->mutex);
+  if (data->count == data->capacity) {
+    data->capacity *= 2;
+    data->positions = realloc_or_die(
+        data->positions, sizeof(AutoplayPosition) * (size_t)data->capacity);
+  }
+  data->positions[data->count++] = position;
+  cpthread_mutex_unlock(&data->mutex);
+}
+
+void positions_data_consolidate(Recorder **recorder_list, int recorder_list_size,
+                                Recorder *primary_recorder) {
+  PositionsData *primary = (PositionsData *)primary_recorder->data;
+  for (int i = 0; i < recorder_list_size; i++) {
+    if (recorder_list[i] == primary_recorder) {
+      continue;
+    }
+    PositionsData *other = (PositionsData *)recorder_list[i]->data;
+    for (int j = 0; j < other->count; j++) {
+      if (primary->count == primary->capacity) {
+        primary->capacity *= 2;
+        primary->positions = realloc_or_die(
+            primary->positions,
+            sizeof(AutoplayPosition) * (size_t)primary->capacity);
+      }
+      // Ownership of the strings moves to the primary.
+      primary->positions[primary->count++] = other->positions[j];
+    }
+    other->count = 0;
+  }
+}
+
+const AutoplayPosition *
+autoplay_results_get_positions(const AutoplayResults *autoplay_results,
+                               int *count) {
+  const Recorder *recorder =
+      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_POSITION];
+  if (!recorder) {
+    *count = 0;
+    return NULL;
+  }
+  const PositionsData *data = (const PositionsData *)recorder->data;
+  *count = data->count;
+  return data->positions;
+}
+
+void autoplay_results_set_position_move_cap(AutoplayResults *autoplay_results,
+                                            int cap) {
+  Recorder *recorder =
+      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_POSITION];
+  if (recorder && cap > 0) {
+    ((PositionsData *)recorder->data)->move_cap = cap;
+  }
+}
+
 void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
                                       uint64_t options,
                                       const AutoplayResults *primary) {
@@ -1318,6 +1482,11 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_LEAVES,
       leaves_data_reset, leaves_data_create, leaves_data_destroy,
       leaves_data_add_move, add_game_noop, leaves_data_consolidate,
+      get_str_noop);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_POSITION,
+      positions_data_reset, positions_data_create, positions_data_destroy,
+      positions_data_add_move, add_game_noop, positions_data_consolidate,
       get_str_noop);
   autoplay_results->options = options;
 }
@@ -1345,6 +1514,8 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WIN_PCT);
     } else if (has_iprefix(option_str, "leaves")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
+    } else if (has_iprefix(option_str, "positions")) {
+      options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_POSITION);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
@@ -1470,11 +1641,17 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave) {
+                               const Rack *leave, const MoveList *move_list,
+                               int game_number, int pair_game_number,
+                               int turn_number) {
   RecorderArgs args = {0};
   args.game = game;
   args.move = move;
   args.leave = leave;
+  args.move_list = move_list;
+  args.game_number = game_number;
+  args.pair_game_number = pair_game_number;
+  args.turn_number = turn_number;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
       recorder_add_move(autoplay_results->recorders[i], &args);
