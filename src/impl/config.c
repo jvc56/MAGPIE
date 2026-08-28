@@ -7241,10 +7241,95 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   return result;
 }
 
-// Writes the moves generated (and, if simming, simmed) for the rack already
-// Analyzes one opening rack -- always the empty board, since an opening rack
-// is by definition the start of the game, so the request sends just the rack
-// to analyze rather than a full position.
+// Analyzes one opening rack onto an already-open JSON array, returning false
+// and pushing onto the stack on failure. Always the empty board: an opening
+// rack is by definition the start of the game, so the request sends just the
+// racks to analyze rather than full positions.
+static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
+                                           const JsonValue *player,
+                                           bool simming,
+                                           StringBuilder *sb,
+                                           ErrorStack *error_stack) {
+  game_reset(config->game);
+  config_reset_move_list_and_invalidate_sim_results(config);
+  if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an unusable rack: '%s'", rack_str));
+    return false;
+  }
+
+  // Simulating needs a move list to simulate over; the CLI's "simulate"
+  // command relies on the user already having run "generate", but a task
+  // request has no such prior step to reuse.
+  impl_move_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  if (simming) {
+    impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return false;
+    }
+  }
+
+  const MoveList *moves = config->move_list;
+  const Game *game = config->game;
+  const LetterDistribution *ld = config->ld;
+  const int count = move_list_get_count(moves);
+  if (count == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("no moves generated for rack '%s'", rack_str));
+    return false;
+  }
+
+  // Every ranked move is reported. How many are worth keeping is the server's
+  // decision -- it stores only the leading few per rack, which is a different
+  // number from how many the player config asked to generate or simulate.
+  bool rack_first = true;
+  json_write_object_start(sb);
+  json_write_string_field(sb, "rack", rack_str, &rack_first);
+  json_write_array_start(sb, "moves", &rack_first);
+  for (int i = 0; i < count; i++) {
+    const Move *move = move_list_get_move(moves, i);
+    if (i > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    bool move_first = true;
+    json_write_object_start(sb);
+
+    StringBuilder *move_sb = string_builder_create();
+    string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
+    char *move_string = string_builder_dump(move_sb, NULL);
+    string_builder_destroy(move_sb);
+    json_write_string_field(sb, "move", move_string, &move_first);
+    free(move_string);
+
+    // A pass carries a sentinel equity that equity_to_double refuses to
+    // convert, and a pass has no score. Reporting zeros keeps the whole
+    // ranked list submittable, which matters for a `-r all` config where the
+    // pass is a legitimate entry rather than an error.
+    const Equity score = move_get_score(move);
+    const Equity equity = move_get_equity(move);
+    json_write_int_field(sb, "score",
+                         equity_is_convertible(score) ? equity_to_int(score) : 0,
+                         &move_first);
+    json_write_double_field(
+        sb, "equity",
+        equity_is_convertible(equity) ? equity_to_double(equity) : 0.0,
+        &move_first);
+    json_write_object_end(sb);
+  }
+  json_write_array_end(sb);
+  json_write_object_end(sb);
+  return true;
+}
+
+// A task covers a *batch* of racks. One rack per task would spend a
+// claim/submit round trip on each, and the rack space runs to millions -- the
+// per-worker rate limit alone would cap a worker at well under a rack a second.
+// The lexicon and player settings are loaded once and reused across the batch.
 static char *config_contribute_opening_rack(Config *config,
                                             const JsonValue *request,
                                             int threads,
@@ -7254,8 +7339,13 @@ static char *config_contribute_opening_rack(Config *config,
   if (!contribute_validate_common(request, &lexicon, &variant, error_stack)) {
     return NULL;
   }
-  const char *rack_str = json_get_string(request, "rack", error_stack);
-  if (!error_stack_is_empty(error_stack)) {
+
+  const JsonValue *racks = json_object_get(request, "racks");
+  const int rack_count = json_array_length(racks);
+  if (rack_count <= 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        string_duplicate("server sent an opening rack task with no racks"));
     return NULL;
   }
 
@@ -7285,66 +7375,34 @@ static char *config_contribute_opening_rack(Config *config,
     return NULL;
   }
   config_init_game(config);
-  game_reset(config->game);
-  config_reset_move_list_and_invalidate_sim_results(config);
-  if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-        get_formatted_string("server sent an unusable rack: '%s'", rack_str));
-    return NULL;
-  }
 
   const JsonValue *iterations = json_object_get(player, "max_iterations");
   const bool simming = iterations && !json_is_null(iterations);
-  // Simulating needs a move list to simulate over; the CLI's "simulate"
-  // command relies on the user already having run "generate", but a task
-  // request has no such prior step to reuse.
-  impl_move_gen(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  if (simming) {
-    impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-  }
-
-  const MoveList *moves = config->move_list;
-  const Game *game = config->game;
-  const LetterDistribution *ld = config->ld;
-  const int count = move_list_get_count(moves);
-  if (count == 0) {
-    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-                     string_duplicate("move generation produced no moves"));
-    return NULL;
-  }
 
   StringBuilder *sb = string_builder_create();
   bool first = true;
   json_write_object_start(sb);
-  json_write_array_start(sb, "moves", &first);
-  for (int i = 0; i < count; i++) {
-    const Move *move = move_list_get_move(moves, i);
+  json_write_array_start(sb, "racks", &first);
+
+  for (int i = 0; i < rack_count; i++) {
+    const char *rack_str = json_array_get_string(racks, i);
+    if (!rack_str) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("rack at index %d is not a string", i));
+      string_builder_destroy(sb);
+      return NULL;
+    }
     if (i > 0) {
       string_builder_add_string(sb, ",");
     }
-    bool move_first = true;
-    json_write_object_start(sb);
-
-    StringBuilder *move_sb = string_builder_create();
-    string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
-    char *move_string = string_builder_dump(move_sb, NULL);
-    string_builder_destroy(move_sb);
-    json_write_string_field(sb, "move", move_string, &move_first);
-    free(move_string);
-
-    json_write_int_field(sb, "score", equity_to_int(move_get_score(move)),
-                         &move_first);
-    json_write_double_field(
-        sb, "equity", equity_to_double(move_get_equity(move)), &move_first);
-    json_write_object_end(sb);
+    if (!config_contribute_analyze_rack(config, rack_str, player, simming, sb,
+                                        error_stack)) {
+      string_builder_destroy(sb);
+      return NULL;
+    }
   }
+
   json_write_array_end(sb);
   json_write_object_end(sb);
   char *result = string_builder_dump(sb, NULL);

@@ -63,6 +63,14 @@ const JsonValue *json_array_get(const JsonValue *array, int index) {
   return as_json(cJSON_GetArrayItem(as_cjson(array), index));
 }
 
+const char *json_array_get_string(const JsonValue *array, int index) {
+  const JsonValue *element = json_array_get(array, index);
+  if (!element || !cJSON_IsString(as_cjson(element))) {
+    return NULL;
+  }
+  return as_cjson(element)->valuestring;
+}
+
 static void push_missing(ErrorStack *error_stack, const char *key) {
   error_stack_push(error_stack, ERROR_STATUS_JSON_FIELD_MISSING,
                    get_formatted_string("JSON field '%s' is missing", key));

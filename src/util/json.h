@@ -20,6 +20,8 @@ bool json_is_null(const JsonValue *value);
 bool json_is_array(const JsonValue *value);
 int json_array_length(const JsonValue *array);
 const JsonValue *json_array_get(const JsonValue *array, int index);
+// The string at `index`, or NULL if the element is absent or not a string.
+const char *json_array_get_string(const JsonValue *array, int index);
 
 // Each pushes onto the error stack when the key is absent or the wrong type,
 // and returns a zero value. Callers check the stack once at the end rather
