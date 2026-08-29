@@ -336,6 +336,10 @@ typedef struct AutoplayWorker {
   Rack nontarget_known_rack;
   Rack target_known_rack;
   MoveList *move_lists[2];
+  // Whether the positions recorder is active for this run. A static player
+  // otherwise only ever ranks the one move it plays; this asks it to keep the
+  // whole ranked list instead, the same way a simming player already does.
+  bool captures_positions;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -344,13 +348,28 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        AutoplaySharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = *args;
-  // 0 plies indicate that the player is using static equity, so the move list
-  // only needs a capacity of 1
+  autoplay_worker->captures_positions =
+      (autoplay_results_get_options(target) &
+       autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_POSITION)) != 0;
+  // A static player normally only needs a move list capacity of 1 (0 plies
+  // indicates static equity), but position capture wants the whole ranked
+  // list up to the job's reporting cap, the same as a simming player's
+  // num_plays already provides.
+  const int position_play_cap =
+      autoplay_worker->captures_positions
+          ? autoplay_results_get_position_play_cap(target)
+          : 0;
   if (autoplay_worker->args.p1_sim_args.num_plays == 0) {
     autoplay_worker->args.p1_sim_args.num_plays = 1;
   }
   if (autoplay_worker->args.p2_sim_args.num_plays == 0) {
     autoplay_worker->args.p2_sim_args.num_plays = 1;
+  }
+  if (autoplay_worker->args.p1_sim_args.num_plays < position_play_cap) {
+    autoplay_worker->args.p1_sim_args.num_plays = position_play_cap;
+  }
+  if (autoplay_worker->args.p2_sim_args.num_plays < position_play_cap) {
+    autoplay_worker->args.p2_sim_args.num_plays = position_play_cap;
   }
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results =
@@ -742,7 +761,8 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
     return get_top_move_for_player_on_turn(
-        game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
+        game_runner->game, autoplay_worker->move_lists[player_on_turn_index],
+        autoplay_worker->captures_positions);
   }
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);
 }

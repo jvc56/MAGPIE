@@ -57,6 +57,162 @@ static wchar_t *widen(const char *text) {
   return wide;
 }
 
+// Everything WinHTTP hands back that needs closing/freeing regardless of
+// where chttp_win32_perform_request stops, so chttp_request can clean it all
+// up in one place after the fact instead of every early return doing its own.
+typedef struct WinHttpResources {
+  HINTERNET session;
+  HINTERNET connection;
+  HINTERNET handle;
+  wchar_t *host;
+  wchar_t *path;
+} WinHttpResources;
+
+static void winhttp_resources_cleanup(WinHttpResources *resources) {
+  if (resources->handle) {
+    WinHttpCloseHandle(resources->handle);
+  }
+  if (resources->connection) {
+    WinHttpCloseHandle(resources->connection);
+  }
+  if (resources->session) {
+    WinHttpCloseHandle(resources->session);
+  }
+  free(resources->host);
+  free(resources->path);
+}
+
+// Returns true on success, with `response` filled in. On failure, pushes onto
+// error_stack and leaves `response` untouched; either way, whatever was
+// allocated into `resources` before the failure is left there for
+// chttp_request to clean up.
+static bool chttp_win32_perform_request(const ChttpRequest *request,
+                                        const wchar_t *wide_url,
+                                        ChttpResponse *response,
+                                        WinHttpResources *resources,
+                                        ErrorStack *error_stack) {
+  URL_COMPONENTS components;
+  memset(&components, 0, sizeof(components));
+  components.dwStructSize = sizeof(components);
+  components.dwHostNameLength = (DWORD)-1;
+  components.dwUrlPathLength = (DWORD)-1;
+  components.dwExtraInfoLength = (DWORD)-1;
+  components.dwSchemeLength = (DWORD)-1;
+
+  if (!WinHttpCrackUrl(wide_url, 0, 0, &components)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
+        get_formatted_string("could not parse url %s", request->url));
+    return false;
+  }
+
+  resources->host = (wchar_t *)malloc_or_die(
+      sizeof(wchar_t) * ((size_t)components.dwHostNameLength + 1));
+  memcpy(resources->host, components.lpszHostName,
+         sizeof(wchar_t) * components.dwHostNameLength);
+  resources->host[components.dwHostNameLength] = L'\0';
+
+  const DWORD path_length =
+      components.dwUrlPathLength + components.dwExtraInfoLength;
+  resources->path =
+      (wchar_t *)malloc_or_die(sizeof(wchar_t) * ((size_t)path_length + 1));
+  memcpy(resources->path, components.lpszUrlPath,
+         sizeof(wchar_t) * path_length);
+  resources->path[path_length] = L'\0';
+
+  resources->session =
+      WinHttpOpen(L"MAGPIE", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+  if (!resources->session) {
+    error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
+                     string_duplicate("WinHttpOpen failed"));
+    return false;
+  }
+
+  const DWORD timeout_ms = (DWORD)request->timeout_seconds * 1000;
+  WinHttpSetTimeouts(resources->session, (int)timeout_ms, (int)timeout_ms,
+                     (int)timeout_ms, (int)timeout_ms);
+
+  resources->connection =
+      WinHttpConnect(resources->session, resources->host, components.nPort, 0);
+  if (!resources->connection) {
+    error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
+                     string_duplicate("WinHttpConnect failed"));
+    return false;
+  }
+
+  const DWORD flags =
+      (components.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
+  resources->handle = WinHttpOpenRequest(
+      resources->connection, request->method == CHTTP_POST ? L"POST" : L"GET",
+      resources->path, NULL, WINHTTP_NO_REFERER,
+      WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+  if (!resources->handle) {
+    error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
+                     string_duplicate("WinHttpOpenRequest failed"));
+    return false;
+  }
+
+  for (int i = 0; i < request->num_headers; i++) {
+    wchar_t *wide_header = widen(request->headers[i]);
+    if (wide_header) {
+      WinHttpAddRequestHeaders(resources->handle, wide_header, (DWORD)-1,
+                               WINHTTP_ADDREQ_FLAG_ADD);
+      free(wide_header);
+    }
+  }
+
+  if (!WinHttpSendRequest(resources->handle, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                          (LPVOID)request->body, (DWORD)request->body_length,
+                          (DWORD)request->body_length, 0) ||
+      !WinHttpReceiveResponse(resources->handle, NULL)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
+        get_formatted_string("request to %s failed", request->url));
+    return false;
+  }
+
+  DWORD status = 0;
+  DWORD status_size = sizeof(status);
+  WinHttpQueryHeaders(resources->handle,
+                      WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                      WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+                      WINHTTP_NO_HEADER_INDEX);
+  response->status_code = (long)status;
+
+  DWORD retry_after = 0;
+  DWORD retry_after_size = sizeof(retry_after);
+  if (WinHttpQueryHeaders(resources->handle,
+                          WINHTTP_QUERY_RETRY_AFTER | WINHTTP_QUERY_FLAG_NUMBER,
+                          WINHTTP_HEADER_NAME_BY_INDEX, &retry_after,
+                          &retry_after_size, WINHTTP_NO_HEADER_INDEX)) {
+    response->retry_after_seconds = (int)retry_after;
+  }
+
+  size_t capacity = 4096;
+  size_t length = 0;
+  char *body = (char *)malloc_or_die(capacity);
+  DWORD available = 0;
+  while (WinHttpQueryDataAvailable(resources->handle, &available) &&
+        available > 0) {
+    if (length + available + 1 > capacity) {
+      while (length + available + 1 > capacity) {
+        capacity *= 2;
+      }
+      body = (char *)realloc_or_die(body, capacity);
+    }
+    DWORD read = 0;
+    if (!WinHttpReadData(resources->handle, body + length, available, &read)) {
+      break;
+    }
+    length += read;
+  }
+  body[length] = '\0';
+  response->body = body;
+  response->body_length = length;
+  return true;
+}
+
 void chttp_request(const ChttpRequest *request, ChttpResponse *response,
                    ErrorStack *error_stack) {
   chttp_response_reset(response);
@@ -69,143 +225,12 @@ void chttp_request(const ChttpRequest *request, ChttpResponse *response,
     return;
   }
 
-  URL_COMPONENTS components;
-  memset(&components, 0, sizeof(components));
-  components.dwStructSize = sizeof(components);
-  components.dwHostNameLength = (DWORD)-1;
-  components.dwUrlPathLength = (DWORD)-1;
-  components.dwExtraInfoLength = (DWORD)-1;
-  components.dwSchemeLength = (DWORD)-1;
-
-  HINTERNET session = NULL;
-  HINTERNET connection = NULL;
-  HINTERNET handle = NULL;
-  wchar_t *host = NULL;
-  wchar_t *path = NULL;
-  bool failed = true;
-
-  if (!WinHttpCrackUrl(wide_url, 0, 0, &components)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
-        get_formatted_string("could not parse url %s", request->url));
-    goto cleanup;
-  }
-
-  host = (wchar_t *)malloc_or_die(sizeof(wchar_t) *
-                                  ((size_t)components.dwHostNameLength + 1));
-  memcpy(host, components.lpszHostName,
-         sizeof(wchar_t) * components.dwHostNameLength);
-  host[components.dwHostNameLength] = L'\0';
-
-  const DWORD path_length =
-      components.dwUrlPathLength + components.dwExtraInfoLength;
-  path = (wchar_t *)malloc_or_die(sizeof(wchar_t) * ((size_t)path_length + 1));
-  memcpy(path, components.lpszUrlPath, sizeof(wchar_t) * path_length);
-  path[path_length] = L'\0';
-
-  session = WinHttpOpen(L"MAGPIE", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-  if (!session) {
-    error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
-                     string_duplicate("WinHttpOpen failed"));
-    goto cleanup;
-  }
-
-  const DWORD timeout_ms = (DWORD)request->timeout_seconds * 1000;
-  WinHttpSetTimeouts(session, (int)timeout_ms, (int)timeout_ms, (int)timeout_ms,
-                     (int)timeout_ms);
-
-  connection = WinHttpConnect(session, host, components.nPort, 0);
-  if (!connection) {
-    error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
-                     string_duplicate("WinHttpConnect failed"));
-    goto cleanup;
-  }
-
-  const DWORD flags =
-      (components.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
-  handle = WinHttpOpenRequest(connection,
-                              request->method == CHTTP_POST ? L"POST" : L"GET",
-                              path, NULL, WINHTTP_NO_REFERER,
-                              WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-  if (!handle) {
-    error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
-                     string_duplicate("WinHttpOpenRequest failed"));
-    goto cleanup;
-  }
-
-  for (int i = 0; i < request->num_headers; i++) {
-    wchar_t *wide_header = widen(request->headers[i]);
-    if (wide_header) {
-      WinHttpAddRequestHeaders(handle, wide_header, (DWORD)-1,
-                               WINHTTP_ADDREQ_FLAG_ADD);
-      free(wide_header);
-    }
-  }
-
-  if (!WinHttpSendRequest(handle, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                          (LPVOID)request->body, (DWORD)request->body_length,
-                          (DWORD)request->body_length, 0) ||
-      !WinHttpReceiveResponse(handle, NULL)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
-        get_formatted_string("request to %s failed", request->url));
-    goto cleanup;
-  }
-
-  DWORD status = 0;
-  DWORD status_size = sizeof(status);
-  WinHttpQueryHeaders(handle,
-                      WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                      WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
-                      WINHTTP_NO_HEADER_INDEX);
-  response->status_code = (long)status;
-
-  DWORD retry_after = 0;
-  DWORD retry_after_size = sizeof(retry_after);
-  if (WinHttpQueryHeaders(handle,
-                          WINHTTP_QUERY_RETRY_AFTER | WINHTTP_QUERY_FLAG_NUMBER,
-                          WINHTTP_HEADER_NAME_BY_INDEX, &retry_after,
-                          &retry_after_size, WINHTTP_NO_HEADER_INDEX)) {
-    response->retry_after_seconds = (int)retry_after;
-  }
-
-  size_t capacity = 4096;
-  size_t length = 0;
-  char *body = (char *)malloc_or_die(capacity);
-  DWORD available = 0;
-  while (WinHttpQueryDataAvailable(handle, &available) && available > 0) {
-    if (length + available + 1 > capacity) {
-      while (length + available + 1 > capacity) {
-        capacity *= 2;
-      }
-      body = (char *)realloc_or_die(body, capacity);
-    }
-    DWORD read = 0;
-    if (!WinHttpReadData(handle, body + length, available, &read)) {
-      break;
-    }
-    length += read;
-  }
-  body[length] = '\0';
-  response->body = body;
-  response->body_length = length;
-  failed = false;
-
-cleanup:
-  if (handle) {
-    WinHttpCloseHandle(handle);
-  }
-  if (connection) {
-    WinHttpCloseHandle(connection);
-  }
-  if (session) {
-    WinHttpCloseHandle(session);
-  }
-  free(host);
-  free(path);
+  WinHttpResources resources = {0};
+  const bool succeeded = chttp_win32_perform_request(
+      request, wide_url, response, &resources, error_stack);
+  winhttp_resources_cleanup(&resources);
   free(wide_url);
-  if (failed) {
+  if (!succeeded) {
     chttp_response_destroy(response);
   }
 }

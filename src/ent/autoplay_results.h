@@ -41,6 +41,8 @@ void autoplay_results_reset(AutoplayResults *autoplay_results);
 // job's num_plays_recorded, which is not how many the player simulated.
 void autoplay_results_set_position_play_cap(AutoplayResults *autoplay_results,
                                             int cap);
+int autoplay_results_get_position_play_cap(
+    const AutoplayResults *autoplay_results);
 
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
@@ -69,12 +71,9 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
 // where a paired run's signal lives, since identically-played pairs are
 // guaranteed ties carrying no information.
 //
-// The positions recorder (when active) writes "positions": a captured
-// position's data lives in the SimResults the simulation already produced,
-// so this reads that directly rather than copying it into a parallel set of
-// public structs first. Positions are recorded per worker thread and merged,
-// so they are *not* in game or turn order -- each carries its own game and
-// turn number.
+// The positions recorder (when active) writes "positions": every worker
+// thread appends captures into one shared, growing list, so they are *not*
+// in game or turn order -- each carries its own game and turn number.
 char *autoplay_results_to_json(AutoplayResults *autoplay_results,
                                bool show_divergent);
 

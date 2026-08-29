@@ -1370,11 +1370,25 @@ void autoplay_results_set_recorder(
 // analysis instead of discarding it. Enabled with the `positions` autoplay
 // option.
 //
-// Each captured position keeps a duplicate of the turn's SimResults when the
-// player simmed, which already holds the ranked plays, their win percentages
-// and their per-ply statistics. Nothing is copied into a parallel struct.
+// Every worker thread appends directly into one array shared across all of
+// them, protected by a single mutex and grown on the fly as captures come in.
+// There is nothing left for positions_data_consolidate to do at the end of a
+// run: by the time it runs, the data is already all in one place.
 
 enum { POSITIONS_INITIAL_CAPACITY = 256 };
+
+typedef struct CapturedPlay {
+  char *move_string;
+  int score;
+  double equity;
+  // A static player's move was never simmed, so it has no win percentage and
+  // no per-ply statistics.
+  bool has_win_percentage;
+  double win_percentage;
+  int num_plies;
+  double *bingo_percentages; // [num_plies]; NULL when num_plies == 0
+  double *average_scores;    // [num_plies]; NULL when num_plies == 0
+} CapturedPlay;
 
 typedef struct CapturedPosition {
   char *cgp;
@@ -1384,19 +1398,13 @@ typedef struct CapturedPosition {
   int turn_number;
   // How many plays were ranked, before the report cap.
   int num_moves;
-  // Set when the player simmed; NULL for a static player, whose ranking is a
-  // single move with no win percentage. Supplies the win percentages and
-  // per-ply statistics, which live nowhere else.
-  SimResults *sim_results;
-  // Rendering a move needs the board and letter distribution as they stood on
-  // this turn, so the strings are built here rather than deferred to write
-  // time. Everything numeric still comes from sim_results.
-  char **move_strings;
-  int *move_scores;
-  double *move_equities;
-  int num_stored_moves;
+  CapturedPlay *plays;
+  int num_stored_plays;
 } CapturedPosition;
 
+// Shared by every worker thread: one growing array, one mutex. The recorder's
+// own per-instance `data` is unused (left NULL) since there is no per-thread
+// state left to keep once captures land here directly.
 typedef struct PositionsData {
   CapturedPosition *positions;
   int count;
@@ -1405,49 +1413,117 @@ typedef struct PositionsData {
   cpthread_mutex_t mutex;
 } PositionsData;
 
+static void captured_play_free_contents(CapturedPlay *play) {
+  free(play->move_string);
+  free(play->bingo_percentages);
+  free(play->average_scores);
+}
+
 static void positions_data_free_contents(PositionsData *data) {
   for (int i = 0; i < data->count; i++) {
     CapturedPosition *position = &data->positions[i];
     free(position->cgp);
     free(position->rack);
-    for (int j = 0; j < position->num_stored_moves; j++) {
-      free(position->move_strings[j]);
+    for (int j = 0; j < position->num_stored_plays; j++) {
+      captured_play_free_contents(&position->plays[j]);
     }
-    free(position->move_strings);
-    free(position->move_scores);
-    free(position->move_equities);
-    if (position->sim_results) {
-      sim_results_destroy(position->sim_results);
-    }
+    free(position->plays);
   }
   data->count = 0;
 }
 
 void positions_data_reset(Recorder *recorder) {
-  positions_data_free_contents((PositionsData *)recorder->data);
+  // Every worker's recorder shares the same PositionsData, so only the owner
+  // clears it -- otherwise every thread's own reset call would free the same
+  // memory again.
+  if (!recorder->owns_thread_shared_data) {
+    return;
+  }
+  positions_data_free_contents((PositionsData *)recorder->thread_shared_data);
 }
 
 void positions_data_create(Recorder *recorder) {
-  PositionsData *data = malloc_or_die(sizeof(PositionsData));
-  data->capacity = POSITIONS_INITIAL_CAPACITY;
-  data->positions =
-      malloc_or_die(sizeof(CapturedPosition) * (size_t)data->capacity);
-  data->count = 0;
-  data->play_cap = 10;
-  cpthread_mutex_init(&data->mutex);
-  recorder->data = data;
-  recorder->thread_shared_data = NULL;
+  PositionsData *shared_data = NULL;
+  if (recorder->owns_thread_shared_data) {
+    shared_data = malloc_or_die(sizeof(PositionsData));
+    shared_data->capacity = POSITIONS_INITIAL_CAPACITY;
+    shared_data->positions =
+        malloc_or_die(sizeof(CapturedPosition) * (size_t)shared_data->capacity);
+    shared_data->count = 0;
+    shared_data->play_cap = 10;
+    cpthread_mutex_init(&shared_data->mutex);
+  }
+  // If this recorder is not the owner, the thread shared data will be
+  // assigned in the recorder_create function.
+  recorder->data = NULL;
+  recorder->thread_shared_data = shared_data;
 }
 
 void positions_data_destroy(Recorder *recorder) {
-  PositionsData *data = (PositionsData *)recorder->data;
+  if (!recorder->owns_thread_shared_data) {
+    return;
+  }
+  PositionsData *data = (PositionsData *)recorder->thread_shared_data;
   positions_data_free_contents(data);
   free(data->positions);
   free(data);
 }
 
+static void captured_play_fill_from_simmed_play(CapturedPlay *play,
+                                                const SimmedPlay *simmed_play,
+                                                const Game *game,
+                                                const LetterDistribution *ld,
+                                                int num_plies) {
+  const Move *move = simmed_play_get_move(simmed_play);
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
+  play->move_string = string_builder_dump(move_sb, NULL);
+  string_builder_destroy(move_sb);
+  const Equity score = move_get_score(move);
+  const Equity equity = move_get_equity(move);
+  // A pass carries a sentinel equity that cannot be converted; reporting
+  // zeros keeps the whole ranked list serializable.
+  play->score = equity_is_convertible(score) ? equity_to_int(score) : 0;
+  play->equity = equity_is_convertible(equity) ? equity_to_double(equity) : 0.0;
+  play->has_win_percentage = true;
+  play->win_percentage =
+      stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) * 100.0;
+  play->num_plies = num_plies;
+  if (num_plies > 0) {
+    play->bingo_percentages = malloc_or_die(sizeof(double) * (size_t)num_plies);
+    play->average_scores = malloc_or_die(sizeof(double) * (size_t)num_plies);
+    for (int ply = 0; ply < num_plies; ply++) {
+      play->bingo_percentages[ply] =
+          stat_get_mean(simmed_play_get_bingo_stat(simmed_play, ply)) * 100.0;
+      play->average_scores[ply] =
+          stat_get_mean(simmed_play_get_score_stat(simmed_play, ply));
+    }
+  } else {
+    play->bingo_percentages = NULL;
+    play->average_scores = NULL;
+  }
+}
+
+static void captured_play_fill_from_move(CapturedPlay *play, const Move *move,
+                                         const Game *game,
+                                         const LetterDistribution *ld) {
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
+  play->move_string = string_builder_dump(move_sb, NULL);
+  string_builder_destroy(move_sb);
+  const Equity score = move_get_score(move);
+  const Equity equity = move_get_equity(move);
+  play->score = equity_is_convertible(score) ? equity_to_int(score) : 0;
+  play->equity = equity_is_convertible(equity) ? equity_to_double(equity) : 0.0;
+  play->has_win_percentage = false;
+  play->win_percentage = 0.0;
+  play->num_plies = 0;
+  play->bingo_percentages = NULL;
+  play->average_scores = NULL;
+}
+
 void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
-  PositionsData *data = (PositionsData *)recorder->data;
+  PositionsData *data = (PositionsData *)recorder->thread_shared_data;
   if (!args->move_list) {
     return;
   }
@@ -1466,45 +1542,29 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   position.game_number = args->game_number;
   position.pair_game_number = args->pair_game_number;
   position.turn_number = args->turn_number;
-  if (args->sim_results &&
-      sim_results_get_number_of_plays(args->sim_results) > 0) {
-    // The simulation is reset for the next turn, so the capture takes its own
-    // copy rather than retaining the pointer.
-    position.sim_results = sim_results_duplicate(args->sim_results);
-    position.num_moves = sim_results_get_number_of_plays(args->sim_results);
-    position.num_stored_moves = position.num_moves;
+
+  const bool simmed = args->sim_results &&
+                      sim_results_get_number_of_plays(args->sim_results) > 0;
+  position.num_moves = simmed
+                           ? sim_results_get_number_of_plays(args->sim_results)
+                           : move_list_get_count(args->move_list);
+  position.num_stored_plays = position.num_moves;
+  position.plays =
+      malloc_or_die(sizeof(CapturedPlay) * (size_t)position.num_stored_plays);
+
+  if (simmed) {
+    const int num_plies = sim_results_get_num_plies(args->sim_results);
+    for (int i = 0; i < position.num_stored_plays; i++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(args->sim_results, i);
+      captured_play_fill_from_simmed_play(&position.plays[i], simmed_play, game,
+                                          ld, num_plies);
+    }
   } else {
-    // A static player forces MOVE_RECORD_BEST, so the move list holds only the
-    // move that was played and there is no simulation behind it.
-    position.sim_results = NULL;
-    position.num_moves = move_list_get_count(args->move_list);
-    position.num_stored_moves = position.num_moves;
-  }
-
-  position.move_strings =
-      malloc_or_die(sizeof(char *) * (size_t)position.num_stored_moves);
-  position.move_scores =
-      malloc_or_die(sizeof(int) * (size_t)position.num_stored_moves);
-  position.move_equities =
-      malloc_or_die(sizeof(double) * (size_t)position.num_stored_moves);
-
-  for (int i = 0; i < position.num_stored_moves; i++) {
-    const Move *move = position.sim_results
-                           ? simmed_play_get_move(sim_results_get_simmed_play(
-                                 position.sim_results, i))
-                           : move_list_get_move(args->move_list, i);
-    StringBuilder *move_sb = string_builder_create();
-    string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
-    position.move_strings[i] = string_builder_dump(move_sb, NULL);
-    string_builder_destroy(move_sb);
-    // A pass carries a sentinel equity that cannot be converted; reporting
-    // zeros keeps the whole ranked list serializable.
-    const Equity score = move_get_score(move);
-    const Equity equity = move_get_equity(move);
-    position.move_scores[i] =
-        equity_is_convertible(score) ? equity_to_int(score) : 0;
-    position.move_equities[i] =
-        equity_is_convertible(equity) ? equity_to_double(equity) : 0.0;
+    for (int i = 0; i < position.num_stored_plays; i++) {
+      const Move *move = move_list_get_move(args->move_list, i);
+      captured_play_fill_from_move(&position.plays[i], move, game, ld);
+    }
   }
 
   cpthread_mutex_lock(&data->mutex);
@@ -1517,57 +1577,37 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   cpthread_mutex_unlock(&data->mutex);
 }
 
-void positions_data_consolidate(Recorder **recorder_list,
-                                int recorder_list_size,
-                                Recorder *primary_recorder) {
-  PositionsData *primary = (PositionsData *)primary_recorder->data;
-  for (int i = 0; i < recorder_list_size; i++) {
-    if (recorder_list[i] == primary_recorder) {
-      continue;
-    }
-    PositionsData *other = (PositionsData *)recorder_list[i]->data;
-    for (int j = 0; j < other->count; j++) {
-      if (primary->count == primary->capacity) {
-        primary->capacity *= 2;
-        primary->positions =
-            realloc_or_die(primary->positions, sizeof(CapturedPosition) *
-                                                   (size_t)primary->capacity);
-      }
-      // Ownership moves to the primary.
-      primary->positions[primary->count++] = other->positions[j];
-    }
-    other->count = 0;
-  }
-}
+// Nothing to do: every worker thread already appended straight into the one
+// shared PositionsData as captures happened, so there are no separate
+// per-thread arrays left to merge.
+void positions_data_consolidate(Recorder __attribute__((unused)) *
+                                    *recorder_list,
+                                int __attribute__((unused)) recorder_list_size,
+                                Recorder __attribute__((unused)) *
+                                    primary_recorder) {}
 
-static void write_position_move(StringBuilder *sb, const char *move, int score,
-                                double equity, const double *win_percentage,
-                                const SimmedPlay *simmed_play, int num_plies) {
+static void write_captured_play(StringBuilder *sb, const CapturedPlay *play) {
   bool first = true;
   json_write_object_start(sb);
-  json_write_string_field(sb, "move", move, &first);
-  json_write_int_field(sb, "score", score, &first);
-  json_write_double_field(sb, "equity", equity, &first);
-  if (win_percentage) {
-    json_write_double_field(sb, "win_percentage", *win_percentage, &first);
+  json_write_string_field(sb, "move", play->move_string, &first);
+  json_write_int_field(sb, "score", play->score, &first);
+  json_write_double_field(sb, "equity", play->equity, &first);
+  if (play->has_win_percentage) {
+    json_write_double_field(sb, "win_percentage", play->win_percentage, &first);
   }
-  if (simmed_play && num_plies > 0) {
+  if (play->num_plies > 0) {
     json_write_array_start(sb, "plies", &first);
-    for (int ply = 0; ply < num_plies; ply++) {
+    for (int ply = 0; ply < play->num_plies; ply++) {
       if (ply > 0) {
         string_builder_add_string(sb, ",");
       }
       bool ply_first = true;
       json_write_object_start(sb);
       json_write_int_field(sb, "ply", ply, &ply_first);
-      json_write_double_field(
-          sb, "bingo_percentage",
-          stat_get_mean(simmed_play_get_bingo_stat(simmed_play, ply)) * 100.0,
-          &ply_first);
-      json_write_double_field(
-          sb, "average_score",
-          stat_get_mean(simmed_play_get_score_stat(simmed_play, ply)),
-          &ply_first);
+      json_write_double_field(sb, "bingo_percentage",
+                              play->bingo_percentages[ply], &ply_first);
+      json_write_double_field(sb, "average_score", play->average_scores[ply],
+                              &ply_first);
       json_write_object_end(sb);
     }
     json_write_array_end(sb);
@@ -1575,11 +1615,13 @@ static void write_position_move(StringBuilder *sb, const char *move, int score,
   json_write_object_end(sb);
 }
 
-// Positions are recorded per worker thread and merged, so they are *not* in
-// game or turn order -- each carries its own game and turn number.
+// Positions are recorded by whichever worker thread played that turn, so they
+// are *not* in game or turn order -- each carries its own game and turn
+// number.
 char *positions_data_json(Recorder *recorder,
                           const RecorderArgs __attribute__((unused)) * args) {
-  const PositionsData *data = (const PositionsData *)recorder->data;
+  const PositionsData *data =
+      (const PositionsData *)recorder->thread_shared_data;
   StringBuilder *sb = string_builder_create();
   bool first = true;
   json_write_array_start(sb, "positions", &first);
@@ -1605,10 +1647,7 @@ char *positions_data_json(Recorder *recorder,
     json_write_int_field(sb, "num_moves", position->num_moves, &position_first);
     json_write_array_start(sb, "moves", &position_first);
 
-    const int num_plies = position->sim_results
-                              ? sim_results_get_num_plies(position->sim_results)
-                              : 0;
-    int plays = position->num_stored_moves;
+    int plays = position->num_stored_plays;
     if (plays > data->play_cap) {
       plays = data->play_cap;
     }
@@ -1616,22 +1655,7 @@ char *positions_data_json(Recorder *recorder,
       if (p > 0) {
         string_builder_add_string(sb, ",");
       }
-      // A static player simulates nothing, so it has no win percentage and no
-      // per-ply statistics.
-      if (position->sim_results) {
-        SimmedPlay *simmed_play =
-            sim_results_get_simmed_play(position->sim_results, p);
-        const double win_percentage =
-            stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) * 100.0;
-        write_position_move(sb, position->move_strings[p],
-                            position->move_scores[p],
-                            position->move_equities[p], &win_percentage,
-                            simmed_play, num_plies);
-      } else {
-        write_position_move(sb, position->move_strings[p],
-                            position->move_scores[p],
-                            position->move_equities[p], NULL, NULL, 0);
-      }
+      write_captured_play(sb, &position->plays[p]);
     }
 
     json_write_array_end(sb);
@@ -1649,8 +1673,18 @@ void autoplay_results_set_position_play_cap(AutoplayResults *autoplay_results,
   Recorder *recorder =
       autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_POSITION];
   if (recorder && cap > 0) {
-    ((PositionsData *)recorder->data)->play_cap = cap;
+    ((PositionsData *)recorder->thread_shared_data)->play_cap = cap;
   }
+}
+
+int autoplay_results_get_position_play_cap(
+    const AutoplayResults *autoplay_results) {
+  const Recorder *recorder =
+      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_POSITION];
+  if (!recorder) {
+    return 0;
+  }
+  return ((PositionsData *)recorder->thread_shared_data)->play_cap;
 }
 
 void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
@@ -1879,11 +1913,18 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary) {
   cpthread_mutex_lock(&primary->mutex);
-  autoplay_results_reset(primary);
   Recorder **recorder_list = malloc_or_die(sizeof(Recorder *) * list_size);
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (!autoplay_results_list[0]->recorders[i]) {
       continue;
+    }
+    // The positions recorder shares one structure across every worker thread
+    // that every capture already landed in directly as it happened, so
+    // resetting it here (like the other recorders, which are pure merge
+    // targets with no data of their own until this loop fills them) would
+    // just discard the run that was just captured.
+    if (i != AUTOPLAY_RECORDER_TYPE_POSITION) {
+      recorder_reset(primary->recorders[i]);
     }
     for (int j = 0; j < list_size; j++) {
       recorder_list[j] = autoplay_results_list[j]->recorders[i];

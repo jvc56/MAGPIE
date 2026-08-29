@@ -90,7 +90,6 @@ enum {
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
   // Sanity bound on a contribute task's requested game count.
-  CONTRIBUTE_MAX_BATCH_GAMES = 1000000,
 };
 
 typedef enum {
@@ -7158,11 +7157,11 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
-  if (num_games <= 0 || num_games > CONTRIBUTE_MAX_BATCH_GAMES) {
-    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-                     get_formatted_string(
-                         "server asked for an unreasonable batch size: %lld",
-                         (long long)num_games));
+  if (num_games <= 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server asked for a non-positive batch size: %lld",
+                             (long long)num_games));
     return NULL;
   }
 

@@ -931,14 +931,16 @@ void test_get_top_move_for_player_on_turn_respects_sort_type(void) {
   draw_rack_string_from_bag(game, 0, "DEKNRTY");
 
   player_set_move_sort_type(player0, MOVE_SORT_SCORE);
-  const Move *score_move = get_top_move_for_player_on_turn(game, move_list);
+  const Move *score_move =
+      get_top_move_for_player_on_turn(game, move_list, false);
   assert(equity_to_int(move_get_score(score_move)) == 36);
   // The move chosen by score has no leave value applied, so its equity
   // exactly equals its score.
   assert(move_get_score(score_move) == move_get_equity(score_move));
 
   player_set_move_sort_type(player0, MOVE_SORT_EQUITY);
-  const Move *equity_move = get_top_move_for_player_on_turn(game, move_list);
+  const Move *equity_move =
+      get_top_move_for_player_on_turn(game, move_list, false);
   assert(equity_to_int(move_get_score(equity_move)) == 36);
   // The move chosen by equity leaves a better rack behind, so its equity is
   // strictly higher than its raw score.

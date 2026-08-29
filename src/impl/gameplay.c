@@ -898,14 +898,23 @@ const Move *get_top_equity_move(Game *game, MoveList *move_list) {
 // the player on turn instead of always using MOVE_SORT_EQUITY. This is what
 // static (non-simming) play should use so that per-player sort type settings
 // (e.g. the "s1"/"s2" args) actually affect play.
-const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list) {
+//
+// record_all keeps every ranked move in move_list (up to its capacity)
+// instead of just the one that gets played, matching how a simming player's
+// SimResults already keeps its whole ranked list. This costs nothing when the
+// caller doesn't need it (move_list_get_move(move_list, 0) is still the move
+// to play either way), so it is off unless something -- currently, position
+// capture -- actually wants the rest of the list.
+const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
+                                            bool record_all) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .eq_margin_movegen = 0,
                             .target_equity = EQUITY_MAX_VALUE,
                             .target_leave_size_for_exchange_cutoff =
                                 UNSET_LEAVE_SIZE};
-  generate_moves_for_game_override_record_type(&args, MOVE_RECORD_BEST);
+  generate_moves_for_game_override_record_type(
+      &args, record_all ? MOVE_RECORD_ALL : MOVE_RECORD_BEST);
   return move_list_get_move(move_list, 0);
 }
 
