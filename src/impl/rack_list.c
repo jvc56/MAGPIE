@@ -1,6 +1,7 @@
 #include "rack_list.h"
 
 #include "../compat/cpthread.h"
+#include "../def/contribute_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"
@@ -16,6 +17,7 @@
 #include "../ent/xoshiro.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
@@ -642,4 +644,45 @@ void rack_list_write_rack_equity_csv(const RackList *rack_list,
   }
   string_builder_destroy(line_sb);
   fclose_or_die(stream);
+}
+
+// {"racks":[{"rack":"AA","count":30,"mean":1.5}, ...]}, one entry per rack
+// actually observed (count > 0) -- forced racks and any other rack that
+// happened to occur alike. Mirrors rack_list_write_rack_equity_csv's own
+// direct traversal of racks_ordered_by_index rather than going through
+// rack_list_get_count/get_mean/get_encoded_rack, which take a *KLV* index
+// and convert it -- the wrong index space here and not what those were built
+// for.
+char *rack_list_get_rack_equity_json(const RackList *rack_list,
+                                     const LetterDistribution *ld) {
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_array_start(sb, CONTRIBUTE_KEY_RACKS, &first);
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(ld));
+  bool any_written = false;
+  for (int i = 0; i < rack_list->number_of_racks; i++) {
+    const RackListItem *item = rack_list->racks_ordered_by_index[i];
+    if (item->count == 0) {
+      continue;
+    }
+    if (any_written) {
+      string_builder_add_string(sb, ",");
+    }
+    any_written = true;
+    rack_decode(&item->encoded_rack, &rack);
+    char rack_str[(RACK_SIZE) * MAX_LETTER_BYTE_LENGTH + 1];
+    rack_get_string(&rack, ld, false, rack_str, sizeof(rack_str));
+    bool rack_first = true;
+    json_write_object_start(sb);
+    json_write_string_field(sb, CONTRIBUTE_KEY_RACK, rack_str, &rack_first);
+    json_write_int_field(sb, CONTRIBUTE_KEY_COUNT, (int64_t)item->count,
+                         &rack_first);
+    json_write_double_field(sb, CONTRIBUTE_KEY_MEAN, item->mean, &rack_first);
+    json_write_object_end(sb);
+  }
+  json_write_array_end(sb);
+  char *json = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return json;
 }

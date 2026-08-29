@@ -39,7 +39,8 @@ void autoplay_results_reset(AutoplayResults *autoplay_results);
 
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave, const MoveList *move_list,
+                               const Move *previous_move, const Rack *leave,
+                               const MoveList *move_list,
                                const SimResults *sim_results, int game_number,
                                int pair_game_number, int turn_number,
                                int play_cap);
@@ -75,6 +76,14 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
 // order -- each carries its own game and turn number.
 const char *autoplay_results_get_json(AutoplayResults *autoplay_results,
                                       bool show_divergent);
+
+// Leave generation only. Set by postgen_prebroadcast_func once a
+// generation's RackList target is reached (or leavegen_max_games ends the
+// run first); NULL otherwise. See the struct comment in autoplay_results.c.
+void autoplay_results_set_leave_results_json(AutoplayResults *autoplay_results,
+                                             char *leave_results_json);
+const char *
+autoplay_results_get_leave_results_json(const AutoplayResults *autoplay_results);
 
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);

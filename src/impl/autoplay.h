@@ -31,6 +31,13 @@ typedef struct AutoplayArgs {
   // (see autoplay_worker_create) and is threaded through to
   // positions_data_add_move via RecorderArgs.play_cap.
   int position_play_cap;
+  // AUTOPLAY_TYPE_LEAVE_GEN only: a hard cap on games played, independent of
+  // whether the generation's rack targets are ever reached. 0 means
+  // unbounded (the CLI leavegen command's own behavior, unchanged). A
+  // bounded contribute leave_generation task sets this so the task cannot
+  // run indefinitely if its forced-rack subset doesn't hit target within a
+  // reasonable number of games.
+  uint64_t leavegen_max_games;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;

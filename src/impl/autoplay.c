@@ -189,6 +189,12 @@ void postgen_prebroadcast_func(void *data) {
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   rack_list_write_to_klv(lg_shared_data->rack_list, lg_shared_data->ld,
                          lg_shared_data->klv);
+  // The direct-RackList-read MAGPIE-CLIENT.md's contribute leave_generation
+  // executor calls for, in place of a -writerackequitycsv file round trip.
+  autoplay_results_set_leave_results_json(
+      lg_shared_data->primary_autoplay_results,
+      rack_list_get_rack_equity_json(lg_shared_data->rack_list,
+                                     lg_shared_data->ld));
   lg_shared_data->gens_completed++;
 
   // Write the KLV for the current generation.
@@ -826,6 +832,9 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   // recorder that keeps them must copy.
   autoplay_results_add_move(
       autoplay_worker->autoplay_results, game_runner->game, move,
+      // previous_move is only meaningful once a turn has actually been
+      // played; game_runner->previous_move is stale/uninitialized before that.
+      game_runner->turn_number > 0 ? &game_runner->previous_move : NULL,
       &rare_rack_or_move_leave,
       autoplay_worker
           ->move_lists[game_get_player_on_turn_index(game_runner->game)],
@@ -1190,7 +1199,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
                                args->num_games_or_min_rack_targets));
       return;
     }
-    first_gen_num_games = UINT64_MAX;
+    first_gen_num_games =
+        args->leavegen_max_games > 0 ? args->leavegen_max_games : UINT64_MAX;
   } else {
     first_gen_num_games =
         string_to_uint64(args->num_games_or_min_rack_targets, error_stack);

@@ -11,6 +11,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../impl/cgp.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
@@ -42,6 +43,9 @@ enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
 typedef struct RecorderArgs {
   const Game *game;
   const Move *move;
+  // The move played on the previous turn of this same game, or NULL on the
+  // first turn. Distinct from `move`, which is this turn's chosen move.
+  const Move *previous_move;
   // The ranked candidates this turn, not just the one chosen. Reused across
   // turns by the caller, so a recorder must copy rather than retain it.
   const MoveList *move_list;
@@ -115,6 +119,13 @@ struct AutoplayResults {
   // Owned by this AutoplayResults; set by autoplay_results_get_json, freed
   // here rather than handed off to the caller.
   char *cached_json;
+  // Leave generation only: the "{"racks":[...]}" rendering of the run's
+  // RackList, stashed by postgen_prebroadcast_func (autoplay.c) at the one
+  // point RackList is both populated and still alive -- it is destroyed
+  // inside autoplay() before returning, so this is the only way a caller
+  // (config_contribute_leave_gen) can read it afterward. NULL outside
+  // leavegen mode.
+  char *leave_results_json;
 };
 
 // Generic recorders
@@ -1400,6 +1411,14 @@ enum {
   // plus a little padding for the space and played-through-tile grouping
   // parens.
   CAPTURED_MOVE_STRING_SIZE = (BOARD_DIM) * (MAX_LETTER_BYTE_LENGTH + 2) + 16,
+  // A full CGP: every board square as a distinct letter (worst case) plus a
+  // '/' between each of the BOARD_DIM rows, both racks, both scores and the
+  // consecutive-scoreless-turns count, with generous padding for the
+  // separators and digits.
+  CAPTURED_CGP_STRING_SIZE = (BOARD_DIM) * (BOARD_DIM) *
+                                 (MAX_LETTER_BYTE_LENGTH) +
+                             (BOARD_DIM) + 2 * (CAPTURED_RACK_STRING_SIZE) +
+                             64,
   // How many per-ply stats a play keeps; a report never needs more detail
   // than this even when the sim ran deeper.
   CAPTURED_PLAY_MAX_PLIES = 10,
@@ -1415,23 +1434,33 @@ typedef struct CapturedPlay {
   int score;
   double equity;
   uint64_t iterations;
-  // A static player's move was never simmed, so it has no win percentage and
-  // no per-ply statistics.
+  // A static player's move was never simmed, so it has no win percentage,
+  // blended utility, or per-ply statistics.
   bool has_win_percentage;
   double win_percentage;
+  // Mean win%+spread blend in [0, 1] (see sim_utility_blend in
+  // src/ent/sim_args.h), parameterized by the player config's
+  // utility_w_winpct/utility_w_spread/utility_spread_scale. Sometimes used
+  // to rank moves instead of equity or raw win percentage.
+  bool has_blended_utility;
+  double blended_utility;
   int num_plies;
   CapturedPly plies[CAPTURED_PLAY_MAX_PLIES];
 } CapturedPlay;
 
 typedef struct CapturedPosition {
   char rack[CAPTURED_RACK_STRING_SIZE];
+  // CGP of the position as it stood before the move was played.
+  char cgp[CAPTURED_CGP_STRING_SIZE];
+  // The move played on the previous turn of this game, and its score.
+  // Absent on the first turn of a game.
+  bool has_previous_move;
+  char previous_move[CAPTURED_MOVE_STRING_SIZE];
+  int previous_move_score;
   int game_number;
   int pair_game_number;
   int turn_number;
-  // How many plays were ranked, before the report cap. The board position
-  // itself isn't kept here: it's derivable from the game recorder's move
-  // history for this game_number/turn_number, so there's no need to carry a
-  // second copy of it through this recorder too.
+  // How many plays were ranked, before the report cap.
   int num_moves;
   uint64_t total_iterations;
   double time_elapsed;
@@ -1528,6 +1557,9 @@ static void captured_play_fill_from_simmed_play(CapturedPlay *play,
   play->has_win_percentage = true;
   play->win_percentage =
       stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) * 100.0;
+  play->has_blended_utility = true;
+  play->blended_utility =
+      stat_get_mean(simmed_play_get_utility_stat(simmed_play));
   play->num_plies =
       num_plies < CAPTURED_PLAY_MAX_PLIES ? num_plies : CAPTURED_PLAY_MAX_PLIES;
   for (int ply = 0; ply < play->num_plies; ply++) {
@@ -1545,6 +1577,8 @@ static void captured_play_fill_from_move(CapturedPlay *play, const Move *move,
   play->iterations = 0;
   play->has_win_percentage = false;
   play->win_percentage = 0.0;
+  play->has_blended_utility = false;
+  play->blended_utility = 0.0;
   play->num_plies = 0;
 }
 
@@ -1580,6 +1614,19 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   }
   CapturedPosition *position = &data->positions[data->count++];
   rack_get_string(rack, ld, false, position->rack, sizeof(position->rack));
+  // The board as it stands before this turn's move is played -- args->move
+  // has been chosen but not yet applied to args->game at this call site.
+  game_get_cgp_string(game, false, position->cgp, sizeof(position->cgp));
+  position->has_previous_move = args->previous_move != NULL;
+  if (position->has_previous_move) {
+    move_get_string(args->previous_move, game_get_board(game), ld, false,
+                    position->previous_move, sizeof(position->previous_move));
+    position->previous_move_score =
+        equity_to_int(move_get_score(args->previous_move));
+  } else {
+    position->previous_move[0] = '\0';
+    position->previous_move_score = 0;
+  }
   position->game_number = args->game_number;
   position->pair_game_number = args->pair_game_number;
   position->turn_number = args->turn_number;
@@ -1631,6 +1678,10 @@ static void write_captured_play(StringBuilder *sb, const CapturedPlay *play) {
     json_write_double_field(sb, CONTRIBUTE_KEY_WIN_PERCENTAGE,
                             play->win_percentage, &first);
   }
+  if (play->has_blended_utility) {
+    json_write_double_field(sb, CONTRIBUTE_KEY_BLENDED_UTILITY,
+                            play->blended_utility, &first);
+  }
   if (play->num_plies > 0) {
     json_write_array_start(sb, CONTRIBUTE_KEY_PLIES, &first);
     for (int ply = 0; ply < play->num_plies; ply++) {
@@ -1667,6 +1718,14 @@ static void write_captured_position(StringBuilder *sb,
                        &position_first);
   json_write_string_field(sb, CONTRIBUTE_KEY_RACK, position->rack,
                           &position_first);
+  json_write_string_field(sb, CONTRIBUTE_KEY_POSITION, position->cgp,
+                          &position_first);
+  if (position->has_previous_move) {
+    json_write_string_field(sb, CONTRIBUTE_KEY_PREVIOUS_MOVE,
+                            position->previous_move, &position_first);
+    json_write_int_field(sb, CONTRIBUTE_KEY_PREVIOUS_MOVE_SCORE,
+                         position->previous_move_score, &position_first);
+  }
   json_write_int_field(sb, CONTRIBUTE_KEY_NUM_MOVES, position->num_moves,
                        &position_first);
   json_write_int_field(sb, CONTRIBUTE_KEY_TOTAL_ITERATIONS,
@@ -1851,6 +1910,7 @@ AutoplayResults *autoplay_results_create_internal(void) {
   autoplay_results->human_readable = false;
   autoplay_results->show_divergent = false;
   autoplay_results->cached_json = NULL;
+  autoplay_results->leave_results_json = NULL;
   cpthread_mutex_init(&autoplay_results->mutex);
   return autoplay_results;
 }
@@ -1886,7 +1946,28 @@ void autoplay_results_destroy(AutoplayResults *autoplay_results) {
     destroy_recorder_context(autoplay_results->recorder_context);
   }
   free(autoplay_results->cached_json);
+  free(autoplay_results->leave_results_json);
   free(autoplay_results);
+}
+
+// Called from postgen_prebroadcast_func (autoplay.c), the one point a
+// leavegen run's RackList is both fully populated for this generation and
+// still alive. Replaces any previous value: leavegen_max_games (see
+// AutoplayArgs) bounds a contribute task to a single generation, so this is
+// set at most once per run in practice, but a multi-generation CLI run
+// would otherwise leak every earlier generation's string.
+void autoplay_results_set_leave_results_json(AutoplayResults *autoplay_results,
+                                             char *leave_results_json) {
+  free(autoplay_results->leave_results_json);
+  autoplay_results->leave_results_json = leave_results_json;
+}
+
+// Borrowed; valid until autoplay_results is destroyed or another leavegen
+// run reuses it. NULL outside leavegen mode, or if the run's target was
+// never reached (see leavegen_max_games).
+const char *
+autoplay_results_get_leave_results_json(const AutoplayResults *autoplay_results) {
+  return autoplay_results->leave_results_json;
 }
 
 void autoplay_results_set_status_data(AutoplayResults *autoplay_results,
@@ -1913,13 +1994,15 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave, const MoveList *move_list,
+                               const Move *previous_move, const Rack *leave,
+                               const MoveList *move_list,
                                const SimResults *sim_results, int game_number,
                                int pair_game_number, int turn_number,
                                int play_cap) {
   RecorderArgs args = {0};
   args.game = game;
   args.move = move;
+  args.previous_move = previous_move;
   args.leave = leave;
   args.move_list = move_list;
   args.sim_results = sim_results;

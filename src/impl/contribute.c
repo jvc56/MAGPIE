@@ -414,6 +414,25 @@ int contribute_get_threads(const ContributeState *state) {
   return state->threads;
 }
 
+void contribute_fetch_artifact(ContributeState *state, const char *key,
+                               ChttpResponse *response,
+                               ErrorStack *error_stack) {
+  char *path = get_formatted_string("/api/worker/artifact?key=%s", key);
+  http_client_get(state->http_client, path, response, error_stack);
+  free(path);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (response->status_code != 200) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string(
+            "fetching artifact '%s' failed with HTTP %ld", key,
+            response->status_code));
+    chttp_response_destroy(response);
+  }
+}
+
 void contribute_state_destroy(ContributeState *state) {
   if (!state) {
     return;

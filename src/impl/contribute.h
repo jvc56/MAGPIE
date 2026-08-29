@@ -11,6 +11,7 @@
 // modules from ever needing each other's types, the same way get_gcg.c knows
 // nothing about Config and config.c's impl_load_gcg does the translating.
 
+#include "../compat/chttp.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include "../util/json.h"
@@ -73,6 +74,14 @@ bool contribute_should_stop(const ContributeState *state);
 // Threads a claimed task should use: the settings file's explicit "threads",
 // or (cores - 1) to leave the machine usable if it doesn't set one.
 int contribute_get_threads(const ContributeState *state);
+
+// GET /api/worker/artifact?key=<key> -- the previous leave-generation KLV, or
+// any other server-minted artifact. `response` must be destroyed by the
+// caller with chttp_response_destroy on success; the body may be binary
+// (KLV), so it is length-delimited rather than NUL-terminated text.
+void contribute_fetch_artifact(ContributeState *state, const char *key,
+                               ChttpResponse *response,
+                               ErrorStack *error_stack);
 
 void contribute_state_destroy(ContributeState *state);
 

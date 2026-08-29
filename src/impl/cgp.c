@@ -3,6 +3,7 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
@@ -342,6 +343,109 @@ char *game_get_cgp(const Game *game, bool write_player_on_turn_first) {
   char *cgp = string_builder_dump(cgp_builder, NULL);
   string_builder_destroy(cgp_builder);
   return cgp;
+}
+
+// Appends src to dest at dest[pos], truncating so the write never runs past
+// dest_size - 1, and returns the new position. Assumes dest_size >= 1.
+// Mirrors the identically named helper in str/move_string.c and
+// str/rack_string.c: each bounded-buffer writer keeps its own copy rather
+// than sharing one across modules.
+static size_t append_bounded(char *dest, size_t dest_size, size_t pos,
+                             const char *src) {
+  if (pos >= dest_size - 1) {
+    return pos;
+  }
+  const size_t src_len = strlen(src);
+  const size_t space = dest_size - 1 - pos;
+  const size_t to_copy = src_len < space ? src_len : space;
+  memcpy(dest + pos, src, to_copy);
+  return pos + to_copy;
+}
+
+static size_t append_int_bounded(char *dest, size_t dest_size, size_t pos,
+                                 int value) {
+  char int_str[16];
+  snprintf_or_die(int_str, sizeof(int_str), "%d", value);
+  return append_bounded(dest, dest_size, pos, int_str);
+}
+
+// Writes the same representation as string_builder_add_cgp into dest instead
+// of a StringBuilder, so a caller that needs a CGP on every turn of every
+// game (the positions recorder) doesn't pay for a heap allocation per turn.
+// Reuses rack_get_string, which is already bounded-buffer; everything else
+// here is small enough that duplicating the write logic against
+// append_bounded directly is simpler than threading a StringBuilder/buffer
+// abstraction through string_builder_add_cgp itself.
+void game_get_cgp_string(const Game *game, bool write_player_on_turn_first,
+                         char *dest, size_t dest_size) {
+  if (dest_size == 0) {
+    return;
+  }
+  size_t pos = 0;
+  const LetterDistribution *ld = game_get_ld(game);
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    int consecutive_empty_squares = 0;
+    for (int col = 0; col < BOARD_DIM; col++) {
+      MachineLetter ml = board_get_letter(board, row, col);
+      if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+        consecutive_empty_squares++;
+      } else {
+        if (consecutive_empty_squares > 0) {
+          pos = append_int_bounded(dest, dest_size, pos,
+                                   consecutive_empty_squares);
+          consecutive_empty_squares = 0;
+        }
+        char *letter_str = ld_ml_to_hl(ld, ml);
+        pos = append_bounded(dest, dest_size, pos, letter_str);
+        free(letter_str);
+      }
+    }
+
+    if (consecutive_empty_squares > 0) {
+      pos = append_int_bounded(dest, dest_size, pos, consecutive_empty_squares);
+    }
+
+    if (row != BOARD_DIM - 1) {
+      pos = append_bounded(dest, dest_size, pos, "/");
+    }
+  }
+
+  pos = append_bounded(dest, dest_size, pos, " ");
+
+  const Player *player0 = game_get_player(game, 0);
+  const Player *player1 = game_get_player(game, 1);
+
+  if (write_player_on_turn_first && game_get_player_on_turn_index(game) == 1) {
+    player1 = game_get_player(game, 0);
+    player0 = game_get_player(game, 1);
+  }
+
+  // rack_get_string null-terminates on its own, so build each rack into a
+  // scratch buffer and append that rather than writing into dest directly.
+  char rack_str[(RACK_SIZE) * MAX_LETTER_BYTE_LENGTH + 1];
+  rack_get_string(player_get_rack(player0), ld, false, rack_str,
+                  sizeof(rack_str));
+  pos = append_bounded(dest, dest_size, pos, rack_str);
+  pos = append_bounded(dest, dest_size, pos, "/");
+  rack_get_string(player_get_rack(player1), ld, false, rack_str,
+                  sizeof(rack_str));
+  pos = append_bounded(dest, dest_size, pos, rack_str);
+
+  pos = append_bounded(dest, dest_size, pos, " ");
+
+  pos = append_int_bounded(dest, dest_size, pos,
+                           equity_to_int(player_get_score(player0)));
+  pos = append_bounded(dest, dest_size, pos, "/");
+  pos = append_int_bounded(dest, dest_size, pos,
+                           equity_to_int(player_get_score(player1)));
+
+  pos = append_bounded(dest, dest_size, pos, " ");
+
+  pos = append_int_bounded(dest, dest_size, pos,
+                           game_get_consecutive_scoreless_turns(game));
+
+  dest[pos] = '\0';
 }
 
 // Always adds the following options:

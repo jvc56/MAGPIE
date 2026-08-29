@@ -35,6 +35,10 @@ void rack_list_write_rack_equity_csv(const RackList *rack_list,
                                      const LetterDistribution *ld,
                                      const char *filename,
                                      ErrorStack *error_stack);
+// {"racks":[{"rack","count","mean"}, ...]}, one entry per rack actually
+// observed. Caller owns the returned string.
+char *rack_list_get_rack_equity_json(const RackList *rack_list,
+                                     const LetterDistribution *ld);
 bool rack_list_get_rare_rack(RackList *rack_list, XoshiroPRNG *prng,
                              Rack *rack);
 int rack_list_get_target_rack_count(const RackList *rack_list);
