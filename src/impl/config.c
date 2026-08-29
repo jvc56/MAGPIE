@@ -7232,37 +7232,21 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
     return NULL;
   }
 
-  const AutoplayResults *results = config->autoplay_results;
-  StringBuilder *sb = string_builder_create();
-  bool first = true;
-  json_write_object_start(sb);
-  if (!autoplay_results_write_game_summary(results, sb, "all_games", false,
-                                           &first)) {
-    string_builder_destroy(sb);
+  // The game recorder is always requested above, so this is a defensive
+  // check rather than an expected failure.
+  if (!(autoplay_results_get_options(config->autoplay_results) &
+        autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME))) {
     error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
                      string_duplicate("autoplay produced no game results"));
     return NULL;
   }
-  if (game_pairs) {
-    // The divergent subset is where a paired run's signal lives: pairs whose
-    // two games played identically are guaranteed ties carrying no
-    // information, and the server computes the LLR from this.
-    autoplay_results_write_game_summary(results, sb, "divergent_games", true,
-                                        &first);
-  }
-  
-  // Captured positions, when the job asked for them. Absent otherwise, which
-  // keeps the submission the same shape every existing server expects. The
-  // recorder writes itself from the SimResults it kept, rather than handing
-  // back structs for this to copy.
-  if (capture_positions) {
-    autoplay_results_write_positions(results, sb, "positions", &first);
-  }
 
-  json_write_object_end(sb);
-  char *result = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
-  return result;
+  // The game recorder writes "all_games" and, for game pairs, "divergent_games"
+  // (the subset whose two games did not play identically, where a paired run's
+  // signal lives). The positions recorder, when the job asked for positions to
+  // be captured, writes "positions" alongside it -- each recorder decides its
+  // own shape, the same as autoplay_results_to_string.
+  return autoplay_results_to_json(config->autoplay_results, game_pairs);
 }
 
 // Analyzes one opening rack onto an already-open JSON array, returning false
@@ -7271,9 +7255,9 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
 // racks to analyze rather than full positions.
 static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
                                            const JsonValue *player,
-                                           bool simming,
-                                           StringBuilder *sb,
+                                           bool simming, StringBuilder *sb,
                                            ErrorStack *error_stack) {
+  (void)player;
   game_reset(config->game);
   config_reset_move_list_and_invalidate_sim_results(config);
   if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
@@ -7336,9 +7320,9 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
     // pass is a legitimate entry rather than an error.
     const Equity score = move_get_score(move);
     const Equity equity = move_get_equity(move);
-    json_write_int_field(sb, "score",
-                         equity_is_convertible(score) ? equity_to_int(score) : 0,
-                         &move_first);
+    json_write_int_field(
+        sb, "score", equity_is_convertible(score) ? equity_to_int(score) : 0,
+        &move_first);
     json_write_double_field(
         sb, "equity",
         equity_is_convertible(equity) ? equity_to_double(equity) : 0.0,

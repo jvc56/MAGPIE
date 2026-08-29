@@ -1,8 +1,5 @@
 #include "autoplay_results.h"
 
-#include "../impl/cgp.h"
-#include "../util/json.h"
-
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
@@ -10,6 +7,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../impl/cgp.h"
+#include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/json.h"
@@ -26,6 +25,7 @@
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
+#include "sim_results.h"
 #include "stats.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -77,6 +77,7 @@ typedef void (*recorder_add_move_func_t)(Recorder *, const RecorderArgs *);
 typedef void (*recorder_add_game_func_t)(Recorder *, const RecorderArgs *);
 typedef void (*recorder_consolidate_func_t)(Recorder **, int, Recorder *);
 typedef char *(*recorder_str_func_t)(Recorder *, const RecorderArgs *);
+typedef char *(*recorder_json_func_t)(Recorder *, const RecorderArgs *);
 
 struct Recorder {
   void *data;
@@ -89,6 +90,7 @@ struct Recorder {
   recorder_add_game_func_t add_game_func;
   recorder_consolidate_func_t consolidate_func;
   recorder_str_func_t str_func;
+  recorder_json_func_t json_func;
 };
 
 struct AutoplayResults {
@@ -115,6 +117,11 @@ void add_game_noop(Recorder __attribute__((unused)) * recorder,
 
 char *get_str_noop(Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
+  return NULL;
+}
+
+char *get_json_noop(Recorder __attribute__((unused)) * recorder,
+                    const RecorderArgs __attribute__((unused)) * args) {
   return NULL;
 }
 
@@ -620,6 +627,46 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
   char *str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return str;
+}
+
+static void write_game_data_json(StringBuilder *sb, const GameData *gd) {
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_int_field(sb, "games", (int64_t)gd->total_games, &first);
+  json_write_int_field(sb, "wins", (int64_t)gd->p0_wins, &first);
+  json_write_int_field(sb, "losses", (int64_t)gd->p0_losses, &first);
+  json_write_int_field(sb, "ties", (int64_t)gd->p0_ties, &first);
+  json_write_double_field(sb, "p1_score_mean", stat_get_mean(gd->p0_score),
+                          &first);
+  json_write_double_field(sb, "p1_score_sd", stat_get_stdev(gd->p0_score),
+                          &first);
+  json_write_double_field(sb, "p2_score_mean", stat_get_mean(gd->p1_score),
+                          &first);
+  json_write_double_field(sb, "p2_score_sd", stat_get_stdev(gd->p1_score),
+                          &first);
+  json_write_object_end(sb);
+}
+
+// "all_games" and, when the caller asked for it, "divergent_games" -- pairs
+// whose two games did not play identically, which is where a paired run's
+// signal lives, since identically-played pairs are guaranteed ties carrying
+// no information.
+char *game_data_sets_json(Recorder *recorder, const RecorderArgs *args) {
+  const GameDataSets *sets = (const GameDataSets *)recorder->data;
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+
+  json_write_raw_key(sb, "all_games", &first);
+  write_game_data_json(sb, sets->all_games);
+
+  if (args->divergent) {
+    json_write_raw_key(sb, "divergent_games", &first);
+    write_game_data_json(sb, sets->divergent_games);
+  }
+
+  char *json = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return json;
 }
 
 // FJ recorders
@@ -1215,6 +1262,7 @@ Recorder *recorder_create(const Recorder *primary_recorder,
                           recorder_add_game_func_t add_game_func,
                           recorder_consolidate_func_t consolidate_func,
                           recorder_str_func_t str_func,
+                          recorder_json_func_t json_func,
                           const RecorderContext *recorder_context) {
   Recorder *recorder = malloc_or_die(sizeof(Recorder));
   recorder->recorder_context = recorder_context;
@@ -1224,6 +1272,7 @@ Recorder *recorder_create(const Recorder *primary_recorder,
   recorder->add_game_func = add_game_func;
   recorder->consolidate_func = consolidate_func;
   recorder->str_func = str_func;
+  recorder->json_func = json_func;
   recorder->owns_thread_shared_data = !primary_recorder;
   create_data_func(recorder);
   // If this recorder owns the shared data, then it was already created
@@ -1268,6 +1317,12 @@ char *recorder_str(Recorder *recorder, bool human_readable,
   return recorder->str_func(recorder, &args);
 }
 
+char *recorder_json(Recorder *recorder, bool show_divergent) {
+  RecorderArgs args = {0};
+  args.divergent = show_divergent;
+  return recorder->json_func(recorder, &args);
+}
+
 uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type) {
   return (uint64_t)1 << recorder_type;
 }
@@ -1290,8 +1345,8 @@ void autoplay_results_set_recorder(
     recorder_destroy_data_func_t destroy_data_func,
     recorder_add_move_func_t add_move_func,
     recorder_add_game_func_t add_game_func,
-    recorder_consolidate_func_t consolidate_func,
-    recorder_str_func_t str_func) {
+    recorder_consolidate_func_t consolidate_func, recorder_str_func_t str_func,
+    recorder_json_func_t json_func) {
   if (options & autoplay_results_build_option(recorder_type)) {
     if (!autoplay_results->recorders[recorder_type]) {
       const Recorder *primary_recorder = NULL;
@@ -1300,7 +1355,7 @@ void autoplay_results_set_recorder(
       }
       autoplay_results->recorders[recorder_type] = recorder_create(
           primary_recorder, reset_func, create_data_func, destroy_data_func,
-          add_move_func, add_game_func, consolidate_func, str_func,
+          add_move_func, add_game_func, consolidate_func, str_func, json_func,
           autoplay_results->recorder_context);
     }
   } else {
@@ -1434,11 +1489,10 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
       malloc_or_die(sizeof(double) * (size_t)position.num_stored_moves);
 
   for (int i = 0; i < position.num_stored_moves; i++) {
-    const Move *move =
-        position.sim_results
-            ? simmed_play_get_move(
-                  sim_results_get_simmed_play(position.sim_results, i))
-            : move_list_get_move(args->move_list, i);
+    const Move *move = position.sim_results
+                           ? simmed_play_get_move(sim_results_get_simmed_play(
+                                 position.sim_results, i))
+                           : move_list_get_move(args->move_list, i);
     StringBuilder *move_sb = string_builder_create();
     string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
     position.move_strings[i] = string_builder_dump(move_sb, NULL);
@@ -1463,7 +1517,8 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   cpthread_mutex_unlock(&data->mutex);
 }
 
-void positions_data_consolidate(Recorder **recorder_list, int recorder_list_size,
+void positions_data_consolidate(Recorder **recorder_list,
+                                int recorder_list_size,
                                 Recorder *primary_recorder) {
   PositionsData *primary = (PositionsData *)primary_recorder->data;
   for (int i = 0; i < recorder_list_size; i++) {
@@ -1474,9 +1529,9 @@ void positions_data_consolidate(Recorder **recorder_list, int recorder_list_size
     for (int j = 0; j < other->count; j++) {
       if (primary->count == primary->capacity) {
         primary->capacity *= 2;
-        primary->positions = realloc_or_die(
-            primary->positions,
-            sizeof(CapturedPosition) * (size_t)primary->capacity);
+        primary->positions =
+            realloc_or_die(primary->positions, sizeof(CapturedPosition) *
+                                                   (size_t)primary->capacity);
       }
       // Ownership moves to the primary.
       primary->positions[primary->count++] = other->positions[j];
@@ -1520,17 +1575,14 @@ static void write_position_move(StringBuilder *sb, const char *move, int score,
   json_write_object_end(sb);
 }
 
-void autoplay_results_write_positions(const AutoplayResults *autoplay_results,
-                                      StringBuilder *sb, const char *key,
-                                      bool *first) {
-  const Recorder *recorder =
-      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_POSITION];
-  json_write_array_start(sb, key, first);
-  if (!recorder) {
-    json_write_array_end(sb);
-    return;
-  }
+// Positions are recorded per worker thread and merged, so they are *not* in
+// game or turn order -- each carries its own game and turn number.
+char *positions_data_json(Recorder *recorder,
+                          const RecorderArgs __attribute__((unused)) * args) {
   const PositionsData *data = (const PositionsData *)recorder->data;
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_array_start(sb, "positions", &first);
 
   for (int i = 0; i < data->count; i++) {
     const CapturedPosition *position = &data->positions[i];
@@ -1553,8 +1605,8 @@ void autoplay_results_write_positions(const AutoplayResults *autoplay_results,
     json_write_int_field(sb, "num_moves", position->num_moves, &position_first);
     json_write_array_start(sb, "moves", &position_first);
 
-    const int num_plies =
-        position->sim_results ? sim_results_get_num_plies(position->sim_results)
+    const int num_plies = position->sim_results
+                              ? sim_results_get_num_plies(position->sim_results)
                               : 0;
     int plays = position->num_stored_moves;
     if (plays > data->play_cap) {
@@ -1572,12 +1624,13 @@ void autoplay_results_write_positions(const AutoplayResults *autoplay_results,
         const double win_percentage =
             stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) * 100.0;
         write_position_move(sb, position->move_strings[p],
-                            position->move_scores[p], position->move_equities[p],
-                            &win_percentage, simmed_play, num_plies);
+                            position->move_scores[p],
+                            position->move_equities[p], &win_percentage,
+                            simmed_play, num_plies);
       } else {
         write_position_move(sb, position->move_strings[p],
-                            position->move_scores[p], position->move_equities[p],
-                            NULL, NULL, 0);
+                            position->move_scores[p],
+                            position->move_equities[p], NULL, NULL, 0);
       }
     }
 
@@ -1585,6 +1638,10 @@ void autoplay_results_write_positions(const AutoplayResults *autoplay_results,
     json_write_object_end(sb);
   }
   json_write_array_end(sb);
+
+  char *json = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return json;
 }
 
 void autoplay_results_set_position_play_cap(AutoplayResults *autoplay_results,
@@ -1603,26 +1660,26 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_GAME,
       game_data_sets_reset, game_data_sets_create, game_data_sets_destroy,
       add_move_noop, game_data_sets_add_game, game_data_sets_consolidate,
-      game_data_sets_str);
+      game_data_sets_str, game_data_sets_json);
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_FJ,
       fj_data_reset, fj_data_create, fj_data_destroy, fj_data_add_move,
-      fj_data_add_game, fj_data_consolidate, get_str_noop);
+      fj_data_add_game, fj_data_consolidate, get_str_noop, get_json_noop);
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_WIN_PCT,
       win_pct_data_reset, win_pct_data_create, win_pct_data_destroy,
       win_pct_data_add_move, win_pct_data_add_game, win_pct_data_consolidate,
-      get_str_noop);
+      get_str_noop, get_json_noop);
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_LEAVES,
       leaves_data_reset, leaves_data_create, leaves_data_destroy,
       leaves_data_add_move, add_game_noop, leaves_data_consolidate,
-      get_str_noop);
+      get_str_noop, get_json_noop);
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_POSITION,
       positions_data_reset, positions_data_create, positions_data_destroy,
       positions_data_add_move, add_game_noop, positions_data_consolidate,
-      get_str_noop);
+      get_str_noop, positions_data_json);
   autoplay_results->options = options;
 }
 
@@ -1837,34 +1894,30 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
   cpthread_mutex_unlock(&primary->mutex);
 }
 
-bool autoplay_results_write_game_summary(
-    const AutoplayResults *autoplay_results, StringBuilder *sb, const char *key,
-    bool divergent, bool *first) {
-  const Recorder *recorder =
-      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_GAME];
-  if (!recorder) {
-    return false;
+char *autoplay_results_to_json(AutoplayResults *autoplay_results,
+                               bool show_divergent) {
+  StringBuilder *ar_sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(ar_sb);
+  for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
+    if (!autoplay_results->recorders[i]) {
+      continue;
+    }
+    char *rec_json =
+        recorder_json(autoplay_results->recorders[i], show_divergent);
+    if (rec_json) {
+      if (!first) {
+        string_builder_add_string(ar_sb, ",");
+      }
+      first = false;
+      string_builder_add_string(ar_sb, rec_json);
+      free(rec_json);
+    }
   }
-  const GameDataSets *sets = (const GameDataSets *)recorder->data;
-  const GameData *gd = divergent ? sets->divergent_games : sets->all_games;
-
-  json_write_raw_key(sb, key, first);
-  bool object_first = true;
-  json_write_object_start(sb);
-  json_write_int_field(sb, "games", (int64_t)gd->total_games, &object_first);
-  json_write_int_field(sb, "wins", (int64_t)gd->p0_wins, &object_first);
-  json_write_int_field(sb, "losses", (int64_t)gd->p0_losses, &object_first);
-  json_write_int_field(sb, "ties", (int64_t)gd->p0_ties, &object_first);
-  json_write_double_field(sb, "p1_score_mean", stat_get_mean(gd->p0_score),
-                          &object_first);
-  json_write_double_field(sb, "p1_score_sd", stat_get_stdev(gd->p0_score),
-                          &object_first);
-  json_write_double_field(sb, "p2_score_mean", stat_get_mean(gd->p1_score),
-                          &object_first);
-  json_write_double_field(sb, "p2_score_sd", stat_get_stdev(gd->p1_score),
-                          &object_first);
-  json_write_object_end(sb);
-  return true;
+  json_write_object_end(ar_sb);
+  char *ar_json = string_builder_dump(ar_sb, NULL);
+  string_builder_destroy(ar_sb);
+  return ar_json;
 }
 
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
