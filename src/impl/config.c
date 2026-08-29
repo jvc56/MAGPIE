@@ -6,6 +6,7 @@
 #include "../def/bai_defs.h"
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
+#include "../def/contribute_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
@@ -409,6 +410,9 @@ struct Config {
   // rack_list_write_rack_equity_csv). Independent of whether a
   // forceracksfile restriction is in use.
   bool write_rack_equity_csv;
+  // How many ranked plays autoplay's positions recorder reports per captured
+  // position; see AutoplayArgs.position_play_cap and RecorderArgs.play_cap.
+  int position_play_cap;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
   // Set when the most recent sim ran inference internally and it completed
@@ -3685,6 +3689,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
   autoplay_args->force_racks_filename = force_racks_filename;
   autoplay_args->write_rack_equity_csv = config->write_rack_equity_csv;
+  autoplay_args->position_play_cap = config->position_play_cap;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
@@ -7211,15 +7216,11 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   // How many ranked plays to report per position: the player config's
   // num_plays_recorded, which is not how many were simulated.
   const JsonValue *capture_player = json_object_get(request, "player1");
-  const int capture_play_cap =
+  config->position_play_cap =
       json_get_int_or(capture_player, "num_plays_recorded", 10);
   autoplay_results_set_options(config->autoplay_results,
                                capture_positions ? "games,positions" : "games",
                                error_stack);
-  if (error_stack_is_empty(error_stack)) {
-    autoplay_results_set_position_play_cap(config->autoplay_results,
-                                           capture_play_cap);
-  }
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -7301,8 +7302,8 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
   // number from how many the player config asked to generate or simulate.
   bool rack_first = true;
   json_write_object_start(sb);
-  json_write_string_field(sb, "rack", rack_str, &rack_first);
-  json_write_array_start(sb, "moves", &rack_first);
+  json_write_string_field(sb, CONTRIBUTE_KEY_RACK, rack_str, &rack_first);
+  json_write_array_start(sb, CONTRIBUTE_KEY_MOVES, &rack_first);
   for (int i = 0; i < count; i++) {
     const Move *move = move_list_get_move(moves, i);
     if (i > 0) {
@@ -7315,7 +7316,7 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
     string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
     char *move_string = string_builder_dump(move_sb, NULL);
     string_builder_destroy(move_sb);
-    json_write_string_field(sb, "move", move_string, &move_first);
+    json_write_string_field(sb, CONTRIBUTE_KEY_MOVE, move_string, &move_first);
     free(move_string);
 
     // A pass carries a sentinel equity that equity_to_double refuses to
@@ -7325,10 +7326,10 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
     const Equity score = move_get_score(move);
     const Equity equity = move_get_equity(move);
     json_write_int_field(
-        sb, "score", equity_is_convertible(score) ? equity_to_int(score) : 0,
-        &move_first);
+        sb, CONTRIBUTE_KEY_SCORE,
+        equity_is_convertible(score) ? equity_to_int(score) : 0, &move_first);
     json_write_double_field(
-        sb, "equity",
+        sb, CONTRIBUTE_KEY_EQUITY,
         equity_is_convertible(equity) ? equity_to_double(equity) : 0.0,
         &move_first);
     json_write_object_end(sb);
@@ -7394,7 +7395,7 @@ static char *config_contribute_opening_rack(Config *config,
   StringBuilder *sb = string_builder_create();
   bool first = true;
   json_write_object_start(sb);
-  json_write_array_start(sb, "racks", &first);
+  json_write_array_start(sb, CONTRIBUTE_KEY_RACKS, &first);
 
   for (int i = 0; i < rack_count; i++) {
     const char *rack_str = json_array_get_string(racks, i);
@@ -10085,6 +10086,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->print_boards = false;
   config->print_on_finish = false;
   config->write_rack_equity_csv = false;
+  config->position_play_cap = 10;
   config->show_game_with_moves = true;
   config->show_prompt = true;
   config->save_settings = true;

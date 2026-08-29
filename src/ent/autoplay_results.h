@@ -37,18 +37,12 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
 
-// Ranked plays to report per captured position. Set before the run; this is the
-// job's num_plays_recorded, which is not how many the player simulated.
-void autoplay_results_set_position_play_cap(AutoplayResults *autoplay_results,
-                                            int cap);
-int autoplay_results_get_position_play_cap(
-    const AutoplayResults *autoplay_results);
-
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
                                const Rack *leave, const MoveList *move_list,
                                const SimResults *sim_results, int game_number,
-                               int pair_game_number, int turn_number);
+                               int pair_game_number, int turn_number,
+                               int play_cap);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);

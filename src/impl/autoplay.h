@@ -26,6 +26,11 @@ typedef struct AutoplayArgs {
   // inferred from force_racks_filename, since an unrestricted run could mean
   // dumping millions of rows.
   bool write_rack_equity_csv;
+  // How many ranked plays the positions recorder reports per captured
+  // position, when active. Sizes each static player's move list up front
+  // (see autoplay_worker_create) and is threaded through to
+  // positions_data_add_move via RecorderArgs.play_cap.
+  int position_play_cap;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;

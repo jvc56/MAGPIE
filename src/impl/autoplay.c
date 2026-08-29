@@ -356,9 +356,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   // list up to the job's reporting cap, the same as a simming player's
   // num_plays already provides.
   const int position_play_cap =
-      autoplay_worker->captures_positions
-          ? autoplay_results_get_position_play_cap(target)
-          : 0;
+      autoplay_worker->captures_positions ? args->position_play_cap : 0;
   if (autoplay_worker->args.p1_sim_args.num_plays == 0) {
     autoplay_worker->args.p1_sim_args.num_plays = 1;
   }
@@ -837,7 +835,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       (sim_args_for_player->num_plies > 0) ? autoplay_worker->sim_results
                                            : NULL,
       (int)game_runner->game_number, game_runner->pair_game_number,
-      game_runner->turn_number);
+      game_runner->turn_number, autoplay_worker->args.position_play_cap);
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {
