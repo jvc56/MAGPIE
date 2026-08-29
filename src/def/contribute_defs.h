@@ -1,11 +1,31 @@
 #ifndef CONTRIBUTE_DEFS_H
 #define CONTRIBUTE_DEFS_H
 
-// JSON key names for the payloads MAGPIE submits to the birdtest server as a
-// contribute worker. These keys are part of the wire contract between the
-// server and this client, so every writer uses these constants instead of a
-// raw string literal -- this is the one place to look, or change, the name
-// of a key.
+// JSON key names for what MAGPIE exchanges with the birdtest server as a
+// contribute worker -- both the task requests it reads and the result
+// payloads it submits. These keys are part of the wire contract between the
+// server and this client, so every reader and writer uses these constants
+// instead of a raw string literal -- this is the one place to look, or
+// change, the name of a key.
+
+// Task request fields, read in config.c's config_contribute_* functions.
+#define CONTRIBUTE_KEY_LEXICON "lexicon"
+#define CONTRIBUTE_KEY_VARIANT "variant"
+#define CONTRIBUTE_KEY_SEED "seed"
+#define CONTRIBUTE_KEY_NUM_GAMES "num_games"
+#define CONTRIBUTE_KEY_PLAYER "player"
+#define CONTRIBUTE_KEY_PLAYER1 "player1"
+#define CONTRIBUTE_KEY_PLAYER2 "player2"
+#define CONTRIBUTE_KEY_LEAVES "leaves"
+#define CONTRIBUTE_KEY_RECORDER_TYPE "recorder_type"
+#define CONTRIBUTE_KEY_SORT_STRATEGY "sort_strategy"
+#define CONTRIBUTE_KEY_MAX_ITERATIONS "max_iterations"
+#define CONTRIBUTE_KEY_TOP_PLAYS "top_plays"
+#define CONTRIBUTE_KEY_STOPPING_PCT "stopping_pct"
+#define CONTRIBUTE_KEY_USE_INFERENCE "use_inference"
+#define CONTRIBUTE_KEY_TIME_LIMIT_SECS "time_limit_secs"
+#define CONTRIBUTE_KEY_CAPTURE_POSITIONS "capture_positions"
+#define CONTRIBUTE_KEY_NUM_PLAYS_RECORDED "num_plays_recorded"
 
 // Game recorder ("games" job type): written once per GameData set
 // (all_games, and divergent_games for a paired run).

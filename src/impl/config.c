@@ -90,7 +90,6 @@ enum {
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
-  // Sanity bound on a contribute task's requested game count.
 };
 
 typedef enum {
@@ -410,9 +409,6 @@ struct Config {
   // rack_list_write_rack_equity_csv). Independent of whether a
   // forceracksfile restriction is in use.
   bool write_rack_equity_csv;
-  // How many ranked plays autoplay's positions recorder reports per captured
-  // position; see AutoplayArgs.position_play_cap and RecorderArgs.play_cap.
-  int position_play_cap;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
   // Set when the most recent sim ran inference internally and it completed
@@ -3689,7 +3685,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
   autoplay_args->force_racks_filename = force_racks_filename;
   autoplay_args->write_rack_equity_csv = config->write_rack_equity_csv;
-  autoplay_args->position_play_cap = config->position_play_cap;
+  autoplay_args->position_play_cap = config->max_num_display_plays;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
@@ -6945,8 +6941,8 @@ static bool contribute_validate_common(const JsonValue *request,
                                        const char **lexicon,
                                        const char **variant,
                                        ErrorStack *error_stack) {
-  *lexicon = json_get_string(request, "lexicon", error_stack);
-  *variant = json_get_string(request, "variant", error_stack);
+  *lexicon = json_get_string(request, CONTRIBUTE_KEY_LEXICON, error_stack);
+  *variant = json_get_string(request, CONTRIBUTE_KEY_VARIANT, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return false;
   }
@@ -7068,14 +7064,16 @@ static void config_contribute_apply_player_settings(Config *config,
                                    ? &config->p1_time_limit_seconds
                                    : &config->p2_time_limit_seconds;
 
-  const char *recorder = json_get_string_or_null(player, "recorder_type");
+  const char *recorder =
+      json_get_string_or_null(player, CONTRIBUTE_KEY_RECORDER_TYPE);
   if (recorder) {
     config_load_record_type(config, recorder, player_index, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
   }
-  const char *sort = json_get_string_or_null(player, "sort_strategy");
+  const char *sort =
+      json_get_string_or_null(player, CONTRIBUTE_KEY_SORT_STRATEGY);
   if (sort) {
     config_load_sort_type(config, sort, player_index, error_stack);
     if (!error_stack_is_empty(error_stack)) {
@@ -7083,9 +7081,11 @@ static void config_contribute_apply_player_settings(Config *config,
     }
   }
 
-  const JsonValue *iterations = json_object_get(player, "max_iterations");
+  const JsonValue *iterations =
+      json_object_get(player, CONTRIBUTE_KEY_MAX_ITERATIONS);
   if (iterations && !json_is_null(iterations)) {
-    const int64_t value = json_get_int_or(player, "max_iterations", 0);
+    const int64_t value =
+        json_get_int_or(player, CONTRIBUTE_KEY_MAX_ITERATIONS, 0);
     if (value < 1) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -7095,9 +7095,9 @@ static void config_contribute_apply_player_settings(Config *config,
     }
     *max_iterations = (uint64_t)value;
   }
-  const JsonValue *plies = json_object_get(player, "plies");
+  const JsonValue *plies = json_object_get(player, CONTRIBUTE_KEY_PLIES);
   if (plies && !json_is_null(plies)) {
-    const int64_t value = json_get_int_or(player, "plies", 0);
+    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_PLIES, 0);
     if (value < 0 || value > MAX_PLIES) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -7107,9 +7107,10 @@ static void config_contribute_apply_player_settings(Config *config,
     }
     *sim_plies = (int)value;
   }
-  const JsonValue *top_plays = json_object_get(player, "top_plays");
+  const JsonValue *top_plays =
+      json_object_get(player, CONTRIBUTE_KEY_TOP_PLAYS);
   if (top_plays && !json_is_null(top_plays)) {
-    const int64_t value = json_get_int_or(player, "top_plays", 0);
+    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_TOP_PLAYS, 0);
     if (value < 1) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -7119,9 +7120,11 @@ static void config_contribute_apply_player_settings(Config *config,
     }
     *num_plays = (int)value;
   }
-  const JsonValue *stopping = json_object_get(player, "stopping_pct");
+  const JsonValue *stopping =
+      json_object_get(player, CONTRIBUTE_KEY_STOPPING_PCT);
   if (stopping && !json_is_null(stopping)) {
-    const double value = json_get_double_or(player, "stopping_pct", 0.0);
+    const double value =
+        json_get_double_or(player, CONTRIBUTE_KEY_STOPPING_PCT, 0.0);
     if (!isfinite(value) || value <= 0 || value >= 100) {
       error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
                        get_formatted_string(
@@ -7130,13 +7133,17 @@ static void config_contribute_apply_player_settings(Config *config,
     }
     *stop_cond_pct = value;
   }
-  const JsonValue *inference = json_object_get(player, "use_inference");
+  const JsonValue *inference =
+      json_object_get(player, CONTRIBUTE_KEY_USE_INFERENCE);
   if (inference && !json_is_null(inference)) {
-    *sim_with_inference = json_get_bool_or(player, "use_inference", false);
+    *sim_with_inference =
+        json_get_bool_or(player, CONTRIBUTE_KEY_USE_INFERENCE, false);
   }
-  const JsonValue *time_limit = json_object_get(player, "time_limit_secs");
+  const JsonValue *time_limit =
+      json_object_get(player, CONTRIBUTE_KEY_TIME_LIMIT_SECS);
   if (time_limit && !json_is_null(time_limit)) {
-    const double value = json_get_double_or(player, "time_limit_secs", 0.0);
+    const double value =
+        json_get_double_or(player, CONTRIBUTE_KEY_TIME_LIMIT_SECS, 0.0);
     if (!isfinite(value) || value < 0 || value > 1e9) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -7157,8 +7164,10 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
     return NULL;
   }
 
-  const uint64_t seed = json_get_uint64_string(request, "seed", error_stack);
-  const int64_t num_games = json_get_int(request, "num_games", error_stack);
+  const uint64_t seed =
+      json_get_uint64_string(request, CONTRIBUTE_KEY_SEED, error_stack);
+  const int64_t num_games =
+      json_get_int(request, CONTRIBUTE_KEY_NUM_GAMES, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -7175,11 +7184,12 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
     return NULL;
   }
 
-  const JsonValue *player1 = json_object_get(request, "player1");
-  const JsonValue *player2 = json_object_get(request, "player2");
+  const JsonValue *player1 = json_object_get(request, CONTRIBUTE_KEY_PLAYER1);
+  const JsonValue *player2 = json_object_get(request, CONTRIBUTE_KEY_PLAYER2);
   config_contribute_load_lexicon_and_variant(
-      config, lexicon, variant, json_get_string_or_null(player1, "leaves"),
-      json_get_string_or_null(player2, "leaves"), error_stack);
+      config, lexicon, variant,
+      json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
+      json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES), error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -7212,12 +7222,13 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   // A worker analyses a position on every turn regardless; the job decides
   // whether those analyses are kept rather than discarded.
   const bool capture_positions =
-      json_get_bool_or(request, "capture_positions", false);
+      json_get_bool_or(request, CONTRIBUTE_KEY_CAPTURE_POSITIONS, false);
   // How many ranked plays to report per position: the player config's
   // num_plays_recorded, which is not how many were simulated.
-  const JsonValue *capture_player = json_object_get(request, "player1");
-  config->position_play_cap =
-      json_get_int_or(capture_player, "num_plays_recorded", 10);
+  const JsonValue *capture_player =
+      json_object_get(request, CONTRIBUTE_KEY_PLAYER1);
+  config->max_num_display_plays =
+      json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, 10);
   autoplay_results_set_options(config->autoplay_results,
                                capture_positions ? "games,positions" : "games",
                                error_stack);
@@ -7353,7 +7364,7 @@ static char *config_contribute_opening_rack(Config *config,
     return NULL;
   }
 
-  const JsonValue *racks = json_object_get(request, "racks");
+  const JsonValue *racks = json_object_get(request, CONTRIBUTE_KEY_RACKS);
   const int rack_count = json_array_length(racks);
   if (rack_count <= 0) {
     error_stack_push(
@@ -7367,9 +7378,10 @@ static char *config_contribute_opening_rack(Config *config,
     return NULL;
   }
 
-  const JsonValue *player = json_object_get(request, "player");
+  const JsonValue *player = json_object_get(request, CONTRIBUTE_KEY_PLAYER);
   config_contribute_load_lexicon_and_variant(
-      config, lexicon, variant, json_get_string_or_null(player, "leaves"), NULL,
+      config, lexicon, variant,
+      json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES), NULL,
       error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
@@ -7389,7 +7401,8 @@ static char *config_contribute_opening_rack(Config *config,
   }
   config_init_game(config);
 
-  const JsonValue *iterations = json_object_get(player, "max_iterations");
+  const JsonValue *iterations =
+      json_object_get(player, CONTRIBUTE_KEY_MAX_ITERATIONS);
   const bool simming = iterations && !json_is_null(iterations);
 
   StringBuilder *sb = string_builder_create();
@@ -10086,7 +10099,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->print_boards = false;
   config->print_on_finish = false;
   config->write_rack_equity_csv = false;
-  config->position_play_cap = 10;
   config->show_game_with_moves = true;
   config->show_prompt = true;
   config->save_settings = true;
