@@ -3444,9 +3444,14 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
     validated_moves_destroy(vms);
     return NULL;
   }
-  // Exchanges need >= 7 tiles in the bag, so validated_moves_create above
-  // already rejects them in any PEG position (bag <= PEG_MAX_BAG); tile plays
-  // and the pass parse through.
+  // Exchange validation (is_exchange_allowed) checks the *raw* bag (>=
+  // RACK_SIZE tiles), not the PEG-effective bag_size computed here and in
+  // peg_solve: with an unknown opponent rack the raw bag is effective + 7, so
+  // an exchange can validate at any effective bag size, including the normal
+  // 1..PEG_MAX_BAG range. peg_solve does not filter only_moves by move type
+  // outside its bag-emptying-guarantee exception, so a parsed exchange flows
+  // through to the candidate set unchecked even though it never empties the
+  // bag; that predates this PR's relaxed-bag change.
   const int num_moves = validated_moves_get_number_of_moves(vms);
   const Move **moves = malloc_or_die((size_t)num_moves * sizeof(Move *));
   for (int i = 0; i < num_moves; i++) {
@@ -3483,13 +3488,17 @@ config_generate_peg_bag_emptying_moves(const Config *config,
   };
   generate_moves(&gen_args);
 
-  const int bag_size = bag_get_letters(game_get_bag(config->game));
+  // The PEG-effective bag size (matching peg_solve's own computation), not
+  // the raw bag_get_letters count: when the opponent's rack isn't fully
+  // known, those tiles sit in the raw bag too, but they are not part of the
+  // real bag peg_solve will enumerate.
+  const int bag_size = peg_compute_bag_size(config->game);
   const int num_moves = move_list_get_count(move_list);
   const Move **moves = malloc_or_die((size_t)num_moves * sizeof(Move *));
   int num_kept = 0;
   for (int move_idx = 0; move_idx < num_moves; move_idx++) {
     const Move *move = move_list_get_move(move_list, move_idx);
-    if (move_get_tiles_played(move) >= bag_size) {
+    if (peg_move_empties_bag(move, bag_size)) {
       moves[num_kept++] = move;
     }
   }

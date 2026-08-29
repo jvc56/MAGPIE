@@ -6,6 +6,7 @@
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
@@ -34,6 +35,7 @@
 #include "peg_combinatorics.h"
 #include "peg_pool.h"
 #include "word_prune.h"
+#include <assert.h>
 #include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -606,7 +608,7 @@ static Game *peg_make_post_cand_game_into(Game **slot, const Game *template_src,
 
   // opp rack = unseen minus the original K-tile bag (mover_drawn ++
   // bag_remaining); the mover would have drawn mover_drawn off the top.
-  MachineLetter all_bag[PEG_MAX_BAG + 1];
+  MachineLetter all_bag[PEG_SCENARIO_ARRAY_CAP + 1];
   const int n_bag = k_drawn + n_bag_remaining;
   for (int i = 0; i < k_drawn; i++) {
     all_bag[i] = mover_drawn[i];
@@ -827,8 +829,8 @@ typedef struct PegScenarioJob {
   int ld_size;
   int k_drawn;
   int n_bag_remaining;
-  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+  MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1];
+  MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
   int64_t weight;
   PegOppModel opp_model;
   int inner_top_k;
@@ -1287,6 +1289,14 @@ static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
   const int bag = bag_get_letters(game_get_bag(parent_game));
   const int tiles_played = move_get_tiles_played(cand);
   const int k_drawn = tiles_played < bag ? tiles_played : bag;
+  // PegNestScenarioJob's mover_drawn/bag_remaining (and the locals below) are
+  // sized PEG_MAX_BAG + 1, not PEG_SCENARIO_ARRAY_CAP + 1: this nested-peg
+  // path is only reachable from a non-relaxed (bag <= PEG_MAX_BAG) top-level
+  // solve, since peg_solve's bag-emptying-guarantee exception (relaxed bag up
+  // to RACK_SIZE) makes every candidate empty the bag outright, leaving no
+  // inner peg to nest into. Guard the invariant here rather than relying on
+  // it silently holding.
+  assert(k_drawn <= PEG_MAX_BAG);
   const int bag_rem = bag - k_drawn;
   // The template (cand played + cross-sets) is read concurrently by the
   // scenario jobs, so it is held on its own frame for the lifetime of the
@@ -1666,7 +1676,7 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   // recursion (ancestor letter-branches own its earlier positions). Mutating it
   // here would scramble those positions for subsequent sibling branches and
   // corrupt their multisets. Copy first so the caller's buffer is untouched.
-  MachineLetter perm[PEG_MAX_BAG + 1];
+  MachineLetter perm[PEG_SCENARIO_ARRAY_CAP + 1];
   for (int i = 0; i < n_bag_remaining; i++) {
     perm[i] = bag_remaining[i];
   }
@@ -1835,8 +1845,8 @@ static void peg_eval_fixed_ordering(PegEvalCtx *ctx,
                                     const MachineLetter *bag_order, int n_bag) {
   const int k_drawn = ctx->k_drawn;
   const int n_bag_remaining = n_bag - k_drawn;
-  MachineLetter mover_drawn[PEG_MAX_BAG + 1] = {0};
-  MachineLetter bag_remaining[PEG_MAX_BAG + 1] = {0};
+  MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1] = {0};
+  MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1] = {0};
   for (int i = 0; i < k_drawn; i++) {
     mover_drawn[i] = bag_order[i];
   }
@@ -1914,8 +1924,8 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
     // Pinned single scenario: evaluate exactly the caller's bag ordering.
     peg_eval_fixed_ordering(&ctx, job->eval_bag_order, job->eval_bag_order_len);
   } else {
-    MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-    MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+    MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1];
+    MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
     peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining, /*weight=*/1,
                     mover_drawn, 0, bag_remaining, 0);
   }
@@ -2231,8 +2241,8 @@ static void peg_eval_candidates_scenario(
     const int tiles_played = move_get_tiles_played(cands[i]);
     ctx.k_drawn = tiles_played < bag_size ? tiles_played : bag_size;
     const int n_bag_remaining = bag_size - ctx.k_drawn;
-    MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-    MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+    MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1];
+    MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
     peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining, /*weight=*/1,
                     mover_drawn, 0, bag_remaining, 0);
   }
@@ -2404,6 +2414,30 @@ static void *peg_injector_main(void *arg) {
   return NULL;
 }
 
+// The effective PEG bag size for `game`: the real remaining bag tiles plus
+// any opponent tiles unknown to the mover, i.e. raw_bag_size - opp_unknown,
+// where opp_unknown = RACK_SIZE - opp_rack_size (the game bag holds the real
+// remaining bag tiles plus any opponent tiles unknown to the mover; tiles
+// explicitly on the opponent's rack are already known and not counted here).
+// Shared by peg_solve and by callers (e.g. the pegonly "empty" positional
+// value) that need to filter candidate moves by the same bag size peg_solve
+// itself will use.
+int peg_compute_bag_size(const Game *game) {
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const int raw_bag_size = bag_get_letters(game_get_bag(game));
+  const Rack *opp_rack_in_game =
+      player_get_rack(game_get_player(game, 1 - mover_idx));
+  const int opp_rack_size = (int)rack_get_total_letters(opp_rack_in_game);
+  const int opp_unknown = RACK_SIZE - opp_rack_size;
+  return raw_bag_size - opp_unknown;
+}
+
+// See peg.h for the contract.
+bool peg_move_empties_bag(const Move *move, int bag_size) {
+  return move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+         move_get_tiles_played(move) >= bag_size;
+}
+
 // ----- public entry --------------------------------------------------------
 
 void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
@@ -2421,23 +2455,41 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       budget > 0.0 ? ctimer_monotonic_ns() + (int64_t)(budget * 1.0e9) : 0;
   const Game *game = args->game;
   const int mover_idx = game_get_player_on_turn_index(game);
-  const int raw_bag_size = bag_get_letters(game_get_bag(game));
-  // The game bag holds the real remaining bag tiles plus any opponent tiles
-  // unknown to the mover: (RACK_SIZE - opp_rack_size) tiles are assumed to be
-  // in the bag as the opponent's unknown holdings. Tiles explicitly on the
-  // opponent's rack are already known and not counted here.
-  const Rack *opp_rack_in_game =
-      player_get_rack(game_get_player(game, 1 - mover_idx));
-  const int opp_rack_size = (int)rack_get_total_letters(opp_rack_in_game);
-  const int opp_unknown = RACK_SIZE - opp_rack_size;
-  const int bag_size = raw_bag_size - opp_unknown;
+  const int bag_size = peg_compute_bag_size(game);
   if (bag_size < PEG_MIN_BAG || bag_size > PEG_MAX_BAG) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_PEG_BAG_OUT_OF_RANGE,
-        get_formatted_string("PEG requires a bag of %d..%d tiles, but found %d",
-                             PEG_MIN_BAG, PEG_MAX_BAG, bag_size));
-    peg_poll_finish(args->poll); // so a waiting poller's read loop terminates
-    return;
+    // Above PEG_MAX_BAG is still solvable, without widening the scenario
+    // enumeration, as long as every move under consideration is guaranteed to
+    // empty the bag (a tile placement playing >= bag_size tiles draws the
+    // whole bag on replenishment, leaving nothing to enumerate: bag_remaining
+    // is always 0). A pass/exchange never empties the bag (an exchange
+    // returns what it drew), and no tile placement can play more than
+    // RACK_SIZE tiles, so the guarantee is only reachable for bag_size in
+    // (PEG_MAX_BAG, RACK_SIZE].
+    //
+    // This can only ever be satisfied via a caller-supplied only_moves set
+    // (e.g. the pegonly "empty" positional value): the full root move list
+    // always includes a pass (0 tiles played, see gen_record_pass), which
+    // never empties the bag, so without only_moves the guarantee can never
+    // hold and there is nothing to check.
+    bool bag_emptying_guaranteed =
+        bag_size > PEG_MAX_BAG && args->n_only_moves > 0;
+    for (int cand_idx = 0;
+         bag_emptying_guaranteed && cand_idx < args->n_only_moves; cand_idx++) {
+      if (!peg_move_empties_bag(args->only_moves[cand_idx], bag_size)) {
+        bag_emptying_guaranteed = false;
+      }
+    }
+    if (!bag_emptying_guaranteed) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_BAG_OUT_OF_RANGE,
+          get_formatted_string(
+              "PEG requires a bag of %d..%d tiles, but found %d (a larger "
+              "bag, up to %d, is only allowed when every candidate move "
+              "empties it by playing at least that many tiles)",
+              PEG_MIN_BAG, PEG_MAX_BAG, bag_size, RACK_SIZE));
+      peg_poll_finish(args->poll); // so a waiting poller's read loop terminates
+      return;
+    }
   }
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
@@ -3052,8 +3104,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         const int tiles_played = move_get_tiles_played(&out->top_cands[0].move);
         ctx.k_drawn = tiles_played < bag_size ? tiles_played : bag_size;
         const int n_bag_remaining = bag_size - ctx.k_drawn;
-        MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-        MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+        MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1];
+        MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
         peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining,
                         /*weight=*/1, mover_drawn, 0, bag_remaining, 0);
         out->per_scenario = capture.rows;
