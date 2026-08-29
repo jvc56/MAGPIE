@@ -62,6 +62,7 @@
 #include "contribute.h"
 #include "convert.h"
 #include "endgame.h"
+#include "exec.h"
 #include "gameplay.h"
 #include "gcg.h"
 #include "get_gcg.h"
@@ -7860,8 +7861,59 @@ static char *config_contribute_leave_gen(Config *config,
 }
 
 
+// Re-applies a settings file saved by save_config_settings (exec.c) --
+// always exactly one "setoptions ..." line -- without going through
+// execute_command_sync/load_command_sync. Those manage ThreadControl's
+// STARTED/FINISHED state machine, which assumes it is only ever driven from
+// the top-level REPL loop; calling them here, reentrantly, while contribute
+// is itself the async command currently occupying that state machine, trips
+// load_command_sync's own assertion that the state machine is idle before
+// a command starts. config_load_command has no such assumption -- it is the
+// pure parse-and-apply half config_execute_command's exec_func normally
+// follows, and "setoptions"'s own exec_func is a no-op (config_load_command
+// alone already applied everything), so skipping straight to it is exactly
+// as complete as the normal path for this one line shape.
+static void config_restore_settings_file(Config *config,
+                                         const char *settings_filename,
+                                         ErrorStack *error_stack) {
+  char *settings_string = get_string_from_file(settings_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    // Nothing saved (or nothing readable) -- nothing to restore.
+    error_stack_reset(error_stack);
+    return;
+  }
+  StringSplitter *lines = split_string_by_newline(settings_string, true);
+  const int num_lines = string_splitter_get_number_of_items(lines);
+  for (int i = 0; i < num_lines; i++) {
+    config_load_command(config, string_splitter_get_item(lines, i),
+                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      break;
+    }
+  }
+  string_splitter_destroy(lines);
+  free(settings_string);
+}
+
 void impl_contribute(Config *config, const char *settings_path,
                      ErrorStack *error_stack) {
+  // Every task mutates config directly (lexicon, per-player settings,
+  // capture options, ...), the same way any other command would, so left
+  // alone it would end this run looking like whatever the last task
+  // happened to configure -- and the REPL's own save-after-every-command
+  // behavior (see save_config_settings's caller in exec.c) would then
+  // persist that into settings.txt. Snapshot the settings file now and
+  // replay it back once contribute is done (below) so a user who runs a
+  // command, then contribute, then another command sees no difference from
+  // never having run contribute at all. Uses its own error stack: a failure
+  // here should not be folded into the contribute loop's own error
+  // reporting, which is about tasks, not local settings-file bookkeeping.
+  ErrorStack *settings_error_stack = error_stack_create();
+  save_config_settings(config, settings_error_stack);
+  if (!error_stack_is_empty(settings_error_stack)) {
+    error_stack_print_and_reset(settings_error_stack);
+  }
+
   ContributeState *state = NULL;
   while (!contribute_should_stop(state)) {
     const char *job_type = NULL;
@@ -7919,6 +7971,15 @@ void impl_contribute(Config *config, const char *settings_path,
     free(error_message);
   }
   contribute_state_destroy(state);
+
+  // Restore whatever was snapshotted above, win, lose, or interrupted --
+  // every exit from the loop above reaches here.
+  config_restore_settings_file(config, config_get_settings_filename(config),
+                               settings_error_stack);
+  if (!error_stack_is_empty(settings_error_stack)) {
+    error_stack_print_and_reset(settings_error_stack);
+  }
+  error_stack_destroy(settings_error_stack);
 }
 
 void string_builder_add_exec_mode_type(StringBuilder *sb,
