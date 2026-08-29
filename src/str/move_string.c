@@ -13,7 +13,6 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -165,12 +164,13 @@ void move_get_string(const Move *move, const Board *board,
 
   char position[16];
   if (board_is_dir_vertical(move_get_dir(move))) {
-    snprintf(position, sizeof(position), "%c%d",
-             (char)(move_get_col_start(move) + 'A'),
-             move_get_row_start(move) + 1);
+    snprintf_or_die(position, sizeof(position), "%c%d",
+                    (char)(move_get_col_start(move) + 'A'),
+                    move_get_row_start(move) + 1);
   } else {
-    snprintf(position, sizeof(position), "%d%c", move_get_row_start(move) + 1,
-             (char)(move_get_col_start(move) + 'A'));
+    snprintf_or_die(position, sizeof(position), "%d%c",
+                    move_get_row_start(move) + 1,
+                    (char)(move_get_col_start(move) + 'A'));
   }
   pos = append_bounded(dest, dest_size, pos, position);
   pos = append_bounded(dest, dest_size, pos, " ");
@@ -217,8 +217,8 @@ void move_get_string(const Move *move, const Board *board,
   }
   if (board && add_score) {
     char score_str[16];
-    snprintf(score_str, sizeof(score_str), " %d",
-             equity_to_int(move_get_score(move)));
+    snprintf_or_die(score_str, sizeof(score_str), " %d",
+                    equity_to_int(move_get_score(move)));
     pos = append_bounded(dest, dest_size, pos, score_str);
   }
   dest[pos] = '\0';
