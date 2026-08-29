@@ -13,7 +13,9 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,
                                          const Move *move,
@@ -123,6 +125,103 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
     string_builder_add_spaces(string_builder, 1);
     string_builder_add_int(string_builder, equity_to_int(move_get_score(move)));
   }
+}
+
+// Appends src to dest at dest[pos], truncating so the write never runs past
+// dest_size - 1, and returns the new position. Assumes dest_size >= 1.
+static size_t append_bounded(char *dest, size_t dest_size, size_t pos,
+                             const char *src) {
+  if (pos >= dest_size - 1) {
+    return pos;
+  }
+  const size_t src_len = strlen(src);
+  const size_t space = dest_size - 1 - pos;
+  const size_t to_copy = src_len < space ? src_len : space;
+  memcpy(dest + pos, src, to_copy);
+  return pos + to_copy;
+}
+
+void move_get_string(const Move *move, const Board *board,
+                     const LetterDistribution *ld, bool add_score, char *dest,
+                     size_t dest_size) {
+  size_t pos = 0;
+  if (move_get_type(move) == GAME_EVENT_PASS) {
+    pos = append_bounded(dest, dest_size, pos, "pass");
+    dest[pos] = '\0';
+    return;
+  }
+
+  if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+    pos = append_bounded(dest, dest_size, pos, "(exch ");
+    for (int i = 0; i < move_get_tiles_played(move); i++) {
+      char *hl = ld_ml_to_hl(ld, move_get_tile(move, i));
+      pos = append_bounded(dest, dest_size, pos, hl);
+      free(hl);
+    }
+    pos = append_bounded(dest, dest_size, pos, ")");
+    dest[pos] = '\0';
+    return;
+  }
+
+  char position[16];
+  if (board_is_dir_vertical(move_get_dir(move))) {
+    snprintf(position, sizeof(position), "%c%d",
+             (char)(move_get_col_start(move) + 'A'),
+             move_get_row_start(move) + 1);
+  } else {
+    snprintf(position, sizeof(position), "%d%c", move_get_row_start(move) + 1,
+             (char)(move_get_col_start(move) + 'A'));
+  }
+  pos = append_bounded(dest, dest_size, pos, position);
+  pos = append_bounded(dest, dest_size, pos, " ");
+
+  int current_row = move_get_row_start(move);
+  int current_col = move_get_col_start(move);
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    MachineLetter tile = move_get_tile(move, i);
+    MachineLetter print_tile = tile;
+    if (tile == PLAYED_THROUGH_MARKER) {
+      if (board) {
+        print_tile = board_get_letter(board, current_row, current_col);
+      }
+      if (i == 0 && board) {
+        pos = append_bounded(dest, dest_size, pos, "(");
+      }
+    }
+
+    if (tile == PLAYED_THROUGH_MARKER && !board) {
+      pos = append_bounded(dest, dest_size, pos, ".");
+    } else {
+      char *hl = ld_ml_to_hl(ld, print_tile);
+      pos = append_bounded(dest, dest_size, pos, hl);
+      free(hl);
+    }
+
+    if (board && (tile == PLAYED_THROUGH_MARKER) &&
+        (i == move_get_tiles_length(move) - 1 ||
+         move_get_tile(move, i + 1) != PLAYED_THROUGH_MARKER)) {
+      pos = append_bounded(dest, dest_size, pos, ")");
+    }
+
+    if (board && (tile != PLAYED_THROUGH_MARKER) &&
+        (i + 1 < move_get_tiles_length(move)) &&
+        move_get_tile(move, i + 1) == PLAYED_THROUGH_MARKER) {
+      pos = append_bounded(dest, dest_size, pos, "(");
+    }
+
+    if (board_is_dir_vertical(move_get_dir(move))) {
+      current_row++;
+    } else {
+      current_col++;
+    }
+  }
+  if (board && add_score) {
+    char score_str[16];
+    snprintf(score_str, sizeof(score_str), " %d",
+             equity_to_int(move_get_score(move)));
+    pos = append_bounded(dest, dest_size, pos, score_str);
+  }
+  dest[pos] = '\0';
 }
 
 void string_builder_add_ucgi_move(StringBuilder *move_string_builder,

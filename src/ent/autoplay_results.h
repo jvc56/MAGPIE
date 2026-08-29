@@ -64,6 +64,10 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
 // design as autoplay_results_to_string, just producing JSON instead of
 // human/status text. This is what the contribution client submits.
 //
+// The returned string is owned by autoplay_results, not the caller: it is
+// cached and freed on the next call (or when autoplay_results is destroyed),
+// so callers that need to keep it past that point must copy it themselves.
+//
 // The game recorder (when active) writes "all_games" (game counts and score
 // moments, read straight out of the recorder rather than parsed back out of
 // formatted output) and, when `show_divergent` is true, "divergent_games"
@@ -71,11 +75,12 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
 // where a paired run's signal lives, since identically-played pairs are
 // guaranteed ties carrying no information.
 //
-// The positions recorder (when active) writes "positions": every worker
-// thread appends captures into one shared, growing list, so they are *not*
-// in game or turn order -- each carries its own game and turn number.
-char *autoplay_results_to_json(AutoplayResults *autoplay_results,
-                               bool show_divergent);
+// The positions recorder (when active) writes "positions": each worker
+// thread accumulates its own captures, and consolidation renders all of them
+// into this recorder's share of the JSON, so they are *not* in game or turn
+// order -- each carries its own game and turn number.
+const char *autoplay_results_get_json(AutoplayResults *autoplay_results,
+                                      bool show_divergent);
 
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);

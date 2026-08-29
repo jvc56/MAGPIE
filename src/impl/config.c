@@ -7245,7 +7245,12 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   // signal lives). The positions recorder, when the job asked for positions to
   // be captured, writes "positions" alongside it -- each recorder decides its
   // own shape, the same as autoplay_results_to_string.
-  return autoplay_results_to_json(config->autoplay_results, game_pairs);
+  //
+  // autoplay_results owns the string autoplay_results_get_json returns, but
+  // the caller of this function frees what it gets back, so that string is
+  // copied here rather than handed out directly.
+  return string_duplicate(
+      autoplay_results_get_json(config->autoplay_results, game_pairs));
 }
 
 // Analyzes one opening rack onto an already-open JSON array, returning false
