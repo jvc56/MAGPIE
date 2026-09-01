@@ -207,6 +207,26 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
       leave_map_get_current_value(&gen->leave_map));
 }
 
+// Best-move recording computes the TWS defense term lazily: because the
+// term is always <= 0, a candidate whose equity WITHOUT it is already
+// strictly below the best move's full equity cannot become the best move,
+// so the (comparatively expensive) per-move lane rescans run only for
+// genuine contenders. Exact, not approximate: the stored equity of a
+// skipped candidate is an overestimate, but it is only ever used in a
+// comparison it strictly loses.
+static inline bool gen_twd_is_active(const MoveGen *gen) {
+  return gen->twd_eval_ctx.weights != NULL;
+}
+
+static inline Equity gen_get_static_equity_without_twd(const MoveGen *gen,
+                                                       const Move *move) {
+  return static_eval_get_move_equity_with_leave_value(
+      &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
+      gen->opening_move_penalties, NULL, gen->board_number_of_tiles_played,
+      gen->number_of_tiles_in_bag,
+      leave_map_get_current_value(&gen->leave_map));
+}
+
 static inline const Move *gen_get_readonly_best_move(const MoveGen *gen) {
   return &gen->best_move_and_current_move[gen->best_move_index];
 }
@@ -355,8 +375,28 @@ static inline void update_best_move_or_insert_into_movelist(
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    move_equity_or_score =
-        get_move_equity_for_sort_type(gen, current_move, score);
+    if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_twd_is_active(gen) &&
+        !gen->stop_on_threshold) {
+      const Equity equity_without_twd =
+          gen_get_static_equity_without_twd(gen, current_move);
+      const Equity best_equity =
+          move_get_equity(gen_get_readonly_best_move(gen));
+      const Equity penalty_bound =
+          twd_eval_move_penalty_bound(&gen->twd_eval_ctx, current_move);
+      if (best_equity != EQUITY_INITIAL_VALUE &&
+          equity_without_twd + penalty_bound < best_equity) {
+        // Cannot become the best move even with its best possible defense
+        // term; the stored overestimate still strictly loses the compare.
+        move_equity_or_score = equity_without_twd + penalty_bound;
+      } else {
+        move_equity_or_score =
+            equity_without_twd +
+            twd_eval_move_penalty(&gen->twd_eval_ctx, current_move);
+      }
+    } else {
+      move_equity_or_score =
+          get_move_equity_for_sort_type(gen, current_move, score);
+    }
     move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
@@ -695,8 +735,31 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   case MOVE_RECORD_BEST: {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
-    move_equity_or_score =
-        get_move_equity_for_sort_type_wmp(gen, current_move, leave_value);
+    if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_twd_is_active(gen) &&
+        !gen->stop_on_threshold) {
+      // See the lazy defense-term comment on gen_twd_is_active.
+      const Equity equity_without_twd =
+          static_eval_get_move_equity_with_leave_value(
+              &gen->ld, current_move, &gen->leave, &gen->opponent_rack,
+              gen->opening_move_penalties, NULL,
+              gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
+              leave_value);
+      const Equity best_equity =
+          move_get_equity(gen_get_readonly_best_move(gen));
+      const Equity penalty_bound =
+          twd_eval_move_penalty_bound(&gen->twd_eval_ctx, current_move);
+      if (best_equity != EQUITY_INITIAL_VALUE &&
+          equity_without_twd + penalty_bound < best_equity) {
+        move_equity_or_score = equity_without_twd + penalty_bound;
+      } else {
+        move_equity_or_score =
+            equity_without_twd +
+            twd_eval_move_penalty(&gen->twd_eval_ctx, current_move);
+      }
+    } else {
+      move_equity_or_score =
+          get_move_equity_for_sort_type_wmp(gen, current_move, leave_value);
+    }
     move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
