@@ -264,6 +264,17 @@ endgame_results_get_seconds_elapsed(const EndgameResults *endgame_results) {
   return endgame_results->seconds_elapsed;
 }
 
+// Live read of the solve timer. Unlike seconds_elapsed, which is only
+// refreshed by endgame_results_update_display_data (i.e. only when someone
+// renders status), this always reflects the real elapsed time: while the
+// timer runs it reads the clock, and after endgame_results_stop_ctimer it
+// returns the total time the solve took. Callers that must not overrun a
+// wall-clock budget need this, not the cached value.
+double endgame_results_get_timer_elapsed_seconds(
+    const EndgameResults *endgame_results) {
+  return ctimer_elapsed_seconds(&endgame_results->timer);
+}
+
 void endgame_results_lock(EndgameResults *endgame_results,
                           endgame_result_t result_type) {
   switch (result_type) {

@@ -54,6 +54,8 @@ int endgame_results_get_depth(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
 double
 endgame_results_get_seconds_elapsed(const EndgameResults *endgame_results);
+double endgame_results_get_timer_elapsed_seconds(
+    const EndgameResults *endgame_results);
 void endgame_results_lock(EndgameResults *endgame_results,
                           endgame_result_t type);
 void endgame_results_unlock(EndgameResults *endgame_results,
