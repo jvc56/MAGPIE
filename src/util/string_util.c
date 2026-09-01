@@ -171,6 +171,19 @@ char *string_builder_dump(const StringBuilder *string_builder, size_t *len) {
   return out;
 }
 
+char *string_builder_dump_and_destroy(StringBuilder *string_builder,
+                                      size_t *len) {
+  if (!string_builder) {
+    return NULL;
+  }
+  if (len) {
+    *len = string_builder->len;
+  }
+  char *out = string_builder->string;
+  free(string_builder);
+  return out;
+}
+
 // ****************************************************************************
 // ***************************** String Splitter ******************************
 // ****************************************************************************
@@ -272,8 +285,8 @@ char *string_splitter_join(const StringSplitter *string_splitter,
       string_builder_add_string(joined_string_builder, separator);
     }
   }
-  char *joined_string = string_builder_dump(joined_string_builder, NULL);
-  string_builder_destroy(joined_string_builder);
+  char *joined_string =
+      string_builder_dump_and_destroy(joined_string_builder, NULL);
   return joined_string;
 }
 
@@ -750,6 +763,24 @@ char *replace_whitespace_with_underscore(const char *str) {
   return new_str;
 }
 
+size_t append_bounded(char *dest, size_t dest_size, size_t pos,
+                      const char *src) {
+  if (pos >= dest_size - 1) {
+    return pos;
+  }
+  const size_t src_len = strlen(src);
+  const size_t space = dest_size - 1 - pos;
+  const size_t to_copy = src_len < space ? src_len : space;
+  memcpy(dest + pos, src, to_copy);
+  return pos + to_copy;
+}
+
+size_t append_int_bounded(char *dest, size_t dest_size, size_t pos, int value) {
+  char int_str[16];
+  snprintf_or_die(int_str, sizeof(int_str), "%d", value);
+  return append_bounded(dest, dest_size, pos, int_str);
+}
+
 const char *get_base_filename(const char *filepath) {
   // Find the last occurrence of the Unix directory separator
   const char *base_filename_unix = strrchr(filepath, '/');
@@ -987,14 +1018,11 @@ char *get_process_output(const char *cmd) {
 
   free(buffer);
   int status = pclose(pipe);
-  char *output = NULL;
-
-  if (status == 0) {
-    output = string_builder_dump(content_builder, NULL);
+  if (status != 0) {
+    string_builder_destroy(content_builder);
+    return NULL; // The command failed
   }
-
-  string_builder_destroy(content_builder);
-  return output; // Returns NULL if command failed
+  return string_builder_dump_and_destroy(content_builder, NULL);
 }
 
 // ****************************************************************************

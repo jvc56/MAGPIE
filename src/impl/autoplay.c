@@ -103,10 +103,6 @@ typedef struct LeavegenSharedData {
   const char *data_paths;
   KLV *klv;
   RackList *rack_list;
-  // Whether each generation should also dump rack_list's
-  // "<rack>,<count>,<mean>" data to a CSV (see rack_list_write_rack_equity_
-  // csv).
-  bool write_rack_equity_csv;
   Checkpoint *postgen_checkpoint;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
@@ -190,7 +186,8 @@ void postgen_prebroadcast_func(void *data) {
   rack_list_write_to_klv(lg_shared_data->rack_list, lg_shared_data->ld,
                          lg_shared_data->klv);
   // The direct-RackList-read MAGPIE-CLIENT.md's contribute leave_generation
-  // executor calls for, in place of a -writerackequitycsv file round trip.
+  // executor calls for: the results go back in the task's JSON response
+  // rather than through a file.
   autoplay_results_set_leave_results_json(
       lg_shared_data->primary_autoplay_results,
       rack_list_get_rack_equity_json(lg_shared_data->rack_list,
@@ -290,22 +287,6 @@ void postgen_prebroadcast_func(void *data) {
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("leavegen failed to write result summary to file");
-  }
-
-  // When -writerackequitycsv is set, also dump rack_list's
-  // "<rack>,<count>,<mean>" data for every observed rack, so a distributed
-  // caller doesn't have to parse the full per-generation KLV to get results.
-  if (lg_shared_data->write_rack_equity_csv) {
-    char *rack_equity_csv_name =
-        get_formatted_string("%s_rack_equity.csv", report_name_prefix);
-    rack_list_write_rack_equity_csv(lg_shared_data->rack_list,
-                                    lg_shared_data->ld, rack_equity_csv_name,
-                                    error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_print_and_reset(error_stack);
-      log_fatal("leavegen failed to write rack equity results to file");
-    }
-    free(rack_equity_csv_name);
   }
 
   string_builder_destroy(leave_gen_sb);
@@ -438,16 +419,16 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
-// forced_racks_filename is optional (NULL/empty for an unrestricted run) and
+// forced_racks is optional (num_forced_racks 0 for an unrestricted run) and
 // is passed straight through to rack_list_create; see its documentation for
-// what it does. Pushes to error_stack and returns NULL if that file can't be
-// read.
+// what it does. Pushes to error_stack and returns NULL if a forced rack is
+// malformed or duplicated.
 LeavegenSharedData *leavegen_shared_data_create(
     AutoplayResults *primary_autoplay_results,
     AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
     const char *data_paths, KLV *klv, int number_of_threads, int num_gens,
-    int *min_rack_targets, const char *forced_racks_filename,
-    bool write_rack_equity_csv, ErrorStack *error_stack) {
+    int *min_rack_targets, const char *const *forced_racks,
+    int num_forced_racks, ErrorStack *error_stack) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->num_gens = num_gens;
@@ -461,31 +442,30 @@ LeavegenSharedData *leavegen_shared_data_create(
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->min_rack_targets = min_rack_targets;
-  shared_data->rack_list = rack_list_create(ld, min_rack_targets[0],
-                                            forced_racks_filename, error_stack);
+  shared_data->rack_list = rack_list_create(
+      ld, min_rack_targets[0], forced_racks, num_forced_racks, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     autoplay_results_destroy(shared_data->gen_autoplay_results);
     free(shared_data);
     return NULL;
   }
-  shared_data->write_rack_equity_csv = write_rack_equity_csv;
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   return shared_data;
 }
 
-// Use NULL for the KLV when not running in leave gen mode. forced_racks_
-// filename and write_rack_equity_csv are only meaningful when klv is
-// non-NULL (see leavegen_shared_data_create); pushes to error_stack and
-// returns NULL on the same conditions that function does.
+// Use NULL for the KLV when not running in leave gen mode. forced_racks and
+// num_forced_racks are only meaningful when klv is non-NULL (see
+// leavegen_shared_data_create); pushes to error_stack and returns NULL on
+// the same conditions that function does.
 AutoplaySharedData *
 autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
                             const uint64_t first_gen_num_games,
                             AutoplayResults *primary_autoplay_results,
                             AutoplayResults **autoplay_results_list, KLV *klv,
                             int num_gens, int *min_rack_targets,
-                            const char *forced_racks_filename,
-                            ErrorStack *error_stack) {
+                            const char *const *forced_racks,
+                            int num_forced_racks, ErrorStack *error_stack) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
   shared_data->num_threads = num_autoplay_threads;
   shared_data->print_interval = args->print_interval;
@@ -503,7 +483,7 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
         args->data_paths, klv, num_autoplay_threads, num_gens, min_rack_targets,
-        forced_racks_filename, args->write_rack_equity_csv, error_stack);
+        forced_racks, num_forced_racks, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       prng_destroy(shared_data->prng);
       free(shared_data);
@@ -633,7 +613,7 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   if (game_runner->shared_data->leavegen_shared_data &&
       // We only force draws if we've played enough games for this
       // generation. This also applies when leavegen's rack list is
-      // restricted to a forceracksfile (see rack_list_create): clients
+      // restricted to a set of forced racks (see rack_list_create): clients
       // fulfilling requests can just pass 0 if they want forcing
       // from the start.
       (iter_output->iter_count -
@@ -806,7 +786,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     // A forced rack is under no obligation to have a legal play, and a
     // pass's equity is a sentinel value that can't be recorded, so passes
     // are skipped entirely here. This is more likely than usual when
-    // lg_shared_data->rack_list is restricted to a forceracksfile (see
+    // lg_shared_data->rack_list is restricted to forced racks (see
     // rack_list_create), since those racks are picked externally rather
     // than drawn from the actual remaining tile pool.
     if (move_get_type(forced_move) != GAME_EVENT_PASS) {
@@ -1234,7 +1214,7 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
       args, autoplay_num_threads, first_gen_num_games, autoplay_results,
       autoplay_results_list, klv, num_gens, min_rack_targets,
-      args->force_racks_filename, error_stack);
+      args->forced_racks, args->num_forced_racks, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     free(autoplay_results_list);
     free(min_rack_targets);

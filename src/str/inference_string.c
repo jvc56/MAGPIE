@@ -461,7 +461,6 @@ char *inference_result_get_string(InferenceResults *inference_results,
   StringBuilder *inference_string = string_builder_create();
   string_builder_add_inference(inference_string, inference_results, ld,
                                max_num_leaves_to_display, use_ucgi_format);
-  char *result_string = string_builder_dump(inference_string, NULL);
-  string_builder_destroy(inference_string);
+  char *result_string = string_builder_dump_and_destroy(inference_string, NULL);
   return result_string;
 }

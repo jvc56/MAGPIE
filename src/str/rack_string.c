@@ -36,20 +36,6 @@ void string_builder_add_rack(StringBuilder *string_builder, const Rack *rack,
   }
 }
 
-// Appends src to dest at dest[pos], truncating so the write never runs past
-// dest_size - 1, and returns the new position. Assumes dest_size >= 1.
-static size_t append_bounded(char *dest, size_t dest_size, size_t pos,
-                             const char *src) {
-  if (pos >= dest_size - 1) {
-    return pos;
-  }
-  const size_t src_len = strlen(src);
-  const size_t space = dest_size - 1 - pos;
-  const size_t to_copy = src_len < space ? src_len : space;
-  memcpy(dest + pos, src, to_copy);
-  return pos + to_copy;
-}
-
 static size_t add_blanks_bounded(char *dest, size_t dest_size, size_t pos,
                                  const Rack *rack,
                                  const LetterDistribution *ld) {

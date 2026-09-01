@@ -29,6 +29,12 @@ void string_builder_clear(StringBuilder *string_builder);
 size_t string_builder_length(const StringBuilder *string_builder);
 const char *string_builder_peek(const StringBuilder *string_builder);
 char *string_builder_dump(const StringBuilder *string_builder, size_t *length);
+// Destroys string_builder and returns its string, transferring ownership of
+// the buffer to the caller instead of copying it the way
+// string_builder_dump + string_builder_destroy would. The caller frees the
+// returned string; string_builder must not be used again.
+char *string_builder_dump_and_destroy(StringBuilder *string_builder,
+                                      size_t *length);
 
 typedef struct StringSplitter StringSplitter;
 
@@ -86,6 +92,16 @@ char *replace_whitespace_with_underscore(const char *str);
 
 // Non-malloc'ing string functions
 const char *get_base_filename(const char *filepath);
+
+// Bounded-buffer append functions, for writers that build a string into a
+// caller-supplied fixed-size buffer instead of a StringBuilder. Both append
+// at dest[pos], truncate so the write never runs past dest_size - 1, and
+// return the new position. Neither writes a null terminator: the caller
+// writes dest[pos] = '\0' once the whole string is assembled. Both assume
+// dest_size >= 1.
+size_t append_bounded(char *dest, size_t dest_size, size_t pos,
+                      const char *src);
+size_t append_int_bounded(char *dest, size_t dest_size, size_t pos, int value);
 
 // Inplace string functions
 void trim_whitespace(char *str);

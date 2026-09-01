@@ -163,8 +163,7 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
       string_builder_add_string(css_builder, ld_ml_to_hl(ld, i));
     }
   }
-  char *result = string_builder_dump(css_builder, NULL);
-  string_builder_destroy(css_builder);
+  char *result = string_builder_dump_and_destroy(css_builder, NULL);
   return result;
 }
 
@@ -498,8 +497,7 @@ void assert_racks_equal(const LetterDistribution *ld, const Rack *r1,
   char *r1_str = string_builder_dump(sb, NULL);
   string_builder_clear(sb);
   string_builder_add_rack(sb, r2, ld, false);
-  char *r2_str = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *r2_str = string_builder_dump_and_destroy(sb, NULL);
   assert_strings_equal(r1_str, r2_str);
   free(r1_str);
   free(r2_str);
@@ -509,8 +507,7 @@ void assert_rack_equals_string(const LetterDistribution *ld, const Rack *r1,
                                const char *r2_str) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_rack(sb, r1, ld, false);
-  char *r1_str = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *r1_str = string_builder_dump_and_destroy(sb, NULL);
   assert_strings_equal(r1_str, r2_str);
   free(r1_str);
 }

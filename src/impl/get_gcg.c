@@ -266,9 +266,11 @@ static void get_local_gcg(const char *identifier, GetGCGResult *result,
       string_builder_add_string(sb, identifier);
       string_builder_add_string(sb, GCG_EXTENSION);
       if (access(string_builder_peek(sb), R_OK) == 0) {
-        identifier_with_possible_ext = string_builder_dump(sb, NULL);
+        identifier_with_possible_ext =
+            string_builder_dump_and_destroy(sb, NULL);
+      } else {
+        string_builder_destroy(sb);
       }
-      string_builder_destroy(sb);
     }
   } else {
     identifier_with_possible_ext = string_duplicate(identifier);

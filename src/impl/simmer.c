@@ -78,8 +78,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
       string_builder_add_string(sb, "opponent rack '");
       string_builder_add_rack(sb, known_opp_rack, ld, false);
       string_builder_add_string(sb, "' is not available in the bag");
-      char *err_msg = string_builder_dump(sb, NULL);
-      string_builder_destroy(sb);
+      char *err_msg = string_builder_dump_and_destroy(sb, NULL);
       error_stack_push(error_stack, ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG,
                        err_msg);
       return;

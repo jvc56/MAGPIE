@@ -340,33 +340,8 @@ void string_builder_add_cgp(StringBuilder *cgp_builder, const Game *game,
 char *game_get_cgp(const Game *game, bool write_player_on_turn_first) {
   StringBuilder *cgp_builder = string_builder_create();
   string_builder_add_cgp(cgp_builder, game, write_player_on_turn_first);
-  char *cgp = string_builder_dump(cgp_builder, NULL);
-  string_builder_destroy(cgp_builder);
+  char *cgp = string_builder_dump_and_destroy(cgp_builder, NULL);
   return cgp;
-}
-
-// Appends src to dest at dest[pos], truncating so the write never runs past
-// dest_size - 1, and returns the new position. Assumes dest_size >= 1.
-// Mirrors the identically named helper in str/move_string.c and
-// str/rack_string.c: each bounded-buffer writer keeps its own copy rather
-// than sharing one across modules.
-static size_t append_bounded(char *dest, size_t dest_size, size_t pos,
-                             const char *src) {
-  if (pos >= dest_size - 1) {
-    return pos;
-  }
-  const size_t src_len = strlen(src);
-  const size_t space = dest_size - 1 - pos;
-  const size_t to_copy = src_len < space ? src_len : space;
-  memcpy(dest + pos, src, to_copy);
-  return pos + to_copy;
-}
-
-static size_t append_int_bounded(char *dest, size_t dest_size, size_t pos,
-                                 int value) {
-  char int_str[16];
-  snprintf_or_die(int_str, sizeof(int_str), "%d", value);
-  return append_bounded(dest, dest_size, pos, int_str);
 }
 
 // Writes the same representation as string_builder_add_cgp into dest instead
@@ -423,7 +398,7 @@ void game_get_cgp_string(const Game *game, bool write_player_on_turn_first,
 
   // rack_get_string null-terminates on its own, so build each rack into a
   // scratch buffer and append that rather than writing into dest directly.
-  char rack_str[(RACK_SIZE) * MAX_LETTER_BYTE_LENGTH + 1];
+  char rack_str[(RACK_SIZE)*MAX_LETTER_BYTE_LENGTH + 1];
   rack_get_string(player_get_rack(player0), ld, false, rack_str,
                   sizeof(rack_str));
   pos = append_bounded(dest, dest_size, pos, rack_str);
@@ -532,7 +507,7 @@ char *game_get_cgp_with_options(const Game *game,
   string_builder_add_cgp_options(cgp_with_options_builder, players_data,
                                  bingo_bonus, board_layout_name, ld_name,
                                  game_variant);
-  char *cgp_with_options = string_builder_dump(cgp_with_options_builder, NULL);
-  string_builder_destroy(cgp_with_options_builder);
+  char *cgp_with_options =
+      string_builder_dump_and_destroy(cgp_with_options_builder, NULL);
   return cgp_with_options;
 }

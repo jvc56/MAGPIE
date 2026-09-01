@@ -1,3 +1,4 @@
+#include "../src/def/autoplay_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
@@ -278,78 +279,44 @@ void test_autoplay_leavegen_force_racks(void) {
   Config *ab_config =
       config_create_or_die("set -lex CSW21_ab -ld english_ab -wmp false -s1 "
                            "equity -s2 equity -r1 best -r2 "
-                           "best -numplays 1 -threads 1");
+                           "best -numplays 1 -threads 1 -seed 3");
 
-  const char *force_racks_filename = "test_leavegen_force_racks.txt";
-  ErrorStack *write_error_stack = error_stack_create();
-  // Racks must be full RACK_SIZE racks: the file restricts which racks
-  // leavegen's RackList treats as eligible to be forced (see
-  // rack_list_create). CSW21_ab/english_ab only has 8 possible full racks
-  // (see test_rack_list in rack_list_test.c), so restricting to 2 of them
-  // makes the generation converge almost immediately.
-  write_string_to_file(force_racks_filename, "w", "AAAAAAB\nABBBBBB\n",
-                       write_error_stack);
-  assert(error_stack_is_empty(write_error_stack));
-  error_stack_destroy(write_error_stack);
+  AutoplayResults *autoplay_results = autoplay_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  autoplay_results_set_options(autoplay_results, "games", error_stack);
+  assert(error_stack_is_empty(error_stack));
 
-  char *leavegen_cmd =
-      get_formatted_string("leavegen 1 0 %s -seed 3", force_racks_filename);
-  // The minimum leave count should be achieved quickly, so if this takes too
-  // long, we know it failed.
-  load_and_exec_config_or_die_timed(ab_config, leavegen_cmd, 60);
-  free(leavegen_cmd);
+  // Forced racks restrict which racks leavegen's RackList treats as eligible
+  // to be forced (see rack_list_create), and only ever come from a
+  // contribute leave_generation task's JSON request, so there is no command
+  // that sets them: call config_autoplay directly, the way
+  // config_contribute_leave_gen does. CSW21_ab/english_ab only has 8
+  // possible full racks (see test_rack_list in rack_list_test.c), so
+  // restricting to 2 of them makes the generation converge almost
+  // immediately.
+  const char *forced_racks[] = {"AAAAAAB", "ABBBBBB"};
+  config_autoplay(ab_config, autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, "1", 0,
+                  forced_racks, 2, error_stack);
+  assert(error_stack_is_empty(error_stack));
 
-  // Missing force racks file.
-  assert_config_exec_status(
-      ab_config, "leavegen 1 0 does_not_exist_force_racks.txt -seed 3",
-      ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM);
+  // Racks must all be full RACK_SIZE racks, and no rack may be listed twice
+  // (see rack_list_test.c for what each rejection protects).
+  const char *malformed_racks[] = {"AAAAAAB", "AB"};
+  config_autoplay(ab_config, autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, "1", 0,
+                  malformed_racks, 2, error_stack);
+  assert(error_stack_top(error_stack) ==
+         ERROR_STATUS_AUTOPLAY_FORCE_RACKS_MALFORMED_RACK);
+  error_stack_reset(error_stack);
 
-  // Malformed rack line (wrong size for RACK_SIZE-tile racks).
-  const char *bad_force_racks_filename = "test_leavegen_bad_force_racks.txt";
-  ErrorStack *bad_write_error_stack = error_stack_create();
-  write_string_to_file(bad_force_racks_filename, "w", "AAAAAAB\nAB\n",
-                       bad_write_error_stack);
-  assert(error_stack_is_empty(bad_write_error_stack));
-  error_stack_destroy(bad_write_error_stack);
-  char *bad_racks_cmd =
-      get_formatted_string("leavegen 1 0 %s -seed 3", bad_force_racks_filename);
-  assert_config_exec_status(ab_config, bad_racks_cmd,
-                            ERROR_STATUS_AUTOPLAY_FORCE_RACKS_MALFORMED_RACK);
-  free(bad_racks_cmd);
-  (void)remove(bad_force_racks_filename);
+  const char *duplicate_racks[] = {"AAAAAAB", "ABBBBBB", "AAAAAAB"};
+  config_autoplay(ab_config, autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, "1", 0,
+                  duplicate_racks, 3, error_stack);
+  assert(error_stack_top(error_stack) ==
+         ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK);
+  error_stack_reset(error_stack);
 
-  // Duplicate rack.
-  const char *duplicate_force_racks_filename =
-      "test_leavegen_duplicate_force_racks.txt";
-  ErrorStack *duplicate_write_error_stack = error_stack_create();
-  write_string_to_file(duplicate_force_racks_filename, "w",
-                       "AAAAAAB\nABBBBBB\nAAAAAAB\n",
-                       duplicate_write_error_stack);
-  assert(error_stack_is_empty(duplicate_write_error_stack));
-  error_stack_destroy(duplicate_write_error_stack);
-  char *duplicate_racks_cmd = get_formatted_string(
-      "leavegen 1 0 %s -seed 3", duplicate_force_racks_filename);
-  assert_config_exec_status(ab_config, duplicate_racks_cmd,
-                            ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK);
-  free(duplicate_racks_cmd);
-  (void)remove(duplicate_force_racks_filename);
-
-  // File with no parseable racks.
-  const char *empty_force_racks_filename =
-      "test_leavegen_empty_force_racks.txt";
-  ErrorStack *empty_write_error_stack = error_stack_create();
-  write_string_to_file(empty_force_racks_filename, "w", "\n\n   \n",
-                       empty_write_error_stack);
-  assert(error_stack_is_empty(empty_write_error_stack));
-  error_stack_destroy(empty_write_error_stack);
-  char *empty_racks_cmd = get_formatted_string("leavegen 1 0 %s -seed 3",
-                                               empty_force_racks_filename);
-  assert_config_exec_status(ab_config, empty_racks_cmd,
-                            ERROR_STATUS_AUTOPLAY_FORCE_RACKS_FILE_EMPTY);
-  free(empty_racks_cmd);
-  (void)remove(empty_force_racks_filename);
-
-  (void)remove(force_racks_filename);
+  error_stack_destroy(error_stack);
+  autoplay_results_destroy(autoplay_results);
   config_destroy(ab_config);
 }
 

@@ -15,28 +15,27 @@ typedef struct GameStringOptions GameStringOptions;
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
   int games_before_force_draw_start;
-  // Optional: path to a file listing racks (one per line) that restricts
-  // which racks leavegen's RackList ever selects as rare (see
-  // rack_list_create). Only meaningful with AUTOPLAY_TYPE_LEAVE_GEN. NULL
-  // means every rack is eligible, as leavegen normally expects.
-  const char *force_racks_filename;
-  // Whether each leavegen generation should also dump rack_list's
-  // "<rack>,<count>,<mean>" data to a CSV (see
-  // rack_list_write_rack_equity_csv). Set explicitly by the user rather than
-  // inferred from force_racks_filename, since an unrestricted run could mean
-  // dumping millions of rows.
-  bool write_rack_equity_csv;
+  // Optional: racks that restrict which racks leavegen's RackList ever
+  // selects as rare (see rack_list_create). Only meaningful with
+  // AUTOPLAY_TYPE_LEAVE_GEN. num_forced_racks 0 means every rack is
+  // eligible, as leavegen normally expects.
+  const char *const *forced_racks;
+  int num_forced_racks;
   // How many ranked plays the positions recorder reports per captured
   // position, when active. Sizes each static player's move list up front
   // (see autoplay_worker_create) and is threaded through to
   // positions_data_add_move via RecorderArgs.play_cap.
   int position_play_cap;
-  // AUTOPLAY_TYPE_LEAVE_GEN only: a hard cap on games played, independent of
-  // whether the generation's rack targets are ever reached. 0 means
-  // unbounded (the CLI leavegen command's own behavior, unchanged). A
-  // bounded contribute leave_generation task sets this so the task cannot
-  // run indefinitely if its forced-rack subset doesn't hit target within a
-  // reasonable number of games.
+  // AUTOPLAY_TYPE_LEAVE_GEN only: a hard cap on games played across the whole
+  // run, independent of whether the generations' rack targets are ever
+  // reached. Leavegen otherwise stops only on its targets -- there is no
+  // per-generation game count anywhere in num_games_or_min_rack_targets,
+  // which carries the targets themselves -- so without this a run is
+  // unbounded, which is what 0 means and what the CLI leavegen command does.
+  // A contribute leave_generation task, whose single generation's target
+  // belongs to the server rather than to the task, sets this so the task
+  // cannot run indefinitely when its own forced-rack subset never reaches
+  // that target.
   uint64_t leavegen_max_games;
   bool use_game_pairs;
   bool human_readable;

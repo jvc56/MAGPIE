@@ -39,12 +39,11 @@ char *validated_move_get_phonies_formed(const LetterDistribution *ld,
       }
     }
   }
-  char *phonies_string = NULL;
-  if (phonies_formed) {
-    phonies_string = string_builder_dump(phonies_string_builder, 0);
+  if (!phonies_formed) {
+    string_builder_destroy(phonies_string_builder);
+    return NULL;
   }
-  string_builder_destroy(phonies_string_builder);
-  return phonies_string;
+  return string_builder_dump_and_destroy(phonies_string_builder, NULL);
 }
 
 void string_builder_add_validated_moves_phonies(StringBuilder *sb,

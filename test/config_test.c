@@ -2772,8 +2772,7 @@ void test_config_commit_by_index_uses_saved_move_list(void) {
   // frontier, so committing by index fails cleanly.
   StringBuilder *commit_cmd_sb = string_builder_create();
   string_builder_add_formatted_string(commit_cmd_sb, "com %d", chosen_rank);
-  char *commit_cmd = string_builder_dump(commit_cmd_sb, NULL);
-  string_builder_destroy(commit_cmd_sb);
+  char *commit_cmd = string_builder_dump_and_destroy(commit_cmd_sb, NULL);
   assert_config_exec_status(config, commit_cmd,
                             ERROR_STATUS_COMMIT_MOVE_INDEX_OUT_OF_RANGE);
 

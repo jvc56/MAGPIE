@@ -126,20 +126,6 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
   }
 }
 
-// Appends src to dest at dest[pos], truncating so the write never runs past
-// dest_size - 1, and returns the new position. Assumes dest_size >= 1.
-static size_t append_bounded(char *dest, size_t dest_size, size_t pos,
-                             const char *src) {
-  if (pos >= dest_size - 1) {
-    return pos;
-  }
-  const size_t src_len = strlen(src);
-  const size_t space = dest_size - 1 - pos;
-  const size_t to_copy = src_len < space ? src_len : space;
-  memcpy(dest + pos, src, to_copy);
-  return pos + to_copy;
-}
-
 void move_get_string(const Move *move, const Board *board,
                      const LetterDistribution *ld, bool add_score, char *dest,
                      size_t dest_size) {
@@ -490,8 +476,7 @@ void string_builder_add_move_list(
     string_builder_add_string_grid(temp_sb, string_grid, false);
     string_builder_add_formatted_string(temp_sb, "\nShowing %d of %d plays\n",
                                         num_moves_to_display, num_moves);
-    char *moves_str = string_builder_dump(temp_sb, NULL);
-    string_builder_destroy(temp_sb);
+    char *moves_str = string_builder_dump_and_destroy(temp_sb, NULL);
     string_builder_add_with_board_interleave(string_builder, moves_str,
                                              game_board_string);
     free(moves_str);
@@ -517,7 +502,6 @@ char *move_list_get_string(const MoveList *move_list, const Board *board,
                                filter_row, filter_col, prefix_mls, prefix_len,
                                exclude_tile_placement_moves, use_ucgi_format,
                                game_board_string);
-  char *move_list_string = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *move_list_string = string_builder_dump_and_destroy(sb, NULL);
   return move_list_string;
 }

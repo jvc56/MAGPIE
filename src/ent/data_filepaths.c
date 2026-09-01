@@ -86,8 +86,7 @@ char *get_filepath(const char *data_path, const char *data_name,
     break;
   }
   string_builder_add_string(filepath_sb, file_ext);
-  char *filepath = string_builder_dump(filepath_sb, NULL);
-  string_builder_destroy(filepath_sb);
+  char *filepath = string_builder_dump_and_destroy(filepath_sb, NULL);
   return filepath;
 }
 

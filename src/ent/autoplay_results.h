@@ -82,8 +82,8 @@ const char *autoplay_results_get_json(AutoplayResults *autoplay_results,
 // run first); NULL otherwise. See the struct comment in autoplay_results.c.
 void autoplay_results_set_leave_results_json(AutoplayResults *autoplay_results,
                                              char *leave_results_json);
-const char *
-autoplay_results_get_leave_results_json(const AutoplayResults *autoplay_results);
+const char *autoplay_results_get_leave_results_json(
+    const AutoplayResults *autoplay_results);
 
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);

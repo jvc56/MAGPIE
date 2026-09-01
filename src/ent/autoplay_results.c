@@ -285,8 +285,7 @@ char *game_data_ucgi_str(const GameData *gd,
         gd->penalty_points[1]);
   }
   string_builder_add_string(sb, "\n");
-  char *res = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *res = string_builder_dump_and_destroy(sb, NULL);
   return res;
 }
 
@@ -440,8 +439,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent,
   if (gd->total_games == 0) {
     string_builder_add_string(sb, "\n");
     string_builder_add_play_chooser_timing(sb, gd, recorder_context, col_width);
-    char *no_games_ret_str = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *no_games_ret_str = string_builder_dump_and_destroy(sb, NULL);
     return no_games_ret_str;
   }
 
@@ -516,8 +514,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent,
 
   string_builder_add_play_chooser_timing(sb, gd, recorder_context, col_width);
 
-  char *ret_str = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *ret_str = string_builder_dump_and_destroy(sb, NULL);
   return ret_str;
 }
 
@@ -645,8 +642,7 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
     free(divergent_games_str);
   }
 
-  char *str = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *str = string_builder_dump_and_destroy(sb, NULL);
   return str;
 }
 
@@ -687,8 +683,7 @@ char *game_data_sets_json(Recorder *recorder, const RecorderArgs *args) {
     write_game_data_json(sb, sets->divergent_games);
   }
 
-  char *json = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *json = string_builder_dump_and_destroy(sb, NULL);
   return json;
 }
 
@@ -1405,20 +1400,20 @@ void autoplay_results_set_recorder(
 enum {
   POSITIONS_INITIAL_CAPACITY = 256,
   CAPTURED_POSITION_PLAYS_INITIAL_CAPACITY = 30,
-  CAPTURED_RACK_STRING_SIZE = (RACK_SIZE)*MAX_LETTER_BYTE_LENGTH + 1,
+  CAPTURED_RACK_STRING_SIZE = (RACK_SIZE)*MAX_SHIPPED_LETTER_BYTE_LENGTH + 1,
   // A move's notation is a position spec (a couple of characters) plus one
   // human-readable letter per board square the play could possibly cover,
   // plus a little padding for the space and played-through-tile grouping
   // parens.
-  CAPTURED_MOVE_STRING_SIZE = (BOARD_DIM) * (MAX_LETTER_BYTE_LENGTH + 2) + 16,
+  CAPTURED_MOVE_STRING_SIZE =
+      (BOARD_DIM) * (MAX_SHIPPED_LETTER_BYTE_LENGTH + 2) + 16,
   // A full CGP: every board square as a distinct letter (worst case) plus a
   // '/' between each of the BOARD_DIM rows, both racks, both scores and the
   // consecutive-scoreless-turns count, with generous padding for the
   // separators and digits.
-  CAPTURED_CGP_STRING_SIZE = (BOARD_DIM) * (BOARD_DIM) *
-                                 (MAX_LETTER_BYTE_LENGTH) +
-                             (BOARD_DIM) + 2 * (CAPTURED_RACK_STRING_SIZE) +
-                             64,
+  CAPTURED_CGP_STRING_SIZE =
+      (BOARD_DIM) * (BOARD_DIM) * (MAX_SHIPPED_LETTER_BYTE_LENGTH) +
+      (BOARD_DIM) + 2 * (CAPTURED_RACK_STRING_SIZE) + 64,
   // How many per-ply stats a play keeps; a report never needs more detail
   // than this even when the sim ran deeper.
   CAPTURED_PLAY_MAX_PLIES = 10,
@@ -1772,8 +1767,7 @@ void positions_data_consolidate(Recorder **recorder_list,
   }
   json_write_array_end(sb);
   free(shared_data->json);
-  shared_data->json = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  shared_data->json = string_builder_dump_and_destroy(sb, NULL);
 }
 
 // The heavy lifting already happened in positions_data_consolidate; this just
@@ -1965,8 +1959,8 @@ void autoplay_results_set_leave_results_json(AutoplayResults *autoplay_results,
 // Borrowed; valid until autoplay_results is destroyed or another leavegen
 // run reuses it. NULL outside leavegen mode, or if the run's target was
 // never reached (see leavegen_max_games).
-const char *
-autoplay_results_get_leave_results_json(const AutoplayResults *autoplay_results) {
+const char *autoplay_results_get_leave_results_json(
+    const AutoplayResults *autoplay_results) {
   return autoplay_results->leave_results_json;
 }
 
@@ -2081,8 +2075,7 @@ const char *autoplay_results_get_json(AutoplayResults *autoplay_results,
   }
   json_write_object_end(ar_sb);
   free(autoplay_results->cached_json);
-  autoplay_results->cached_json = string_builder_dump(ar_sb, NULL);
-  string_builder_destroy(ar_sb);
+  autoplay_results->cached_json = string_builder_dump_and_destroy(ar_sb, NULL);
   return autoplay_results->cached_json;
 }
 
@@ -2100,8 +2093,7 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
       free(rec_str);
     }
   }
-  char *ar_str = string_builder_dump(ar_sb, NULL);
-  string_builder_destroy(ar_sb);
+  char *ar_str = string_builder_dump_and_destroy(ar_sb, NULL);
   return ar_str;
 }
 

@@ -49,8 +49,8 @@ void string_builder_add_simmed_play_ply_counts(StringBuilder *sb,
   StringBuilder *move_sb = string_builder_create();
   string_builder_add_move(move_sb, board, simmed_play_get_move(simmed_play), ld,
                           false);
-  string_grid_set_cell(sg, curr_row, 1, string_builder_dump(move_sb, NULL));
-  string_builder_destroy(move_sb);
+  string_grid_set_cell(sg, curr_row, 1,
+                       string_builder_dump_and_destroy(move_sb, NULL));
   curr_row++;
 
   string_grid_set_cell(sg, curr_row, 0, string_duplicate("Iters:"));
@@ -295,9 +295,9 @@ bool string_builder_add_sim_stats_with_display_lock(
   string_builder_add_rack(known_opp_rack_sb,
                           sim_results_get_known_opp_rack(sim_results), ld,
                           false);
-  string_grid_set_cell(summary_sg, curr_row, 1,
-                       string_builder_dump(known_opp_rack_sb, NULL));
-  string_builder_destroy(known_opp_rack_sb);
+  string_grid_set_cell(
+      summary_sg, curr_row, 1,
+      string_builder_dump_and_destroy(known_opp_rack_sb, NULL));
   curr_row++;
 
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Infer:"));
@@ -371,8 +371,7 @@ void string_builder_add_sim_stats(
         temp_sb, game, sim_results, max_num_display_plays,
         max_num_display_plies, filter_row, filter_col, prefix_mls, prefix_len,
         exclude_tile_placement_moves, use_ucgi_format, show_bu);
-    char *sim_str = string_builder_dump(temp_sb, NULL);
-    string_builder_destroy(temp_sb);
+    char *sim_str = string_builder_dump_and_destroy(temp_sb, NULL);
     string_builder_add_with_board_interleave(sb, sim_str, game_board_string);
     free(sim_str);
   } else {
@@ -397,8 +396,7 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
                                prefix_mls, prefix_len,
                                exclude_tile_placement_moves, use_ucgi_format,
                                show_bu, game_board_string);
-  char *str = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *str = string_builder_dump_and_destroy(sb, NULL);
   return str;
 }
 

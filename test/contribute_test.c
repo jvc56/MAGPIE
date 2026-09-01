@@ -83,8 +83,7 @@ static void test_json_serialization(void) {
   json_write_double_field(sb, "mean", 429.5, &first);
   json_write_string_field(sb, "quoted", "a\"b\\c", &first);
   json_write_object_end(sb);
-  char *text = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *text = string_builder_dump_and_destroy(sb, NULL);
 
   // Round-tripping is the real assertion: escaping that looks right but does
   // not parse would be caught here rather than by the server.

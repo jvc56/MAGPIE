@@ -333,8 +333,7 @@ static void submit_result_over_http(HttpClient *client, const char *claim_token,
   json_write_raw_key(sb, "result", &first);
   string_builder_add_string(sb, result_json);
   json_write_object_end(sb);
-  char *body = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *body = string_builder_dump_and_destroy(sb, NULL);
 
   ChttpResponse response;
   http_client_post_json(client, "/api/worker/result", body, &response,
@@ -426,9 +425,8 @@ void contribute_fetch_artifact(ContributeState *state, const char *key,
   if (response->status_code != 200) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-        get_formatted_string(
-            "fetching artifact '%s' failed with HTTP %ld", key,
-            response->status_code));
+        get_formatted_string("fetching artifact '%s' failed with HTTP %ld", key,
+                             response->status_code));
     chttp_response_destroy(response);
   }
 }

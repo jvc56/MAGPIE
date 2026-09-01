@@ -473,8 +473,7 @@ void set_random_rack(const Game *game, const int player_index,
       string_builder_add_string(sb, "unexpectedly failed to draw rack '");
       string_builder_add_rack(sb, known_rack, ld, false);
       string_builder_add_string(sb, "' from the bag");
-      char *err_msg = string_builder_dump(sb, NULL);
-      string_builder_destroy(sb);
+      char *err_msg = string_builder_dump_and_destroy(sb, NULL);
       log_fatal(err_msg);
       // Unreachable, but will silence static analyzer warnings
       free(err_msg);
@@ -1244,8 +1243,7 @@ void set_rack_from_bag_or_push_to_error_stack(const Game *game,
     string_builder_add_rack(sb, rack_to_draw, game_get_ld(game), false);
     string_builder_add_formatted_string(sb, " for player %d not in bag",
                                         player_index + 1);
-    char *err_msg = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *err_msg = string_builder_dump_and_destroy(sb, NULL);
     error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG,
                      err_msg);
   }

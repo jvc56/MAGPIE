@@ -103,6 +103,11 @@
 #define CONTRIBUTE_KEY_GENERATION "generation"
 #define CONTRIBUTE_KEY_FORCED_RACKS "forced_racks"
 #define CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY "previous_artifact_key"
+// The minimum number of times every forced rack must occur before this
+// generation closes -- leavegen's per-generation "minimum rack target", the
+// value the CLI passes positionally as one entry of e.g.
+// "100,200,500,1000,1000,1000".
+#define CONTRIBUTE_KEY_TARGET_RACK_COUNT "target_rack_count"
 #define CONTRIBUTE_KEY_COUNT "count"
 #define CONTRIBUTE_KEY_MEAN "mean"
 
