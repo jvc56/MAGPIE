@@ -865,6 +865,7 @@ void generate_moves_for_game_override_record_type(
       .eq_margin_movegen = args->eq_margin_movegen,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .disable_twd = args->disable_twd,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
@@ -920,7 +921,11 @@ Move *get_top_equity_move_for_inferences(
                             .eq_margin_movegen = equity_margin,
                             .target_equity = target_equity,
                             .target_leave_size_for_exchange_cutoff =
-                                target_leave_size_for_exchange_cutoff};
+                                target_leave_size_for_exchange_cutoff,
+                            // Inference thresholds are built from score plus
+                            // leave; the TWS defense term would misalign
+                            // recorded equities with them.
+                            .disable_twd = true};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
 }

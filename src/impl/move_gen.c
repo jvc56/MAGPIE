@@ -31,6 +31,7 @@
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
+#include "../ent/tws_defense.h"
 #include "../ent/wmp.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
@@ -201,8 +202,8 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
-      gen->opening_move_penalties, gen->board_number_of_tiles_played,
-      gen->number_of_tiles_in_bag,
+      gen->opening_move_penalties, &gen->twd_eval_ctx,
+      gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
 
@@ -654,8 +655,9 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
   case MOVE_SORT_EQUITY:
     return static_eval_get_move_equity_with_leave_value(
         &gen->ld, move, &gen->leave, &gen->opponent_rack,
-        gen->opening_move_penalties, gen->board_number_of_tiles_played,
-        gen->number_of_tiles_in_bag, leave_value);
+        gen->opening_move_penalties, &gen->twd_eval_ctx,
+        gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
+        leave_value);
   case MOVE_SORT_SCORE:
     return move_get_score(move);
   default:
@@ -928,6 +930,11 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
     if (gen->number_of_tiles_in_bag > 0) {
       const Equity leave_value =
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
+      // This is an equity upper bound independent of the anchor's
+      // highest_possible_equity, so any positive equity term added to the
+      // real evaluation must be added here too. Terms that are always
+      // <= 0 (opening placement_adjustment, the TWS defense term) are
+      // soundly omitted; see static_eval_get_shadow_equity.
       if (better_play_has_been_found(gen, leave_value +
                                               anchor->highest_possible_score)) {
         continue;
@@ -2893,6 +2900,21 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
       gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
       gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
     board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+    // The TWS defense term is equity-only, bag-gated like the leave value,
+    // and requires valid cross sets (its scans read them). The weights are
+    // re-read from the player on every position load, so a training loop
+    // that rewrites them between generations needs no extra invalidation.
+    const TWDWeights *twd = player_get_twd(player);
+    if (twd && !args->disable_twd && gen->move_sort_type == MOVE_SORT_EQUITY &&
+        gen->number_of_tiles_in_bag > 0 &&
+        board_get_cross_sets_valid(gen->board)) {
+      twd_eval_context_load(&gen->twd_eval_ctx, twd, gen->lanes_cache,
+                            &gen->ld);
+    } else {
+      twd_eval_context_disable(&gen->twd_eval_ctx);
+    }
+  } else {
+    twd_eval_context_disable(&gen->twd_eval_ctx);
   }
 
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
@@ -3134,6 +3156,11 @@ void gen_record_scoring_plays(MoveGen *gen) {
       break;
     }
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
+    // The heap is ordered by highest_possible_equity, so one anchor whose
+    // bound cannot beat the cutoff ends the whole generation. This is only
+    // sound while every anchor's bound is a true upper bound on the equity
+    // of every move from that anchor; see the invariant comment on
+    // static_eval_get_shadow_equity for what that requires of new terms.
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
       break;
     }

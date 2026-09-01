@@ -16,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
+#include "../ent/tws_defense.h"
 #include "wmp_move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -109,6 +110,9 @@ typedef struct MoveGen {
   Square row_cache[BOARD_DIM];
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
   Equity opening_move_penalties[(BOARD_DIM) * 2];
+  // TWS defense evaluation state; disabled (weights NULL) unless the player
+  // has TWD weights loaded and the record/sort types use static equity.
+  TWDEvalContext twd_eval_ctx;
   int board_number_of_tiles_played;
   int cross_index;
   Move best_move_and_current_move[2];
@@ -271,6 +275,11 @@ typedef struct MoveGenArgs {
   // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
   // Movegen ORs further discoveries in. Default 0 (no known tiles).
   uint64_t initial_tiles_bv;
+  // Disables the TWS defense term even when the player has weights loaded.
+  // Set by the inference paths, which build their own equity thresholds
+  // from score plus leave and would misclassify moves whose recorded
+  // equities carried the defense term.
+  bool disable_twd;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);

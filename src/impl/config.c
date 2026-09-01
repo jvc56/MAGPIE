@@ -41,6 +41,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/trie.h"
+#include "../ent/tws_defense.h"
 #include "../ent/validated_move.h"
 #include "../ent/win_pct.h"
 #include "../str/endgame_string.h"
@@ -8188,6 +8189,24 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     free(updated_p2_twd_name);
     if (!error_stack_is_empty(error_stack)) {
       return;
+    }
+  }
+
+  // The TWS defense hook-flex table depends on the lexicon, so rebuild it
+  // whenever data may have changed (cheap: one DAWG walk per letter). When
+  // both players share one weights object but use different lexicons, the
+  // second player's table wins; the approximation it feeds is coarse enough
+  // that this does not matter.
+  if (config->ld) {
+    for (int player_index = 0; player_index < 2; player_index++) {
+      TWDWeights *player_twd =
+          players_data_get_twd(config->players_data, player_index);
+      if (player_twd) {
+        twd_prepare_hook_flex(
+            player_twd,
+            players_data_get_kwg(config->players_data, player_index),
+            config->ld);
+      }
     }
   }
 }

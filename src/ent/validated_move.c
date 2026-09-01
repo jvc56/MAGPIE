@@ -22,6 +22,7 @@
 #include "player.h"
 #include "rack.h"
 #include "static_eval.h"
+#include "tws_defense.h"
 #include "words.h"
 #include <ctype.h>
 #include <stdint.h>
@@ -472,12 +473,28 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
 
   if (move_type != GAME_EVENT_PASS) {
     if (player_get_move_sort_type(player) == MOVE_SORT_EQUITY) {
+      // Build the TWS defense context on the stack so validated moves get
+      // the same equity as movegen-recorded moves. Disabled when the
+      // player has no weights or the board state cannot support the scans.
+      TWDEvalContext twd_eval_ctx;
+      twd_eval_context_disable(&twd_eval_ctx);
+      const TWDWeights *twd = player_get_twd(player);
+      if (twd && bag_get_letters(game_get_bag(game)) > 0 &&
+          !board_get_transposed(board) && board_get_cross_sets_valid(board)) {
+        twd_eval_context_load(
+            &twd_eval_ctx, twd,
+            board_get_readonly_lanes(
+                board, board_get_cross_set_index(
+                           game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+                           player_index)),
+            ld);
+      }
       move_set_equity(
           vm->move,
           static_eval_get_move_equity(
               ld, klv, vm->move, vm->leave,
               player_get_rack(game_get_player(game, 1 - player_index)),
-              board_get_opening_move_penalties(board),
+              board_get_opening_move_penalties(board), &twd_eval_ctx,
               board_get_tiles_played(board),
               bag_get_letters(game_get_bag(game))));
     } else {
