@@ -110,6 +110,7 @@ typedef enum {
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
+  ARG_TOKEN_TWD_GEN,
   ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
@@ -1260,6 +1261,22 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "externally-provided racks). See -writerackequitycsv for a way to "
           "dump each generation's rack data to a CSV.";
       break;
+    case ARG_TOKEN_TWD_GEN:
+      usages[0] = "<gen1_games>,<gen2_games>,... [<output_name>]";
+      examples[0] = "50000,50000,50000";
+      examples[1] = "20000,20000 english_twd";
+      text =
+          "Trains TWS defense weights (see the 'twd' option) by self-play: "
+          "each generation plays the given number of games, recording the "
+          "post-move TWS access features of every move and the opponent's "
+          "reply score, then refits the weights by ridge regression and "
+          "continues with them live. Requires both players to share a "
+          "lexicon; if no 'twd' weights are loaded, training bootstraps from "
+          "zero weights (which play identically to no weights). Each "
+          "generation writes <output_name>_gen_<N>.twd and a _report.txt "
+          "with the fit; the final weights are also written under "
+          "<output_name>, which defaults to the loaded weights name.";
+      break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
       examples[0] = "klv CSW50";
@@ -2341,6 +2358,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
         ARG_TOKEN_SNOPRUNE,             /* snoprune */
+        ARG_TOKEN_TWD_GEN,              /* twdgen */
     };
     // Other Commands (alphabetical by name)
     static const arg_token_t other_cmds[] = {
@@ -3827,13 +3845,14 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
                      const char *force_racks_filename,
-                     ErrorStack *error_stack) {
+                     const char *twd_gen_output_name, ErrorStack *error_stack) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(
       config, &args, autoplay_type, num_games_or_min_rack_targets,
       games_before_force_draw_start, force_racks_filename);
+  args.twd_gen_output_name = twd_gen_output_name;
   autoplay(&args, autoplay_results, error_stack);
 }
 
@@ -3865,7 +3884,8 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
       config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 1);
 
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_DEFAULT,
-                  num_games_str, 0, /*force_racks_filename=*/NULL, error_stack);
+                  num_games_str, 0, /*force_racks_filename=*/NULL,
+                  /*twd_gen_output_name=*/NULL, error_stack);
 }
 
 char *status_autoplay(Config *config) {
@@ -3950,7 +3970,70 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
 
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                   min_rack_targets_str, games_before_force_draw_start,
-                  force_racks_filename, error_stack);
+                  force_racks_filename, NULL, error_stack);
+}
+
+// TWS Defense Gen
+
+void impl_twd_gen(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate(
+            "cannot generate TWS defense weights without lexicon"));
+    return;
+  }
+
+  // The feature scans read cross sets at cross index 0, which requires
+  // both players to share a lexicon; the trained weights object must also
+  // be shared so one regression trains one set of weights.
+  if (!players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KWG)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_TWD_GEN_UNSHARED_DATA,
+        string_duplicate("cannot generate TWS defense weights with different "
+                         "lexica for the players"));
+    return;
+  }
+
+  TWDWeights *twd = players_data_get_twd(config->players_data, 0);
+  if (twd && twd != players_data_get_twd(config->players_data, 1)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_TWD_GEN_UNSHARED_DATA,
+        string_duplicate("cannot generate TWS defense weights when the "
+                         "players have different weights loaded"));
+    return;
+  }
+  if (!twd) {
+    // Bootstrap from zero weights shared by both players. Ownership
+    // transfers to players_data.
+    char *bootstrap_name =
+        get_formatted_string("%s_twd", ld_get_name(config_get_ld(config)));
+    twd = twd_create_zeroed(bootstrap_name);
+    free(bootstrap_name);
+    players_data_set_data(config->players_data, PLAYERS_DATA_TYPE_TWD, 0, twd);
+    players_data_set_data(config->players_data, PLAYERS_DATA_TYPE_TWD, 1, twd);
+    players_data_set_is_shared(config->players_data, PLAYERS_DATA_TYPE_TWD,
+                               true);
+  }
+  twd_prepare_hook_flex(twd, players_data_get_kwg(config->players_data, 0),
+                        config_get_ld(config));
+
+  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  const char *games_per_gen_str =
+      config_get_parg_value(config, ARG_TOKEN_TWD_GEN, 0);
+  const char *output_name = config_get_parg_value(config, ARG_TOKEN_TWD_GEN, 1);
+  if (!output_name) {
+    output_name = twd_get_name(twd);
+  }
+
+  config_autoplay(config, config->autoplay_results,
+                  AUTOPLAY_TYPE_TWS_DEFENSE_GEN, games_per_gen_str, 0, NULL,
+                  output_name, error_stack);
 }
 
 // Create
@@ -8492,6 +8575,15 @@ char *str_api_leave_gen(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_twd_gen(Config *config, ErrorStack *error_stack) {
+  impl_twd_gen(config, error_stack);
+}
+
+char *str_api_twd_gen(Config *config, ErrorStack *error_stack) {
+  impl_twd_gen(config, error_stack);
+  return empty_string();
+}
+
 void execute_create_data(Config *config, ErrorStack *error_stack) {
   impl_create_data(config, error_stack);
 }
@@ -9339,6 +9431,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 3, leave_gen, generic, false);
+  cmd(ARG_TOKEN_TWD_GEN, "twdgen", 1, 2, twd_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -9702,6 +9795,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
+    case ARG_TOKEN_TWD_GEN:
     case ARG_TOKEN_CREATE_DATA:
     case ARG_TOKEN_ANALYZE:
     case ARG_TOKEN_LOAD:

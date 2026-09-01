@@ -40,6 +40,9 @@ void *players_data_get_data(const PlayersData *players_data,
                             players_data_t players_data_type, int player_index);
 bool players_data_get_is_shared(const PlayersData *players_data,
                                 players_data_t players_data_type);
+void players_data_set_is_shared(PlayersData *players_data,
+                                players_data_t players_data_type,
+                                bool is_shared);
 bool players_data_get_use_when_available(const PlayersData *players_data,
                                          players_data_t players_data_type,
                                          int player_index);

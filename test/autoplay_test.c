@@ -1,8 +1,10 @@
+#include "../src/def/tws_defense_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/tws_defense.h"
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
@@ -15,6 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 void test_odds_that_player_is_better(void) {
   assert(within_epsilon(odds_that_player_is_better(0.6, 10), 73.645537));
@@ -128,6 +132,43 @@ void test_autoplay_leavegen(void) {
   load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3", 60);
   load_and_exec_config_or_die_timed(ab_config, "leavegen 1,2,1 0 -seed 3", 60);
 
+  config_destroy(ab_config);
+}
+
+void test_autoplay_twd_gen(void) {
+  char tmp_template[] = "/tmp/magpie_twdgen_XXXXXX";
+  const char *tmp_dir = mkdtemp(tmp_template);
+  assert(tmp_dir);
+  char *strategy_dir = get_formatted_string("%s/strategy", tmp_dir);
+  assert(mkdir(strategy_dir, 0755) == 0);
+  free(strategy_dir);
+
+  char *set_cmd = get_formatted_string(
+      "set -path %s:%s -lex CSW21_ab -ld english_ab -wmp false -s1 equity "
+      "-s2 equity -r1 best -r2 best -numplays 1 -threads 2",
+      tmp_dir, DEFAULT_TEST_DATA_PATH);
+  Config *ab_config = config_create_or_die(set_cmd);
+  free(set_cmd);
+
+  load_and_exec_config_or_die_timed(ab_config, "twdgen 4,4 twdgen_test -seed 3",
+                                    60);
+
+  // Both generation snapshots and the final weights reload cleanly with
+  // every applied weight <= 0.
+  ErrorStack *error_stack = error_stack_create();
+  const char *const twd_names[3] = {"twdgen_test_gen_1", "twdgen_test_gen_2",
+                                    "twdgen_test"};
+  for (int name_index = 0; name_index < 3; name_index++) {
+    TWDWeights *twd = twd_create(tmp_dir, twd_names[name_index], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(twd);
+    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+         feature_index++) {
+      assert(twd_get_weight(twd, feature_index) <= 0);
+    }
+    twd_destroy(twd);
+  }
+  error_stack_destroy(error_stack);
   config_destroy(ab_config);
 }
 
@@ -597,6 +638,7 @@ void test_autoplay_play_chooser(void) {
 void test_autoplay_remaining(void) {
   test_odds_that_player_is_better();
   test_autoplay_leavegen();
+  test_autoplay_twd_gen();
   test_autoplay_divergent_games();
   test_autoplay_sort_type_divergence();
   test_autoplay_win_pct_record();
