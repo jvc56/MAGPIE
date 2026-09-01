@@ -113,6 +113,9 @@ typedef struct MoveGen {
   // TWS defense evaluation state; disabled (weights NULL) unless the player
   // has TWD weights loaded and the record/sort types use static equity.
   TWDEvalContext twd_eval_ctx;
+  // twd_eval_lane_penalty_bound for the lane the shadow phase is on, folded
+  // into every shadow equity bound recorded from it (zero when disabled).
+  Equity twd_lane_penalty_bound;
   int board_number_of_tiles_played;
   int cross_index;
   Move best_move_and_current_move[2];

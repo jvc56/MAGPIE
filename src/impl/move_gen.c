@@ -519,7 +519,13 @@ static inline void record_exchange(MoveGen *gen) {
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
   case MOVE_RECORD_BEST:
     if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-      const Equity leave_value = leave_map_get_current_value(&gen->leave_map);
+      // An exchange's equity is its leave value plus the (<= 0, exactly
+      // known) TWS defense baseline; the cutoff already includes the best
+      // move's defense term, so compare like with like or every exchange
+      // within the baseline of the cutoff gets needlessly recorded.
+      const Equity leave_value =
+          leave_map_get_current_value(&gen->leave_map) +
+          twd_eval_non_placement_penalty(&gen->twd_eval_ctx);
       if (better_play_has_been_found(gen, leave_value)) {
         return;
       }
@@ -558,7 +564,10 @@ static void record_best_exchange_from_table(MoveGen *gen) {
   }
   const int leave_size = RACK_SIZE - tiles_exchanged;
   const Equity leave_value = gen->best_leaves[leave_size];
-  if (better_play_has_been_found(gen, leave_value)) {
+  // See record_exchange for why the defense baseline is included.
+  if (better_play_has_been_found(
+          gen,
+          leave_value + twd_eval_non_placement_penalty(&gen->twd_eval_ctx))) {
     return;
   }
   // Temporarily set leave_map so gen_get_static_equity reads the correct
@@ -988,6 +997,11 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
+  // Upper bound on the (<= 0) TWS defense term of every move from this
+  // anchor (zero when the term is off); omitting it would be sound too,
+  // just looser. See the shadow_record comment.
+  const Equity anchor_twd_bound =
+      twd_eval_lane_penalty_bound(&gen->twd_eval_ctx, anchor->dir, anchor->row);
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (gen->number_of_tiles_in_bag > 0) {
@@ -995,11 +1009,12 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
       // This is an equity upper bound independent of the anchor's
       // highest_possible_equity, so any positive equity term added to the
-      // real evaluation must be added here too. Terms that are always
-      // <= 0 (opening placement_adjustment, the TWS defense term) are
-      // soundly omitted; see static_eval_get_shadow_equity.
+      // real evaluation must be added here too. The opening
+      // placement_adjustment (always <= 0) is soundly omitted; see
+      // static_eval_get_shadow_equity.
       if (better_play_has_been_found(gen, leave_value +
-                                              anchor->highest_possible_score)) {
+                                              anchor->highest_possible_score +
+                                              anchor_twd_bound)) {
         continue;
       }
     }
@@ -1709,6 +1724,12 @@ static inline void shadow_record(MoveGen *gen) {
         &gen->ld, &gen->opponent_rack, best_leaves,
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
+    // The TWS defense term is <= 0, so the bound would stay valid without
+    // it, but then every anchor's bound is loose by roughly the position's
+    // baseline penalty and anchors survive the cutoff on a penalty all of
+    // their moves will pay. The per-lane bound (set when the lane is
+    // loaded; zero when the term is off) recovers most of that for free.
+    equity += gen->twd_lane_penalty_bound;
   }
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     const int word_length =
@@ -2748,6 +2769,8 @@ void shadow_by_orientation(MoveGen *gen) {
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
     board_copy_row_cache(gen->lanes_cache, gen->row_cache,
                          gen->current_row_index, gen->dir);
+    gen->twd_lane_penalty_bound = twd_eval_lane_penalty_bound(
+        &gen->twd_eval_ctx, gen->dir, gen->current_row_index);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
