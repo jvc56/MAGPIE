@@ -121,16 +121,19 @@ typedef enum {
   ARG_TOKEN_USE_RIT,
   ARG_TOKEN_USE_MMAP_FOR_RIT,
   ARG_TOKEN_LEAVES,
+  ARG_TOKEN_TWS_DEFENSE,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_USE_RIT,
   ARG_TOKEN_P1_LEAVES,
+  ARG_TOKEN_P1_TWS_DEFENSE,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
   ARG_TOKEN_P2_USE_WMP,
   ARG_TOKEN_P2_USE_RIT,
   ARG_TOKEN_P2_LEAVES,
+  ARG_TOKEN_P2_TWS_DEFENSE,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
@@ -1593,6 +1596,23 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the leaves for the given player, This can can be used "
              "with the autoplay command to compare different leaves.";
       break;
+    case ARG_TOKEN_TWS_DEFENSE:
+      usages[0] = "<tws_defense>";
+      examples[0] = "english_twd";
+      examples[1] = "none";
+      text = "Specifies the TWS defense weights for both players, unless "
+             "overridden by the 'twd1' or 'twd2' options. Use 'none' to "
+             "unload. TWS defense weights are off by default.";
+      break;
+    case ARG_TOKEN_P1_TWS_DEFENSE:
+    case ARG_TOKEN_P2_TWS_DEFENSE:
+      usages[0] = "<tws_defense>";
+      examples[0] = "english_twd";
+      examples[1] = "none";
+      text = "Specifies the TWS defense weights for the given player. This "
+             "can be used with the autoplay command to compare playing with "
+             "and without defense weights. Use 'none' to unload.";
+      break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       usages[0] = "<sort_type>";
@@ -2351,6 +2371,9 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_USE_MMAP_FOR_RIT,    /* ritmmap */
         ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
         ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
+        ARG_TOKEN_TWS_DEFENSE,         /* twd */
+        ARG_TOKEN_P1_TWS_DEFENSE,      /* twd1 */
+        ARG_TOKEN_P2_TWS_DEFENSE,      /* twd2 */
         ARG_TOKEN_GAME_VARIANT,        /* var */
         ARG_TOKEN_P1_USE_WMP,          /* w1 */
         ARG_TOKEN_P2_USE_WMP,          /* w2 */
@@ -8112,6 +8135,61 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
+
+  // Set the TWS defense weights - opt-in and per-player. The "twd1" and
+  // "twd2" args override the "twd" arg; "none" unloads. Unlike leaves, an
+  // unset arg means "keep whatever is currently loaded", which for a fresh
+  // config is nothing.
+  const char *new_twd_name =
+      config_get_parg_value(config, ARG_TOKEN_TWS_DEFENSE, 0);
+  const char *new_p1_twd_name = new_twd_name;
+  const char *new_p2_twd_name = new_twd_name;
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_TWS_DEFENSE) > 0) {
+    new_p1_twd_name =
+        config_get_parg_value(config, ARG_TOKEN_P1_TWS_DEFENSE, 0);
+  }
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_TWS_DEFENSE) > 0) {
+    new_p2_twd_name =
+        config_get_parg_value(config, ARG_TOKEN_P2_TWS_DEFENSE, 0);
+  }
+  if (new_p1_twd_name || new_p2_twd_name) {
+    char *updated_p1_twd_name = NULL;
+    if (new_p1_twd_name) {
+      updated_p1_twd_name = string_duplicate(new_p1_twd_name);
+    } else {
+      const char *existing_p1_twd_name = players_data_get_data_name(
+          config->players_data, PLAYERS_DATA_TYPE_TWD, 0);
+      if (existing_p1_twd_name) {
+        updated_p1_twd_name = string_duplicate(existing_p1_twd_name);
+      }
+    }
+    char *updated_p2_twd_name = NULL;
+    if (new_p2_twd_name) {
+      updated_p2_twd_name = string_duplicate(new_p2_twd_name);
+    } else {
+      const char *existing_p2_twd_name = players_data_get_data_name(
+          config->players_data, PLAYERS_DATA_TYPE_TWD, 1);
+      if (existing_p2_twd_name) {
+        updated_p2_twd_name = string_duplicate(existing_p2_twd_name);
+      }
+    }
+    const char *p1_twd_name_or_null = updated_p1_twd_name;
+    if (p1_twd_name_or_null && strings_iequal(p1_twd_name_or_null, "none")) {
+      p1_twd_name_or_null = NULL;
+    }
+    const char *p2_twd_name_or_null = updated_p2_twd_name;
+    if (p2_twd_name_or_null && strings_iequal(p2_twd_name_or_null, "none")) {
+      p2_twd_name_or_null = NULL;
+    }
+    players_data_set(config->players_data, PLAYERS_DATA_TYPE_TWD,
+                     config->data_paths, p1_twd_name_or_null,
+                     p2_twd_name_or_null, false, error_stack);
+    free(updated_p1_twd_name);
+    free(updated_p2_twd_name);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
 }
 
 // Parses the arguments given by the cmd string and updates the state of
@@ -9261,16 +9339,19 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_RIT, "rit", 1, 1);
   arg(ARG_TOKEN_USE_MMAP_FOR_RIT, "ritmmap", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
+  arg(ARG_TOKEN_TWS_DEFENSE, "twd", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
+  arg(ARG_TOKEN_P1_TWS_DEFENSE, "twd1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
   arg(ARG_TOKEN_P2_USE_RIT, "rit2", 1, 1);
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
+  arg(ARG_TOKEN_P2_TWS_DEFENSE, "twd2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -9671,6 +9752,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_USE_WMP:
     case ARG_TOKEN_USE_RIT:
     case ARG_TOKEN_LEAVES:
+    case ARG_TOKEN_TWS_DEFENSE:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
@@ -9700,6 +9782,15 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           players_data_get_data_name(config->players_data,
                                      PLAYERS_DATA_TYPE_KLV, 0));
+      break;
+    case ARG_TOKEN_P1_TWS_DEFENSE:
+      // Omitted when no weights are loaded; unloaded is the default.
+      if (players_data_get_twd(config->players_data, 0)) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token,
+            players_data_get_data_name(config->players_data,
+                                       PLAYERS_DATA_TYPE_TWD, 0));
+      }
       break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
@@ -9736,6 +9827,15 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           players_data_get_data_name(config->players_data,
                                      PLAYERS_DATA_TYPE_KLV, 1));
+      break;
+    case ARG_TOKEN_P2_TWS_DEFENSE:
+      // Omitted when no weights are loaded; unloaded is the default.
+      if (players_data_get_twd(config->players_data, 1)) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token,
+            players_data_get_data_name(config->players_data,
+                                       PLAYERS_DATA_TYPE_TWD, 1));
+      }
       break;
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",

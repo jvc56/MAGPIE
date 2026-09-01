@@ -17,7 +17,8 @@ static const char *const filepath_type_names[] = {"kwg",
                                                   "lexicon",
                                                   "wordmap",
                                                   "rack info table",
-                                                  "packed dawg"};
+                                                  "packed dawg",
+                                                  "tws defense"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
                                                 const char *data_path,
@@ -36,6 +37,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
     string_builder_add_formatted_string(sb, "%s/layouts/", data_path);
     break;
   case DATA_FILEPATH_TYPE_WIN_PCT:
+  case DATA_FILEPATH_TYPE_TWS_DEFENSE:
     string_builder_add_formatted_string(sb, "%s/strategy/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LD:
@@ -66,6 +68,9 @@ char *get_filepath(const char *data_path, const char *data_name,
     break;
   case DATA_FILEPATH_TYPE_RACK_INFO_TABLE:
     file_ext = RACK_INFO_TABLE_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_TWS_DEFENSE:
+    file_ext = TWS_DEFENSE_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_DAWG_PACKED:
     file_ext = DAWG_PACKED_EXTENSION;
