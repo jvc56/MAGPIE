@@ -14,6 +14,16 @@ enum {
   MAX_ALPHABET_SIZE = 50,
   MACHINE_LETTER_MAX_VALUE = (MAX_ALPHABET_SIZE + BLANK_MASK),
   MAX_LETTER_BYTE_LENGTH = 6,
+  // The longest human-readable letter in any letter distribution MAGPIE
+  // ships (data/letterdistributions): Catalan's L-middot-L digraph, which
+  // is 4 bytes (two ASCII letters plus a two-byte U+00B7).
+  // MAX_LETTER_BYTE_LENGTH above is the parser's ceiling, not a length any
+  // shipped distribution reaches, so buffers sized for the distributions
+  // that actually exist use this instead. A distribution with longer
+  // letters than this would be truncated by such a buffer, not overflow it
+  // -- every letter writer takes a destination size -- but this constant
+  // must grow with any distribution added.
+  MAX_SHIPPED_LETTER_BYTE_LENGTH = 4,
   ASCII_PLAYED_THROUGH = '.',
   ASCII_BLANK = '?',
 };

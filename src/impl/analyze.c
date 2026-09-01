@@ -363,8 +363,7 @@ static char *analyze_format_rack(const Rack *rack,
                                  const LetterDistribution *ld) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_rack(sb, rack, ld, false);
-  char *result = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *result = string_builder_dump_and_destroy(sb, NULL);
   return result;
 }
 
@@ -380,10 +379,9 @@ static void analyze_format_move(char *buf, size_t buf_size, const Move *move,
   } else {
     string_builder_add_move_description(sb, move, ld);
   }
-  char *result = string_builder_dump(sb, NULL);
+  char *result = string_builder_dump_and_destroy(sb, NULL);
   snprintf_or_die(buf, buf_size, "%s", result);
   free(result);
-  string_builder_destroy(sb);
 }
 
 // Populates best.display_move from best.move with board context.
@@ -657,8 +655,7 @@ static void write_per_turn_human_readable(
     }
   }
 
-  char *section = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *section = string_builder_dump_and_destroy(sb, NULL);
   append_string_to_file(report_path, section, error_stack);
   free(section);
 }
@@ -705,8 +702,7 @@ static void write_per_turn_csv(const TurnResult *turn_result,
 
   free(rack_str);
 
-  char *section = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *section = string_builder_dump_and_destroy(sb, NULL);
   append_string_to_file(report_path, section, error_stack);
   free(section);
 }
@@ -813,8 +809,7 @@ write_analysis_summary(GameHistory *game_history, const LetterDistribution *ld,
     string_builder_add_formatted_string(
         header_sb, "\n=== Game Summary: %s ===\n\n", player_name);
   }
-  char *header_str = string_builder_dump(header_sb, NULL);
-  string_builder_destroy(header_sb);
+  char *header_str = string_builder_dump_and_destroy(header_sb, NULL);
   append_string_to_file(report_path, header_str, error_stack);
   free(header_str);
   if (!error_stack_is_empty(error_stack)) {
@@ -924,8 +919,7 @@ write_analysis_summary(GameHistory *game_history, const LetterDistribution *ld,
         mistake_counts[MISTAKE_SMALL], mistake_counts[MISTAKE_MEDIUM],
         mistake_counts[MISTAKE_LARGE], total_mistake_index);
   }
-  char *section = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *section = string_builder_dump_and_destroy(sb, NULL);
   append_string_to_file(report_path, section, error_stack);
   free(section);
 
@@ -1496,8 +1490,7 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     string_builder_add_formatted_string(header_sb, "%s\n\n",
                                         analyze_args->config_settings_str);
   }
-  char *header_str = string_builder_dump(header_sb, NULL);
-  string_builder_destroy(header_sb);
+  char *header_str = string_builder_dump_and_destroy(header_sb, NULL);
   write_string_to_file(report_path, "w", header_str, error_stack);
   free(header_str);
   if (!error_stack_is_empty(error_stack)) {

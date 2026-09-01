@@ -32,6 +32,9 @@ typedef struct ConfigArgs {
 } ConfigArgs;
 
 // Constructors and Destructors
+// This build's version, for the contribution client's version negotiation.
+const char *config_get_magpie_version(void);
+
 Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 
@@ -114,7 +117,8 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
-                     const char *force_racks_filename, ErrorStack *error_stack);
+                     const char *const *forced_racks, int num_forced_racks,
+                     ErrorStack *error_stack);
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
                      SimResults *sim_results, int *arm_avoid_prune,
                      int num_arm_avoid_prune, ErrorStack *error_stack);

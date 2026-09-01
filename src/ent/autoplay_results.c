@@ -1,17 +1,25 @@
 #include "autoplay_results.h"
 
 #include "../compat/cpthread.h"
+#include "../def/board_defs.h"
+#include "../def/contribute_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/klv_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../impl/cgp.h"
+#include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "bag.h"
+#include "bai_result.h"
 #include "data_filepaths.h"
 #include "equity.h"
 #include "game.h"
@@ -22,6 +30,7 @@
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
+#include "sim_results.h"
 #include "stats.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -34,12 +43,27 @@ enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
 typedef struct RecorderArgs {
   const Game *game;
   const Move *move;
+  // The move played on the previous turn of this same game, or NULL on the
+  // first turn. Distinct from `move`, which is this turn's chosen move.
+  const Move *previous_move;
+  // The ranked candidates this turn, not just the one chosen. Reused across
+  // turns by the caller, so a recorder must copy rather than retain it.
+  const MoveList *move_list;
+  // The simulation behind this turn, when the player simmed. Carries the
+  // per-play win percentage and per-ply statistics the move list does not.
+  const SimResults *sim_results;
+  int game_number;
+  int pair_game_number;
+  int turn_number;
   const Rack *leave;
   int number_of_turns;
   uint64_t seed;
   bool divergent;
   bool human_readable;
   const AutoplayGameTiming *timing;
+  // How many ranked plays the positions recorder should keep per captured
+  // position. Unused by every other recorder.
+  int play_cap;
 } RecorderArgs;
 
 // Read-only data shared across all recorder types
@@ -64,6 +88,7 @@ typedef void (*recorder_add_move_func_t)(Recorder *, const RecorderArgs *);
 typedef void (*recorder_add_game_func_t)(Recorder *, const RecorderArgs *);
 typedef void (*recorder_consolidate_func_t)(Recorder **, int, Recorder *);
 typedef char *(*recorder_str_func_t)(Recorder *, const RecorderArgs *);
+typedef char *(*recorder_json_func_t)(Recorder *, const RecorderArgs *);
 
 struct Recorder {
   void *data;
@@ -76,6 +101,7 @@ struct Recorder {
   recorder_add_game_func_t add_game_func;
   recorder_consolidate_func_t consolidate_func;
   recorder_str_func_t str_func;
+  recorder_json_func_t json_func;
 };
 
 struct AutoplayResults {
@@ -90,6 +116,16 @@ struct AutoplayResults {
   bool human_readable;
   bool show_divergent;
   cpthread_mutex_t mutex;
+  // Owned by this AutoplayResults; set by autoplay_results_get_json, freed
+  // here rather than handed off to the caller.
+  char *cached_json;
+  // Leave generation only: the "{"racks":[...]}" rendering of the run's
+  // RackList, stashed by postgen_prebroadcast_func (autoplay.c) at the one
+  // point RackList is both populated and still alive -- it is destroyed
+  // inside autoplay() before returning, so this is the only way a caller
+  // (config_contribute_leave_gen) can read it afterward. NULL outside
+  // leavegen mode.
+  char *leave_results_json;
 };
 
 // Generic recorders
@@ -102,6 +138,11 @@ void add_game_noop(Recorder __attribute__((unused)) * recorder,
 
 char *get_str_noop(Recorder __attribute__((unused)) * recorder,
                    const RecorderArgs __attribute__((unused)) * args) {
+  return NULL;
+}
+
+char *get_json_noop(Recorder __attribute__((unused)) * recorder,
+                    const RecorderArgs __attribute__((unused)) * args) {
   return NULL;
 }
 
@@ -244,8 +285,7 @@ char *game_data_ucgi_str(const GameData *gd,
         gd->penalty_points[1]);
   }
   string_builder_add_string(sb, "\n");
-  char *res = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *res = string_builder_dump_and_destroy(sb, NULL);
   return res;
 }
 
@@ -399,8 +439,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent,
   if (gd->total_games == 0) {
     string_builder_add_string(sb, "\n");
     string_builder_add_play_chooser_timing(sb, gd, recorder_context, col_width);
-    char *no_games_ret_str = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *no_games_ret_str = string_builder_dump_and_destroy(sb, NULL);
     return no_games_ret_str;
   }
 
@@ -475,8 +514,7 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent,
 
   string_builder_add_play_chooser_timing(sb, gd, recorder_context, col_width);
 
-  char *ret_str = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *ret_str = string_builder_dump_and_destroy(sb, NULL);
   return ret_str;
 }
 
@@ -604,9 +642,49 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
     free(divergent_games_str);
   }
 
-  char *str = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *str = string_builder_dump_and_destroy(sb, NULL);
   return str;
+}
+
+static void write_game_data_json(StringBuilder *sb, const GameData *gd) {
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_int_field(sb, CONTRIBUTE_KEY_GAMES, (int64_t)gd->total_games,
+                       &first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_WINS, (int64_t)gd->p0_wins, &first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_LOSSES, (int64_t)gd->p0_losses,
+                       &first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_TIES, (int64_t)gd->p0_ties, &first);
+  json_write_double_field(sb, CONTRIBUTE_KEY_P1_SCORE_MEAN,
+                          stat_get_mean(gd->p0_score), &first);
+  json_write_double_field(sb, CONTRIBUTE_KEY_P1_SCORE_SD,
+                          stat_get_stdev(gd->p0_score), &first);
+  json_write_double_field(sb, CONTRIBUTE_KEY_P2_SCORE_MEAN,
+                          stat_get_mean(gd->p1_score), &first);
+  json_write_double_field(sb, CONTRIBUTE_KEY_P2_SCORE_SD,
+                          stat_get_stdev(gd->p1_score), &first);
+  json_write_object_end(sb);
+}
+
+// "all_games" and, when the caller asked for it, "divergent_games" -- pairs
+// whose two games did not play identically, which is where a paired run's
+// signal lives, since identically-played pairs are guaranteed ties carrying
+// no information.
+char *game_data_sets_json(Recorder *recorder, const RecorderArgs *args) {
+  const GameDataSets *sets = (const GameDataSets *)recorder->data;
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+
+  json_write_raw_key(sb, CONTRIBUTE_KEY_ALL_GAMES, &first);
+  write_game_data_json(sb, sets->all_games);
+
+  if (args->divergent) {
+    json_write_raw_key(sb, CONTRIBUTE_KEY_DIVERGENT_GAMES, &first);
+    write_game_data_json(sb, sets->divergent_games);
+  }
+
+  char *json = string_builder_dump_and_destroy(sb, NULL);
+  return json;
 }
 
 // FJ recorders
@@ -1202,6 +1280,7 @@ Recorder *recorder_create(const Recorder *primary_recorder,
                           recorder_add_game_func_t add_game_func,
                           recorder_consolidate_func_t consolidate_func,
                           recorder_str_func_t str_func,
+                          recorder_json_func_t json_func,
                           const RecorderContext *recorder_context) {
   Recorder *recorder = malloc_or_die(sizeof(Recorder));
   recorder->recorder_context = recorder_context;
@@ -1211,6 +1290,7 @@ Recorder *recorder_create(const Recorder *primary_recorder,
   recorder->add_game_func = add_game_func;
   recorder->consolidate_func = consolidate_func;
   recorder->str_func = str_func;
+  recorder->json_func = json_func;
   recorder->owns_thread_shared_data = !primary_recorder;
   create_data_func(recorder);
   // If this recorder owns the shared data, then it was already created
@@ -1255,6 +1335,12 @@ char *recorder_str(Recorder *recorder, bool human_readable,
   return recorder->str_func(recorder, &args);
 }
 
+char *recorder_json(Recorder *recorder, bool show_divergent) {
+  RecorderArgs args = {0};
+  args.divergent = show_divergent;
+  return recorder->json_func(recorder, &args);
+}
+
 uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type) {
   return (uint64_t)1 << recorder_type;
 }
@@ -1277,8 +1363,8 @@ void autoplay_results_set_recorder(
     recorder_destroy_data_func_t destroy_data_func,
     recorder_add_move_func_t add_move_func,
     recorder_add_game_func_t add_game_func,
-    recorder_consolidate_func_t consolidate_func,
-    recorder_str_func_t str_func) {
+    recorder_consolidate_func_t consolidate_func, recorder_str_func_t str_func,
+    recorder_json_func_t json_func) {
   if (options & autoplay_results_build_option(recorder_type)) {
     if (!autoplay_results->recorders[recorder_type]) {
       const Recorder *primary_recorder = NULL;
@@ -1287,13 +1373,415 @@ void autoplay_results_set_recorder(
       }
       autoplay_results->recorders[recorder_type] = recorder_create(
           primary_recorder, reset_func, create_data_func, destroy_data_func,
-          add_move_func, add_game_func, consolidate_func, str_func,
+          add_move_func, add_game_func, consolidate_func, str_func, json_func,
           autoplay_results->recorder_context);
     }
   } else {
     recorder_destroy(autoplay_results->recorders[recorder_type]);
     autoplay_results->recorders[recorder_type] = NULL;
   }
+}
+
+// --- positions recorder ------------------------------------------------------
+//
+// A player analyses a position on every turn regardless; this keeps that
+// analysis instead of discarding it. Enabled with the `positions` autoplay
+// option.
+//
+// Each worker thread accumulates its own captures in a plain growing array --
+// a rack and a move never need more than a few dozen bytes, so both live in
+// fixed-size fields. The plays kept per position can't be bounded the same
+// way, though: a position can legally have hundreds of ranked plays, so that
+// list is its own growing allocation, starting small and doubling as needed.
+// Once every worker thread is done, consolidation walks all of their arrays
+// once and renders the whole run's captures into one JSON string, owned by
+// the primary recorder's shared data.
+
+enum {
+  POSITIONS_INITIAL_CAPACITY = 256,
+  CAPTURED_POSITION_PLAYS_INITIAL_CAPACITY = 30,
+  CAPTURED_RACK_STRING_SIZE = (RACK_SIZE)*MAX_SHIPPED_LETTER_BYTE_LENGTH + 1,
+  // A move's notation is a position spec (a couple of characters) plus one
+  // human-readable letter per board square the play could possibly cover,
+  // plus a little padding for the space and played-through-tile grouping
+  // parens.
+  CAPTURED_MOVE_STRING_SIZE =
+      (BOARD_DIM) * (MAX_SHIPPED_LETTER_BYTE_LENGTH + 2) + 16,
+  // A full CGP: every board square as a distinct letter (worst case) plus a
+  // '/' between each of the BOARD_DIM rows, both racks, both scores and the
+  // consecutive-scoreless-turns count, with generous padding for the
+  // separators and digits.
+  CAPTURED_CGP_STRING_SIZE =
+      (BOARD_DIM) * (BOARD_DIM) * (MAX_SHIPPED_LETTER_BYTE_LENGTH) +
+      (BOARD_DIM) + 2 * (CAPTURED_RACK_STRING_SIZE) + 64,
+  // How many per-ply stats a play keeps; a report never needs more detail
+  // than this even when the sim ran deeper.
+  CAPTURED_PLAY_MAX_PLIES = 10,
+};
+
+typedef struct CapturedPly {
+  double bingo_percentage;
+  double average_score;
+} CapturedPly;
+
+typedef struct CapturedPlay {
+  char move[CAPTURED_MOVE_STRING_SIZE];
+  int score;
+  double equity;
+  uint64_t iterations;
+  // A static player's move was never simmed, so it has no win percentage,
+  // blended utility, or per-ply statistics.
+  bool has_win_percentage;
+  double win_percentage;
+  // Mean win%+spread blend in [0, 1] (see sim_utility_blend in
+  // src/ent/sim_args.h), parameterized by the player config's
+  // utility_w_winpct/utility_w_spread/utility_spread_scale. Sometimes used
+  // to rank moves instead of equity or raw win percentage.
+  bool has_blended_utility;
+  double blended_utility;
+  int num_plies;
+  CapturedPly plies[CAPTURED_PLAY_MAX_PLIES];
+} CapturedPlay;
+
+typedef struct CapturedPosition {
+  char rack[CAPTURED_RACK_STRING_SIZE];
+  // CGP of the position as it stood before the move was played.
+  char cgp[CAPTURED_CGP_STRING_SIZE];
+  // The move played on the previous turn of this game, and its score.
+  // Absent on the first turn of a game.
+  bool has_previous_move;
+  char previous_move[CAPTURED_MOVE_STRING_SIZE];
+  int previous_move_score;
+  int game_number;
+  int pair_game_number;
+  int turn_number;
+  // How many plays were ranked, before the report cap.
+  int num_moves;
+  uint64_t total_iterations;
+  double time_elapsed;
+  bai_result_status_t status;
+  CapturedPlay *plays;
+  int num_stored_plays;
+  int plays_capacity;
+} CapturedPosition;
+
+// Per worker thread: a plain growing array, no synchronization needed since
+// only the owning thread ever touches it.
+typedef struct PositionsData {
+  CapturedPosition *positions;
+  int count;
+  int capacity;
+} PositionsData;
+
+// Shared across every worker thread's recorder, owned by the one created
+// without a primary. Filled in once, by positions_data_consolidate, after
+// every worker is done.
+typedef struct PositionsSharedData {
+  char *json;
+} PositionsSharedData;
+
+static void positions_data_free_contents(PositionsData *data) {
+  for (int i = 0; i < data->count; i++) {
+    free(data->positions[i].plays);
+  }
+  data->count = 0;
+}
+
+void positions_data_reset(Recorder *recorder) {
+  positions_data_free_contents((PositionsData *)recorder->data);
+  if (recorder->owns_thread_shared_data) {
+    PositionsSharedData *shared_data =
+        (PositionsSharedData *)recorder->thread_shared_data;
+    free(shared_data->json);
+    shared_data->json = NULL;
+  }
+}
+
+void positions_data_create(Recorder *recorder) {
+  PositionsData *data = malloc_or_die(sizeof(PositionsData));
+  data->capacity = POSITIONS_INITIAL_CAPACITY;
+  data->positions =
+      malloc_or_die(sizeof(CapturedPosition) * (size_t)data->capacity);
+  data->count = 0;
+  recorder->data = data;
+
+  PositionsSharedData *shared_data = NULL;
+  // If this recorder is not the owner, the thread shared data will be
+  // assigned in the recorder_create function.
+  if (recorder->owns_thread_shared_data) {
+    shared_data = malloc_or_die(sizeof(PositionsSharedData));
+    shared_data->json = NULL;
+  }
+  recorder->thread_shared_data = shared_data;
+}
+
+void positions_data_destroy(Recorder *recorder) {
+  PositionsData *data = (PositionsData *)recorder->data;
+  positions_data_free_contents(data);
+  free(data->positions);
+  free(data);
+  if (recorder->owns_thread_shared_data) {
+    PositionsSharedData *shared_data =
+        (PositionsSharedData *)recorder->thread_shared_data;
+    free(shared_data->json);
+    free(shared_data);
+  }
+}
+
+static void captured_play_fill_common(CapturedPlay *play, const Move *move,
+                                      const Game *game,
+                                      const LetterDistribution *ld) {
+  move_get_string(move, game_get_board(game), ld, false, play->move,
+                  sizeof(play->move));
+  play->score = equity_to_int(move_get_score(move));
+  // A pass carries a sentinel equity that can't go through equity_to_double,
+  // but its display value is well defined, so it doesn't need to be excluded.
+  play->equity = move_get_type(move) == GAME_EVENT_PASS
+                     ? EQUITY_PASS_DISPLAY_DOUBLE
+                     : equity_to_double(move_get_equity(move));
+}
+
+static void captured_play_fill_from_simmed_play(CapturedPlay *play,
+                                                const SimmedPlay *simmed_play,
+                                                const Game *game,
+                                                const LetterDistribution *ld,
+                                                int num_plies) {
+  captured_play_fill_common(play, simmed_play_get_move(simmed_play), game, ld);
+  play->iterations =
+      stat_get_num_samples(simmed_play_get_win_pct_stat(simmed_play));
+  play->has_win_percentage = true;
+  play->win_percentage =
+      stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) * 100.0;
+  play->has_blended_utility = true;
+  play->blended_utility =
+      stat_get_mean(simmed_play_get_utility_stat(simmed_play));
+  play->num_plies =
+      num_plies < CAPTURED_PLAY_MAX_PLIES ? num_plies : CAPTURED_PLAY_MAX_PLIES;
+  for (int ply = 0; ply < play->num_plies; ply++) {
+    play->plies[ply].bingo_percentage =
+        stat_get_mean(simmed_play_get_bingo_stat(simmed_play, ply)) * 100.0;
+    play->plies[ply].average_score =
+        stat_get_mean(simmed_play_get_score_stat(simmed_play, ply));
+  }
+}
+
+static void captured_play_fill_from_move(CapturedPlay *play, const Move *move,
+                                         const Game *game,
+                                         const LetterDistribution *ld) {
+  captured_play_fill_common(play, move, game, ld);
+  play->iterations = 0;
+  play->has_win_percentage = false;
+  play->win_percentage = 0.0;
+  play->has_blended_utility = false;
+  play->blended_utility = 0.0;
+  play->num_plies = 0;
+}
+
+// Allocates a plays array big enough for `needed` entries, starting from
+// CAPTURED_POSITION_PLAYS_INITIAL_CAPACITY and doubling -- a position can
+// legally have hundreds of ranked plays, far more than makes sense as a
+// fixed default, so this can't be a fixed-size field the way rack and move
+// are.
+static CapturedPlay *captured_plays_create(int needed, int *out_capacity) {
+  int capacity = CAPTURED_POSITION_PLAYS_INITIAL_CAPACITY;
+  while (capacity < needed) {
+    capacity *= 2;
+  }
+  *out_capacity = capacity;
+  return malloc_or_die(sizeof(CapturedPlay) * (size_t)capacity);
+}
+
+void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  PositionsData *data = (PositionsData *)recorder->data;
+  if (!args->move_list) {
+    return;
+  }
+
+  const Game *game = args->game;
+  const LetterDistribution *ld = game_get_ld(game);
+  const int player_on_turn = game_get_player_on_turn_index(game);
+  const Rack *rack = player_get_rack(game_get_player(game, player_on_turn));
+
+  if (data->count == data->capacity) {
+    data->capacity *= 2;
+    data->positions = realloc_or_die(
+        data->positions, sizeof(CapturedPosition) * (size_t)data->capacity);
+  }
+  CapturedPosition *position = &data->positions[data->count++];
+  rack_get_string(rack, ld, false, position->rack, sizeof(position->rack));
+  // The board as it stands before this turn's move is played -- args->move
+  // has been chosen but not yet applied to args->game at this call site.
+  game_get_cgp_string(game, false, position->cgp, sizeof(position->cgp));
+  position->has_previous_move = args->previous_move != NULL;
+  if (position->has_previous_move) {
+    move_get_string(args->previous_move, game_get_board(game), ld, false,
+                    position->previous_move, sizeof(position->previous_move));
+    position->previous_move_score =
+        equity_to_int(move_get_score(args->previous_move));
+  } else {
+    position->previous_move[0] = '\0';
+    position->previous_move_score = 0;
+  }
+  position->game_number = args->game_number;
+  position->pair_game_number = args->pair_game_number;
+  position->turn_number = args->turn_number;
+
+  const bool simmed = args->sim_results &&
+                      sim_results_get_number_of_plays(args->sim_results) > 0;
+  position->num_moves = simmed
+                            ? sim_results_get_number_of_plays(args->sim_results)
+                            : move_list_get_count(args->move_list);
+  const int play_cap = args->play_cap > 0 ? args->play_cap : 0;
+  position->num_stored_plays =
+      position->num_moves < play_cap ? position->num_moves : play_cap;
+  position->plays = captured_plays_create(position->num_stored_plays,
+                                          &position->plays_capacity);
+
+  if (simmed) {
+    BAIResult *bai_result = sim_results_get_bai_result(args->sim_results);
+    position->total_iterations =
+        sim_results_get_iteration_count(args->sim_results);
+    position->time_elapsed = bai_result_get_elapsed_seconds(bai_result);
+    position->status = bai_result_get_status(bai_result);
+    const int num_plies = sim_results_get_num_plies(args->sim_results);
+    for (int i = 0; i < position->num_stored_plays; i++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(args->sim_results, i);
+      captured_play_fill_from_simmed_play(&position->plays[i], simmed_play,
+                                          game, ld, num_plies);
+    }
+  } else {
+    position->total_iterations = 0;
+    position->time_elapsed = 0.0;
+    position->status = BAI_RESULT_STATUS_NONE;
+    for (int i = 0; i < position->num_stored_plays; i++) {
+      const Move *move = move_list_get_move(args->move_list, i);
+      captured_play_fill_from_move(&position->plays[i], move, game, ld);
+    }
+  }
+}
+
+static void write_captured_play(StringBuilder *sb, const CapturedPlay *play) {
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_string_field(sb, CONTRIBUTE_KEY_MOVE, play->move, &first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_SCORE, play->score, &first);
+  json_write_double_field(sb, CONTRIBUTE_KEY_EQUITY, play->equity, &first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_ITERATIONS, (int64_t)play->iterations,
+                       &first);
+  if (play->has_win_percentage) {
+    json_write_double_field(sb, CONTRIBUTE_KEY_WIN_PERCENTAGE,
+                            play->win_percentage, &first);
+  }
+  if (play->has_blended_utility) {
+    json_write_double_field(sb, CONTRIBUTE_KEY_BLENDED_UTILITY,
+                            play->blended_utility, &first);
+  }
+  if (play->num_plies > 0) {
+    json_write_array_start(sb, CONTRIBUTE_KEY_PLIES, &first);
+    for (int ply = 0; ply < play->num_plies; ply++) {
+      if (ply > 0) {
+        string_builder_add_string(sb, ",");
+      }
+      bool ply_first = true;
+      json_write_object_start(sb);
+      json_write_int_field(sb, CONTRIBUTE_KEY_PLY, ply, &ply_first);
+      json_write_double_field(sb, CONTRIBUTE_KEY_BINGO_PERCENTAGE,
+                              play->plies[ply].bingo_percentage, &ply_first);
+      json_write_double_field(sb, CONTRIBUTE_KEY_AVERAGE_SCORE,
+                              play->plies[ply].average_score, &ply_first);
+      json_write_object_end(sb);
+    }
+    json_write_array_end(sb);
+  }
+  json_write_object_end(sb);
+}
+
+static void write_captured_position(StringBuilder *sb,
+                                    const CapturedPosition *position) {
+  bool position_first = true;
+  json_write_object_start(sb);
+  // pair_game_number is 0 for an unpaired game and 1 or 2 within a pair, so
+  // the batch-wide index is derived rather than assumed.
+  const int game_index =
+      position->pair_game_number > 0
+          ? position->game_number * 2 + (position->pair_game_number - 1)
+          : position->game_number;
+  json_write_int_field(sb, CONTRIBUTE_KEY_GAME_INDEX, game_index,
+                       &position_first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_TURN_NUMBER, position->turn_number,
+                       &position_first);
+  json_write_string_field(sb, CONTRIBUTE_KEY_RACK, position->rack,
+                          &position_first);
+  json_write_string_field(sb, CONTRIBUTE_KEY_POSITION, position->cgp,
+                          &position_first);
+  if (position->has_previous_move) {
+    json_write_string_field(sb, CONTRIBUTE_KEY_PREVIOUS_MOVE,
+                            position->previous_move, &position_first);
+    json_write_int_field(sb, CONTRIBUTE_KEY_PREVIOUS_MOVE_SCORE,
+                         position->previous_move_score, &position_first);
+  }
+  json_write_int_field(sb, CONTRIBUTE_KEY_NUM_MOVES, position->num_moves,
+                       &position_first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_TOTAL_ITERATIONS,
+                       (int64_t)position->total_iterations, &position_first);
+  json_write_double_field(sb, CONTRIBUTE_KEY_TIME_ELAPSED,
+                          position->time_elapsed, &position_first);
+  json_write_int_field(sb, CONTRIBUTE_KEY_STATUS, (int64_t)position->status,
+                       &position_first);
+  json_write_array_start(sb, CONTRIBUTE_KEY_MOVES, &position_first);
+
+  for (int p = 0; p < position->num_stored_plays; p++) {
+    if (p > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    write_captured_play(sb, &position->plays[p]);
+  }
+
+  json_write_array_end(sb);
+  json_write_object_end(sb);
+}
+
+// Renders every worker thread's captures into one JSON string, owned by the
+// primary recorder's shared data. Positions are visited thread by thread, so
+// they are *not* in game or turn order -- each carries its own game and turn
+// number.
+void positions_data_consolidate(Recorder **recorder_list,
+                                int recorder_list_size,
+                                Recorder *primary_recorder) {
+  PositionsSharedData *shared_data =
+      (PositionsSharedData *)primary_recorder->thread_shared_data;
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_array_start(sb, CONTRIBUTE_KEY_POSITIONS, &first);
+  bool any_written = false;
+  for (int i = 0; i < recorder_list_size; i++) {
+    const PositionsData *data = (const PositionsData *)recorder_list[i]->data;
+    for (int j = 0; j < data->count; j++) {
+      if (any_written) {
+        string_builder_add_string(sb, ",");
+      }
+      any_written = true;
+      write_captured_position(sb, &data->positions[j]);
+    }
+  }
+  json_write_array_end(sb);
+  free(shared_data->json);
+  shared_data->json = string_builder_dump_and_destroy(sb, NULL);
+}
+
+// The heavy lifting already happened in positions_data_consolidate; this just
+// hands back a copy of what it built; consolidate itself may run again later
+// (e.g. reused across leavegen generations), so json_func callers own the
+// copy they get rather than the shared original.
+char *positions_data_json(Recorder *recorder,
+                          const RecorderArgs __attribute__((unused)) * args) {
+  const PositionsSharedData *shared_data =
+      (const PositionsSharedData *)recorder->thread_shared_data;
+  if (!shared_data->json) {
+    return string_duplicate("\"" CONTRIBUTE_KEY_POSITIONS "\":[]");
+  }
+  return string_duplicate(shared_data->json);
 }
 
 void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
@@ -1303,21 +1791,26 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_GAME,
       game_data_sets_reset, game_data_sets_create, game_data_sets_destroy,
       add_move_noop, game_data_sets_add_game, game_data_sets_consolidate,
-      game_data_sets_str);
+      game_data_sets_str, game_data_sets_json);
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_FJ,
       fj_data_reset, fj_data_create, fj_data_destroy, fj_data_add_move,
-      fj_data_add_game, fj_data_consolidate, get_str_noop);
+      fj_data_add_game, fj_data_consolidate, get_str_noop, get_json_noop);
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_WIN_PCT,
       win_pct_data_reset, win_pct_data_create, win_pct_data_destroy,
       win_pct_data_add_move, win_pct_data_add_game, win_pct_data_consolidate,
-      get_str_noop);
+      get_str_noop, get_json_noop);
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_LEAVES,
       leaves_data_reset, leaves_data_create, leaves_data_destroy,
       leaves_data_add_move, add_game_noop, leaves_data_consolidate,
-      get_str_noop);
+      get_str_noop, get_json_noop);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_POSITION,
+      positions_data_reset, positions_data_create, positions_data_destroy,
+      positions_data_add_move, add_game_noop, positions_data_consolidate,
+      get_str_noop, positions_data_json);
   autoplay_results->options = options;
 }
 
@@ -1344,6 +1837,8 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WIN_PCT);
     } else if (has_iprefix(option_str, "leaves")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
+    } else if (has_iprefix(option_str, "positions")) {
+      options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_POSITION);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
@@ -1408,6 +1903,8 @@ AutoplayResults *autoplay_results_create_internal(void) {
   autoplay_results->finished = false;
   autoplay_results->human_readable = false;
   autoplay_results->show_divergent = false;
+  autoplay_results->cached_json = NULL;
+  autoplay_results->leave_results_json = NULL;
   cpthread_mutex_init(&autoplay_results->mutex);
   return autoplay_results;
 }
@@ -1442,7 +1939,29 @@ void autoplay_results_destroy(AutoplayResults *autoplay_results) {
   if (autoplay_results->owns_recorder_context) {
     destroy_recorder_context(autoplay_results->recorder_context);
   }
+  free(autoplay_results->cached_json);
+  free(autoplay_results->leave_results_json);
   free(autoplay_results);
+}
+
+// Called from postgen_prebroadcast_func (autoplay.c), the one point a
+// leavegen run's RackList is both fully populated for this generation and
+// still alive. Replaces any previous value: leavegen_max_games (see
+// AutoplayArgs) bounds a contribute task to a single generation, so this is
+// set at most once per run in practice, but a multi-generation CLI run
+// would otherwise leak every earlier generation's string.
+void autoplay_results_set_leave_results_json(AutoplayResults *autoplay_results,
+                                             char *leave_results_json) {
+  free(autoplay_results->leave_results_json);
+  autoplay_results->leave_results_json = leave_results_json;
+}
+
+// Borrowed; valid until autoplay_results is destroyed or another leavegen
+// run reuses it. NULL outside leavegen mode, or if the run's target was
+// never reached (see leavegen_max_games).
+const char *autoplay_results_get_leave_results_json(
+    const AutoplayResults *autoplay_results) {
+  return autoplay_results->leave_results_json;
 }
 
 void autoplay_results_set_status_data(AutoplayResults *autoplay_results,
@@ -1469,11 +1988,22 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave) {
+                               const Move *previous_move, const Rack *leave,
+                               const MoveList *move_list,
+                               const SimResults *sim_results, int game_number,
+                               int pair_game_number, int turn_number,
+                               int play_cap) {
   RecorderArgs args = {0};
   args.game = game;
   args.move = move;
+  args.previous_move = previous_move;
   args.leave = leave;
+  args.move_list = move_list;
+  args.sim_results = sim_results;
+  args.game_number = game_number;
+  args.pair_game_number = pair_game_number;
+  args.turn_number = turn_number;
+  args.play_cap = play_cap;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
       recorder_add_move(autoplay_results->recorders[i], &args);
@@ -1508,12 +2038,12 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary) {
   cpthread_mutex_lock(&primary->mutex);
-  autoplay_results_reset(primary);
   Recorder **recorder_list = malloc_or_die(sizeof(Recorder *) * list_size);
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (!autoplay_results_list[0]->recorders[i]) {
       continue;
     }
+    recorder_reset(primary->recorders[i]);
     for (int j = 0; j < list_size; j++) {
       recorder_list[j] = autoplay_results_list[j]->recorders[i];
     }
@@ -1521,6 +2051,32 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
   }
   free(recorder_list);
   cpthread_mutex_unlock(&primary->mutex);
+}
+
+const char *autoplay_results_get_json(AutoplayResults *autoplay_results,
+                                      bool show_divergent) {
+  StringBuilder *ar_sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(ar_sb);
+  for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
+    if (!autoplay_results->recorders[i]) {
+      continue;
+    }
+    char *rec_json =
+        recorder_json(autoplay_results->recorders[i], show_divergent);
+    if (rec_json) {
+      if (!first) {
+        string_builder_add_string(ar_sb, ",");
+      }
+      first = false;
+      string_builder_add_string(ar_sb, rec_json);
+      free(rec_json);
+    }
+  }
+  json_write_object_end(ar_sb);
+  free(autoplay_results->cached_json);
+  autoplay_results->cached_json = string_builder_dump_and_destroy(ar_sb, NULL);
+  return autoplay_results->cached_json;
 }
 
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
@@ -1537,8 +2093,7 @@ char *autoplay_results_to_string(AutoplayResults *autoplay_results,
       free(rec_str);
     }
   }
-  char *ar_str = string_builder_dump(ar_sb, NULL);
-  string_builder_destroy(ar_sb);
+  char *ar_str = string_builder_dump_and_destroy(ar_sb, NULL);
   return ar_str;
 }
 

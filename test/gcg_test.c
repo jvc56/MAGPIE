@@ -970,9 +970,8 @@ void test_success_board_layout_pragma(GameHistory *game_history) {
     }
   }
 
-  char *ext_gcg = string_builder_dump(ext_bdn_sb, NULL);
+  char *ext_gcg = string_builder_dump_and_destroy(ext_bdn_sb, NULL);
 
-  string_builder_destroy(ext_bdn_sb);
   string_splitter_destroy(split_standard);
   free(std_gcg);
 
@@ -1231,9 +1230,8 @@ void test_multiple_description_pragmas(GameHistory *game_history) {
     }
   }
 
-  char *multi_desc_gcg = string_builder_dump(multi_desc_sb, NULL);
+  char *multi_desc_gcg = string_builder_dump_and_destroy(multi_desc_sb, NULL);
 
-  string_builder_destroy(multi_desc_sb);
   string_splitter_destroy(split_standard);
   free(std_gcg);
 
@@ -1353,8 +1351,8 @@ void test_success_trailing_overtime_penalty(GameHistory *game_history) {
   string_builder_add_string(partial_gcg_sb,
                             ">RightBehindYou:  (time) -10 69\n");
 
-  char *gcg_with_penalty = string_builder_dump(partial_gcg_sb, NULL);
-  string_builder_destroy(partial_gcg_sb);
+  char *gcg_with_penalty =
+      string_builder_dump_and_destroy(partial_gcg_sb, NULL);
   string_splitter_destroy(split_standard);
   free(std_gcg);
 

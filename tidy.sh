@@ -10,7 +10,7 @@ echo "$CLANG_TIDY_EXEC version:"
 $CLANG_TIDY_EXEC --version
 
 SEARCH_DIRECTORIES="src/ test/ cmd/"
-EXCLUDED_FILES="linenoise.c"
+EXCLUDED_FILES="linenoise.c cjson.c"
 CLANG_TIDY_CHECKS="*,
                   -readability-magic-numbers,
                   -cppcoreguidelines-avoid-magic-numbers,
@@ -32,7 +32,7 @@ CLANG_TIDY_CHECKS="*,
                   -llvm-header-guard,
                   -android-cloexec-pipe,
                   -cppcoreguidelines-avoid-non-const-global-variables"
-CLANG_TIDY_EXCLUDE_HEADER_FILTER="^(?!.*linenoise\.(c|h)).*"
+CLANG_TIDY_EXCLUDE_HEADER_FILTER="^(?!.*(linenoise|cjson)\.(c|h)).*"
 C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__linux__ -U_WIN32 -U__APPLE__ "
 
 MAX_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)

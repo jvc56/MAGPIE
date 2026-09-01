@@ -531,8 +531,7 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
                                         otherwise_word[implied]);
   }
   free(toks);
-  char *out = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *out = string_builder_dump_and_destroy(sb, NULL);
   return out;
 }
 
@@ -823,8 +822,7 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
       rankc[n_rows] = get_formatted_string("%d", n_rows + 1);
       StringBuilder *move_sb = string_builder_create();
       string_builder_add_move(move_sb, board, &cand->move, ld, false);
-      movec[n_rows] = string_builder_dump(move_sb, NULL);
-      string_builder_destroy(move_sb);
+      movec[n_rows] = string_builder_dump_and_destroy(move_sb, NULL);
       winsc[n_rows] = get_formatted_string("%" PRId64, cand->win_count);
       tiesc[n_rows] = get_formatted_string("%" PRId64, cand->tie_count);
       lossc[n_rows] = get_formatted_string(
@@ -1116,8 +1114,7 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
 
     StringBuilder *move_sb = string_builder_create();
     string_builder_add_move(move_sb, board, &cand->move, ld, false);
-    char *move_str = string_builder_dump(move_sb, NULL);
-    string_builder_destroy(move_sb);
+    char *move_str = string_builder_dump_and_destroy(move_sb, NULL);
     if (min_move_width > (int)string_length(move_str)) {
       // Left-pad to the stage's widest move so the column never grows
       // mid-solve.
@@ -1260,15 +1257,13 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
         peg_cand_outcomes_destroy_array(live_oc, live_n_oc);
       }
     }
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
 
   if (result->last_completed_stage < 0 && result->n_stage_history == 0) {
     string_builder_add_string(sb, "no PEG results.\n");
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
 
@@ -1296,8 +1291,7 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
   }
 
   if (result->n_top_cands == 0) {
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
 
@@ -1315,8 +1309,7 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
     peg_append_graded_table(sb, result, board, ld, have_snap ? &snap : NULL,
                             show_outcomes, out_width, out_max_lines, trunc_note,
                             out_truncated);
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *out = string_builder_dump_and_destroy(sb, NULL);
     return out;
   }
 
@@ -1330,7 +1323,6 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
     free(outcomes);
   }
 
-  char *out = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *out = string_builder_dump_and_destroy(sb, NULL);
   return out;
 }

@@ -335,7 +335,6 @@ char *endgame_results_get_string(EndgameResults *endgame_results,
   string_builder_endgame_results(pv_description, endgame_results, game,
                                  game_history);
   endgame_results_unlock(endgame_results, ENDGAME_RESULT_DISPLAY);
-  char *pvline_string = string_builder_dump(pv_description, NULL);
-  string_builder_destroy(pv_description);
+  char *pvline_string = string_builder_dump_and_destroy(pv_description, NULL);
   return pvline_string;
 }

@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,
                                          const Move *move,
@@ -123,6 +124,90 @@ void string_builder_add_move(StringBuilder *string_builder, const Board *board,
     string_builder_add_spaces(string_builder, 1);
     string_builder_add_int(string_builder, equity_to_int(move_get_score(move)));
   }
+}
+
+void move_get_string(const Move *move, const Board *board,
+                     const LetterDistribution *ld, bool add_score, char *dest,
+                     size_t dest_size) {
+  size_t pos = 0;
+  if (move_get_type(move) == GAME_EVENT_PASS) {
+    pos = append_bounded(dest, dest_size, pos, "pass");
+    dest[pos] = '\0';
+    return;
+  }
+
+  if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+    pos = append_bounded(dest, dest_size, pos, "(exch ");
+    for (int i = 0; i < move_get_tiles_played(move); i++) {
+      char *hl = ld_ml_to_hl(ld, move_get_tile(move, i));
+      pos = append_bounded(dest, dest_size, pos, hl);
+      free(hl);
+    }
+    pos = append_bounded(dest, dest_size, pos, ")");
+    dest[pos] = '\0';
+    return;
+  }
+
+  char position[16];
+  if (board_is_dir_vertical(move_get_dir(move))) {
+    snprintf_or_die(position, sizeof(position), "%c%d",
+                    (char)(move_get_col_start(move) + 'A'),
+                    move_get_row_start(move) + 1);
+  } else {
+    snprintf_or_die(position, sizeof(position), "%d%c",
+                    move_get_row_start(move) + 1,
+                    (char)(move_get_col_start(move) + 'A'));
+  }
+  pos = append_bounded(dest, dest_size, pos, position);
+  pos = append_bounded(dest, dest_size, pos, " ");
+
+  int current_row = move_get_row_start(move);
+  int current_col = move_get_col_start(move);
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    MachineLetter tile = move_get_tile(move, i);
+    MachineLetter print_tile = tile;
+    if (tile == PLAYED_THROUGH_MARKER) {
+      if (board) {
+        print_tile = board_get_letter(board, current_row, current_col);
+      }
+      if (i == 0 && board) {
+        pos = append_bounded(dest, dest_size, pos, "(");
+      }
+    }
+
+    if (tile == PLAYED_THROUGH_MARKER && !board) {
+      pos = append_bounded(dest, dest_size, pos, ".");
+    } else {
+      char *hl = ld_ml_to_hl(ld, print_tile);
+      pos = append_bounded(dest, dest_size, pos, hl);
+      free(hl);
+    }
+
+    if (board && (tile == PLAYED_THROUGH_MARKER) &&
+        (i == move_get_tiles_length(move) - 1 ||
+         move_get_tile(move, i + 1) != PLAYED_THROUGH_MARKER)) {
+      pos = append_bounded(dest, dest_size, pos, ")");
+    }
+
+    if (board && (tile != PLAYED_THROUGH_MARKER) &&
+        (i + 1 < move_get_tiles_length(move)) &&
+        move_get_tile(move, i + 1) == PLAYED_THROUGH_MARKER) {
+      pos = append_bounded(dest, dest_size, pos, "(");
+    }
+
+    if (board_is_dir_vertical(move_get_dir(move))) {
+      current_row++;
+    } else {
+      current_col++;
+    }
+  }
+  if (board && add_score) {
+    char score_str[16];
+    snprintf_or_die(score_str, sizeof(score_str), " %d",
+                    equity_to_int(move_get_score(move)));
+    pos = append_bounded(dest, dest_size, pos, score_str);
+  }
+  dest[pos] = '\0';
 }
 
 void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
@@ -391,8 +476,7 @@ void string_builder_add_move_list(
     string_builder_add_string_grid(temp_sb, string_grid, false);
     string_builder_add_formatted_string(temp_sb, "\nShowing %d of %d plays\n",
                                         num_moves_to_display, num_moves);
-    char *moves_str = string_builder_dump(temp_sb, NULL);
-    string_builder_destroy(temp_sb);
+    char *moves_str = string_builder_dump_and_destroy(temp_sb, NULL);
     string_builder_add_with_board_interleave(string_builder, moves_str,
                                              game_board_string);
     free(moves_str);
@@ -418,7 +502,6 @@ char *move_list_get_string(const MoveList *move_list, const Board *board,
                                filter_row, filter_col, prefix_mls, prefix_len,
                                exclude_tile_placement_moves, use_ucgi_format,
                                game_board_string);
-  char *move_list_string = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *move_list_string = string_builder_dump_and_destroy(sb, NULL);
   return move_list_string;
 }

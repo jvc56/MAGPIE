@@ -2,10 +2,12 @@
 #define AUTOPLAY_RESULTS_H
 
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/string_util.h"
 #include "game.h"
 #include "klv.h"
 #include "move.h"
+#include "sim_results.h"
 #include <stdbool.h>
 
 typedef enum {
@@ -13,6 +15,7 @@ typedef enum {
   AUTOPLAY_RECORDER_TYPE_FJ,
   AUTOPLAY_RECORDER_TYPE_WIN_PCT,
   AUTOPLAY_RECORDER_TYPE_LEAVES,
+  AUTOPLAY_RECORDER_TYPE_POSITION,
   NUMBER_OF_AUTOPLAY_RECORDERS,
 } autoplay_recorder_t;
 
@@ -33,9 +36,14 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   ErrorStack *error_stack);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
+
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave);
+                               const Move *previous_move, const Rack *leave,
+                               const MoveList *move_list,
+                               const SimResults *sim_results, int game_number,
+                               int pair_game_number, int turn_number,
+                               int play_cap);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);
@@ -45,6 +53,38 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
                                            const AutoplayGameTiming *timing);
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary);
+
+// Returns a finished autoplay run's results as a JSON object, one key per
+// active recorder -- the same "each recorder decides how it writes itself"
+// design as autoplay_results_to_string, just producing JSON instead of
+// human/status text. This is what the contribution client submits.
+//
+// The returned string is owned by autoplay_results, not the caller: it is
+// cached and freed on the next call (or when autoplay_results is destroyed),
+// so callers that need to keep it past that point must copy it themselves.
+//
+// The game recorder (when active) writes "all_games" (game counts and score
+// moments, read straight out of the recorder rather than parsed back out of
+// formatted output) and, when `show_divergent` is true, "divergent_games"
+// alongside it -- pairs whose two games did not play identically, which is
+// where a paired run's signal lives, since identically-played pairs are
+// guaranteed ties carrying no information.
+//
+// The positions recorder (when active) writes "positions": each worker
+// thread accumulates its own captures, and consolidation renders all of them
+// into this recorder's share of the JSON, so they are *not* in game or turn
+// order -- each carries its own game and turn number.
+const char *autoplay_results_get_json(AutoplayResults *autoplay_results,
+                                      bool show_divergent);
+
+// Leave generation only. Set by postgen_prebroadcast_func once a
+// generation's RackList target is reached (or leavegen_max_games ends the
+// run first); NULL otherwise. See the struct comment in autoplay_results.c.
+void autoplay_results_set_leave_results_json(AutoplayResults *autoplay_results,
+                                             char *leave_results_json);
+const char *autoplay_results_get_leave_results_json(
+    const AutoplayResults *autoplay_results);
+
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);
 char *autoplay_results_get_status(AutoplayResults *autoplay_results);
