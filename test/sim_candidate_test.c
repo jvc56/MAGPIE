@@ -43,7 +43,11 @@
 //   CANDRECALL_MAX_TURNS  positions are taken after 0..MAX_TURNS-1 static
 //                         plays (default 20)
 //   CANDRECALL_SEED       base seed (default 1)
-//   CANDRECALL_TWD        TWS defense weights name (default none)
+//   CANDRECALL_TWD        TWS defense weights the players use (default none)
+//   CANDRECALL_TWD_DIAG   TWS defense weights scored into the twd column but
+//                         NOT given to the players, so the term is a
+//                         diagnostic that never enters static equity or the
+//                         candidate pool (default: whatever CANDRECALL_TWD is)
 //   CANDRECALL_PATH       -path value (default ./data)
 
 enum {
@@ -106,6 +110,8 @@ void test_candidate_recall(void) {
   const long base_seed =
       candrecall_env_long("CANDRECALL_SEED", CANDRECALL_DEFAULT_SEED);
   const char *twd_name = candrecall_env_string("CANDRECALL_TWD", "none");
+  const char *twd_diag_name =
+      candrecall_env_string("CANDRECALL_TWD_DIAG", NULL);
   const char *data_path = candrecall_env_string("CANDRECALL_PATH", "./data");
 
   char cmd[CANDRECALL_CMD_SIZE];
@@ -122,6 +128,24 @@ void test_candidate_recall(void) {
   Game *game = config_get_game(config);
   const LetterDistribution *ld = config_get_ld(config);
   SimResults *sim_results = config_get_sim_results(config);
+
+  // Weights scored into the diagnostic column only. Loading them here
+  // rather than through the player keeps the term out of static equity, so
+  // the column measures what a board heuristic would add to a pool the
+  // heuristic did not itself choose.
+  TWDWeights *diag_twd = NULL;
+  if (twd_diag_name != NULL) {
+    ErrorStack *error_stack = error_stack_create();
+    diag_twd =
+        twd_create(config_get_data_paths(config), twd_diag_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("cannot load diagnostic TWS defense weights %s", twd_diag_name);
+    }
+    error_stack_destroy(error_stack);
+    twd_prepare_hook_flex(diag_twd, player_get_kwg(game_get_player(game, 0)),
+                          ld);
+  }
 
   FILE *out = fopen_or_die(out_path, "we");
   (void)fprintf(
@@ -168,7 +192,8 @@ void test_candidate_recall(void) {
     // validated_move.c for the same stack-context idiom).
     TWDEvalContext twd_eval_ctx;
     twd_eval_context_disable(&twd_eval_ctx);
-    const TWDWeights *twd = player_get_twd(player);
+    const TWDWeights *twd =
+        (diag_twd != NULL) ? diag_twd : player_get_twd(player);
     if (twd != NULL) {
       twd_eval_context_load(
           &twd_eval_ctx, twd,
@@ -228,6 +253,7 @@ void test_candidate_recall(void) {
   }
   string_builder_destroy(move_sb);
   (void)fclose(out);
+  twd_destroy(diag_twd);
   printf("candrecall: wrote %ld positions to %s\n", positions_written,
          out_path);
   config_destroy(config);
