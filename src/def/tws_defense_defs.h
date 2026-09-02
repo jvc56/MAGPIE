@@ -18,8 +18,21 @@ enum {
   TWD_FEATURE_FLOAT_FLEX_START = TWD_FEATURE_HOOK_START + TWD_HOOK_BIN_COUNT,
   TWD_FEATURE_FLOAT_SCORE_START =
       TWD_FEATURE_FLOAT_FLEX_START + TWD_FLOATER_BIN_COUNT,
-  TWD_FEATURE_TT_FLOATER =
+  // Face value alone does not say what a floater is worth to the opponent.
+  // What matters is the words that actually reach the triple through it and
+  // what they score on the way: a J prices high and reaches almost nothing,
+  // an S prices at one and reaches nearly everything, and a blank scores
+  // nothing itself while reaching whatever the letter it was played as
+  // reaches. Both channels come from a table built once from the lexicon,
+  // keyed by the floater's letter and how far the word has to span to
+  // arrive: the mean tile value a reaching word lays down besides the
+  // floater, and how many such words exist at all.
+  TWD_FEATURE_FLOAT_THROUGH_SCORE_START =
       TWD_FEATURE_FLOAT_SCORE_START + TWD_FLOATER_BIN_COUNT,
+  TWD_FEATURE_FLOAT_THROUGH_COUNT_START =
+      TWD_FEATURE_FLOAT_THROUGH_SCORE_START + TWD_FLOATER_BIN_COUNT,
+  TWD_FEATURE_TT_FLOATER =
+      TWD_FEATURE_FLOAT_THROUGH_COUNT_START + TWD_FLOATER_BIN_COUNT,
   TWD_FEATURE_TT_HOOK_ONLY = TWD_FEATURE_TT_FLOATER + 1,
   // Double-double windows: a pair of empty double word squares in one lane
   // close enough for a single word to cover both, which doubles the word
@@ -44,8 +57,16 @@ enum {
 
 // Optional row naming how per-unit penalties combine; absent means 1.0,
 // the plain sum every earlier file used.
+// The through-table spans word lengths 2 up to this; a floater further
+// from the triple than this cannot be reached by one word anyway.
+#define TWD_MAX_THROUGH_LEN 16
+
 #define TWD_GAMMA_ROW_PREFIX "gamma,"
 #define TWD_DEFAULT_COMBINE_GAMMA 1.0
+// What new training uses unless told otherwise. Measured flat between 0.4
+// and 0.7, so this is the middle of a plateau rather than a peak, and it
+// reads as a second route to danger being worth half a first.
+#define TWD_TRAINING_COMBINE_GAMMA 0.5
 
 #define TWD_MAGIC_HEADER "magpie_twd_v2"
 

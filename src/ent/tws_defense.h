@@ -56,6 +56,9 @@ void twd_prepare_hook_flex(TWDWeights *twd, const KWG *kwg,
                            const LetterDistribution *ld);
 // Returns the flexibility table entry for an (unblanked) machine letter.
 int twd_get_hook_flex(const TWDWeights *twd, MachineLetter ml);
+// Entries of the floater through-table; see TWDWeights.through_score.
+int twd_get_through_score(const TWDWeights *twd, MachineLetter ml, int span);
+int twd_get_through_count(const TWDWeights *twd, MachineLetter ml, int span);
 
 enum {
   // Standard boards have 8 TWS squares; exotic layouts get headroom. A
@@ -179,8 +182,11 @@ twd_eval_lane_penalty_bound(const TWDEvalContext *twd_eval_ctx, int dir,
 // Extracts the feature vector for the board as it stands (no move overlay).
 // Used for the context baseline and, exactly as-is, by the training loop on
 // post-move boards. features must have TWD_NUM_FEATURES elements.
+// twd supplies the per-letter tables the floater channels read and may be
+// NULL, which zeroes those channels.
 void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
-                          const Rack *player_rack, int32_t *features);
+                          const Rack *player_rack, const TWDWeights *twd,
+                          int32_t *features);
 // The feature row to regress on when per-unit penalties are combined with a
 // gamma below one. Because the combination charges the worst unit in full
 // and the rest at gamma, the row whose dot product with the weights equals

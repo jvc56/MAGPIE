@@ -352,3 +352,27 @@ void test_board_dump(void) {
   printf("boarddump: wrote %ld boards to %s\n", games_written, out_path);
   config_destroy(config);
 }
+
+// Prints the lexicon-derived floater through-table (on-demand test
+// "throughtable"): for a floater letter and the span a word must cover to
+// reach the triple from it, the mean tile value that word lays down besides
+// the floater, and how many such words exist (log-scaled).
+void test_through_table(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -savesettings false -path /tmp/twdcfg:./data -twd zeros");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  const TWDWeights *twd = player_get_twd(game_get_player(game, 0));
+  printf("letter  score  span2  span3  span5  span7   cnt2  cnt5\n");
+  for (MachineLetter ml = 1; ml <= 26; ml++) {
+    printf("%-6c %5d  %5d  %5d  %5d  %5d  %5d %5d\n", (char)('A' + ml - 1),
+           equity_to_int(ld_get_score(ld, ml)),
+           twd_get_through_score(twd, ml, 2), twd_get_through_score(twd, ml, 3),
+           twd_get_through_score(twd, ml, 5), twd_get_through_score(twd, ml, 7),
+           twd_get_through_count(twd, ml, 2),
+           twd_get_through_count(twd, ml, 5));
+  }
+  config_destroy(config);
+}

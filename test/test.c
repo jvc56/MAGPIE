@@ -152,6 +152,7 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"analyze_sim", test_analyze_sim},
     {"boarddump", test_board_dump},
+    {"throughtable", test_through_table},
     {"candrecall", test_candidate_recall},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},

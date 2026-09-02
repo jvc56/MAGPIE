@@ -9684,7 +9684,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->sim_with_inference = true;
   config->twd_root_only = false;
   config->twd_label_plies = 1;
-  config->twd_combine_gamma = TWD_DEFAULT_COMBINE_GAMMA;
+  config->twd_combine_gamma = TWD_TRAINING_COMBINE_GAMMA;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
   config->p1_num_plays = config->num_plays;
