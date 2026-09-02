@@ -522,6 +522,9 @@ typedef struct TWDCrossInfo {
   bool dead;
   bool hooky;
   int flex;
+  // Tiles the evaluating player holds that fit here; only computed when a
+  // caller asks for diagnostics, and never used by a feature.
+  int own_flex;
 } TWDCrossInfo;
 
 // The perpendicular constraint at an empty square: dead (no letter can be
@@ -531,16 +534,17 @@ typedef struct TWDCrossInfo {
 // traversal, so it is approximated with the per-letter hook_flex table; a
 // pre-move dead square is left dead even though a fresh adjacent tile
 // technically changes its perpendicular pattern.
-static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
-                                             int dir,
-                                             const TWDMoveOverlay *overlay,
-                                             int row, int col,
-                                             const uint8_t *unseen_counts) {
+static TWDCrossInfo twd_effective_cross_info(
+    const Square *lane, int idx, int dir, const TWDMoveOverlay *overlay,
+    int row, int col, const uint8_t *unseen_counts, const uint8_t *own_counts) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   TWDCrossInfo info;
   info.dead = (base_cross_set == 0);
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
   info.flex = info.hooky ? twd_set_flex(unseen_counts, base_cross_set) : 0;
+  info.own_flex = (info.hooky && own_counts != NULL)
+                      ? twd_set_flex(own_counts, base_cross_set)
+                      : 0;
   if (!overlay || info.dead) {
     return info;
   }
@@ -568,9 +572,28 @@ static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
   }
   if (fresh_flex >= 0) {
     info.flex = (info.hooky && info.flex < fresh_flex) ? info.flex : fresh_flex;
+    // A hook the move itself creates has no cross set yet to test the
+    // player's own tiles against.
+    info.own_flex = 0;
     info.hooky = true;
   }
   return info;
+}
+
+// See TWDMoveDiagnostics. A hook the opponent has no tile for is not a
+// threat at all, and if the player holds tiles for it, it is theirs alone.
+static inline void twd_add_hook_diagnostics(TWDMoveDiagnostics *diagnostics,
+                                            const TWDCrossInfo *info) {
+  if (diagnostics == NULL) {
+    return;
+  }
+  if (info->flex == 0) {
+    diagnostics->own_monopoly += info->own_flex;
+  } else if (info->own_flex == 0) {
+    diagnostics->hook_uncontested += info->flex;
+  } else {
+    diagnostics->hook_contested += info->flex;
+  }
 }
 
 // Scans one (TWS, dir) unit: walks outward from the empty TWS square along
@@ -584,10 +607,12 @@ static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
 // change this unit's features by placing a tile on one of those squares or
 // directly beside them in the perpendicular direction.
 static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
-                          const uint8_t *unseen_counts, const TWDWeights *twd,
+                          const uint8_t *unseen_counts,
+                          const uint8_t *own_counts, const TWDWeights *twd,
                           int tws_row, int tws_col, int dir,
                           const TWDMoveOverlay *overlay, int32_t *features,
-                          int *extent_lo, int *extent_hi) {
+                          TWDMoveDiagnostics *diagnostics, int *extent_lo,
+                          int *extent_hi) {
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
   const int tws_idx = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_col : tws_row;
@@ -610,7 +635,7 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
   }
   const TWDCrossInfo tws_info = twd_effective_cross_info(
       lane, tws_idx, dir, overlay, twd_unit_row(dir, lane_index, tws_idx),
-      twd_unit_col(dir, lane_index, tws_idx), unseen_counts);
+      twd_unit_col(dir, lane_index, tws_idx), unseen_counts, own_counts);
   if (tws_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -619,6 +644,7 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
     // A one-tile play on the TWS square itself completes a perpendicular
     // word at triple word score: hook access at d = 1.
     features[TWD_FEATURE_HOOK_START] += tws_info.flex;
+    twd_add_hook_diagnostics(diagnostics, &tws_info);
   }
 
   for (int side = -1; side <= 1; side += 2) {
@@ -705,8 +731,9 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
         span_floater_flex += run_flex;
         continue;
       }
-      const TWDCrossInfo info = twd_effective_cross_info(
-          lane, idx, dir, overlay, square_row, square_col, unseen_counts);
+      const TWDCrossInfo info =
+          twd_effective_cross_info(lane, idx, dir, overlay, square_row,
+                                   square_col, unseen_counts, own_counts);
       if (info.dead) {
         break;
       }
@@ -727,6 +754,7 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       if (info.hooky) {
         features[TWD_FEATURE_HOOK_START + empties_used - 1] += info.flex;
+        twd_add_hook_diagnostics(diagnostics, &info);
         span_has_hook = true;
       }
       prev_empty_idx = idx;
@@ -778,7 +806,7 @@ static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
       continue;
     }
     const TWDCrossInfo info = twd_effective_cross_info(
-        lane, idx, dir, overlay, square_row, square_col, unseen_counts);
+        lane, idx, dir, overlay, square_row, square_col, unseen_counts, NULL);
     if (info.dead) {
       return;
     }
@@ -874,12 +902,12 @@ void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
   uint8_t tws_cols[TWD_MAX_TWS];
   const int num_tws = twd_find_tws(lanes, tws_rows, tws_cols);
   for (int tws_idx = 0; tws_idx < num_tws; tws_idx++) {
-    twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
+    twd_scan_unit(lanes, ld, unseen_counts, NULL, twd, tws_rows[tws_idx],
                   tws_cols[tws_idx], BOARD_HORIZONTAL_DIRECTION, NULL, features,
-                  NULL, NULL);
-    twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
+                  NULL, NULL, NULL);
+    twd_scan_unit(lanes, ld, unseen_counts, NULL, twd, tws_rows[tws_idx],
                   tws_cols[tws_idx], BOARD_VERTICAL_DIRECTION, NULL, features,
-                  NULL, NULL);
+                  NULL, NULL, NULL);
   }
   uint8_t dd_dirs[TWD_MAX_DD];
   uint8_t dd_lanes[TWD_MAX_DD];
@@ -986,6 +1014,8 @@ void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx) {
 // the double-double windows.
 static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
                                   int unit_index, const TWDMoveOverlay *overlay,
+                                  const uint8_t *own_counts,
+                                  TWDMoveDiagnostics *diagnostics,
                                   int32_t *features, int *dir_out,
                                   int *lane_out, int *extent_lo,
                                   int *extent_hi) {
@@ -998,8 +1028,9 @@ static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
     *dir_out = dir;
     *lane_out = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
     twd_scan_unit(twd_eval_ctx->lanes, twd_eval_ctx->ld,
-                  twd_eval_ctx->unseen_counts, twd_eval_ctx->weights, tws_row,
-                  tws_col, dir, overlay, features, extent_lo, extent_hi);
+                  twd_eval_ctx->unseen_counts, own_counts,
+                  twd_eval_ctx->weights, tws_row, tws_col, dir, overlay,
+                  features, diagnostics, extent_lo, extent_hi);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
@@ -1024,6 +1055,15 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
   twd_eval_ctx->lanes = lanes;
   twd_compute_unseen_counts(lanes, ld, player_rack,
                             twd_eval_ctx->unseen_counts);
+  memset(twd_eval_ctx->own_counts, 0, sizeof(twd_eval_ctx->own_counts));
+  if (player_rack != NULL) {
+    const int own_ld_size = ld_get_size(ld);
+    for (int machine_letter = 0; machine_letter < own_ld_size;
+         machine_letter++) {
+      twd_eval_ctx->own_counts[machine_letter] =
+          (uint8_t)rack_get_letter(player_rack, machine_letter);
+    }
+  }
   twd_eval_ctx->num_tws =
       twd_find_tws(lanes, twd_eval_ctx->tws_rows, twd_eval_ctx->tws_cols);
   twd_eval_ctx->num_dd =
@@ -1042,8 +1082,8 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
     int lane = 0;
     int extent_lo = 0;
     int extent_hi = 0;
-    twd_scan_context_unit(twd_eval_ctx, unit_index, NULL, unit_features, &dir,
-                          &lane, &extent_lo, &extent_hi);
+    twd_scan_context_unit(twd_eval_ctx, unit_index, NULL, NULL, NULL,
+                          unit_features, &dir, &lane, &extent_lo, &extent_hi);
     twd_eval_ctx->unit_penalty[unit_index] = twd_dot(weights, unit_features);
     for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
          feature_index++) {
@@ -1169,8 +1209,8 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
     // candidate against its leave would call every hook uncontested in
     // proportion to how many tiles the move played, which is a penalty on
     // bingos and nothing to do with hooks.
-    twd_scan_context_unit(twd_eval_ctx, unit_index, &overlay, overlay_features,
-                          &scan_dir, &scan_lane, NULL, NULL);
+    twd_scan_context_unit(twd_eval_ctx, unit_index, &overlay, NULL, NULL,
+                          overlay_features, &scan_dir, &scan_lane, NULL, NULL);
     post_move_penalties[unit_index] =
         twd_dot(twd_eval_ctx->weights, overlay_features);
   }
@@ -1207,8 +1247,9 @@ void twd_extract_features_combined(const Square *lanes,
     memset(row, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
     if (unit_index < num_tws * 2) {
       const int tws_idx = unit_index / 2;
-      twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
-                    tws_cols[tws_idx], unit_index % 2, NULL, row, NULL, NULL);
+      twd_scan_unit(lanes, ld, unseen_counts, NULL, twd, tws_rows[tws_idx],
+                    tws_cols[tws_idx], unit_index % 2, NULL, row, NULL, NULL,
+                    NULL);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
       twd_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
@@ -1226,6 +1267,92 @@ void twd_extract_features_combined(const Square *lanes,
   // an ordinary fit and gives later ones something to rank with.
   const double gamma = (worst_unit >= 0) ? twd->combine_gamma : 1.0;
   for (int unit_index = 0; unit_index < num_units; unit_index++) {
+    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+         feature_index++) {
+      features[feature_index] +=
+          gamma * (double)unit_features[unit_index][feature_index];
+    }
+  }
+  if (worst_unit >= 0) {
+    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+         feature_index++) {
+      features[feature_index] +=
+          (1.0 - gamma) * (double)unit_features[worst_unit][feature_index];
+    }
+  }
+}
+
+void twd_extract_move_features(const TWDEvalContext *twd_eval_ctx,
+                               const Move *move, double *features,
+                               TWDMoveDiagnostics *diagnostics) {
+  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+       feature_index++) {
+    features[feature_index] = 0.0;
+  }
+  if (diagnostics != NULL) {
+    diagnostics->hook_contested = 0;
+    diagnostics->hook_uncontested = 0;
+    diagnostics->own_monopoly = 0;
+  }
+  if (twd_eval_ctx == NULL || twd_eval_ctx->weights == NULL) {
+    return;
+  }
+
+  // Non-placement moves leave the board exactly as it is, so their row is
+  // the position's own.
+  const bool is_placement =
+      move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
+  const bool vertical =
+      is_placement && board_is_dir_vertical(move_get_dir(move));
+  const int row_start = is_placement ? move_get_row_start(move) : 0;
+  const int col_start = is_placement ? move_get_col_start(move) : 0;
+  const int tiles_length = is_placement ? move_get_tiles_length(move) : 0;
+  const int row_end = vertical ? row_start + tiles_length - 1 : row_start;
+  const int col_end = vertical ? col_start : col_start + tiles_length - 1;
+  const TWDMoveOverlay overlay = {
+      .move = move,
+      .row_start = row_start,
+      .col_start = col_start,
+      .row_end = row_end,
+      .col_end = col_end,
+      .vertical = vertical,
+      .hook_flex = twd_eval_ctx->weights->hook_flex,
+  };
+  const uint64_t affected_units =
+      is_placement ? twd_move_affected_units(twd_eval_ctx, row_start, row_end,
+                                             col_start, col_end)
+                   : 0;
+
+  // Every unit is scanned, with the move overlaid on the ones it can reach,
+  // because the row has to describe the whole post-move board and not only
+  // what changed. Diagnostics need the player's rack; the features never
+  // read it.
+  const uint8_t *own_counts =
+      (diagnostics != NULL) ? twd_eval_ctx->own_counts : NULL;
+  int32_t unit_features[TWD_MAX_SCAN_UNITS][TWD_NUM_FEATURES];
+  int worst_unit = -1;
+  Equity worst_penalty = 0;
+  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
+    int32_t *row = unit_features[unit_index];
+    memset(row, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
+    const bool reached = ((affected_units >> unit_index) & 1) != 0;
+    int scan_dir = 0;
+    int scan_lane = 0;
+    twd_scan_context_unit(twd_eval_ctx, unit_index, reached ? &overlay : NULL,
+                          own_counts, diagnostics, row, &scan_dir, &scan_lane,
+                          NULL, NULL);
+    const Equity penalty = twd_dot(twd_eval_ctx->weights, row);
+    if (penalty < worst_penalty) {
+      worst_penalty = penalty;
+      worst_unit = unit_index;
+    }
+  }
+
+  // Combined exactly as the term applies it, so a fit on this row is a fit
+  // on what the engine actually adds to a move's equity.
+  const double gamma =
+      (worst_unit >= 0) ? twd_eval_ctx->weights->combine_gamma : 1.0;
+  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
     for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
          feature_index++) {
       features[feature_index] +=

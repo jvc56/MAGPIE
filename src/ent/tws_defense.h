@@ -118,6 +118,10 @@ typedef struct TWDEvalContext {
   // either. The player's whole rack is excluded, not the leave the move
   // would keep, since the context is built once for the position.
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
+  // The evaluating player's own tiles. No feature reads this: it exists so
+  // twd_extract_move_features can report the rack-relative diagnostics that
+  // are deliberately not modelled (see TWDMoveDiagnostics).
+  uint8_t own_counts[MAX_ALPHABET_SIZE];
   int32_t unit_features[TWD_MAX_SCAN_UNITS][TWD_NUM_FEATURES];
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
@@ -179,6 +183,29 @@ twd_eval_lane_penalty_bound(const TWDEvalContext *twd_eval_ctx, int dir,
   }
   return twd_eval_ctx->lane_penalty_bound[dir][lane];
 }
+// Quantities that describe a candidate move but are deliberately kept out
+// of the model. Contested and uncontested hook access split the same
+// squares hook_dN counts by whether the evaluating player holds a tile that
+// fits; own_monopoly counts the tiles they hold for hooks the opponent has
+// no tile for at all. All three are functions of the player's own rack,
+// which is identical across the candidate moves of one position, so fitting
+// them against an absolute label learns rack strength rather than hook
+// value (measured: doing so loses badly). They are computed only when asked
+// for, to be fitted against a within-position label offline.
+typedef struct TWDMoveDiagnostics {
+  int32_t hook_contested;
+  int32_t hook_uncontested;
+  int32_t own_monopoly;
+} TWDMoveDiagnostics;
+
+// The feature row a candidate move produces, combined exactly as the term
+// applies it (see TWDWeights.combine_gamma), so it is the row a fit should
+// regress a label on. features has TWD_NUM_FEATURES elements. diagnostics
+// may be NULL; when given it is filled from the same scans.
+void twd_extract_move_features(const TWDEvalContext *twd_eval_ctx,
+                               const Move *move, double *features,
+                               TWDMoveDiagnostics *diagnostics);
+
 // Extracts the feature vector for the board as it stands (no move overlay).
 // Used for the context baseline and, exactly as-is, by the training loop on
 // post-move boards. features must have TWD_NUM_FEATURES elements.

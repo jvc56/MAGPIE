@@ -153,7 +153,14 @@ void test_candidate_recall(void) {
   (void)fprintf(
       out, "pos,seed,turn,bag,play,type,tiles_played,score,leave,twd,"
            "equity,equity_rank,win_pct,win_pct_sd,sim_equity,sim_equity_sd,"
-           "samples,move\n");
+           "samples,hook_contested,hook_uncontested,own_monopoly");
+  char feature_name[64];
+  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+       feature_index++) {
+    twd_feature_name(feature_index, feature_name, sizeof(feature_name));
+    (void)fprintf(out, ",f_%s", feature_name);
+  }
+  (void)fprintf(out, ",move\n");
 
   uint64_t rng_state = (uint64_t)base_seed * 0x9E3779B97F4A7C15ULL + 1;
   long positions_written = 0;
@@ -232,6 +239,10 @@ void test_candidate_recall(void) {
       const Equity leave_value =
           get_leave_value_for_move(klv, move, &leave_rack);
       const Equity twd_penalty = twd_eval_move_penalty(&twd_eval_ctx, move);
+      double move_features[TWD_NUM_FEATURES];
+      TWDMoveDiagnostics diagnostics;
+      twd_extract_move_features(&twd_eval_ctx, move, move_features,
+                                &diagnostics);
       const Stat *win_pct_stat = simmed_play_get_win_pct_stat(simmed_play);
       const Stat *equity_stat = simmed_play_get_equity_stat(simmed_play);
       string_builder_clear(move_sb);
@@ -239,7 +250,7 @@ void test_candidate_recall(void) {
       (void)fprintf(
           out,
           "%ld,%llu,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%d,%.6f,%.6f,"
-          "%.3f,%.3f,%llu,%s\n",
+          "%.3f,%.3f,%llu,%d,%d,%d",
           positions_written, (unsigned long long)game_seed_value, turns,
           bag_count, play_idx, (int)move_get_type(move),
           move_get_tiles_played(move), equity_to_double(move_get_score(move)),
@@ -248,7 +259,13 @@ void test_candidate_recall(void) {
           stat_get_mean(win_pct_stat), stat_get_stdev(win_pct_stat),
           stat_get_mean(equity_stat), stat_get_stdev(equity_stat),
           (unsigned long long)stat_get_num_samples(win_pct_stat),
-          string_builder_peek(move_sb));
+          diagnostics.hook_contested, diagnostics.hook_uncontested,
+          diagnostics.own_monopoly);
+      for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+           feature_index++) {
+        (void)fprintf(out, ",%.4f", move_features[feature_index]);
+      }
+      (void)fprintf(out, ",%s\n", string_builder_peek(move_sb));
     }
     free(ranks);
     positions_written++;
