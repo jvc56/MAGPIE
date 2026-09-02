@@ -183,7 +183,7 @@ static void test_twd_extract_features_floater_board(void) {
   const Square *lanes = board_get_readonly_lanes(board, 0);
 
   int32_t features[TWD_NUM_FEATURES];
-  twd_extract_features(lanes, ld, features);
+  twd_extract_features(lanes, ld, NULL, features);
 
   // The floater E at (14,5) is two empties from the TWS at (14,7) and five
   // empties from the TWS at (14,0); E scores one point.
@@ -222,7 +222,7 @@ static void test_twd_move_penalty(void) {
   const LetterDistribution *ld = game_get_ld(game);
   const Square *lanes = board_get_readonly_lanes(board, 0);
   int32_t features[TWD_NUM_FEATURES];
-  twd_extract_features(lanes, ld, features);
+  twd_extract_features(lanes, ld, NULL, features);
   const int32_t float_flex_d5 = features[TWD_FEATURE_FLOAT_FLEX_START + 4];
 
   TWDWeights *twd = twd_create_zeroed("penalty_test");
@@ -231,7 +231,7 @@ static void test_twd_move_penalty(void) {
   twd_set_weight(twd, TWD_FEATURE_FLOAT_FLEX_START + 4, -100);
 
   TWDEvalContext twd_eval_ctx;
-  twd_eval_context_load(&twd_eval_ctx, twd, lanes, ld);
+  twd_eval_context_load(&twd_eval_ctx, twd, lanes, ld, NULL);
   const Equity expected_pre = -1000 * features[TWD_FEATURE_TT_FLOATER] -
                               100 * features[TWD_FEATURE_FLOAT_FLEX_START + 1] -
                               100 * float_flex_d5;
@@ -270,7 +270,7 @@ static void test_twd_move_penalty(void) {
   // With zero weights everything is zero.
   TWDWeights *zero_twd = twd_create_zeroed("zero_test");
   TWDEvalContext zero_ctx;
-  twd_eval_context_load(&zero_ctx, zero_twd, lanes, ld);
+  twd_eval_context_load(&zero_ctx, zero_twd, lanes, ld, NULL);
   assert(zero_ctx.pre_penalty == 0);
   assert(twd_eval_move_penalty(&zero_ctx, &block_move) == 0);
   assert(twd_eval_move_penalty(&zero_ctx, &far_move) == 0);
@@ -307,7 +307,7 @@ static void test_twd_opening_and_hook_flex(void) {
   assert(twd_get_hook_flex(twd, e_ml) > twd_get_hook_flex(twd, z_ml));
 
   TWDEvalContext twd_eval_ctx;
-  twd_eval_context_load(&twd_eval_ctx, twd, lanes, ld);
+  twd_eval_context_load(&twd_eval_ctx, twd, lanes, ld, NULL);
   // Baseline: the floater E is a 1-point tile two empties from (14,7).
   assert(twd_eval_ctx.pre_penalty == -500);
 
@@ -323,7 +323,7 @@ static void test_twd_opening_and_hook_flex(void) {
   // hook_flex table when the flex bin is weighted.
   twd_set_weight(twd, TWD_FEATURE_FLOAT_SCORE_START + 1, 0);
   twd_set_weight(twd, TWD_FEATURE_FLOAT_FLEX_START + 1, -10);
-  twd_eval_context_load(&twd_eval_ctx, twd, lanes, ld);
+  twd_eval_context_load(&twd_eval_ctx, twd, lanes, ld, NULL);
   const Equity flex_penalty = twd_eval_move_penalty(&twd_eval_ctx, &open_move);
   // Baseline has the board floater E at d = 2; the move adds the fresh Z
   // floater at d = 2 with hook_flex[Z] flexibility.

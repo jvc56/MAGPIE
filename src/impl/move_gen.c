@@ -2994,8 +2994,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     if (twd && !args->disable_twd && gen->move_sort_type == MOVE_SORT_EQUITY &&
         gen->number_of_tiles_in_bag > 0 &&
         board_get_cross_sets_valid(gen->board)) {
-      twd_eval_context_load(&gen->twd_eval_ctx, twd, gen->lanes_cache,
-                            &gen->ld);
+      twd_eval_context_load(&gen->twd_eval_ctx, twd, gen->lanes_cache, &gen->ld,
+                            &gen->player_rack);
     } else {
       twd_eval_context_disable(&gen->twd_eval_ctx);
     }

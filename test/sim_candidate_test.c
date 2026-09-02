@@ -203,7 +203,7 @@ void test_candidate_recall(void) {
               board, board_get_cross_set_index(
                          game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
                          player_index)),
-          ld);
+          ld, player_get_rack(player));
     }
 
     // Static-equity rank of each play within the pool (1 = best).
