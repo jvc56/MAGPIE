@@ -151,6 +151,7 @@ static TestEntry test_table[] = {
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
     {"analyze_sim", test_analyze_sim},
+    {"boarddump", test_board_dump},
     {"candrecall", test_candidate_recall},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},

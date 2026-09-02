@@ -2,5 +2,6 @@
 #define SIM_CANDIDATE_TEST_H
 
 void test_candidate_recall(void);
+void test_board_dump(void);
 
 #endif

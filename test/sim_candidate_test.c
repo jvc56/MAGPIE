@@ -1,8 +1,10 @@
 #include "sim_candidate_test.h"
 
+#include "../src/def/board_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
+#include "../src/ent/bonus_square.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
@@ -256,5 +258,97 @@ void test_candidate_recall(void) {
   twd_destroy(diag_twd);
   printf("candrecall: wrote %ld positions to %s\n", positions_written,
          out_path);
+  config_destroy(config);
+}
+
+// Final-board dump (on-demand test "boarddump").
+//
+// Writes one line per completed self-play game: BOARD_DIM*BOARD_DIM
+// characters, '1' where a tile sits at the end of the game and '0' where the
+// square is empty, in row-major order. This is the observable the pairwise
+// maximum-entropy model of Witteveen and Bauer (arXiv:2605.00813) is fit to:
+// the crossword pattern alone, with the letters discarded. Fitting fields and
+// interactions to MAGPIE's own self-play says whether that model's structure
+// (triple-word squares carrying the largest fields, orthogonal neighbours
+// attracting and diagonal ones repelling) reproduces here, and yields the
+// parameters a board-shape feature would be built from.
+// Configured by environment variables:
+//   BOARDDUMP_OUT     output path (default boards.txt)
+//   BOARDDUMP_GAMES   games to play (default 2000)
+//   BOARDDUMP_SEED    base seed (default 1)
+//   BOARDDUMP_PATH    -path value (default ./data)
+//   BOARDDUMP_TWD     TWS defense weights for both players (default none)
+
+enum {
+  BOARDDUMP_DEFAULT_GAMES = 2000,
+  BOARDDUMP_DEFAULT_SEED = 1,
+  BOARDDUMP_MAX_TURNS = 60,
+};
+
+void test_board_dump(void) {
+  const char *out_path = candrecall_env_string("BOARDDUMP_OUT", "boards.txt");
+  const long num_games =
+      candrecall_env_long("BOARDDUMP_GAMES", BOARDDUMP_DEFAULT_GAMES);
+  const long base_seed =
+      candrecall_env_long("BOARDDUMP_SEED", BOARDDUMP_DEFAULT_SEED);
+  const char *data_path = candrecall_env_string("BOARDDUMP_PATH", "./data");
+  const char *twd_name = candrecall_env_string("BOARDDUMP_TWD", "none");
+
+  char cmd[CANDRECALL_CMD_SIZE];
+  snprintf(cmd, sizeof(cmd),
+           "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+           "-numplays 1 -threads 1 -savesettings false -path %s -twd %s",
+           data_path, twd_name);
+  Config *config = config_create_or_die(cmd);
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  Game *game = config_get_game(config);
+
+  FILE *out = fopen_or_die(out_path, "we");
+  // The bonus square layout is constant, so record it once as a legend for
+  // the fit rather than per game: 3 = triple word, 2 = double word, t =
+  // triple letter, d = double letter, . = plain.
+  (void)fprintf(out, "#layout ");
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const BonusSquare bonus = board_get_bonus_square(board, row, col);
+      const int word_multiplier = bonus_square_get_word_multiplier(bonus);
+      const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
+      char symbol = '.';
+      if (word_multiplier == 3) {
+        symbol = '3';
+      } else if (word_multiplier == 2) {
+        symbol = '2';
+      } else if (letter_multiplier == 3) {
+        symbol = 't';
+      } else if (letter_multiplier == 2) {
+        symbol = 'd';
+      }
+      (void)fputc(symbol, out);
+    }
+  }
+  (void)fputc('\n', out);
+
+  long games_written = 0;
+  for (long game_idx = 0; game_idx < num_games; game_idx++) {
+    game_reset(game);
+    game_seed(game, (uint64_t)base_seed * 7919ULL + (uint64_t)game_idx);
+    draw_starting_racks(game);
+    for (int turn = 0; turn < BOARDDUMP_MAX_TURNS && !game_over(game); turn++) {
+      play_top_n_equity_move(game, 0);
+    }
+    if (!game_over(game)) {
+      continue;
+    }
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        (void)fputc(board_is_empty(board, row, col) ? '0' : '1', out);
+      }
+    }
+    (void)fputc('\n', out);
+    games_written++;
+  }
+  (void)fclose(out);
+  printf("boarddump: wrote %ld boards to %s\n", games_written, out_path);
   config_destroy(config);
 }
