@@ -132,7 +132,7 @@ typedef struct TWDPendingObservation {
   bool valid;
   int plies_seen;
   double label;
-  int32_t features[TWD_NUM_FEATURES];
+  double features[TWD_NUM_FEATURES];
 } TWDPendingObservation;
 
 typedef struct TWDGenSharedData {
@@ -1004,7 +1004,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
           (observation->plies_seen % 2 == 0) ? move_score : -move_score;
       observation->plies_seen++;
       if (observation->plies_seen >= twd_gen_shared_data->label_plies) {
-        twd_regression_add_observation(
+        twd_regression_add_observation_double(
             &twd_gen_shared_data->regressions[autoplay_worker->worker_index],
             observation->features, observation->label);
         observation->valid = false;
@@ -1072,11 +1072,13 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         continue;
       }
       // The rack excluded from the unseen pool is the mover's own, which
-      // after play_move has already been drawn back to full.
-      twd_extract_features(
+      // after play_move has already been drawn back to full. The row is
+      // the one the live weights' combination rule makes linear, so that
+      // fitting and evaluating agree; with gamma 1 it is the plain sum.
+      twd_extract_features_combined(
           board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
           player_get_rack(game_get_player(game, player_on_turn_index)),
-          observation->features);
+          twd_gen_shared_data->twd, observation->features);
       observation->plies_seen = 0;
       observation->label = 0.0;
       observation->valid = true;

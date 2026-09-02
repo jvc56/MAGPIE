@@ -42,6 +42,11 @@ enum {
 // observations waiting to be labeled at once.
 #define TWD_MAX_LABEL_PLIES 4
 
+// Optional row naming how per-unit penalties combine; absent means 1.0,
+// the plain sum every earlier file used.
+#define TWD_GAMMA_ROW_PREFIX "gamma,"
+#define TWD_DEFAULT_COMBINE_GAMMA 1.0
+
 #define TWD_MAGIC_HEADER "magpie_twd_v2"
 
 #endif

@@ -27,6 +27,11 @@ void twd_regression_reset(TWDRegression *regression);
 void twd_regression_add_observation(TWDRegression *regression,
                                     const int32_t *features,
                                     double reply_score);
+// The same, for a feature row that is no longer integral because the units
+// were combined with a gamma below one (see twd_extract_features_combined).
+void twd_regression_add_observation_double(TWDRegression *regression,
+                                           const double *features,
+                                           double label);
 void twd_regression_merge(TWDRegression *dst, const TWDRegression *src);
 
 typedef struct TWDSolveResult {

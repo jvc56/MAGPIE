@@ -17,6 +17,7 @@
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../def/tws_defense_defs.h"
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
@@ -228,6 +229,7 @@ typedef enum {
   ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_TWD_ROOT_ONLY,
   ARG_TOKEN_TWD_LABEL_PLIES,
+  ARG_TOKEN_TWD_COMBINE_GAMMA,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
   ARG_TOKEN_P1_TIME_LIMIT,
@@ -415,6 +417,8 @@ struct Config {
   bool twd_root_only;
   // Plies of net result a TWS defense training label spans.
   int twd_label_plies;
+  // See TWDWeights.combine_gamma; used when twdgen bootstraps weights.
+  double twd_combine_gamma;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
   // Set when the most recent sim ran inference internally and it completed
@@ -2179,6 +2183,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the minimum number of iterations per play for player "
              "1 or 2 during autoplay simulation.";
       break;
+    case ARG_TOKEN_TWD_COMBINE_GAMMA:
+      usages[0] = "<gamma>";
+      text = "Specifies how much a second route to danger counts once the "
+             "worst one is counted, when training TWS defense weights: 1 "
+             "adds every scan unit, 0 charges only the worst.";
+      break;
     case ARG_TOKEN_TWD_LABEL_PLIES:
       usages[0] = "<plies>";
       text = "Specifies how many plies of net result a TWS defense training "
@@ -2462,6 +2472,9 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
         ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
+        ARG_TOKEN_TWD_ROOT_ONLY,           /* twdroot */
+        ARG_TOKEN_TWD_LABEL_PLIES,         /* twdplies */
+        ARG_TOKEN_TWD_COMBINE_GAMMA,       /* twdgamma */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
         ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
         ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
@@ -4033,6 +4046,7 @@ void impl_twd_gen(Config *config, ErrorStack *error_stack) {
     char *bootstrap_name =
         get_formatted_string("%s_twd", ld_get_name(config_get_ld(config)));
     twd = twd_create_zeroed(bootstrap_name);
+    twd_set_combine_gamma(twd, config->twd_combine_gamma);
     free(bootstrap_name);
     players_data_set_data(config->players_data, PLAYERS_DATA_TYPE_TWD, 0, twd);
     players_data_set_data(config->players_data, PLAYERS_DATA_TYPE_TWD, 1, twd);
@@ -7961,6 +7975,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->p1_sim_with_inference = config->sim_with_inference;
     config->p2_sim_with_inference = config->sim_with_inference;
   }
+  config_load_double(config, ARG_TOKEN_TWD_COMBINE_GAMMA, 0.0, 1.0,
+                     &config->twd_combine_gamma, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   config_load_int(config, ARG_TOKEN_TWD_LABEL_PLIES, 1, TWD_MAX_LABEL_PLIES,
                   &config->twd_label_plies, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -9560,6 +9579,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
   arg(ARG_TOKEN_TWD_ROOT_ONLY, "twdroot", 1, 1);
   arg(ARG_TOKEN_TWD_LABEL_PLIES, "twdplies", 1, 1);
+  arg(ARG_TOKEN_TWD_COMBINE_GAMMA, "twdgamma", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
@@ -9664,6 +9684,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->sim_with_inference = true;
   config->twd_root_only = false;
   config->twd_label_plies = 1;
+  config->twd_combine_gamma = TWD_DEFAULT_COMBINE_GAMMA;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
   config->p1_num_plays = config->num_plays;
@@ -10183,6 +10204,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_TWD_LABEL_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->twd_label_plies);
+      break;
+    case ARG_TOKEN_TWD_COMBINE_GAMMA:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->twd_combine_gamma);
       break;
     case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
