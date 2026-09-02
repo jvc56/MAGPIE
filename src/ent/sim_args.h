@@ -37,6 +37,13 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // When true the TWS defense term applies only at the root, where it orders
+  // and values the candidate plays, and is switched off inside rollouts so
+  // the replies there are chosen by score and leave alone. The term measures
+  // as predictive of a play's simulated value yet unhelpful when it also
+  // steers rollout replies, which this separates. Defaulted false by
+  // sim_args_fill; callers that want it set it afterwards.
+  bool twd_root_only;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -100,6 +107,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = utility_w_winpct;
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
+  sim_args->twd_root_only = false;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

@@ -21,6 +21,11 @@ void play_move_no_cross_set_update(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
 const Move *get_top_equity_move(Game *game, MoveList *move_list);
+// Like get_top_equity_move, but able to switch the TWS defense term off for
+// this generation alone. Rollouts use this to keep the term at the root of a
+// simulation without letting it choose the replies inside one.
+const Move *get_top_equity_move_with_twd(Game *game, MoveList *move_list,
+                                         bool disable_twd);
 const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list);
 Move *get_top_equity_move_for_inferences(
     Game *game, MoveList *move_list, Equity target_equity,

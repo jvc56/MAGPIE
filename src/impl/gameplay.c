@@ -881,7 +881,8 @@ void generate_moves_for_game(const MoveGenArgs *args) {
                 args->game, game_get_player_on_turn_index(args->game))));
 }
 
-const Move *get_top_equity_move(Game *game, MoveList *move_list) {
+const Move *get_top_equity_move_with_twd(Game *game, MoveList *move_list,
+                                         bool disable_twd) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
@@ -890,9 +891,14 @@ const Move *get_top_equity_move(Game *game, MoveList *move_list) {
                             .eq_margin_movegen = 0,
                             .target_equity = EQUITY_MAX_VALUE,
                             .target_leave_size_for_exchange_cutoff =
-                                UNSET_LEAVE_SIZE};
+                                UNSET_LEAVE_SIZE,
+                            .disable_twd = disable_twd};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
+}
+
+const Move *get_top_equity_move(Game *game, MoveList *move_list) {
+  return get_top_equity_move_with_twd(game, move_list, false);
 }
 
 // Like get_top_equity_move, but sorts by the move_sort_type configured for

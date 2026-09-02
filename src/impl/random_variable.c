@@ -403,6 +403,9 @@ typedef struct Simmer {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // See SimArgs.twd_root_only: switches the defense term off for the plays
+  // chosen inside a rollout, leaving it in force at the root.
+  bool twd_root_only;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -506,7 +509,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, move_list);
+    const Move *best_play =
+        get_top_equity_move_with_twd(game, move_list, simmer->twd_root_only);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -644,6 +648,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->twd_root_only = sim_args->twd_root_only;
 
   simmer->thread_control = thread_control;
 
@@ -696,6 +701,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->twd_root_only = sim_args->twd_root_only;
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,
