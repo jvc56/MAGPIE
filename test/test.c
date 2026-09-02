@@ -55,6 +55,7 @@
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
+#include "sim_candidate_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
@@ -150,6 +151,7 @@ static TestEntry test_table[] = {
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
     {"analyze_sim", test_analyze_sim},
+    {"candrecall", test_candidate_recall},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},

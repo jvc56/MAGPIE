@@ -1,0 +1,234 @@
+#include "sim_candidate_test.h"
+
+#include "../src/def/players_data_defs.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/board.h"
+#include "../src/ent/equity.h"
+#include "../src/ent/game.h"
+#include "../src/ent/klv.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
+#include "../src/ent/sim_results.h"
+#include "../src/ent/stats.h"
+#include "../src/ent/tws_defense.h"
+#include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
+#include "../src/str/move_string.h"
+#include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
+#include "test_constants.h"
+#include "test_util.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+// Candidate recall harness (on-demand test "candrecall").
+//
+// Samples mid-game positions from seeded static self-play and, for each,
+// simulates a pool of the top P static-equity plays with round-robin sampling
+// at a fixed per-arm sample count, then writes one CSV row per play with its
+// static-equity components and its sim results. Selection rules (top-k by
+// equity, coverage variants) are then evaluated offline on the same data, so
+// candidate selection is measured in isolation from the sampling rule and
+// the rollout policy. Configured by environment variables:
+//   CANDRECALL_OUT        output CSV path (default candrecall.csv)
+//   CANDRECALL_POSITIONS  positions to sample (default 300)
+//   CANDRECALL_POOL       pool size P (default 60)
+//   CANDRECALL_ITERS      samples per arm (default 400)
+//   CANDRECALL_PLIES      sim plies (default 2)
+//   CANDRECALL_THREADS    sim threads (default 8)
+//   CANDRECALL_MAX_TURNS  positions are taken after 0..MAX_TURNS-1 static
+//                         plays (default 20)
+//   CANDRECALL_SEED       base seed (default 1)
+//   CANDRECALL_TWD        TWS defense weights name (default none)
+//   CANDRECALL_PATH       -path value (default ./data)
+
+enum {
+  CANDRECALL_DEFAULT_POSITIONS = 300,
+  CANDRECALL_DEFAULT_POOL = 60,
+  CANDRECALL_DEFAULT_ITERS = 400,
+  CANDRECALL_DEFAULT_PLIES = 2,
+  CANDRECALL_DEFAULT_THREADS = 8,
+  CANDRECALL_DEFAULT_MAX_TURNS = 20,
+  CANDRECALL_DEFAULT_SEED = 1,
+  // Skip positions too close to the endgame for a 2-ply sim to be the
+  // right tool; the play chooser hands those to PEG.
+  CANDRECALL_MIN_BAG = 8,
+  CANDRECALL_CMD_SIZE = 1024,
+};
+
+static long candrecall_env_long(const char *name, long default_value) {
+  const char *value = getenv(name);
+  if (value == NULL || value[0] == '\0') {
+    return default_value;
+  }
+  return strtol(value, NULL, 10);
+}
+
+static const char *candrecall_env_string(const char *name,
+                                         const char *default_value) {
+  const char *value = getenv(name);
+  if (value == NULL || value[0] == '\0') {
+    return default_value;
+  }
+  return value;
+}
+
+// xorshift64*: a self-contained generator so the position sample is
+// reproducible from CANDRECALL_SEED alone.
+static uint64_t candrecall_next_random(uint64_t *state) {
+  uint64_t x = *state;
+  x ^= x >> 12;
+  x ^= x << 25;
+  x ^= x >> 27;
+  *state = x;
+  return x * 2685821657736338717ULL;
+}
+
+void test_candidate_recall(void) {
+  const char *out_path =
+      candrecall_env_string("CANDRECALL_OUT", "candrecall.csv");
+  const long num_positions =
+      candrecall_env_long("CANDRECALL_POSITIONS", CANDRECALL_DEFAULT_POSITIONS);
+  const long pool_size =
+      candrecall_env_long("CANDRECALL_POOL", CANDRECALL_DEFAULT_POOL);
+  const long iters_per_arm =
+      candrecall_env_long("CANDRECALL_ITERS", CANDRECALL_DEFAULT_ITERS);
+  const long plies =
+      candrecall_env_long("CANDRECALL_PLIES", CANDRECALL_DEFAULT_PLIES);
+  const long threads =
+      candrecall_env_long("CANDRECALL_THREADS", CANDRECALL_DEFAULT_THREADS);
+  const long max_turns =
+      candrecall_env_long("CANDRECALL_MAX_TURNS", CANDRECALL_DEFAULT_MAX_TURNS);
+  const long base_seed =
+      candrecall_env_long("CANDRECALL_SEED", CANDRECALL_DEFAULT_SEED);
+  const char *twd_name = candrecall_env_string("CANDRECALL_TWD", "none");
+  const char *data_path = candrecall_env_string("CANDRECALL_PATH", "./data");
+
+  char cmd[CANDRECALL_CMD_SIZE];
+  snprintf(cmd, sizeof(cmd),
+           "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+           "-numplays %ld -plies %ld -threads %ld -iter %ld -minp %ld -sr rr "
+           "-threshold none -scond none -seed 7 -savesettings false -path %s "
+           "-twd %s",
+           pool_size, plies, threads, pool_size * iters_per_arm, iters_per_arm,
+           data_path, twd_name);
+  Config *config = config_create_or_die(cmd);
+  // The config's game exists only once a position has been loaded.
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  SimResults *sim_results = config_get_sim_results(config);
+
+  FILE *out = fopen_or_die(out_path, "we");
+  (void)fprintf(
+      out, "pos,seed,turn,bag,play,type,tiles_played,score,leave,twd,"
+           "equity,equity_rank,win_pct,win_pct_sd,sim_equity,sim_equity_sd,"
+           "samples,move\n");
+
+  uint64_t rng_state = (uint64_t)base_seed * 0x9E3779B97F4A7C15ULL + 1;
+  long positions_written = 0;
+  StringBuilder *move_sb = string_builder_create();
+  for (long pos_idx = 0; pos_idx < num_positions; pos_idx++) {
+    const uint64_t game_seed_value =
+        (uint64_t)base_seed * 1000003ULL + (uint64_t)pos_idx;
+    game_reset(game);
+    game_seed(game, game_seed_value);
+    draw_starting_racks(game);
+    const int turns =
+        (int)(candrecall_next_random(&rng_state) % (uint64_t)max_turns);
+    for (int turn_idx = 0; turn_idx < turns && !game_over(game); turn_idx++) {
+      play_top_n_equity_move(game, 0);
+    }
+    if (game_over(game) ||
+        bag_get_letters(game_get_bag(game)) < CANDRECALL_MIN_BAG) {
+      continue;
+    }
+    load_and_exec_config_or_die(config, "gen");
+    const error_code_t status =
+        config_simulate_and_return_status(config, NULL, NULL, sim_results);
+    if (status != ERROR_STATUS_SUCCESS) {
+      log_fatal("simulation failed with status %d", status);
+    }
+    const int num_plays = sim_results_get_number_of_plays(sim_results);
+    if (num_plays < 2) {
+      continue;
+    }
+
+    const int player_index = game_get_player_on_turn_index(game);
+    const Player *player = game_get_player(game, player_index);
+    const KLV *klv = player_get_klv(player);
+    const Board *board = game_get_board(game);
+    const int bag_count = bag_get_letters(game_get_bag(game));
+
+    // The TWS defense term, exactly as static eval sees it (see
+    // validated_move.c for the same stack-context idiom).
+    TWDEvalContext twd_eval_ctx;
+    twd_eval_context_disable(&twd_eval_ctx);
+    const TWDWeights *twd = player_get_twd(player);
+    if (twd != NULL) {
+      twd_eval_context_load(
+          &twd_eval_ctx, twd,
+          board_get_readonly_lanes(
+              board, board_get_cross_set_index(
+                         game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+                         player_index)),
+          ld);
+    }
+
+    // Static-equity rank of each play within the pool (1 = best).
+    int *ranks = malloc_or_die(sizeof(int) * num_plays);
+    for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+      const Equity equity = move_get_equity(simmed_play_get_move(
+          sim_results_get_simmed_play(sim_results, play_idx)));
+      int rank = 1;
+      for (int other_idx = 0; other_idx < num_plays; other_idx++) {
+        const Equity other_equity = move_get_equity(simmed_play_get_move(
+            sim_results_get_simmed_play(sim_results, other_idx)));
+        if (other_equity > equity ||
+            (other_equity == equity && other_idx < play_idx)) {
+          rank++;
+        }
+      }
+      ranks[play_idx] = rank;
+    }
+
+    for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, play_idx);
+      const Move *move = simmed_play_get_move(simmed_play);
+      Rack leave_rack;
+      rack_copy(&leave_rack, player_get_rack(player));
+      const Equity leave_value =
+          get_leave_value_for_move(klv, move, &leave_rack);
+      const Equity twd_penalty = twd_eval_move_penalty(&twd_eval_ctx, move);
+      const Stat *win_pct_stat = simmed_play_get_win_pct_stat(simmed_play);
+      const Stat *equity_stat = simmed_play_get_equity_stat(simmed_play);
+      string_builder_clear(move_sb);
+      string_builder_add_move(move_sb, board, move, ld, false);
+      (void)fprintf(
+          out,
+          "%ld,%llu,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%d,%.6f,%.6f,"
+          "%.3f,%.3f,%llu,%s\n",
+          positions_written, (unsigned long long)game_seed_value, turns,
+          bag_count, play_idx, (int)move_get_type(move),
+          move_get_tiles_played(move), equity_to_double(move_get_score(move)),
+          equity_to_double(leave_value), equity_to_double(twd_penalty),
+          equity_to_double(move_get_equity(move)), ranks[play_idx],
+          stat_get_mean(win_pct_stat), stat_get_stdev(win_pct_stat),
+          stat_get_mean(equity_stat), stat_get_stdev(equity_stat),
+          (unsigned long long)stat_get_num_samples(win_pct_stat),
+          string_builder_peek(move_sb));
+    }
+    free(ranks);
+    positions_written++;
+  }
+  string_builder_destroy(move_sb);
+  (void)fclose(out);
+  printf("candrecall: wrote %ld positions to %s\n", positions_written,
+         out_path);
+  config_destroy(config);
+}
