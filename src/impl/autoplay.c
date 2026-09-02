@@ -122,7 +122,23 @@ typedef struct LeavegenSharedData {
 // at the generation-boundary checkpoint), and the per-generation game
 // budget. There are no forced draws and no early bag truncation: games run
 // to completion and observations self-gate on the bag.
+// One training observation waiting for its label: the features of the board
+// left by the move that opened it, and the opponent's net gain so far over
+// the plies played since. Scores of the opponent's moves count positively
+// and the observing player's own moves negatively, so a board that hands
+// the opponent a big play but pays it back next turn is not scored as a
+// mistake.
+typedef struct TWDPendingObservation {
+  bool valid;
+  int plies_seen;
+  double label;
+  int32_t features[TWD_NUM_FEATURES];
+} TWDPendingObservation;
+
 typedef struct TWDGenSharedData {
+  // Plies of net result the label spans (1 reproduces the original
+  // opponent-reply-score label).
+  int label_plies;
   int num_gens;
   int gens_completed;
   uint64_t *games_per_gen;
@@ -625,13 +641,12 @@ void leavegen_shared_data_destroy(LeavegenSharedData *lg_shared_data) {
   free(lg_shared_data);
 }
 
-TWDGenSharedData *twd_gen_shared_data_create(TWDWeights *twd,
-                                             const char *data_paths,
-                                             const char *output_name,
-                                             int num_threads, int num_gens,
-                                             uint64_t *games_per_gen) {
+TWDGenSharedData *twd_gen_shared_data_create(
+    TWDWeights *twd, const char *data_paths, const char *output_name,
+    int num_threads, int num_gens, uint64_t *games_per_gen, int label_plies) {
   TWDGenSharedData *twd_gen_shared_data =
       malloc_or_die(sizeof(TWDGenSharedData));
+  twd_gen_shared_data->label_plies = label_plies;
   twd_gen_shared_data->num_gens = num_gens;
   twd_gen_shared_data->gens_completed = 0;
   twd_gen_shared_data->games_per_gen = games_per_gen;
@@ -680,13 +695,12 @@ typedef struct GameRunner {
   Game *game_one_move_behind;
   Move previous_move;
   Move play_chooser_move;
-  // TWS defense training (AUTOPLAY_TYPE_TWS_DEFENSE_GEN): the features of
-  // the previous move's post-move board, pending its label (the opponent's
-  // reply score, known when the next move of this game is chosen). The
-  // final move of a game leaves its observation unlabeled and dropped: it
-  // structurally has no reply.
-  bool twd_obs_valid;
-  int32_t twd_obs_features[TWD_NUM_FEATURES];
+  // TWS defense training (AUTOPLAY_TYPE_TWS_DEFENSE_GEN): observations
+  // opened by recent moves of this game, each still accumulating its label.
+  // One opens per move and one closes every label_plies plies later, so at
+  // most that many are ever in flight. Observations still unlabeled when
+  // the game ends are dropped: their plies do not exist.
+  TWDPendingObservation twd_obs[TWD_MAX_LABEL_PLIES];
   PlayChooser *play_choosers[2];
   GameTimer game_timer;
   AutoplayGameTiming timing;
@@ -773,7 +787,9 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
 
   game_runner->turn_number = 0;
   game_runner->force_draw = false;
-  game_runner->twd_obs_valid = false;
+  for (int obs_index = 0; obs_index < TWD_MAX_LABEL_PLIES; obs_index++) {
+    game_runner->twd_obs[obs_index].valid = false;
+  }
   if (game_runner->shared_data->leavegen_shared_data &&
       // We only force draws if we've played enough games for this
       // generation. This also applies when leavegen's rack list is
@@ -967,17 +983,33 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        equity_to_double(move_get_equity(move)));
   }
 
-  // TWS defense training: the move just chosen is the reply to the previous
-  // move of this game, so it labels the pending observation. A pass or
-  // exchange reply scores zero, which is a legitimate "no reply damage"
-  // label.
+  // TWS defense training: the move just chosen is the next ply for every
+  // observation still open in this game. It counts against the observing
+  // player when the opponent made it and for them when they made it
+  // themselves; an observation that has now seen all its plies is complete
+  // and goes to the regression. A pass or exchange scores zero, which is a
+  // legitimate "nothing happened" ply.
   TWDGenSharedData *twd_gen_shared_data =
       game_runner->shared_data->twd_gen_shared_data;
-  if (twd_gen_shared_data && game_runner->twd_obs_valid) {
-    twd_regression_add_observation(
-        &twd_gen_shared_data->regressions[autoplay_worker->worker_index],
-        game_runner->twd_obs_features, equity_to_double(move_get_score(move)));
-    game_runner->twd_obs_valid = false;
+  if (twd_gen_shared_data) {
+    const double move_score = equity_to_double(move_get_score(move));
+    for (int obs_index = 0; obs_index < TWD_MAX_LABEL_PLIES; obs_index++) {
+      TWDPendingObservation *observation = &game_runner->twd_obs[obs_index];
+      if (!observation->valid) {
+        continue;
+      }
+      // Plies alternate, and ply 0 of an observation is always the
+      // opponent's reply to the move that opened it.
+      observation->label +=
+          (observation->plies_seen % 2 == 0) ? move_score : -move_score;
+      observation->plies_seen++;
+      if (observation->plies_seen >= twd_gen_shared_data->label_plies) {
+        twd_regression_add_observation(
+            &twd_gen_shared_data->regressions[autoplay_worker->worker_index],
+            observation->features, observation->label);
+        observation->valid = false;
+      }
+    }
   }
   const int twd_pre_move_bag_count =
       twd_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
@@ -1034,9 +1066,22 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   // defense term, and skipped when the move ended the game (its
   // observation could never be labeled).
   if (twd_gen_shared_data && twd_pre_move_bag_count > 0 && !game_over(game)) {
-    twd_extract_features(board_get_readonly_lanes(game_get_board(game), 0),
-                         game_get_ld(game), game_runner->twd_obs_features);
-    game_runner->twd_obs_valid = true;
+    for (int obs_index = 0; obs_index < TWD_MAX_LABEL_PLIES; obs_index++) {
+      TWDPendingObservation *observation = &game_runner->twd_obs[obs_index];
+      if (observation->valid) {
+        continue;
+      }
+      // The rack excluded from the unseen pool is the mover's own, which
+      // after play_move has already been drawn back to full.
+      twd_extract_features(
+          board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
+          player_get_rack(game_get_player(game, player_on_turn_index)),
+          observation->features);
+      observation->plies_seen = 0;
+      observation->label = 0.0;
+      observation->valid = true;
+      break;
+    }
   }
 
   if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {
@@ -1442,7 +1487,7 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     }
     shared_data->twd_gen_shared_data = twd_gen_shared_data_create(
         twd, args->data_paths, args->twd_gen_output_name, autoplay_num_threads,
-        num_gens, twd_games_per_gen);
+        num_gens, twd_games_per_gen, args->twd_label_plies);
   }
 
   AutoplayWorker **autoplay_workers =

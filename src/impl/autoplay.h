@@ -30,6 +30,9 @@ typedef struct AutoplayArgs {
   // AUTOPLAY_TYPE_TWS_DEFENSE_GEN; per-generation snapshots are written as
   // <name>_gen_<N>.twd. Only meaningful for that autoplay type.
   const char *twd_gen_output_name;
+  // Plies of net result a TWS defense training label spans; see
+  // TWDPendingObservation.
+  int twd_label_plies;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;

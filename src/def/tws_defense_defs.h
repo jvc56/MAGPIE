@@ -37,6 +37,11 @@ enum {
   TWD_NUM_FEATURES = TWD_FEATURE_DD_TILES_SAVED + 1,
 };
 
+// The label a training observation carries is the opponent's net gain over
+// the next this-many plies, so the buffer holds at most this many
+// observations waiting to be labeled at once.
+#define TWD_MAX_LABEL_PLIES 4
+
 #define TWD_MAGIC_HEADER "magpie_twd_v2"
 
 #endif
