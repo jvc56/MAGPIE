@@ -70,6 +70,12 @@ void twd_feature_name(int feature_index, char *buf, size_t buf_size) {
     snprintf(buf, buf_size, "tt_floater");
   } else if (feature_index == TWD_FEATURE_TT_HOOK_ONLY) {
     snprintf(buf, buf_size, "tt_hook_only");
+  } else if (feature_index == TWD_FEATURE_DD_FLOATER) {
+    snprintf(buf, buf_size, "dd_floater");
+  } else if (feature_index == TWD_FEATURE_DD_HOOK_ONLY) {
+    snprintf(buf, buf_size, "dd_hook_only");
+  } else if (feature_index == TWD_FEATURE_DD_TILES_SAVED) {
+    snprintf(buf, buf_size, "dd_tiles_saved");
   } else {
     log_fatal("invalid TWS defense feature index: %d", feature_index);
   }
@@ -553,6 +559,100 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
   }
 }
 
+// Scans one double-double window: the lane squares from lo to hi, whose
+// endpoints are both double word squares. A word covering the window doubles
+// twice, so it is worth about as much as a triple-triple and is defended the
+// same way. The window is dead when either endpoint is covered (covering one
+// is exactly the blocking reward), when a square inside it is bricked or has
+// an empty cross set, or when it still needs more fresh tiles than a rack
+// holds. A live window also needs somewhere to attach: a playthrough tile
+// inside it, or a hookable empty square.
+static void twd_scan_dd_unit(const Square *lanes, int dir, int lane_index,
+                             int lo, int hi, const TWDMoveOverlay *overlay,
+                             int32_t *features, int *extent_lo,
+                             int *extent_hi) {
+  const Square *lane = board_get_row_cache(lanes, lane_index, dir);
+  if (extent_lo != NULL) {
+    *extent_lo = lo;
+  }
+  if (extent_hi != NULL) {
+    *extent_hi = hi;
+  }
+  int empties = 0;
+  bool has_floater = false;
+  bool has_hook = false;
+  for (int idx = lo; idx <= hi; idx++) {
+    if (square_get_is_brick(&lane[idx])) {
+      return;
+    }
+    const int square_row = twd_unit_row(dir, lane_index, idx);
+    const int square_col = twd_unit_col(dir, lane_index, idx);
+    const MachineLetter letter =
+        twd_effective_letter(lane, idx, overlay, square_row, square_col);
+    if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+      if (idx == lo || idx == hi) {
+        return;
+      }
+      has_floater = true;
+      continue;
+    }
+    const TWDCrossInfo info = twd_effective_cross_info(lane, idx, dir, overlay,
+                                                       square_row, square_col);
+    if (info.dead) {
+      return;
+    }
+    if (info.hooky) {
+      has_hook = true;
+    }
+    empties++;
+  }
+  if (empties > RACK_SIZE) {
+    return;
+  }
+  if (has_floater) {
+    features[TWD_FEATURE_DD_FLOATER] += 1;
+  } else if (has_hook) {
+    features[TWD_FEATURE_DD_HOOK_ONLY] += 1;
+  } else {
+    return;
+  }
+  features[TWD_FEATURE_DD_TILES_SAVED] += RACK_SIZE - empties;
+}
+
+// Finds the double-double windows: consecutive pairs of double word squares
+// in one lane, near enough that a single word could cover both. Horizontal
+// lanes come first, then vertical, each scanned in increasing order, so the
+// truncation at TWD_MAX_DD is deterministic and training and evaluation
+// always agree. Whether a window is currently live is left to the scan.
+static int twd_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
+                       uint8_t *dd_los, uint8_t *dd_his) {
+  int num_dd = 0;
+  for (int dir = 0; dir < 2; dir++) {
+    for (int lane_index = 0; lane_index < BOARD_DIM; lane_index++) {
+      const Square *lane = board_get_row_cache(lanes, lane_index, dir);
+      int previous_dw = -1;
+      for (int idx = 0; idx < BOARD_DIM; idx++) {
+        if (bonus_square_get_word_multiplier(
+                square_get_bonus_square(&lane[idx])) != 2) {
+          continue;
+        }
+        if (previous_dw >= 0 && idx - previous_dw <= TWD_DD_MAX_SPAN) {
+          if (num_dd == TWD_MAX_DD) {
+            return num_dd;
+          }
+          dd_dirs[num_dd] = (uint8_t)dir;
+          dd_lanes[num_dd] = (uint8_t)lane_index;
+          dd_los[num_dd] = (uint8_t)previous_dw;
+          dd_his[num_dd] = (uint8_t)idx;
+          num_dd++;
+        }
+        previous_dw = idx;
+      }
+    }
+  }
+  return num_dd;
+}
+
 // Finds up to TWD_MAX_TWS uncovered TWS squares in row-major order (the
 // truncation is deterministic, so training and evaluation always agree).
 // Bricked and occupied squares are excluded: a covered TWS can never be
@@ -594,6 +694,15 @@ void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL);
     twd_scan_unit(lanes, ld, tws_rows[tws_idx], tws_cols[tws_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL);
+  }
+  uint8_t dd_dirs[TWD_MAX_DD];
+  uint8_t dd_lanes[TWD_MAX_DD];
+  uint8_t dd_los[TWD_MAX_DD];
+  uint8_t dd_his[TWD_MAX_DD];
+  const int num_dd = twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his);
+  for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
+    twd_scan_dd_unit(lanes, dd_dirs[dd_idx], dd_lanes[dd_idx], dd_los[dd_idx],
+                     dd_his[dd_idx], NULL, features, NULL, NULL);
   }
 }
 
@@ -643,6 +752,36 @@ void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx) {
   twd_eval_ctx->weights = NULL;
 }
 
+// Scans one of the context's units into `features`, reporting the lane it
+// walks and the span of lane squares that walk could read. Units 2*i and
+// 2*i+1 are TWS i's horizontal and vertical walks; the units after those are
+// the double-double windows.
+static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
+                                  int unit_index, const TWDMoveOverlay *overlay,
+                                  int32_t *features, int *dir_out,
+                                  int *lane_out, int *extent_lo,
+                                  int *extent_hi) {
+  const int num_tws_units = twd_eval_ctx->num_tws * 2;
+  if (unit_index < num_tws_units) {
+    const int tws_idx = unit_index / 2;
+    const int dir = unit_index % 2;
+    const int tws_row = twd_eval_ctx->tws_rows[tws_idx];
+    const int tws_col = twd_eval_ctx->tws_cols[tws_idx];
+    *dir_out = dir;
+    *lane_out = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
+    twd_scan_unit(twd_eval_ctx->lanes, twd_eval_ctx->ld, tws_row, tws_col, dir,
+                  overlay, features, extent_lo, extent_hi);
+    return;
+  }
+  const int dd_idx = unit_index - num_tws_units;
+  *dir_out = twd_eval_ctx->dd_dirs[dd_idx];
+  *lane_out = twd_eval_ctx->dd_lanes[dd_idx];
+  twd_scan_dd_unit(twd_eval_ctx->lanes, twd_eval_ctx->dd_dirs[dd_idx],
+                   twd_eval_ctx->dd_lanes[dd_idx], twd_eval_ctx->dd_los[dd_idx],
+                   twd_eval_ctx->dd_his[dd_idx], overlay, features, extent_lo,
+                   extent_hi);
+}
+
 void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
                            const TWDWeights *weights, const Square *lanes,
                            const LetterDistribution *ld) {
@@ -654,54 +793,50 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
   twd_eval_ctx->lanes = lanes;
   twd_eval_ctx->num_tws =
       twd_find_tws(lanes, twd_eval_ctx->tws_rows, twd_eval_ctx->tws_cols);
+  twd_eval_ctx->num_dd =
+      twd_find_dd(lanes, twd_eval_ctx->dd_dirs, twd_eval_ctx->dd_lanes,
+                  twd_eval_ctx->dd_los, twd_eval_ctx->dd_his);
+  twd_eval_ctx->num_units = twd_eval_ctx->num_tws * 2 + twd_eval_ctx->num_dd;
   memset(twd_eval_ctx->unit_mask_by_row, 0,
          sizeof(twd_eval_ctx->unit_mask_by_row));
   memset(twd_eval_ctx->unit_mask_by_col, 0,
          sizeof(twd_eval_ctx->unit_mask_by_col));
   int32_t features[TWD_NUM_FEATURES] = {0};
-  for (int tws_idx = 0; tws_idx < twd_eval_ctx->num_tws; tws_idx++) {
-    const int tws_row = twd_eval_ctx->tws_rows[tws_idx];
-    const int tws_col = twd_eval_ctx->tws_cols[tws_idx];
-    for (int dir = 0; dir < 2; dir++) {
-      const int unit_index = tws_idx * 2 + dir;
-      int32_t *unit_features = twd_eval_ctx->unit_features[unit_index];
-      memset(unit_features, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
-      int extent_lo = 0;
-      int extent_hi = 0;
-      twd_scan_unit(lanes, ld, tws_row, tws_col, dir, NULL, unit_features,
-                    &extent_lo, &extent_hi);
-      twd_eval_ctx->unit_penalty[unit_index] = twd_dot(weights, unit_features);
-      for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
-           feature_index++) {
-        features[feature_index] += unit_features[feature_index];
+  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
+    int32_t *unit_features = twd_eval_ctx->unit_features[unit_index];
+    memset(unit_features, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
+    int dir = 0;
+    int lane = 0;
+    int extent_lo = 0;
+    int extent_hi = 0;
+    twd_scan_context_unit(twd_eval_ctx, unit_index, NULL, unit_features, &dir,
+                          &lane, &extent_lo, &extent_hi);
+    twd_eval_ctx->unit_penalty[unit_index] = twd_dot(weights, unit_features);
+    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+         feature_index++) {
+      features[feature_index] += unit_features[feature_index];
+    }
+    // A move affects this unit only when it has a tile on or directly
+    // beside the lane (perpendicular halo of one) within the span of
+    // squares the baseline walk visited: squares beyond the walk's break
+    // point are unreachable within the empty-square budget either way.
+    // Farther effects (a move extending a distant perpendicular word
+    // into a lane square's cross set) are deliberately ignored in the
+    // per-move delta.
+    const uint64_t unit_bit = (uint64_t)1 << unit_index;
+    uint64_t *halo_masks = (dir == BOARD_HORIZONTAL_DIRECTION)
+                               ? twd_eval_ctx->unit_mask_by_row
+                               : twd_eval_ctx->unit_mask_by_col;
+    uint64_t *extent_masks = (dir == BOARD_HORIZONTAL_DIRECTION)
+                                 ? twd_eval_ctx->unit_mask_by_col
+                                 : twd_eval_ctx->unit_mask_by_row;
+    for (int halo = lane - 1; halo <= lane + 1; halo++) {
+      if (halo >= 0 && halo < BOARD_DIM) {
+        halo_masks[halo] |= unit_bit;
       }
-      // A move affects this unit only when it has a tile on or directly
-      // beside the lane (perpendicular halo of one) within the span of
-      // squares the baseline walk visited: squares beyond the walk's break
-      // point are unreachable within the empty-square budget either way.
-      // Farther effects (a move extending a distant perpendicular word
-      // into a lane square's cross set) are deliberately ignored in the
-      // per-move delta.
-      const uint64_t unit_bit = (uint64_t)1 << unit_index;
-      if (dir == BOARD_HORIZONTAL_DIRECTION) {
-        for (int row = tws_row - 1; row <= tws_row + 1; row++) {
-          if (row >= 0 && row < BOARD_DIM) {
-            twd_eval_ctx->unit_mask_by_row[row] |= unit_bit;
-          }
-        }
-        for (int col = extent_lo; col <= extent_hi; col++) {
-          twd_eval_ctx->unit_mask_by_col[col] |= unit_bit;
-        }
-      } else {
-        for (int col = tws_col - 1; col <= tws_col + 1; col++) {
-          if (col >= 0 && col < BOARD_DIM) {
-            twd_eval_ctx->unit_mask_by_col[col] |= unit_bit;
-          }
-        }
-        for (int row = extent_lo; row <= extent_hi; row++) {
-          twd_eval_ctx->unit_mask_by_row[row] |= unit_bit;
-        }
-      }
+    }
+    for (int idx = extent_lo; idx <= extent_hi; idx++) {
+      extent_masks[idx] |= unit_bit;
     }
   }
   twd_eval_ctx->pre_penalty = twd_dot(weights, features);
@@ -785,13 +920,11 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
   while (affected_units) {
     const int unit_index = twd_ctz(affected_units);
     affected_units &= affected_units - 1;
-    const int tws_idx = unit_index / 2;
-    const int dir = unit_index % 2;
     int32_t overlay_features[TWD_NUM_FEATURES] = {0};
-    twd_scan_unit(twd_eval_ctx->lanes, twd_eval_ctx->ld,
-                  twd_eval_ctx->tws_rows[tws_idx],
-                  twd_eval_ctx->tws_cols[tws_idx], dir, &overlay,
-                  overlay_features, NULL, NULL);
+    int scan_dir = 0;
+    int scan_lane = 0;
+    twd_scan_context_unit(twd_eval_ctx, unit_index, &overlay, overlay_features,
+                          &scan_dir, &scan_lane, NULL, NULL);
     const int32_t *unit_features = twd_eval_ctx->unit_features[unit_index];
     for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
          feature_index++) {

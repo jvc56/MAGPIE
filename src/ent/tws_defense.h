@@ -58,8 +58,16 @@ enum {
   // board with more uncovered TWS than this is deterministically truncated
   // to the first TWD_MAX_TWS in row-major order, identically in training
   // and evaluation.
-  TWD_MAX_TWS = 32,
-  TWD_MAX_SCAN_UNITS = TWD_MAX_TWS * 2,
+  TWD_MAX_TWS = 24,
+  // The standard board has exactly 16 double-double windows (8 in rows and
+  // 8 in columns); the same truncation rule applies past this.
+  TWD_MAX_DD = 16,
+  // The unit masks are 64-bit, so this is the hard ceiling (see the
+  // static_assert in tws_defense.c).
+  TWD_MAX_SCAN_UNITS = TWD_MAX_TWS * 2 + TWD_MAX_DD,
+  // Double word squares further apart than this cannot be joined by one
+  // word even with playthrough, so they are not a window.
+  TWD_DD_MAX_SPAN = 2 * RACK_SIZE,
 };
 
 // Per-position evaluation state, rebuilt by each movegen position load (and
@@ -84,7 +92,17 @@ typedef struct TWDEvalContext {
   int num_tws;
   uint8_t tws_rows[TWD_MAX_TWS];
   uint8_t tws_cols[TWD_MAX_TWS];
-  // Units 2*i and 2*i+1 are TWS i's horizontal and vertical walks.
+  // Double-double windows: window i runs along lane dd_lanes[i] of
+  // direction dd_dirs[i], from lane square dd_los[i] to dd_his[i], whose
+  // squares are both double word squares.
+  int num_dd;
+  uint8_t dd_dirs[TWD_MAX_DD];
+  uint8_t dd_lanes[TWD_MAX_DD];
+  uint8_t dd_los[TWD_MAX_DD];
+  uint8_t dd_his[TWD_MAX_DD];
+  // Units 2*i and 2*i+1 are TWS i's horizontal and vertical walks; the
+  // num_dd units after those are the double-double windows in order.
+  int num_units;
   int32_t unit_features[TWD_MAX_SCAN_UNITS][TWD_NUM_FEATURES];
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
