@@ -464,6 +464,11 @@ void test_late_pool(void) {
   const long samples =
       lategate_env_long("LATEPOOL_SAMPLES", LATEPOOL_DEFAULT_SAMPLES);
   const long top = lategate_env_long("LATEPOOL_TOP", LATEPOOL_DEFAULT_TOP);
+  // Extension mode: candidates within this rank of either ranking were
+  // simulated by an earlier run on the same seed and are skipped; the plain
+  // top play is re-simulated as a reference that must reproduce its earlier
+  // value, since every play's rollouts are seeded alike.
+  const int skip_top = (int)lategate_env_long("LATEPOOL_SKIP_TOP", 0);
   const long plies = lategate_env_long("LATEPOOL_PLIES", MAX_PLIES);
   const long rollout = lategate_env_long("LATEPOOL_ROLLOUT", MAX_PLIES);
   const long threads =
@@ -532,19 +537,37 @@ void test_late_pool(void) {
     latepool_generate(game, with_term, false);
     latepool_generate(game, without_term, true);
     move_list_reset(pool);
+    if (skip_top > 0 && move_list_get_count(without_term) > 0) {
+      move_list_add_move(pool, move_list_get_move(without_term, 0));
+    }
     for (int move_idx = 0; move_idx < move_list_get_count(with_term);
          move_idx++) {
-      move_list_add_move(pool, move_list_get_move(with_term, move_idx));
+      const Move *move = move_list_get_move(with_term, move_idx);
+      const int rank_old = latepool_rank(without_term, move);
+      if (skip_top > 0 &&
+          (move_idx < skip_top || (rank_old > 0 && rank_old <= skip_top))) {
+        continue;
+      }
+      move_list_add_move(pool, move);
     }
     for (int move_idx = 0; move_idx < move_list_get_count(without_term);
          move_idx++) {
       const Move *move = move_list_get_move(without_term, move_idx);
-      if (latepool_rank(with_term, move) == 0) {
-        move_list_add_move(pool, move);
+      if (latepool_rank(with_term, move) != 0) {
+        continue;
       }
+      if (skip_top > 0 && move_idx < skip_top) {
+        continue;
+      }
+      move_list_add_move(pool, move);
     }
     const int pool_size = move_list_get_count(pool);
     if (pool_size < 2) {
+      // Nothing beyond the earlier run's pool (or a one-move position); in
+      // extension mode still count the position so numbering stays aligned.
+      if (skip_top > 0) {
+        positions_done++;
+      }
       continue;
     }
     snprintf(cmd, sizeof(cmd), "set -iter %ld", (long)pool_size * samples);
@@ -604,6 +627,33 @@ void test_late_pool(void) {
           stat_get_mean(equity_stat), stat_get_stdev(equity_stat),
           (unsigned long long)stat_get_num_samples(win_pct_stat),
           string_builder_peek(move_sb));
+    }
+    if (skip_top > 0) {
+      // Rank-only rows for the candidates the earlier run simulated, so the
+      // merged data carries every move's rank in both deeper rankings.
+      for (int list_idx = 0; list_idx < 2; list_idx++) {
+        const MoveList *list = list_idx == 0 ? with_term : without_term;
+        for (int move_idx = 0; move_idx < move_list_get_count(list);
+             move_idx++) {
+          const Move *move = move_list_get_move(list, move_idx);
+          const int rank_new = latepool_rank(with_term, move);
+          const int rank_old = latepool_rank(without_term, move);
+          const bool simmed_before = (rank_new > 0 && rank_new <= skip_top) ||
+                                     (rank_old > 0 && rank_old <= skip_top);
+          // Each move once: from the defensive list, or from the plain list
+          // when it is absent from the defensive one.
+          if (!simmed_before || (list_idx == 1 && rank_new > 0)) {
+            continue;
+          }
+          string_builder_clear(move_sb);
+          string_builder_add_move(move_sb, board, move, ld, false);
+          (void)fprintf(out, "%ld,%llu,%d,-1,%d,%d,%d,%d,,,,,,,,,,0,%s\n",
+                        positions_done, (unsigned long long)sample_seed,
+                        bag_count, rank_new, rank_old, (int)move_get_type(move),
+                        move_get_tiles_played(move),
+                        string_builder_peek(move_sb));
+        }
+      }
     }
     (void)fflush(out);
     positions_done++;
