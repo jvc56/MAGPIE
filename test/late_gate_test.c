@@ -1,5 +1,6 @@
 #include "late_gate_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/sim_defs.h"
 #include "../src/ent/bag.h"
@@ -67,6 +68,7 @@ enum {
   LATEGATE_MAX_SAMPLE_TURNS = 80,
   LATEGATE_MAX_CONTINUATION_MOVES = 80,
   LATEGATE_CMD_SIZE = 1024,
+  LATEGATE_NS_PER_SECOND = 1000000000,
 };
 
 static long lategate_env_long(const char *name, long default_value) {
@@ -193,7 +195,7 @@ void test_late_gate(void) {
 
   FILE *out = fopen_or_die(out_path, "we");
   (void)fprintf(out, "pos,seed,bag,game,a_first,a_score,b_score,a_spread,"
-                     "moves\n");
+                     "moves,a_sim_moves,b_sim_moves,a_seconds,b_seconds\n");
   Game *position = game_duplicate(game);
   long positions_done = 0;
   long games_played = 0;
@@ -202,6 +204,12 @@ void test_late_gate(void) {
   long pairs_a_both = 0;
   long pairs_split = 0;
   long pairs_b_both = 0;
+  // Wall-clock spent inside each player's sim decisions, to check how well
+  // the two sample counts approximate an equal time budget.
+  int64_t a_total_ns = 0;
+  int64_t b_total_ns = 0;
+  long a_total_sim_moves = 0;
+  long b_total_sim_moves = 0;
   uint64_t sample_seed = (uint64_t)base_seed * 1000003ULL;
   while (positions_done < num_positions) {
     sample_seed++;
@@ -220,6 +228,10 @@ void test_late_gate(void) {
       game_seed(game, sample_seed * 7919ULL + 17ULL);
       const int a_player = a_first ? start_player : 1 - start_player;
       int moves = 0;
+      int64_t a_game_ns = 0;
+      int64_t b_game_ns = 0;
+      int a_game_sim_moves = 0;
+      int b_game_sim_moves = 0;
       while (!game_over(game) && moves < LATEGATE_MAX_CONTINUATION_MOVES) {
         if (verbose) {
           printf("lategate: pos %ld game %d move %d: bag %d, on turn %d, %s\n",
@@ -239,8 +251,17 @@ void test_late_gate(void) {
         }
         const bool a_to_move = game_get_player_on_turn_index(game) == a_player;
         Move move;
+        const int64_t start_ns = ctimer_monotonic_ns();
         play_chooser_choose_move(a_to_move ? chooser_a : chooser_b, game, &move,
                                  error_stack);
+        const int64_t elapsed_ns = ctimer_monotonic_ns() - start_ns;
+        if (a_to_move) {
+          a_game_ns += elapsed_ns;
+          a_game_sim_moves++;
+        } else {
+          b_game_ns += elapsed_ns;
+          b_game_sim_moves++;
+        }
         if (!error_stack_is_empty(error_stack)) {
           error_stack_print_and_reset(error_stack);
           log_fatal("lategate: play chooser failed at position %ld",
@@ -264,9 +285,17 @@ void test_late_gate(void) {
       pair_points += points;
       a_spread_sum += a_spread;
       games_played++;
-      (void)fprintf(out, "%ld,%llu,%d,%d,%d,%d,%d,%d,%d\n", positions_done,
-                    (unsigned long long)sample_seed, bag_at_start, continuation,
-                    a_first ? 1 : 0, a_score, b_score, a_spread, moves);
+      a_total_ns += a_game_ns;
+      b_total_ns += b_game_ns;
+      a_total_sim_moves += a_game_sim_moves;
+      b_total_sim_moves += b_game_sim_moves;
+      (void)fprintf(out, "%ld,%llu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.3f,%.3f\n",
+                    positions_done, (unsigned long long)sample_seed,
+                    bag_at_start, continuation, a_first ? 1 : 0, a_score,
+                    b_score, a_spread, moves, a_game_sim_moves,
+                    b_game_sim_moves,
+                    (double)a_game_ns / LATEGATE_NS_PER_SECOND,
+                    (double)b_game_ns / LATEGATE_NS_PER_SECOND);
       (void)fflush(out);
     }
     if (pair_points > 1.5) {
@@ -278,11 +307,22 @@ void test_late_gate(void) {
     }
     positions_done++;
     if (positions_done % 10 == 0) {
-      printf("lategate: %ld positions, A %.2f%% over %ld games, spread %+.2f "
-             "(pairs A/split/B %ld/%ld/%ld)\n",
-             positions_done, 100.0 * a_points / (double)games_played,
-             games_played, (double)a_spread_sum / (double)games_played,
-             pairs_a_both, pairs_split, pairs_b_both);
+      printf(
+          "lategate: %ld positions, A %.2f%% over %ld games, spread %+.2f "
+          "(pairs A/split/B %ld/%ld/%ld); sim time A %.1fs B %.1fs "
+          "(A/B %.3f), per sim move A %.3fs B %.3fs\n",
+          positions_done, 100.0 * a_points / (double)games_played, games_played,
+          (double)a_spread_sum / (double)games_played, pairs_a_both,
+          pairs_split, pairs_b_both,
+          (double)a_total_ns / LATEGATE_NS_PER_SECOND,
+          (double)b_total_ns / LATEGATE_NS_PER_SECOND,
+          b_total_ns > 0 ? (double)a_total_ns / (double)b_total_ns : 0.0,
+          a_total_sim_moves > 0 ? (double)a_total_ns / LATEGATE_NS_PER_SECOND /
+                                      (double)a_total_sim_moves
+                                : 0.0,
+          b_total_sim_moves > 0 ? (double)b_total_ns / LATEGATE_NS_PER_SECOND /
+                                      (double)b_total_sim_moves
+                                : 0.0);
       (void)fflush(stdout);
     }
   }
@@ -290,10 +330,14 @@ void test_late_gate(void) {
   const double sigma =
       sqrt(a_win_rate * (1.0 - a_win_rate) / (double)games_played);
   printf("lategate: DONE %ld positions, %ld games: A %.2f%% (+/- %.2f), "
-         "spread %+.2f/game, pairs A-both/split/B-both %ld/%ld/%ld\n",
+         "spread %+.2f/game, pairs A-both/split/B-both %ld/%ld/%ld; sim "
+         "time A %.1fs over %ld moves, B %.1fs over %ld moves (A/B %.3f)\n",
          positions_done, games_played, 100.0 * a_win_rate, 100.0 * sigma,
          (double)a_spread_sum / (double)games_played, pairs_a_both, pairs_split,
-         pairs_b_both);
+         pairs_b_both, (double)a_total_ns / LATEGATE_NS_PER_SECOND,
+         a_total_sim_moves, (double)b_total_ns / LATEGATE_NS_PER_SECOND,
+         b_total_sim_moves,
+         b_total_ns > 0 ? (double)a_total_ns / (double)b_total_ns : 0.0);
   (void)fclose(out);
   game_destroy(position);
   error_stack_destroy(error_stack);
