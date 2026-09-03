@@ -250,12 +250,16 @@ int main(int argc, char *argv[]) {
       }
     }
   } else if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
-    if (argc > 1) {
-      log_warn("Ignoring test arguments when testing default super board "
-               "dimensions of %d.",
-               DEFAULT_SUPER_BOARD_DIM);
+    // Named tests run as asked, so a test written to be board-size aware
+    // (or an on-demand harness pointed at a super lexicon) can be exercised
+    // here; with no arguments the fixed super suite runs as before.
+    if (argc == 1) {
+      run_all_super();
+    } else {
+      for (int i = 1; i < argc; i++) {
+        run_test(argv[i]);
+      }
     }
-    run_all_super();
   } else {
     log_fatal(
         "Testing with unsupported board dimension of %d. Only %d and %d are "

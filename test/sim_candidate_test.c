@@ -1,7 +1,9 @@
 #include "sim_candidate_test.h"
 
 #include "../src/def/board_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/def/tws_defense_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/bonus_square.h"
@@ -51,6 +53,9 @@
 //                         diagnostic that never enters static equity or the
 //                         candidate pool (default: whatever CANDRECALL_TWD is)
 //   CANDRECALL_PATH       -path value (default ./data)
+//   CANDRECALL_LEX        lexicon (default CSW21)
+//   CANDRECALL_WMP        "true"/"false" for -wmp (default true; the super
+//                         board's lexica ship a 15-board wmp, so use false)
 
 enum {
   CANDRECALL_DEFAULT_POSITIONS = 300,
@@ -115,18 +120,31 @@ void test_candidate_recall(void) {
   const char *twd_diag_name =
       candrecall_env_string("CANDRECALL_TWD_DIAG", NULL);
   const char *data_path = candrecall_env_string("CANDRECALL_PATH", "./data");
+  const char *lexicon = candrecall_env_string("CANDRECALL_LEX", "CSW21");
+  const char *use_wmp = candrecall_env_string("CANDRECALL_WMP", "true");
 
   char cmd[CANDRECALL_CMD_SIZE];
   snprintf(cmd, sizeof(cmd),
-           "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+           "set -lex %s -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
            "-numplays %ld -plies %ld -threads %ld -iter %ld -minp %ld -sr rr "
            "-threshold none -scond none -seed 7 -savesettings false -path %s "
            "-twd %s",
-           pool_size, plies, threads, pool_size * iters_per_arm, iters_per_arm,
-           data_path, twd_name);
+           lexicon, use_wmp, pool_size, plies, threads,
+           pool_size * iters_per_arm, iters_per_arm, data_path, twd_name);
   Config *config = config_create_or_die(cmd);
-  // The config's game exists only once a position has been loaded.
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  // The config's game exists only once a position has been loaded. Build
+  // an empty board of this binary's dimension rather than using the 15x15
+  // literal, so the same harness serves the super board.
+  char empty_cgp[CANDRECALL_CMD_SIZE];
+  int cgp_len = snprintf(empty_cgp, sizeof(empty_cgp), "cgp ");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    cgp_len +=
+        snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+                 "%d%s", BOARD_DIM, row + 1 < BOARD_DIM ? "/" : "");
+  }
+  snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+           " / 0/0 0");
+  load_and_exec_config_or_die(config, empty_cgp);
   Game *game = config_get_game(config);
   const LetterDistribution *ld = config_get_ld(config);
   SimResults *sim_results = config_get_sim_results(config);
@@ -317,7 +335,16 @@ void test_board_dump(void) {
            "-numplays 1 -threads 1 -savesettings false -path %s -twd %s",
            data_path, twd_name);
   Config *config = config_create_or_die(cmd);
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  char empty_cgp[CANDRECALL_CMD_SIZE];
+  int cgp_len = snprintf(empty_cgp, sizeof(empty_cgp), "cgp ");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    cgp_len +=
+        snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+                 "%d%s", BOARD_DIM, row + 1 < BOARD_DIM ? "/" : "");
+  }
+  snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+           " / 0/0 0");
+  load_and_exec_config_or_die(config, empty_cgp);
   Game *game = config_get_game(config);
 
   FILE *out = fopen_or_die(out_path, "we");
