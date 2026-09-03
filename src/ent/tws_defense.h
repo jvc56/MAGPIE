@@ -60,18 +60,34 @@ int twd_get_hook_flex(const TWDWeights *twd, MachineLetter ml);
 int twd_get_through_score(const TWDWeights *twd, MachineLetter ml, int span);
 int twd_get_through_count(const TWDWeights *twd, MachineLetter ml, int span);
 
+// The premium squares a lane walk can be anchored on. Each is worth
+// reaching for a different reason, so each keeps its own feature channels.
+typedef enum {
+  TWD_PREMIUM_TWS,
+  TWD_PREMIUM_DWS,
+  TWD_PREMIUM_TLS,
+  TWD_NUM_PREMIUM_CLASSES,
+} twd_premium_class_t;
+
 enum {
-  // Standard boards have 8 TWS squares; exotic layouts get headroom. A
-  // board with more uncovered TWS than this is deterministically truncated
-  // to the first TWD_MAX_TWS in row-major order, identically in training
-  // and evaluation.
+  // The standard 15x15 board has 37 premium squares of the three classes
+  // walked (8 triple word, 17 double word, 12 triple letter) and the 21x21
+  // super board has 77. Truncation past the cap is deterministic
+  // (row-major) but it is also a defect: the trainer lists squares on the
+  // post-move board and the engine on the pre-move board, so a covered
+  // square near the cap shifts which squares each side sees. Keep the cap
+  // above every layout that is built.
   TWD_MAX_TWS = 24,
-  // The standard board has exactly 16 double-double windows (8 in rows and
-  // 8 in columns); the same truncation rule applies past this.
-  TWD_MAX_DD = 16,
+  TWD_MAX_PREMIUM = 80,
+  // The standard board has 16 double-double windows (8 in rows and 8 in
+  // columns) and the super board 40. Windows are found horizontally first,
+  // so a cap below the count silently drops every vertical window.
+  TWD_MAX_DD = 48,
   // The unit masks are 64-bit, so this is the hard ceiling (see the
   // static_assert in tws_defense.c).
-  TWD_MAX_SCAN_UNITS = TWD_MAX_TWS * 2 + TWD_MAX_DD,
+  TWD_MAX_SCAN_UNITS = TWD_MAX_PREMIUM * 2 + TWD_MAX_DD,
+  // The affected-unit set no longer fits one word.
+  TWD_MASK_WORDS = (TWD_MAX_SCAN_UNITS + 63) / 64,
   // Double word squares further apart than this cannot be joined by one
   // word even with playthrough, so they are not a window.
   TWD_DD_MAX_SPAN = 2 * RACK_SIZE,
@@ -96,9 +112,12 @@ typedef struct TWDEvalContext {
   const LetterDistribution *ld;
   const Square *lanes;
   Equity pre_penalty;
+  // The premium squares walked, in row-major order within each class, and
+  // which class each belongs to.
   int num_tws;
-  uint8_t tws_rows[TWD_MAX_TWS];
-  uint8_t tws_cols[TWD_MAX_TWS];
+  uint8_t tws_rows[TWD_MAX_PREMIUM];
+  uint8_t tws_cols[TWD_MAX_PREMIUM];
+  uint8_t tws_classes[TWD_MAX_PREMIUM];
   // Double-double windows: window i runs along lane dd_lanes[i] of
   // direction dd_dirs[i], from lane square dd_los[i] to dd_his[i], whose
   // squares are both double word squares.
@@ -132,8 +151,8 @@ typedef struct TWDEvalContext {
   // set is the AND of the OR of its rows' masks with the OR of its
   // columns' masks: a few operations per candidate on the movegen record
   // path, zero for the vast majority of moves.
-  uint64_t unit_mask_by_row[BOARD_DIM];
-  uint64_t unit_mask_by_col[BOARD_DIM];
+  uint64_t unit_mask_by_row[BOARD_DIM][TWD_MASK_WORDS];
+  uint64_t unit_mask_by_col[BOARD_DIM][TWD_MASK_WORDS];
   // lane_penalty_bound[dir][lane] is an upper bound on the defense term of
   // every tile placement along that lane (a row for horizontal moves, a
   // column for vertical ones): the baseline penalty less the baseline
