@@ -15,6 +15,7 @@
 #include "test_util.h"
 #include <math.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -253,7 +254,12 @@ void test_late_gate(void) {
       const int b_score =
           equity_to_int(player_get_score(game_get_player(game, 1 - a_player)));
       const int a_spread = a_score - b_score;
-      const double points = a_spread > 0 ? 1.0 : (a_spread == 0 ? 0.5 : 0.0);
+      double points = 0.0;
+      if (a_spread > 0) {
+        points = 1.0;
+      } else if (a_spread == 0) {
+        points = 0.5;
+      }
       a_points += points;
       pair_points += points;
       a_spread_sum += a_spread;
