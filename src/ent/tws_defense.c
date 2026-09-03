@@ -106,19 +106,35 @@ void twd_feature_name(int feature_index, char *buf, size_t buf_size) {
   } else if (feature_index < TWD_FEATURE_TLS_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "tls_hook_d%d",
              feature_index - TWD_FEATURE_TLS_HOOK_START + 1);
-  } else if (feature_index < TWD_FEATURE_TT_FLOATER) {
+  } else if (feature_index < TWD_FEATURE_QWS_HOOK_START) {
     snprintf(buf, buf_size, "tls_float_score_d%d",
              feature_index - TWD_FEATURE_TLS_FLOAT_SCORE_START + 1);
+  } else if (feature_index < TWD_FEATURE_QWS_FLOAT_SCORE_START) {
+    snprintf(buf, buf_size, "qws_hook_d%d",
+             feature_index - TWD_FEATURE_QWS_HOOK_START + 1);
+  } else if (feature_index < TWD_FEATURE_QLS_HOOK_START) {
+    snprintf(buf, buf_size, "qws_float_score_d%d",
+             feature_index - TWD_FEATURE_QWS_FLOAT_SCORE_START + 1);
+  } else if (feature_index < TWD_FEATURE_QLS_FLOAT_SCORE_START) {
+    snprintf(buf, buf_size, "qls_hook_d%d",
+             feature_index - TWD_FEATURE_QLS_HOOK_START + 1);
+  } else if (feature_index < TWD_FEATURE_TT_FLOATER) {
+    snprintf(buf, buf_size, "qls_float_score_d%d",
+             feature_index - TWD_FEATURE_QLS_FLOAT_SCORE_START + 1);
   } else if (feature_index == TWD_FEATURE_TT_FLOATER) {
     snprintf(buf, buf_size, "tt_floater");
   } else if (feature_index == TWD_FEATURE_TT_HOOK_ONLY) {
     snprintf(buf, buf_size, "tt_hook_only");
-  } else if (feature_index == TWD_FEATURE_DD_FLOATER) {
-    snprintf(buf, buf_size, "dd_floater");
-  } else if (feature_index == TWD_FEATURE_DD_HOOK_ONLY) {
-    snprintf(buf, buf_size, "dd_hook_only");
-  } else if (feature_index == TWD_FEATURE_DD_TILES_SAVED) {
-    snprintf(buf, buf_size, "dd_tiles_saved");
+  } else if (feature_index >= TWD_FEATURE_WINDOW_START &&
+             feature_index < TWD_NUM_FEATURES) {
+    static const char *const tier_names[TWD_WINDOW_TIER_COUNT] = {"dd", "w6",
+                                                                  "w9", "w12"};
+    static const char *const kind_names[TWD_WINDOW_FEATURES_PER_TIER] = {
+        "floater", "hook_only", "tiles_saved"};
+    const int offset = feature_index - TWD_FEATURE_WINDOW_START;
+    snprintf(buf, buf_size, "%s_%s",
+             tier_names[offset / TWD_WINDOW_FEATURES_PER_TIER],
+             kind_names[offset % TWD_WINDOW_FEATURES_PER_TIER]);
   } else {
     log_fatal("invalid TWS defense feature index: %d", feature_index);
   }
@@ -654,6 +670,12 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
   } else if (premium_class == TWD_PREMIUM_TLS) {
     hook_base = TWD_FEATURE_TLS_HOOK_START;
     float_score_base = TWD_FEATURE_TLS_FLOAT_SCORE_START;
+  } else if (premium_class == TWD_PREMIUM_QWS) {
+    hook_base = TWD_FEATURE_QWS_HOOK_START;
+    float_score_base = TWD_FEATURE_QWS_FLOAT_SCORE_START;
+  } else if (premium_class == TWD_PREMIUM_QLS) {
+    hook_base = TWD_FEATURE_QLS_HOOK_START;
+    float_score_base = TWD_FEATURE_QLS_FLOAT_SCORE_START;
   }
   const bool full_channels = (premium_class == TWD_PREMIUM_TWS);
   const int lane_index =
@@ -821,9 +843,11 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
 // holds. A live window also needs somewhere to attach: a playthrough tile
 // inside it, or a hookable empty square.
 static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
-                             int dir, int lane_index, int lo, int hi,
+                             int dir, int lane_index, int lo, int hi, int tier,
                              const TWDMoveOverlay *overlay, int32_t *features,
                              int *extent_lo, int *extent_hi) {
+  const int tier_base =
+      TWD_FEATURE_WINDOW_START + tier * TWD_WINDOW_FEATURES_PER_TIER;
   const Square *lane = board_get_row_cache(lanes, lane_index, dir);
   if (extent_lo != NULL) {
     *extent_lo = lo;
@@ -863,13 +887,13 @@ static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     return;
   }
   if (has_floater) {
-    features[TWD_FEATURE_DD_FLOATER] += 1;
+    features[tier_base] += 1;
   } else if (has_hook) {
-    features[TWD_FEATURE_DD_HOOK_ONLY] += 1;
+    features[tier_base + 1] += 1;
   } else {
     return;
   }
-  features[TWD_FEATURE_DD_TILES_SAVED] += RACK_SIZE - empties;
+  features[tier_base + 2] += RACK_SIZE - empties;
 }
 
 // Finds the double-double windows: consecutive pairs of double word squares
@@ -877,29 +901,53 @@ static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
 // lanes come first, then vertical, each scanned in increasing order, so the
 // truncation at TWD_MAX_DD is deterministic and training and evaluation
 // always agree. Whether a window is currently live is left to the scan.
+// Which window tier the product of two word multipliers belongs to.
+static int twd_window_tier(int product) {
+  if (product <= 4) {
+    return 0; // double-double
+  }
+  if (product <= 8) {
+    return 1; // double-triple, double-quad
+  }
+  if (product == 9) {
+    return 2; // triple-triple
+  }
+  return 3; // triple-quad, quad-quad
+}
+
+// Finds the windows: consecutive pairs of word-multiplier squares in one
+// lane, near enough that a single word could cover both. Horizontal lanes
+// come first, then vertical, each scanned in increasing order, so the
+// truncation at TWD_MAX_DD is deterministic and training and evaluation
+// always agree. Whether a window is currently live is left to the scan.
 static int twd_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
-                       uint8_t *dd_los, uint8_t *dd_his) {
+                       uint8_t *dd_los, uint8_t *dd_his, uint8_t *dd_tiers) {
   int num_dd = 0;
   for (int dir = 0; dir < 2; dir++) {
     for (int lane_index = 0; lane_index < BOARD_DIM; lane_index++) {
       const Square *lane = board_get_row_cache(lanes, lane_index, dir);
-      int previous_dw = -1;
+      int previous_idx = -1;
+      int previous_multiplier = 0;
       for (int idx = 0; idx < BOARD_DIM; idx++) {
-        if (bonus_square_get_word_multiplier(
-                square_get_bonus_square(&lane[idx])) != 2) {
+        const int word_multiplier = bonus_square_get_word_multiplier(
+            square_get_bonus_square(&lane[idx]));
+        if (word_multiplier < 2) {
           continue;
         }
-        if (previous_dw >= 0 && idx - previous_dw <= TWD_DD_MAX_SPAN) {
+        if (previous_idx >= 0 && idx - previous_idx <= TWD_DD_MAX_SPAN) {
           if (num_dd == TWD_MAX_DD) {
             return num_dd;
           }
           dd_dirs[num_dd] = (uint8_t)dir;
           dd_lanes[num_dd] = (uint8_t)lane_index;
-          dd_los[num_dd] = (uint8_t)previous_dw;
+          dd_los[num_dd] = (uint8_t)previous_idx;
           dd_his[num_dd] = (uint8_t)idx;
+          dd_tiers[num_dd] =
+              (uint8_t)twd_window_tier(previous_multiplier * word_multiplier);
           num_dd++;
         }
-        previous_dw = idx;
+        previous_idx = idx;
+        previous_multiplier = word_multiplier;
       }
     }
   }
@@ -913,13 +961,20 @@ static int twd_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
 static int twd_premium_class_of(const Square *square) {
   const BonusSquare bonus = square_get_bonus_square(square);
   const int word_multiplier = bonus_square_get_word_multiplier(bonus);
+  if (word_multiplier >= 4) {
+    return TWD_PREMIUM_QWS;
+  }
   if (word_multiplier == 3) {
     return TWD_PREMIUM_TWS;
   }
   if (word_multiplier == 2) {
     return TWD_PREMIUM_DWS;
   }
-  if (bonus_square_get_letter_multiplier(bonus) == 3) {
+  const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
+  if (letter_multiplier >= 4) {
+    return TWD_PREMIUM_QLS;
+  }
+  if (letter_multiplier == 3) {
     return TWD_PREMIUM_TLS;
   }
   return -1;
@@ -979,11 +1034,13 @@ void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
   uint8_t dd_lanes[TWD_MAX_DD];
   uint8_t dd_los[TWD_MAX_DD];
   uint8_t dd_his[TWD_MAX_DD];
-  const int num_dd = twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his);
+  uint8_t dd_tiers[TWD_MAX_DD];
+  const int num_dd =
+      twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his, dd_tiers);
   for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
     twd_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
-                     dd_los[dd_idx], dd_his[dd_idx], NULL, features, NULL,
-                     NULL);
+                     dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
+                     features, NULL, NULL);
   }
 }
 
@@ -1137,8 +1194,8 @@ static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
   twd_scan_dd_unit(twd_eval_ctx->lanes, twd_eval_ctx->unseen_counts,
                    twd_eval_ctx->dd_dirs[dd_idx],
                    twd_eval_ctx->dd_lanes[dd_idx], twd_eval_ctx->dd_los[dd_idx],
-                   twd_eval_ctx->dd_his[dd_idx], overlay, features, extent_lo,
-                   extent_hi);
+                   twd_eval_ctx->dd_his[dd_idx], twd_eval_ctx->dd_tiers[dd_idx],
+                   overlay, features, extent_lo, extent_hi);
 }
 
 void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
@@ -1165,9 +1222,9 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
   twd_eval_ctx->num_tws =
       twd_find_tws(lanes, twd_eval_ctx->tws_rows, twd_eval_ctx->tws_cols,
                    twd_eval_ctx->tws_classes);
-  twd_eval_ctx->num_dd =
-      twd_find_dd(lanes, twd_eval_ctx->dd_dirs, twd_eval_ctx->dd_lanes,
-                  twd_eval_ctx->dd_los, twd_eval_ctx->dd_his);
+  twd_eval_ctx->num_dd = twd_find_dd(
+      lanes, twd_eval_ctx->dd_dirs, twd_eval_ctx->dd_lanes,
+      twd_eval_ctx->dd_los, twd_eval_ctx->dd_his, twd_eval_ctx->dd_tiers);
   twd_eval_ctx->num_units = twd_eval_ctx->num_tws * 2 + twd_eval_ctx->num_dd;
   memset(twd_eval_ctx->unit_mask_by_row, 0,
          sizeof(twd_eval_ctx->unit_mask_by_row));
@@ -1345,7 +1402,9 @@ void twd_extract_features_combined(const Square *lanes,
   uint8_t dd_lanes[TWD_MAX_DD];
   uint8_t dd_los[TWD_MAX_DD];
   uint8_t dd_his[TWD_MAX_DD];
-  const int num_dd = twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his);
+  uint8_t dd_tiers[TWD_MAX_DD];
+  const int num_dd =
+      twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his, dd_tiers);
   const int num_units = num_tws * 2 + num_dd;
 
   int32_t unit_features[TWD_MAX_SCAN_UNITS][TWD_NUM_FEATURES];
@@ -1362,7 +1421,8 @@ void twd_extract_features_combined(const Square *lanes,
     } else {
       const int dd_idx = unit_index - num_tws * 2;
       twd_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
-                       dd_los[dd_idx], dd_his[dd_idx], NULL, row, NULL, NULL);
+                       dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
+                       row, NULL, NULL);
     }
     const Equity penalty = twd_dot(twd, row);
     if (penalty < worst_penalty) {
