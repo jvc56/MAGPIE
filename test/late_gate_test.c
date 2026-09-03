@@ -421,7 +421,10 @@ void test_late_gate(void) {
 // LATEPOOL_ROLLOUT (MAX_PLIES, rollout plies steered by the defense term),
 // LATEPOOL_THREADS (16), LATEPOOL_MIN_BAG (5), LATEPOOL_MAX_BAG (9),
 // LATEPOOL_SEED (1), LATEPOOL_TWD (gs050_105), LATEPOOL_PATH (./data),
-// LATEPOOL_LEX (CSW24), LATEPOOL_WMP (true), LATEPOOL_WINPCT (winpct).
+// LATEPOOL_LEX (CSW24), LATEPOOL_WMP (true), LATEPOOL_WINPCT (winpct),
+// LATEPOOL_SIM_SEED (7, the rollouts' seed; a second run on the same
+// positions with another value gives an independent replicate),
+// LATEPOOL_SKIP_TOP (0; see the extension note above).
 
 enum {
   LATEPOOL_DEFAULT_POSITIONS = 10000,
@@ -488,15 +491,18 @@ void test_late_pool(void) {
   const char *lexicon = lategate_env_string("LATEPOOL_LEX", "CSW24");
   const char *use_wmp = lategate_env_string("LATEPOOL_WMP", "true");
   const char *win_pct_name = lategate_env_string("LATEPOOL_WINPCT", "winpct");
+  // The rollouts' seed, separate from the position seed so the same
+  // positions can be re-simulated independently.
+  const long sim_seed = lategate_env_long("LATEPOOL_SIM_SEED", 7);
 
   char cmd[LATEGATE_CMD_SIZE];
   snprintf(cmd, sizeof(cmd),
            "set -lex %s -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
            "-numplays %ld -plies %ld -threads %ld -iter %ld -minp %ld -sr rr "
-           "-threshold none -scond none -cutoff 0 -seed 7 -savesettings false "
-           "-path %s -twd %s -winpct %s -twdrollout %ld",
+           "-threshold none -scond none -cutoff 0 -seed %ld -savesettings "
+           "false -path %s -twd %s -winpct %s -twdrollout %ld",
            lexicon, use_wmp, 2 * top, plies, threads, 2 * top * samples,
-           samples, data_path, twd_name, win_pct_name, rollout);
+           samples, sim_seed, data_path, twd_name, win_pct_name, rollout);
   Config *config = config_create_or_die(cmd);
   char empty_cgp[LATEGATE_CMD_SIZE];
   int cgp_len = snprintf(empty_cgp, sizeof(empty_cgp), "cgp ");
