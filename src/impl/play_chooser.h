@@ -89,6 +89,17 @@ typedef struct PlayChooserStrategy {
   double utility_w_spread;
   double utility_spread_scale;
   uint64_t seed;
+  // Sim rollout budget as a fixed number of samples instead of the move's
+  // time budget: when > 0 the sim runs this many rollouts and the time
+  // budget does not apply to it (the pre-endgame and endgame solvers keep
+  // theirs). 0, the default, leaves the sim time-budgeted.
+  uint64_t sim_max_iterations;
+  // The defense term inside the sim's rollouts (see SimArgs.twd_rollout_plies
+  // and SimArgs.twd_leaf). With set_twd_rollout_plies false, which a
+  // zero-initialized strategy gets, the sim keeps each player's own settings.
+  bool set_twd_rollout_plies;
+  int twd_rollout_plies;
+  bool twd_leaf;
 } PlayChooserStrategy;
 
 typedef struct PlayChooser PlayChooser;

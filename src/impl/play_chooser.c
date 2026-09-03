@@ -37,6 +37,12 @@
 #include <stdlib.h>
 
 enum {
+  // Stands in for the time budget when the sim is bounded by samples
+  // instead; no sim runs anywhere near this long.
+  PLAY_CHOOSER_UNLIMITED_SECONDS = 1000000,
+  // A win% cutoff no sample mean can be within: the extremes it tests are
+  // win% <= cutoff and win% >= 1 - cutoff.
+  PLAY_CHOOSER_NO_WIN_PCT_CUTOFF = -1,
   PLAY_CHOOSER_DEFAULT_SIM_PLIES = 2,
   PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES = 15,
   // Assume roughly four tiles per play across both players when splitting
@@ -285,6 +291,20 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
       /*inference_args=*/NULL, &sim_args);
+  if (strategy->sim_max_iterations > 0) {
+    // Nothing but exhausting the samples stops a fixed-sample sim: no time
+    // limit, and no win% cutoff, which with a cutoff of zero would end a
+    // sim as soon as the leading candidate's samples were all wins or all
+    // losses, as they often are early when rollouts run to the end of a
+    // late-game position.
+    sim_args.bai_options.sample_limit = strategy->sim_max_iterations;
+    sim_args.bai_options.time_limit_seconds = PLAY_CHOOSER_UNLIMITED_SECONDS;
+    sim_args.bai_options.cutoff = PLAY_CHOOSER_NO_WIN_PCT_CUTOFF;
+  }
+  if (strategy->set_twd_rollout_plies) {
+    sim_args.twd_rollout_plies = strategy->twd_rollout_plies;
+  }
+  sim_args.twd_leaf = strategy->twd_leaf;
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).

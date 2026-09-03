@@ -35,6 +35,7 @@
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
+#include "late_gate_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
@@ -154,6 +155,7 @@ static TestEntry on_demand_test_table[] = {
     {"boarddump", test_board_dump},
     {"throughtable", test_through_table},
     {"candrecall", test_candidate_recall},
+    {"lategate", test_late_gate},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},
