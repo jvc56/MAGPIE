@@ -44,6 +44,9 @@
 // Environment: LATEGATE_OUT (lategate.csv), LATEGATE_POSITIONS (200),
 // LATEGATE_ITERS_A (160000), LATEGATE_ITERS_B (200000), LATEGATE_ROLLOUT_A
 // (2), LATEGATE_ROLLOUT_B (0), LATEGATE_LEAF_A (0), LATEGATE_LEAF_B (0),
+// LATEGATE_ROOT_A (1), LATEGATE_ROOT_B (1) (whether each player's candidate
+// pool is chosen with the defense term; 0 gives a player with no term
+// anywhere),
 // LATEGATE_PLIES (MAX_PLIES), LATEGATE_CANDIDATES (15), LATEGATE_THREADS
 // (16), LATEGATE_WINPCT (winpct),
 // LATEGATE_MIN_BAG (5), LATEGATE_MAX_BAG (9), LATEGATE_SIM_MIN_BAG (1),
@@ -126,6 +129,9 @@ void test_late_gate(void) {
       lategate_env_long("LATEGATE_ROLLOUT_B", LATEGATE_DEFAULT_ROLLOUT_B);
   const bool leaf_a = lategate_env_long("LATEGATE_LEAF_A", 0) != 0;
   const bool leaf_b = lategate_env_long("LATEGATE_LEAF_B", 0) != 0;
+  // Whether each player's candidate pool is chosen with the defense term.
+  const bool root_a = lategate_env_long("LATEGATE_ROOT_A", 1) != 0;
+  const bool root_b = lategate_env_long("LATEGATE_ROOT_B", 1) != 0;
   const long plies =
       lategate_env_long("LATEGATE_PLIES", LATEGATE_DEFAULT_PLIES);
   const long candidates =
@@ -185,10 +191,12 @@ void test_late_gate(void) {
   strategy_a.sim_max_iterations = (uint64_t)iters_a;
   strategy_a.twd_rollout_plies = (int)rollout_a;
   strategy_a.twd_leaf = leaf_a;
+  strategy_a.disable_root_twd = !root_a;
   PlayChooserStrategy strategy_b = base_strategy;
   strategy_b.sim_max_iterations = (uint64_t)iters_b;
   strategy_b.twd_rollout_plies = (int)rollout_b;
   strategy_b.twd_leaf = leaf_b;
+  strategy_b.disable_root_twd = !root_b;
   PlayChooser *chooser_a = play_chooser_create(&strategy_a);
   PlayChooser *chooser_b = play_chooser_create(&strategy_b);
   ErrorStack *error_stack = error_stack_create();

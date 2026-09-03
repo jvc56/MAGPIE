@@ -253,6 +253,7 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       .move_list = move_list,
       .tiles_played_bv = NULL,
       .initial_tiles_bv = 0,
+      .disable_twd = strategy->disable_root_twd,
   };
   generate_moves(&gen_args);
   const int num_candidates = move_list_get_count(move_list);

@@ -100,6 +100,10 @@ typedef struct PlayChooserStrategy {
   bool set_twd_rollout_plies;
   int twd_rollout_plies;
   bool twd_leaf;
+  // Generate the sim's candidate pool without the defense term even when
+  // the on-turn player has weights, so a chooser can stand for a player
+  // that never uses it while sharing a game with one that does.
+  bool disable_root_twd;
 } PlayChooserStrategy;
 
 typedef struct PlayChooser PlayChooser;
