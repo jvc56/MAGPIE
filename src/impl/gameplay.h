@@ -9,6 +9,7 @@
 #include "../ent/move_undo.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
+#include "../ent/tws_defense.h"
 #include "move_gen.h"
 
 void draw_starting_racks(Game *game);
@@ -24,7 +25,10 @@ const Move *get_top_equity_move(Game *game, MoveList *move_list);
 // Like get_top_equity_move, but able to switch the TWS defense term off for
 // this generation alone. Rollouts use this to keep the term at the root of a
 // simulation without letting it choose the replies inside one.
+// override_twd, when non-NULL, drives the defense term in place of the
+// on-turn player's own weights; disable_twd switches the term off.
 const Move *get_top_equity_move_with_twd(Game *game, MoveList *move_list,
+                                         const TWDWeights *override_twd,
                                          bool disable_twd);
 const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list);
 Move *get_top_equity_move_for_inferences(

@@ -18,6 +18,7 @@
 #include "../ent/move_undo.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/tws_defense.h"
 #include "../ent/validated_move.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
@@ -866,6 +867,7 @@ void generate_moves_for_game_override_record_type(
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .disable_twd = args->disable_twd,
+      .override_twd = args->override_twd,
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);
@@ -882,6 +884,7 @@ void generate_moves_for_game(const MoveGenArgs *args) {
 }
 
 const Move *get_top_equity_move_with_twd(Game *game, MoveList *move_list,
+                                         const TWDWeights *override_twd,
                                          bool disable_twd) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
@@ -892,13 +895,14 @@ const Move *get_top_equity_move_with_twd(Game *game, MoveList *move_list,
                             .target_equity = EQUITY_MAX_VALUE,
                             .target_leave_size_for_exchange_cutoff =
                                 UNSET_LEAVE_SIZE,
-                            .disable_twd = disable_twd};
+                            .disable_twd = disable_twd,
+                            .override_twd = override_twd};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
 }
 
 const Move *get_top_equity_move(Game *game, MoveList *move_list) {
-  return get_top_equity_move_with_twd(game, move_list, false);
+  return get_top_equity_move_with_twd(game, move_list, NULL, false);
 }
 
 // Like get_top_equity_move, but sorts by the move_sort_type configured for

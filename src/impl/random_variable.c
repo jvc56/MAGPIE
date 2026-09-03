@@ -15,6 +15,7 @@
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/tws_defense.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 #include "../str/sim_string.h"
@@ -403,9 +404,12 @@ typedef struct Simmer {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
-  // See SimArgs.twd_root_only: switches the defense term off for the plays
-  // chosen inside a rollout, leaving it in force at the root.
-  bool twd_root_only;
+  // See SimArgs.twd_rollout_plies. The rollouts apply the simulating
+  // player's weights (root_twd) to whoever is on turn for the first
+  // twd_rollout_plies plies, and no weights after, unless the value is the
+  // per-player default.
+  int twd_rollout_plies;
+  const TWDWeights *root_twd;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -509,8 +513,17 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play =
-        get_top_equity_move_with_twd(game, move_list, simmer->twd_root_only);
+    const TWDWeights *override_twd = NULL;
+    bool disable_twd = false;
+    if (simmer->twd_rollout_plies != SIM_TWD_ROLLOUT_PLAYER_SETTINGS) {
+      if (ply < simmer->twd_rollout_plies && simmer->root_twd != NULL) {
+        override_twd = simmer->root_twd;
+      } else {
+        disable_twd = true;
+      }
+    }
+    const Move *best_play = get_top_equity_move_with_twd(
+        game, move_list, override_twd, disable_twd);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -648,7 +661,9 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
-  simmer->twd_root_only = sim_args->twd_root_only;
+  simmer->twd_rollout_plies = sim_args->twd_rollout_plies;
+  simmer->root_twd = player_get_twd(game_get_player(
+      sim_args->game, game_get_player_on_turn_index(sim_args->game)));
 
   simmer->thread_control = thread_control;
 
@@ -701,7 +716,9 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
-  simmer->twd_root_only = sim_args->twd_root_only;
+  simmer->twd_rollout_plies = sim_args->twd_rollout_plies;
+  simmer->root_twd = player_get_twd(game_get_player(
+      sim_args->game, game_get_player_on_turn_index(sim_args->game)));
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,

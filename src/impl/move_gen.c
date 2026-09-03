@@ -2990,7 +2990,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     // and requires valid cross sets (its scans read them). The weights are
     // re-read from the player on every position load, so a training loop
     // that rewrites them between generations needs no extra invalidation.
-    const TWDWeights *twd = player_get_twd(player);
+    const TWDWeights *twd = (args->override_twd != NULL)
+                                ? args->override_twd
+                                : player_get_twd(player);
     if (twd && !args->disable_twd && gen->move_sort_type == MOVE_SORT_EQUITY &&
         gen->number_of_tiles_in_bag > 0 &&
         board_get_cross_sets_valid(gen->board)) {

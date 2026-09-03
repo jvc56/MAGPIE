@@ -227,7 +227,7 @@ typedef enum {
   ARG_TOKEN_P2_MAX_ITERATIONS,
   ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
-  ARG_TOKEN_TWD_ROOT_ONLY,
+  ARG_TOKEN_TWD_ROLLOUT_PLIES,
   ARG_TOKEN_TWD_LABEL_PLIES,
   ARG_TOKEN_TWD_COMBINE_GAMMA,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
@@ -413,8 +413,8 @@ struct Config {
   // rack_list_write_rack_equity_csv). Independent of whether a
   // forceracksfile restriction is in use.
   bool write_rack_equity_csv;
-  // See SimArgs.twd_root_only.
-  bool twd_root_only;
+  // See SimArgs.twd_rollout_plies.
+  int twd_rollout_plies;
   // Plies of net result a TWS defense training label spans.
   int twd_label_plies;
   // See TWDWeights.combine_gamma; used when twdgen bootstraps weights.
@@ -2196,11 +2196,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "values subtract what the observing player scores back and add "
              "what the opponent scores after that.";
       break;
-    case ARG_TOKEN_TWD_ROOT_ONLY:
-      usages[0] = "<true_or_false>";
-      text = "Specifies whether the TWS defense term applies only to the "
-             "candidate plays at the root of a simulation, leaving the "
-             "replies played inside rollouts to score and leave alone.";
+    case ARG_TOKEN_TWD_ROLLOUT_PLIES:
+      usages[0] = "<plies>";
+      text = "Specifies how many plies into each simulation rollout the TWS "
+             "defense term reaches, applied with the simulating player's "
+             "weights to whoever is on turn: -1 (the default) leaves it to "
+             "each player's own settings, 0 confines it to the candidate "
+             "plays at the root, and 1 adds the opponent's immediate reply.";
       break;
     case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
     case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
@@ -2472,7 +2474,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
         ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
-        ARG_TOKEN_TWD_ROOT_ONLY,           /* twdroot */
+        ARG_TOKEN_TWD_ROLLOUT_PLIES,       /* twdrollout */
         ARG_TOKEN_TWD_LABEL_PLIES,         /* twdplies */
         ARG_TOKEN_TWD_COMBINE_GAMMA,       /* twdgamma */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
@@ -3014,6 +3016,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sampling_rule, config->cutoff, config->utility_w_winpct,
       config->utility_w_spread, config->utility_spread_scale, &inference_args,
       sim_args);
+  sim_args->twd_rollout_plies = config->twd_rollout_plies;
 }
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
@@ -3852,8 +3855,8 @@ void config_fill_autoplay_args(const Config *config,
       &autoplay_args->p2_sim_args);
 
   autoplay_args->twd_label_plies = config->twd_label_plies;
-  autoplay_args->p1_sim_args.twd_root_only = config->twd_root_only;
-  autoplay_args->p2_sim_args.twd_root_only = config->twd_root_only;
+  autoplay_args->p1_sim_args.twd_rollout_plies = config->twd_rollout_plies;
+  autoplay_args->p2_sim_args.twd_rollout_plies = config->twd_rollout_plies;
 
   const double utility_win_pct[2] = {config->p1_utility_w_winpct,
                                      config->p2_utility_w_winpct};
@@ -7985,8 +7988,9 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  config_load_bool(config, ARG_TOKEN_TWD_ROOT_ONLY, &config->twd_root_only,
-                   error_stack);
+  config_load_int(config, ARG_TOKEN_TWD_ROLLOUT_PLIES,
+                  SIM_TWD_ROLLOUT_PLAYER_SETTINGS, MAX_PLIES,
+                  &config->twd_rollout_plies, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -9577,7 +9581,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MAX_ITERATIONS, "i2", 1, 1);
   arg(ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, "mi1", 1, 1);
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
-  arg(ARG_TOKEN_TWD_ROOT_ONLY, "twdroot", 1, 1);
+  arg(ARG_TOKEN_TWD_ROLLOUT_PLIES, "twdrollout", 1, 1);
   arg(ARG_TOKEN_TWD_LABEL_PLIES, "twdplies", 1, 1);
   arg(ARG_TOKEN_TWD_COMBINE_GAMMA, "twdgamma", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
@@ -9682,7 +9686,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->human_readable = true;
   config->show_mistakes = false;
   config->sim_with_inference = true;
-  config->twd_root_only = false;
+  config->twd_rollout_plies = SIM_TWD_ROLLOUT_PLAYER_SETTINGS;
   config->twd_label_plies = 1;
   config->twd_combine_gamma = TWD_TRAINING_COMBINE_GAMMA;
   config->p1_sim_plies = 0;
@@ -10197,9 +10201,9 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->sim_with_inference);
       break;
-    case ARG_TOKEN_TWD_ROOT_ONLY:
-      config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                config->twd_root_only);
+    case ARG_TOKEN_TWD_ROLLOUT_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->twd_rollout_plies);
       break;
     case ARG_TOKEN_TWD_LABEL_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

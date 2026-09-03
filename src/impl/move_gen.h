@@ -283,6 +283,10 @@ typedef struct MoveGenArgs {
   // from score plus leave and would misclassify moves whose recorded
   // equities carried the defense term.
   bool disable_twd;
+  // When set, these weights drive the defense term in place of the on-turn
+  // player's own. Simulations use it to model a rollout reply with the
+  // simulating player's defense (see SimArgs.twd_rollout_plies).
+  const TWDWeights *override_twd;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);

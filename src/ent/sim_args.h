@@ -13,6 +13,10 @@
 #include <math.h>
 #include <stdint.h>
 
+// The value of SimArgs.twd_rollout_plies that leaves the defense term to
+// each player's own settings inside rollouts.
+enum { SIM_TWD_ROLLOUT_PLAYER_SETTINGS = -1 };
+
 typedef struct SimArgs {
   int num_plies;
   const Game *game;
@@ -37,13 +41,18 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
-  // When true the TWS defense term applies only at the root, where it orders
-  // and values the candidate plays, and is switched off inside rollouts so
-  // the replies there are chosen by score and leave alone. The term measures
-  // as predictive of a play's simulated value yet unhelpful when it also
-  // steers rollout replies, which this separates. Defaulted false by
-  // sim_args_fill; callers that want it set it afterwards.
-  bool twd_root_only;
+  // How many plies into each rollout the TWS defense term reaches, applied
+  // with the simulating player's weights to whoever is on turn.
+  // SIM_TWD_ROLLOUT_PLAYER_SETTINGS (the default) leaves it to each
+  // player's own settings; 0 confines it to the root, where it orders and
+  // values the candidate plays; 1 adds the opponent's immediate reply, so
+  // the rollout's opponent is modelled as defense-aware for that one move
+  // and plays score and leave alone after it. The term measures as
+  // predictive of a play's simulated value yet unhelpful when it steers
+  // every rollout reply, and the reply right after the candidate is where
+  // it is expected to matter. Callers that want it set it after
+  // sim_args_fill.
+  int twd_rollout_plies;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -107,7 +116,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = utility_w_winpct;
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
-  sim_args->twd_root_only = false;
+  sim_args->twd_rollout_plies = SIM_TWD_ROLLOUT_PLAYER_SETTINGS;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI
