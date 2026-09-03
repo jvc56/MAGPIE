@@ -2,17 +2,30 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/move_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/def/sim_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/klv.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/rack.h"
+#include "../src/ent/sim_results.h"
+#include "../src/ent/stats.h"
+#include "../src/ent/tws_defense.h"
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/play_chooser.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <math.h>
 #include <stdbool.h>
@@ -46,7 +59,9 @@
 // (2), LATEGATE_ROLLOUT_B (0), LATEGATE_LEAF_A (0), LATEGATE_LEAF_B (0),
 // LATEGATE_ROOT_A (1), LATEGATE_ROOT_B (1) (whether each player's candidate
 // pool is chosen with the defense term; 0 gives a player with no term
-// anywhere),
+// anywhere), LATEGATE_DEFENSE_POOL_A (0), LATEGATE_DEFENSE_POOL_B (0) (a
+// mixed pool: that many candidates by defensive static, the rest of the
+// LATEGATE_CANDIDATES by plain static),
 // LATEGATE_PLIES (MAX_PLIES), LATEGATE_CANDIDATES (15), LATEGATE_THREADS
 // (16), LATEGATE_WINPCT (winpct),
 // LATEGATE_MIN_BAG (5), LATEGATE_MAX_BAG (9), LATEGATE_SIM_MIN_BAG (1),
@@ -132,6 +147,12 @@ void test_late_gate(void) {
   // Whether each player's candidate pool is chosen with the defense term.
   const bool root_a = lategate_env_long("LATEGATE_ROOT_A", 1) != 0;
   const bool root_b = lategate_env_long("LATEGATE_ROOT_B", 1) != 0;
+  // Mixed pools: this many candidates by defensive static, the rest by
+  // plain static (0 = a single ranking).
+  const int defense_pool_a =
+      (int)lategate_env_long("LATEGATE_DEFENSE_POOL_A", 0);
+  const int defense_pool_b =
+      (int)lategate_env_long("LATEGATE_DEFENSE_POOL_B", 0);
   const long plies =
       lategate_env_long("LATEGATE_PLIES", LATEGATE_DEFAULT_PLIES);
   const long candidates =
@@ -192,11 +213,13 @@ void test_late_gate(void) {
   strategy_a.twd_rollout_plies = (int)rollout_a;
   strategy_a.twd_leaf = leaf_a;
   strategy_a.disable_root_twd = !root_a;
+  strategy_a.defense_pool_size = defense_pool_a;
   PlayChooserStrategy strategy_b = base_strategy;
   strategy_b.sim_max_iterations = (uint64_t)iters_b;
   strategy_b.twd_rollout_plies = (int)rollout_b;
   strategy_b.twd_leaf = leaf_b;
   strategy_b.disable_root_twd = !root_b;
+  strategy_b.defense_pool_size = defense_pool_b;
   PlayChooser *chooser_a = play_chooser_create(&strategy_a);
   PlayChooser *chooser_b = play_chooser_create(&strategy_b);
   ErrorStack *error_stack = error_stack_create();
@@ -351,5 +374,224 @@ void test_late_gate(void) {
   error_stack_destroy(error_stack);
   play_chooser_destroy(chooser_a);
   play_chooser_destroy(chooser_b);
+  config_destroy(config);
+}
+
+// Late-game candidate pool collection (on-demand test "latepool").
+//
+// For each sampled late-game position, the candidate pool is the union of
+// the top LATEPOOL_TOP plays by static equity without the defense term and
+// the top LATEPOOL_TOP with it, and every candidate is simulated for a flat
+// LATEPOOL_SAMPLES rollouts (round robin, no adaptive sampling, no stopping
+// condition) with rollouts running to the end of the game. Each candidate's
+// row records its rank in both rankings, its static components, and its
+// simulated win% and spread, so selection rules can be evaluated afterwards
+// against the sim's own verdict on the whole union.
+//
+// Environment: LATEPOOL_OUT (latepool.csv), LATEPOOL_POSITIONS (10000),
+// LATEPOOL_SAMPLES (1000), LATEPOOL_TOP (15), LATEPOOL_PLIES (MAX_PLIES),
+// LATEPOOL_ROLLOUT (MAX_PLIES, rollout plies steered by the defense term),
+// LATEPOOL_THREADS (16), LATEPOOL_MIN_BAG (5), LATEPOOL_MAX_BAG (9),
+// LATEPOOL_SEED (1), LATEPOOL_TWD (gs050_105), LATEPOOL_PATH (./data),
+// LATEPOOL_LEX (CSW24), LATEPOOL_WMP (true), LATEPOOL_WINPCT (winpct).
+
+enum {
+  LATEPOOL_DEFAULT_POSITIONS = 10000,
+  LATEPOOL_DEFAULT_SAMPLES = 1000,
+  LATEPOOL_DEFAULT_TOP = 15,
+  LATEPOOL_PROGRESS_EVERY = 100,
+};
+
+// 1-based rank of the move in a sorted list, or 0 if absent.
+static int latepool_rank(const MoveList *sorted, const Move *move) {
+  for (int move_idx = 0; move_idx < move_list_get_count(sorted); move_idx++) {
+    // The two rankings value the same move differently, so equity is
+    // left out of the comparison.
+    if (compare_moves_without_equity(move_list_get_move(sorted, move_idx), move,
+                                     true) == -1) {
+      return move_idx + 1;
+    }
+  }
+  return 0;
+}
+
+static void latepool_generate(Game *game, MoveList *move_list,
+                              bool disable_twd) {
+  move_list_reset(move_list);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = move_list,
+      .disable_twd = disable_twd,
+  };
+  generate_moves(&gen_args);
+  move_list_sort_moves(move_list);
+}
+
+void test_late_pool(void) {
+  const char *out_path = lategate_env_string("LATEPOOL_OUT", "latepool.csv");
+  const long num_positions =
+      lategate_env_long("LATEPOOL_POSITIONS", LATEPOOL_DEFAULT_POSITIONS);
+  const long samples =
+      lategate_env_long("LATEPOOL_SAMPLES", LATEPOOL_DEFAULT_SAMPLES);
+  const long top = lategate_env_long("LATEPOOL_TOP", LATEPOOL_DEFAULT_TOP);
+  const long plies = lategate_env_long("LATEPOOL_PLIES", MAX_PLIES);
+  const long rollout = lategate_env_long("LATEPOOL_ROLLOUT", MAX_PLIES);
+  const long threads =
+      lategate_env_long("LATEPOOL_THREADS", LATEGATE_DEFAULT_THREADS);
+  const int min_bag =
+      (int)lategate_env_long("LATEPOOL_MIN_BAG", LATEGATE_DEFAULT_MIN_BAG);
+  const int max_bag =
+      (int)lategate_env_long("LATEPOOL_MAX_BAG", LATEGATE_DEFAULT_MAX_BAG);
+  const long base_seed =
+      lategate_env_long("LATEPOOL_SEED", LATEGATE_DEFAULT_SEED);
+  const char *twd_name = lategate_env_string("LATEPOOL_TWD", "gs050_105");
+  const char *data_path = lategate_env_string("LATEPOOL_PATH", "./data");
+  const char *lexicon = lategate_env_string("LATEPOOL_LEX", "CSW24");
+  const char *use_wmp = lategate_env_string("LATEPOOL_WMP", "true");
+  const char *win_pct_name = lategate_env_string("LATEPOOL_WINPCT", "winpct");
+
+  char cmd[LATEGATE_CMD_SIZE];
+  snprintf(cmd, sizeof(cmd),
+           "set -lex %s -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
+           "-numplays %ld -plies %ld -threads %ld -iter %ld -minp %ld -sr rr "
+           "-threshold none -scond none -cutoff 0 -seed 7 -savesettings false "
+           "-path %s -twd %s -winpct %s -twdrollout %ld",
+           lexicon, use_wmp, 2 * top, plies, threads, 2 * top * samples,
+           samples, data_path, twd_name, win_pct_name, rollout);
+  Config *config = config_create_or_die(cmd);
+  char empty_cgp[LATEGATE_CMD_SIZE];
+  int cgp_len = snprintf(empty_cgp, sizeof(empty_cgp), "cgp ");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    cgp_len +=
+        snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+                 "%d%s", BOARD_DIM, row + 1 < BOARD_DIM ? "/" : "");
+  }
+  snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+           " / 0/0 0");
+  load_and_exec_config_or_die(config, empty_cgp);
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  // The config creates its move list on the first generate command.
+  MoveList *pool = NULL;
+  SimResults *sim_results = config_get_sim_results(config);
+  MoveList *with_term = move_list_create((int)top);
+  MoveList *without_term = move_list_create((int)top);
+
+  FILE *out = fopen_or_die(out_path, "we");
+  (void)fprintf(out, "pos,seed,bag,cand,rank_new,rank_old,type,tiles_played,"
+                     "score,leave,twd,equity_old,equity_new,win_pct,"
+                     "win_pct_sd,sim_spread,sim_spread_sd,samples,move\n");
+  StringBuilder *move_sb = string_builder_create();
+  long positions_done = 0;
+  uint64_t sample_seed = (uint64_t)base_seed * 1000003ULL;
+  while (positions_done < num_positions) {
+    sample_seed++;
+    if (!lategate_sample_position(game, sample_seed, min_bag, max_bag)) {
+      continue;
+    }
+    const int player_index = game_get_player_on_turn_index(game);
+    const Player *player = game_get_player(game, player_index);
+    const KLV *klv = player_get_klv(player);
+    const Board *board = game_get_board(game);
+    const int bag_count = bag_get_letters(game_get_bag(game));
+
+    if (pool == NULL) {
+      load_and_exec_config_or_die(config, "gen");
+      pool = config_get_move_list(config);
+    }
+    latepool_generate(game, with_term, false);
+    latepool_generate(game, without_term, true);
+    move_list_reset(pool);
+    for (int move_idx = 0; move_idx < move_list_get_count(with_term);
+         move_idx++) {
+      move_list_add_move(pool, move_list_get_move(with_term, move_idx));
+    }
+    for (int move_idx = 0; move_idx < move_list_get_count(without_term);
+         move_idx++) {
+      const Move *move = move_list_get_move(without_term, move_idx);
+      if (latepool_rank(with_term, move) == 0) {
+        move_list_add_move(pool, move);
+      }
+    }
+    const int pool_size = move_list_get_count(pool);
+    if (pool_size < 2) {
+      continue;
+    }
+    snprintf(cmd, sizeof(cmd), "set -iter %ld", (long)pool_size * samples);
+    load_and_exec_config_or_die(config, cmd);
+    const error_code_t status =
+        config_simulate_and_return_status(config, NULL, NULL, sim_results);
+    if (status != ERROR_STATUS_SUCCESS) {
+      log_fatal("latepool: simulation failed with status %d", status);
+    }
+    const int num_plays = sim_results_get_number_of_plays(sim_results);
+
+    TWDEvalContext twd_eval_ctx;
+    twd_eval_context_disable(&twd_eval_ctx);
+    const TWDWeights *twd = player_get_twd(player);
+    if (twd != NULL) {
+      twd_eval_context_load(
+          &twd_eval_ctx, twd,
+          board_get_readonly_lanes(
+              board, board_get_cross_set_index(
+                         game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+                         player_index)),
+          ld, player_get_rack(player));
+    }
+    for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, play_idx);
+      const Move *move = simmed_play_get_move(simmed_play);
+      const int rank_new = latepool_rank(with_term, move);
+      const int rank_old = latepool_rank(without_term, move);
+      Rack leave_rack;
+      rack_copy(&leave_rack, player_get_rack(player));
+      const Equity leave_value =
+          get_leave_value_for_move(klv, move, &leave_rack);
+      const Equity twd_penalty = twd_eval_move_penalty(&twd_eval_ctx, move);
+      // The term is additive on top of the plain static equity, so either
+      // ranking's recorded equity gives both.
+      const Equity equity_old =
+          rank_old > 0
+              ? move_get_equity(move_list_get_move(without_term, rank_old - 1))
+              : move_get_equity(move_list_get_move(with_term, rank_new - 1)) -
+                    twd_penalty;
+      const Equity equity_new = equity_old + twd_penalty;
+      const Stat *win_pct_stat = simmed_play_get_win_pct_stat(simmed_play);
+      const Stat *equity_stat = simmed_play_get_equity_stat(simmed_play);
+      string_builder_clear(move_sb);
+      string_builder_add_move(move_sb, board, move, ld, false);
+      (void)fprintf(
+          out,
+          "%ld,%llu,%d,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,"
+          "%.6f,%.6f,%.3f,%.3f,%llu,%s\n",
+          positions_done, (unsigned long long)sample_seed, bag_count, play_idx,
+          rank_new, rank_old, (int)move_get_type(move),
+          move_get_tiles_played(move), equity_to_double(move_get_score(move)),
+          equity_to_double(leave_value), equity_to_double(twd_penalty),
+          equity_to_double(equity_old), equity_to_double(equity_new),
+          stat_get_mean(win_pct_stat), stat_get_stdev(win_pct_stat),
+          stat_get_mean(equity_stat), stat_get_stdev(equity_stat),
+          (unsigned long long)stat_get_num_samples(win_pct_stat),
+          string_builder_peek(move_sb));
+    }
+    (void)fflush(out);
+    positions_done++;
+    if (positions_done % LATEPOOL_PROGRESS_EVERY == 0) {
+      printf("latepool: %ld positions\n", positions_done);
+      (void)fflush(stdout);
+    }
+  }
+  printf("latepool: DONE %ld positions to %s\n", positions_done, out_path);
+  string_builder_destroy(move_sb);
+  (void)fclose(out);
+  move_list_destroy(with_term);
+  move_list_destroy(without_term);
   config_destroy(config);
 }

@@ -691,6 +691,13 @@ static inline void move_list_sort_moves(MoveList *ml) {
   ml->count = number_of_moves;
 }
 
+// Keeps only the first `count` moves of a sorted list.
+static inline void move_list_truncate_sorted_list(MoveList *ml, int count) {
+  if (count < ml->count) {
+    ml->count = count;
+  }
+}
+
 // Assumes the move list is sorted and has enough capacity to accept
 // an additional move
 static inline void move_list_add_move_to_sorted_list(MoveList *ml,

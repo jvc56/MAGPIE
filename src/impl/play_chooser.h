@@ -104,6 +104,12 @@ typedef struct PlayChooserStrategy {
   // the on-turn player has weights, so a chooser can stand for a player
   // that never uses it while sharing a game with one that does.
   bool disable_root_twd;
+  // A mixed candidate pool: this many candidates taken from the top of the
+  // static ranking WITH the defense term, then the pool filled to
+  // sim_max_candidates from the top of the ranking WITHOUT it, skipping
+  // moves already chosen. The plays the term would drop out of a
+  // single ranking stay in reach of the sim. 0 = one ranking, the default.
+  int defense_pool_size;
 } PlayChooserStrategy;
 
 typedef struct PlayChooser PlayChooser;

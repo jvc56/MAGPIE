@@ -68,6 +68,9 @@ static const double PLAY_CHOOSER_ENDGAME_TT_FRACTION = 0.2;
 struct PlayChooser {
   PlayChooserStrategy strategy;
   MoveList *move_list;
+  // The ranking without the defense term, for a mixed pool (see
+  // PlayChooserStrategy.defense_pool_size).
+  MoveList *plain_move_list;
   SimResults *sim_results;
   SimCtx *sim_ctx;
   EndgameResults *endgame_results;
@@ -121,6 +124,8 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   play_chooser->strategy = *strategy;
   play_chooser->move_list =
       move_list_create(play_chooser_get_sim_max_candidates(strategy));
+  play_chooser->plain_move_list =
+      move_list_create(play_chooser_get_sim_max_candidates(strategy));
   play_chooser->sim_results = sim_results_create(0.0);
   play_chooser->sim_ctx = NULL;
   play_chooser->endgame_results = endgame_results_create();
@@ -138,6 +143,7 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
     return;
   }
   move_list_destroy(play_chooser->move_list);
+  move_list_destroy(play_chooser->plain_move_list);
   sim_results_destroy(play_chooser->sim_results);
   sim_ctx_destroy(play_chooser->sim_ctx);
   endgame_results_destroy(play_chooser->endgame_results);
@@ -256,6 +262,42 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       .disable_twd = strategy->disable_root_twd,
   };
   generate_moves(&gen_args);
+  if (strategy->defense_pool_size > 0 && !strategy->disable_root_twd &&
+      player_get_twd(
+          game_get_player(game, game_get_player_on_turn_index(game))) != NULL) {
+    // Mixed pool: the top defense_pool_size of the ranking with the term,
+    // then the best of the ranking without it that are not already in.
+    move_list_sort_moves(move_list);
+    move_list_truncate_sorted_list(move_list, strategy->defense_pool_size);
+    MoveList *plain_move_list = play_chooser->plain_move_list;
+    move_list_reset(plain_move_list);
+    MoveGenArgs plain_gen_args = gen_args;
+    plain_gen_args.move_list = plain_move_list;
+    plain_gen_args.disable_twd = true;
+    generate_moves(&plain_gen_args);
+    move_list_sort_moves(plain_move_list);
+    const int pool_capacity = move_list_get_capacity(move_list);
+    const int num_defense_moves = move_list_get_count(move_list);
+    for (int plain_idx = 0; plain_idx < move_list_get_count(plain_move_list) &&
+                            move_list_get_count(move_list) < pool_capacity;
+         plain_idx++) {
+      const Move *plain_move = move_list_get_move(plain_move_list, plain_idx);
+      // The two rankings value a move differently, so equity is left out
+      // of the comparison.
+      bool already_chosen = false;
+      for (int chosen_idx = 0; chosen_idx < num_defense_moves; chosen_idx++) {
+        if (compare_moves_without_equity(
+                move_list_get_move(move_list, chosen_idx), plain_move, true) ==
+            -1) {
+          already_chosen = true;
+          break;
+        }
+      }
+      if (!already_chosen) {
+        move_list_add_move_to_sorted_list(move_list, plain_move);
+      }
+    }
+  }
   const int num_candidates = move_list_get_count(move_list);
   if (num_candidates == 0) {
     return false;
