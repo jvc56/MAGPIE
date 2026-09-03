@@ -171,10 +171,24 @@ typedef struct TWDEvalContext {
 } TWDEvalContext;
 
 void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx);
+// Builds the context static evaluation uses. Premium squares whose class
+// has no nonzero weight, and windows whose tier has none, are not walked:
+// their penalty would be exactly zero, so leaving them out changes no
+// result and only saves the scans. Training never comes through here (it
+// extracts every feature from the board directly), so a class the weights
+// have not learned yet still reaches the fit.
 void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
                            const TWDWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
                            const Rack *player_rack);
+// The same context with every unit walked whatever its weights, for callers
+// that read per-move feature rows (twd_extract_move_features) and need the
+// channels the current weights leave at zero.
+void twd_eval_context_load_all_units(TWDEvalContext *twd_eval_ctx,
+                                     const TWDWeights *weights,
+                                     const Square *lanes,
+                                     const LetterDistribution *ld,
+                                     const Rack *player_rack);
 // Returns the defense term for the move: the penalty for the opponent's TWS
 // access after the move is played, which is always <= 0. Returns 0 when the
 // context is NULL or disabled. Non-placement moves return the position

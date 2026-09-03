@@ -215,14 +215,16 @@ void test_candidate_recall(void) {
     const Board *board = game_get_board(game);
     const int bag_count = bag_get_letters(game_get_bag(game));
 
-    // The TWS defense term, exactly as static eval sees it (see
-    // validated_move.c for the same stack-context idiom).
+    // The TWS defense term, combined exactly as static eval applies it (see
+    // validated_move.c for the same stack-context idiom), but with every
+    // unit walked: the feature row must carry the channels the current
+    // weights leave at zero, or a fit on it could never give them weight.
     TWDEvalContext twd_eval_ctx;
     twd_eval_context_disable(&twd_eval_ctx);
     const TWDWeights *twd =
         (diag_twd != NULL) ? diag_twd : player_get_twd(player);
     if (twd != NULL) {
-      twd_eval_context_load(
+      twd_eval_context_load_all_units(
           &twd_eval_ctx, twd,
           board_get_readonly_lanes(
               board, board_get_cross_set_index(

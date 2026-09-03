@@ -1198,10 +1198,112 @@ static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
                    overlay, features, extent_lo, extent_hi);
 }
 
-void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
-                           const TWDWeights *weights, const Square *lanes,
-                           const LetterDistribution *ld,
-                           const Rack *player_rack) {
+// Whether any channel a walk from this premium class can write carries a
+// nonzero weight. Each class writes only its own hook and floater-value
+// channels; the triple word class alone also writes the flexibility,
+// through-table and triple-triple channels.
+static bool twd_class_is_weighted(const TWDWeights *weights,
+                                  int premium_class) {
+  int start = 0;
+  int end = 0;
+  switch (premium_class) {
+  case TWD_PREMIUM_TWS:
+    start = TWD_FEATURE_HOOK_START;
+    end = TWD_FEATURE_DWS_HOOK_START;
+    break;
+  case TWD_PREMIUM_DWS:
+    start = TWD_FEATURE_DWS_HOOK_START;
+    end = TWD_FEATURE_TLS_HOOK_START;
+    break;
+  case TWD_PREMIUM_TLS:
+    start = TWD_FEATURE_TLS_HOOK_START;
+    end = TWD_FEATURE_QWS_HOOK_START;
+    break;
+  case TWD_PREMIUM_QWS:
+    start = TWD_FEATURE_QWS_HOOK_START;
+    end = TWD_FEATURE_QLS_HOOK_START;
+    break;
+  case TWD_PREMIUM_QLS:
+    start = TWD_FEATURE_QLS_HOOK_START;
+    end = TWD_FEATURE_TT_FLOATER;
+    break;
+  default:
+    return true;
+  }
+  for (int feature_index = start; feature_index < end; feature_index++) {
+    if (weights->weights[feature_index] != 0) {
+      return true;
+    }
+  }
+  return premium_class == TWD_PREMIUM_TWS &&
+         (weights->weights[TWD_FEATURE_TT_FLOATER] != 0 ||
+          weights->weights[TWD_FEATURE_TT_HOOK_ONLY] != 0);
+}
+
+// Whether any of a window tier's three channels carries a nonzero weight.
+static bool twd_tier_is_weighted(const TWDWeights *weights, int tier) {
+  const int start =
+      TWD_FEATURE_WINDOW_START + tier * TWD_WINDOW_FEATURES_PER_TIER;
+  for (int feature_index = start;
+       feature_index < start + TWD_WINDOW_FEATURES_PER_TIER; feature_index++) {
+    if (weights->weights[feature_index] != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Drops the units whose every channel is unweighted. Such a unit's penalty
+// is zero on any board, with or without a move overlaid, and a zero penalty
+// is never the worst unit and adds nothing to the sum, so removing it
+// changes no penalty, combination, or lane bound: it only saves the walk.
+// The enumeration and its caps have already run, so which squares exist
+// was decided exactly as training decides it.
+static void twd_drop_unweighted_units(TWDEvalContext *twd_eval_ctx,
+                                      const TWDWeights *weights) {
+  bool class_weighted[TWD_NUM_PREMIUM_CLASSES];
+  for (int premium_class = 0; premium_class < TWD_NUM_PREMIUM_CLASSES;
+       premium_class++) {
+    class_weighted[premium_class] =
+        twd_class_is_weighted(weights, premium_class);
+  }
+  int kept = 0;
+  for (int tws_idx = 0; tws_idx < twd_eval_ctx->num_tws; tws_idx++) {
+    if (!class_weighted[twd_eval_ctx->tws_classes[tws_idx]]) {
+      continue;
+    }
+    twd_eval_ctx->tws_rows[kept] = twd_eval_ctx->tws_rows[tws_idx];
+    twd_eval_ctx->tws_cols[kept] = twd_eval_ctx->tws_cols[tws_idx];
+    twd_eval_ctx->tws_classes[kept] = twd_eval_ctx->tws_classes[tws_idx];
+    kept++;
+  }
+  twd_eval_ctx->num_tws = kept;
+
+  bool tier_weighted[TWD_WINDOW_TIER_COUNT];
+  for (int tier = 0; tier < TWD_WINDOW_TIER_COUNT; tier++) {
+    tier_weighted[tier] = twd_tier_is_weighted(weights, tier);
+  }
+  kept = 0;
+  for (int dd_idx = 0; dd_idx < twd_eval_ctx->num_dd; dd_idx++) {
+    if (!tier_weighted[twd_eval_ctx->dd_tiers[dd_idx]]) {
+      continue;
+    }
+    twd_eval_ctx->dd_dirs[kept] = twd_eval_ctx->dd_dirs[dd_idx];
+    twd_eval_ctx->dd_lanes[kept] = twd_eval_ctx->dd_lanes[dd_idx];
+    twd_eval_ctx->dd_los[kept] = twd_eval_ctx->dd_los[dd_idx];
+    twd_eval_ctx->dd_his[kept] = twd_eval_ctx->dd_his[dd_idx];
+    twd_eval_ctx->dd_tiers[kept] = twd_eval_ctx->dd_tiers[dd_idx];
+    kept++;
+  }
+  twd_eval_ctx->num_dd = kept;
+}
+
+static void twd_eval_context_load_units(TWDEvalContext *twd_eval_ctx,
+                                        const TWDWeights *weights,
+                                        const Square *lanes,
+                                        const LetterDistribution *ld,
+                                        const Rack *player_rack,
+                                        bool drop_unweighted_units) {
   twd_eval_ctx->weights = weights;
   if (!weights) {
     return;
@@ -1225,6 +1327,9 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
   twd_eval_ctx->num_dd = twd_find_dd(
       lanes, twd_eval_ctx->dd_dirs, twd_eval_ctx->dd_lanes,
       twd_eval_ctx->dd_los, twd_eval_ctx->dd_his, twd_eval_ctx->dd_tiers);
+  if (drop_unweighted_units) {
+    twd_drop_unweighted_units(twd_eval_ctx, weights);
+  }
   twd_eval_ctx->num_units = twd_eval_ctx->num_tws * 2 + twd_eval_ctx->num_dd;
   memset(twd_eval_ctx->unit_mask_by_row, 0,
          sizeof(twd_eval_ctx->unit_mask_by_row));
@@ -1232,7 +1337,6 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
          sizeof(twd_eval_ctx->unit_mask_by_col));
   static_assert(TWD_MAX_SCAN_UNITS <= TWD_MASK_WORDS * 64,
                 "unit masks must cover every scan unit");
-  int32_t features[TWD_NUM_FEATURES] = {0};
   for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
     int32_t *unit_features = twd_eval_ctx->unit_features[unit_index];
     memset(unit_features, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
@@ -1243,10 +1347,6 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
     twd_scan_context_unit(twd_eval_ctx, unit_index, NULL, NULL, NULL,
                           unit_features, &dir, &lane, &extent_lo, &extent_hi);
     twd_eval_ctx->unit_penalty[unit_index] = twd_dot(weights, unit_features);
-    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
-         feature_index++) {
-      features[feature_index] += unit_features[feature_index];
-    }
     // A move affects this unit only when it has a tile on or directly
     // beside the lane (perpendicular halo of one) within the span of
     // squares the baseline walk visited: squares beyond the walk's break
@@ -1280,6 +1380,23 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
         twd_units_penalty_bound(twd_eval_ctx,
                                 twd_eval_ctx->unit_mask_by_col[lane]);
   }
+}
+
+void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
+                           const TWDWeights *weights, const Square *lanes,
+                           const LetterDistribution *ld,
+                           const Rack *player_rack) {
+  twd_eval_context_load_units(twd_eval_ctx, weights, lanes, ld, player_rack,
+                              true);
+}
+
+void twd_eval_context_load_all_units(TWDEvalContext *twd_eval_ctx,
+                                     const TWDWeights *weights,
+                                     const Square *lanes,
+                                     const LetterDistribution *ld,
+                                     const Rack *player_rack) {
+  twd_eval_context_load_units(twd_eval_ctx, weights, lanes, ld, player_rack,
+                              false);
 }
 
 // Returns the bitset of scan units the move can affect (see the
