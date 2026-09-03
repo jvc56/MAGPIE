@@ -153,6 +153,14 @@ void test_late_gate(void) {
       (int)lategate_env_long("LATEGATE_DEFENSE_POOL_A", 0);
   const int defense_pool_b =
       (int)lategate_env_long("LATEGATE_DEFENSE_POOL_B", 0);
+  // The objective, for the sims' ranking and for scoring the games: the
+  // engine's utility blend of win% and sigmoid-normalized spread.
+  const double utility_w_winpct =
+      (double)lategate_env_long("LATEGATE_UWIN_PCT", 100) / 100.0;
+  const double utility_w_spread =
+      (double)lategate_env_long("LATEGATE_USPREAD_PCT", 50) / 100.0;
+  const double utility_spread_scale =
+      (double)lategate_env_long("LATEGATE_USCALE", 100);
   const long plies =
       lategate_env_long("LATEGATE_PLIES", LATEGATE_DEFAULT_PLIES);
   const long candidates =
@@ -207,6 +215,9 @@ void test_late_gate(void) {
       .num_threads = (int)threads,
       .seed = (uint64_t)base_seed,
       .set_twd_rollout_plies = true,
+      .utility_w_winpct = utility_w_winpct,
+      .utility_w_spread = utility_w_spread,
+      .utility_spread_scale = utility_spread_scale,
   };
   PlayChooserStrategy strategy_a = base_strategy;
   strategy_a.sim_max_iterations = (uint64_t)iters_a;
@@ -226,7 +237,8 @@ void test_late_gate(void) {
 
   FILE *out = fopen_or_die(out_path, "we");
   (void)fprintf(out, "pos,seed,bag,game,a_first,a_score,b_score,a_spread,"
-                     "moves,a_sim_moves,b_sim_moves,a_seconds,b_seconds\n");
+                     "moves,a_sim_moves,b_sim_moves,a_seconds,b_seconds,"
+                     "a_utility\n");
   Game *position = game_duplicate(game);
   long positions_done = 0;
   long games_played = 0;
@@ -241,6 +253,9 @@ void test_late_gate(void) {
   int64_t b_total_ns = 0;
   long a_total_sim_moves = 0;
   long b_total_sim_moves = 0;
+  // A's realized utility summed over games, and its per-pair edge (A's
+  // utility in the pair less B's, which is 1 - A's in the same game).
+  double a_utility_sum = 0.0;
   uint64_t sample_seed = (uint64_t)base_seed * 1000003ULL;
   while (positions_done < num_positions) {
     sample_seed++;
@@ -315,18 +330,24 @@ void test_late_gate(void) {
       a_points += points;
       pair_points += points;
       a_spread_sum += a_spread;
+      // Realized utility: the game's result as win%, blended with its
+      // final spread exactly as the sims blend their rollouts.
+      const double a_utility =
+          sim_utility_blend(points, int_to_equity(a_spread), utility_w_winpct,
+                            utility_w_spread, utility_spread_scale);
+      a_utility_sum += a_utility;
       games_played++;
       a_total_ns += a_game_ns;
       b_total_ns += b_game_ns;
       a_total_sim_moves += a_game_sim_moves;
       b_total_sim_moves += b_game_sim_moves;
-      (void)fprintf(out, "%ld,%llu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.3f,%.3f\n",
+      (void)fprintf(out, "%ld,%llu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%.3f,%.3f,%.6f\n",
                     positions_done, (unsigned long long)sample_seed,
                     bag_at_start, continuation, a_first ? 1 : 0, a_score,
                     b_score, a_spread, moves, a_game_sim_moves,
                     b_game_sim_moves,
                     (double)a_game_ns / LATEGATE_NS_PER_SECOND,
-                    (double)b_game_ns / LATEGATE_NS_PER_SECOND);
+                    (double)b_game_ns / LATEGATE_NS_PER_SECOND, a_utility);
       (void)fflush(out);
     }
     if (pair_points > 1.5) {
@@ -361,10 +382,13 @@ void test_late_gate(void) {
   const double sigma =
       sqrt(a_win_rate * (1.0 - a_win_rate) / (double)games_played);
   printf("lategate: DONE %ld positions, %ld games: A %.2f%% (+/- %.2f), "
-         "spread %+.2f/game, pairs A-both/split/B-both %ld/%ld/%ld; sim "
-         "time A %.1fs over %ld moves, B %.1fs over %ld moves (A/B %.3f)\n",
+         "spread %+.2f/game, utility %.4f (edge %+.4f), pairs "
+         "A-both/split/B-both %ld/%ld/%ld; sim time A %.1fs over %ld moves, "
+         "B %.1fs over %ld moves (A/B %.3f)\n",
          positions_done, games_played, 100.0 * a_win_rate, 100.0 * sigma,
-         (double)a_spread_sum / (double)games_played, pairs_a_both, pairs_split,
+         (double)a_spread_sum / (double)games_played,
+         a_utility_sum / (double)games_played,
+         a_utility_sum / (double)games_played - 0.5, pairs_a_both, pairs_split,
          pairs_b_both, (double)a_total_ns / LATEGATE_NS_PER_SECOND,
          a_total_sim_moves, (double)b_total_ns / LATEGATE_NS_PER_SECOND,
          b_total_sim_moves,
