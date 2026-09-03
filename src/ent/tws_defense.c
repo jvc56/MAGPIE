@@ -125,8 +125,7 @@ void twd_feature_name(int feature_index, char *buf, size_t buf_size) {
     snprintf(buf, buf_size, "tt_floater");
   } else if (feature_index == TWD_FEATURE_TT_HOOK_ONLY) {
     snprintf(buf, buf_size, "tt_hook_only");
-  } else if (feature_index >= TWD_FEATURE_WINDOW_START &&
-             feature_index < TWD_NUM_FEATURES) {
+  } else if (feature_index < TWD_NUM_FEATURES) {
     static const char *const tier_names[TWD_WINDOW_TIER_COUNT] = {"dd", "w6",
                                                                   "w9", "w12"};
     static const char *const kind_names[TWD_WINDOW_FEATURES_PER_TIER] = {
@@ -350,11 +349,11 @@ static void twd_walk_words(const KWG *kwg, const LetterDistribution *ld,
       stats->count[first][word_length] += 1.0;
       stats->score_sum[first][word_length] +=
           total_score - equity_to_int(ld_get_score(ld, first));
-      if (last != first || word_length > 1) {
-        stats->count[last][word_length] += 1.0;
-        stats->score_sum[last][word_length] +=
-            total_score - equity_to_int(ld_get_score(ld, last));
-      }
+      // The last letter is a distinct position even when it repeats the
+      // first, since accepted words are at least two letters long.
+      stats->count[last][word_length] += 1.0;
+      stats->score_sum[last][word_length] +=
+          total_score - equity_to_int(ld_get_score(ld, last));
     }
     if (word_length < TWD_MAX_THROUGH_LEN - 1) {
       twd_walk_words(kwg, ld, kwg_node_arc_index(node), word, word_length,
