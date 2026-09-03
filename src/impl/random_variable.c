@@ -3,8 +3,10 @@
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
+#include "../def/players_data_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -376,6 +378,9 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  // For the leaf defense term (see SimArgs.twd_leaf); owned here rather
+  // than on the sampler's stack, since it is large.
+  TWDEvalContext *twd_eval_ctx;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -410,6 +415,8 @@ typedef struct Simmer {
   // per-player default.
   int twd_rollout_plies;
   const TWDWeights *root_twd;
+  // See SimArgs.twd_leaf.
+  bool twd_leaf;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -420,6 +427,7 @@ SimmerWorker *simmer_create_worker(const Game *game) {
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
+  simmer_worker->twd_eval_ctx = malloc_or_die(sizeof(TWDEvalContext));
   return simmer_worker;
 }
 
@@ -434,6 +442,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   game_destroy(simmer_worker->game);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
+  free(simmer_worker->twd_eval_ctx);
   free(simmer_worker);
 }
 
@@ -505,6 +514,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
   Rack spare_rack;
+  int last_mover_index = -1;
   for (int ply = 0; ply < plies; ply++) {
     const int player_on_turn_index = game_get_player_on_turn_index(game);
     const Player *player_on_turn = game_get_player(game, player_on_turn_index);
@@ -528,12 +538,14 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
     // On the final ply the resulting cross-sets are never read (no further move
     // generation happens before game_unplay_last_move restores the board), so
-    // skip the cross-set update for that play.
-    if (ply == plies - 1) {
+    // skip the cross-set update for that play, unless the leaf defense term
+    // is on: its lane scans read them.
+    if (ply == plies - 1 && !simmer->twd_leaf) {
       play_move_no_cross_set_update(best_play, game, NULL);
     } else {
       play_move(best_play, game, NULL);
     }
+    last_mover_index = player_on_turn_index;
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
       Equity this_leftover = get_leave_value_for_move(
@@ -545,6 +557,33 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       }
     }
     simmed_play_add_stats_for_ply(simmed_play, ply, best_play);
+  }
+
+  // The leaf defense term: the final board still holds whatever the last
+  // mover opened, which the rollout never sees the opponent use. The term
+  // was trained as that mover's expected net loss over the next two plies,
+  // so it extends the horizon by about that much, and it is signed like
+  // the leave values above: against the initial player when the initial
+  // player moved last, for it otherwise. Bag-gated like the term in
+  // movegen, and skipped once the game is over, where the win% table
+  // already has the answer.
+  if (simmer->twd_leaf && simmer->root_twd != NULL && last_mover_index >= 0 &&
+      !game_over(game) && bag_get_letters(game_get_bag(game)) > 0) {
+    const Board *board = game_get_board(game);
+    twd_eval_context_load(
+        simmer_worker->twd_eval_ctx, simmer->root_twd,
+        board_get_readonly_lanes(
+            board, board_get_cross_set_index(
+                       game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+                       last_mover_index)),
+        game_get_ld(game),
+        player_get_rack(game_get_player(game, last_mover_index)));
+    const Equity leaf_penalty = simmer_worker->twd_eval_ctx->pre_penalty;
+    if (last_mover_index == simmer->initial_player) {
+      leftover += leaf_penalty;
+    } else {
+      leftover -= leaf_penalty;
+    }
   }
 
   const Equity spread =
@@ -662,6 +701,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->twd_rollout_plies = sim_args->twd_rollout_plies;
+  simmer->twd_leaf = sim_args->twd_leaf;
   simmer->root_twd = player_get_twd(game_get_player(
       sim_args->game, game_get_player_on_turn_index(sim_args->game)));
 
@@ -717,6 +757,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->twd_rollout_plies = sim_args->twd_rollout_plies;
+  simmer->twd_leaf = sim_args->twd_leaf;
   simmer->root_twd = player_get_twd(game_get_player(
       sim_args->game, game_get_player_on_turn_index(sim_args->game)));
 

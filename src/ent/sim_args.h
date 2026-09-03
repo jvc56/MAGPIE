@@ -53,6 +53,14 @@ typedef struct SimArgs {
   // it is expected to matter. Callers that want it set it after
   // sim_args_fill.
   int twd_rollout_plies;
+  // Whether the simulating player's defense term is added to each
+  // rollout's leaf value: the penalty of the final board for whoever moved
+  // last, signed like the leave values there. A rollout never sees the
+  // opponent use what its last ply opened; the term was trained as that
+  // mover's expected net loss over the next two plies, so this extends the
+  // horizon by about that much for one context load per rollout.
+  // Defaulted false by sim_args_fill.
+  bool twd_leaf;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -117,6 +125,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->twd_rollout_plies = SIM_TWD_ROLLOUT_PLAYER_SETTINGS;
+  sim_args->twd_leaf = false;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI
