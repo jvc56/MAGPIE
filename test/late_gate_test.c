@@ -15,6 +15,7 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/tws_defense.h"
@@ -61,7 +62,10 @@
 // pool is chosen with the defense term; 0 gives a player with no term
 // anywhere), LATEGATE_DEFENSE_POOL_A (0), LATEGATE_DEFENSE_POOL_B (0) (a
 // mixed pool: that many candidates by defensive static, the rest of the
-// LATEGATE_CANDIDATES by plain static),
+// LATEGATE_CANDIDATES by plain static), LATEGATE_UWIN_PCT (100),
+// LATEGATE_USPREAD_PCT (50), LATEGATE_USCALE (100) (the utility blend, in
+// percent weights and spread points, that the sims rank by and that scores
+// each game: the engine default weighs win% 1.0 and sigmoid spread 0.5),
 // LATEGATE_PLIES (MAX_PLIES), LATEGATE_CANDIDATES (15), LATEGATE_THREADS
 // (16), LATEGATE_WINPCT (winpct),
 // LATEGATE_MIN_BAG (5), LATEGATE_MAX_BAG (9), LATEGATE_SIM_MIN_BAG (1),
