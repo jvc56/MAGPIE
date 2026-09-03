@@ -151,6 +151,17 @@ typedef struct TWDEvalContext {
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
   Equity unit_penalty[TWD_MAX_SCAN_UNITS];
+  // Sum of every unit's baseline penalty, and the units ordered from the
+  // most negative baseline up. A move's combination is then formed from
+  // the units it reaches alone: the unreached sum is the total less the
+  // reached baselines, and the unreached worst is the first unit in this
+  // order the move does not reach.
+  int64_t total_unit_penalty;
+  uint16_t units_by_penalty[TWD_MAX_SCAN_UNITS];
+  // The features carrying a nonzero weight, so a unit's dot product visits
+  // only those; every other term is exactly zero.
+  int nonzero_feature_index[TWD_NUM_FEATURES];
+  int num_nonzero_features;
   // Bit u of unit_mask_by_row[r] is set when a fresh tile in row r could
   // affect unit u provided the move's column span also overlaps the unit
   // (and symmetrically for columns), so a candidate move's affected-unit

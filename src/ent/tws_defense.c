@@ -1052,8 +1052,7 @@ static int64_t twd_dot_raw(const TWDWeights *twd, const int32_t *features) {
   return acc;
 }
 
-static Equity twd_dot(const TWDWeights *twd, const int32_t *features) {
-  int64_t acc = twd_dot_raw(twd, features);
+static Equity twd_clamp_dot(int64_t acc) {
   if (acc < EQUITY_MIN_VALUE) {
     acc = EQUITY_MIN_VALUE;
   }
@@ -1063,6 +1062,24 @@ static Equity twd_dot(const TWDWeights *twd, const int32_t *features) {
     acc = 0;
   }
   return (Equity)acc;
+}
+
+static Equity twd_dot(const TWDWeights *twd, const int32_t *features) {
+  return twd_clamp_dot(twd_dot_raw(twd, features));
+}
+
+// The same product over only the weighted features; the other terms are
+// zero. Every path that has a context uses this one.
+static Equity twd_dot_ctx(const TWDEvalContext *twd_eval_ctx,
+                          const int32_t *features) {
+  const Equity *weights = twd_eval_ctx->weights->weights;
+  int64_t acc = 0;
+  for (int nonzero_idx = 0; nonzero_idx < twd_eval_ctx->num_nonzero_features;
+       nonzero_idx++) {
+    const int feature_index = twd_eval_ctx->nonzero_feature_index[nonzero_idx];
+    acc += (int64_t)weights[feature_index] * features[feature_index];
+  }
+  return twd_clamp_dot(acc);
 }
 
 // The per-row and per-column unit masks are 64-bit.
@@ -1141,17 +1158,25 @@ static Equity twd_units_penalty_bound(const TWDEvalContext *twd_eval_ctx,
   // A move can at best zero out every unit it reaches, and the combination
   // is nondecreasing in each unit, so combining with those units at zero
   // bounds the term from above. A zeroed unit adds nothing to the sum and
-  // can never be the worst, so it simply drops out of both.
-  int64_t sum = 0;
-  int64_t worst = 0;
-  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
-    if (twd_mask_test(affected_units, unit_index)) {
-      continue;
+  // can never be the worst, so it simply drops out of both: the sum is the
+  // total less the reached baselines, and the worst is the first unit in
+  // penalty order the move does not reach. Only the reached units are
+  // visited, and a move reaches few.
+  int64_t sum = twd_eval_ctx->total_unit_penalty;
+  for (int word = 0; word < TWD_MASK_WORDS; word++) {
+    uint64_t bits = affected_units[word];
+    while (bits != 0) {
+      const int unit_index = word * 64 + twd_ctz(bits);
+      sum -= twd_eval_ctx->unit_penalty[unit_index];
+      bits &= bits - 1;
     }
-    const int64_t penalty = twd_eval_ctx->unit_penalty[unit_index];
-    sum += penalty;
-    if (penalty < worst) {
-      worst = penalty;
+  }
+  int64_t worst = 0;
+  for (int order_idx = 0; order_idx < twd_eval_ctx->num_units; order_idx++) {
+    const int unit_index = twd_eval_ctx->units_by_penalty[order_idx];
+    if (!twd_mask_test(affected_units, unit_index)) {
+      worst = twd_eval_ctx->unit_penalty[unit_index];
+      break;
     }
   }
   return twd_combine(worst, sum, twd_eval_ctx->weights->combine_gamma);
@@ -1336,6 +1361,17 @@ static void twd_eval_context_load_units(TWDEvalContext *twd_eval_ctx,
          sizeof(twd_eval_ctx->unit_mask_by_col));
   static_assert(TWD_MAX_SCAN_UNITS <= TWD_MASK_WORDS * 64,
                 "unit masks must cover every scan unit");
+  static_assert(TWD_MAX_SCAN_UNITS <= UINT16_MAX,
+                "unit order entries must hold every unit index");
+  twd_eval_ctx->num_nonzero_features = 0;
+  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+       feature_index++) {
+    if (weights->weights[feature_index] != 0) {
+      twd_eval_ctx
+          ->nonzero_feature_index[twd_eval_ctx->num_nonzero_features++] =
+          feature_index;
+    }
+  }
   for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
     int32_t *unit_features = twd_eval_ctx->unit_features[unit_index];
     memset(unit_features, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
@@ -1345,7 +1381,8 @@ static void twd_eval_context_load_units(TWDEvalContext *twd_eval_ctx,
     int extent_hi = 0;
     twd_scan_context_unit(twd_eval_ctx, unit_index, NULL, NULL, NULL,
                           unit_features, &dir, &lane, &extent_lo, &extent_hi);
-    twd_eval_ctx->unit_penalty[unit_index] = twd_dot(weights, unit_features);
+    twd_eval_ctx->unit_penalty[unit_index] =
+        twd_dot_ctx(twd_eval_ctx, unit_features);
     // A move affects this unit only when it has a tile on or directly
     // beside the lane (perpendicular halo of one) within the span of
     // squares the baseline walk visited: squares beyond the walk's break
@@ -1368,6 +1405,26 @@ static void twd_eval_context_load_units(TWDEvalContext *twd_eval_ctx,
       twd_mask_set(extent_masks[idx], unit_index);
     }
   }
+  // The total and the penalty order that let a move's combination be
+  // formed from the units it reaches alone (see twd_units_penalty_bound).
+  // Insertion sort: a few dozen units, once per position.
+  int64_t total_unit_penalty = 0;
+  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
+    const Equity penalty = twd_eval_ctx->unit_penalty[unit_index];
+    total_unit_penalty += penalty;
+    int order_idx = unit_index;
+    while (
+        order_idx > 0 &&
+        twd_eval_ctx
+                ->unit_penalty[twd_eval_ctx->units_by_penalty[order_idx - 1]] >
+            penalty) {
+      twd_eval_ctx->units_by_penalty[order_idx] =
+          twd_eval_ctx->units_by_penalty[order_idx - 1];
+      order_idx--;
+    }
+    twd_eval_ctx->units_by_penalty[order_idx] = (uint16_t)unit_index;
+  }
+  twd_eval_ctx->total_unit_penalty = total_unit_penalty;
   twd_eval_ctx->pre_penalty = twd_combine_unit_penalties(
       twd_eval_ctx->unit_penalty, twd_eval_ctx->num_units,
       weights->combine_gamma);
@@ -1473,31 +1530,45 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
   };
   // Rescan only the units the move can reach and combine the whole set:
   // the units it cannot reach keep exactly the penalty they were loaded
-  // with.
-  Equity post_move_penalties[TWD_MAX_SCAN_UNITS];
-  memcpy(post_move_penalties, twd_eval_ctx->unit_penalty,
-         sizeof(Equity) * (size_t)twd_eval_ctx->num_units);
-  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
-    if (!twd_mask_test(affected_units, unit_index)) {
-      continue;
+  // with, so the sum is the total moved by each reached unit's change and
+  // the worst is the lesser of the reached units' new penalties and the
+  // first unreached unit in penalty order.
+  int64_t sum = twd_eval_ctx->total_unit_penalty;
+  int64_t worst = 0;
+  for (int word = 0; word < TWD_MASK_WORDS; word++) {
+    uint64_t bits = affected_units[word];
+    while (bits != 0) {
+      const int unit_index = word * 64 + twd_ctz(bits);
+      bits &= bits - 1;
+      int32_t overlay_features[TWD_NUM_FEATURES] = {0};
+      int scan_dir = 0;
+      int scan_lane = 0;
+      // The same rack the training label was built against: whatever the
+      // player holds now, not the leave this move would keep. Training
+      // opens its observation after the mover has drawn back to full, so
+      // scoring a candidate against its leave would call every hook
+      // uncontested in proportion to how many tiles the move played, which
+      // is a penalty on bingos and nothing to do with hooks.
+      twd_scan_context_unit(twd_eval_ctx, unit_index, &overlay, NULL, NULL,
+                            overlay_features, &scan_dir, &scan_lane, NULL,
+                            NULL);
+      const Equity penalty = twd_dot_ctx(twd_eval_ctx, overlay_features);
+      sum += penalty - twd_eval_ctx->unit_penalty[unit_index];
+      if (penalty < worst) {
+        worst = penalty;
+      }
     }
-    int32_t overlay_features[TWD_NUM_FEATURES] = {0};
-    int scan_dir = 0;
-    int scan_lane = 0;
-    // The same rack the training label was built against: whatever the
-    // player holds now, not the leave this move would keep. Training opens
-    // its observation after the mover has drawn back to full, so scoring a
-    // candidate against its leave would call every hook uncontested in
-    // proportion to how many tiles the move played, which is a penalty on
-    // bingos and nothing to do with hooks.
-    twd_scan_context_unit(twd_eval_ctx, unit_index, &overlay, NULL, NULL,
-                          overlay_features, &scan_dir, &scan_lane, NULL, NULL);
-    post_move_penalties[unit_index] =
-        twd_dot(twd_eval_ctx->weights, overlay_features);
   }
-  return twd_combine_unit_penalties(post_move_penalties,
-                                    twd_eval_ctx->num_units,
-                                    twd_eval_ctx->weights->combine_gamma);
+  for (int order_idx = 0; order_idx < twd_eval_ctx->num_units; order_idx++) {
+    const int unit_index = twd_eval_ctx->units_by_penalty[order_idx];
+    if (!twd_mask_test(affected_units, unit_index)) {
+      if (twd_eval_ctx->unit_penalty[unit_index] < worst) {
+        worst = twd_eval_ctx->unit_penalty[unit_index];
+      }
+      break;
+    }
+  }
+  return twd_combine(worst, sum, twd_eval_ctx->weights->combine_gamma);
 }
 
 void twd_extract_features_combined(const Square *lanes,
