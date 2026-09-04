@@ -103,6 +103,11 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     return;
   }
 
+  // Text files carry no ordering guarantee and the DAWG builders require one.
+  // Sorting here keeps every convert command safe without charging internal
+  // callers, which build ordered lists themselves.
+  dictionary_word_list_sort(strings);
+
   if (conversion_type == CONVERT_TEXT2WORDMAP) {
     char *wmp_output_filename = data_filepaths_get_writable_filename(
         data_paths, output_name, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
