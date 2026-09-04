@@ -1478,11 +1478,10 @@ void test_nest_pool(void) {
       for (int idx = 0; idx < num_cands; idx++) {
         int rank = 1;
         for (int other = 0; other < num_cands; other++) {
-          if (cands[other].screen_util[screen] >
-                  cands[idx].screen_util[screen] ||
-              (cands[other].screen_util[screen] ==
-                   cands[idx].screen_util[screen] &&
-               other < idx)) {
+          if (other < idx ? cands[other].screen_util[screen] >=
+                                cands[idx].screen_util[screen]
+                          : cands[other].screen_util[screen] >
+                                cands[idx].screen_util[screen]) {
             rank++;
           }
         }

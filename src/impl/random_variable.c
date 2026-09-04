@@ -25,7 +25,6 @@
 #include "../ent/xoshiro.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
-#include "../util/math_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
 #include "move_gen.h"
@@ -535,7 +534,13 @@ static const Move *rv_nested_reply(const Simmer *simmer,
                             player_get_score(game_get_player(inner, 1 - mover));
       double win;
       if (game_over(inner)) {
-        win = spread > 0 ? 1.0 : (spread == 0 ? 0.5 : 0.0);
+        if (spread > 0) {
+          win = 1.0;
+        } else if (spread == 0) {
+          win = 0.5;
+        } else {
+          win = 0.0;
+        }
       } else {
         // The table gives the player on turn's win% from their spread.
         const int on_turn = game_get_player_on_turn_index(inner);
