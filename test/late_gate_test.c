@@ -424,7 +424,9 @@ void test_late_gate(void) {
 // LATEPOOL_LEX (CSW24), LATEPOOL_WMP (true), LATEPOOL_WINPCT (winpct),
 // LATEPOOL_SIM_SEED (7, the rollouts' seed; a second run on the same
 // positions with another value gives an independent replicate),
-// LATEPOOL_SKIP_TOP (0; see the extension note above).
+// LATEPOOL_SKIP_TOP (0; see the extension note above), LATEPOOL_MAX_TURNS (0;
+// when > 0 positions are taken at a random turn in 0..max_turns and kept if
+// the bag is in range, for a sample spread across the game).
 
 enum {
   LATEPOOL_DEFAULT_POSITIONS = 10000,
@@ -464,6 +466,31 @@ static void latepool_generate(Game *game, MoveList *move_list,
   move_list_sort_moves(move_list);
 }
 
+// Plays a random number of static turns (0..max_turns, from the seed) and
+// accepts the position if the mover's bag count is within range, so the
+// sample spreads over the phases of the game rather than taking the first
+// turn that qualifies.
+static bool latepool_sample_random_turn(Game *game, uint64_t seed,
+                                        int max_turns, int min_bag,
+                                        int max_bag) {
+  game_reset(game);
+  game_seed(game, seed);
+  draw_starting_racks(game);
+  const int turns =
+      (int)((seed * 0x9E3779B97F4A7C15ULL >> 33) % (uint64_t)(max_turns + 1));
+  for (int turn_idx = 0; turn_idx < turns; turn_idx++) {
+    if (game_over(game)) {
+      return false;
+    }
+    play_top_n_equity_move(game, 0);
+  }
+  if (game_over(game)) {
+    return false;
+  }
+  const int bag_count = bag_get_letters(game_get_bag(game));
+  return bag_count >= min_bag && bag_count <= max_bag;
+}
+
 void test_late_pool(void) {
   const char *out_path = lategate_env_string("LATEPOOL_OUT", "latepool.csv");
   const long num_positions =
@@ -476,6 +503,9 @@ void test_late_pool(void) {
   // top play is re-simulated as a reference that must reproduce its earlier
   // value, since every play's rollouts are seeded alike.
   const int skip_top = (int)lategate_env_long("LATEPOOL_SKIP_TOP", 0);
+  // When > 0, sample at a random turn in 0..max_turns instead of the first
+  // turn whose bag count is in range.
+  const int max_turns = (int)lategate_env_long("LATEPOOL_MAX_TURNS", 0);
   const long plies = lategate_env_long("LATEPOOL_PLIES", MAX_PLIES);
   const long rollout = lategate_env_long("LATEPOOL_ROLLOUT", MAX_PLIES);
   const long threads =
@@ -531,7 +561,12 @@ void test_late_pool(void) {
   uint64_t sample_seed = (uint64_t)base_seed * 1000003ULL;
   while (positions_done < num_positions) {
     sample_seed++;
-    if (!lategate_sample_position(game, sample_seed, min_bag, max_bag)) {
+    const bool sampled =
+        max_turns > 0
+            ? latepool_sample_random_turn(game, sample_seed, max_turns, min_bag,
+                                          max_bag)
+            : lategate_sample_position(game, sample_seed, min_bag, max_bag);
+    if (!sampled) {
       continue;
     }
     const int player_index = game_get_player_on_turn_index(game);
