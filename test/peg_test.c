@@ -2,8 +2,10 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"
@@ -11,6 +13,7 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/thread_control.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/move_gen.h"
@@ -631,8 +634,8 @@ static void test_peg_main_pnoprune(void) {
 }
 
 // Drives the `peg` CLI command end to end through the config command path
-// (load_and_exec_config_or_die), exercising the -pegonly / -pegpess /
-// -pegstride knobs and config_get_peg_result. The onyx board with -pegonly
+// (load_and_exec_config_or_die), exercising the pegonly positional / -pegpess
+// / -pegstride knobs and config_get_peg_result. The onyx board with pegonly
 // restricted to ONYX + OXY must publish 13L ONYX (the studied 7.5/8 = 0.9375
 // verdict).
 static void test_peg_main_cli(void) {
@@ -642,9 +645,10 @@ static void test_peg_main_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
-  // -pegonly takes space-free UCGI moves; the period is the in-move separator.
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX,13L.OXY");
-  load_and_exec_config_or_die(config, "peg");
+  // pegonly is a positional argument on the peg command itself: space-free
+  // UCGI moves, the period is the in-move separator. It is per-invocation
+  // (not persisted), so every `peg` call below repeats it.
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
 
   const Game *game = config_get_game(config);
   const PegResult *result = config_get_peg_result(config);
@@ -661,12 +665,458 @@ static void test_peg_main_cli(void) {
   // to the two pegonly candidates, so this stays fast).
   load_and_exec_config_or_die(config,
                               "set -pegpess true -pegstride 1 -pegtopk 4,2");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
 
   printf("[peg_cli] pegonly best=13L ONYX win=%.4f\n", onyx_win);
   config_destroy(config);
 }
+
+// pegonly moved from the persistent -pegonly option to a positional argument
+// on the peg command itself: `-pegonly` as a standalone option must no longer
+// parse, and the restriction it applies must not persist to a later `peg`
+// call that omits it.
+static void test_peg_pegonly_positional_arg(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+
+  // The old persistent option is gone; it should be an unrecognized arg now.
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "set -pegonly 13L.ONYX", error_stack);
+  assert(error_stack_top(error_stack) ==
+         ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG);
+  error_stack_destroy(error_stack);
+
+  // Restricted to the two onyx candidates: at most 2 candidates ever enter a
+  // halving stage.
+  load_and_exec_config_or_die(config, "peg 13L.ONYX,13L.OXY");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  assert(config_get_peg_result(config)->n_graded <= 2);
+
+  // A later `peg` call with no positional argument must not inherit the
+  // restriction from the previous call: with the full board's moves in play,
+  // many more than 2 candidates enter the halving stages.
+  load_and_exec_config_or_die(config, "peg");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  assert(config_get_peg_result(config)->n_graded > 2);
+
+  config_destroy(config);
+}
+
+// Confirms, by generating the full root move list directly (no solve, so this
+// stays cheap even though the board's move list is large), that "empties the
+// bag" is a genuine, non-trivial restriction on a real 3-in-bag position:
+// some generated moves play fewer than 3 tiles and some play 3 or more.
+static void test_peg_bag_emptying_move_split(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
+              "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
+              "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21");
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 3);
+
+  MoveList *move_list = move_list_create(10000);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = move_list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&gen_args);
+
+  bool found_short_move = false;
+  bool found_bag_emptying_move = false;
+  const int num_moves = move_list_get_count(move_list);
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    const int tiles_played =
+        move_get_tiles_played(move_list_get_move(move_list, move_idx));
+    if (tiles_played < 3) {
+      found_short_move = true;
+    } else {
+      found_bag_emptying_move = true;
+    }
+  }
+  assert(found_short_move);
+  assert(found_bag_emptying_move);
+
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// The pegonly positional argument's case-insensitive "empty" value restricts
+// the root candidates to every generated move that would empty the bag. On
+// the 1-in-bag onyx board, that is every generated move except pass (0
+// tiles played); pass is a genuine generated candidate here (it is exercised
+// as such by test_peg_main_pnoprune), so this is a real restriction rather
+// than incidentally the full move list.
+static void test_peg_pegonly_empty(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) == 1);
+
+  // Case-insensitive: mixed case still matches.
+  load_and_exec_config_or_die(config, "peg EmptY");
+  const PegResult *result = config_get_peg_result(config);
+  assert(result->last_completed_stage >= 0);
+  assert(result->n_top_cands > 0);
+  for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+    assert(move_get_tiles_played(&result->top_cands[cand_idx].move) >= 1);
+  }
+  for (int cand_idx = 0; cand_idx < result->n_graded; cand_idx++) {
+    assert(move_get_tiles_played(&result->graded_cands[cand_idx].move) >= 1);
+  }
+
+  config_destroy(config);
+}
+
+// "empty" with no move that empties the bag is a solver error, not a silent
+// empty result: the 1-in-bag forced-pass board's only generated move is
+// "pass" (0 tiles played), which never reaches the 1-tile bag threshold.
+static void test_peg_pegonly_empty_no_moves(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 1);
+
+  // Empty the mover's rack directly (bypassing the CGP text parser's tile
+  // accounting, which would otherwise reject a rack this short): with no
+  // tiles to place, the only generated move is pass (0 tiles played), which
+  // never reaches the 1-tile bag threshold, so no candidate empties the bag.
+  const int mover_idx = game_get_player_on_turn_index(game);
+  rack_reset(player_get_rack(game_get_player(game, mover_idx)));
+
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "peg empty", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_execute_command(config, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_EMPTY_NO_MOVES);
+  error_stack_destroy(error_stack);
+
+  config_destroy(config);
+}
+
+// ----- bag-emptying-guarantee exception (bag above PEG_MAX_BAG) ------------
+
+// The macondo "pond" board (see test_peg_4bag_pond) with one board tile
+// erased (the isolated Q at row 8), so one extra tile falls back into the
+// unseen pool: bag_size goes from the board's natural 4 to 5, one past
+// PEG_MAX_BAG. Both racks stay full (opp rack is genuinely empty, absorbed
+// into the bag), so this is a real, if synthetic, 5-in-bag position; among
+// its generated moves, exactly 8 tile placements play all 5 tiles the mover
+// holds that also appear in the board's remaining word spots, and no move
+// plays more.
+#define PEG_5BAG_CGP                                                           \
+  "cgp 12D2/1U10O2/1p10L2/1R1C3KANJIS2/1I1O3A2U4/1G1T3I2I4/1H1E3Z2C1LOO/"      \
+  "1TED3E1BYWORD/7N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/V1E5LOURY2/"            \
+  "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20"
+
+// Same board with two more board tiles erased (the isolated V and the Z),
+// so bag_size is 7 == RACK_SIZE: the largest bag the guarantee can ever cover.
+// At this size the mover's rack (bag >= RACK_SIZE) also makes exchanges
+// legal, including a 7-tile "exchange everything" move -- tiles_played == 7
+// == bag_size, but an exchange never empties the bag (it returns what it
+// drew), so it must not qualify.
+#define PEG_7BAG_CGP                                                           \
+  "cgp 12D2/1U10O2/1p10L2/1R1C3KANJIS2/1I1O3A2U4/1G1T3I2I4/1H1E6C1LOO/"        \
+  "1TED3E1BYWORD/7N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/2E5LOURY2/"             \
+  "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20"
+
+// Root-generates every move on `cgp`, filters to the tile placements that
+// play exactly `tiles_played` tiles, and writes up to `cap` of their Move
+// pointers to `out`. Returns the count and hands the owning MoveList back via
+// *out_ml (caller destroys after `out` is no longer needed).
+static int peg_collect_moves_with_tiles_played(const Game *game,
+                                               int tiles_played, int cap,
+                                               const Move **out,
+                                               MoveList **out_ml) {
+  MoveList *move_list = move_list_create(10000);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = move_list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&gen_args);
+  int n_found = 0;
+  const int num_moves = move_list_get_count(move_list);
+  for (int move_idx = 0; move_idx < num_moves && n_found < cap; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        move_get_tiles_played(move) == tiles_played) {
+      out[n_found++] = move;
+    }
+  }
+  *out_ml = move_list;
+  return n_found;
+}
+
+// A bag above PEG_MAX_BAG (here 5) is accepted when only_moves is restricted
+// to moves that all empty it (play >= bag_size tiles): the enumeration only
+// ever needs the emptier (bag_remaining == 0) machinery, regardless of how
+// large bag_size is above PEG_MAX_BAG.
+static void test_peg_bag_emptying_guarantee_only_moves(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_5BAG_CGP);
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) ==
+         12); // opp_unknown=7 -> bag_size=5
+
+  const Move *only_moves[16];
+  MoveList *move_list = NULL;
+  const int n_only =
+      peg_collect_moves_with_tiles_played(game, 5, 16, only_moves, &move_list);
+  assert(n_only > 0);
+
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 4;
+  args.time_budget_seconds = 60.0;
+  args.only_moves = only_moves;
+  args.n_only_moves = n_only;
+
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    char *err = error_stack_get_string_and_reset(error_stack);
+    log_fatal("peg_solve unexpectedly rejected a guaranteed-emptying 5-bag "
+              "only_moves set: %s",
+              err);
+  }
+  assert(result.n_top_cands > 0);
+  for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+    assert(move_get_tiles_played(&result.top_cands[cand_idx].move) >= 5);
+    assert(result.top_cands[cand_idx].win_pct >= 0.0 &&
+           result.top_cands[cand_idx].win_pct <= 1.0);
+  }
+  printf(
+      "[peg_bag_emptying_only_moves] n_only=%d n_top_cands=%d best_win=%.4f\n",
+      n_only, result.n_top_cands, result.best_win);
+
+  peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// Mixing a single move that does NOT empty the bag into only_moves still
+// rejects the whole solve: the guarantee requires every candidate under
+// consideration to empty the bag, not just some of them.
+static void test_peg_bag_emptying_guarantee_rejects_short_move(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_5BAG_CGP);
+  const Game *game = config_get_game(config);
+
+  const Move *emptying_moves[16];
+  MoveList *emptying_ml = NULL;
+  const int n_emptying = peg_collect_moves_with_tiles_played(
+      game, 5, 16, emptying_moves, &emptying_ml);
+  assert(n_emptying > 0);
+  const Move *short_moves[1];
+  MoveList *short_ml = NULL;
+  const int n_short =
+      peg_collect_moves_with_tiles_played(game, 1, 1, short_moves, &short_ml);
+  assert(n_short == 1); // a 1-tile play exists and never reaches the 5-bag
+
+  const Move *only_moves[2] = {emptying_moves[0], short_moves[0]};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 1;
+  args.only_moves = only_moves;
+  args.n_only_moves = 2;
+
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
+
+  error_stack_destroy(error_stack);
+  peg_result_destroy(&result);
+  move_list_destroy(emptying_ml);
+  move_list_destroy(short_ml);
+  config_destroy(config);
+}
+
+// At bag_size == RACK_SIZE (7), an exchange becomes a legal move (the real
+// Scrabble rule requires bag >= RACK_SIZE to exchange) and can play as many
+// tiles as a tile placement, but it never empties the bag -- the exchanged
+// tiles go back in. only_moves of just the "exchange everything" move must be
+// rejected, not silently treated as bag-emptying.
+static void test_peg_bag_emptying_guarantee_rejects_exchange(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_7BAG_CGP);
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) ==
+         14); // opp_unknown=7 -> bag_size=7
+
+  MoveList *move_list = move_list_create(10000);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = move_list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&gen_args);
+  const Move *full_exchange = NULL;
+  const int num_moves = move_list_get_count(move_list);
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_type(move) == GAME_EVENT_EXCHANGE &&
+        move_get_tiles_played(move) == 7) {
+      full_exchange = move;
+      break;
+    }
+  }
+  assert(full_exchange != NULL); // the "exchange all 7" move must be legal here
+
+  const Move *only_moves[1] = {full_exchange};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 1;
+  args.only_moves = only_moves;
+  args.n_only_moves = 1;
+
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
+
+  error_stack_destroy(error_stack);
+  peg_result_destroy(&result);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// Without only_moves, the guarantee can never hold: the full root move list
+// always contains pass (0 tiles played, see gen_record_pass), which never
+// empties the bag, so peg_solve rejects immediately rather than generating
+// the full list to discover the same thing. config_peg's pegonly "empty"
+// keyword is the intended way to actually satisfy the guarantee; see
+// test_peg_pegonly_empty_above_max_bag_cli below.
+static void test_peg_bag_emptying_guarantee_no_only_moves_rejects(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_5BAG_CGP);
+  const Game *game = config_get_game(config);
+
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 1;
+
+  ErrorStack *error_stack = error_stack_create();
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
+
+  error_stack_destroy(error_stack);
+  peg_result_destroy(&result);
+  config_destroy(config);
+}
+
+// End-to-end through the peg command's pegonly "empty" positional argument
+// (config_generate_peg_bag_emptying_moves): on the same 5-in-bag board, this
+// is exactly how a real user reaches the guarantee -- no direct-API only_moves
+// construction needed.
+static void test_peg_pegonly_empty_above_max_bag_cli(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_5BAG_CGP);
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) == 12);
+
+  load_and_exec_config_or_die(config, "peg empty");
+  const PegResult *result = config_get_peg_result(config);
+  assert(result->last_completed_stage >= 0);
+  assert(result->n_top_cands > 0);
+  for (int cand_idx = 0; cand_idx < result->n_top_cands; cand_idx++) {
+    assert(move_get_tiles_played(&result->top_cands[cand_idx].move) >= 5);
+  }
+  printf("[peg_empty_above_max_bag] n_top_cands=%d best_win=%.4f\n",
+         result->n_top_cands, result->best_win);
+
+  // The same board with no pegonly restriction (full move generation) must
+  // still reject: not every generated move empties this 5-tile bag.
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "peg", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_execute_command(config, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_BAG_OUT_OF_RANGE);
+  error_stack_destroy(error_stack);
+
+  config_destroy(config);
+}
+
+// End-to-end through "peg empty" at bag_size == RACK_SIZE (7), the same board
+// as test_peg_bag_emptying_guarantee_rejects_exchange: movegen's exchange gate
+// (raw bag + known opp rack >= 2*RACK_SIZE) is exactly effective bag >= 7, so
+// this is the one bag size in the relaxed range where generate_moves actually
+// produces an exchange, and this board's only 7-tiles-played move is that
+// "exchange everything" move (no tile placement here plays all 7). Before
+// config_generate_peg_bag_emptying_moves filtered by peg_move_empties_bag
+// (move-type aware) instead of a bare tiles_played >= bag_size check, it kept
+// that exchange as the sole only_move, and peg_solve rejected it as
+// ERROR_STATUS_PEG_BAG_OUT_OF_RANGE (a confusing error from a command whose
+// whole job is to filter to bag-emptying moves). With the fix, the exchange
+// is excluded before reaching peg_solve, so config_generate_peg_bag_emptying_
+// moves itself correctly reports no move empties the bag.
+static void test_peg_pegonly_empty_at_rack_size_cli(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, PEG_7BAG_CGP);
+  assert(bag_get_letters(game_get_bag(config_get_game(config))) ==
+         14); // opp_unknown=7 -> bag_size=7
+
+  ErrorStack *error_stack = error_stack_create();
+  config_load_command(config, "peg empty", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_execute_command(config, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PEG_EMPTY_NO_MOVES);
+  error_stack_destroy(error_stack);
+
+  config_destroy(config);
+}
+
+#undef PEG_5BAG_CGP
+#undef PEG_7BAG_CGP
 
 // ----- progress callbacks + per-scenario detail -----------------------------
 
@@ -784,6 +1234,92 @@ static void test_peg_main_progress_detail(void) {
          atomic_load(&counters.scenario_dones), result.n_per_scenario);
 
   peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+typedef struct PegDiscardStageContext {
+  ThreadControl *thread_control;
+  int interrupted_stage;
+} PegDiscardStageContext;
+
+// Interrupt the second halving stage after its first candidate finishes. The
+// solver must discard that one-candidate stage and keep every published result,
+// including its captured outcomes, at the preceding fidelity.
+static void peg_test_interrupt_discarded_stage(int stage_idx, int cand_rank,
+                                               const Move *cand, double win_pct,
+                                               double mean_spread,
+                                               int scen_done, bool reordered,
+                                               void *user_data) {
+  (void)cand;
+  (void)win_pct;
+  (void)mean_spread;
+  (void)scen_done;
+  (void)reordered;
+  if (stage_idx == 2 && cand_rank == 0) {
+    PegDiscardStageContext *context = user_data;
+    context->interrupted_stage = stage_idx;
+    thread_control_set_status(context->thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+}
+
+static void test_peg_discarded_stage_outcomes(void) {
+  const char *cgp =
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = config_get_thread_control(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  ValidatedMoves *moves = validated_moves_create(
+      game, game_get_player_on_turn_index(game), "13L ONYX,13L OXY",
+      /*allow_phonies=*/false, /*allow_playthrough=*/true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(validated_moves_get_number_of_moves(moves) == 2);
+  const Move *only_moves[2] = {validated_moves_get_move(moves, 0),
+                               validated_moves_get_move(moves, 1)};
+
+  PegPoll *poll = peg_poll_create();
+  PegDiscardStageContext context = {
+      .thread_control = thread_control,
+      .interrupted_stage = -1,
+  };
+  static const int stage_top_k[] = {2, 2};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = thread_control;
+  args.num_threads = 4;
+  args.time_budget_seconds = 10.0;
+  args.stage_top_k = stage_top_k;
+  args.num_stages = 2;
+  args.only_moves = only_moves;
+  args.n_only_moves = 2;
+  args.include_per_scenario = true;
+  args.poll = poll;
+  args.on_cand_done = peg_test_interrupt_discarded_stage;
+  args.user_data = &context;
+
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  assert(context.interrupted_stage == 2);
+  assert(result.last_completed_stage == 1);
+  assert(result.n_cand_outcomes == 2);
+  for (int outcome_idx = 0; outcome_idx < result.n_cand_outcomes;
+       outcome_idx++) {
+    assert(result.cand_outcomes[outcome_idx].fidelity == 2);
+  }
+
+  peg_result_destroy(&result);
+  peg_poll_destroy(poll);
+  validated_moves_destroy(moves);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
@@ -1219,7 +1755,7 @@ static void test_peg_opp_rack_sizes(void) {
 }
 
 // Verifies the opp-rack bag adjustment fix through the CLI command path
-// (config / cgp / set -pegonly / peg), exercising both the empty and partial
+// (config / cgp / peg <pegonly>), exercising both the empty and partial
 // opp-rack cases on the same 1-in-bag ONYX board.
 static void test_peg_opp_rack_sizes_cli(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score");
@@ -1232,8 +1768,7 @@ static void test_peg_opp_rack_sizes_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   printf("[peg_cli_opp_empty] accepted: win=%.4f\n",
          config_get_peg_result(config)->best_win);
@@ -1246,8 +1781,7 @@ static void test_peg_opp_rack_sizes_cli(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACE 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
-  load_and_exec_config_or_die(config, "peg");
+  load_and_exec_config_or_die(config, "peg 13L.ONYX");
   assert(config_get_peg_result(config)->last_completed_stage >= 0);
   printf("[peg_cli_opp_partial] accepted: win=%.4f\n",
          config_get_peg_result(config)->best_win);
@@ -1309,6 +1843,54 @@ static void test_peg_outcomes_string(void) {
       {.drawn = "X", .remaining = "ZY", .weight = 4, .mover_total = -5},
   };
   assert_outcomes_eq(rem_split, 2, "W: X/Y/Zx4");
+
+  // A tie draw with no losing draw (the ONYX case from the bug report). The old
+  // "shorter list wins" logic picked the empty loss list and rendered a bare
+  // "L:". Now wins (the largest list) is left implied and the tie is shown.
+  // Because the tie list is the only one shown (losses is empty), "T: E" alone
+  // can't say whether the implied majority is wins or losses, so it is named.
+  const PegPerScenario tie_no_loss[] = {
+      {.drawn = "A", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "B", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "E", .remaining = "", .weight = 1, .mover_total = 0},
+  };
+  assert_outcomes_eq(tie_no_loss, 3, "T: E, otherwise wins");
+
+  // A tie draw with no winning draw: losses are the largest list, left implied,
+  // and the tie is the only list shown, so the implied loss is named.
+  const PegPerScenario tie_no_win[] = {
+      {.drawn = "P", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "Q", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "X", .remaining = "", .weight = 1, .mover_total = 0},
+  };
+  assert_outcomes_eq(tie_no_win, 3, "T: X, otherwise loses");
+
+  // All three buckets: the largest list (here losses) is implied; the two
+  // shorter lists -- wins and the tie -- are printed comma-separated, in
+  // wins/ties/loss order.
+  const PegPerScenario win_tie_loss[] = {
+      {.drawn = "C", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "U", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "Y", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "D", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "F", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "G", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "H", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "E", .remaining = "", .weight = 1, .mover_total = 0},
+  };
+  assert_outcomes_eq(win_tie_loss, 8, "W: C U Y, T: E");
+
+  // Ties are the most common result: the tie list is the largest, so it is the
+  // one left implied. A tie majority is rare, so it is named explicitly with a
+  // trailing ", otherwise ties" after the shorter win / loss lists.
+  const PegPerScenario tie_majority[] = {
+      {.drawn = "A", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "B", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "C", .remaining = "", .weight = 1, .mover_total = 0},
+      {.drawn = "D", .remaining = "", .weight = 1, .mover_total = 0},
+      {.drawn = "E", .remaining = "", .weight = 1, .mover_total = 0},
+  };
+  assert_outcomes_eq(tie_majority, 5, "W: A, L: B, otherwise ties");
 }
 
 void test_peg(void) {
@@ -1322,6 +1904,7 @@ void test_peg(void) {
   test_peg_main_opp_models();
   test_peg_main_pnoprune();
   test_peg_main_progress_detail();
+  test_peg_discarded_stage_outcomes();
   test_peg_main_inner_top_k();
   // Cases drawn from the macondo codebase + pre-endgame manual.
   test_peg_macondo_only_onyx();
@@ -1330,7 +1913,18 @@ void test_peg(void) {
   test_peg_macondo_pah_slice();
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
+  test_peg_pegonly_positional_arg();
+  test_peg_bag_emptying_move_split();
+  test_peg_pegonly_empty();
+  test_peg_pegonly_empty_no_moves();
   // Opp-rack bag adjustment fix: empty and partial opp racks.
   test_peg_opp_rack_sizes();
   test_peg_opp_rack_sizes_cli();
+  // Bag-emptying-guarantee exception: bag above PEG_MAX_BAG.
+  test_peg_bag_emptying_guarantee_only_moves();
+  test_peg_bag_emptying_guarantee_rejects_short_move();
+  test_peg_bag_emptying_guarantee_rejects_exchange();
+  test_peg_bag_emptying_guarantee_no_only_moves_rejects();
+  test_peg_pegonly_empty_above_max_bag_cli();
+  test_peg_pegonly_empty_at_rack_size_cli();
 }
