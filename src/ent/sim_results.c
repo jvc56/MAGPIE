@@ -45,6 +45,14 @@ struct SimmedPlay {
   // Copied from SimResults at the same points cutoff is refreshed. Nonzero
   // means the BU (blended utility) stat is meaningful for this play.
   double utility_w_spread;
+  // Per-sample outcome log (see sim_results_set_sample_log_capacity): the
+  // win% and spread each sample produced, indexed by the order its seed was
+  // issued, so any prefix is exactly the smaller sim that would have run.
+  int sample_log_capacity;
+  int num_seeds_issued;
+  int num_logged_samples;
+  float *sample_wins;
+  float *sample_equities;
 };
 
 struct SimResults {
@@ -67,6 +75,8 @@ struct SimResults {
   // sim_results_get_best_move; see the comment there.
   double utility_w_spread;
   uint64_t num_infer_leaves;
+  // Per-play sample log capacity applied at every reset; 0 = off.
+  int sample_log_capacity;
 };
 
 void ply_info_init(PlyInfo *ply_info, bool use_heat_map) {
@@ -115,8 +125,30 @@ SimmedPlay *simmed_play_create(const MoveList *move_list, int num_plies,
   simmed_play->cutoff = cutoff;
   simmed_play->utility_w_spread = 0.0;
   simmed_play->prng = prng_create(seed);
+  simmed_play->sample_log_capacity = 0;
+  simmed_play->num_seeds_issued = 0;
+  simmed_play->num_logged_samples = 0;
+  simmed_play->sample_wins = NULL;
+  simmed_play->sample_equities = NULL;
   cpthread_mutex_init(&simmed_play->mutex);
   return simmed_play;
+}
+
+static void simmed_play_set_sample_log_capacity(SimmedPlay *simmed_play,
+                                                int capacity) {
+  if (capacity != simmed_play->sample_log_capacity) {
+    free(simmed_play->sample_wins);
+    free(simmed_play->sample_equities);
+    simmed_play->sample_wins = NULL;
+    simmed_play->sample_equities = NULL;
+    if (capacity > 0) {
+      simmed_play->sample_wins = malloc_or_die(sizeof(float) * capacity);
+      simmed_play->sample_equities = malloc_or_die(sizeof(float) * capacity);
+    }
+    simmed_play->sample_log_capacity = capacity;
+  }
+  simmed_play->num_seeds_issued = 0;
+  simmed_play->num_logged_samples = 0;
 }
 
 SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
@@ -143,6 +175,8 @@ SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
   simmed_play->play_index_by_sort_type = i;
   simmed_play->cutoff = cutoff;
   prng_seed(simmed_play->prng, seed);
+  simmed_play->num_seeds_issued = 0;
+  simmed_play->num_logged_samples = 0;
   return simmed_play;
 }
 
@@ -300,6 +334,8 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_alloc_sps) {
     stat_destroy(simmed_plays[i]->win_pct_stat);
     stat_destroy(simmed_plays[i]->utility_stat);
     prng_destroy(simmed_plays[i]->prng);
+    free(simmed_plays[i]->sample_wins);
+    free(simmed_plays[i]->sample_equities);
     free(simmed_plays[i]);
   }
   free(simmed_plays);
@@ -335,10 +371,19 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
     sim_results_simmed_plays_reset(sim_results, move_list, num_plies, seed,
                                    use_heat_map);
   }
+  for (int i = 0; i < sim_results->num_simmed_plays; i++) {
+    simmed_play_set_sample_log_capacity(sim_results->simmed_plays[i],
+                                        sim_results->sample_log_capacity);
+  }
   atomic_init(&sim_results->node_count, 0);
   atomic_init(&sim_results->iteration_count, 0);
   sim_results->valid_for_current_game_state = false;
   cpthread_mutex_unlock(&sim_results->display_mutex);
+}
+
+void sim_results_set_sample_log_capacity(SimResults *sim_results,
+                                         int capacity) {
+  sim_results->sample_log_capacity = capacity;
 }
 
 SimResults *sim_results_create(const double cutoff) {
@@ -355,6 +400,7 @@ SimResults *sim_results_create(const double cutoff) {
   sim_results->bai_result = bai_result_create();
   sim_results->valid_for_current_game_state = false;
   sim_results->cutoff = cutoff;
+  sim_results->sample_log_capacity = 0;
   sim_results->utility_w_spread = 0.0;
   sim_results->num_infer_leaves = 0;
   rack_set_dist_size_and_reset(&sim_results->rack, 0);
@@ -409,6 +455,7 @@ SimResults *sim_results_duplicate(const SimResults *sim_results) {
   new_sim_results->cutoff = sim_results->cutoff;
   new_sim_results->utility_w_spread = sim_results->utility_w_spread;
   new_sim_results->num_infer_leaves = sim_results->num_infer_leaves;
+  new_sim_results->sample_log_capacity = 0;
   return new_sim_results;
 }
 
@@ -461,8 +508,50 @@ uint64_t simmed_play_get_seed(SimmedPlay *simmed_play) {
   uint64_t seed;
   cpthread_mutex_lock(&simmed_play->mutex);
   seed = prng_next(simmed_play->prng);
+  simmed_play->num_seeds_issued++;
   cpthread_mutex_unlock(&simmed_play->mutex);
   return seed;
+}
+
+uint64_t simmed_play_get_seed_and_index(SimmedPlay *simmed_play,
+                                        int *sample_index) {
+  uint64_t seed;
+  cpthread_mutex_lock(&simmed_play->mutex);
+  seed = prng_next(simmed_play->prng);
+  *sample_index = simmed_play->num_seeds_issued;
+  simmed_play->num_seeds_issued++;
+  cpthread_mutex_unlock(&simmed_play->mutex);
+  return seed;
+}
+
+void simmed_play_log_sample(SimmedPlay *simmed_play, int sample_index,
+                            double win_pct, double equity) {
+  if (sample_index < 0 || sample_index >= simmed_play->sample_log_capacity) {
+    return;
+  }
+  // Each index is written by exactly one sample, so only the count needs
+  // the lock.
+  simmed_play->sample_wins[sample_index] = (float)win_pct;
+  simmed_play->sample_equities[sample_index] = (float)equity;
+  cpthread_mutex_lock(&simmed_play->mutex);
+  simmed_play->num_logged_samples++;
+  cpthread_mutex_unlock(&simmed_play->mutex);
+}
+
+int simmed_play_get_num_logged_samples(const SimmedPlay *simmed_play) {
+  return simmed_play->num_logged_samples < simmed_play->sample_log_capacity
+             ? simmed_play->num_logged_samples
+             : simmed_play->sample_log_capacity;
+}
+
+double simmed_play_get_logged_win_pct(const SimmedPlay *simmed_play,
+                                      int sample_index) {
+  return simmed_play->sample_wins[sample_index];
+}
+
+double simmed_play_get_logged_equity(const SimmedPlay *simmed_play,
+                                     int sample_index) {
+  return simmed_play->sample_equities[sample_index];
 }
 
 int sim_results_get_number_of_plays(const SimResults *sim_results) {

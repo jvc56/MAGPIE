@@ -157,6 +157,8 @@ static TestEntry on_demand_test_table[] = {
     {"candrecall", test_candidate_recall},
     {"lategate", test_late_gate},
     {"latepool", test_late_pool},
+    {"fullgate", test_full_gate},
+    {"oraclepool", test_oracle_pool},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},

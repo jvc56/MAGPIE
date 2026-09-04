@@ -110,6 +110,19 @@ typedef struct PlayChooserStrategy {
   // moves already chosen. The plays the term would drop out of a
   // single ranking stay in reach of the sim. 0 = one ranking, the default.
   int defense_pool_size;
+  // Turnover diversity: this many of the pool's last slots go to the plays
+  // using the most tiles (ties by equity) that the ranking left out, while
+  // the bag holds turnover_min_bag..turnover_max_bag tiles. In the
+  // pre-endgame the plays that empty the bag or set up going out are what
+  // a static ranking misses. 0 = off.
+  int turnover_pool_size;
+  int turnover_min_bag;
+  int turnover_max_bag;
+  // Deeper rollouts late: while the bag holds at most deep_sim_max_bag
+  // tiles the sim runs deep_sim_plies plies instead of sim_plies, so
+  // rollouts reach the end of the game. 0 = off.
+  int deep_sim_max_bag;
+  int deep_sim_plies;
 } PlayChooserStrategy;
 
 typedef struct PlayChooser PlayChooser;

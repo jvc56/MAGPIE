@@ -38,6 +38,19 @@ const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play);
 bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play);
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
+// Like simmed_play_get_seed, also reporting the sample's index in the order
+// this play's seeds were issued.
+uint64_t simmed_play_get_seed_and_index(SimmedPlay *simmed_play,
+                                        int *sample_index);
+// Records a sample's outcome at its index when a sample log is enabled
+// (see sim_results_set_sample_log_capacity); a no-op otherwise.
+void simmed_play_log_sample(SimmedPlay *simmed_play, int sample_index,
+                            double win_pct, double equity);
+int simmed_play_get_num_logged_samples(const SimmedPlay *simmed_play);
+double simmed_play_get_logged_win_pct(const SimmedPlay *simmed_play,
+                                      int sample_index);
+double simmed_play_get_logged_equity(const SimmedPlay *simmed_play,
+                                     int sample_index);
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
                                    const Move *move);
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
@@ -55,6 +68,11 @@ SimResults *sim_results_duplicate(const SimResults *sim_results);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_plies, uint64_t seed, bool use_heat_map);
 void sim_results_destroy(SimResults *sim_results);
+// Keeps, for every play, the win% and spread of each of its first `capacity`
+// samples in seed order, so a prefix of the log is exactly the smaller sim
+// that would have run. Applied at the next reset; 0 (the default) keeps no
+// log.
+void sim_results_set_sample_log_capacity(SimResults *sim_results, int capacity);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);
 int sim_results_get_num_plies(const SimResults *sim_results);

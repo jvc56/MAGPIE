@@ -472,7 +472,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
-  const uint64_t seed = simmed_play_get_seed(simmed_play);
+  int sample_index = 0;
+  const uint64_t seed =
+      simmed_play_get_seed_and_index(simmed_play, &sample_index);
   prng_seed(simmer_worker->prng, seed);
   game_seed(game, seed);
 
@@ -599,6 +601,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
           rack_get_total_letters(player_get_rack(
               game_get_player(game, 1 - simmer->initial_player))),
       plies % 2);
+  simmed_play_log_sample(
+      simmed_play, sample_index, wpct,
+      equity_to_double(spread - simmer->initial_spread + leftover));
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);

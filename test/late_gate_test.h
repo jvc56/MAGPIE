@@ -3,5 +3,7 @@
 
 void test_late_gate(void);
 void test_late_pool(void);
+void test_full_gate(void);
+void test_oracle_pool(void);
 
 #endif

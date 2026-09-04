@@ -10,6 +10,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/peg_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/endgame_results.h"
@@ -37,6 +38,8 @@
 #include <stdlib.h>
 
 enum {
+  // How many plays by equity the turnover candidates are drawn from.
+  PLAY_CHOOSER_TURNOVER_SCAN = 60,
   // Stands in for the time budget when the sim is bounded by samples
   // instead; no sim runs anywhere near this long.
   PLAY_CHOOSER_UNLIMITED_SECONDS = 1000000,
@@ -71,6 +74,9 @@ struct PlayChooser {
   // The ranking without the defense term, for a mixed pool (see
   // PlayChooserStrategy.defense_pool_size).
   MoveList *plain_move_list;
+  // A wider plain ranking to draw turnover candidates from (see
+  // PlayChooserStrategy.turnover_pool_size).
+  MoveList *turnover_move_list;
   SimResults *sim_results;
   SimCtx *sim_ctx;
   EndgameResults *endgame_results;
@@ -126,6 +132,8 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
       move_list_create(play_chooser_get_sim_max_candidates(strategy));
   play_chooser->plain_move_list =
       move_list_create(play_chooser_get_sim_max_candidates(strategy));
+  play_chooser->turnover_move_list =
+      move_list_create(PLAY_CHOOSER_TURNOVER_SCAN);
   play_chooser->sim_results = sim_results_create(0.0);
   play_chooser->sim_ctx = NULL;
   play_chooser->endgame_results = endgame_results_create();
@@ -144,6 +152,7 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
   }
   move_list_destroy(play_chooser->move_list);
   move_list_destroy(play_chooser->plain_move_list);
+  move_list_destroy(play_chooser->turnover_move_list);
   sim_results_destroy(play_chooser->sim_results);
   sim_ctx_destroy(play_chooser->sim_ctx);
   endgame_results_destroy(play_chooser->endgame_results);
@@ -262,12 +271,15 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       .disable_twd = strategy->disable_root_twd,
   };
   generate_moves(&gen_args);
+  const int bag_count = bag_get_letters(game_get_bag(game));
+  bool pool_sorted = false;
   if (strategy->defense_pool_size > 0 && !strategy->disable_root_twd &&
       player_get_twd(
           game_get_player(game, game_get_player_on_turn_index(game))) != NULL) {
     // Mixed pool: the top defense_pool_size of the ranking with the term,
     // then the best of the ranking without it that are not already in.
     move_list_sort_moves(move_list);
+    pool_sorted = true;
     move_list_truncate_sorted_list(move_list, strategy->defense_pool_size);
     MoveList *plain_move_list = play_chooser->plain_move_list;
     move_list_reset(plain_move_list);
@@ -298,6 +310,54 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       }
     }
   }
+  if (strategy->turnover_pool_size > 0 &&
+      bag_count >= strategy->turnover_min_bag &&
+      bag_count <= strategy->turnover_max_bag) {
+    // Turnover diversity: give the pool's last slots to the highest-turnover
+    // plays the ranking left out, best equity first within a tile count.
+    if (!pool_sorted) {
+      move_list_sort_moves(move_list);
+      pool_sorted = true;
+    }
+    const int pool_capacity = move_list_get_capacity(move_list);
+    const int keep = pool_capacity - strategy->turnover_pool_size;
+    if (keep > 0) {
+      move_list_truncate_sorted_list(move_list, keep);
+    }
+    MoveList *scan = play_chooser->turnover_move_list;
+    move_list_reset(scan);
+    MoveGenArgs scan_args = gen_args;
+    scan_args.move_list = scan;
+    scan_args.disable_twd = true;
+    generate_moves(&scan_args);
+    move_list_sort_moves(scan);
+    for (int tiles = RACK_SIZE;
+         tiles >= 1 && move_list_get_count(move_list) < pool_capacity;
+         tiles--) {
+      for (int scan_idx = 0; scan_idx < move_list_get_count(scan) &&
+                             move_list_get_count(move_list) < pool_capacity;
+           scan_idx++) {
+        const Move *scan_move = move_list_get_move(scan, scan_idx);
+        if (move_get_tiles_played(scan_move) != tiles ||
+            move_get_type(scan_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          continue;
+        }
+        bool already_in = false;
+        for (int pool_idx = 0; pool_idx < move_list_get_count(move_list);
+             pool_idx++) {
+          if (compare_moves_without_equity(
+                  move_list_get_move(move_list, pool_idx), scan_move, true) ==
+              -1) {
+            already_in = true;
+            break;
+          }
+        }
+        if (!already_in) {
+          move_list_add_move_to_sorted_list(move_list, scan_move);
+        }
+      }
+    }
+  }
   const int num_candidates = move_list_get_count(move_list);
   if (num_candidates == 0) {
     return false;
@@ -308,9 +368,12 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   }
 
   const int num_threads = play_chooser_get_num_threads(strategy);
-  const int sim_plies = strategy->sim_plies > 0
-                            ? strategy->sim_plies
-                            : PLAY_CHOOSER_DEFAULT_SIM_PLIES;
+  int sim_plies = strategy->sim_plies > 0 ? strategy->sim_plies
+                                          : PLAY_CHOOSER_DEFAULT_SIM_PLIES;
+  if (strategy->deep_sim_max_bag > 0 && strategy->deep_sim_plies > 0 &&
+      bag_count <= strategy->deep_sim_max_bag) {
+    sim_plies = strategy->deep_sim_plies;
+  }
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
 

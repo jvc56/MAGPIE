@@ -714,3 +714,537 @@ void test_late_pool(void) {
   move_list_destroy(without_term);
   config_destroy(config);
 }
+
+// Full-game equal-time gate (on-demand test "fullgate").
+//
+// Two play choosers play game pairs from the opening with the same per-move
+// time budget, the same pre-endgame and endgame solvers, and the same tile
+// order, roles swapped between the games of a pair. Player A is the test
+// configuration; player B is the stock configuration: plain candidate pool,
+// no defense term anywhere, 2-ply sims. Each game is scored by result, spread
+// and the utility blend, and each player's wall-clock inside its decisions
+// is logged.
+//
+// Environment: FULLGATE_OUT (fullgate.csv), FULLGATE_PAIRS (100000),
+// FULLGATE_SECONDS (0 = no time limit on the whole run), FULLGATE_TL_MS (300,
+// per-move budget), FULLGATE_THREADS (16), FULLGATE_CANDIDATES (15),
+// FULLGATE_SEED (1), FULLGATE_TWD (gs050_105), FULLGATE_PATH, FULLGATE_LEX,
+// FULLGATE_WMP, FULLGATE_WINPCT, the utility blend as in lategate
+// (FULLGATE_UWIN_PCT 100, FULLGATE_USPREAD_PCT 50, FULLGATE_USCALE 100), and
+// A's knobs: FULLGATE_A_ROLLOUT (MAX_PLIES, defense rollout plies),
+// FULLGATE_A_ROOT (0, defense term in A's candidate ranking),
+// FULLGATE_A_TURNOVER (3), FULLGATE_A_TURNOVER_MIN_BAG (6),
+// FULLGATE_A_TURNOVER_MAX_BAG (12), FULLGATE_A_DEEP_MAX_BAG (12),
+// FULLGATE_A_DEEP_PLIES (MAX_PLIES).
+
+enum {
+  FULLGATE_DEFAULT_PAIRS = 100000,
+  FULLGATE_DEFAULT_TL_MS = 300,
+  FULLGATE_MAX_MOVES = 120,
+  FULLGATE_PROGRESS_EVERY = 10,
+};
+
+void test_full_gate(void) {
+  const char *out_path = lategate_env_string("FULLGATE_OUT", "fullgate.csv");
+  const long num_pairs =
+      lategate_env_long("FULLGATE_PAIRS", FULLGATE_DEFAULT_PAIRS);
+  const long run_seconds = lategate_env_long("FULLGATE_SECONDS", 0);
+  const long tl_ms =
+      lategate_env_long("FULLGATE_TL_MS", FULLGATE_DEFAULT_TL_MS);
+  const long threads =
+      lategate_env_long("FULLGATE_THREADS", LATEGATE_DEFAULT_THREADS);
+  const long candidates =
+      lategate_env_long("FULLGATE_CANDIDATES", LATEGATE_DEFAULT_CANDIDATES);
+  const long base_seed =
+      lategate_env_long("FULLGATE_SEED", LATEGATE_DEFAULT_SEED);
+  const char *twd_name = lategate_env_string("FULLGATE_TWD", "gs050_105");
+  const char *data_path = lategate_env_string("FULLGATE_PATH", "./data");
+  const char *lexicon = lategate_env_string("FULLGATE_LEX", "CSW24");
+  const char *use_wmp = lategate_env_string("FULLGATE_WMP", "true");
+  const char *win_pct_name = lategate_env_string("FULLGATE_WINPCT", "winpct");
+  const double utility_w_winpct =
+      (double)lategate_env_long("FULLGATE_UWIN_PCT", 100) / 100.0;
+  const double utility_w_spread =
+      (double)lategate_env_long("FULLGATE_USPREAD_PCT", 50) / 100.0;
+  const double utility_spread_scale =
+      (double)lategate_env_long("FULLGATE_USCALE", 100);
+  const int a_rollout = (int)lategate_env_long("FULLGATE_A_ROLLOUT", MAX_PLIES);
+  const bool a_root = lategate_env_long("FULLGATE_A_ROOT", 0) != 0;
+  const int a_turnover = (int)lategate_env_long("FULLGATE_A_TURNOVER", 3);
+  const int a_turnover_min_bag =
+      (int)lategate_env_long("FULLGATE_A_TURNOVER_MIN_BAG", 6);
+  const int a_turnover_max_bag =
+      (int)lategate_env_long("FULLGATE_A_TURNOVER_MAX_BAG", 12);
+  const int a_deep_max_bag =
+      (int)lategate_env_long("FULLGATE_A_DEEP_MAX_BAG", 12);
+  const int a_deep_plies =
+      (int)lategate_env_long("FULLGATE_A_DEEP_PLIES", MAX_PLIES);
+
+  char cmd[LATEGATE_CMD_SIZE];
+  snprintf(cmd, sizeof(cmd),
+           "set -lex %s -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
+           "-numplays %ld -threads %ld -seed 7 -savesettings false -path %s "
+           "-twd %s -winpct %s",
+           lexicon, use_wmp, candidates, threads, data_path, twd_name,
+           win_pct_name);
+  Config *config = config_create_or_die(cmd);
+  char empty_cgp[LATEGATE_CMD_SIZE];
+  int cgp_len = snprintf(empty_cgp, sizeof(empty_cgp), "cgp ");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    cgp_len +=
+        snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+                 "%d%s", BOARD_DIM, row + 1 < BOARD_DIM ? "/" : "");
+  }
+  snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+           " / 0/0 0");
+  load_and_exec_config_or_die(config, empty_cgp);
+  Game *game = config_get_game(config);
+  WinPct *win_pcts = config_get_win_pcts(config);
+  if (win_pcts == NULL) {
+    log_fatal("fullgate needs a win percentage table");
+  }
+
+  const PlayChooserStrategy base_strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+      .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+      .sim_plies = 2,
+      .sim_max_candidates = (int)candidates,
+      .fixed_seconds_per_move = (double)tl_ms / 1000.0,
+      .win_pcts = win_pcts,
+      .num_threads = (int)threads,
+      .seed = (uint64_t)base_seed,
+      .set_twd_rollout_plies = true,
+      .utility_w_winpct = utility_w_winpct,
+      .utility_w_spread = utility_w_spread,
+      .utility_spread_scale = utility_spread_scale,
+  };
+  PlayChooserStrategy strategy_a = base_strategy;
+  strategy_a.twd_rollout_plies = a_rollout;
+  strategy_a.disable_root_twd = !a_root;
+  strategy_a.turnover_pool_size = a_turnover;
+  strategy_a.turnover_min_bag = a_turnover_min_bag;
+  strategy_a.turnover_max_bag = a_turnover_max_bag;
+  strategy_a.deep_sim_max_bag = a_deep_max_bag;
+  strategy_a.deep_sim_plies = a_deep_plies;
+  // B is stock: plain pool, no term in rollouts, 2-ply everywhere.
+  PlayChooserStrategy strategy_b = base_strategy;
+  strategy_b.twd_rollout_plies = 0;
+  strategy_b.disable_root_twd = true;
+  PlayChooser *chooser_a = play_chooser_create(&strategy_a);
+  PlayChooser *chooser_b = play_chooser_create(&strategy_b);
+  ErrorStack *error_stack = error_stack_create();
+
+  FILE *out = fopen_or_die(out_path, "we");
+  (void)fprintf(out, "pair,seed,game,a_first,a_score,b_score,a_spread,"
+                     "a_utility,moves,a_seconds,b_seconds\n");
+  const int64_t run_start_ns = ctimer_monotonic_ns();
+  long pairs_done = 0;
+  long games_played = 0;
+  double a_points = 0.0;
+  long a_spread_sum = 0;
+  double a_utility_sum = 0.0;
+  long pairs_a_both = 0;
+  long pairs_split = 0;
+  long pairs_b_both = 0;
+  int64_t a_total_ns = 0;
+  int64_t b_total_ns = 0;
+  while (pairs_done < num_pairs) {
+    if (run_seconds > 0 && ctimer_monotonic_ns() - run_start_ns >
+                               (int64_t)run_seconds * LATEGATE_NS_PER_SECOND) {
+      break;
+    }
+    const uint64_t pair_seed =
+        (uint64_t)base_seed * 1000003ULL + (uint64_t)pairs_done + 1;
+    double pair_points = 0.0;
+    for (int game_idx = 0; game_idx < 2; game_idx++) {
+      game_reset(game);
+      game_seed(game, pair_seed);
+      draw_starting_racks(game);
+      const int a_player = game_idx == 0
+                               ? game_get_player_on_turn_index(game)
+                               : 1 - game_get_player_on_turn_index(game);
+      int64_t a_game_ns = 0;
+      int64_t b_game_ns = 0;
+      int moves = 0;
+      while (!game_over(game) && moves < FULLGATE_MAX_MOVES) {
+        const bool a_to_move = game_get_player_on_turn_index(game) == a_player;
+        Move move;
+        const int64_t start_ns = ctimer_monotonic_ns();
+        play_chooser_choose_move(a_to_move ? chooser_a : chooser_b, game, &move,
+                                 error_stack);
+        const int64_t elapsed_ns = ctimer_monotonic_ns() - start_ns;
+        if (a_to_move) {
+          a_game_ns += elapsed_ns;
+        } else {
+          b_game_ns += elapsed_ns;
+        }
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_print_and_reset(error_stack);
+          log_fatal("fullgate: play chooser failed in pair %ld", pairs_done);
+        }
+        play_move(&move, game, NULL);
+        moves++;
+      }
+      const int a_score =
+          equity_to_int(player_get_score(game_get_player(game, a_player)));
+      const int b_score =
+          equity_to_int(player_get_score(game_get_player(game, 1 - a_player)));
+      const int a_spread = a_score - b_score;
+      double points = 0.0;
+      if (a_spread > 0) {
+        points = 1.0;
+      } else if (a_spread == 0) {
+        points = 0.5;
+      }
+      const double a_utility =
+          sim_utility_blend(points, int_to_equity(a_spread), utility_w_winpct,
+                            utility_w_spread, utility_spread_scale);
+      a_points += points;
+      pair_points += points;
+      a_spread_sum += a_spread;
+      a_utility_sum += a_utility;
+      a_total_ns += a_game_ns;
+      b_total_ns += b_game_ns;
+      games_played++;
+      (void)fprintf(out, "%ld,%llu,%d,%d,%d,%d,%d,%.6f,%d,%.3f,%.3f\n",
+                    pairs_done, (unsigned long long)pair_seed, game_idx,
+                    game_idx == 0 ? 1 : 0, a_score, b_score, a_spread,
+                    a_utility, moves,
+                    (double)a_game_ns / LATEGATE_NS_PER_SECOND,
+                    (double)b_game_ns / LATEGATE_NS_PER_SECOND);
+      (void)fflush(out);
+    }
+    if (pair_points > 1.5) {
+      pairs_a_both++;
+    } else if (pair_points < 0.5) {
+      pairs_b_both++;
+    } else {
+      pairs_split++;
+    }
+    pairs_done++;
+    if (pairs_done % FULLGATE_PROGRESS_EVERY == 0) {
+      printf("fullgate: %ld pairs (%.0fs), A %.2f%% over %ld games, spread "
+             "%+.2f, utility edge %+.4f (pairs A/split/B %ld/%ld/%ld), time "
+             "A/B %.3f\n",
+             pairs_done,
+             (double)(ctimer_monotonic_ns() - run_start_ns) /
+                 LATEGATE_NS_PER_SECOND,
+             100.0 * a_points / (double)games_played, games_played,
+             (double)a_spread_sum / (double)games_played,
+             a_utility_sum / (double)games_played - 0.5, pairs_a_both,
+             pairs_split, pairs_b_both,
+             b_total_ns > 0 ? (double)a_total_ns / (double)b_total_ns : 0.0);
+      (void)fflush(stdout);
+    }
+  }
+  const double a_win_rate =
+      games_played > 0 ? a_points / (double)games_played : 0.5;
+  const double sigma =
+      games_played > 0
+          ? sqrt(a_win_rate * (1.0 - a_win_rate) / (double)games_played)
+          : 0.0;
+  printf("fullgate: DONE %ld pairs, %ld games: A %.2f%% (+/- %.2f), spread "
+         "%+.2f/game, utility %.4f (edge %+.4f), pairs A-both/split/B-both "
+         "%ld/%ld/%ld; decision time A %.1fs B %.1fs (A/B %.3f)\n",
+         pairs_done, games_played, 100.0 * a_win_rate, 100.0 * sigma,
+         games_played > 0 ? (double)a_spread_sum / (double)games_played : 0.0,
+         games_played > 0 ? a_utility_sum / (double)games_played : 0.5,
+         games_played > 0 ? a_utility_sum / (double)games_played - 0.5 : 0.0,
+         pairs_a_both, pairs_split, pairs_b_both,
+         (double)a_total_ns / LATEGATE_NS_PER_SECOND,
+         (double)b_total_ns / LATEGATE_NS_PER_SECOND,
+         b_total_ns > 0 ? (double)a_total_ns / (double)b_total_ns : 0.0);
+  (void)fclose(out);
+  error_stack_destroy(error_stack);
+  play_chooser_destroy(chooser_a);
+  play_chooser_destroy(chooser_b);
+  config_destroy(config);
+}
+
+// Oracle pool collection (on-demand test "oraclepool").
+//
+// Like latepool, but across the whole game, with a wider union pool (plain
+// top ORACLE_TOP, defensive top ORACLE_TOP, and the ORACLE_TURNOVER
+// highest-turnover plays), many flat samples per candidate, and the
+// simmer's sample log switched on, so every candidate's running estimate is
+// written out at a fixed list of sample counts. A pool rule's pick at a
+// budget of k samples per candidate is then the candidate with the best
+// estimate at checkpoint k, and its regret against the oracle (the full
+// sample) can be computed offline for any rule and budget. The sim horizon
+// follows the test player: ORACLE_PLIES plies normally, ORACLE_DEEP_PLIES
+// while the bag holds at most ORACLE_DEEP_MAX_BAG tiles.
+//
+// Environment: ORACLE_OUT (oracle.csv), ORACLE_POSITIONS (10000),
+// ORACLE_SAMPLES (2000), ORACLE_TOP (30), ORACLE_TURNOVER (5), ORACLE_PLIES
+// (2), ORACLE_DEEP_MAX_BAG (12), ORACLE_DEEP_PLIES (MAX_PLIES),
+// ORACLE_ROLLOUT (MAX_PLIES), ORACLE_MIN_BAG (5), ORACLE_MAX_BAG (86),
+// ORACLE_MAX_TURNS (24), ORACLE_THREADS (16), ORACLE_SEED (1),
+// ORACLE_SIM_SEED (7), ORACLE_TWD, ORACLE_PATH, ORACLE_LEX, ORACLE_WMP,
+// ORACLE_WINPCT, ORACLE_UWIN_PCT (100), ORACLE_USPREAD_PCT (50),
+// ORACLE_USCALE (100).
+
+enum {
+  ORACLE_DEFAULT_POSITIONS = 10000,
+  ORACLE_DEFAULT_SAMPLES = 2000,
+  ORACLE_DEFAULT_TOP = 30,
+  ORACLE_DEFAULT_TURNOVER = 5,
+  ORACLE_SCAN_CAPACITY = 60,
+  ORACLE_NUM_CHECKPOINTS = 15,
+};
+
+static const int ORACLE_CHECKPOINTS[ORACLE_NUM_CHECKPOINTS] = {
+    10, 20, 30, 50, 75, 100, 150, 200, 300, 400, 500, 750, 1000, 1500, 2000};
+
+void test_oracle_pool(void) {
+  const char *out_path = lategate_env_string("ORACLE_OUT", "oracle.csv");
+  const long num_positions =
+      lategate_env_long("ORACLE_POSITIONS", ORACLE_DEFAULT_POSITIONS);
+  const long samples =
+      lategate_env_long("ORACLE_SAMPLES", ORACLE_DEFAULT_SAMPLES);
+  const long top = lategate_env_long("ORACLE_TOP", ORACLE_DEFAULT_TOP);
+  const long turnover =
+      lategate_env_long("ORACLE_TURNOVER", ORACLE_DEFAULT_TURNOVER);
+  const long plies = lategate_env_long("ORACLE_PLIES", 2);
+  const int deep_max_bag = (int)lategate_env_long("ORACLE_DEEP_MAX_BAG", 12);
+  const long deep_plies = lategate_env_long("ORACLE_DEEP_PLIES", MAX_PLIES);
+  const long rollout = lategate_env_long("ORACLE_ROLLOUT", MAX_PLIES);
+  const int min_bag = (int)lategate_env_long("ORACLE_MIN_BAG", 5);
+  const int max_bag = (int)lategate_env_long("ORACLE_MAX_BAG", 86);
+  const int max_turns = (int)lategate_env_long("ORACLE_MAX_TURNS", 24);
+  const long threads =
+      lategate_env_long("ORACLE_THREADS", LATEGATE_DEFAULT_THREADS);
+  const long base_seed =
+      lategate_env_long("ORACLE_SEED", LATEGATE_DEFAULT_SEED);
+  const long sim_seed = lategate_env_long("ORACLE_SIM_SEED", 7);
+  const char *twd_name = lategate_env_string("ORACLE_TWD", "gs050_105");
+  const char *data_path = lategate_env_string("ORACLE_PATH", "./data");
+  const char *lexicon = lategate_env_string("ORACLE_LEX", "CSW24");
+  const char *use_wmp = lategate_env_string("ORACLE_WMP", "true");
+  const char *win_pct_name = lategate_env_string("ORACLE_WINPCT", "winpct");
+  const double utility_w_winpct =
+      (double)lategate_env_long("ORACLE_UWIN_PCT", 100) / 100.0;
+  const double utility_w_spread =
+      (double)lategate_env_long("ORACLE_USPREAD_PCT", 50) / 100.0;
+  const double utility_spread_scale =
+      (double)lategate_env_long("ORACLE_USCALE", 100);
+
+  char cmd[LATEGATE_CMD_SIZE];
+  snprintf(cmd, sizeof(cmd),
+           "set -lex %s -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
+           "-numplays %ld -plies %ld -threads %ld -iter %ld -minp %ld -sr rr "
+           "-threshold none -scond none -cutoff 0 -seed %ld -savesettings "
+           "false -path %s -twd %s -winpct %s -twdrollout %ld",
+           lexicon, use_wmp, 2 * top + turnover, plies, threads,
+           (2 * top + turnover) * samples, samples, sim_seed, data_path,
+           twd_name, win_pct_name, rollout);
+  Config *config = config_create_or_die(cmd);
+  char empty_cgp[LATEGATE_CMD_SIZE];
+  int cgp_len = snprintf(empty_cgp, sizeof(empty_cgp), "cgp ");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    cgp_len +=
+        snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+                 "%d%s", BOARD_DIM, row + 1 < BOARD_DIM ? "/" : "");
+  }
+  snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+           " / 0/0 0");
+  load_and_exec_config_or_die(config, empty_cgp);
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  MoveList *pool = NULL;
+  SimResults *sim_results = config_get_sim_results(config);
+  sim_results_set_sample_log_capacity(sim_results, (int)samples);
+  MoveList *with_term = move_list_create((int)top);
+  MoveList *plain_scan = move_list_create(ORACLE_SCAN_CAPACITY);
+
+  FILE *out = fopen_or_die(out_path, "we");
+  (void)fprintf(out, "pos,seed,bag,plies,cand,rank_new,rank_old,rank_tiles,"
+                     "type,tiles_played,score,leave,twd,equity_old,equity_new,"
+                     "samples");
+  for (int cp = 0; cp < ORACLE_NUM_CHECKPOINTS; cp++) {
+    (void)fprintf(out, ",win_%d,spread_%d,util_%d", ORACLE_CHECKPOINTS[cp],
+                  ORACLE_CHECKPOINTS[cp], ORACLE_CHECKPOINTS[cp]);
+  }
+  (void)fprintf(out, ",move\n");
+  StringBuilder *move_sb = string_builder_create();
+  long positions_done = 0;
+  uint64_t sample_seed = (uint64_t)base_seed * 1000003ULL;
+  while (positions_done < num_positions) {
+    sample_seed++;
+    if (!latepool_sample_random_turn(game, sample_seed, max_turns, min_bag,
+                                     max_bag)) {
+      continue;
+    }
+    if (pool == NULL) {
+      load_and_exec_config_or_die(config, "gen");
+      pool = config_get_move_list(config);
+    }
+    const int player_index = game_get_player_on_turn_index(game);
+    const Player *player = game_get_player(game, player_index);
+    const KLV *klv = player_get_klv(player);
+    const Board *board = game_get_board(game);
+    const int bag_count = bag_get_letters(game_get_bag(game));
+
+    latepool_generate(game, with_term, false);
+    latepool_generate(game, plain_scan, true);
+    move_list_reset(pool);
+    for (int move_idx = 0; move_idx < move_list_get_count(with_term);
+         move_idx++) {
+      move_list_add_move(pool, move_list_get_move(with_term, move_idx));
+    }
+    for (int move_idx = 0;
+         move_idx < move_list_get_count(plain_scan) && move_idx < top;
+         move_idx++) {
+      const Move *move = move_list_get_move(plain_scan, move_idx);
+      if (latepool_rank(with_term, move) == 0) {
+        move_list_add_move(pool, move);
+      }
+    }
+    // The highest-turnover plays, best equity first within a tile count.
+    int turnover_added = 0;
+    for (int tiles = RACK_SIZE; tiles >= 1 && turnover_added < turnover;
+         tiles--) {
+      for (int scan_idx = 0; scan_idx < move_list_get_count(plain_scan) &&
+                             turnover_added < turnover;
+           scan_idx++) {
+        const Move *move = move_list_get_move(plain_scan, scan_idx);
+        if (move_get_tiles_played(move) != tiles ||
+            move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          continue;
+        }
+        bool in_pool = false;
+        for (int pool_idx = 0; pool_idx < move_list_get_count(pool);
+             pool_idx++) {
+          if (compare_moves_without_equity(move_list_get_move(pool, pool_idx),
+                                           move, true) == -1) {
+            in_pool = true;
+            break;
+          }
+        }
+        if (!in_pool) {
+          move_list_add_move(pool, move);
+          turnover_added++;
+        }
+      }
+    }
+    const int pool_size = move_list_get_count(pool);
+    if (pool_size < 2) {
+      continue;
+    }
+    const long position_plies = bag_count <= deep_max_bag ? deep_plies : plies;
+    snprintf(cmd, sizeof(cmd), "set -iter %ld -plies %ld",
+             (long)pool_size * samples, position_plies);
+    load_and_exec_config_or_die(config, cmd);
+    const error_code_t status =
+        config_simulate_and_return_status(config, NULL, NULL, sim_results);
+    if (status != ERROR_STATUS_SUCCESS) {
+      log_fatal("oraclepool: simulation failed with status %d", status);
+    }
+    const int num_plays = sim_results_get_number_of_plays(sim_results);
+
+    TWDEvalContext twd_eval_ctx;
+    twd_eval_context_disable(&twd_eval_ctx);
+    const TWDWeights *twd = player_get_twd(player);
+    if (twd != NULL) {
+      twd_eval_context_load(
+          &twd_eval_ctx, twd,
+          board_get_readonly_lanes(
+              board, board_get_cross_set_index(
+                         game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+                         player_index)),
+          ld, player_get_rack(player));
+    }
+    for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, play_idx);
+      const Move *move = simmed_play_get_move(simmed_play);
+      const int rank_new = latepool_rank(with_term, move);
+      const int rank_old = latepool_rank(plain_scan, move);
+      // Rank among the turnover picks: 1-based by tiles then equity, 0 if
+      // the move was not one of them.
+      int rank_tiles = 0;
+      {
+        int seen = 0;
+        for (int tiles = RACK_SIZE; tiles >= 1 && rank_tiles == 0; tiles--) {
+          for (int scan_idx = 0;
+               scan_idx < move_list_get_count(plain_scan) && rank_tiles == 0;
+               scan_idx++) {
+            const Move *scan_move = move_list_get_move(plain_scan, scan_idx);
+            if (move_get_tiles_played(scan_move) != tiles ||
+                move_get_type(scan_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+              continue;
+            }
+            seen++;
+            if (compare_moves_without_equity(scan_move, move, true) == -1) {
+              rank_tiles = seen;
+            }
+          }
+        }
+      }
+      Rack leave_rack;
+      rack_copy(&leave_rack, player_get_rack(player));
+      const Equity leave_value =
+          get_leave_value_for_move(klv, move, &leave_rack);
+      const Equity twd_penalty = twd_eval_move_penalty(&twd_eval_ctx, move);
+      const Equity equity_old =
+          rank_old > 0
+              ? move_get_equity(move_list_get_move(plain_scan, rank_old - 1))
+              : move_get_equity(move_list_get_move(with_term, rank_new - 1)) -
+                    twd_penalty;
+      const Equity equity_new = equity_old + twd_penalty;
+      const int num_logged = simmed_play_get_num_logged_samples(simmed_play);
+      string_builder_clear(move_sb);
+      string_builder_add_move(move_sb, board, move, ld, false);
+      (void)fprintf(out,
+                    "%ld,%llu,%d,%ld,%d,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,"
+                    "%.3f,%.3f,%d",
+                    positions_done, (unsigned long long)sample_seed, bag_count,
+                    position_plies, play_idx, rank_new, rank_old, rank_tiles,
+                    (int)move_get_type(move), move_get_tiles_played(move),
+                    equity_to_double(move_get_score(move)),
+                    equity_to_double(leave_value),
+                    equity_to_double(twd_penalty), equity_to_double(equity_old),
+                    equity_to_double(equity_new), num_logged);
+      // Running means at each checkpoint, in seed order.
+      double win_sum = 0.0;
+      double spread_sum = 0.0;
+      double util_sum = 0.0;
+      int next_cp = 0;
+      for (int sample_idx = 0;
+           sample_idx < num_logged && next_cp < ORACLE_NUM_CHECKPOINTS;
+           sample_idx++) {
+        const double win =
+            simmed_play_get_logged_win_pct(simmed_play, sample_idx);
+        const double spread =
+            simmed_play_get_logged_equity(simmed_play, sample_idx);
+        win_sum += win;
+        spread_sum += spread;
+        util_sum +=
+            sim_utility_blend(win, double_to_equity(spread), utility_w_winpct,
+                              utility_w_spread, utility_spread_scale);
+        const int count = sample_idx + 1;
+        while (next_cp < ORACLE_NUM_CHECKPOINTS &&
+               count == ORACLE_CHECKPOINTS[next_cp]) {
+          (void)fprintf(out, ",%.6f,%.3f,%.6f", win_sum / count,
+                        spread_sum / count, util_sum / count);
+          next_cp++;
+        }
+      }
+      for (; next_cp < ORACLE_NUM_CHECKPOINTS; next_cp++) {
+        (void)fprintf(out, ",,,");
+      }
+      (void)fprintf(out, ",%s\n", string_builder_peek(move_sb));
+    }
+    (void)fflush(out);
+    positions_done++;
+    if (positions_done % LATEPOOL_PROGRESS_EVERY == 0) {
+      printf("oraclepool: %ld positions\n", positions_done);
+      (void)fflush(stdout);
+    }
+  }
+  printf("oraclepool: DONE %ld positions to %s\n", positions_done, out_path);
+  string_builder_destroy(move_sb);
+  (void)fclose(out);
+  move_list_destroy(with_term);
+  move_list_destroy(plain_scan);
+  config_destroy(config);
+}
