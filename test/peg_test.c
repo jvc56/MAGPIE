@@ -1339,8 +1339,8 @@ static void peg_test_count_completed_candidates(
   (void)mean_spread;
   (void)scen_done;
   (void)reordered;
-  PegInterruptedCandidateContext *context = user_data;
   if (stage_idx == 2) {
+    PegInterruptedCandidateContext *context = user_data;
     context->completed_candidates++;
   }
 }

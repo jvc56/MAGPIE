@@ -131,6 +131,7 @@ typedef struct PegWorker {
 // not spend most of its clock zeroing tables it will never consult.
 static TranspositionTable *peg_worker_get_endgame_tt(PegWorker *worker) {
   if (worker->eg_tt == NULL) {
+    assert(worker->eg_tt_fraction > 0.0);
     worker->eg_tt = transposition_table_create(worker->eg_tt_fraction);
   }
   return worker->eg_tt;
