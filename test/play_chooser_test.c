@@ -132,6 +132,49 @@ static void drain_bag(const Game *game) {
   }
 }
 
+// An explicit 125 ms endgame budget must reach the solver even when the
+// game clock has expired. Static play scores 13 with QA(T); a two-ply search
+// spends A and E for 6 instead, denying the opponent's immediate Z(AT)I
+// outplay.
+void test_play_chooser_fixed_short_budget(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/7AT6/15/15/15/15/15/15/15 "
+              "AEQ/IZ 0/0 0 -lex CSW21;");
+  Game *game = config_get_game(config);
+  drain_bag(game);
+  GameTimer game_timer;
+  game_timer_reset(&game_timer, 1.0);
+  game_timer.seconds_used[game_get_player_on_turn_index(game)] = 1.0;
+  PlayChooserStrategy strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+      .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+      .endgame_plies = 2,
+      .game_timer = &game_timer,
+      .num_threads = 1,
+  };
+  ErrorStack *error_stack = error_stack_create();
+  PlayChooser *clock_chooser = play_chooser_create(&strategy);
+  Move static_move;
+  play_chooser_choose_move(clock_chooser, game, &static_move, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(move_get_tiles_played(&static_move) == 2);
+  assert_move_score(&static_move, 13);
+  play_chooser_destroy(clock_chooser);
+
+  strategy.fixed_seconds_per_move = 0.125;
+  PlayChooser *fixed_chooser = play_chooser_create(&strategy);
+  Move searched_move;
+  play_chooser_choose_move(fixed_chooser, game, &searched_move, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(move_get_tiles_played(&searched_move) == 2);
+  assert_move_score(&searched_move, 6);
+  play_chooser_destroy(fixed_chooser);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // The opponent holds AABDDET, whose only bingo is the triple-triple
 // 1H DEADB(E)AT for 185 through the lane's E (AABDDET has no 7-letter
 // words and DEADBEAT is its only 8-letter word with E placeable on the
@@ -976,6 +1019,7 @@ static void test_challenge_stage_combinations(void) {
 void test_play_chooser(void) {
   test_game_timer();
   test_play_chooser_clock_budget();
+  test_play_chooser_fixed_short_budget();
   test_keep_phony_for_triple_triple();
   test_challenge_off_blocks_bingo();
   test_endgame_keep_phony_for_only_q_play();

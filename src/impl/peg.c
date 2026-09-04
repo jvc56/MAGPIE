@@ -3010,10 +3010,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
               args->include_per_scenario ? &stage_outcomes[cand_idx] : NULL);
           restaged[cand_idx].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
           peg_poll_set_evaluating(args->poll, -1, 0);
-          // If the deadline passed while this candidate was evaluating, some of
-          // its scenarios bailed (above), so its score is incomplete — drop it
-          // rather than show or rank a partial result, and stop the stage.
-          if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+          // A deadline or user interrupt can leave scenarios unscored. Require
+          // the full weight carried from this candidate's preceding stage
+          // before publishing its score or captured outcomes.
+          if (peg_should_stop(deadline_ns, args->thread_control) ||
+              restaged[cand_idx].weight_sum < ranked[cand_idx].weight_sum) {
             if (args->include_per_scenario) {
               free(stage_outcomes[cand_idx].rows);
             }

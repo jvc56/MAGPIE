@@ -567,7 +567,10 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
       play_chooser_get_eval_for_phase(strategy, game);
   const double budget_seconds =
       play_chooser_get_seconds_for_move(strategy, game);
-  if (eval != PLAY_CHOOSER_EVAL_STATIC &&
+  // Clock-derived budgets reserve enough time for a static fallback. An
+  // explicit fixed budget must still reach the requested evaluator.
+  if (strategy->fixed_seconds_per_move <= 0.0 &&
+      eval != PLAY_CHOOSER_EVAL_STATIC &&
       budget_seconds < play_chooser_get_min_budget_for_eval(eval)) {
     play_chooser_choose_static_move(play_chooser, game, out_move);
     return;
