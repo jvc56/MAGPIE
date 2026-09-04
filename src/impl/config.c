@@ -229,6 +229,8 @@ typedef enum {
   ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_TWD_ROLLOUT_PLIES,
   ARG_TOKEN_TWD_LEAF,
+  ARG_TOKEN_NESTED_REPLY_CANDIDATES,
+  ARG_TOKEN_NESTED_REPLY_SAMPLES,
   ARG_TOKEN_TWD_LABEL_PLIES,
   ARG_TOKEN_TWD_COMBINE_GAMMA,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
@@ -418,6 +420,9 @@ struct Config {
   int twd_rollout_plies;
   // See SimArgs.twd_leaf.
   bool twd_leaf;
+  // See SimArgs.nested_reply_candidates / nested_reply_samples.
+  int nested_reply_candidates;
+  int nested_reply_samples;
   // Plies of net result a TWS defense training label spans.
   int twd_label_plies;
   // See TWDWeights.combine_gamma; used when twdgen bootstraps weights.
@@ -2207,6 +2212,18 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "each player's own settings, 0 confines it to the candidate "
              "plays at the root, and 1 adds the opponent's immediate reply.";
       break;
+    case ARG_TOKEN_NESTED_REPLY_CANDIDATES:
+      usages[0] = "<candidates>";
+      text = "Specifies how many plain-static candidates an inner flat sim "
+             "chooses the opponent's reply from in every rollout's first ply "
+             "(0, the default, keeps the static reply). A referee setting, "
+             "far too slow for play.";
+      break;
+    case ARG_TOKEN_NESTED_REPLY_SAMPLES:
+      usages[0] = "<samples>";
+      text = "Specifies how many plain playouts to the end of the game the "
+             "inner sim gives each candidate reply (see nestcands).";
+      break;
     case ARG_TOKEN_TWD_LEAF:
       usages[0] = "<true_or_false>";
       text = "Specifies whether the simulating player's TWS defense term is "
@@ -2485,6 +2502,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
         ARG_TOKEN_TWD_ROLLOUT_PLIES,       /* twdrollout */
         ARG_TOKEN_TWD_LEAF,                /* twdleaf */
+        ARG_TOKEN_NESTED_REPLY_CANDIDATES, /* nestcands */
+        ARG_TOKEN_NESTED_REPLY_SAMPLES,    /* nestsamples */
         ARG_TOKEN_TWD_LABEL_PLIES,         /* twdplies */
         ARG_TOKEN_TWD_COMBINE_GAMMA,       /* twdgamma */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
@@ -3028,6 +3047,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       sim_args);
   sim_args->twd_rollout_plies = config->twd_rollout_plies;
   sim_args->twd_leaf = config->twd_leaf;
+  sim_args->nested_reply_candidates = config->nested_reply_candidates;
+  sim_args->nested_reply_samples = config->nested_reply_samples;
 }
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
@@ -3870,6 +3891,14 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->p2_sim_args.twd_rollout_plies = config->twd_rollout_plies;
   autoplay_args->p1_sim_args.twd_leaf = config->twd_leaf;
   autoplay_args->p2_sim_args.twd_leaf = config->twd_leaf;
+  autoplay_args->p1_sim_args.nested_reply_candidates =
+      config->nested_reply_candidates;
+  autoplay_args->p2_sim_args.nested_reply_candidates =
+      config->nested_reply_candidates;
+  autoplay_args->p1_sim_args.nested_reply_samples =
+      config->nested_reply_samples;
+  autoplay_args->p2_sim_args.nested_reply_samples =
+      config->nested_reply_samples;
 
   const double utility_win_pct[2] = {config->p1_utility_w_winpct,
                                      config->p2_utility_w_winpct};
@@ -8011,6 +8040,16 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config_load_int(config, ARG_TOKEN_NESTED_REPLY_CANDIDATES, 0, 1000,
+                  &config->nested_reply_candidates, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_NESTED_REPLY_SAMPLES, 0, 100000,
+                  &config->nested_reply_samples, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   config_load_bool(config, ARG_TOKEN_P1_SIM_WITH_INFERENCE,
                    &config->p1_sim_with_inference, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -9600,6 +9639,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
   arg(ARG_TOKEN_TWD_ROLLOUT_PLIES, "twdrollout", 1, 1);
   arg(ARG_TOKEN_TWD_LEAF, "twdleaf", 1, 1);
+  arg(ARG_TOKEN_NESTED_REPLY_CANDIDATES, "nestcands", 1, 1);
+  arg(ARG_TOKEN_NESTED_REPLY_SAMPLES, "nestsamples", 1, 1);
   arg(ARG_TOKEN_TWD_LABEL_PLIES, "twdplies", 1, 1);
   arg(ARG_TOKEN_TWD_COMBINE_GAMMA, "twdgamma", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
@@ -9706,6 +9747,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->sim_with_inference = true;
   config->twd_rollout_plies = SIM_TWD_ROLLOUT_PLAYER_SETTINGS;
   config->twd_leaf = false;
+  config->nested_reply_candidates = 0;
+  config->nested_reply_samples = 0;
   config->twd_label_plies = 1;
   config->twd_combine_gamma = TWD_TRAINING_COMBINE_GAMMA;
   config->p1_sim_plies = 0;
@@ -10227,6 +10270,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_TWD_LEAF:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->twd_leaf);
+      break;
+    case ARG_TOKEN_NESTED_REPLY_CANDIDATES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->nested_reply_candidates);
+      break;
+    case ARG_TOKEN_NESTED_REPLY_SAMPLES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->nested_reply_samples);
       break;
     case ARG_TOKEN_TWD_LABEL_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

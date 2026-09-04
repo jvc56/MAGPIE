@@ -1250,3 +1250,311 @@ void test_oracle_pool(void) {
   move_list_destroy(plain_scan);
   config_destroy(config);
 }
+
+// Nested-referee pool (on-demand test "nestpool").
+//
+// Judges rollout policies with a referee that uses neither: in each
+// pre-endgame position the candidates whose choice is in question (the plain
+// and defensive static top picks, and the top NEST_KEEP of two screening
+// sims, one with plain rollouts and one with defense-aware rollouts) are
+// re-valued by an oracle sim in which the opponent's immediate reply is
+// chosen by an inner flat sim (NEST_CANDS plain-static candidates,
+// NEST_INNER_SAMPLES plain playouts each, common random numbers) and every
+// other ply is plain static. Each row records a candidate's rank in both
+// static rankings, its value and rank under each screening sim, and its
+// referee value, so the regret of each pick against the referee's best is
+// computable offline.
+//
+// Environment: NEST_OUT (nestpool.csv), NEST_POSITIONS (1500), NEST_MIN_BAG
+// (5), NEST_MAX_BAG (12), NEST_TOP (15), NEST_TURNOVER (3),
+// NEST_SCREEN_SAMPLES (500), NEST_KEEP (3), NEST_ORACLE_SAMPLES (300),
+// NEST_CANDS (8), NEST_INNER_SAMPLES (24), NEST_PLIES (MAX_PLIES),
+// NEST_ROLLOUT (MAX_PLIES, the defense-rollout screening's ply count),
+// NEST_THREADS (16), NEST_SEED (1), NEST_SIM_SEED (7), NEST_TWD, NEST_PATH,
+// NEST_LEX, NEST_WMP, NEST_WINPCT.
+
+enum {
+  NEST_DEFAULT_POSITIONS = 1500,
+  NEST_DEFAULT_SCREEN_SAMPLES = 500,
+  NEST_DEFAULT_KEEP = 3,
+  NEST_DEFAULT_ORACLE_SAMPLES = 300,
+  NEST_DEFAULT_CANDS = 8,
+  NEST_DEFAULT_INNER_SAMPLES = 24,
+  NEST_MAX_POOL = 64,
+};
+
+typedef struct NestCandidate {
+  Move move;
+  int rank_old;
+  int rank_new;
+  int rank_tiles;
+  double screen_util[2];
+  int screen_rank[2];
+} NestCandidate;
+
+static int nest_find(const NestCandidate *cands, int num, const Move *move) {
+  for (int idx = 0; idx < num; idx++) {
+    if (compare_moves_without_equity(&cands[idx].move, move, true) == -1) {
+      return idx;
+    }
+  }
+  return -1;
+}
+
+void test_nest_pool(void) {
+  const char *out_path = lategate_env_string("NEST_OUT", "nestpool.csv");
+  const long num_positions =
+      lategate_env_long("NEST_POSITIONS", NEST_DEFAULT_POSITIONS);
+  const int min_bag = (int)lategate_env_long("NEST_MIN_BAG", 5);
+  const int max_bag = (int)lategate_env_long("NEST_MAX_BAG", 12);
+  const long top = lategate_env_long("NEST_TOP", LATEPOOL_DEFAULT_TOP);
+  const long turnover = lategate_env_long("NEST_TURNOVER", 3);
+  const long screen_samples =
+      lategate_env_long("NEST_SCREEN_SAMPLES", NEST_DEFAULT_SCREEN_SAMPLES);
+  const int keep = (int)lategate_env_long("NEST_KEEP", NEST_DEFAULT_KEEP);
+  const long oracle_samples =
+      lategate_env_long("NEST_ORACLE_SAMPLES", NEST_DEFAULT_ORACLE_SAMPLES);
+  const long nest_cands = lategate_env_long("NEST_CANDS", NEST_DEFAULT_CANDS);
+  const long inner_samples =
+      lategate_env_long("NEST_INNER_SAMPLES", NEST_DEFAULT_INNER_SAMPLES);
+  const long plies = lategate_env_long("NEST_PLIES", MAX_PLIES);
+  const long rollout = lategate_env_long("NEST_ROLLOUT", MAX_PLIES);
+  const long threads =
+      lategate_env_long("NEST_THREADS", LATEGATE_DEFAULT_THREADS);
+  const long base_seed = lategate_env_long("NEST_SEED", LATEGATE_DEFAULT_SEED);
+  const long sim_seed = lategate_env_long("NEST_SIM_SEED", 7);
+  const char *twd_name = lategate_env_string("NEST_TWD", "gs050_105");
+  const char *data_path = lategate_env_string("NEST_PATH", "./data");
+  const char *lexicon = lategate_env_string("NEST_LEX", "CSW24");
+  const char *use_wmp = lategate_env_string("NEST_WMP", "true");
+  const char *win_pct_name = lategate_env_string("NEST_WINPCT", "winpct");
+
+  char cmd[LATEGATE_CMD_SIZE];
+  snprintf(cmd, sizeof(cmd),
+           "set -lex %s -wmp %s -s1 equity -s2 equity -r1 all -r2 all "
+           "-numplays %ld -plies %ld -threads %ld -iter %ld -minp %ld -sr rr "
+           "-threshold none -scond none -cutoff 0 -seed %ld -savesettings "
+           "false -path %s -twd %s -winpct %s -twdrollout 0 -nestcands 0 "
+           "-nestsamples 0",
+           lexicon, use_wmp, 2 * top + turnover, plies, threads,
+           (2 * top + turnover) * screen_samples, screen_samples, sim_seed,
+           data_path, twd_name, win_pct_name);
+  Config *config = config_create_or_die(cmd);
+  char empty_cgp[LATEGATE_CMD_SIZE];
+  int cgp_len = snprintf(empty_cgp, sizeof(empty_cgp), "cgp ");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    cgp_len +=
+        snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+                 "%d%s", BOARD_DIM, row + 1 < BOARD_DIM ? "/" : "");
+  }
+  snprintf(empty_cgp + cgp_len, sizeof(empty_cgp) - (size_t)cgp_len,
+           " / 0/0 0");
+  load_and_exec_config_or_die(config, empty_cgp);
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = config_get_ld(config);
+  MoveList *pool = NULL;
+  SimResults *sim_results = config_get_sim_results(config);
+  MoveList *with_term = move_list_create((int)top);
+  MoveList *plain_scan = move_list_create(ORACLE_SCAN_CAPACITY);
+  NestCandidate *cands = malloc_or_die(sizeof(NestCandidate) * NEST_MAX_POOL);
+
+  FILE *out = fopen_or_die(out_path, "we");
+  (void)fprintf(out, "pos,seed,bag,cand,rank_old,rank_new,rank_tiles,"
+                     "tiles_played,plain_util,plain_rank,defense_util,"
+                     "defense_rank,oracle_util,oracle_util_sd,oracle_win,"
+                     "oracle_spread,samples,move\n");
+  StringBuilder *move_sb = string_builder_create();
+  long positions_done = 0;
+  uint64_t sample_seed = (uint64_t)base_seed * 1000003ULL;
+  while (positions_done < num_positions) {
+    sample_seed++;
+    if (!lategate_sample_position(game, sample_seed, min_bag, max_bag)) {
+      continue;
+    }
+    if (pool == NULL) {
+      load_and_exec_config_or_die(config, "gen");
+      pool = config_get_move_list(config);
+    }
+    const Board *board = game_get_board(game);
+    const int bag_count = bag_get_letters(game_get_bag(game));
+
+    // The screening pool: plain top, defensive top, and turnover extras.
+    latepool_generate(game, with_term, false);
+    latepool_generate(game, plain_scan, true);
+    int num_cands = 0;
+    for (int move_idx = 0;
+         move_idx < move_list_get_count(with_term) && num_cands < NEST_MAX_POOL;
+         move_idx++) {
+      move_copy(&cands[num_cands].move,
+                move_list_get_move(with_term, move_idx));
+      num_cands++;
+    }
+    for (int move_idx = 0; move_idx < move_list_get_count(plain_scan) &&
+                           move_idx < top && num_cands < NEST_MAX_POOL;
+         move_idx++) {
+      const Move *move = move_list_get_move(plain_scan, move_idx);
+      if (nest_find(cands, num_cands, move) < 0) {
+        move_copy(&cands[num_cands].move, move);
+        num_cands++;
+      }
+    }
+    int turnover_added = 0;
+    for (int tiles = RACK_SIZE; tiles >= 1 && turnover_added < turnover;
+         tiles--) {
+      for (int scan_idx = 0;
+           scan_idx < move_list_get_count(plain_scan) &&
+           turnover_added < turnover && num_cands < NEST_MAX_POOL;
+           scan_idx++) {
+        const Move *move = move_list_get_move(plain_scan, scan_idx);
+        if (move_get_tiles_played(move) != tiles ||
+            move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
+            nest_find(cands, num_cands, move) >= 0) {
+          continue;
+        }
+        move_copy(&cands[num_cands].move, move);
+        num_cands++;
+        turnover_added++;
+      }
+    }
+    if (num_cands < 2) {
+      continue;
+    }
+    for (int idx = 0; idx < num_cands; idx++) {
+      cands[idx].rank_old = latepool_rank(plain_scan, &cands[idx].move);
+      cands[idx].rank_new = latepool_rank(with_term, &cands[idx].move);
+      int rank_tiles = 0;
+      int seen = 0;
+      for (int tiles = RACK_SIZE; tiles >= 1 && rank_tiles == 0; tiles--) {
+        for (int scan_idx = 0;
+             scan_idx < move_list_get_count(plain_scan) && rank_tiles == 0;
+             scan_idx++) {
+          const Move *scan_move = move_list_get_move(plain_scan, scan_idx);
+          if (move_get_tiles_played(scan_move) != tiles ||
+              move_get_type(scan_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+            continue;
+          }
+          seen++;
+          if (compare_moves_without_equity(scan_move, &cands[idx].move, true) ==
+              -1) {
+            rank_tiles = seen;
+          }
+        }
+      }
+      cands[idx].rank_tiles = rank_tiles;
+      cands[idx].screen_rank[0] = 0;
+      cands[idx].screen_rank[1] = 0;
+    }
+
+    // Two screening sims over the whole pool: plain rollouts, then
+    // defense-aware rollouts.
+    for (int screen = 0; screen < 2; screen++) {
+      move_list_reset(pool);
+      for (int idx = 0; idx < num_cands; idx++) {
+        move_list_add_move(pool, &cands[idx].move);
+      }
+      snprintf(cmd, sizeof(cmd),
+               "set -iter %ld -minp %ld -twdrollout %ld -nestcands 0 "
+               "-nestsamples 0",
+               (long)num_cands * screen_samples, screen_samples,
+               screen == 0 ? 0L : rollout);
+      load_and_exec_config_or_die(config, cmd);
+      const error_code_t status =
+          config_simulate_and_return_status(config, NULL, NULL, sim_results);
+      if (status != ERROR_STATUS_SUCCESS) {
+        log_fatal("nestpool: screening sim failed with status %d", status);
+      }
+      const int num_plays = sim_results_get_number_of_plays(sim_results);
+      for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+        const SimmedPlay *simmed_play =
+            sim_results_get_simmed_play(sim_results, play_idx);
+        const int idx =
+            nest_find(cands, num_cands, simmed_play_get_move(simmed_play));
+        if (idx >= 0) {
+          cands[idx].screen_util[screen] =
+              stat_get_mean(simmed_play_get_utility_stat(simmed_play));
+        }
+      }
+      // Ranks within this screening.
+      for (int idx = 0; idx < num_cands; idx++) {
+        int rank = 1;
+        for (int other = 0; other < num_cands; other++) {
+          if (cands[other].screen_util[screen] >
+                  cands[idx].screen_util[screen] ||
+              (cands[other].screen_util[screen] ==
+                   cands[idx].screen_util[screen] &&
+               other < idx)) {
+            rank++;
+          }
+        }
+        cands[idx].screen_rank[screen] = rank;
+      }
+    }
+
+    // The referee set: both static top picks and each screening's top keep.
+    move_list_reset(pool);
+    int num_referee = 0;
+    for (int idx = 0; idx < num_cands; idx++) {
+      const bool chosen = cands[idx].rank_old == 1 ||
+                          cands[idx].rank_new == 1 ||
+                          cands[idx].screen_rank[0] <= keep ||
+                          cands[idx].screen_rank[1] <= keep;
+      if (chosen) {
+        move_list_add_move(pool, &cands[idx].move);
+        num_referee++;
+      }
+    }
+    if (num_referee < 2) {
+      continue;
+    }
+    snprintf(cmd, sizeof(cmd),
+             "set -iter %ld -minp %ld -twdrollout 0 -nestcands %ld "
+             "-nestsamples %ld",
+             (long)num_referee * oracle_samples, oracle_samples, nest_cands,
+             inner_samples);
+    load_and_exec_config_or_die(config, cmd);
+    const error_code_t status =
+        config_simulate_and_return_status(config, NULL, NULL, sim_results);
+    if (status != ERROR_STATUS_SUCCESS) {
+      log_fatal("nestpool: referee sim failed with status %d", status);
+    }
+    const int num_plays = sim_results_get_number_of_plays(sim_results);
+    for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+      const SimmedPlay *simmed_play =
+          sim_results_get_simmed_play(sim_results, play_idx);
+      const Move *move = simmed_play_get_move(simmed_play);
+      const int idx = nest_find(cands, num_cands, move);
+      if (idx < 0) {
+        continue;
+      }
+      const Stat *util_stat = simmed_play_get_utility_stat(simmed_play);
+      string_builder_clear(move_sb);
+      string_builder_add_move(move_sb, board, move, ld, false);
+      (void)fprintf(out,
+                    "%ld,%llu,%d,%d,%d,%d,%d,%d,%.6f,%d,%.6f,%d,%.6f,%.6f,"
+                    "%.6f,%.3f,%llu,%s\n",
+                    positions_done, (unsigned long long)sample_seed, bag_count,
+                    play_idx, cands[idx].rank_old, cands[idx].rank_new,
+                    cands[idx].rank_tiles, move_get_tiles_played(move),
+                    cands[idx].screen_util[0], cands[idx].screen_rank[0],
+                    cands[idx].screen_util[1], cands[idx].screen_rank[1],
+                    stat_get_mean(util_stat), stat_get_stdev(util_stat),
+                    stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)),
+                    stat_get_mean(simmed_play_get_equity_stat(simmed_play)),
+                    (unsigned long long)stat_get_num_samples(util_stat),
+                    string_builder_peek(move_sb));
+    }
+    (void)fflush(out);
+    positions_done++;
+    if (positions_done % LATEPOOL_PROGRESS_EVERY == 0) {
+      printf("nestpool: %ld positions\n", positions_done);
+      (void)fflush(stdout);
+    }
+  }
+  printf("nestpool: DONE %ld positions to %s\n", positions_done, out_path);
+  string_builder_destroy(move_sb);
+  (void)fclose(out);
+  free(cands);
+  move_list_destroy(with_term);
+  move_list_destroy(plain_scan);
+  config_destroy(config);
+}

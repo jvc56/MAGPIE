@@ -61,6 +61,14 @@ typedef struct SimArgs {
   // horizon by about that much for one context load per rollout.
   // Defaulted false by sim_args_fill.
   bool twd_leaf;
+  // Nested opponent reply: when nested_reply_candidates > 0, the first ply
+  // of every rollout (the opponent's reply) is chosen by an inner flat sim
+  // over that many plain-static candidates, nested_reply_samples plain
+  // playouts each to the end of the game with common random numbers,
+  // instead of by static equity. Every other ply stays as configured. A
+  // stronger opponent model for a referee sim; far too slow for play.
+  int nested_reply_candidates;
+  int nested_reply_samples;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -126,6 +134,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->twd_rollout_plies = SIM_TWD_ROLLOUT_PLAYER_SETTINGS;
   sim_args->twd_leaf = false;
+  sim_args->nested_reply_candidates = 0;
+  sim_args->nested_reply_samples = 0;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

@@ -2,8 +2,11 @@
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/sim_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -22,14 +25,22 @@
 #include "../ent/xoshiro.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
+#include "../util/math_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
+#include "move_gen.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+enum {
+  // Seeds kept per nested reply decision; inner sample counts above this
+  // are capped.
+  RV_NESTED_MAX_SAMPLES = 256,
+};
 
 #define SIMILARITY_EPSILON 1e-6
 
@@ -381,6 +392,14 @@ typedef struct SimmerWorker {
   // For the leaf defense term (see SimArgs.twd_leaf); owned here rather
   // than on the sampler's stack, since it is large.
   TWDEvalContext *twd_eval_ctx;
+  // For the nested opponent reply (see SimArgs.nested_reply_candidates):
+  // a scratch game for the inner playouts, the inner candidate list, a
+  // one-move list for the inner playouts' static choices, and the chosen
+  // reply, which must outlive the inner lists.
+  Game *inner_game;
+  MoveList *inner_candidates;
+  MoveList *inner_playout_list;
+  Move nested_move;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -417,6 +436,9 @@ typedef struct Simmer {
   const TWDWeights *root_twd;
   // See SimArgs.twd_leaf.
   bool twd_leaf;
+  // See SimArgs.nested_reply_candidates.
+  int nested_reply_candidates;
+  int nested_reply_samples;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -428,6 +450,10 @@ SimmerWorker *simmer_create_worker(const Game *game) {
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   simmer_worker->twd_eval_ctx = malloc_or_die(sizeof(TWDEvalContext));
+  simmer_worker->inner_game = game_duplicate(game);
+  game_set_backup_mode(simmer_worker->inner_game, BACKUP_MODE_OFF);
+  simmer_worker->inner_candidates = NULL;
+  simmer_worker->inner_playout_list = move_list_create(1);
   return simmer_worker;
 }
 
@@ -443,7 +469,97 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
   free(simmer_worker->twd_eval_ctx);
+  game_destroy(simmer_worker->inner_game);
+  move_list_destroy(simmer_worker->inner_candidates);
+  move_list_destroy(simmer_worker->inner_playout_list);
   free(simmer_worker);
+}
+
+// Chooses the player on turn's move by an inner flat sim: each of the top
+// nested_reply_candidates plain-static candidates gets nested_reply_samples
+// plain-static playouts to the end of the game (or the ply cap, valued by
+// the win table), with the same draw seeds for every candidate, and the
+// best mean utility wins. Returns NULL when there are no candidates.
+static const Move *rv_nested_reply(const Simmer *simmer,
+                                   SimmerWorker *simmer_worker, Game *game) {
+  if (simmer_worker->inner_candidates == NULL) {
+    simmer_worker->inner_candidates =
+        move_list_create(simmer->nested_reply_candidates);
+  }
+  MoveList *candidates = simmer_worker->inner_candidates;
+  move_list_reset(candidates);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = candidates,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .disable_twd = true,
+  };
+  generate_moves(&gen_args);
+  const int num_candidates = move_list_get_count(candidates);
+  if (num_candidates == 0) {
+    return NULL;
+  }
+  move_list_sort_moves(candidates);
+  if (num_candidates == 1) {
+    move_copy(&simmer_worker->nested_move, move_list_get_move(candidates, 0));
+    return &simmer_worker->nested_move;
+  }
+  const int mover = game_get_player_on_turn_index(game);
+  uint64_t seeds[RV_NESTED_MAX_SAMPLES];
+  const int num_samples = simmer->nested_reply_samples < RV_NESTED_MAX_SAMPLES
+                              ? simmer->nested_reply_samples
+                              : RV_NESTED_MAX_SAMPLES;
+  for (int sample_idx = 0; sample_idx < num_samples; sample_idx++) {
+    seeds[sample_idx] = prng_next(simmer_worker->prng);
+  }
+  Game *inner = simmer_worker->inner_game;
+  int best_idx = 0;
+  double best_total = -1.0;
+  for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+    double total = 0.0;
+    for (int sample_idx = 0; sample_idx < num_samples; sample_idx++) {
+      game_copy(inner, game);
+      game_seed(inner, seeds[sample_idx]);
+      play_move(move_list_get_move(candidates, cand_idx), inner, NULL);
+      for (int ply = 0; ply < MAX_PLIES && !game_over(inner); ply++) {
+        const Move *reply = get_top_equity_move_with_twd(
+            inner, simmer_worker->inner_playout_list, NULL, true);
+        play_move(reply, inner, NULL);
+      }
+      const Equity spread = player_get_score(game_get_player(inner, mover)) -
+                            player_get_score(game_get_player(inner, 1 - mover));
+      double win;
+      if (game_over(inner)) {
+        win = spread > 0 ? 1.0 : (spread == 0 ? 0.5 : 0.0);
+      } else {
+        // The table gives the player on turn's win% from their spread.
+        const int on_turn = game_get_player_on_turn_index(inner);
+        const int unseen = bag_get_letters(game_get_bag(inner)) +
+                           rack_get_total_letters(player_get_rack(
+                               game_get_player(inner, 1 - on_turn)));
+        const int spread_points =
+            (int)lround(equity_to_double(on_turn == mover ? spread : -spread));
+        const double on_turn_win =
+            (double)win_pct_get(simmer->win_pcts, spread_points, unseen);
+        win = on_turn == mover ? on_turn_win : 1.0 - on_turn_win;
+      }
+      total += sim_utility_blend(win, spread, simmer->utility_w_winpct,
+                                 simmer->utility_w_spread,
+                                 simmer->utility_spread_scale);
+    }
+    if (total > best_total) {
+      best_total = total;
+      best_idx = cand_idx;
+    }
+  }
+  move_copy(&simmer_worker->nested_move,
+            move_list_get_move(candidates, best_idx));
+  return &simmer_worker->nested_move;
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
@@ -534,8 +650,15 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
         disable_twd = true;
       }
     }
-    const Move *best_play = get_top_equity_move_with_twd(
-        game, move_list, override_twd, disable_twd);
+    const Move *best_play = NULL;
+    if (ply == 0 && simmer->nested_reply_candidates > 0 &&
+        simmer->nested_reply_samples > 0) {
+      best_play = rv_nested_reply(simmer, simmer_worker, game);
+    }
+    if (best_play == NULL) {
+      best_play = get_top_equity_move_with_twd(game, move_list, override_twd,
+                                               disable_twd);
+    }
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -707,6 +830,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->twd_rollout_plies = sim_args->twd_rollout_plies;
   simmer->twd_leaf = sim_args->twd_leaf;
+  simmer->nested_reply_candidates = sim_args->nested_reply_candidates;
+  simmer->nested_reply_samples = sim_args->nested_reply_samples;
   simmer->root_twd = player_get_twd(game_get_player(
       sim_args->game, game_get_player_on_turn_index(sim_args->game)));
 
@@ -763,6 +888,8 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->twd_rollout_plies = sim_args->twd_rollout_plies;
   simmer->twd_leaf = sim_args->twd_leaf;
+  simmer->nested_reply_candidates = sim_args->nested_reply_candidates;
+  simmer->nested_reply_samples = sim_args->nested_reply_samples;
   simmer->root_twd = player_get_twd(game_get_player(
       sim_args->game, game_get_player_on_turn_index(sim_args->game)));
 
