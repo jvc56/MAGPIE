@@ -6,6 +6,7 @@
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
@@ -34,6 +35,7 @@
 #include "peg_combinatorics.h"
 #include "peg_pool.h"
 #include "word_prune.h"
+#include <assert.h>
 #include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -606,7 +608,7 @@ static Game *peg_make_post_cand_game_into(Game **slot, const Game *template_src,
 
   // opp rack = unseen minus the original K-tile bag (mover_drawn ++
   // bag_remaining); the mover would have drawn mover_drawn off the top.
-  MachineLetter all_bag[PEG_MAX_BAG + 1];
+  MachineLetter all_bag[PEG_SCENARIO_ARRAY_CAP + 1];
   const int n_bag = k_drawn + n_bag_remaining;
   for (int i = 0; i < k_drawn; i++) {
     all_bag[i] = mover_drawn[i];
@@ -827,8 +829,8 @@ typedef struct PegScenarioJob {
   int ld_size;
   int k_drawn;
   int n_bag_remaining;
-  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+  MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1];
+  MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
   int64_t weight;
   PegOppModel opp_model;
   int inner_top_k;
@@ -1287,6 +1289,14 @@ static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
   const int bag = bag_get_letters(game_get_bag(parent_game));
   const int tiles_played = move_get_tiles_played(cand);
   const int k_drawn = tiles_played < bag ? tiles_played : bag;
+  // PegNestScenarioJob's mover_drawn/bag_remaining (and the locals below) are
+  // sized PEG_MAX_BAG + 1, not PEG_SCENARIO_ARRAY_CAP + 1: this nested-peg
+  // path is only reachable from a non-relaxed (bag <= PEG_MAX_BAG) top-level
+  // solve, since peg_solve's bag-emptying-guarantee exception (relaxed bag up
+  // to RACK_SIZE) makes every candidate empty the bag outright, leaving no
+  // inner peg to nest into. Guard the invariant here rather than relying on
+  // it silently holding.
+  assert(k_drawn <= PEG_MAX_BAG);
   const int bag_rem = bag - k_drawn;
   // The template (cand played + cross-sets) is read concurrently by the
   // scenario jobs, so it is held on its own frame for the lifetime of the
@@ -1666,7 +1676,7 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   // recursion (ancestor letter-branches own its earlier positions). Mutating it
   // here would scramble those positions for subsequent sibling branches and
   // corrupt their multisets. Copy first so the caller's buffer is untouched.
-  MachineLetter perm[PEG_MAX_BAG + 1];
+  MachineLetter perm[PEG_SCENARIO_ARRAY_CAP + 1];
   for (int i = 0; i < n_bag_remaining; i++) {
     perm[i] = bag_remaining[i];
   }
@@ -1835,8 +1845,8 @@ static void peg_eval_fixed_ordering(PegEvalCtx *ctx,
                                     const MachineLetter *bag_order, int n_bag) {
   const int k_drawn = ctx->k_drawn;
   const int n_bag_remaining = n_bag - k_drawn;
-  MachineLetter mover_drawn[PEG_MAX_BAG + 1] = {0};
-  MachineLetter bag_remaining[PEG_MAX_BAG + 1] = {0};
+  MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1] = {0};
+  MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1] = {0};
   for (int i = 0; i < k_drawn; i++) {
     mover_drawn[i] = bag_order[i];
   }
@@ -1914,8 +1924,8 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
     // Pinned single scenario: evaluate exactly the caller's bag ordering.
     peg_eval_fixed_ordering(&ctx, job->eval_bag_order, job->eval_bag_order_len);
   } else {
-    MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-    MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+    MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1];
+    MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
     peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining, /*weight=*/1,
                     mover_drawn, 0, bag_remaining, 0);
   }
@@ -2231,8 +2241,8 @@ static void peg_eval_candidates_scenario(
     const int tiles_played = move_get_tiles_played(cands[i]);
     ctx.k_drawn = tiles_played < bag_size ? tiles_played : bag_size;
     const int n_bag_remaining = bag_size - ctx.k_drawn;
-    MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-    MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+    MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1];
+    MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
     peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining, /*weight=*/1,
                     mover_drawn, 0, bag_remaining, 0);
   }
@@ -2404,6 +2414,30 @@ static void *peg_injector_main(void *arg) {
   return NULL;
 }
 
+// The effective PEG bag size for `game`: the real remaining bag tiles plus
+// any opponent tiles unknown to the mover, i.e. raw_bag_size - opp_unknown,
+// where opp_unknown = RACK_SIZE - opp_rack_size (the game bag holds the real
+// remaining bag tiles plus any opponent tiles unknown to the mover; tiles
+// explicitly on the opponent's rack are already known and not counted here).
+// Shared by peg_solve and by callers (e.g. the pegonly "empty" positional
+// value) that need to filter candidate moves by the same bag size peg_solve
+// itself will use.
+int peg_compute_bag_size(const Game *game) {
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const int raw_bag_size = bag_get_letters(game_get_bag(game));
+  const Rack *opp_rack_in_game =
+      player_get_rack(game_get_player(game, 1 - mover_idx));
+  const int opp_rack_size = (int)rack_get_total_letters(opp_rack_in_game);
+  const int opp_unknown = RACK_SIZE - opp_rack_size;
+  return raw_bag_size - opp_unknown;
+}
+
+// See peg.h for the contract.
+bool peg_move_empties_bag(const Move *move, int bag_size) {
+  return move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+         move_get_tiles_played(move) >= bag_size;
+}
+
 // ----- public entry --------------------------------------------------------
 
 void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
@@ -2421,23 +2455,41 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       budget > 0.0 ? ctimer_monotonic_ns() + (int64_t)(budget * 1.0e9) : 0;
   const Game *game = args->game;
   const int mover_idx = game_get_player_on_turn_index(game);
-  const int raw_bag_size = bag_get_letters(game_get_bag(game));
-  // The game bag holds the real remaining bag tiles plus any opponent tiles
-  // unknown to the mover: (RACK_SIZE - opp_rack_size) tiles are assumed to be
-  // in the bag as the opponent's unknown holdings. Tiles explicitly on the
-  // opponent's rack are already known and not counted here.
-  const Rack *opp_rack_in_game =
-      player_get_rack(game_get_player(game, 1 - mover_idx));
-  const int opp_rack_size = (int)rack_get_total_letters(opp_rack_in_game);
-  const int opp_unknown = RACK_SIZE - opp_rack_size;
-  const int bag_size = raw_bag_size - opp_unknown;
+  const int bag_size = peg_compute_bag_size(game);
   if (bag_size < PEG_MIN_BAG || bag_size > PEG_MAX_BAG) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_PEG_BAG_OUT_OF_RANGE,
-        get_formatted_string("PEG requires a bag of %d..%d tiles, but found %d",
-                             PEG_MIN_BAG, PEG_MAX_BAG, bag_size));
-    peg_poll_finish(args->poll); // so a waiting poller's read loop terminates
-    return;
+    // Above PEG_MAX_BAG is still solvable, without widening the scenario
+    // enumeration, as long as every move under consideration is guaranteed to
+    // empty the bag (a tile placement playing >= bag_size tiles draws the
+    // whole bag on replenishment, leaving nothing to enumerate: bag_remaining
+    // is always 0). A pass/exchange never empties the bag (an exchange
+    // returns what it drew), and no tile placement can play more than
+    // RACK_SIZE tiles, so the guarantee is only reachable for bag_size in
+    // (PEG_MAX_BAG, RACK_SIZE].
+    //
+    // This can only ever be satisfied via a caller-supplied only_moves set
+    // (e.g. the pegonly "empty" positional value): the full root move list
+    // always includes a pass (0 tiles played, see gen_record_pass), which
+    // never empties the bag, so without only_moves the guarantee can never
+    // hold and there is nothing to check.
+    bool bag_emptying_guaranteed =
+        bag_size > PEG_MAX_BAG && args->n_only_moves > 0;
+    for (int cand_idx = 0;
+         bag_emptying_guaranteed && cand_idx < args->n_only_moves; cand_idx++) {
+      if (!peg_move_empties_bag(args->only_moves[cand_idx], bag_size)) {
+        bag_emptying_guaranteed = false;
+      }
+    }
+    if (!bag_emptying_guaranteed) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_BAG_OUT_OF_RANGE,
+          get_formatted_string(
+              "PEG requires a bag of %d..%d tiles, but found %d (a larger "
+              "bag, up to %d, is only allowed when every candidate move "
+              "empties it by playing at least that many tiles)",
+              PEG_MIN_BAG, PEG_MAX_BAG, bag_size, RACK_SIZE));
+      peg_poll_finish(args->poll); // so a waiting poller's read loop terminates
+      return;
+    }
   }
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
@@ -2799,6 +2851,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       PegRankedCand *restaged =
           malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
       int done_count = eval_count;
+      // Keep this stage's captures separate until the stage is accepted. A
+      // stage with fewer than two completed candidates is rolled back to the
+      // preceding fidelity, so publishing its captures early would pair deeper
+      // outcomes with the restored shallower ranking.
+      PegCandOutcomes *stage_outcomes =
+          args->include_per_scenario
+              ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
+              : NULL;
       if (args->poll != NULL) {
         // Live mode: evaluate one candidate at a time so each completion
         // updates the pollable leaderboard (for `sta`/`shpeg`) and so we can
@@ -2827,13 +2887,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           const int64_t cand_start_ns = ctimer_monotonic_ns();
           peg_poll_set_evaluating(args->poll, cand_idx, cand_start_ns);
           ctimer_start(&cand_timer);
-          PegCandOutcomes cand_oc;
           peg_eval_candidates_scenario(
               pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
               bag_size, &moves[cand_idx], 1, args->opp_model, args->inner_top_k,
               stage_fidelity, scenario_stride, deadline_ns,
               args->thread_control, &inner, /*poll=*/NULL, &restaged[cand_idx],
-              args->include_per_scenario ? &cand_oc : NULL);
+              args->include_per_scenario ? &stage_outcomes[cand_idx] : NULL);
           restaged[cand_idx].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
           peg_poll_set_evaluating(args->poll, -1, 0);
           // If the deadline passed while this candidate was evaluating, some of
@@ -2841,14 +2900,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           // rather than show or rank a partial result, and stop the stage.
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
             if (args->include_per_scenario) {
-              free(cand_oc.rows);
+              free(stage_outcomes[cand_idx].rows);
             }
             break;
           }
           done_count = cand_idx + 1;
-          if (args->include_per_scenario) {
-            peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap, &cand_oc);
-          }
           // Surface this finished candidate into the leaderboard, then stream
           // the updated ranking to the caller right away — every candidate's
           // result prints as soon as it finishes, so the deep stages fill in
@@ -2869,15 +2925,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // across all candidates at once — a halving stage has few candidates,
         // so pooling their scenarios keeps all cores busy with a single
         // barrier.
-        PegCandOutcomes *stage_oc =
-            args->include_per_scenario
-                ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
-                : NULL;
         peg_eval_candidates_scenario(
             pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
             bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
             stage_fidelity, scenario_stride, deadline_ns, args->thread_control,
-            &progress, args->poll, restaged, stage_oc);
+            &progress, args->poll, restaged, stage_outcomes);
         // A deadline can cut the stage mid-flight: a candidate whose scenario
         // jobs bailed has a short weight_sum, so keep only the fully-scored
         // ones (as the live path does) instead of ranking partial scores.
@@ -2893,7 +2945,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         PegRankedCand *part_old =
             malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
         PegCandOutcomes *part_oc =
-            stage_oc != NULL
+            stage_outcomes != NULL
                 ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
                 : NULL;
         int placed = 0;
@@ -2907,7 +2959,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             part_new[placed] = restaged[cand_idx];
             part_old[placed] = ranked[cand_idx];
             if (part_oc != NULL) {
-              part_oc[placed] = stage_oc[cand_idx];
+              part_oc[placed] = stage_outcomes[cand_idx];
             }
             placed++;
           }
@@ -2919,20 +2971,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         memcpy(ranked, part_old, (size_t)eval_count * sizeof(PegRankedCand));
         free(part_new);
         free(part_old);
-        if (stage_oc != NULL) {
-          memcpy(stage_oc, part_oc,
+        if (stage_outcomes != NULL) {
+          memcpy(stage_outcomes, part_oc,
                  (size_t)eval_count * sizeof(PegCandOutcomes));
           free(part_oc);
-          // Publish only the fully-scored candidates' outcomes; discard the cut
-          // candidates' partial captures.
-          for (int cand_idx = 0; cand_idx < done_count; cand_idx++) {
-            peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap,
-                                      &stage_oc[cand_idx]);
-          }
+          // Discard the cut candidates' partial captures. The complete prefix
+          // remains stage-local until the shared acceptance check below.
           for (int cand_idx = done_count; cand_idx < eval_count; cand_idx++) {
-            free(stage_oc[cand_idx].rows);
+            free(stage_outcomes[cand_idx].rows);
           }
-          free(stage_oc);
         }
       }
       // Fewer than 2 finished: nothing to compare at this depth, so discard the
@@ -2941,12 +2988,29 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (done_count < 2) {
         n_graded = n_graded_before_stage;
         free(restaged);
+        // Frees memory this stage still owns: stage_outcomes[0, done_count)
+        // are completed captures that were never upserted, since the store
+        // only takes them on the accept path below. The cut tail
+        // [done_count, eval_count) was already freed by whichever evaluation
+        // path cut it -- the live path frees the deadline-cut candidate on its
+        // break, the batch path frees the tail after stable-partitioning. With
+        // accept upserting exactly [0, done_count), every rows allocation is
+        // freed exactly once across all three exits.
+        peg_cand_outcomes_destroy_array(stage_outcomes, done_count);
         // This stage cleared the live poll at its start but contributed
         // nothing, so restore the previous stage's ranking (still in `ranked`)
         // instead of leaving the final snapshot empty.
         peg_poll_replace(args->poll, ranked, live_count, stage_idx - 1,
                          prev_fidelity, live_count);
         break;
+      }
+      if (stage_outcomes != NULL) {
+        for (int cand_idx = 0; cand_idx < done_count; cand_idx++) {
+          peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap,
+                                    &stage_outcomes[cand_idx]);
+        }
+        // Ownership of each rows allocation moved into oc_store.
+        free(stage_outcomes);
       }
       qsort(restaged, (size_t)done_count, sizeof(PegRankedCand), peg_rank_cmp);
       // Partial stage: candidates [done_count, eval_count) were selected but
@@ -3040,8 +3104,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         const int tiles_played = move_get_tiles_played(&out->top_cands[0].move);
         ctx.k_drawn = tiles_played < bag_size ? tiles_played : bag_size;
         const int n_bag_remaining = bag_size - ctx.k_drawn;
-        MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-        MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+        MachineLetter mover_drawn[PEG_SCENARIO_ARRAY_CAP + 1];
+        MachineLetter bag_remaining[PEG_SCENARIO_ARRAY_CAP + 1];
         peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining,
                         /*weight=*/1, mover_drawn, 0, bag_remaining, 0);
         out->per_scenario = capture.rows;

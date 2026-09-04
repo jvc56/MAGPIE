@@ -5,10 +5,23 @@
 
 // Bag-size range a pre-endgame (PEG) position may have. PEG handles 1..4 tiles
 // in the bag; larger positions are midgame and are rejected by the solver.
+// Exception: a bag above PEG_MAX_BAG (up to RACK_SIZE) is still accepted when
+// every candidate move under consideration is guaranteed to empty it -- see
+// the bag-emptying-guarantee check in peg_solve.
 enum {
   PEG_MIN_BAG = 1,
   PEG_MAX_BAG = 4,
   PEG_MAX_UNSEEN = RACK_SIZE + PEG_MAX_BAG,
+};
+
+// Capacity of the mover-drawn / bag-remaining scratch arrays in peg.c's outer
+// (non-nested) scenario enumeration. Normally bounded by PEG_MAX_BAG, but the
+// bag-emptying-guarantee exception above lets bag_size run as high as
+// RACK_SIZE, and k_drawn = min(tiles_played, bag_size) <= tiles_played is
+// always <= RACK_SIZE regardless, so these arrays are sized off RACK_SIZE
+// unconditionally rather than off the (possibly relaxed) bag_size.
+enum {
+  PEG_SCENARIO_ARRAY_CAP = RACK_SIZE,
 };
 
 // Default inner-peg recursion depth when nested lookahead is on: one nested

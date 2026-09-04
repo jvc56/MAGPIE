@@ -39,7 +39,7 @@ static void get_xt_gcg(const char *identifier, GetGCGResult *result,
                        ErrorStack *error_stack) {
   char game_id_str[MAX_GAME_ID_LENGTH + 1] = {0};
   // Check if this is a Cross-tables URL first
-  char *xt_url_start = strstr(identifier, XTABLES_URL);
+  const char *xt_url_start = strstr(identifier, XTABLES_URL);
   if (xt_url_start) {
     size_t game_id_str_len = 0;
     xt_url_start += XTABLES_URL_LENGTH;
@@ -111,7 +111,7 @@ static void get_woogles_gcg(const char *identifier, GetGCGResult *result,
                             ErrorStack *error_stack) {
   char game_id_str[MAX_GAME_ID_LENGTH + 1] = {0};
 
-  char *woogles_url_start = strstr(identifier, WOOGLES_URL);
+  const char *woogles_url_start = strstr(identifier, WOOGLES_URL);
   if (woogles_url_start) {
     size_t game_id_str_len = 0;
     woogles_url_start += WOOGLES_URL_LENGTH;

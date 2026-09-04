@@ -17,6 +17,7 @@ typedef struct BAIResult BAIResult;
 
 void bai_result_reset(BAIResult *bai_result, double time_limit_seconds);
 BAIResult *bai_result_create(void);
+BAIResult *bai_result_duplicate(const BAIResult *bai_result);
 void bai_result_destroy(BAIResult *bai_result);
 void bai_result_set_best_arm(BAIResult *bai_result, int best_arm);
 int bai_result_get_best_arm(const BAIResult *bai_result);

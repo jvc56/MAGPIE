@@ -559,6 +559,9 @@ static inline MoveList *move_list_create_small(int capacity) {
 }
 
 static inline MoveList *move_list_duplicate(const MoveList *ml) {
+  if (!ml) {
+    return NULL;
+  }
   MoveList *new_ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   new_ml->count = ml->count;
   new_ml->spare_move = move_create();
@@ -566,6 +569,7 @@ static inline MoveList *move_list_duplicate(const MoveList *ml) {
   for (int i = 0; i < new_ml->moves_size; i++) {
     move_copy(new_ml->moves[i], ml->moves[i]);
   }
+  new_ml->rack = ml->rack;
   return new_ml;
 }
 

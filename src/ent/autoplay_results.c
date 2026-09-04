@@ -39,6 +39,7 @@ typedef struct RecorderArgs {
   uint64_t seed;
   bool divergent;
   bool human_readable;
+  const AutoplayGameTiming *timing;
 } RecorderArgs;
 
 // Read-only data shared across all recorder types
@@ -48,6 +49,10 @@ typedef struct RecorderContext {
   const LetterDistribution *ld;
   KLV *klv;
   const PlayersData *players_data;
+  bool play_chooser_active[2];
+  double time_control_seconds[2];
+  int overtime_penalty_points;
+  double overtime_period_seconds;
 } RecorderContext;
 
 typedef struct Recorder Recorder;
@@ -112,6 +117,10 @@ typedef struct GameData {
   Stat *p0_score;
   Stat *p1_score;
   Stat *turns;
+  double total_seconds_used[2];
+  double total_overtime_seconds[2];
+  uint64_t overtime_games[2];
+  uint64_t penalty_points[2];
   int game_end_reasons[NUMBER_OF_GAME_END_REASONS];
   cpthread_mutex_t mutex;
 } GameData;
@@ -126,6 +135,12 @@ void game_data_reset(GameData *gd) {
   stat_reset(gd->p0_score);
   stat_reset(gd->p1_score);
   stat_reset(gd->turns);
+  for (int i = 0; i < 2; i++) {
+    gd->total_seconds_used[i] = 0.0;
+    gd->total_overtime_seconds[i] = 0.0;
+    gd->overtime_games[i] = 0;
+    gd->penalty_points[i] = 0;
+  }
   for (int i = 0; i < NUMBER_OF_GAME_END_REASONS; i++) {
     gd->game_end_reasons[i] = 0;
   }
@@ -174,6 +189,22 @@ void game_data_add_game(GameData *gd, const RecorderArgs *args) {
   stat_push(gd->p1_score, (double)p1_game_score, 1);
   stat_push(gd->turns, (double)turns, 1);
   gd->total_turns += turns;
+  if (args->timing != NULL) {
+    for (int player_index = 0; player_index < 2; player_index++) {
+      if (!args->timing->active[player_index]) {
+        continue;
+      }
+      gd->total_seconds_used[player_index] +=
+          args->timing->seconds_used[player_index];
+      gd->total_overtime_seconds[player_index] +=
+          args->timing->overtime_seconds[player_index];
+      if (args->timing->overtime_seconds[player_index] > 0.0) {
+        gd->overtime_games[player_index]++;
+      }
+      gd->penalty_points[player_index] +=
+          (uint64_t)args->timing->penalty_points[player_index];
+    }
+  }
   gd->game_end_reasons[game_get_game_end_reason(game)]++;
   cpthread_mutex_unlock(&gd->mutex);
 }
@@ -185,7 +216,14 @@ void string_builder_add_game_end_reasons(StringBuilder *sb,
   }
 }
 
-char *game_data_ucgi_str(const GameData *gd) {
+static bool
+recorder_context_uses_play_chooser(const RecorderContext *recorder_context) {
+  return recorder_context->play_chooser_active[0] ||
+         recorder_context->play_chooser_active[1];
+}
+
+char *game_data_ucgi_str(const GameData *gd,
+                         const RecorderContext *recorder_context) {
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(
       sb, "autoplay games %lu %lu %lu %lu %lu %f %f %f %f ", gd->total_games,
@@ -193,6 +231,18 @@ char *game_data_ucgi_str(const GameData *gd) {
       stat_get_mean(gd->p0_score), stat_get_stdev(gd->p0_score),
       stat_get_mean(gd->p1_score), stat_get_stdev(gd->p1_score));
   string_builder_add_game_end_reasons(sb, gd);
+  if (recorder_context_uses_play_chooser(recorder_context)) {
+    string_builder_add_formatted_string(
+        sb, "playchooser %d %d %.0f %.0f %.3f %.3f %.3f %.3f %lu %lu ",
+        recorder_context->play_chooser_active[0],
+        recorder_context->play_chooser_active[1],
+        recorder_context->time_control_seconds[0] * 1000.0,
+        recorder_context->time_control_seconds[1] * 1000.0,
+        gd->total_seconds_used[0] * 1000.0, gd->total_seconds_used[1] * 1000.0,
+        gd->total_overtime_seconds[0] * 1000.0,
+        gd->total_overtime_seconds[1] * 1000.0, gd->penalty_points[0],
+        gd->penalty_points[1]);
+  }
   string_builder_add_string(sb, "\n");
   char *res = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
@@ -243,20 +293,94 @@ void string_builder_add_winning_player_confidence(StringBuilder *sb,
   }
 }
 
-char *game_data_human_readable_str(const GameData *gd, bool divergent) {
-  uint64_t p0_wins = gd->p0_wins;
-  double p0_win_pct = (double)p0_wins / (double)gd->total_games;
-  uint64_t p0_losses = gd->p0_losses;
-  double p0_loss_pct = (double)p0_losses / (double)gd->total_games;
-  uint64_t p0_ties = gd->p0_ties;
-  double p0_tie_pct = (double)p0_ties / (double)gd->total_games;
+static char *get_timing_value_string(bool active, double value) {
+  return active ? get_formatted_string("%.3f", value) : string_duplicate("-");
+}
 
-  double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
-  double p0_total_pct = p0_total / (double)(gd->total_games);
+static char *get_time_control_string(bool active, double seconds) {
+  if (!active) {
+    return string_duplicate("-");
+  }
+  if (seconds <= 0.0) {
+    return string_duplicate("untimed");
+  }
+  return get_formatted_string("%.0f", seconds * 1000.0);
+}
 
-  double p1_total = (double)(gd->total_games) - p0_total;
-  double p1_total_pct = p1_total / (double)(gd->total_games);
+static void
+string_builder_add_play_chooser_timing(StringBuilder *sb, const GameData *gd,
+                                       const RecorderContext *recorder_context,
+                                       int col_width) {
+  if (!recorder_context_uses_play_chooser(recorder_context)) {
+    return;
+  }
 
+  string_builder_add_string(sb, "PlayChooser Timing\n\n");
+  string_builder_add_table_row(sb, col_width, "", "Player 1", "Player 2");
+
+  char *values[2];
+  for (int i = 0; i < 2; i++) {
+    values[i] =
+        get_time_control_string(recorder_context->play_chooser_active[i],
+                                recorder_context->time_control_seconds[i]);
+  }
+  string_builder_add_table_row(sb, col_width, "Time control (ms):", values[0],
+                               values[1]);
+  free(values[0]);
+  free(values[1]);
+
+  for (int i = 0; i < 2; i++) {
+    const double mean_ms =
+        gd->total_games > 0
+            ? gd->total_seconds_used[i] * 1000.0 / (double)gd->total_games
+            : 0.0;
+    values[i] = get_timing_value_string(
+        recorder_context->play_chooser_active[i], mean_ms);
+  }
+  string_builder_add_table_row(sb, col_width, "Mean time used (ms):", values[0],
+                               values[1]);
+  free(values[0]);
+  free(values[1]);
+
+  for (int i = 0; i < 2; i++) {
+    values[i] =
+        get_timing_value_string(recorder_context->play_chooser_active[i],
+                                gd->total_overtime_seconds[i] * 1000.0);
+  }
+  string_builder_add_table_row(sb, col_width, "Total overtime (ms):", values[0],
+                               values[1]);
+  free(values[0]);
+  free(values[1]);
+
+  for (int i = 0; i < 2; i++) {
+    values[i] = recorder_context->play_chooser_active[i]
+                    ? get_formatted_string("%lu", gd->overtime_games[i])
+                    : string_duplicate("-");
+  }
+  string_builder_add_table_row(sb, col_width, "Overtime games:", values[0],
+                               values[1]);
+  free(values[0]);
+  free(values[1]);
+
+  for (int i = 0; i < 2; i++) {
+    values[i] = recorder_context->play_chooser_active[i]
+                    ? get_formatted_string("%lu", gd->penalty_points[i])
+                    : string_duplicate("-");
+  }
+  string_builder_add_table_row(sb, col_width, "Penalty points:", values[0],
+                               values[1]);
+  free(values[0]);
+  free(values[1]);
+
+  string_builder_add_formatted_string(
+      sb, "Rate: %d point%s per started %.0f ms\n\n",
+      recorder_context->overtime_penalty_points,
+      recorder_context->overtime_penalty_points == 1 ? "" : "s",
+      recorder_context->overtime_period_seconds * 1000.0);
+}
+
+char *game_data_human_readable_str(const GameData *gd, bool divergent,
+                                   const RecorderContext *recorder_context) {
   const int col_width = 25;
   StringBuilder *sb = string_builder_create();
   string_builder_add_string(sb, "\n");
@@ -274,10 +398,24 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
 
   if (gd->total_games == 0) {
     string_builder_add_string(sb, "\n");
+    string_builder_add_play_chooser_timing(sb, gd, recorder_context, col_width);
     char *no_games_ret_str = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
     return no_games_ret_str;
   }
+
+  uint64_t p0_wins = gd->p0_wins;
+  double p0_win_pct = (double)p0_wins / (double)gd->total_games;
+  uint64_t p0_losses = gd->p0_losses;
+  double p0_loss_pct = (double)p0_losses / (double)gd->total_games;
+  uint64_t p0_ties = gd->p0_ties;
+  double p0_tie_pct = (double)p0_ties / (double)gd->total_games;
+
+  double p0_total = (double)gd->p0_wins + (double)gd->p0_ties / (double)2;
+  double p0_total_pct = p0_total / (double)(gd->total_games);
+
+  double p1_total = (double)(gd->total_games) - p0_total;
+  double p1_total_pct = p1_total / (double)(gd->total_games);
 
   string_builder_add_formatted_string(sb, "Turns per Game: %0.2f %0.2f\n\n",
                                       stat_get_mean(gd->turns),
@@ -335,16 +473,19 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
                                                gd->total_games);
   string_builder_add_string(sb, "\n");
 
+  string_builder_add_play_chooser_timing(sb, gd, recorder_context, col_width);
+
   char *ret_str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return ret_str;
 }
 
-char *game_data_str(const GameData *gd, bool human_readable, bool divergent) {
+char *game_data_str(const GameData *gd, bool human_readable, bool divergent,
+                    const RecorderContext *recorder_context) {
   if (human_readable) {
-    return game_data_human_readable_str(gd, divergent);
+    return game_data_human_readable_str(gd, divergent, recorder_context);
   }
-  return game_data_ucgi_str(gd);
+  return game_data_ucgi_str(gd, recorder_context);
 }
 
 typedef struct GameDataSets {
@@ -413,6 +554,16 @@ void game_data_sets_consolidate_subset(Recorder **recorder_list,
     p1_score_stats[i] = gd_i->p1_score;
     turns_stats[i] = gd_i->turns;
     gd_primary->total_turns += gd_i->total_turns;
+    for (int player_index = 0; player_index < 2; player_index++) {
+      gd_primary->total_seconds_used[player_index] +=
+          gd_i->total_seconds_used[player_index];
+      gd_primary->total_overtime_seconds[player_index] +=
+          gd_i->total_overtime_seconds[player_index];
+      gd_primary->overtime_games[player_index] +=
+          gd_i->overtime_games[player_index];
+      gd_primary->penalty_points[player_index] +=
+          gd_i->penalty_points[player_index];
+    }
     for (int j = 0; j < NUMBER_OF_GAME_END_REASONS; j++) {
       gd_primary->game_end_reasons[j] += gd_i->game_end_reasons[j];
     }
@@ -440,14 +591,15 @@ char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
   const GameDataSets *sets = (GameDataSets *)recorder->data;
   StringBuilder *sb = string_builder_create();
 
-  char *all_game_str =
-      game_data_str(sets->all_games, args->human_readable, false);
+  char *all_game_str = game_data_str(sets->all_games, args->human_readable,
+                                     false, recorder->recorder_context);
   string_builder_add_string(sb, all_game_str);
   free(all_game_str);
 
   if (args->divergent) {
     char *divergent_games_str =
-        game_data_str(sets->divergent_games, args->human_readable, true);
+        game_data_str(sets->divergent_games, args->human_readable, true,
+                      recorder->recorder_context);
     string_builder_add_string(sb, divergent_games_str);
     free(divergent_games_str);
   }
@@ -1097,7 +1249,7 @@ void recorder_consolidate(Recorder **recorder_list, int list_size,
 
 char *recorder_str(Recorder *recorder, bool human_readable,
                    bool show_divergent) {
-  RecorderArgs args;
+  RecorderArgs args = {0};
   args.human_readable = human_readable;
   args.divergent = show_divergent;
   return recorder->str_func(recorder, &args);
@@ -1226,6 +1378,13 @@ RecorderContext *create_recorder_context(void) {
   recorder_context->data_paths = NULL;
   recorder_context->ld = NULL;
   recorder_context->klv = NULL;
+  recorder_context->players_data = NULL;
+  recorder_context->play_chooser_active[0] = false;
+  recorder_context->play_chooser_active[1] = false;
+  recorder_context->time_control_seconds[0] = 0.0;
+  recorder_context->time_control_seconds[1] = 0.0;
+  recorder_context->overtime_penalty_points = 10;
+  recorder_context->overtime_period_seconds = 60.0;
   return recorder_context;
 }
 
@@ -1311,7 +1470,7 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
                                const Rack *leave) {
-  RecorderArgs args;
+  RecorderArgs args = {0};
   args.game = game;
   args.move = move;
   args.leave = leave;
@@ -1325,11 +1484,20 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed) {
-  RecorderArgs args;
+  autoplay_results_add_game_with_timing(autoplay_results, game, turns,
+                                        divergent, seed, NULL);
+}
+
+void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
+                                           const Game *game, int turns,
+                                           bool divergent, uint64_t seed,
+                                           const AutoplayGameTiming *timing) {
+  RecorderArgs args = {0};
   args.game = game;
   args.number_of_turns = turns;
   args.divergent = divergent;
   args.seed = seed;
+  args.timing = timing;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
       recorder_add_game(autoplay_results->recorders[i], &args);
@@ -1430,4 +1598,17 @@ void autoplay_results_set_klv(AutoplayResults *autoplay_results, KLV *klv) {
 void autoplay_results_set_players_data(AutoplayResults *autoplay_results,
                                        const PlayersData *players_data) {
   autoplay_results->recorder_context->players_data = players_data;
+}
+
+void autoplay_results_set_play_chooser_config(
+    AutoplayResults *autoplay_results, const bool active[2],
+    const double time_control_seconds[2], int overtime_penalty_points,
+    double overtime_period_seconds) {
+  RecorderContext *context = autoplay_results->recorder_context;
+  for (int i = 0; i < 2; i++) {
+    context->play_chooser_active[i] = active[i];
+    context->time_control_seconds[i] = time_control_seconds[i];
+  }
+  context->overtime_penalty_points = overtime_penalty_points;
+  context->overtime_period_seconds = overtime_period_seconds;
 }

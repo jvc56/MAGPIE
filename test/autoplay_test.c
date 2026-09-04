@@ -5,6 +5,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/players_data.h"
+#include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
@@ -261,6 +262,44 @@ void test_autoplay_divergent_games(void) {
   config_destroy(csw_config);
 }
 
+// Regression test: static (non-simming) autoplay must respect each player's
+// configured move_sort_type ("s1"/"s2"). Before this was fixed, static play
+// always used get_top_equity_move regardless of the configured sort type, so
+// the "s1"/"s2" args had no effect on play and game pairs never diverged.
+void test_autoplay_sort_type_divergence(void) {
+  Config *csw_config = config_create_or_die("set -lex CSW21");
+
+  // With one player sorting moves by score and the other by equity, the two
+  // players in a game pair should almost always choose different moves, so
+  // essentially every game pair should be recorded as divergent.
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 score -gp true");
+
+  char *ar_diff_sort_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false, true);
+  assert_autoplay_output(
+      ar_diff_sort_str, 2,
+      (const char *[]){"autoplay games 100", "autoplay games 100"});
+
+  free(ar_diff_sort_str);
+
+  // Sanity check: with both players using the same sort type, the games
+  // should not diverge (mirrors the same-lexicon case in
+  // test_autoplay_divergent_games).
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 equity -gp true");
+
+  char *ar_same_sort_str = autoplay_results_to_string(
+      config_get_autoplay_results(csw_config), false, true);
+  assert_autoplay_output(
+      ar_same_sort_str, 2,
+      (const char *[]){"autoplay games 100", "autoplay games 0"});
+
+  free(ar_same_sort_str);
+
+  config_destroy(csw_config);
+}
+
 void test_autoplay_win_pct_record(void) {
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
@@ -505,14 +544,110 @@ void test_autoplay_sim(void) {
   config_destroy(config);
 }
 
+void test_autoplay_play_chooser(void) {
+  assert(autoplay_overtime_penalty_points(0.0, 10, 60.0) == 0);
+  assert(autoplay_overtime_penalty_points(0.001, 10, 60.0) == 10);
+  assert(autoplay_overtime_penalty_points(60.0, 10, 60.0) == 10);
+  assert(autoplay_overtime_penalty_points(60.001, 10, 60.0) == 20);
+  assert(autoplay_overtime_penalty_points(0.001, 1, 1.0) == 1);
+  assert(autoplay_overtime_penalty_points(1.001, 1, 1.0) == 2);
+  assert(autoplay_overtime_penalty_points(1.0, 0, 1.0) == 0);
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "-numplays 1 -gp false -threads 1 -hr true -pc1 1 -pc2 -1 "
+      "-otpenalty 1 -otperiod 1");
+
+  load_and_exec_config_or_die(config, "autoplay games 1 -seed 123");
+  char *human_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), true, false);
+  assert(has_substring(human_output, "PlayChooser Timing"));
+  assert(has_substring(human_output, "Time control (ms):"));
+  assert(has_substring(human_output, "Penalty points:"));
+  assert(has_substring(human_output, "Rate: 1 point per started 1 ms"));
+  free(human_output);
+
+  char *machine_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), false, false);
+  assert(has_substring(machine_output, "playchooser 1 0 1 0"));
+  const char *play_chooser_output = strstr(machine_output, "playchooser");
+  int active[2];
+  double time_control_ms[2];
+  double seconds_used_ms[2];
+  double overtime_ms[2];
+  unsigned long penalty_points[2];
+  // The parsed values are test data, and sscanf's field count is checked
+  // immediately below.
+  // NOLINTNEXTLINE(cert-err34-c)
+  const int parsed_fields = sscanf(
+      play_chooser_output, "playchooser %d %d %lf %lf %lf %lf %lf %lf %lu %lu",
+      &active[0], &active[1], &time_control_ms[0], &time_control_ms[1],
+      &seconds_used_ms[0], &seconds_used_ms[1], &overtime_ms[0],
+      &overtime_ms[1], &penalty_points[0], &penalty_points[1]);
+  assert(parsed_fields == 10);
+  assert(active[0] == 1);
+  assert(active[1] == 0);
+  assert(time_control_ms[0] == 1.0);
+  // The player must have used measurable clock, but whether a 1 ms control
+  // is overrun depends on machine speed and build type (a fast release
+  // build can finish every static-fallback move in under 1 ms total), so
+  // assert the overtime accounting is CONSISTENT rather than that overtime
+  // occurred: any overrun must produce overtime and a penalty (1 point per
+  // started 1 ms period), and no overrun must produce neither.
+  assert(seconds_used_ms[0] > 0.0);
+  if (seconds_used_ms[0] > time_control_ms[0]) {
+    assert(overtime_ms[0] > 0.0);
+    assert(penalty_points[0] > 0);
+  } else {
+    assert(overtime_ms[0] == 0.0);
+    assert(penalty_points[0] == 0);
+  }
+  free(machine_output);
+
+  load_and_exec_config_or_die(config,
+                              "autoplay games 1 -pc1 -1 -pc2 -1 -seed 124");
+  human_output = autoplay_results_to_string(config_get_autoplay_results(config),
+                                            true, false);
+  assert(!has_substring(human_output, "PlayChooser Timing"));
+  free(human_output);
+
+  machine_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), false, false);
+  assert(!has_substring(machine_output, "playchooser"));
+  free(machine_output);
+
+  load_and_exec_config_or_die(config,
+                              "autoplay games 0 -hr false -pc1 -1 -pc2 2");
+  machine_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), false, false);
+  assert(has_substring(machine_output, "playchooser 0 1 0 2"));
+  free(machine_output);
+
+  load_and_exec_config_or_die(config,
+                              "autoplay games 1 -pc1 3 -pc2 4 -seed 125");
+  machine_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), false, false);
+  assert(has_substring(machine_output, "playchooser 1 1 3 4"));
+  free(machine_output);
+
+  human_output = autoplay_results_to_string(config_get_autoplay_results(config),
+                                            true, false);
+  assert(has_substring(human_output, "PlayChooser Timing"));
+  free(human_output);
+
+  config_destroy(config);
+}
+
 void test_autoplay_remaining(void) {
   test_odds_that_player_is_better();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
+  test_autoplay_sort_type_divergence();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
   test_autoplay_leavegen_force_racks();
   test_autoplay_sim();
+  test_autoplay_play_chooser();
 }
 
 void test_autoplay(void) {
