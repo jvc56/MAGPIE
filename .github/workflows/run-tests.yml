@@ -176,6 +176,45 @@ jobs:
           make magpie_test BOARD_DIM=21
           ./bin/magpie_test
 
+  unit-tests-rack8:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up GCC
+        uses: egor-tensin/setup-gcc@v1
+        with:
+          version: latest
+          platform: x64
+
+      - name: Get datafile cache
+        id: cache-datafiles
+        uses: actions/cache@v3
+        with:
+          path: |
+            data/*
+            testdata/*
+          key: downloaded-data-files-30
+
+      - name: Download data files and convert lexica
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      # RACK_SIZE is a compile-time parameter that CI otherwise never varies.
+      # 8 is the largest supported value; 2-6 build too but are left to local
+      # runs (make magpie_test RACK_SIZE=n && ./bin/magpie_test) to keep CI
+      # cheap. The no-argument test run is the reduced rack-size-generic set.
+      - name: Build and run RACK_SIZE=8 release tests
+        run: |
+          make magpie_test BUILD=release RACK_SIZE=8
+          ./bin/magpie_test
+
+      - name: Build and run RACK_SIZE=8 dev tests
+        run: |
+          make clean
+          make magpie_test RACK_SIZE=8
+          ./bin/magpie_test
+
   wasm-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -213,6 +252,7 @@ jobs:
       - unit-tests-release
       - unit-tests-dev
       - unit-tests-super
+      - unit-tests-rack8
       - wasm-tests
     runs-on: ubuntu-latest
     steps:
@@ -228,6 +268,7 @@ jobs:
           echo "| unit-tests-release | \`${{ needs.unit-tests-release.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| unit-tests-dev | \`${{ needs.unit-tests-dev.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| unit-tests-super | \`${{ needs.unit-tests-super.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| unit-tests-rack8 | \`${{ needs.unit-tests-rack8.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| wasm-tests | \`${{ needs.wasm-tests.result }}\` |" >> $GITHUB_STEP_SUMMARY
 
       - name: Check for failures
