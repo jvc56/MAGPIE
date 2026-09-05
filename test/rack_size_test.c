@@ -1,18 +1,32 @@
 #include "rack_size_test.h"
 
 #include "../src/def/bit_rack_defs.h"
+#include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
+#include "../src/ent/game.h"
 #include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
+#include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 // Tests for the structures that are sized by RACK_SIZE, written so that
 // every expectation is derived from RACK_SIZE rather than from 7-tile
@@ -160,6 +174,143 @@ static void test_rack_size_leave_map(Rack *rack, LeaveMap *leave_map) {
   assert(leave_map_get_current_index(leave_map) == full_index);
 }
 
+// ---------------------------------------------------------------------------
+// CGP loading. A CGP is where a RACK_SIZE-tile rack first enters the engine
+// from the outside, so this is the integration check: racks of exactly
+// RACK_SIZE tiles load, the loaded racks and the bag are right, the CGP
+// round-trips, and move generation runs on the loaded position with every
+// move bounded by RACK_SIZE.
+//
+// Rejection of a RACK_SIZE + 1 rack is deliberately not asserted here yet:
+// that check is added by jvc56/MAGPIE#660 and is not on this branch.
+// ---------------------------------------------------------------------------
+
+enum { RACK_SIZE_CGP_BUFFER = 512, RACK_SIZE_RACK_BUFFER = 32 };
+
+// Writes `count` copies of `letters` cycled from the front, so "ABCDEFGH"
+// with count 3 is "ABC" and "E" with count 3 is "EEE". Inputs are already in
+// machine-letter order, so the result matches what game_get_cgp writes back.
+static void make_rack_string(char *out, size_t cap, const char *letters,
+                             int count) {
+  const size_t len = strlen(letters);
+  assert((size_t)count < cap);
+  for (int i = 0; i < count; i++) {
+    out[i] = letters[len == 1 ? 0 : (size_t)i % len];
+  }
+  out[count] = '\0';
+}
+
+// An empty BOARD_DIM x BOARD_DIM board, the two racks, no score, no zeros.
+static void build_cgp(char *out, size_t cap, const char *rack1,
+                      const char *rack2) {
+  int offset = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    offset += snprintf(out + offset, cap - (size_t)offset, "%s%d",
+                       row == 0 ? "" : "/", BOARD_DIM);
+  }
+  snprintf(out + offset, cap - (size_t)offset, " %s/%s 0/0 0", rack1, rack2);
+}
+
+// Loads the racks into `game`, checks their sizes, then writes the position
+// back out with game_get_cgp and loads that into `reloaded`. The racks must
+// come through structurally equal. Comparing racks rather than strings keeps
+// this independent of serialization details such as where blanks are
+// written (the CGP writer puts them after the letters).
+static void load_cgp_and_check_racks(Game *game, Game *reloaded,
+                                     const char *rack1, const char *rack2) {
+  char cgp[RACK_SIZE_CGP_BUFFER];
+  build_cgp(cgp, sizeof(cgp), rack1, rack2);
+  load_cgp_or_die(game, cgp);
+
+  assert(rack_get_total_letters(player_get_rack(game_get_player(game, 0))) ==
+         (int)strlen(rack1));
+  assert(rack_get_total_letters(player_get_rack(game_get_player(game, 1))) ==
+         (int)strlen(rack2));
+
+  char *written = game_get_cgp(game, false);
+  load_cgp_or_die(reloaded, written);
+  free(written);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    assert(racks_are_equal(
+        player_get_rack(game_get_player(game, player_idx)),
+        player_get_rack(game_get_player(reloaded, player_idx))));
+  }
+}
+
+static void assert_moves_bounded_by_rack_size(Game *game) {
+  MoveList *move_list = move_list_create(50);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves_for_game(&args);
+  assert(move_list_get_count(move_list) > 0);
+  SortedMoveList *sorted = sorted_move_list_create(move_list);
+  bool saw_tile_placement = false;
+  for (int move_idx = 0; move_idx < sorted->count; move_idx++) {
+    const Move *move = sorted->moves[move_idx];
+    assert(move_get_tiles_played(move) >= 0);
+    assert(move_get_tiles_played(move) <= RACK_SIZE);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      saw_tile_placement = true;
+    }
+  }
+  assert(saw_tile_placement);
+  sorted_move_list_destroy(sorted);
+  move_list_destroy(move_list);
+}
+
+static void test_rack_size_cgp(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 50");
+  Game *game = config_game_create(config);
+  Game *reloaded = config_game_create(config);
+  const Bag *bag = game_get_bag(game);
+  char rack1[RACK_SIZE_RACK_BUFFER];
+  char rack2[RACK_SIZE_RACK_BUFFER];
+
+  // Empty racks: establishes the full bag size without hard-coding it.
+  load_cgp_and_check_racks(game, reloaded, "", "");
+  const int full_bag = bag_get_letters(bag);
+  assert(full_bag > 2 * RACK_SIZE);
+
+  // Full racks of RACK_SIZE distinct letters, disjoint between the players.
+  make_rack_string(rack1, sizeof(rack1), "ABCDEFGH", RACK_SIZE);
+  make_rack_string(rack2, sizeof(rack2), "IJKLMNOP", RACK_SIZE);
+  load_cgp_and_check_racks(game, reloaded, rack1, rack2);
+  assert(bag_get_letters(bag) == full_bag - 2 * RACK_SIZE);
+  assert_moves_bounded_by_rack_size(game);
+
+  // Full racks of one repeated letter (E and A both have more than 8 tiles).
+  make_rack_string(rack1, sizeof(rack1), "E", RACK_SIZE);
+  make_rack_string(rack2, sizeof(rack2), "A", RACK_SIZE);
+  load_cgp_and_check_racks(game, reloaded, rack1, rack2);
+  assert(bag_get_letters(bag) == full_bag - 2 * RACK_SIZE);
+
+  // Both blanks plus letters on one side; "?" sorts first, so this is still
+  // in the order game_get_cgp writes.
+  rack1[0] = '?';
+  rack1[1] = '?';
+  make_rack_string(rack1 + 2, sizeof(rack1) - 2, "ABCDEF", RACK_SIZE - 2);
+  make_rack_string(rack2, sizeof(rack2), "IJKLMNOP", RACK_SIZE);
+  load_cgp_and_check_racks(game, reloaded, rack1, rack2);
+  assert(bag_get_letters(bag) == full_bag - 2 * RACK_SIZE);
+  assert_moves_bounded_by_rack_size(game);
+
+  // One tile short of full on both sides.
+  make_rack_string(rack1, sizeof(rack1), "ABCDEFGH", RACK_SIZE - 1);
+  make_rack_string(rack2, sizeof(rack2), "IJKLMNOP", RACK_SIZE - 1);
+  load_cgp_and_check_racks(game, reloaded, rack1, rack2);
+  assert(bag_get_letters(bag) == full_bag - 2 * (RACK_SIZE - 1));
+
+  game_destroy(reloaded);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_rack_size(void) {
   test_rack_size_combination_offsets();
 
@@ -173,6 +324,7 @@ void test_rack_size(void) {
   test_rack_size_bit_rack_counts(ld, rack);
   test_rack_size_encoded_rack(rack, decoded);
   test_rack_size_leave_map(rack, leave_map);
+  test_rack_size_cgp();
 
   leave_map_destroy(leave_map);
   rack_destroy(decoded);
