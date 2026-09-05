@@ -12,6 +12,7 @@
 #include "../src/util/io_util.h"
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -60,8 +61,10 @@ static double parse_positive_double(const char *value, const char *name) {
   errno = 0;
   char *end = NULL;
   const double parsed = strtod(value, &end);
-  if (errno != 0 || end == value || *end != '\0' || !(parsed > 0.0)) {
-    (void)fprintf(stderr, "%s must be positive, got '%s'\n", name, value);
+  if (errno != 0 || end == value || *end != '\0' || !isfinite(parsed) ||
+      !(parsed > 0.0)) {
+    (void)fprintf(stderr, "%s must be finite and positive, got '%s'\n", name,
+                  value);
     exit(EXIT_FAILURE);
   }
   return parsed;

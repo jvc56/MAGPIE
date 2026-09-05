@@ -242,7 +242,7 @@ peg_eg: pgo_eg
 # profile-guided native build. The dedicated driver contains no benchmark
 # harness; it invokes real engine workloads directly.
 pgo_workload:
-	@if test -f data/lexica/CSW24.rit; then \
+	@set -e; if test -f data/lexica/CSW24.rit; then \
 		echo 'Using existing data/lexica/CSW24.rit'; \
 	else \
 		$(MAKE) -B magpie \
