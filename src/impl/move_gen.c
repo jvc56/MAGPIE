@@ -1,7 +1,6 @@
 #include "move_gen.h"
 
 #include "../compat/cpthread.h"
-#include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/cross_set_defs.h"
@@ -979,13 +978,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           (MachineLetter)lowest_set_bit_index(forbidden);
       forbidden_count += rack_get_letter(&gen->player_rack, forbidden_ml);
       // BitRack stores a four-bit count for each machine letter. Mask the
-      // entire nibble so any positive count rejects the subrack.
-      const int shift = forbidden_ml * BIT_RACK_BITS_PER_LETTER;
-      if (shift < 64) {
-        forbidden_subrack_low |= 0xFULL << shift;
-      } else {
-        forbidden_subrack_high |= 0xFULL << (shift - 64);
-      }
+      // entire lane so any positive count rejects the subrack.
+      bit_rack_add_letter_to_mask(&forbidden_subrack_low,
+                                  &forbidden_subrack_high, forbidden_ml);
       forbidden = clear_lowest_set_bit(forbidden);
     }
     if (gen->number_of_letters_on_rack - forbidden_count <
@@ -999,8 +994,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
     if ((forbidden_subrack_low | forbidden_subrack_high) != 0) {
       const BitRack *subrack =
           wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx);
-      if ((bit_rack_get_low_64(subrack) & forbidden_subrack_low) != 0 ||
-          (bit_rack_get_high_64(subrack) & forbidden_subrack_high) != 0) {
+      if (bit_rack_intersects_mask(subrack, forbidden_subrack_low,
+                                   forbidden_subrack_high)) {
         continue;
       }
     }

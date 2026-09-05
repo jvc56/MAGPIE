@@ -1,3 +1,4 @@
+#include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
@@ -1682,6 +1683,52 @@ static void add_wit_prune_test_word(DictionaryWordList *words,
 // rack has both usable tiles (B/C) and a proven-impossible tile (X), then
 // verify that enabling the per-subrack rejection leaves the complete move list
 // exact.
+static void assert_wit_prune_agrees(Game *without_wit, Game *with_wit,
+                                    const char *cgp) {
+  load_cgp_or_die(without_wit, cgp);
+  load_cgp_or_die(with_wit, cgp);
+  MoveList *without_wit_moves = move_list_create(1000);
+  MoveList *with_wit_moves = move_list_create(1000);
+  const MoveGenArgs without_wit_args = {
+      .game = without_wit,
+      .move_list = without_wit_moves,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  MoveGenArgs with_wit_args = without_wit_args;
+  with_wit_args.game = with_wit;
+  with_wit_args.move_list = with_wit_moves;
+  generate_moves_for_game(&without_wit_args);
+  generate_moves_for_game(&with_wit_args);
+
+  SortedMoveList *without_wit_sorted =
+      sorted_move_list_create(without_wit_moves);
+  SortedMoveList *with_wit_sorted = sorted_move_list_create(with_wit_moves);
+  assert(without_wit_sorted->count > 0);
+  assert(with_wit_sorted->count == without_wit_sorted->count);
+  for (int move_idx = 0; move_idx < without_wit_sorted->count; move_idx++) {
+    assert_moves_are_equal(without_wit_sorted->moves[move_idx],
+                           with_wit_sorted->moves[move_idx]);
+  }
+  sorted_move_list_destroy(without_wit_sorted);
+  sorted_move_list_destroy(with_wit_sorted);
+  move_list_destroy(without_wit_moves);
+  move_list_destroy(with_wit_moves);
+}
+
+// WIT's per-anchor letter union is a necessary condition for every canonical
+// subrack, not just for the rack as a whole. Exercise surviving anchors whose
+// racks mix usable tiles with provably impossible ones, and verify that the
+// complete move list is unchanged by the per-subrack rejection.
+//
+// The forbidden set becomes a 128-bit BitRack lane mask split across two
+// 64-bit halves, so the racks below deliberately place forbidden letters in
+// the low half (D is machine letter 4), the high half (X is 24), and both at
+// once. Blanks are wild -- they may be designated as any letter, including a
+// forbidden one -- so a rack holding a blank must never lose a play.
 static void wit_subrack_prune_movegen_test(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all");
@@ -1692,8 +1739,9 @@ static void wit_subrack_prune_movegen_test(void) {
   static const char *const word_strings[] = {
       "AT", "BAT", "CAT", "RAT", "ATB", "ATC", "BATS", "CATS", "RATS",
   };
-  for (size_t i = 0; i < sizeof(word_strings) / sizeof(word_strings[0]); i++) {
-    add_wit_prune_test_word(words, ld, word_strings[i]);
+  for (size_t word_idx = 0;
+       word_idx < sizeof(word_strings) / sizeof(word_strings[0]); word_idx++) {
+    add_wit_prune_test_word(words, ld, word_strings[word_idx]);
   }
 
   KWG *test_kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
@@ -1718,54 +1766,47 @@ static void wit_subrack_prune_movegen_test(void) {
   players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, test_wit);
   Game *with_wit = config_game_create(config);
 
-  static const char *const cgp =
-      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 BCX/ 0/0 0";
-  load_cgp_or_die(without_wit, cgp);
-  load_cgp_or_die(with_wit, cgp);
-
-  MachineLetter at[2];
-  assert(ld_str_to_mls(ld, "AT", false, at, 2) == 2);
-  const uint32_t *at_row = word_info_table_lookup(test_wit, at, 2);
+  // Confirm the fixture really does forbid the letters the racks rely on:
+  // words of length three through the AT block use only A, T, B, C and R.
+  MachineLetter at_block[2];
+  assert(ld_str_to_mls(ld, "AT", false, at_block, 2) == 2);
+  const uint32_t *at_row = word_info_table_lookup(test_wit, at_block, 2);
   assert(at_row != NULL);
   const uint32_t length_three_addable = at_row[1];
-  const MachineLetter b = ld_hl_to_ml(ld, "B");
-  const MachineLetter c = ld_hl_to_ml(ld, "C");
-  const MachineLetter x = ld_hl_to_ml(ld, "X");
-  assert((length_three_addable & (1U << b)) != 0);
-  assert((length_three_addable & (1U << c)) != 0);
-  assert((length_three_addable & (1U << x)) == 0);
+  const MachineLetter b_letter = ld_hl_to_ml(ld, "B");
+  const MachineLetter c_letter = ld_hl_to_ml(ld, "C");
+  const MachineLetter d_letter = ld_hl_to_ml(ld, "D");
+  const MachineLetter x_letter = ld_hl_to_ml(ld, "X");
+  assert((length_three_addable & (1U << b_letter)) != 0);
+  assert((length_three_addable & (1U << c_letter)) != 0);
+  assert((length_three_addable & (1U << d_letter)) == 0);
+  assert((length_three_addable & (1U << x_letter)) == 0);
+  // D and X must straddle the 64-bit boundary of the BitRack lane mask, or
+  // these cases would not cover both halves of the split.
+  assert(d_letter * BIT_RACK_BITS_PER_LETTER < 64);
+  assert(x_letter * BIT_RACK_BITS_PER_LETTER >= 64);
 
-  MoveList *without_wit_moves = move_list_create(1000);
-  MoveList *with_wit_moves = move_list_create(1000);
-  const MoveGenArgs without_wit_args = {
-      .game = without_wit,
-      .move_list = without_wit_moves,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_SCORE,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  static const char *const cgps[] = {
+      // Forbidden letter in the high mask half only (X).
+      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 BCX/ 0/0 0",
+      // Forbidden letter in the low mask half only (D).
+      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 BCD/ 0/0 0",
+      // Forbidden letters in both halves at once.
+      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 BDX/ 0/0 0",
+      // A blank alongside forbidden letters: the blank can be designated as
+      // any addable letter, so no subrack containing it may be skipped.
+      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 B?X/ 0/0 0",
+      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 ?DX/ 0/0 0",
+      // Every rack tile forbidden except the blank, spanning both halves.
+      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 ?DXG/ 0/0 0",
+      // No forbidden tiles at all: the prune must stay inert.
+      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 BCR/ 0/0 0",
   };
-  MoveGenArgs with_wit_args = without_wit_args;
-  with_wit_args.game = with_wit;
-  with_wit_args.move_list = with_wit_moves;
-  generate_moves_for_game(&without_wit_args);
-  generate_moves_for_game(&with_wit_args);
-
-  SortedMoveList *without_wit_sorted =
-      sorted_move_list_create(without_wit_moves);
-  SortedMoveList *with_wit_sorted = sorted_move_list_create(with_wit_moves);
-  assert(without_wit_sorted->count > 0);
-  assert(with_wit_sorted->count == without_wit_sorted->count);
-  for (int i = 0; i < without_wit_sorted->count; i++) {
-    assert_moves_are_equal(without_wit_sorted->moves[i],
-                           with_wit_sorted->moves[i]);
+  for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
+       cgp_idx++) {
+    assert_wit_prune_agrees(without_wit, with_wit, cgps[cgp_idx]);
   }
 
-  sorted_move_list_destroy(without_wit_sorted);
-  sorted_move_list_destroy(with_wit_sorted);
-  move_list_destroy(without_wit_moves);
-  move_list_destroy(with_wit_moves);
   game_destroy(without_wit);
   game_destroy(with_wit);
 
