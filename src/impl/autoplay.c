@@ -736,6 +736,10 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                 (unsigned long long)game_runner->game_number + 1,
                 (unsigned long long)game_runner->seed);
     }
+    if (autoplay_get_bench_static_move()) {
+      return get_top_equity_move(
+          game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
+    }
     return &game_runner->play_chooser_move;
   }
   const SimArgs *sim_args = (player_on_turn_index == 0)

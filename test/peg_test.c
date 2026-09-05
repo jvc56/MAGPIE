@@ -1145,13 +1145,15 @@ static void peg_test_on_stage_start(int stage_idx, int k_cands, int inner_d,
 static void peg_test_on_cand_done(int stage_idx, int cand_rank,
                                   const Move *cand, double win_pct,
                                   double mean_spread, int scen_done,
-                                  bool reordered, void *user_data) {
+                                  int64_t completed_ns, bool reordered,
+                                  void *user_data) {
   (void)stage_idx;
   (void)cand_rank;
   (void)mean_spread;
   (void)reordered;
   assert(cand != NULL);
   assert(scen_done >= 1);
+  assert(completed_ns > 0);
   assert(win_pct >= 0.0 && win_pct <= 1.0);
   PegCallbackCounters *counters = user_data;
   atomic_fetch_add(&counters->cand_dones, 1);
@@ -1246,15 +1248,15 @@ typedef struct PegDiscardStageContext {
 // Interrupt the second halving stage after its first candidate finishes. The
 // solver must discard that one-candidate stage and keep every published result,
 // including its captured outcomes, at the preceding fidelity.
-static void peg_test_interrupt_discarded_stage(int stage_idx, int cand_rank,
-                                               const Move *cand, double win_pct,
-                                               double mean_spread,
-                                               int scen_done, bool reordered,
-                                               void *user_data) {
+static void peg_test_interrupt_discarded_stage(
+    int stage_idx, int cand_rank, const Move *cand, double win_pct,
+    double mean_spread, int scen_done, int64_t completed_ns, bool reordered,
+    void *user_data) {
   (void)cand;
   (void)win_pct;
   (void)mean_spread;
   (void)scen_done;
+  (void)completed_ns;
   (void)reordered;
   if (stage_idx == 2 && cand_rank == 0) {
     PegDiscardStageContext *context = user_data;
@@ -1332,12 +1334,14 @@ typedef struct PegInterruptedCandidateContext {
 
 static void peg_test_count_completed_candidates(
     int stage_idx, int cand_rank, const Move *cand, double win_pct,
-    double mean_spread, int scen_done, bool reordered, void *user_data) {
+    double mean_spread, int scen_done, int64_t completed_ns, bool reordered,
+    void *user_data) {
   (void)cand_rank;
   (void)cand;
   (void)win_pct;
   (void)mean_spread;
   (void)scen_done;
+  (void)completed_ns;
   (void)reordered;
   if (stage_idx == 2) {
     PegInterruptedCandidateContext *context = user_data;
