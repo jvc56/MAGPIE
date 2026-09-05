@@ -9,6 +9,7 @@
 #include "rack_info_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
+#include <stdint.h>
 #include <stdlib.h>
 
 static const char *const players_data_type_names[] = {
