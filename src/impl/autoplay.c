@@ -573,6 +573,7 @@ static void game_runner_create_play_choosers(AutoplayWorker *autoplay_worker,
     }
     PlayChooserStrategy strategy = args->play_chooser_strategies[player_index];
     strategy.game_timer = &game_runner->game_timer;
+    strategy.overtime_period_seconds = args->overtime_period_seconds;
     strategy.seed = seed + (uint64_t)player_index;
     game_runner->play_choosers[player_index] = play_chooser_create(&strategy);
   }
@@ -734,6 +735,10 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                 player_on_turn_index + 1, game_runner->turn_number + 1,
                 (unsigned long long)game_runner->game_number + 1,
                 (unsigned long long)game_runner->seed);
+    }
+    if (autoplay_get_bench_static_move()) {
+      return get_top_equity_move(
+          game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
     }
     return &game_runner->play_chooser_move;
   }
