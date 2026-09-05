@@ -875,6 +875,29 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
   return true;
 }
 
+// Index of the lowest set bit of a nonzero bitset, following
+// get_single_bit_index's guarded-intrinsic pattern. Undefined for zero, so
+// callers loop on `bitset != 0`.
+static inline int lowest_set_bit_index(uint32_t bitset) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+  return __builtin_ctz(bitset);
+#else
+  int index = 0;
+  while ((bitset & 1U) == 0) {
+    bitset >>= 1U;
+    index++;
+  }
+  return index;
+#endif
+}
+
+// Clears the lowest set bit, so a loop can visit each set bit in turn:
+// subtracting one flips that bit and everything below it, and the AND keeps
+// only the bits above it.
+static inline uint32_t clear_lowest_set_bit(uint32_t bitset) {
+  return bitset & (bitset - 1U);
+}
+
 void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(gen != NULL);
   assert(anchor != NULL);
@@ -948,9 +971,10 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
     uint32_t forbidden = rack_present & ~addable;
     int forbidden_count = 0;
     while (forbidden != 0) {
-      forbidden_count += rack_get_letter(
-          &gen->player_rack, (MachineLetter)__builtin_ctz(forbidden));
-      forbidden &= forbidden - 1;
+      const MachineLetter forbidden_ml =
+          (MachineLetter)lowest_set_bit_index(forbidden);
+      forbidden_count += rack_get_letter(&gen->player_rack, forbidden_ml);
+      forbidden = clear_lowest_set_bit(forbidden);
     }
     if (gen->number_of_letters_on_rack - forbidden_count <
         anchor->tiles_to_play) {
