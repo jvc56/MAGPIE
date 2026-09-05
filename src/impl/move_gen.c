@@ -41,6 +41,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// See WMP_ENTRY_UNRESOLVED in wmp_move_gen.h. Only its address is used.
+const WMPEntry wmp_entry_unresolved_sentinel = {0};
+
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 // Cache move generators since destroying
@@ -3276,12 +3279,8 @@ void generate_moves(const MoveGenArgs *args) {
           leaves_are_populated && subrack_entry->valid &&
           bit_rack_equals(&subrack_entry->key, &wgen->player_bit_rack);
       if (subrack_cache_hit) {
-        // Restore enumerate_nonplaythrough_subracks output AND the
-        // per-subrack wmp_entry pointers from cache. Both pieces are
-        // rack-determined (subracks via combinatoric walk, wmp_entries
-        // via WMP hash), so on hit we skip both the enumeration and the
-        // per-subrack wmp_get_word_entry calls that the size walk would
-        // otherwise run.
+        // Restore the enumeration output and whichever per-subrack WMP
+        // entries prior occurrences of this rack actually needed.
         memcpy(wgen->count_by_size, subrack_entry->count_by_size,
                sizeof(wgen->count_by_size));
         for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
@@ -3292,16 +3291,16 @@ void generate_moves(const MoveGenArgs *args) {
               subrack_entry->wmp_entries[i];
         }
       }
+      if (leaves_are_populated) {
+        wgen->nonplaythrough_wmp_entry_cache = subrack_entry->wmp_entries;
+      }
       if (gen->rit_entry != NULL) {
-        // RIT-backed fast path: skip the per-size wmp_get_word_entry loop
-        // for any played size where the RIT entry says no canonical
-        // k-subrack of this rack forms a k-letter word on its own. Seeds
-        // nonplaythrough_best_leave_values directly from the cached max
-        // the RIT already computed at build time.
+        // The RIT supplies existence and best-leave bounds. Defer each
+        // per-subrack WMP lookup until wordmap generation survives those
+        // bounds and actually needs that subrack's words.
         wmp_move_gen_check_nonplaythrough_existence_with_rit(
             wgen, check_leaves, &gen->leave_map, gen->rit_entry,
-            /*subracks_precomputed=*/subrack_cache_hit,
-            /*wmp_entries_precomputed=*/subrack_cache_hit);
+            /*subracks_precomputed=*/subrack_cache_hit);
       } else {
         wmp_move_gen_check_nonplaythrough_existence(
             wgen, check_leaves, &gen->leave_map,
@@ -3309,8 +3308,8 @@ void generate_moves(const MoveGenArgs *args) {
             /*wmp_entries_precomputed=*/subrack_cache_hit);
       }
       if (!subrack_cache_hit && leaves_are_populated) {
-        // Store the newly-computed enumeration and wmp_entry pointers
-        // into the cache. Only cache when leaves_are_populated so we
+        // Store the newly computed enumeration and any WMP entries that have
+        // already been resolved. Only cache when leaves_are_populated so we
         // don't stash garbage leave_values from an uninitialized leave_map.
         subrack_entry->key = wgen->player_bit_rack;
         subrack_entry->valid = true;

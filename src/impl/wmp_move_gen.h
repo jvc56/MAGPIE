@@ -29,6 +29,13 @@ typedef struct SubrackInfo {
   Equity leave_value;
 } SubrackInfo;
 
+// A nonplaythrough subrack's wmp_entry has three states: unresolved (this
+// sentinel), a resolved miss (NULL), or a resolved entry. Only the RIT-backed
+// path ever writes the sentinel, so the non-RIT path is unchanged by lazy
+// resolution. The object lives in move_gen.c; only its address matters.
+extern const WMPEntry wmp_entry_unresolved_sentinel;
+#define WMP_ENTRY_UNRESOLVED (&wmp_entry_unresolved_sentinel)
+
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct WMPMoveGen {
   const WMP *wmp;
@@ -70,6 +77,10 @@ typedef struct WMPMoveGen {
   int word_length;
   int num_words;
   Equity leave_value;
+  // When the caller has an active per-rack cache, lazily resolved
+  // nonplaythrough WMP entries are written through to it for the next
+  // occurrence of the rack. The cache stores the same three-state pointers.
+  const WMPEntry **nonplaythrough_wmp_entry_cache;
 } WMPMoveGen;
 
 static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
@@ -88,6 +99,7 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
                                      const Rack *player_rack, const WMP *wmp) {
   wmp_move_gen->wmp = wmp;
+  wmp_move_gen->nonplaythrough_wmp_entry_cache = NULL;
   if (wmp == NULL || player_rack == NULL || ld == NULL) {
     return;
   }
@@ -346,6 +358,11 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
     if (!wmp_entries_precomputed) {
       subrack_info->wmp_entry =
           wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
+    } else {
+      // Only the RIT-backed path leaves entries unresolved, and a rack's path
+      // is fixed by whether it has a RIT entry, so a precomputed entry
+      // reaching the eager walk must already be resolved.
+      assert(subrack_info->wmp_entry != WMP_ENTRY_UNRESOLVED);
     }
     if (subrack_info->wmp_entry == NULL) {
       continue;
@@ -384,14 +401,10 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
   }
 }
 
-// RIT-backed variant of wmp_move_gen_check_nonplaythrough_existence. Skips
-// the per-size wmp_get_word_entry loop for any size where the RIT entry
-// says there is no canonical size-k subrack that forms a valid k-letter
-// word. For sizes that do have words, still runs the existing walk to
-// populate subrack_info->wmp_entry pointers needed at record time. Also
-// seeds nonplaythrough_best_leave_values from the RIT entry directly so
-// that even for the walked sizes we avoid the running-max update inside
-// the inner loop.
+// RIT-backed variant of wmp_move_gen_check_nonplaythrough_existence. The RIT
+// supplies both the per-size existence result and best leave, so no WMP hash
+// walk is needed here. Nonplaythrough WMP entries are resolved lazily if
+// record-time generation actually reaches their subrack.
 //
 // Precondition: rit_entry is non-NULL and corresponds to this move_gen's
 // full player_rack.
@@ -400,8 +413,7 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
 // cache), so we skip the enumerate_nonplaythrough_subracks step.
 static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
     WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
-    const RackInfoTableEntry *rit_entry, bool subracks_precomputed,
-    bool wmp_entries_precomputed) {
+    const RackInfoTableEntry *rit_entry, bool subracks_precomputed) {
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
   if (!subracks_precomputed) {
@@ -434,34 +446,24 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
     }
   }
 
-  // For sizes that have at least one valid nonplaythrough word we still
-  // need to populate subrack_info->wmp_entry pointers for the eventual
-  // record-time wmp_entry_write_words_to_buffer call. But we can skip the
-  // walk entirely for sizes where no canonical subrack makes a word -- the
-  // wmp_entry cache for those sizes is never read because shadow_record
-  // early-returns on wmp_move_gen_nonplaythrough_word_of_length_exists
-  // before getting to the record stage.
-  for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
-       size++) {
-    if (!wmp_move_gen->nonplaythrough_has_word_of_length[size]) {
-      continue;
+  // Freshly enumerated subracks carry stale wmp_entry pointers from whatever
+  // rack was generated before. Mark the ones record time can reach as
+  // unresolved; wmp_move_gen_get_subrack_words resolves them on demand. Sizes
+  // with no word are never read, so their pointers are left alone. On a cache
+  // hit the restored pointers already carry each slot's state.
+  if (!subracks_precomputed) {
+    for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
+         size++) {
+      if (!wmp_move_gen->nonplaythrough_has_word_of_length[size]) {
+        continue;
+      }
+      const int offset = subracks_get_combination_offset(size);
+      const int count = wmp_move_gen->count_by_size[size];
+      for (int idx = 0; idx < count; idx++) {
+        wmp_move_gen->nonplaythrough_infos[offset + idx].wmp_entry =
+            WMP_ENTRY_UNRESOLVED;
+      }
     }
-    const int leave_size = wmp_move_gen->full_rack_size - size;
-    // The existing wmp_move_gen_check_nonplaythroughs_of_size writes to
-    // nonplaythrough_best_leave_values[leave_size] and runs a max update
-    // across subracks. We already seeded the final value from the RIT, so
-    // stash it and restore after the walk (the walk only keeps a running
-    // max vs EQUITY_MIN_VALUE, which matches the RIT-seeded max).
-    const Equity seeded_best =
-        wmp_move_gen->nonplaythrough_best_leave_values[leave_size];
-    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, check_leaves,
-                                               wmp_entries_precomputed);
-    // Assert the walk's max matches what RIT already stored. Cheap sanity
-    // check that catches maker/consumer drift.
-    assert(!check_leaves ||
-           wmp_move_gen->nonplaythrough_best_leave_values[leave_size] ==
-               seeded_best);
-    (void)seeded_best;
   }
 }
 
@@ -650,11 +652,16 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   SubrackInfo *subrack_info =
       is_playthrough ? &wmp_move_gen->playthrough_infos[subrack_idx]
                      : &wmp_move_gen->nonplaythrough_infos[subrack_idx];
-  // Nonplaythrough subracks' wmp entries were already looked up during
-  // shadow.
   if (is_playthrough) {
     subrack_info->wmp_entry = wmp_get_word_entry(
         wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
+  } else if (subrack_info->wmp_entry == WMP_ENTRY_UNRESOLVED) {
+    subrack_info->wmp_entry = wmp_get_word_entry(
+        wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
+    if (wmp_move_gen->nonplaythrough_wmp_entry_cache != NULL) {
+      wmp_move_gen->nonplaythrough_wmp_entry_cache[subrack_idx] =
+          subrack_info->wmp_entry;
+    }
   }
 
   if (subrack_info->wmp_entry == NULL) {
