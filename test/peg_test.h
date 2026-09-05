@@ -26,4 +26,6 @@ void test_peg_4bag_pond(void);
 void test_peg_3bag_pah_pessimistic(void);
 void test_peg_4bag_pond_pessimistic(void);
 
+void test_peg_interrupted_candidate_outcomes(void);
+
 #endif

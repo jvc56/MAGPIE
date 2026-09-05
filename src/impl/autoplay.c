@@ -746,7 +746,7 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
-    return get_top_equity_move(
+    return get_top_move_for_player_on_turn(
         game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
   }
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);

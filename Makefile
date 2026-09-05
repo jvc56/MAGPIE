@@ -91,10 +91,13 @@ pgo_use_flags := -fprofile-instr-use=$(PGO_PROFILE) \
                  -Wno-profile-instr-unprofiled
 cflags.pgo_use := $(cflags.no_pgo_release) $(pgo_use_flags)
 cflags.test_pgo_use := $(cflags.test_no_pgo_release) $(pgo_use_flags)
+# Shared library flavor: release optimization plus -fPIC, no sanitizers
+cflags.lib := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -fPIC
 cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
+ldflags.lib := -pthread
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
 ldflags.no_pgo_release := -pthread -flto
@@ -124,12 +127,47 @@ LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
-	pgo_eg peg_eg pgo_workload
+	pgo_eg peg_eg pgo_workload libmagpie examples
 
 all: magpie magpie_test
 
 libmagpie_core.a: $(OBJ_SRC)
 	ar rcs $@ $^
+
+# Shared library for embedding magpie; the API surface is src/impl/cmd_api.h
+# and only magpie_* symbols are exported. Re-invokes make with BUILD=lib so
+# objects are always compiled with -fPIC and without sanitizers.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+SHARED_LIB := $(BIN_DIR)/libmagpie.dylib
+else
+SHARED_LIB := $(BIN_DIR)/libmagpie.so
+endif
+
+libmagpie:
+	@$(MAKE) BUILD=lib $(SHARED_LIB)
+
+$(OBJ_DIR)/libmagpie.map: | $(OBJ_DIR)
+	printf '{ global: magpie_*; local: *; };\n' > $@
+
+$(OBJ_DIR)/libmagpie.exports: | $(OBJ_DIR)
+	printf '_magpie_*\n' > $@
+
+$(BIN_DIR)/libmagpie.so: $(OBJ_SRC) $(OBJ_DIR)/libmagpie.map | $(BIN_DIR)
+	$(CC) -shared $(LDFLAGS) $(LFLAGS) $(OBJ_SRC) $(LDLIBS) -Wl,--version-script=$(OBJ_DIR)/libmagpie.map -o $@
+
+$(BIN_DIR)/libmagpie.dylib: $(OBJ_SRC) $(OBJ_DIR)/libmagpie.exports | $(BIN_DIR)
+	$(CC) -dynamiclib $(LDFLAGS) $(LFLAGS) $(OBJ_SRC) $(LDLIBS) -Wl,-exported_symbols_list,$(OBJ_DIR)/libmagpie.exports -o $@
+
+# Example programs embedding magpie through the shared library
+ifeq ($(UNAME_S),Darwin)
+EXAMPLE_RPATH := -Wl,-rpath,@loader_path
+else
+EXAMPLE_RPATH := -Wl,-rpath,'$$ORIGIN'
+endif
+
+examples: libmagpie
+	$(CC) -O2 -Wall -Werror examples/generate_moves.c -L$(BIN_DIR) -lmagpie $(EXAMPLE_RPATH) -o $(BIN_DIR)/generate_moves
 
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@

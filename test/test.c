@@ -16,6 +16,7 @@
 #include "board_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
+#include "cmd_api_test.h"
 #include "command_test.h"
 #include "config_test.h"
 #include "convert_test.h"
@@ -111,6 +112,7 @@ static TestEntry test_table[] = {
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},
+    {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},
@@ -145,6 +147,8 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"peginterrupt", test_peg_interrupted_candidate_outcomes},
+    {"playchooserfixed", test_play_chooser_fixed_short_budget},
     {"analyze_sim", test_analyze_sim},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
