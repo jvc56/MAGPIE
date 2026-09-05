@@ -185,10 +185,12 @@ void test_mul(void) {
 // prune's `shift < 64` split turns on.
 void test_letter_masks(void) {
   const int max_count = (1 << BIT_RACK_BITS_PER_LETTER) - 1;
+  assert(!bit_rack_mask_has_letters(0, 0));
   for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     uint64_t low_mask = 0;
     uint64_t high_mask = 0;
     bit_rack_add_letter_to_mask(&low_mask, &high_mask, (MachineLetter)ml);
+    assert(bit_rack_mask_has_letters(low_mask, high_mask));
 
     // Exactly one half carries the lane, and it carries exactly one lane.
     const bool in_low = ml < BIT_RACK_MAX_ALPHABET_SIZE / 2;
@@ -227,6 +229,7 @@ void test_letter_masks(void) {
   bit_rack_add_letter_to_mask(&low_mask, &high_mask, last_low);
   bit_rack_add_letter_to_mask(&low_mask, &high_mask, first_high);
   assert(low_mask != 0 && high_mask != 0);
+  assert(bit_rack_mask_has_letters(low_mask, high_mask));
   for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     BitRack single = bit_rack_create_empty();
     bit_rack_set_letter_count(&single, (MachineLetter)ml, 1);

@@ -190,6 +190,13 @@ static inline bool bit_rack_intersects_mask(const BitRack *bit_rack,
          (bit_rack_get_high_64(bit_rack) & high_mask) != 0;
 }
 
+// True if any letter's lane is set in the mask. Sits on move generation's
+// per-anchor path, so keep it from ever becoming a call.
+static inline __attribute__((always_inline)) bool
+bit_rack_mask_has_letters(uint64_t low_mask, uint64_t high_mask) {
+  return (low_mask | high_mask) != 0;
+}
+
 static inline bool bit_rack_equals(const BitRack *a, const BitRack *b) {
 #if USE_INT128_INTRINSIC
   return *a == *b;
