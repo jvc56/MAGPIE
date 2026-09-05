@@ -69,6 +69,7 @@
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -253,8 +254,14 @@ void run_all_rack_size(void) {
 int main(int argc, char *argv[]) {
   log_set_level(LOG_WARN);
 
+  // These compare compile-time constants; at the default sizes both sides
+  // are the same literal, which clang-tidy flags as redundant.
   // NOLINTNEXTLINE(misc-redundant-expression)
-  if (BOARD_DIM == DEFAULT_BOARD_DIM && RACK_SIZE != DEFAULT_RACK_SIZE) {
+  const bool is_default_board = BOARD_DIM == DEFAULT_BOARD_DIM;
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  const bool is_default_rack = RACK_SIZE == DEFAULT_RACK_SIZE;
+
+  if (is_default_board && !is_default_rack) {
     // Named tests still run, so a single test can be debugged at any rack
     // size; the no-argument form runs the reduced rack-size-generic set.
     if (argc == 1) {
@@ -264,7 +271,7 @@ int main(int argc, char *argv[]) {
         run_test(argv[i]);
       }
     }
-  } else if (BOARD_DIM == DEFAULT_BOARD_DIM) {
+  } else if (is_default_board) {
     if (argc == 1) {
       run_all();
     } else {

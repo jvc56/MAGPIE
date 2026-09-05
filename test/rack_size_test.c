@@ -96,9 +96,12 @@ static void test_rack_size_encoded_rack(Rack *rack, Rack *decoded) {
   // Mixed: blanks, a repeated low letter, and Z, totalling exactly RACK_SIZE.
   rack_reset(rack);
   for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
-    const MachineLetter ml = tile_idx == 0               ? BLANK_MACHINE_LETTER
-                             : tile_idx == RACK_SIZE - 1 ? z_ml
-                                                         : 1;
+    MachineLetter ml = 1;
+    if (tile_idx == 0) {
+      ml = BLANK_MACHINE_LETTER;
+    } else if (tile_idx == RACK_SIZE - 1) {
+      ml = z_ml;
+    }
     rack_add_letter(rack, ml);
   }
   assert_encode_decode(rack, decoded);
