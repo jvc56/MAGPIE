@@ -639,8 +639,12 @@ wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
   return &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size].subrack;
 }
 
-static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
-                                                  int idx_for_size) {
+// Called once per canonical subrack from the hottest loop in wordmap_gen.
+// clang inlines it there while it has a single caller; a second caller
+// anywhere in that translation unit flips the cost model and turns the loop
+// into a call per subrack (measured: about -5% sim throughput). Pin it.
+static inline __attribute__((always_inline)) bool
+wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen, int idx_for_size) {
   const int offset =
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play);
   const int subrack_idx = offset + idx_for_size;
