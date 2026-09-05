@@ -23,6 +23,11 @@ enum {
       ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS),
 };
 
+// Anchor slot indices travel through uint8_t arrays (touched_anchor_slots
+// and the sorted copy in wmp_move_gen_add_anchors).
+static_assert(MAX_WMP_MOVE_GEN_ANCHORS <= UINT8_MAX,
+              "anchor slot indices must fit in a uint8_t");
+
 typedef struct SubrackInfo {
   BitRack subrack;
   const WMPEntry *wmp_entry;
@@ -690,11 +695,24 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
                                             int dir,
                                             Equity inference_cutoff_equity,
                                             AnchorHeap *anchor_heap) {
-  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    const Anchor *anchor = &wmp_move_gen->anchors[i];
-    if (anchor->tiles_to_play == 0) {
-      continue;
+  // Only slots touched in this shadow pass have tiles_to_play != 0 (see
+  // wmp_move_gen_maybe_update_anchor and wmp_move_gen_reset_anchors), so
+  // visit just those. Sort them so anchors reach the heap in the same slot
+  // order a full table scan produces.
+  uint8_t sorted_slots[MAX_WMP_MOVE_GEN_ANCHORS];
+  const int num_touched = wmp_move_gen->num_touched_anchor_slots;
+  for (int touched_idx = 0; touched_idx < num_touched; touched_idx++) {
+    const uint8_t slot = wmp_move_gen->touched_anchor_slots[touched_idx];
+    int insert_idx = touched_idx;
+    while (insert_idx > 0 && sorted_slots[insert_idx - 1] > slot) {
+      sorted_slots[insert_idx] = sorted_slots[insert_idx - 1];
+      insert_idx--;
     }
+    sorted_slots[insert_idx] = slot;
+  }
+  for (int touched_idx = 0; touched_idx < num_touched; touched_idx++) {
+    const Anchor *anchor = &wmp_move_gen->anchors[sorted_slots[touched_idx]];
+    assert(anchor->tiles_to_play != 0);
 
     // Skip subanchors whose highest possible equity is below the cutoff
     // threshold. This is safe when cutoff_equity is fixed (as in inference
