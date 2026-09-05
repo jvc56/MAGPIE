@@ -869,9 +869,17 @@ static inline Board *board_create(const BoardLayout *bl) {
 }
 
 static inline void board_copy(Board *dst, const Board *src) {
-  // Do not copy derived WIT rows, but clear a reused destination: its old
-  // rows can describe longer blocks and suppress legal moves in the source.
-  board_clear_wit_cache(dst);
+  // The WIT rows are derived from the squares, and dst receives exactly src's
+  // squares, so src's rows describe dst's blocks: copying them is correct and
+  // keeps the cache usable after the copy. Leaving dst's own rows in place is
+  // not -- they describe the board dst used to hold and can suppress legal
+  // moves -- so the region must be copied whenever either side has any row.
+  if (src->wit_cache_populated || dst->wit_cache_populated) {
+    memcpy(dst, src, sizeof(Board));
+    return;
+  }
+  // Both caches are entirely NULL, so the region needs no traffic at all. This
+  // is the WIT-disabled path, where game_copy runs once per sim rollout.
   memcpy(dst, src, offsetof(Board, wit_block_rows));
   const size_t after_wit = offsetof(Board, opening_move_penalties);
   memcpy((char *)dst + after_wit, (const char *)src + after_wit,
