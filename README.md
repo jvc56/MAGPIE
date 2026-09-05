@@ -39,6 +39,8 @@ You should now be able to run the compiled MAGPIE executable:
 ./bin/magpie
 ```
 
+This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
+
 ### Release builds
 
 The production release is a native profile-guided build. Install Clang and
@@ -90,8 +92,6 @@ make release \
   LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata \
   PGO_LDFLAGS=-fuse-ld=lld
 ```
-
-This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
 
 ## Usage
 
