@@ -915,8 +915,10 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
     }
   }
 
-  wmp_move_gen_set_playthrough_bit_rack(wgen, anchor, gen->row_squares,
-                                        gen->wit_row_lane, gen->wit_len_lane);
+  wmp_move_gen_set_playthrough_bit_rack(
+      wgen, anchor, gen->row_squares,
+      gen->word_info_table != NULL ? gen->wit_row_lane : NULL,
+      gen->wit_len_lane);
   wmp_move_gen_playthrough_subracks_init(wgen, anchor);
 
   assert(anchor->leftmost_start_col <= anchor->rightmost_start_col);

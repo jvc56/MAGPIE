@@ -40,9 +40,8 @@ typedef struct MoveUndo {
   // Square changes - tracked incrementally
   //
   // This does not include Board.wit_block_rows/wit_block_lens, which are
-  // parallel caches rather than Square fields. That is safe only while WMP is
-  // disabled for incremental endgame move generation. If an incremental path
-  // enables WMP, these caches must also be restored or invalidated on unplay.
+  // parallel caches rather than Square fields. unplay_move_incremental clears
+  // them so a child block cannot constrain move generation at its parent.
   int num_square_changes;
   SquareChange square_changes[MAX_UNDO_SQUARE_CHANGES];
 

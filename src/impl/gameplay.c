@@ -236,8 +236,7 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game) {
 // squares in the through direction (the word edges adjacent to this square).
 // With these saves, unplay_move_incremental's square restore reverts the
 // Square-backed lazy cross-set updates exactly and no recompute is needed after
-// unplay. MoveUndo does not restore Board's parallel WIT block caches; see its
-// declaration for the WMP constraint.
+// unplay. Board's parallel WIT block caches are invalidated on unplay.
 static void game_gen_cross_set_tracked(const Game *game, int row, int col,
                                        int csd, int cross_set_index,
                                        MoveUndo *undo) {
@@ -812,6 +811,7 @@ void unplay_move_incremental(Game *game, const MoveUndo *undo) {
   // Restore board
   Board *board = game_get_board(game);
   move_undo_restore_squares(undo, board);
+  board_clear_wit_cache(board);
   board_set_tiles_played(board, undo->old_tiles_played);
   board_set_cross_sets_valid(board, undo->old_cross_sets_valid);
   memcpy(board->number_of_row_anchors, undo->old_number_of_row_anchors,

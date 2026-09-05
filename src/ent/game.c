@@ -271,7 +271,7 @@ get_word_info_table_for_cross_set(const Game *game, int cross_set_index) {
 // Computes and caches the word info table value-row pointer for the block of
 // tiles [block_left, block_right] on `row` (this orientation), keyed to the
 // block's leftmost square in the word direction. Move generation reads it with
-// no per-call lookup. See Square.wit_block_row.
+// no per-call lookup. See Board.wit_block_rows.
 static inline void game_store_wit_block(const WordInfoTable *wit, Board *board,
                                         int row, int block_left,
                                         int block_right, int through_dir,
@@ -490,6 +490,7 @@ void game_gen_cross_set(const Game *game, int row, int col, int dir,
 
 void game_gen_all_cross_sets(const Game *game) {
   Board *board = game_get_board(game);
+  board_clear_wit_cache(board);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
   // We only use the vertical direction here since the board
@@ -583,6 +584,10 @@ void game_update(Game *game, const GameArgs *game_args) {
   board_apply_layout(game_args->board_layout, game->board);
 
   game->variant = game_args->game_variant;
+  // The owner may have replaced or reloaded lexical data, including at the
+  // same address. Both cross sets and borrowed WIT rows must match the new
+  // tables; clearing only WIT would leave the old lexicon's cross sets.
+  game_gen_all_cross_sets(game);
 }
 
 Game *game_create(const GameArgs *game_args) {

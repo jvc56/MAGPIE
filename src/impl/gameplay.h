@@ -56,7 +56,7 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game);
 // Saves the previous contents of every square it modifies into the same
 // undo, so unplay_move_incremental's square restore reverts the cross-set
 // updates exactly — no recompute is needed after unplay. This excludes the
-// parallel WIT block caches; see MoveUndo's declaration for the WMP constraint.
+// parallel WIT block caches; unplay invalidates those derived entries.
 void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game);
 
 void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
