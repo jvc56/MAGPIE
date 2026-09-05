@@ -3,6 +3,7 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
@@ -148,6 +149,15 @@ void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
           get_formatted_string(
               "rack not available in the bag for player %d: %s",
               player_index + 1,
+              string_splitter_get_item(player_racks, player_index)));
+      return;
+    }
+    if (number_of_letters_added == -3) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CGP_PARSE_RACK_TOO_MANY_LETTERS,
+          get_formatted_string(
+              "rack for player %d exceeds the maximum rack size of %d: %s",
+              player_index + 1, RACK_SIZE,
               string_splitter_get_item(player_racks, player_index)));
       return;
     }
