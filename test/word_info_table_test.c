@@ -89,6 +89,7 @@ static void assert_tries_equal(const WitTrie *a, const WitTrie *b, int stride) {
 }
 
 static void assert_wits_equal(const WordInfoTable *a, const WordInfoTable *b) {
+  assert(a->kwg_hash == b->kwg_hash);
   assert(a->version == b->version);
   for (int len = 1; len <= BOARD_DIM; len++) {
     assert_tries_equal(&a->tries[len], &b->tries[len], wit_stride_for_len(len));

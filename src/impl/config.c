@@ -6535,6 +6535,12 @@ void config_load_lexicon_dependent_data(
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  // Every data type is now in place; a table that does not match its KWG
+  // must not survive the set.
+  players_data_validate_word_info_tables(config->players_data, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   // Load letter distribution
 

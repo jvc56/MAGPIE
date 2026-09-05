@@ -31,8 +31,8 @@
 // returns NULL and the caller permits all letters.
 enum {
   // Bump WIT_VERSION whenever the on-disk layout changes incompatibly.
-  WIT_VERSION = 2,
-  WIT_EARLIEST_SUPPORTED_VERSION = 2,
+  WIT_VERSION = 3,
+  WIT_EARLIEST_SUPPORTED_VERSION = 3,
 };
 
 typedef struct WitTrie {
@@ -49,6 +49,10 @@ typedef struct WitTrie {
 typedef struct WordInfoTable {
   char *name;
   uint8_t version;
+  // kwg_get_hash of the KWG this table was built from, so loading pairs it
+  // with the matching graph. Zero for a table built from a bare word list,
+  // which has nothing to verify against.
+  uint64_t kwg_hash;
   // Indexed by key-word length; tries[0] is unused, tries[len] holds the
   // length-`len` words. Lengths run 1..BOARD_DIM.
   WitTrie tries[BOARD_DIM + 1];
@@ -60,6 +64,10 @@ static inline int wit_stride_for_len(int len) { return BOARD_DIM - len + 1; }
 
 static inline const char *word_info_table_get_name(const WordInfoTable *wit) {
   return wit->name;
+}
+
+static inline uint64_t word_info_table_get_kwg_hash(const WordInfoTable *wit) {
+  return wit->kwg_hash;
 }
 
 // Returns the value row for `block` (a word of length `len`), or NULL if
@@ -127,6 +135,7 @@ static inline void word_info_table_destroy(WordInfoTable *wit) {
 //   1 byte:  version (WIT_VERSION)
 //   1 byte:  board_dim (matches BOARD_DIM)
 //   2 bytes: zero padding (keeps the following u32s aligned)
+//   8 bytes: kwg_hash (uint64, 0 if unknown)
 //   For each key length len = 1..BOARD_DIM (in order), one trie:
 //     4 bytes: num_nodes
 //     4 bytes: root
@@ -187,6 +196,8 @@ static inline void word_info_table_write_to_file(const WordInfoTable *wit,
   fwrite_or_die(&board_dim, sizeof(board_dim), 1, stream, "wit board dim");
   const uint8_t padding[2] = {0, 0};
   fwrite_or_die(padding, sizeof(uint8_t), 2, stream, "wit header padding");
+  const uint64_t kwg_hash_le = htole64(wit->kwg_hash);
+  fwrite_or_die(&kwg_hash_le, sizeof(kwg_hash_le), 1, stream, "wit kwg hash");
   for (int len = 1; len <= BOARD_DIM; len++) {
     wit_write_trie_or_die(&wit->tries[len], wit_stride_for_len(len), stream);
   }
@@ -283,6 +294,11 @@ static inline void word_info_table_load(WordInfoTable *wit, const char *name,
   if (fread(padding, sizeof(uint8_t), 2, stream) != 2) {
     log_fatal("could not read wit header padding");
   }
+  uint64_t kwg_hash_le;
+  if (fread(&kwg_hash_le, sizeof(kwg_hash_le), 1, stream) != 1) {
+    log_fatal("could not read wit kwg hash");
+  }
+  wit->kwg_hash = le64toh(kwg_hash_le);
 
   for (int len = 1; len <= BOARD_DIM; len++) {
     wit_read_trie_or_die(&wit->tries[len], wit_stride_for_len(len), stream);

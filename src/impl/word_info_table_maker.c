@@ -211,6 +211,8 @@ make_word_info_table_from_words(const DictionaryWordList *words) {
   WordInfoTable *wit = malloc_or_die(sizeof(WordInfoTable));
   wit->name = NULL;
   wit->version = WIT_VERSION;
+  // Unknown source graph until a KWG-based builder stamps it.
+  wit->kwg_hash = 0;
   for (int len = 0; len <= BOARD_DIM; len++) {
     flatten_trie(roots[len], wit_stride_for_len(len), &wit->tries[len]);
   }
@@ -233,5 +235,6 @@ WordInfoTable *make_word_info_table_from_kwg(const KWG *kwg) {
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
   WordInfoTable *wit = make_word_info_table_from_words(words);
   dictionary_word_list_destroy(words);
+  wit->kwg_hash = kwg_get_hash(kwg);
   return wit;
 }

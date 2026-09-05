@@ -363,6 +363,34 @@ void players_data_set(PlayersData *players_data,
 }
 
 // Destroys and recreates the existing data for both players.
+// A word info table describes the words of the KWG it was built from. Pair
+// each player's table with that player's KWG by hash, so a stale or mismatched
+// .wit fails to load rather than silently pruning legal plays. Tables built
+// from a bare word list carry no hash and are not checked.
+void players_data_validate_word_info_tables(const PlayersData *players_data,
+                                            ErrorStack *error_stack) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const WordInfoTable *wit =
+        players_data_get_word_info_table(players_data, player_index);
+    const KWG *kwg = players_data_get_kwg(players_data, player_index);
+    if (wit == NULL || kwg == NULL) {
+      continue;
+    }
+    const uint64_t wit_kwg_hash = word_info_table_get_kwg_hash(wit);
+    if (wit_kwg_hash == 0 || wit_kwg_hash == kwg_get_hash(kwg)) {
+      continue;
+    }
+    error_stack_push(
+        error_stack, ERROR_STATUS_WIT_KWG_MISMATCH,
+        get_formatted_string(
+            "word info table '%s' was not built from kwg '%s' (player %d); "
+            "delete the .wit file and rebuild it with 'convert kwg2wit %s'\n",
+            word_info_table_get_name(wit), kwg_get_name(kwg), player_index + 1,
+            word_info_table_get_name(wit)));
+    return;
+  }
+}
+
 void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *data_paths, ErrorStack *error_stack) {
@@ -403,5 +431,9 @@ void players_data_reload(PlayersData *players_data,
       players_data_set_data(players_data, players_data_type, player_index,
                             recreated_data[player_index]);
     }
+  }
+  if (players_data_type == PLAYERS_DATA_TYPE_WIT ||
+      players_data_type == PLAYERS_DATA_TYPE_KWG) {
+    players_data_validate_word_info_tables(players_data, error_stack);
   }
 }

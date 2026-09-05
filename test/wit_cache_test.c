@@ -66,7 +66,7 @@ static Config *create_cache_config(void) {
     KWG *kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                    KWG_MAKER_MERGE_EXACT);
     WMP *wmp = make_wmp_from_words(words, ld, 1);
-    WordInfoTable *wit = make_word_info_table_from_words(words);
+    WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
     char *kwg_path = data_filepaths_get_writable_filename(
         DEFAULT_TEST_DATA_PATH, CACHE_LEXICA[lexicon_idx],
         DATA_FILEPATH_TYPE_KWG, error_stack);
@@ -346,8 +346,30 @@ void test_wit_cache_config(void) {
   destroy_cache_config(config);
 }
 
+// A .wit that was not built from the loaded KWG must be refused, not used.
+void test_wit_cache_kwg_mismatch(void) {
+  Config *config = create_cache_config();
+  // Write lexicon a's table under lexicon b's name, then switch to b.
+  const WordInfoTable *wit_a =
+      players_data_get_word_info_table(config_get_players_data(config), 0);
+  assert(wit_a != NULL && word_info_table_get_kwg_hash(wit_a) != 0);
+  ErrorStack *error_stack = error_stack_create();
+  char *wit_b_path = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, CACHE_LEXICA[1],
+      DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  word_info_table_write_to_file(wit_a, wit_b_path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  free(wit_b_path);
+  config_load_command(config, "set -lex CSW21_wit_cache_b", error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_WIT_KWG_MISMATCH);
+  error_stack_destroy(error_stack);
+  destroy_cache_config(config);
+}
+
 void test_wit_cache(void) {
   test_wit_cache_copy();
+  test_wit_cache_kwg_mismatch();
   test_wit_cache_copy_propagates();
   test_wit_cache_undo();
   test_wit_cache_config();

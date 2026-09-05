@@ -62,6 +62,8 @@ void players_data_set(PlayersData *players_data,
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data);
+void players_data_validate_word_info_tables(const PlayersData *players_data,
+                                            ErrorStack *error_stack);
 void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *data_paths, ErrorStack *error_stack);
