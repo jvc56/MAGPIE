@@ -1,4 +1,5 @@
 #include "../src/def/board_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
 #include "alias_method_test.h"
@@ -51,6 +52,7 @@
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
+#include "rack_size_test.h"
 #include "rack_test.h"
 #include "random_variable_test.h"
 #include "shadow_test.h"
@@ -67,6 +69,7 @@
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,6 +94,7 @@ static TestEntry test_table[] = {
     {"bag", test_bag},
     {"rack", test_rack},
     {"bitrack", test_bit_rack},
+    {"racksize", test_rack_size},
     {"board", test_board},
     {"layout", test_board_layout_default},
     {"cs", test_cross_set},
@@ -231,11 +235,43 @@ void run_all_super(void) {
   test_board_layout_super();
 }
 
+// The shipped KLV/WMP/RIT files and the expected values in the standard
+// suite assume DEFAULT_RACK_SIZE tiles, so other rack sizes run a reduced
+// set. rack_size_test.c holds the tests written for this purpose: every
+// expectation there is derived from RACK_SIZE (combination offsets, BitRack
+// counts, EncodedRack round trips, LeaveMap indexing). bitrack, wmp and rit
+// are standard tests that happen to be rack-size-generic and pass at 2-8.
+//
+// The endgame tests are left out on purpose: SmallMove encodes at most 7
+// tiles (jvc56/MAGPIE#661).
+void run_all_rack_size(void) {
+  test_rack_size();
+  test_bit_rack();
+  test_wmp();
+  test_rack_info_table();
+}
+
 int main(int argc, char *argv[]) {
   log_set_level(LOG_WARN);
 
+  // These compare compile-time constants; at the default sizes both sides
+  // are the same literal, which clang-tidy flags as redundant.
   // NOLINTNEXTLINE(misc-redundant-expression)
-  if (BOARD_DIM == DEFAULT_BOARD_DIM) {
+  const bool is_default_board = BOARD_DIM == DEFAULT_BOARD_DIM;
+  // NOLINTNEXTLINE(misc-redundant-expression)
+  const bool is_default_rack = RACK_SIZE == DEFAULT_RACK_SIZE;
+
+  if (is_default_board && !is_default_rack) {
+    // Named tests still run, so a single test can be debugged at any rack
+    // size; the no-argument form runs the reduced rack-size-generic set.
+    if (argc == 1) {
+      run_all_rack_size();
+    } else {
+      for (int i = 1; i < argc; i++) {
+        run_test(argv[i]);
+      }
+    }
+  } else if (is_default_board) {
     if (argc == 1) {
       run_all();
     } else {
