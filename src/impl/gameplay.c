@@ -392,6 +392,10 @@ bool draw_rack_from_bag(const Game *game, const int player_index,
     // Rack is effectively NULL
     return true;
   }
+  // Every path that puts an externally supplied rack on a player (CGP, GCG
+  // replay, known racks) comes through here. The callers validate the size
+  // and report it; this is the backstop for the ones that forget.
+  assert(rack_get_total_letters(rack_to_draw) <= RACK_SIZE);
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
@@ -1236,6 +1240,26 @@ void set_rack_from_bag_or_push_to_error_stack(const Game *game,
                                               const int player_index,
                                               const Rack *rack_to_draw,
                                               ErrorStack *error_stack) {
+  // GCG racks are parsed without a size bound (rack_set_to_string allows
+  // MAX_RACK_SIZE tiles), and this is the point where a replayed rack becomes
+  // the live player rack. Move generation indexes RACK_SIZE-sized arrays by
+  // the rack size, so refuse an over-full rack here, before the game state
+  // is touched, rather than letting it reach the generator.
+  const int number_of_letters = rack_get_total_letters(rack_to_draw);
+  if (number_of_letters > RACK_SIZE) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_string(sb, "rack of ");
+    string_builder_add_rack(sb, rack_to_draw, game_get_ld(game), false);
+    string_builder_add_formatted_string(
+        sb,
+        " for player %d has %d tiles which exceeds the maximum rack size of %d",
+        player_index + 1, number_of_letters, RACK_SIZE);
+    char *err_msg = string_builder_dump(sb, NULL);
+    string_builder_destroy(sb);
+    error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_TOO_MANY_LETTERS,
+                     err_msg);
+    return;
+  }
   return_rack_to_bag(game, player_index);
   if (!draw_rack_from_bag(game, player_index, rack_to_draw)) {
     StringBuilder *sb = string_builder_create();
