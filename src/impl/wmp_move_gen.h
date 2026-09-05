@@ -93,6 +93,13 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
   }
   wmp_move_gen->player_bit_rack = bit_rack_create_from_rack(ld, player_rack);
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
+  // This whole module is sized off RACK_SIZE: count_by_size,
+  // nonplaythrough_has_word_of_length, nonplaythrough_best_leave_values and
+  // subracks_combination_offsets all have RACK_SIZE + 1 entries, and
+  // nonplaythrough_infos holds 1 << RACK_SIZE. An over-full rack would index
+  // past all of them, so assert the precondition once here rather than
+  // rediscovering it at each use.
+  assert(wmp_move_gen->full_rack_size <= RACK_SIZE);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
          sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
   // One-time full anchor slot initialization. wmp_move_gen_reset_anchors()
