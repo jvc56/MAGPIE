@@ -208,7 +208,8 @@ static void build_cgp(char *out, size_t cap, const char *rack1,
     offset += snprintf(out + offset, cap - (size_t)offset, "%s%d",
                        row == 0 ? "" : "/", BOARD_DIM);
   }
-  snprintf(out + offset, cap - (size_t)offset, " %s/%s 0/0 0", rack1, rack2);
+  (void)snprintf(out + offset, cap - (size_t)offset, " %s/%s 0/0 0", rack1,
+                 rack2);
 }
 
 // Loads the racks into `game`, checks their sizes, then writes the position
