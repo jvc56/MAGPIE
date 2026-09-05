@@ -5,6 +5,7 @@
 #include "../util/io_util.h"
 #include "equity.h"
 #include "rack.h"
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -38,6 +39,9 @@ static inline void leave_map_destroy(LeaveMap *leave_map) {
 }
 
 static inline void leave_map_init(const Rack *rack, LeaveMap *leave_map) {
+  // reversed_letter_bit_map has RACK_SIZE entries and leave_values has
+  // 1 << RACK_SIZE; both are indexed by tile position (jvc56/MAGPIE#662).
+  assert(rack_get_total_letters(rack) <= RACK_SIZE);
   int current_base_index = 0;
   leave_map->rack_array_size = rack_get_dist_size(rack);
   for (int i = 0; i < leave_map->rack_array_size; i++) {
