@@ -1,6 +1,7 @@
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
+#include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
@@ -135,7 +136,7 @@ void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
     int number_of_letters_added = draw_rack_string_from_bag(
         game, player_index,
         string_splitter_get_item(player_racks, player_index));
-    if (number_of_letters_added == -1) {
+    if (number_of_letters_added == DRAW_RACK_STRING_MALFORMED) {
       error_stack_push(
           error_stack, ERROR_STATUS_CGP_PARSE_MALFORMED_RACK_LETTERS,
           get_formatted_string(
@@ -143,7 +144,7 @@ void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
               string_splitter_get_item(player_racks, player_index)));
       return;
     }
-    if (number_of_letters_added == -2) {
+    if (number_of_letters_added == DRAW_RACK_STRING_NOT_IN_BAG) {
       error_stack_push(
           error_stack, ERROR_STATUS_CGP_PARSE_RACK_LETTERS_NOT_IN_BAG,
           get_formatted_string(
@@ -152,7 +153,7 @@ void parse_cgp_racks_with_string_splitter(const StringSplitter *player_racks,
               string_splitter_get_item(player_racks, player_index)));
       return;
     }
-    if (number_of_letters_added == -3) {
+    if (number_of_letters_added == DRAW_RACK_STRING_TOO_MANY_LETTERS) {
       error_stack_push(
           error_stack, ERROR_STATUS_CGP_PARSE_RACK_TOO_MANY_LETTERS,
           get_formatted_string(

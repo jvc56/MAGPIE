@@ -3,6 +3,7 @@
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -431,33 +432,31 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 
 // Draws a nonrandom set of letters specified by rack_string from the
 // bag to the rack. Assumes the rack is empty.
-// Returns number of letters drawn on success
-// Returns -1 if the string was malformed.
-// Returns -2 if the tiles were not in the bag.
-// Returns -3 if the string held more than RACK_SIZE tiles.
+// Returns the number of letters drawn on success, or one of the
+// DRAW_RACK_STRING_* codes declared in def/gameplay_defs.h.
 int draw_rack_string_from_bag(const Game *game, const int player_index,
                               const char *rack_string) {
   const LetterDistribution *ld = game_get_ld(game);
   Rack player_rack_copy;
   rack_set_dist_size_and_reset(&player_rack_copy, ld_get_size(ld));
-  int number_of_letters_set =
+  const int number_of_letters_set =
       rack_set_to_string(ld, &player_rack_copy, rack_string);
-
-  if (number_of_letters_set != -1) {
-    if (number_of_letters_set > RACK_SIZE) {
-      // rack_set_to_string bounds the string by MAX_RACK_SIZE, which is far
-      // larger than RACK_SIZE. Racks wider than RACK_SIZE must be rejected
-      // here: move generation indexes several RACK_SIZE-sized arrays by the
-      // rack size, so drawing one would be memory-unsafe rather than merely
-      // wrong.
-      number_of_letters_set = -3;
-    } else if (!rack_is_drawable(game, player_index, &player_rack_copy)) {
-      number_of_letters_set = -2;
-    } else {
-      draw_rack_from_bag(game, player_index, &player_rack_copy);
-    }
+  if (number_of_letters_set == -1) {
+    // rack_set_to_string reports a malformed string as -1.
+    return DRAW_RACK_STRING_MALFORMED;
   }
-
+  if (number_of_letters_set > RACK_SIZE) {
+    // rack_set_to_string bounds the string by MAX_RACK_SIZE, which is far
+    // larger than RACK_SIZE. Racks wider than RACK_SIZE must be rejected
+    // here: move generation indexes several RACK_SIZE-sized arrays by the
+    // rack size, so drawing one would be memory-unsafe rather than merely
+    // wrong.
+    return DRAW_RACK_STRING_TOO_MANY_LETTERS;
+  }
+  if (!rack_is_drawable(game, player_index, &player_rack_copy)) {
+    return DRAW_RACK_STRING_NOT_IN_BAG;
+  }
+  draw_rack_from_bag(game, player_index, &player_rack_copy);
   return number_of_letters_set;
 }
 

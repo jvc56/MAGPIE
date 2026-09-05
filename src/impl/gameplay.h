@@ -29,6 +29,8 @@ void generate_moves_for_game_override_record_type(
     const MoveGenArgs *args, move_record_t move_record_type);
 void generate_moves_for_game(const MoveGenArgs *args);
 void draw_to_full_rack(const Game *game, int player_index);
+// Returns the number of letters drawn, or a DRAW_RACK_STRING_* code from
+// def/gameplay_defs.h.
 int draw_rack_string_from_bag(const Game *game, int player_index,
                               const char *rack_string);
 bool draw_rack_from_bag(Game *game, int player_index, const Rack *rack_to_draw);
