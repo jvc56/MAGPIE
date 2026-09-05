@@ -197,6 +197,52 @@ void test_wit_cache_copy(void) {
   destroy_cache_config(config);
 }
 
+// The stale-destination regression above is satisfied by discarding the
+// destination's rows, but discarding them also throws away the source's --
+// leaving every copied board with an empty cache and the prunes inert, which
+// is most of what game_copy does during a simulation. The rows are derived
+// from the squares and the destination receives exactly the source's squares,
+// so the copy must reproduce the source's cache exactly.
+void test_wit_cache_copy_propagates(void) {
+  Config *config = create_cache_config();
+  Game *source = config_game_create(config);
+  load_cgp_or_die(source, AT_POSITION);
+  const Board *source_board = game_get_board(source);
+  // The fixture must actually cache something, or this proves nothing.
+  assert(source_board->wit_cache_populated);
+
+  Game *destination = game_duplicate(source);
+  load_cgp_or_die(destination, ATE_POSITION);
+  game_copy(destination, source);
+  const Board *destination_board = game_get_board(destination);
+  assert(destination_board->wit_cache_populated);
+  assert(memcmp(destination_board->wit_block_rows, source_board->wit_block_rows,
+                sizeof(source_board->wit_block_rows)) == 0);
+  assert(memcmp(destination_board->wit_block_lens, source_board->wit_block_lens,
+                sizeof(source_board->wit_block_lens)) == 0);
+  assert_same_moves(destination, source);
+
+  // Copying from an empty cache must clear the destination's rows rather than
+  // leave them behind, so the two boards still agree afterwards.
+  Game *empty_cache = config_game_create(config);
+  load_cgp_or_die(empty_cache, AT_POSITION);
+  board_clear_wit_cache(game_get_board(empty_cache));
+  game_copy(destination, empty_cache);
+  assert(!destination_board->wit_cache_populated);
+  for (size_t index = 0;
+       index < sizeof(destination_board->wit_block_rows) /
+                   sizeof(destination_board->wit_block_rows[0]);
+       index++) {
+    assert(destination_board->wit_block_rows[index] == NULL);
+  }
+  assert_same_moves(destination, empty_cache);
+
+  game_destroy(empty_cache);
+  game_destroy(destination);
+  game_destroy(source);
+  destroy_cache_config(config);
+}
+
 void test_wit_cache_undo(void) {
   Config *config = create_cache_config();
   for (int incremental = 0; incremental < 2; incremental++) {
@@ -302,6 +348,7 @@ void test_wit_cache_config(void) {
 
 void test_wit_cache(void) {
   test_wit_cache_copy();
+  test_wit_cache_copy_propagates();
   test_wit_cache_undo();
   test_wit_cache_config();
 }
@@ -319,6 +366,7 @@ void test_wit_cache_differential(void) {
   Game *game = config_game_create(with_wit);
   Game *reference = config_game_create(without_wit);
   Game *reused = game_duplicate(game);
+  Game *reused_reference = game_duplicate(reference);
   MoveList *best_move = move_list_create(1);
   int positions = 0;
   for (int game_idx = 0; game_idx < 32; game_idx++) {
@@ -335,6 +383,13 @@ void test_wit_cache_differential(void) {
       game_copy(reused, game);
       assert_same_moves(reused, reference);
       const Move move = *get_top_equity_move(game, best_move);
+      // A copied board inherits the source's rows. Playing on top of them
+      // exercises the incremental update against an inherited cache rather
+      // than against the empty one a discarding copy would leave.
+      game_copy(reused_reference, reference);
+      play_move(&move, reused, NULL);
+      play_move(&move, reused_reference, NULL);
+      assert_same_moves(reused, reused_reference);
       game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
       play_move(&move, game, NULL);
       game_gen_all_cross_sets(game);
@@ -352,6 +407,7 @@ void test_wit_cache_differential(void) {
          "and equities before/after copy and undo\n",
          positions);
   move_list_destroy(best_move);
+  game_destroy(reused_reference);
   game_destroy(reused);
   game_destroy(reference);
   game_destroy(game);
