@@ -23,6 +23,11 @@ enum {
       ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS),
 };
 
+// Anchor slot indices travel through uint8_t arrays (touched_anchor_slots
+// and the sorted copy in wmp_move_gen_add_anchors).
+static_assert(MAX_WMP_MOVE_GEN_ANCHORS <= UINT8_MAX,
+              "anchor slot indices must fit in a uint8_t");
+
 typedef struct SubrackInfo {
   BitRack subrack;
   const WMPEntry *wmp_entry;
