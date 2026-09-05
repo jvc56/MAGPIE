@@ -54,6 +54,11 @@ typedef struct PlayChooserStrategy {
   // evaluation ignores the budget.
   double fixed_seconds_per_move;
   GameTimer *game_timer; // not owned; may be NULL
+  // Length of an overtime penalty period. Once the main clock expires,
+  // PlayChooser may spend time already covered by the current started period,
+  // while reserving enough time to avoid starting the next one. Zero disables
+  // overtime search and falls back to static play after flag fall.
+  double overtime_period_seconds;
   // Whether play_chooser_decide_challenge considers challenging phonies
   // at all. When false it always advises against challenging.
   bool enable_challenges;
@@ -118,6 +123,11 @@ void play_chooser_destroy(PlayChooser *play_chooser);
 // passed along to the simulation.
 void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
                               Move *out_move, ErrorStack *error_stack);
+
+// Returns the current search budget for the player on turn. Zero means there
+// is not enough safely spendable clock for a non-static search.
+double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
+                                         const Game *game);
 
 // Decide whether opp_move, announced by the player on turn in
 // game_before_move, should be challenged off. game_before_move must be
