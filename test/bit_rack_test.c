@@ -1,5 +1,6 @@
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/rack.h"
@@ -184,10 +185,10 @@ void test_mul(void) {
 // prune's `shift < 64` split turns on.
 void test_letter_masks(void) {
   const int max_count = (1 << BIT_RACK_BITS_PER_LETTER) - 1;
-  for (MachineLetter ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     uint64_t low_mask = 0;
     uint64_t high_mask = 0;
-    bit_rack_add_letter_to_mask(&low_mask, &high_mask, ml);
+    bit_rack_add_letter_to_mask(&low_mask, &high_mask, (MachineLetter)ml);
 
     // Exactly one half carries the lane, and it carries exactly one lane.
     const bool in_low = ml < BIT_RACK_MAX_ALPHABET_SIZE / 2;
@@ -202,17 +203,17 @@ void test_letter_masks(void) {
     // letter's presence is mistaken for this one.
     for (int count = 1; count <= max_count; count++) {
       BitRack only_this = bit_rack_create_empty();
-      bit_rack_set_letter_count(&only_this, ml, count);
+      bit_rack_set_letter_count(&only_this, (MachineLetter)ml, count);
       assert(bit_rack_intersects_mask(&only_this, low_mask, high_mask));
     }
     BitRack empty = bit_rack_create_empty();
     assert(!bit_rack_intersects_mask(&empty, low_mask, high_mask));
-    for (MachineLetter other = 0; other < BIT_RACK_MAX_ALPHABET_SIZE; other++) {
+    for (int other = 0; other < BIT_RACK_MAX_ALPHABET_SIZE; other++) {
       if (other == ml) {
         continue;
       }
       BitRack only_other = bit_rack_create_empty();
-      bit_rack_set_letter_count(&only_other, other, max_count);
+      bit_rack_set_letter_count(&only_other, (MachineLetter)other, max_count);
       assert(!bit_rack_intersects_mask(&only_other, low_mask, high_mask));
     }
   }
@@ -226,9 +227,9 @@ void test_letter_masks(void) {
   bit_rack_add_letter_to_mask(&low_mask, &high_mask, last_low);
   bit_rack_add_letter_to_mask(&low_mask, &high_mask, first_high);
   assert(low_mask != 0 && high_mask != 0);
-  for (MachineLetter ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     BitRack single = bit_rack_create_empty();
-    bit_rack_set_letter_count(&single, ml, 1);
+    bit_rack_set_letter_count(&single, (MachineLetter)ml, 1);
     const bool expected = (ml == last_low) || (ml == first_high);
     assert(bit_rack_intersects_mask(&single, low_mask, high_mask) == expected);
   }
