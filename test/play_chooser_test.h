@@ -3,4 +3,6 @@
 
 void test_play_chooser(void);
 
+void test_play_chooser_fixed_short_budget(void);
+
 #endif
