@@ -4740,77 +4740,80 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  // Add the consecutive pass rack end penalties for both players
-  int player_index = game_get_player_on_turn_index(game);
+  // Add the consecutive pass rack end penalties for both players.
+  //
+  // The racks for both players are resolved before either is drawn. When the
+  // game ends on consecutive passes with an empty (or nearly empty) bag, the
+  // tiles one player must draw are sitting on the other player's rack, so
+  // drawing them one player at a time would fail.
+  const int first_player_index = game_get_player_on_turn_index(game);
   const LetterDistribution *ld = game_get_ld(game);
+  const Rack *racks_to_draw[2] = {NULL, NULL};
   for (int i = 0; i < 2; i++) {
-    if (i == 1) {
-      player_index = 1 - player_index;
-    }
-    const Player *player = game_get_player(game, player_index);
-    const Rack *player_rack = player_get_rack(player);
+    const int player_index =
+        i == 0 ? first_player_index : 1 - first_player_index;
     const Rack *rack_to_draw_before_pass_out_game_end =
         game_history_player_get_rack_to_draw_before_pass_out_game_end(
             game_history, player_index);
     if (rack_get_dist_size(rack_to_draw_before_pass_out_game_end) != 0) {
-      if (!rack_is_drawable(game, player_index,
-                            rack_to_draw_before_pass_out_game_end)) {
-        StringBuilder *sb = string_builder_create();
-        string_builder_add_rack(sb, rack_to_draw_before_pass_out_game_end, ld,
-                                false);
-        error_stack_push(
-            error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
-            get_formatted_string(
-                "rack to draw before game end pass out '%s' for player '%s'"
-                "is not available in the bag",
-                string_builder_peek(sb),
-                game_history_player_get_name(game_history, player_index)));
-        string_builder_destroy(sb);
-        return;
-      }
-      return_rack_to_bag(game, player_index);
-      draw_rack_from_bag(game, player_index,
-                         rack_to_draw_before_pass_out_game_end);
-    } else {
-      // Get the rack from the previous pass
-      bool found_pass = false;
-      for (int j = num_events - 1; j >= 0; j--) {
-        GameEvent *game_event = game_history_get_event(game_history, j);
-        if (game_event_get_type(game_event) == GAME_EVENT_PASS &&
-            game_event_get_player_index(game_event) == player_index) {
-          const Rack *prev_pass_rack = game_event_get_rack(game_event);
-          if (!rack_is_drawable(game, player_index, prev_pass_rack)) {
-            StringBuilder *sb = string_builder_create();
-            string_builder_add_rack(sb, prev_pass_rack, ld, false);
-            error_stack_push(
-                error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
-                get_formatted_string(
-                    "rack to draw before game end pass out "
-                    "'%s' for player '%s'"
-                    "is not available in the bag",
-                    string_builder_peek(sb),
-                    game_history_player_get_name(game_history, player_index)));
-            string_builder_destroy(sb);
-            return;
-          }
-          return_rack_to_bag(game, player_index);
-          draw_rack_from_bag(game, player_index, prev_pass_rack);
-          found_pass = true;
-          break;
-        }
-      }
-      if (!found_pass) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND,
-            get_formatted_string(
-                "did not find expected previous pass for player '%s' when "
-                "processing consecutive pass game end penalty",
-                game_history_player_get_name(game_history, player_index)));
+      racks_to_draw[i] = rack_to_draw_before_pass_out_game_end;
+      continue;
+    }
+    // Get the rack from the previous pass
+    for (int j = num_events - 1; j >= 0; j--) {
+      const GameEvent *game_event = game_history_get_event(game_history, j);
+      if (game_event_get_type(game_event) == GAME_EVENT_PASS &&
+          game_event_get_player_index(game_event) == player_index) {
+        racks_to_draw[i] = game_event_get_const_rack(game_event);
+        break;
       }
     }
+    if (!racks_to_draw[i]) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND,
+          get_formatted_string(
+              "did not find expected previous pass for player '%s' when "
+              "processing consecutive pass game end penalty",
+              game_history_player_get_name(game_history, player_index)));
+      return;
+    }
+  }
 
+  // Both racks go back to the bag before either player draws so that the
+  // tiles held by one player are available to the other.
+  return_rack_to_bag(game, 0);
+  return_rack_to_bag(game, 1);
+
+  for (int i = 0; i < 2; i++) {
+    const int player_index =
+        i == 0 ? first_player_index : 1 - first_player_index;
+    if (!rack_is_drawable(game, player_index, racks_to_draw[i])) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_rack(sb, racks_to_draw[i], ld, false);
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
+          get_formatted_string(
+              "rack to draw before game end pass out '%s' for player '%s'"
+              "is not available in the bag",
+              string_builder_peek(sb),
+              game_history_player_get_name(game_history, player_index)));
+      string_builder_destroy(sb);
+      return;
+    }
+    draw_rack_from_bag(game, player_index, racks_to_draw[i]);
+  }
+
+  for (int i = 0; i < 2; i++) {
+    const int player_index =
+        i == 0 ? first_player_index : 1 - first_player_index;
     draw_to_full_rack(game, player_index);
+  }
 
+  for (int i = 0; i < 2; i++) {
+    const int player_index =
+        i == 0 ? first_player_index : 1 - first_player_index;
+    const Player *player = game_get_player(game, player_index);
+    const Rack *player_rack = player_get_rack(player);
     const Equity end_rack_penalty = calculate_end_rack_penalty(player_rack, ld);
     GameEvent *rack_penalty_event =
         game_history_add_game_event(game_history, error_stack);

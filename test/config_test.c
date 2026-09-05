@@ -2227,6 +2227,77 @@ void test_config_load_incomplete(void) {
   config_destroy(config);
 }
 
+// The game ends on six passes with an empty bag. The tiles each player has to
+// draw back for the end rack penalties are sitting on the other player's rack,
+// so both racks must be returned to the bag before either player draws.
+void test_config_six_pass_empty_bag(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  load_and_exec_config_or_die(config, "load testdata/gcgs/success_standard");
+  // Rewind to the position just before the final outplay, where the bag is
+  // empty, HastyBot holds I and RightBehindYou holds OST.
+  load_and_exec_config_or_die(config, "goto 26");
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 0);
+  assert_rack_equals_string(game_get_ld(game),
+                            player_get_rack(game_get_player(game, 0)), "I");
+  assert_rack_equals_string(game_get_ld(game),
+                            player_get_rack(game_get_player(game, 1)), "OST");
+  assert(equity_to_int(player_get_score(game_get_player(game, 0))) == 516);
+  assert(equity_to_int(player_get_score(game_get_player(game, 1))) == 362);
+
+  for (int pass_index = 0; pass_index < 6; pass_index++) {
+    assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  }
+
+  game = config_get_game(config);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
+  // Both players keep the rack they passed with and are penalized for it.
+  assert_rack_equals_string(game_get_ld(game),
+                            player_get_rack(game_get_player(game, 0)), "I");
+  assert_rack_equals_string(game_get_ld(game),
+                            player_get_rack(game_get_player(game, 1)), "OST");
+  assert(equity_to_int(player_get_score(game_get_player(game, 0))) == 515);
+  assert(equity_to_int(player_get_score(game_get_player(game, 1))) == 359);
+  // Six passes plus the two end rack penalty events.
+  assert(game_history_get_num_events(config_get_game_history(config)) == 34);
+
+  config_destroy(config);
+}
+
+// The game ends on six passes with fewer than RACK_SIZE tiles left in the bag,
+// so the two racks do not account for every unseen tile.
+void test_config_six_pass_partial_bag(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  load_and_exec_config_or_die(config, "load testdata/gcgs/success_standard");
+  // Rewind to a position with 5 tiles left in the bag.
+  load_and_exec_config_or_die(config, "goto 22");
+  // RightBehindYou is on turn holding ILOOPQR. The other twelve unseen tiles
+  // are still in the bag object, seven of which are HastyBot's unknown rack,
+  // leaving five tiles that neither player will hold.
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 12);
+
+  for (int pass_index = 0; pass_index < 6; pass_index++) {
+    if (pass_index % 2 == 0) {
+      assert_config_exec_status(config, "rack ILOOPQR", ERROR_STATUS_SUCCESS);
+    } else {
+      assert_config_exec_status(config, "rack EEIIPRU", ERROR_STATUS_SUCCESS);
+    }
+    assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  }
+
+  game = config_get_game(config);
+  assert(game_get_game_end_reason(game) == GAME_END_REASON_CONSECUTIVE_ZEROS);
+  assert(equity_to_int(player_get_score(game_get_player(game, 0))) == 472);
+  assert(equity_to_int(player_get_score(game_get_player(game, 1))) == 271);
+
+  config_destroy(config);
+}
+
 void test_config_export(void) {
   Config *config = config_create_default_test();
   assert_config_exec_status(config, "ex",
@@ -3013,6 +3084,8 @@ void test_config(void) {
   test_config_anno_challenge();
   test_config_anno_endgame_rack();
   test_config_load_incomplete();
+  test_config_six_pass_empty_bag();
+  test_config_six_pass_partial_bag();
   test_config_challenge_rack();
   test_config_export();
   test_config_load_error_cases();
