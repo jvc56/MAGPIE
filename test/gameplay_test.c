@@ -912,6 +912,46 @@ void test_incremental_cross_set_undo(void) {
   config_destroy(dual_config);
 }
 
+// Regression test: get_top_move_for_player_on_turn (used by autoplay's
+// static, non-simming play) must sort/select moves using the move_sort_type
+// configured on the player on turn, instead of always using MOVE_SORT_EQUITY
+// like get_top_equity_move does. With rack "DEKNRTY" on an empty board, the
+// top-scoring play and the top-equity play both score 36 but leave different
+// racks behind, so this rack distinguishes the two sort types: a move
+// selected by MOVE_SORT_SCORE has no leave value applied (its equity equals
+// its raw score), while the move selected by MOVE_SORT_EQUITY has a higher
+// equity than its score because it also accounts for leave value.
+void test_get_top_move_for_player_on_turn_respects_sort_type(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  Player *player0 = game_get_player(game, 0);
+  MoveList *move_list = move_list_create(1000);
+
+  draw_rack_string_from_bag(game, 0, "DEKNRTY");
+
+  player_set_move_sort_type(player0, MOVE_SORT_SCORE);
+  const Move *score_move = get_top_move_for_player_on_turn(game, move_list);
+  assert(equity_to_int(move_get_score(score_move)) == 36);
+  // The move chosen by score has no leave value applied, so its equity
+  // exactly equals its score.
+  assert(move_get_score(score_move) == move_get_equity(score_move));
+
+  player_set_move_sort_type(player0, MOVE_SORT_EQUITY);
+  const Move *equity_move = get_top_move_for_player_on_turn(game, move_list);
+  assert(equity_to_int(move_get_score(equity_move)) == 36);
+  // The move chosen by equity leaves a better rack behind, so its equity is
+  // strictly higher than its raw score.
+  assert(move_get_equity(equity_move) > move_get_score(equity_move));
+
+  // The two sort types must choose different moves.
+  assert(compare_moves_without_equity(score_move, equity_move, true) != 0);
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_gameplay(void) {
   test_draw_to_full_rack();
   test_rack_is_drawable();
@@ -924,4 +964,5 @@ void test_gameplay(void) {
   test_leave_record();
   test_moves_are_similar();
   test_incremental_cross_set_undo();
+  test_get_top_move_for_player_on_turn_respects_sort_type();
 }

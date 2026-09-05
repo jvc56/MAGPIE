@@ -19,13 +19,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Outcome bucket a PEG draw lands in, keyed off the mover's final spread. These
+// values index this file's per-bucket arrays (a family's seen flags, the
+// per-bucket token counts, the display labels), so they must stay a dense
+// 0-based range and NUMBER_OF_PEG_OUTCOME_BUCKETS must stay last.
+enum {
+  PEG_OUTCOME_BUCKET_WIN,
+  PEG_OUTCOME_BUCKET_LOSS,
+  PEG_OUTCOME_BUCKET_TIE,
+  NUMBER_OF_PEG_OUTCOME_BUCKETS,
+};
+
 // One displayable outcome token: a draw rendered as the mover's drawn multiset
 // followed by the bag remainder -- a sorted multiset ("DH/RS") when its
 // orderings share a bucket, or "/"-segmented ("DH/R/S") when they split --
 // tagged with its bucket and summed labeled-ordering weight.
 typedef struct {
   char text[64];
-  int bucket; // 0 = win, 1 = loss
+  int bucket; // a PEG_OUTCOME_BUCKET_* value
   int64_t weight;
 } PegOutcomeTok;
 
@@ -38,7 +49,7 @@ typedef struct {
 typedef struct {
   char drawn[40];  // sorted mover-draw multiset (leading segment)
   char rem_ms[40]; // sorted bag-remainder multiset (family key tail)
-  bool seen[3];    // [0]=win [1]=loss [2]=tie
+  bool seen[NUMBER_OF_PEG_OUTCOME_BUCKETS];
   int64_t per_ordering;
   int64_t total_weight;
 } PegOutcomeFamily;
@@ -257,15 +268,15 @@ static int peg_outcome_tok_cmp(const void *a, const void *b) {
                 ((const PegOutcomeTok *)b)->text);
 }
 
-// 0 = win, 1 = loss, 2 = tie.
+// Classify a draw by the mover's final spread.
 static int peg_outcome_bucket(int32_t mover_total) {
   if (mover_total > 0) {
-    return 0;
+    return PEG_OUTCOME_BUCKET_WIN;
   }
   if (mover_total < 0) {
-    return 1;
+    return PEG_OUTCOME_BUCKET_LOSS;
   }
-  return 2;
+  return PEG_OUTCOME_BUCKET_TIE;
 }
 
 // Copy a short tile string and sort it into multiset (canonical) order.
@@ -287,6 +298,24 @@ static void peg_draw_token(char *dst, size_t dst_size, const char *drawn,
   }
 }
 
+// Append every token in `bucket` to `sb`, each preceded by a space and given an
+// "xN" suffix when its labeled-ordering weight exceeds 1.
+static void peg_append_outcome_toks(StringBuilder *sb,
+                                    const PegOutcomeTok *toks, int n_toks,
+                                    int bucket) {
+  for (int tok_idx = 0; tok_idx < n_toks; tok_idx++) {
+    if (toks[tok_idx].bucket != bucket) {
+      continue;
+    }
+    if (toks[tok_idx].weight > 1) {
+      string_builder_add_formatted_string(
+          sb, " %sx%" PRId64, toks[tok_idx].text, toks[tok_idx].weight);
+    } else {
+      string_builder_add_formatted_string(sb, " %s", toks[tok_idx].text);
+    }
+  }
+}
+
 // Condense a candidate's per-ordering rows into one line. Each token is a draw:
 // the mover's drawn tiles (always a sorted multiset, since they are drawn
 // together and order-independent) as a leading segment, followed by the bag
@@ -297,25 +326,35 @@ static void peg_draw_token(char *dst, size_t dst_size, const char *drawn,
 // freely-permutable blocks collapse to a sorted multiset segment and
 // order-significant boundaries stay "/"-separated. Each token carries an "xN"
 // labeled-ordering weight (N=1 omitted), so the win tokens' weights sum to the
-// wins column and the loss tokens' to the loss column. Only the shorter of the
-// win / loss lists is printed (the other is implied by the counts); tie draws
-// are not listed but do count toward the split decision. When every ordering
-// shares one bucket, says "always wins/loses/ties". Caller frees.
+// wins column and the loss tokens' to the loss column. The largest of the three
+// lists is left implied (the reader infers it from the count columns); the
+// smaller ones are printed, comma-separated, each with its label ("W:"/"L:"/
+// "T:"). Empty lists are skipped, so a row with no tie draws just shows the
+// shorter of win / loss. The implied list is named with a trailing ", otherwise
+// wins/loses/ties" only when the cell would otherwise be ambiguous: ties are
+// the implied majority (rare), or the tie list is the only list shown (its
+// win/loss counterpart was empty, so "T: E" alone cannot say which of win/loss
+// is implied). When every ordering shares one bucket, says "always
+// wins/loses/ties". Caller frees.
 char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
   if (n_rows <= 0) {
     return string_duplicate("");
   }
 
   // "always X" when every ordering shares a single bucket.
-  bool any[3] = {false, false, false};
+  bool any[NUMBER_OF_PEG_OUTCOME_BUCKETS] = {false};
   for (int row_idx = 0; row_idx < n_rows; row_idx++) {
     any[peg_outcome_bucket(rows[row_idx].mover_total)] = true;
   }
-  if ((int)any[0] + (int)any[1] + (int)any[2] == 1) {
+  int n_any_buckets = 0;
+  for (int bucket = 0; bucket < NUMBER_OF_PEG_OUTCOME_BUCKETS; bucket++) {
+    n_any_buckets += (int)any[bucket];
+  }
+  if (n_any_buckets == 1) {
     const char *all_label = "always ties";
-    if (any[0]) {
+    if (any[PEG_OUTCOME_BUCKET_WIN]) {
       all_label = "always wins";
-    } else if (any[1]) {
+    } else if (any[PEG_OUTCOME_BUCKET_LOSS]) {
       all_label = "always loses";
     }
     return string_duplicate(all_label);
@@ -349,9 +388,9 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
                      row_drawn[row_idx]);
       (void)snprintf(fams[fam_idx].rem_ms, sizeof(fams[fam_idx].rem_ms), "%s",
                      row_rem_ms[row_idx]);
-      fams[fam_idx].seen[0] = false;
-      fams[fam_idx].seen[1] = false;
-      fams[fam_idx].seen[2] = false;
+      for (int bucket = 0; bucket < NUMBER_OF_PEG_OUTCOME_BUCKETS; bucket++) {
+        fams[fam_idx].seen[bucket] = false;
+      }
       fams[fam_idx].per_ordering = rows[row_idx].weight;
       fams[fam_idx].total_weight = 0;
     }
@@ -361,25 +400,25 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
 
   // Pass 2: emit one token per (display form, bucket). When a family's bag
   // orderings all share a bucket, the whole draw is one token (drawn multiset,
-  // then the bag remainder as a multiset). When they span buckets, only the bag
+  // then the bag remainder as a multiset). When they span buckets, the bag
   // remainder is factored per bucket into segmented forms; the drawn multiset
-  // stays a fixed leading segment (no token for a tie-only family).
+  // stays a fixed leading segment. Tie draws get tokens too -- whether they are
+  // finally shown is a display decision made below.
   PegOutcomeTok *toks =
       malloc_or_die((size_t)(n_rows + n_fams) * sizeof(PegOutcomeTok));
   int n_toks = 0;
   for (int fam_idx = 0; fam_idx < n_fams; fam_idx++) {
     const PegOutcomeFamily *fam = &fams[fam_idx];
-    const int n_buckets =
-        (int)fam->seen[0] + (int)fam->seen[1] + (int)fam->seen[2];
+    int n_buckets = 0;
+    for (int bucket = 0; bucket < NUMBER_OF_PEG_OUTCOME_BUCKETS; bucket++) {
+      n_buckets += (int)fam->seen[bucket];
+    }
     if (n_buckets <= 1) {
-      int bucket = 2;
-      if (fam->seen[0]) {
-        bucket = 0;
-      } else if (fam->seen[1]) {
-        bucket = 1;
-      }
-      if (bucket == 2) {
-        continue; // tie-only: not listed
+      int bucket = PEG_OUTCOME_BUCKET_TIE;
+      if (fam->seen[PEG_OUTCOME_BUCKET_WIN]) {
+        bucket = PEG_OUTCOME_BUCKET_WIN;
+      } else if (fam->seen[PEG_OUTCOME_BUCKET_LOSS]) {
+        bucket = PEG_OUTCOME_BUCKET_LOSS;
       }
       peg_draw_token(toks[n_toks].text, sizeof(toks[n_toks].text), fam->drawn,
                      fam->rem_ms);
@@ -389,9 +428,9 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
       continue;
     }
     // Split: the bag remainder's orderings land in more than one bucket. Factor
-    // them per win/loss bucket, keeping the drawn multiset as a leading
+    // them per win/loss/tie bucket, keeping the drawn multiset as a leading
     // segment.
-    for (int bucket = 0; bucket <= 1; bucket++) {
+    for (int bucket = 0; bucket < NUMBER_OF_PEG_OUTCOME_BUCKETS; bucket++) {
       PegStrList seqs = {0};
       for (int row_idx = 0; row_idx < n_rows; row_idx++) {
         if (peg_outcome_bucket(rows[row_idx].mover_total) != bucket) {
@@ -425,26 +464,71 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
   free(row_rem_ms);
 
   qsort(toks, (size_t)n_toks, sizeof(PegOutcomeTok), peg_outcome_tok_cmp);
-  int n_win_toks = 0;
+  int n_bucket_toks[NUMBER_OF_PEG_OUTCOME_BUCKETS] = {0};
   for (int tok_idx = 0; tok_idx < n_toks; tok_idx++) {
-    if (toks[tok_idx].bucket == 0) {
-      n_win_toks++;
+    n_bucket_toks[toks[tok_idx].bucket]++;
+  }
+
+  // Leave the largest list implied -- the reader infers it from the count
+  // columns -- and print the smaller ones, comma-separated, each with its
+  // label. Empty lists are skipped, so a row with no tie draws just shows the
+  // shorter of win / loss, exactly as before ties were tracked. On a size tie,
+  // prefer to imply a loss, then a win, so a tie draw stays visible.
+  static const int imply_pref[NUMBER_OF_PEG_OUTCOME_BUCKETS] = {
+      PEG_OUTCOME_BUCKET_LOSS,
+      PEG_OUTCOME_BUCKET_WIN,
+      PEG_OUTCOME_BUCKET_TIE,
+  };
+  int implied = imply_pref[0];
+  for (int pref_idx = 1; pref_idx < NUMBER_OF_PEG_OUTCOME_BUCKETS; pref_idx++) {
+    const int bucket = imply_pref[pref_idx];
+    if (n_bucket_toks[bucket] > n_bucket_toks[implied]) {
+      implied = bucket;
     }
   }
-  const int want = n_win_toks <= n_toks - n_win_toks ? 0 : 1;
 
+  static const char *const labels[NUMBER_OF_PEG_OUTCOME_BUCKETS] = {
+      [PEG_OUTCOME_BUCKET_WIN] = "W:",
+      [PEG_OUTCOME_BUCKET_LOSS] = "L:",
+      [PEG_OUTCOME_BUCKET_TIE] = "T:",
+  };
+  static const char *const otherwise_word[NUMBER_OF_PEG_OUTCOME_BUCKETS] = {
+      [PEG_OUTCOME_BUCKET_WIN] = "wins",
+      [PEG_OUTCOME_BUCKET_LOSS] = "loses",
+      [PEG_OUTCOME_BUCKET_TIE] = "ties",
+  };
+  const int display_order[NUMBER_OF_PEG_OUTCOME_BUCKETS] = {
+      PEG_OUTCOME_BUCKET_WIN,
+      PEG_OUTCOME_BUCKET_TIE,
+      PEG_OUTCOME_BUCKET_LOSS,
+  };
   StringBuilder *sb = string_builder_create();
-  string_builder_add_string(sb, want == 0 ? "W:" : "L:");
-  for (int tok_idx = 0; tok_idx < n_toks; tok_idx++) {
-    if (toks[tok_idx].bucket != want) {
+  int n_shown = 0;
+  int last_shown = -1;
+  for (int order_idx = 0; order_idx < NUMBER_OF_PEG_OUTCOME_BUCKETS;
+       order_idx++) {
+    const int bucket = display_order[order_idx];
+    if (bucket == implied || n_bucket_toks[bucket] == 0) {
       continue;
     }
-    if (toks[tok_idx].weight > 1) {
-      string_builder_add_formatted_string(
-          sb, " %sx%" PRId64, toks[tok_idx].text, toks[tok_idx].weight);
-    } else {
-      string_builder_add_formatted_string(sb, " %s", toks[tok_idx].text);
+    if (n_shown > 0) {
+      string_builder_add_string(sb, ", ");
     }
+    string_builder_add_string(sb, labels[bucket]);
+    peg_append_outcome_toks(sb, toks, n_toks, bucket);
+    last_shown = bucket;
+    n_shown++;
+  }
+  // Name the implied list when the cell alone would not pin it down: ties are
+  // the implied majority (rare and surprising), or the only list shown is the
+  // tie list -- its win/loss counterpart was empty, so "T: E" alone cannot say
+  // whether the implied majority is wins or losses. Two labeled lists already
+  // imply the third, and a no-tie row implies its win/loss counterpart, so
+  // those stay label-free.
+  if (implied == PEG_OUTCOME_BUCKET_TIE ||
+      (n_shown == 1 && last_shown == PEG_OUTCOME_BUCKET_TIE)) {
+    string_builder_add_formatted_string(sb, ", otherwise %s",
+                                        otherwise_word[implied]);
   }
   free(toks);
   char *out = string_builder_dump(sb, NULL);

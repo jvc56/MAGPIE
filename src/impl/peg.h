@@ -15,7 +15,10 @@
 // Unified pre-endgame (PEG) solver
 //
 // Solves positions with PEG_MIN_BAG..PEG_MAX_BAG tiles in the bag; larger
-// positions are midgame and are rejected.
+// positions are midgame and are rejected, unless every candidate move is
+// guaranteed to empty the bag (see peg_solve's bag-emptying-guarantee
+// exception, reachable only via a caller-supplied only_moves set), in which
+// case a bag up to RACK_SIZE is also accepted.
 //
 // The solver ranks candidate moves by their win% (and spread) over every way
 // the bag could be drawn, in a cascade of progressively-deeper stages:
@@ -104,7 +107,11 @@ typedef struct PegPoll PegPoll;
 
 typedef struct PegArgs {
   // Required: PEG position to analyze. Must have bag size in [PEG_MIN_BAG,
-  // PEG_MAX_BAG]. Caller retains ownership.
+  // PEG_MAX_BAG], except bag sizes up to RACK_SIZE are also accepted when
+  // only_moves is non-empty and every move in it is guaranteed to empty the
+  // bag (see peg_move_empties_bag); this exception can only be satisfied via
+  // only_moves; the full root move list always includes a pass, which never
+  // empties the bag. Caller retains ownership.
   const Game *game;
 
   // Required: thread control for movegen / endgame coordination.
@@ -491,6 +498,22 @@ void peg_poll_set_outcomes(PegPoll *poll, const PegCandOutcomes *src, int n);
 void peg_poll_copy_outcomes(PegPoll *poll, PegCandOutcomes **out, int *n_out);
 // Free an array of PegCandOutcomes (each rows[] then the array).
 void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n);
+
+// The effective PEG bag size for `game`: the real remaining bag tiles plus
+// any opponent tiles unknown to the mover (see peg.c for the derivation).
+// Exposed so a caller that pre-filters candidate moves (e.g. the pegonly
+// "empty" positional value) can match exactly the bag size peg_solve itself
+// will compute, rather than the raw (unadjusted) bag_get_letters count.
+int peg_compute_bag_size(const Game *game);
+
+// True when playing `move` is guaranteed to empty a bag of `bag_size` tiles:
+// a tile placement that plays at least bag_size tiles draws the whole bag on
+// replenishment. A pass never touches the bag, and an exchange draws
+// replacements but then returns the exchanged tiles to the bag, so neither
+// ever empties it regardless of tiles played. Exposed so a caller filtering
+// candidate moves (e.g. the pegonly "empty" positional value) uses the same
+// predicate peg_solve itself checks.
+bool peg_move_empties_bag(const Move *move, int bag_size);
 
 // ----- Entry points -----------------------------------------------------
 

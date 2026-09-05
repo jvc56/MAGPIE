@@ -896,6 +896,21 @@ const Move *get_top_equity_move(Game *game, MoveList *move_list) {
   return move_list_get_move(move_list, 0);
 }
 
+// Like get_top_equity_move, but sorts by the move_sort_type configured for
+// the player on turn instead of always using MOVE_SORT_EQUITY. This is what
+// static (non-simming) play should use so that per-player sort type settings
+// (e.g. the "s1"/"s2" args) actually affect play.
+const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list) {
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .eq_margin_movegen = 0,
+                            .target_equity = EQUITY_MAX_VALUE,
+                            .target_leave_size_for_exchange_cutoff =
+                                UNSET_LEAVE_SIZE};
+  generate_moves_for_game_override_record_type(&args, MOVE_RECORD_BEST);
+  return move_list_get_move(move_list, 0);
+}
+
 Move *get_top_equity_move_for_inferences(
     Game *game, MoveList *move_list, Equity target_equity,
     int target_leave_size_for_exchange_cutoff, Equity equity_margin) {

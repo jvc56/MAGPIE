@@ -156,7 +156,9 @@ void play_chooser_destroy(PlayChooser *play_chooser);
 // Enable/reset, snapshot, and disable the process-wide benchmark counters.
 // Counters are atomic because autoplay may run chooser games concurrently.
 // Collection is disabled by default and has only one predictable branch per
-// chooser operation when unused.
+// chooser operation when unused. Reset, event copying, and stopping require
+// all chooser operations to have finished (including their worker threads);
+// disabling collection does not wait for callbacks already in flight.
 void play_chooser_benchmark_reset(void);
 void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats);
 // Copies up to capacity PEG candidate events into events and returns the
