@@ -12,8 +12,10 @@
 #include "letter_distribution.h"
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct Square {
   uint64_t cross_set;
@@ -53,6 +55,9 @@ typedef struct Board {
   // Flag for lazy cross-set evaluation in endgame solver.
   // When false, cross-sets need to be recalculated before move generation.
   bool cross_sets_valid;
+  // True if any WIT row may be non-NULL. Empty caches need no clearing in
+  // board_copy or incremental undo, keeping WIT-off copies cheap.
+  bool wit_cache_populated;
 } Board;
 
 // Square: Letter
@@ -415,6 +420,21 @@ static inline void board_set_wit_block(Board *b, int row, int col, int dir,
   const int index = board_get_square_index(b, row, col, dir, csi);
   b->wit_block_rows[index] = row_ptr;
   b->wit_block_lens[index] = len;
+  if (row_ptr != NULL) {
+    b->wit_cache_populated = true;
+  }
+}
+
+// WIT rows borrow storage from lexical data and describe the current board.
+// Discard them whenever either changes without corresponding cache updates.
+// NULL rows conservatively disable the optional pruning.
+static inline void board_clear_wit_cache(Board *board) {
+  if (!board->wit_cache_populated) {
+    return;
+  }
+  memset(board->wit_block_rows, 0, sizeof(board->wit_block_rows));
+  memset(board->wit_block_lens, 0, sizeof(board->wit_block_lens));
+  board->wit_cache_populated = false;
 }
 
 // Returns pointers into the WIT parallel arrays for the lane at row_or_col in
@@ -762,6 +782,7 @@ static inline void board_reset(Board *board) {
   // computation as tiles are played.
   memset(board->wit_block_rows, 0, sizeof(board->wit_block_rows));
   memset(board->wit_block_lens, 0, sizeof(board->wit_block_lens));
+  board->wit_cache_populated = false;
 }
 
 static inline void update_opening_penalty(Board *board, int dir, int i,
@@ -848,23 +869,21 @@ static inline Board *board_create(const BoardLayout *bl) {
 }
 
 static inline void board_copy(Board *dst, const Board *src) {
-  // Skip the WIT block cache region (~8KB) during the hot copy: game_copy
-  // runs per sim rollout, and copying 900 cached row pointers taxes every
-  // iteration whether or not a table is loaded. A NULL row means
-  // "uncached -> treat as permit-all", so leaving dst's region zeroed is
-  // always safe; with a table loaded the cache repopulates through the
-  // tracked cross-set updates. Measured: +2.3% sim throughput WIT-off and
-  // ~+4% WIT-on vs copying the region.
+  // Do not copy derived WIT rows, but clear a reused destination: its old
+  // rows can describe longer blocks and suppress legal moves in the source.
+  board_clear_wit_cache(dst);
   memcpy(dst, src, offsetof(Board, wit_block_rows));
   const size_t after_wit = offsetof(Board, opening_move_penalties);
   memcpy((char *)dst + after_wit, (const char *)src + after_wit,
          sizeof(Board) - after_wit);
+  dst->wit_cache_populated = false;
 }
 
 static inline Board *board_duplicate(const Board *board) {
   Board *new_board = (Board *)malloc_or_die(sizeof(Board));
   memset(new_board->wit_block_rows, 0, sizeof(new_board->wit_block_rows));
   memset(new_board->wit_block_lens, 0, sizeof(new_board->wit_block_lens));
+  new_board->wit_cache_populated = false;
   board_copy(new_board, board);
   return new_board;
 }

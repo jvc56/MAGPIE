@@ -1,8 +1,10 @@
-
 #include "wmp_move_gen_test.h"
 
+#include "../src/def/board_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/anchor.h"
+#include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/leave_map.h"
@@ -14,6 +16,7 @@
 #include "../src/impl/wmp_move_gen.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 void test_wmp_move_gen_inactive(void) {
@@ -42,11 +45,16 @@ void test_wit_prune_skips_block_longer_than_anchor_word(void) {
   wit_row_lane[0] = block_row;
   wit_len_lane[0] = 3;
 
-  wmp_move_gen_set_playthrough_bit_rack(
-      &wmg, &anchor, row_cache, wit_row_lane, wit_len_lane);
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, wit_row_lane,
+                                        wit_len_lane);
 
   // The cached block is not wholly contained in this shorter shadow word, so
   // it cannot constrain the optional WIT prune.
+  assert(wmg.playthrough_addable == UINT32_MAX);
+  assert(wmg.num_tiles_played_through == 3);
+  // WIT-disabled callers supply no row lane. Collect playthrough letters
+  // without touching any cached table storage.
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL);
   assert(wmg.playthrough_addable == UINT32_MAX);
   assert(wmg.num_tiles_played_through == 3);
 }

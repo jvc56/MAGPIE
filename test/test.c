@@ -61,6 +61,7 @@
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
+#include "wit_cache_test.h"
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
@@ -89,6 +90,7 @@ static TestEntry test_table[] = {
     {"leavemap", test_leave_map},
     {"rit", test_rack_info_table},
     {"wit", test_word_info_table},
+    {"witcache", test_wit_cache},
     {"kwg", test_kwg_alpha},
     {"bag", test_bag},
     {"rack", test_rack},
@@ -149,6 +151,10 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"witdiff", test_wit_cache_differential},
+    {"witcopy", test_wit_cache_copy},
+    {"witundo", test_wit_cache_undo},
+    {"witconfig", test_wit_cache_config},
     {"peginterrupt", test_peg_interrupted_candidate_outcomes},
     {"playchooserfixed", test_play_chooser_fixed_short_budget},
     {"analyze_sim", test_analyze_sim},

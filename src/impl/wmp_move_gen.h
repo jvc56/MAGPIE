@@ -607,7 +607,8 @@ static inline void wmp_move_gen_set_playthrough_bit_rack(
       // `col` is this block's leftmost tile; fold in the cached letter set of
       // words of this length that contain the block. A NULL row means uncached
       // or no table loaded (treat as permit-all).
-      const uint32_t *block_row = wit_row_lane[col];
+      const uint32_t *block_row =
+          wit_row_lane != NULL ? wit_row_lane[col] : NULL;
       if (block_row != NULL) {
         const int block_len = wit_len_lane[col];
         const int extension_len = anchor->word_length - block_len;
