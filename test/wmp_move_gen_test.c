@@ -1,21 +1,28 @@
 
 #include "wmp_move_gen_test.h"
 
+#include "../src/def/equity_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 void test_wmp_move_gen_inactive(void) {
@@ -338,4 +345,92 @@ void test_wmp_move_gen(void) {
   test_nonplaythrough_subrack_enumeration();
   test_nonplaythrough_existence();
   test_playthrough_bingo_existence();
+}
+
+// The RIT-backed path resolves nonplaythrough WMP entries lazily at record
+// time; the non-RIT path resolves them eagerly during shadow. Move generation
+// must not be able to tell the difference. Two games are driven in lockstep
+// from identical seeds, one with a RIT and one without, and at every
+// position the complete sorted move lists must match move for move.
+//
+// Needs <lexicon>.rit on the data path. The ap_rit CI shard builds it for
+// TWL98 before running this; test_autoplay_rit_correctness removes it after.
+static void generate_all_sorted(Game *game, MoveList *move_list,
+                                SortedMoveList **sorted_out) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves_for_game(&args);
+  *sorted_out = sorted_move_list_create(move_list);
+}
+
+void test_rit_movegen_equality(void) {
+  const char *settings = "-wmp true -s1 equity -s2 equity -r1 all -r2 all "
+                         "-numplays 100000 -threads 1";
+  char cmd[256];
+  (void)snprintf(cmd, sizeof(cmd), "set -lex TWL98 -rit true %s", settings);
+  Config *rit_config = config_create_or_die(cmd);
+  (void)snprintf(cmd, sizeof(cmd), "set -lex TWL98 -rit false %s", settings);
+  Config *plain_config = config_create_or_die(cmd);
+  Game *rit_game = config_game_create(rit_config);
+  Game *plain_game = config_game_create(plain_config);
+  // The test is only meaningful if the RIT actually loaded on one side and
+  // not the other; assert it so a missing file cannot pass vacuously.
+  assert(player_get_rack_info_table(game_get_player(rit_game, 0)) != NULL);
+  assert(player_get_rack_info_table(game_get_player(plain_game, 0)) == NULL);
+
+  MoveList *rit_list = move_list_create(100000);
+  MoveList *plain_list = move_list_create(100000);
+  int positions = 0;
+  long moves = 0;
+  for (uint64_t seed = 1; seed <= 6; seed++) {
+    game_reset(rit_game);
+    game_reset(plain_game);
+    game_seed(rit_game, seed);
+    game_seed(plain_game, seed);
+    draw_starting_racks(rit_game);
+    draw_starting_racks(plain_game);
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      assert(racks_are_equal(
+          player_get_rack(game_get_player(rit_game, player_idx)),
+          player_get_rack(game_get_player(plain_game, player_idx))));
+    }
+    int turn = 0;
+    while (!game_over(plain_game)) {
+      SortedMoveList *rit_sorted = NULL;
+      SortedMoveList *plain_sorted = NULL;
+      generate_all_sorted(rit_game, rit_list, &rit_sorted);
+      generate_all_sorted(plain_game, plain_list, &plain_sorted);
+      assert(rit_sorted->count == plain_sorted->count);
+      assert(plain_sorted->count > 0);
+      for (int move_idx = 0; move_idx < plain_sorted->count; move_idx++) {
+        assert_moves_are_equal(rit_sorted->moves[move_idx],
+                               plain_sorted->moves[move_idx]);
+      }
+      moves += plain_sorted->count;
+      positions++;
+      // Same (asserted-equal) move on both sides keeps the games in lockstep.
+      play_move(rit_sorted->moves[0], rit_game, NULL);
+      play_move(plain_sorted->moves[0], plain_game, NULL);
+      sorted_move_list_destroy(rit_sorted);
+      sorted_move_list_destroy(plain_sorted);
+      turn++;
+      assert(turn < 200);
+    }
+    assert(game_over(rit_game));
+  }
+  assert(positions > 0);
+  printf("RIT movegen equality: %d positions, %ld moves identical\n", positions,
+         moves);
+
+  move_list_destroy(rit_list);
+  move_list_destroy(plain_list);
+  game_destroy(rit_game);
+  game_destroy(plain_game);
+  config_destroy(rit_config);
+  config_destroy(plain_config);
 }
