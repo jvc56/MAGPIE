@@ -1,3 +1,5 @@
+#include "fileproxy.h"
+
 #include "io_util.h"
 #include "string_util.h"
 #include <stdio.h>

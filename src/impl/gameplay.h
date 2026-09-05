@@ -11,7 +11,7 @@
 #include "../ent/sim_args.h"
 #include "move_gen.h"
 
-void draw_starting_racks(Game *game);
+void draw_starting_racks(const Game *game);
 Equity calculate_end_rack_points(const Rack *rack,
                                  const LetterDistribution *ld);
 Equity calculate_end_rack_penalty(const Rack *rack,
@@ -19,7 +19,8 @@ Equity calculate_end_rack_penalty(const Rack *rack,
 void play_move(const Move *move, Game *game, Rack *leave);
 void play_move_no_cross_set_update(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
-void set_random_rack(Game *game, int player_index, const Rack *known_rack);
+void set_random_rack(const Game *game, int player_index,
+                     const Rack *known_rack);
 const Move *get_top_equity_move(Game *game, MoveList *move_list);
 const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list);
 Move *get_top_equity_move_for_inferences(
@@ -31,7 +32,8 @@ void generate_moves_for_game(const MoveGenArgs *args);
 void draw_to_full_rack(const Game *game, int player_index);
 int draw_rack_string_from_bag(const Game *game, int player_index,
                               const char *rack_string);
-bool draw_rack_from_bag(Game *game, int player_index, const Rack *rack_to_draw);
+bool draw_rack_from_bag(const Game *game, int player_index,
+                        const Rack *rack_to_draw);
 void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
                          const Rack *rack_to_draw);
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave);
@@ -56,8 +58,9 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game);
 // updates exactly — no recompute is needed after unplay.
 void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game);
 
-void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
-                        bool validate, ErrorStack *error_stack);
+void game_play_n_events(GameHistory *game_history, Game *game,
+                        int num_events_to_play, bool validate,
+                        ErrorStack *error_stack);
 bool game_history_contains_end_rack_penalty_event(
     const GameHistory *game_history);
 

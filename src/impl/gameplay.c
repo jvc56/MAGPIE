@@ -1,3 +1,5 @@
+#include "gameplay.h"
+
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
@@ -1126,7 +1128,7 @@ void copy_bag_to_rack(const Bag *bag, const Rack *rack_to_sub, Rack *rack) {
   bag_increment_unseen_count(bag, remaining_letters);
   const int ld_size = rack_get_dist_size(rack);
   rack_set_dist_size_and_reset(rack, ld_size);
-  for (MachineLetter ml = 0; ml < ld_size; ml++) {
+  for (int ml = 0; ml < ld_size; ml++) {
     int letters_to_sub = 0;
     if (rack_to_sub) {
       letters_to_sub = rack_get_letter(rack_to_sub, ml);

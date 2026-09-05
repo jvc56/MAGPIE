@@ -1,3 +1,5 @@
+#include "validated_moves_string.h"
+
 #include "../def/game_history_defs.h"
 #include "../ent/board.h"
 #include "../ent/letter_distribution.h"
