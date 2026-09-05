@@ -16,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
+#include "../ent/word_info_table.h"
 #include "wmp_move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -105,8 +106,16 @@ typedef struct MoveGen {
   Rack leave;
   // Read-only view into the board's lanes for the current cross index;
   // refreshed by gen_load_position each call.
-  const Square *lanes_cache;
-  Square row_cache[BOARD_DIM];
+  // Direct views into the board (not copies): board_lanes points at all lane
+  // squares for the cross index, row_squares at the current row/dir within it.
+  // Square grew large enough that copying a row per anchor cost more than the
+  // locality it bought, so move generation reads the board in place.
+  const Square *board_lanes;
+  const Square *row_squares;
+  // Parallel WIT block data for the current lane (see Board.wit_block_rows),
+  // set alongside row_squares. NULL when no word info table is loaded.
+  const uint32_t *const *wit_row_lane;
+  const uint8_t *wit_len_lane;
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
   Equity opening_move_penalties[(BOARD_DIM) * 2];
   int board_number_of_tiles_played;
@@ -198,6 +207,10 @@ typedef struct MoveGen {
   uint64_t klv_instance_fp_at_load;
   uint64_t wmp_instance_fp_at_load;
   const RackInfoTable *rack_info_table;
+  // Optional precomputed word info table (loaded with -wit). When non-NULL,
+  // wmp_move_gen prunes subracks whose letters cannot appear in any word
+  // containing the playthrough blocks. NULL disables the optimization.
+  const WordInfoTable *word_info_table;
   // RIT entry for the current player_rack, looked up once in
   // gen_look_up_leaves_and_record_exchanges and cached here for the duration
   // of this move generation. NULL if rack_info_table is NULL, the rack isn't
