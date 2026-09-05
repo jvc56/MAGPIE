@@ -27,8 +27,14 @@ typedef struct SubrackInfo {
   BitRack subrack;
   const WMPEntry *wmp_entry;
   Equity leave_value;
-  bool wmp_entry_is_set;
 } SubrackInfo;
+
+// A nonplaythrough subrack's wmp_entry has three states: unresolved (this
+// sentinel), a resolved miss (NULL), or a resolved entry. Only the RIT-backed
+// path ever writes the sentinel, so the non-RIT path is unchanged by lazy
+// resolution. The object lives in move_gen.c; only its address matters.
+extern const WMPEntry wmp_entry_unresolved_sentinel;
+#define WMP_ENTRY_UNRESOLVED (&wmp_entry_unresolved_sentinel)
 
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct WMPMoveGen {
@@ -73,9 +79,8 @@ typedef struct WMPMoveGen {
   Equity leave_value;
   // When the caller has an active per-rack cache, lazily resolved
   // nonplaythrough WMP entries are written through to it for the next
-  // occurrence of the rack.
+  // occurrence of the rack. The cache stores the same three-state pointers.
   const WMPEntry **nonplaythrough_wmp_entry_cache;
-  bool *nonplaythrough_wmp_entry_cache_set;
 } WMPMoveGen;
 
 static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
@@ -95,7 +100,6 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const Rack *player_rack, const WMP *wmp) {
   wmp_move_gen->wmp = wmp;
   wmp_move_gen->nonplaythrough_wmp_entry_cache = NULL;
-  wmp_move_gen->nonplaythrough_wmp_entry_cache_set = NULL;
   if (wmp == NULL || player_rack == NULL || ld == NULL) {
     return;
   }
@@ -152,7 +156,6 @@ static inline void wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
         wmp_move_gen->nonplaythrough_infos + insert_index;
     subrack_info->subrack = *current;
     subrack_info->leave_value = leave_map_get_current_value(leave_map);
-    subrack_info->wmp_entry_is_set = false;
     wmp_move_gen->count_by_size[count]++;
     return;
   }
@@ -355,9 +358,11 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
     if (!wmp_entries_precomputed) {
       subrack_info->wmp_entry =
           wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
-      subrack_info->wmp_entry_is_set = true;
     } else {
-      assert(subrack_info->wmp_entry_is_set);
+      // Only the RIT-backed path leaves entries unresolved, and a rack's path
+      // is fixed by whether it has a RIT entry, so a precomputed entry
+      // reaching the eager walk must already be resolved.
+      assert(subrack_info->wmp_entry != WMP_ENTRY_UNRESOLVED);
     }
     if (subrack_info->wmp_entry == NULL) {
       continue;
@@ -438,6 +443,26 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
           check_leaves ? EQUITY_MIN_VALUE : 0;
     } else {
       wmp_move_gen->nonplaythrough_best_leave_values[leave_size] = rit_best;
+    }
+  }
+
+  // Freshly enumerated subracks carry stale wmp_entry pointers from whatever
+  // rack was generated before. Mark the ones record time can reach as
+  // unresolved; wmp_move_gen_get_subrack_words resolves them on demand. Sizes
+  // with no word are never read, so their pointers are left alone. On a cache
+  // hit the restored pointers already carry each slot's state.
+  if (!subracks_precomputed) {
+    for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
+         size++) {
+      if (!wmp_move_gen->nonplaythrough_has_word_of_length[size]) {
+        continue;
+      }
+      const int offset = subracks_get_combination_offset(size);
+      const int count = wmp_move_gen->count_by_size[size];
+      for (int idx = 0; idx < count; idx++) {
+        wmp_move_gen->nonplaythrough_infos[offset + idx].wmp_entry =
+            WMP_ENTRY_UNRESOLVED;
+      }
     }
   }
 }
@@ -630,14 +655,12 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   if (is_playthrough) {
     subrack_info->wmp_entry = wmp_get_word_entry(
         wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
-  } else if (!subrack_info->wmp_entry_is_set) {
+  } else if (subrack_info->wmp_entry == WMP_ENTRY_UNRESOLVED) {
     subrack_info->wmp_entry = wmp_get_word_entry(
         wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
-    subrack_info->wmp_entry_is_set = true;
     if (wmp_move_gen->nonplaythrough_wmp_entry_cache != NULL) {
       wmp_move_gen->nonplaythrough_wmp_entry_cache[subrack_idx] =
           subrack_info->wmp_entry;
-      wmp_move_gen->nonplaythrough_wmp_entry_cache_set[subrack_idx] = true;
     }
   }
 
