@@ -91,6 +91,7 @@ static TestEntry test_table[] = {
     {"rit", test_rack_info_table},
     {"wit", test_word_info_table},
     {"witcache", test_wit_cache},
+    {"witsweep", test_wit_equivalence_sweep},
     {"kwg", test_kwg_alpha},
     {"bag", test_bag},
     {"rack", test_rack},

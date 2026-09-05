@@ -353,6 +353,79 @@ void test_wit_cache(void) {
   test_wit_cache_config();
 }
 
+// CI cover for the prunes themselves. witdiff below needs the production
+// CSW24.wit, so it stays on demand; this builds a table from the loaded KWG in
+// memory instead and asserts that WIT-on generation yields the complete move
+// list WIT-off does at every position of seeded games, for both players, and
+// again on a copied board after a further play. Game count is a knob so the
+// same sweep can run long on demand (WIT_SWEEP_GAMES).
+void test_wit_equivalence_sweep(void) {
+  const char *games_env = getenv("WIT_SWEEP_GAMES");
+  const int num_games =
+      games_env != NULL ? (int)strtol(games_env, NULL, 10) : 4;
+  Config *with_wit = config_create_or_die(
+      "set -lex CSW21 -wmp true -wit false -s1 equity -s2 equity -r1 all "
+      "-r2 all -numplays 10000");
+  Config *without_wit = config_create_or_die(
+      "set -lex CSW21 -wmp true -wit false -s1 equity -s2 equity -r1 all "
+      "-r2 all -numplays 10000");
+  PlayersData *players_data = config_get_players_data(with_wit);
+  assert(players_data_get_word_info_table(players_data, 0) == NULL);
+  WordInfoTable *wit =
+      make_word_info_table_from_kwg(players_data_get_kwg(players_data, 0));
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, wit);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, wit);
+
+  Game *game = config_game_create(with_wit);
+  Game *reference = config_game_create(without_wit);
+  Game *copied = game_duplicate(game);
+  Game *copied_reference = game_duplicate(reference);
+  MoveList *best_move = move_list_create(1);
+  int positions = 0;
+  for (int game_idx = 0; game_idx < num_games; game_idx++) {
+    game_reset(game);
+    game_reset(reference);
+    const uint64_t seed = 0x616U + (uint64_t)game_idx;
+    game_seed(game, seed);
+    game_seed(reference, seed);
+    draw_starting_racks(game);
+    draw_starting_racks(reference);
+    while (!game_over(game)) {
+      for (int player_idx = 0; player_idx < 2; player_idx++) {
+        game_set_player_on_turn_index(game, player_idx);
+        game_set_player_on_turn_index(reference, player_idx);
+        assert_same_moves(game, reference);
+      }
+      game_set_player_on_turn_index(game,
+                                    game_get_player_on_turn_index(reference));
+      const Move move = *get_top_equity_move(game, best_move);
+      // A copied board inherits the source's rows; play on top of them.
+      game_copy(copied, game);
+      game_copy(copied_reference, reference);
+      play_move(&move, copied, NULL);
+      play_move(&move, copied_reference, NULL);
+      assert_same_moves(copied, copied_reference);
+      play_move(&move, game, NULL);
+      play_move(&move, reference, NULL);
+      positions++;
+    }
+    assert(game_over(reference));
+  }
+  printf("WIT sweep: %d games, %d positions; identical complete move lists "
+         "with and without the table\n",
+         num_games, positions);
+  move_list_destroy(best_move);
+  game_destroy(copied_reference);
+  game_destroy(copied);
+  game_destroy(reference);
+  game_destroy(game);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, NULL);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, NULL);
+  word_info_table_destroy(wit);
+  config_destroy(without_wit);
+  config_destroy(with_wit);
+}
+
 // On-demand integration coverage: build CSW24.wit first (make release does so).
 // Compare every generated move, score, and equity through seeded games, and
 // repeat the comparison after warming a reused copy and undoing each play.
