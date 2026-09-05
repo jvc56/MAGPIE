@@ -1,5 +1,6 @@
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/rack.h"
@@ -177,8 +178,69 @@ void test_mul(void) {
   config_destroy(config);
 }
 
+// Exhaustive cover of the 128-bit lane mask used by move generation's WIT
+// subrack prune. Every machine letter must land in exactly one half, and the
+// mask must fire on any positive count of that letter and on nothing else.
+// The lane at BIT_RACK_MAX_ALPHABET_SIZE / 2 is the low/high boundary the
+// prune's `shift < 64` split turns on.
+void test_letter_masks(void) {
+  const int max_count = (1 << BIT_RACK_BITS_PER_LETTER) - 1;
+  assert(!bit_rack_mask_has_letters(0, 0));
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    uint64_t low_mask = 0;
+    uint64_t high_mask = 0;
+    bit_rack_add_letter_to_mask(&low_mask, &high_mask, (MachineLetter)ml);
+    assert(bit_rack_mask_has_letters(low_mask, high_mask));
+
+    // Exactly one half carries the lane, and it carries exactly one lane.
+    const bool in_low = ml < BIT_RACK_MAX_ALPHABET_SIZE / 2;
+    assert(in_low ? (low_mask != 0 && high_mask == 0)
+                  : (low_mask == 0 && high_mask != 0));
+    const uint64_t set_half = in_low ? low_mask : high_mask;
+    const int shift =
+        (ml % (BIT_RACK_MAX_ALPHABET_SIZE / 2)) * BIT_RACK_BITS_PER_LETTER;
+    assert(set_half == (uint64_t)max_count << shift);
+
+    // Every count from 1 up to the lane's capacity is detected, and no other
+    // letter's presence is mistaken for this one.
+    for (int count = 1; count <= max_count; count++) {
+      BitRack only_this = bit_rack_create_empty();
+      bit_rack_set_letter_count(&only_this, (MachineLetter)ml, count);
+      assert(bit_rack_intersects_mask(&only_this, low_mask, high_mask));
+    }
+    BitRack empty = bit_rack_create_empty();
+    assert(!bit_rack_intersects_mask(&empty, low_mask, high_mask));
+    for (int other = 0; other < BIT_RACK_MAX_ALPHABET_SIZE; other++) {
+      if (other == ml) {
+        continue;
+      }
+      BitRack only_other = bit_rack_create_empty();
+      bit_rack_set_letter_count(&only_other, (MachineLetter)other, max_count);
+      assert(!bit_rack_intersects_mask(&only_other, low_mask, high_mask));
+    }
+  }
+
+  // Accumulating several letters keeps every lane independently detectable,
+  // including a pair that straddles the low/high boundary.
+  const MachineLetter last_low = BIT_RACK_MAX_ALPHABET_SIZE / 2 - 1;
+  const MachineLetter first_high = BIT_RACK_MAX_ALPHABET_SIZE / 2;
+  uint64_t low_mask = 0;
+  uint64_t high_mask = 0;
+  bit_rack_add_letter_to_mask(&low_mask, &high_mask, last_low);
+  bit_rack_add_letter_to_mask(&low_mask, &high_mask, first_high);
+  assert(low_mask != 0 && high_mask != 0);
+  assert(bit_rack_mask_has_letters(low_mask, high_mask));
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    BitRack single = bit_rack_create_empty();
+    bit_rack_set_letter_count(&single, (MachineLetter)ml, 1);
+    const bool expected = (ml == last_low) || (ml == first_high);
+    assert(bit_rack_intersects_mask(&single, low_mask, high_mask) == expected);
+  }
+}
+
 void test_bit_rack(void) {
   test_compatibility();
+  test_letter_masks();
   if (BOARD_DIM > 15) {
     // No current super config is compatible with bit_rack.
     return;
