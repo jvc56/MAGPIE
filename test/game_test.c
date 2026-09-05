@@ -156,6 +156,29 @@ void test_load_gcg_cgp(void) {
       game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 Z/ZZ 0/0 0",
       ERROR_STATUS_CGP_PARSE_RACK_LETTERS_NOT_IN_BAG);
 
+  // More rack letters than RACK_SIZE. These tiles are all available in the
+  // bag, so the size check is the only thing rejecting them. Move generation
+  // indexes RACK_SIZE-sized arrays by the rack size, so an over-full rack has
+  // to be refused at parse time.
+  reset_and_load_game_failure(
+      game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFGH/ 0/0 0",
+      ERROR_STATUS_CGP_PARSE_RACK_TOO_MANY_LETTERS);
+
+  reset_and_load_game_failure(
+      game,
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFGHIJKLMNOPQR/ 0/0 0",
+      ERROR_STATUS_CGP_PARSE_RACK_TOO_MANY_LETTERS);
+
+  // ... on either player.
+  reset_and_load_game_failure(
+      game,
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/ABCDEFGH 0/0 0",
+      ERROR_STATUS_CGP_PARSE_RACK_TOO_MANY_LETTERS);
+
+  // A full RACK_SIZE rack still loads.
+  load_cgp_or_die(
+      game, "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/ 0/0 0");
+
   load_and_exec_config_or_die(config, "cgp " VS_FRENTZ_CGP);
 
   config_load_command(

@@ -430,6 +430,7 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 // Returns number of letters drawn on success
 // Returns -1 if the string was malformed.
 // Returns -2 if the tiles were not in the bag.
+// Returns -3 if the string held more than RACK_SIZE tiles.
 int draw_rack_string_from_bag(const Game *game, const int player_index,
                               const char *rack_string) {
   const LetterDistribution *ld = game_get_ld(game);
@@ -439,7 +440,14 @@ int draw_rack_string_from_bag(const Game *game, const int player_index,
       rack_set_to_string(ld, &player_rack_copy, rack_string);
 
   if (number_of_letters_set != -1) {
-    if (!rack_is_drawable(game, player_index, &player_rack_copy)) {
+    if (number_of_letters_set > RACK_SIZE) {
+      // rack_set_to_string bounds the string by MAX_RACK_SIZE, which is far
+      // larger than RACK_SIZE. Racks wider than RACK_SIZE must be rejected
+      // here: move generation indexes several RACK_SIZE-sized arrays by the
+      // rack size, so drawing one would be memory-unsafe rather than merely
+      // wrong.
+      number_of_letters_set = -3;
+    } else if (!rack_is_drawable(game, player_index, &player_rack_copy)) {
       number_of_letters_set = -2;
     } else {
       draw_rack_from_bag(game, player_index, &player_rack_copy);
