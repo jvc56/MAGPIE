@@ -41,6 +41,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// See WMP_ENTRY_UNRESOLVED in wmp_move_gen.h. Only its address is used.
+const WMPEntry wmp_entry_unresolved_sentinel = {0};
+
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 // Cache move generators since destroying
@@ -3480,14 +3483,10 @@ void generate_moves(const MoveGenArgs *args) {
               subrack_entry->leave_values[i];
           wgen->nonplaythrough_infos[i].wmp_entry =
               subrack_entry->wmp_entries[i];
-          wgen->nonplaythrough_infos[i].wmp_entry_is_set =
-              subrack_entry->wmp_entries_are_set[i];
         }
       }
       if (leaves_are_populated) {
         wgen->nonplaythrough_wmp_entry_cache = subrack_entry->wmp_entries;
-        wgen->nonplaythrough_wmp_entry_cache_set =
-            subrack_entry->wmp_entries_are_set;
       }
       if (gen->rit_entry != NULL) {
         // The RIT supplies existence and best-leave bounds. Defer each
@@ -3516,8 +3515,6 @@ void generate_moves(const MoveGenArgs *args) {
               wgen->nonplaythrough_infos[i].leave_value;
           subrack_entry->wmp_entries[i] =
               wgen->nonplaythrough_infos[i].wmp_entry;
-          subrack_entry->wmp_entries_are_set[i] =
-              wgen->nonplaythrough_infos[i].wmp_entry_is_set;
         }
       }
     }
