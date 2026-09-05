@@ -1069,7 +1069,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   // The forbidden set is the same for every subrack, so decide once per
   // anchor. The masked scan lives out of line; this loop stays the one the
   // generator ran before the prune existed, with no per-subrack test.
-  if ((forbidden_subrack_low | forbidden_subrack_high) != 0) {
+  if (bit_rack_mask_has_letters(forbidden_subrack_low,
+                                forbidden_subrack_high)) {
     wordmap_gen_forbidden_subracks(gen, anchor, forbidden_subrack_low,
                                    forbidden_subrack_high);
     return;
