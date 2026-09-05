@@ -1,3 +1,5 @@
+#include "kwg_alpha_test.h"
+
 #include "../src/ent/kwg.h"
 #include "../src/ent/kwg_alpha.h"
 #include "../src/ent/letter_distribution.h"

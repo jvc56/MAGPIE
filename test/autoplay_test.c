@@ -1,3 +1,5 @@
+#include "autoplay_test.h"
+
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"

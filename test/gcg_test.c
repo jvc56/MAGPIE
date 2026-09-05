@@ -1,3 +1,5 @@
+#include "gcg_test.h"
+
 #include "../src/def/board_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"

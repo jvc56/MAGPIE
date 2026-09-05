@@ -1,3 +1,5 @@
+#include "equity_test.h"
+
 #include "../src/def/equity_defs.h"
 #include "../src/ent/equity.h"
 #include "test_util.h"

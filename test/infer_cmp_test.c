@@ -1,3 +1,5 @@
+#include "infer_cmp_test.h"
+
 #include "../src/def/game_history_defs.h"
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"

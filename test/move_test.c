@@ -1,3 +1,5 @@
+#include "move_test.h"
+
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"

@@ -1,3 +1,5 @@
+#include "klv_test.h"
+
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/klv.h"

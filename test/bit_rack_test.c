@@ -1,3 +1,5 @@
+#include "bit_rack_test.h"
+
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
 #include "../src/ent/bit_rack.h"

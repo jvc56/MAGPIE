@@ -1,3 +1,5 @@
+#include "rack_list_test.h"
+
 #include "../src/ent/encoded_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/klv.h"
