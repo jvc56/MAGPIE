@@ -26,9 +26,11 @@ make libmagpie                 # shared library; API is src/impl/cmd_api.h
 make clean                     # remove build artifacts
 ```
 
-The local PGO build uses Clang and `llvm-profdata`, reuses an existing production
-CSW24 RIT (or creates it when missing), discards old profile data, and trains
-the current source on static autoplay. Experimental `pgo`, `pgo_sim`,
+The local PGO build uses Clang and `llvm-profdata`, found under their plain or
+distro-versioned names (`clang-18`, `llvm-profdata-18`); with no clang on PATH,
+`make release` builds the plain optimized release and says so. It reuses an
+existing production CSW24 RIT (or creates it when missing), discards old
+profile data, and trains the current source on static autoplay. Experimental `pgo`, `pgo_sim`,
 `pgo_peg`, and `pgo_eg` targets are also available. Each produces a
 `-march=native` binary for the build machine. Rerun the selected target after
 source changes and on each target architecture. Override `PGO_CC`,

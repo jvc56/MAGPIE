@@ -40,7 +40,12 @@ OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
 PGO_DIR ?= $(OBJ_ROOT)/pgo-data
 PGO_RAW_DIR ?= $(PGO_DIR)/raw
 PGO_PROFILE ?= $(abspath $(PGO_DIR)/magpie.profdata)
-PGO_CC ?= clang
+# PGO needs clang's instrumentation and llvm-profdata. Distros often install
+# only versioned names (clang-18, llvm-profdata-18), so look for those too. An
+# explicit PGO_CC or LLVM_PROFDATA on the command line wins. With no clang at
+# all, `make release` builds the plain optimized release and says so.
+PGO_TOOL_VERSIONS := 20 19 18 17 16 15
+PGO_CC ?= $(firstword $(foreach c,clang $(addprefix clang-,$(PGO_TOOL_VERSIONS)),$(if $(shell command -v $(c) 2>/dev/null),$(c),)))
 PGO_LDFLAGS ?=
 PGO_TRAIN_GAMES ?= 16
 PGO_TRAIN_TIME_MS ?= 1000
@@ -48,9 +53,15 @@ PGO_TRAIN_SECONDS ?= 0.05
 PGO_TRAIN_THREADS ?= $(NPROCS)
 PGO_LEAVEGEN_TARGET ?= 100
 PGO_LEAVEGEN_DATA_DIR ?= $(abspath $(PGO_DIR)/leavegen-data)
-LLVM_PROFDATA ?= $(shell command -v llvm-profdata 2>/dev/null)
+# Prefer the llvm-profdata matching a versioned clang (clang-18 pairs with
+# llvm-profdata-18), then the unversioned one, then any versioned one; on macOS
+# Xcode provides it through xcrun.
+PGO_CC_VERSION_SUFFIX := $(patsubst clang%,%,$(notdir $(PGO_CC)))
+LLVM_PROFDATA ?= $(firstword $(foreach p,llvm-profdata$(PGO_CC_VERSION_SUFFIX) llvm-profdata $(addprefix llvm-profdata-,$(PGO_TOOL_VERSIONS)),$(if $(shell command -v $(p) 2>/dev/null),$(p),)))
 ifeq ($(LLVM_PROFDATA),)
+ifneq ($(shell command -v xcrun 2>/dev/null),)
 LLVM_PROFDATA := xcrun llvm-profdata
+endif
 endif
 
 SRC  := $(wildcard $(SRC_DIR)/**/*.c)
@@ -127,6 +138,7 @@ LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
+	pgo_toolchain_check \
 	pgo_eg peg_eg pgo_workload libmagpie examples
 
 all: magpie magpie_test
@@ -210,9 +222,16 @@ clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
 
 # The production release is trained on static autoplay, the best general
-# profile in the measured workload matrix.
+# profile in the measured workload matrix. Without clang there is nothing to
+# train with, so build the plain optimized release rather than fail.
 release:
-	$(MAKE) pgo_workload PGO_WORKLOAD=static
+	@if test -n "$(PGO_CC)"; then \
+		$(MAKE) pgo_workload PGO_WORKLOAD=static; \
+	else \
+		echo '*** No clang on PATH for the profile-guided release; building the plain optimized release instead.'; \
+		echo '*** Install clang, or pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata>, to train the PGO build.'; \
+		$(MAKE) magpie BUILD=no_pgo_release; \
+	fi
 
 # Leave generation benefits from its own focused profile.
 leavegen_pgo_release:
@@ -237,11 +256,30 @@ pgo_eg:
 # Accept the originally proposed endgame spelling as an alias.
 peg_eg: pgo_eg
 
+# Refuse to start a PGO build without its toolchain, instead of failing on the
+# first object file. The instrumentation flags are clang's, so PGO_CC must be
+# some clang; LLVM_PROFDATA may carry an `xcrun` prefix.
+pgo_toolchain_check:
+	@if test -z "$(PGO_CC)"; then \
+		echo '*** PGO needs clang and none was found on PATH (clang, clang-20 .. clang-15).'; \
+		echo '*** Install clang, or pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata>.'; \
+		exit 1; \
+	fi
+	@if ! command -v "$(PGO_CC)" >/dev/null 2>&1; then \
+		echo '*** PGO_CC=$(PGO_CC) was not found on PATH.'; exit 1; \
+	fi
+	@if ! "$(PGO_CC)" --version 2>/dev/null | grep -qi clang; then \
+		echo '*** PGO_CC=$(PGO_CC) is not clang; the PGO instrumentation flags are clang-specific.'; exit 1; \
+	fi
+	@if test -z "$(LLVM_PROFDATA)" || ! command -v $(firstword $(LLVM_PROFDATA)) >/dev/null 2>&1; then \
+		echo '*** PGO needs llvm-profdata (llvm-profdata, llvm-profdata-20 .. -15, or xcrun on macOS); pass LLVM_PROFDATA=<path>.'; exit 1; \
+	fi
+
 # Reuse or build the production RIT, discard all previous profile data, train
 # a freshly instrumented production engine, and replace bin/magpie with the
 # profile-guided native build. The dedicated driver contains no benchmark
 # harness; it invokes real engine workloads directly.
-pgo_workload:
+pgo_workload: pgo_toolchain_check
 	@set -e; if test -f data/lexica/CSW24.rit; then \
 		echo 'Using existing data/lexica/CSW24.rit'; \
 	else \

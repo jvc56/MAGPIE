@@ -43,8 +43,9 @@ This will start MAGPIE in async interactive mode by default. For more details on
 
 ### Release builds
 
-The production release is a native profile-guided build. Install Clang and
-`llvm-profdata`, then run:
+The production release is a native profile-guided build. It needs Clang and
+`llvm-profdata`; with no clang on PATH it builds the plain optimized release
+instead and says so. Run:
 
 ```
 make release
@@ -83,8 +84,9 @@ The result is tailored to the machine that ran the build, making it suitable
 for long-running jobs and release builds on that target.
 
 Run the selected release target again after changing source, and run it
-separately on each target architecture. Override the tool names when a system
-installs versioned LLVM binaries:
+separately on each target architecture. Versioned LLVM binaries (`clang-18`,
+`llvm-profdata-18`) are found automatically; override the tool names only when
+they live outside `PATH` or you want a particular version:
 
 ```
 make release \
