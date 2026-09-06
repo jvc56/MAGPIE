@@ -206,7 +206,7 @@ jobs:
       # cheap. The no-argument test run is the reduced rack-size-generic set.
       - name: Build and run RACK_SIZE=8 release tests
         run: |
-          make magpie_test BUILD=release RACK_SIZE=8
+          make magpie_test BUILD=no_pgo_release RACK_SIZE=8
           ./bin/magpie_test
 
       - name: Build and run RACK_SIZE=8 dev tests
