@@ -875,6 +875,83 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
   return true;
 }
 
+// Probes the WMP for one canonical subrack of the current anchor and records
+// every play its words allow. Returns true once the recording threshold has
+// been exceeded, so the caller stops scanning subracks.
+//
+// This has two callers, and with two callers clang keeps it out of line,
+// turning the hottest loop in wordmap_gen into a call per subrack (measured
+// at about -6% sim throughput with WIT off). Force the inline so that loop
+// fuses exactly as it did before the prune; the second copy lands in the
+// out-of-line masked scan below, away from generate_moves.
+static inline __attribute__((always_inline)) bool
+wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor,
+                           int subrack_idx) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  if (gen->number_of_tiles_in_bag > 0) {
+    const Equity leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
+    if (better_play_has_been_found(gen, leave_value +
+                                            anchor->highest_possible_score)) {
+      return false;
+    }
+  }
+  if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
+    return false;
+  }
+  if (gen->number_of_tiles_in_bag == 0) {
+    wgen->leave_value = 0;
+    for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
+      const int leave_num_ml =
+          rack_get_letter(&gen->player_rack, ml) -
+          bit_rack_get_letter(
+              wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx), ml);
+      rack_set_letter(&gen->leave, ml, leave_num_ml);
+    }
+    rack_set_total_letters(&gen->leave,
+                           rack_get_total_letters(&gen->player_rack) -
+                               anchor->tiles_to_play);
+  }
+  for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
+    for (int start_col = anchor->leftmost_start_col;
+         start_col <= anchor->rightmost_start_col; start_col++) {
+      if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx, start_col)) {
+        record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
+        if (gen->threshold_exceeded) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Scans the subracks of an anchor whose WIT forbidden set is nonzero, skipping
+// each canonical subrack that holds a forbidden letter before it is probed.
+// Kept out of line on purpose: a second inlined copy of the subrack loop in
+// wordmap_gen (and through it in generate_moves) grows the hot function
+// enough to cost several percent of sim throughput with WIT off, where this
+// scan never runs. One call per anchor here is negligible.
+static __attribute__((noinline)) void
+wordmap_gen_forbidden_subracks(MoveGen *gen, const Anchor *anchor,
+                               uint64_t forbidden_subrack_low,
+                               uint64_t forbidden_subrack_high) {
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const int num_subrack_combinations =
+      wmp_move_gen_get_num_subrack_combinations(wgen);
+  for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
+       subrack_idx++) {
+    const BitRack *subrack =
+        wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx);
+    if (bit_rack_intersects_mask(subrack, forbidden_subrack_low,
+                                 forbidden_subrack_high)) {
+      continue;
+    }
+    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx)) {
+      return;
+    }
+  }
+}
+
 // Index of the lowest set bit of a nonzero bitset, following
 // get_single_bit_index's guarded-intrinsic pattern. Undefined for zero, so
 // callers loop on `bitset != 0`.
@@ -949,6 +1026,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
+  uint64_t forbidden_subrack_low = 0;
+  uint64_t forbidden_subrack_high = 0;
 
   // Word info table prune, lifted entirely out of the loops below. The block
   // scan in wmp_move_gen_set_playthrough_bit_rack already AND-folded each
@@ -957,8 +1036,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   // So the rack must supply tiles_to_play tiles that are each addable (blanks
   // are wild). Count the rack tiles that are NOT placeable -- present non-blank
   // letters outside addable, usually just a couple of set bits -- and skip the
-  // whole anchor if too few remain. The blocks (hence addable) are the same for
-  // every start column, so this rules out every candidate play at once.
+  // whole anchor if too few remain. Otherwise, use the same exact condition to
+  // skip individual canonical subracks before hashing or probing the WMP. The
+  // blocks (hence addable) are the same for every start column.
   if (gen->word_info_table != NULL && anchor->playthrough_blocks > 0) {
     const uint32_t letter_universe =
         (uint32_t)((1U << ld_get_size(&gen->ld)) - 1) & ~1U;
@@ -974,6 +1054,10 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
       const MachineLetter forbidden_ml =
           (MachineLetter)lowest_set_bit_index(forbidden);
       forbidden_count += rack_get_letter(&gen->player_rack, forbidden_ml);
+      // BitRack stores a four-bit count for each machine letter. Mask the
+      // entire lane so any positive count rejects the subrack.
+      bit_rack_add_letter_to_mask(&forbidden_subrack_low,
+                                  &forbidden_subrack_high, forbidden_ml);
       forbidden = clear_lowest_set_bit(forbidden);
     }
     if (gen->number_of_letters_on_rack - forbidden_count <
@@ -982,43 +1066,19 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
     }
   }
 
+  // The forbidden set is the same for every subrack, so decide once per
+  // anchor. The masked scan lives out of line; this loop stays the one the
+  // generator ran before the prune existed, with no per-subrack test.
+  if (bit_rack_mask_has_letters(forbidden_subrack_low,
+                                forbidden_subrack_high)) {
+    wordmap_gen_forbidden_subracks(gen, anchor, forbidden_subrack_low,
+                                   forbidden_subrack_high);
+    return;
+  }
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
-    if (gen->number_of_tiles_in_bag > 0) {
-      const Equity leave_value =
-          wmp_move_gen_get_leave_value(wgen, subrack_idx);
-      if (better_play_has_been_found(gen, leave_value +
-                                              anchor->highest_possible_score)) {
-        continue;
-      }
-    }
-    if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
-      continue;
-    }
-    if (gen->number_of_tiles_in_bag == 0) {
-      wgen->leave_value = 0;
-      for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
-        const int leave_num_ml =
-            rack_get_letter(&gen->player_rack, ml) -
-            bit_rack_get_letter(
-                wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx), ml);
-        rack_set_letter(&gen->leave, ml, leave_num_ml);
-      }
-      rack_set_total_letters(&gen->leave,
-                             rack_get_total_letters(&gen->player_rack) -
-                                 anchor->tiles_to_play);
-    }
-    for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
-      for (int start_col = anchor->leftmost_start_col;
-           start_col <= anchor->rightmost_start_col; start_col++) {
-        if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx,
-                                                      start_col)) {
-          record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
-          if (gen->threshold_exceeded) {
-            return;
-          }
-        }
-      }
+    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx)) {
+      return;
     }
   }
 }
