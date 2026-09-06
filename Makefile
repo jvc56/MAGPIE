@@ -45,7 +45,25 @@ PGO_PROFILE ?= $(abspath $(PGO_DIR)/magpie.profdata)
 # explicit PGO_CC or LLVM_PROFDATA on the command line wins. With no clang at
 # all, `make release` builds the plain optimized release and says so.
 PGO_TOOL_VERSIONS := 20 19 18 17 16 15
-PGO_CC ?= $(firstword $(foreach c,clang $(addprefix clang-,$(PGO_TOOL_VERSIONS)),$(if $(shell command -v $(c) 2>/dev/null),$(c),)))
+# The oldest clang the PGO build supports; matches the versioned names above.
+# Older clangs (Ubuntu 20.04 ships clang 10) lack flags the instrumented build
+# relies on, so auto-selection skips them and `make release` degrades to the
+# plain optimized build with a one-line explanation instead of failing on
+# every object file.
+PGO_MIN_CLANG_MAJOR := 15
+# Major version of a clang ("Apple clang version 17.0.0", "clang version
+# 10.0.0-4ubuntu1"), or empty if the command is missing or is not clang.
+pgo_clang_major = $(shell $(1) --version 2>/dev/null | sed -n '1s/.*clang version \([0-9][0-9]*\).*/\1/p')
+PGO_CC_CANDIDATES := clang $(addprefix clang-,$(PGO_TOOL_VERSIONS))
+# Expanded once: a recursive `?=` would rerun every probe on each reference.
+ifeq ($(origin PGO_CC),undefined)
+PGO_CC := $(firstword $(foreach c,$(PGO_CC_CANDIDATES),$(shell v=$$($(c) --version 2>/dev/null | sed -n '1s/.*clang version \([0-9][0-9]*\).*/\1/p'); if test -n "$$v" && test "$$v" -ge $(PGO_MIN_CLANG_MAJOR); then echo $(c); fi)))
+endif
+# For diagnostics: the clang that would have been used, even if it is too old.
+PGO_CC_FOUND := $(if $(PGO_CC),$(PGO_CC),$(firstword $(foreach c,$(PGO_CC_CANDIDATES),$(if $(shell command -v $(c) 2>/dev/null),$(c),))))
+PGO_CC_FOUND_MAJOR := $(if $(PGO_CC_FOUND),$(call pgo_clang_major,$(PGO_CC_FOUND)))
+# Non-empty when PGO_CC exists, is clang, and is new enough to train with.
+PGO_CC_USABLE := $(if $(PGO_CC),$(shell if test -n "$(PGO_CC_FOUND_MAJOR)" && test "$(PGO_CC_FOUND_MAJOR)" -ge $(PGO_MIN_CLANG_MAJOR); then echo yes; fi))
 PGO_LDFLAGS ?=
 PGO_TRAIN_GAMES ?= 16
 PGO_TRAIN_TIME_MS ?= 1000
@@ -95,8 +113,15 @@ cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
 # Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs
-cflags.pgo_generate := $(cflags.no_pgo_release) -fprofile-instr-generate -fprofile-update=atomic
-cflags.test_pgo_generate := $(cflags.test_no_pgo_release) -fprofile-instr-generate -fprofile-update=atomic
+# Training runs multithreaded, so counter updates must be atomic. clang 17
+# added the GCC-style -fprofile-update=atomic; older clangs get the LLVM-native
+# equivalent. Probed only for the instrumented builds, with the compiler that
+# will do the compiling.
+ifneq ($(filter pgo_generate test_pgo_generate,$(BUILD)),)
+pgo_atomic_flag := $(shell if printf 'int main(void) { return 0; }\n' | $(CC) -fprofile-instr-generate -fprofile-update=atomic -x c -c - -o /dev/null >/dev/null 2>&1; then echo -fprofile-update=atomic; else echo -mllvm -instrprof-atomic-counter-update-all; fi)
+endif
+cflags.pgo_generate := $(cflags.no_pgo_release) -fprofile-instr-generate $(pgo_atomic_flag)
+cflags.test_pgo_generate := $(cflags.test_no_pgo_release) -fprofile-instr-generate $(pgo_atomic_flag)
 pgo_use_flags := -fprofile-instr-use=$(PGO_PROFILE) \
                  -Werror=profile-instr-out-of-date \
                  -Wno-profile-instr-unprofiled
@@ -225,11 +250,17 @@ clean:
 # profile in the measured workload matrix. Without clang there is nothing to
 # train with, so build the plain optimized release rather than fail.
 release:
-	@if test -n "$(PGO_CC)"; then \
+	@if test -n "$(PGO_CC_USABLE)"; then \
 		$(MAKE) pgo_workload PGO_WORKLOAD=static; \
 	else \
-		echo '*** No clang on PATH for the profile-guided release; building the plain optimized release instead.'; \
-		echo '*** Install clang, or pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata>, to train the PGO build.'; \
+		if test -n "$(PGO_CC_FOUND_MAJOR)"; then \
+			echo '*** $(PGO_CC_FOUND) is clang $(PGO_CC_FOUND_MAJOR); the profile-guided release needs clang $(PGO_MIN_CLANG_MAJOR) or newer. Building the plain optimized release instead.'; \
+		elif test -n "$(PGO_CC_FOUND)"; then \
+			echo '*** $(PGO_CC_FOUND) is not clang; the profile-guided release needs clang $(PGO_MIN_CLANG_MAJOR) or newer. Building the plain optimized release instead.'; \
+		else \
+			echo '*** No clang on PATH for the profile-guided release; building the plain optimized release instead.'; \
+		fi; \
+		echo '*** Install clang $(PGO_MIN_CLANG_MAJOR) or newer (Debian/Ubuntu: apt.llvm.org), or pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata>, to train the PGO build.'; \
 		$(MAKE) magpie BUILD=no_pgo_release; \
 	fi
 
@@ -261,7 +292,7 @@ peg_eg: pgo_eg
 # some clang; LLVM_PROFDATA may carry an `xcrun` prefix.
 pgo_toolchain_check:
 	@if test -z "$(PGO_CC)"; then \
-		echo '*** PGO needs clang and none was found on PATH (clang, clang-20 .. clang-15).'; \
+		echo '*** PGO needs clang $(PGO_MIN_CLANG_MAJOR) or newer and none was found on PATH (clang, clang-20 .. clang-15).'; \
 		echo '*** Install clang, or pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata>.'; \
 		exit 1; \
 	fi
@@ -270,6 +301,9 @@ pgo_toolchain_check:
 	fi
 	@if ! "$(PGO_CC)" --version 2>/dev/null | grep -qi clang; then \
 		echo '*** PGO_CC=$(PGO_CC) is not clang; the PGO instrumentation flags are clang-specific.'; exit 1; \
+	fi
+	@if test -z "$(PGO_CC_USABLE)"; then \
+		echo '*** PGO_CC=$(PGO_CC) is clang $(PGO_CC_FOUND_MAJOR); PGO needs clang $(PGO_MIN_CLANG_MAJOR) or newer (Debian/Ubuntu: apt.llvm.org, e.g. PGO_CC=clang-18 LLVM_PROFDATA=llvm-profdata-18).'; exit 1; \
 	fi
 	@if test -z "$(LLVM_PROFDATA)" || ! command -v $(firstword $(LLVM_PROFDATA)) >/dev/null 2>&1; then \
 		echo '*** PGO needs llvm-profdata (llvm-profdata, llvm-profdata-20 .. -15, or xcrun on macOS); pass LLVM_PROFDATA=<path>.'; exit 1; \
