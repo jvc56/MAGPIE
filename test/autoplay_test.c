@@ -448,6 +448,7 @@ void test_autoplay_rit_correctness(void) {
   // produce identical move lists. Runs here because this shard is where the
   // TWL98 RIT exists, and it must run before the cleanup below removes it.
   test_rit_movegen_equality();
+  test_rit_toggle_subrack_cache();
 
   // Build a RIT for TWL98 using the release binary (fast), then run
   // game pairs under ASAN where player 1 uses RIT and player 2 does not.
