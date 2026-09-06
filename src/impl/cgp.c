@@ -1,3 +1,5 @@
+#include "cgp.h"
+
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"

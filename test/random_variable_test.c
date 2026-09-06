@@ -1,3 +1,5 @@
+#include "random_variable_test.h"
+
 #include "../src/impl/random_variable.h"
 #include "test_util.h"
 #include <assert.h>

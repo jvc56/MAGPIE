@@ -1,3 +1,5 @@
+#include "cross_set_test.h"
+
 #include "../src/def/board_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"

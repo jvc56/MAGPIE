@@ -1,3 +1,5 @@
+#include "heat_map_test.h"
+
 #include "../src/def/board_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/game.h"

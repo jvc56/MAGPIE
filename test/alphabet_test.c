@@ -1,3 +1,5 @@
+#include "alphabet_test.h"
+
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/impl/config.h"

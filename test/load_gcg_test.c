@@ -1,3 +1,5 @@
+#include "load_gcg_test.h"
+
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"

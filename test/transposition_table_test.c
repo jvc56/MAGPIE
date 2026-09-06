@@ -1,3 +1,5 @@
+#include "transposition_table_test.h"
+
 #include "../src/ent/transposition_table.h"
 #include <assert.h>
 #include <stdatomic.h>

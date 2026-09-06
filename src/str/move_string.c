@@ -1,3 +1,5 @@
+#include "move_string.h"
+
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"

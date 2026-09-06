@@ -1,3 +1,5 @@
+#include "players_data_test.h"
+
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/equity.h"

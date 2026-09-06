@@ -1,3 +1,5 @@
+#include "stats_test.h"
+
 #include "../src/ent/stats.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
