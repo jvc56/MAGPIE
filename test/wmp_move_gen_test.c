@@ -207,6 +207,14 @@ void test_nonplaythrough_subrack_enumeration(void) {
   const LetterDistribution *ld = game_get_ld(game);
   const WMP *wmp = player_get_wmp(player);
 
+  const int empty_counts[RACK_SIZE + 1] = {1};
+  assert_nonplaythrough_subrack_enumeration(ld, wmp, "", empty_counts);
+  const int single_counts[RACK_SIZE + 1] = {1, 1};
+  assert_nonplaythrough_subrack_enumeration(ld, wmp, "?", single_counts);
+  // The racks below have seven tiles and their expected counts are written
+  // for RACK_SIZE 7, so they need at least that many slots; the two cases
+  // above hold for every rack size.
+#if RACK_SIZE >= 7
   const int full_rack_counts[RACK_SIZE + 1] = {1, 5, 12, 18, 18, 12, 5, 1};
   assert_nonplaythrough_subrack_enumeration(ld, wmp, "AABEE?Z",
                                             full_rack_counts);
@@ -214,10 +222,6 @@ void test_nonplaythrough_subrack_enumeration(void) {
   const int short_rack_counts[RACK_SIZE + 1] = {1, 3, 4, 3, 1, 0, 0, 0};
   assert_nonplaythrough_subrack_enumeration(ld, wmp, "AA?Z", short_rack_counts);
 
-  const int empty_counts[RACK_SIZE + 1] = {1};
-  assert_nonplaythrough_subrack_enumeration(ld, wmp, "", empty_counts);
-  const int single_counts[RACK_SIZE + 1] = {1, 1};
-  assert_nonplaythrough_subrack_enumeration(ld, wmp, "?", single_counts);
   const int repeated_counts[RACK_SIZE + 1] = {1, 1, 1, 1, 1, 1, 1, 1};
   assert_nonplaythrough_subrack_enumeration(ld, wmp, "AAAAAAA",
                                             repeated_counts);
@@ -227,6 +231,7 @@ void test_nonplaythrough_subrack_enumeration(void) {
   const int two_blank_counts[RACK_SIZE + 1] = {1, 6, 16, 25, 25, 16, 6, 1};
   assert_nonplaythrough_subrack_enumeration(ld, wmp, "??AEIOZ",
                                             two_blank_counts);
+#endif
 
   game_destroy(game);
   config_destroy(config);
