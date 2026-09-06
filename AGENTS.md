@@ -85,6 +85,12 @@ Keep performance work and quality work separate.
 
 Make it faster **without changing behavior**. Validate with autoplay or on-demand tests comparing before/after. Profile with `BUILD=profile` and `sample <pid>` on macOS. Measure the specific functions changed, not just wall-clock time.
 
+### Feature flags must be free when off
+
+A flag-gated optimization (RIT, WMP, WIT, PGO paths, ...) must cost nothing measurable on the path where the flag is off. Do not add struct fields, per-item stores, cache copies, or branches that the disabled path pays for. Put the mechanism's state where only the enabled path touches it — a sentinel value written by that path beats a flag every path must maintain.
+
+Benchmark both states. The flag-off run is the control and must measure ~0; a flag-off regression means the mechanism is in the wrong place, not that the change is a wash. #614's first port gained +0.7% with RIT on and lost −0.7% with RIT off from exactly this, and the fix removed the loss without touching the gain.
+
 ### Quality work
 
 Validate with **game pairs** — two variants play identical tile draws, alternating who goes first.
