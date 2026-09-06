@@ -8,10 +8,12 @@
 #include "kwg.h"
 #include "rack_info_table.h"
 #include "wmp.h"
+#include "word_info_table.h"
+#include <stdint.h>
 #include <stdlib.h>
 
-static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap",
-                                                      "rack info table"};
+static const char *const players_data_type_names[] = {
+    "kwg", "klv", "wordmap", "rack info table", "word info table"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -111,6 +113,12 @@ RackInfoTable *players_data_get_rack_info_table(const PlayersData *players_data,
       players_data, PLAYERS_DATA_TYPE_RIT, player_index);
 }
 
+WordInfoTable *players_data_get_word_info_table(const PlayersData *players_data,
+                                                int player_index) {
+  return (WordInfoTable *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_WIT, player_index);
+}
+
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
@@ -141,6 +149,9 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_RIT:
     data = rack_info_table_create(data_paths, data_name, use_mmap, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_WIT:
+    data = word_info_table_create(data_paths, data_name, error_stack);
+    break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -166,6 +177,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_RIT:
       rack_info_table_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_WIT:
+      word_info_table_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -211,6 +225,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_RIT:
       data_name = rack_info_table_get_name(players_data->data[data_index]);
       break;
+    case PLAYERS_DATA_TYPE_WIT:
+      data_name = word_info_table_get_name(players_data->data[data_index]);
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -230,10 +247,11 @@ PlayersData *players_data_create(bool use_wmp) {
       bool default_use = true;
       if (data_index == PLAYERS_DATA_TYPE_WMP) {
         default_use = use_wmp;
-      } else if (data_index == PLAYERS_DATA_TYPE_RIT) {
-        // RIT files are opt-in: callers must explicitly enable them with
-        // -rit true (or -rit1/-rit2) since they are large and may not
-        // exist for every lexicon.
+      } else if (data_index == PLAYERS_DATA_TYPE_RIT ||
+                 data_index == PLAYERS_DATA_TYPE_WIT) {
+        // RIT and WIT files are opt-in: callers must explicitly enable them
+        // with -rit/-wit (or the per-player variants) since they are built by
+        // a convert command and may not exist for every lexicon.
         default_use = false;
       }
       players_data_set_use_when_available(players_data, data_index,
@@ -266,7 +284,8 @@ void players_data_destroy(PlayersData *players_data) {
 
 bool players_data_type_is_nullable(players_data_t players_data_type) {
   return players_data_type == PLAYERS_DATA_TYPE_WMP ||
-         players_data_type == PLAYERS_DATA_TYPE_RIT;
+         players_data_type == PLAYERS_DATA_TYPE_RIT ||
+         players_data_type == PLAYERS_DATA_TYPE_WIT;
 }
 
 void players_data_set(PlayersData *players_data,
@@ -345,6 +364,34 @@ void players_data_set(PlayersData *players_data,
 }
 
 // Destroys and recreates the existing data for both players.
+// A word info table describes the words of the KWG it was built from. Pair
+// each player's table with that player's KWG by hash, so a stale or mismatched
+// .wit fails to load rather than silently pruning legal plays. Tables built
+// from a bare word list carry no hash and are not checked.
+void players_data_validate_word_info_tables(const PlayersData *players_data,
+                                            ErrorStack *error_stack) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const WordInfoTable *wit =
+        players_data_get_word_info_table(players_data, player_index);
+    const KWG *kwg = players_data_get_kwg(players_data, player_index);
+    if (wit == NULL || kwg == NULL) {
+      continue;
+    }
+    const uint64_t wit_kwg_hash = word_info_table_get_kwg_hash(wit);
+    if (wit_kwg_hash == 0 || wit_kwg_hash == kwg_get_hash(kwg)) {
+      continue;
+    }
+    error_stack_push(
+        error_stack, ERROR_STATUS_WIT_KWG_MISMATCH,
+        get_formatted_string(
+            "word info table '%s' was not built from kwg '%s' (player %d); "
+            "delete the .wit file and rebuild it with 'convert kwg2wit %s'\n",
+            word_info_table_get_name(wit), kwg_get_name(kwg), player_index + 1,
+            word_info_table_get_name(wit)));
+    return;
+  }
+}
+
 void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *data_paths, ErrorStack *error_stack) {
@@ -385,5 +432,9 @@ void players_data_reload(PlayersData *players_data,
       players_data_set_data(players_data, players_data_type, player_index,
                             recreated_data[player_index]);
     }
+  }
+  if (players_data_type == PLAYERS_DATA_TYPE_WIT ||
+      players_data_type == PLAYERS_DATA_TYPE_KWG) {
+    players_data_validate_word_info_tables(players_data, error_stack);
   }
 }
