@@ -15,9 +15,12 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
+#include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -368,10 +371,166 @@ void test_playthrough_bingo_existence(void) {
   config_destroy(config);
 }
 
+// Under score sort the cutoff is a score, so a subrack's leave value must take
+// no part in the bound that decides whether the subrack can still beat the
+// cutoff (#673). This drives the WMP generator through the cutoff-based record
+// modes on a set of positions in both sort types and checks each result
+// against the full list: the best move carries the head's equity, and a
+// within-x list holds every play strictly inside the margin. Equal-equity
+// ties are compared by membership rather than position, since shadow lets the
+// bounded modes skip anchors that cannot beat the running cutoff and that
+// decides ties by anchor order.
+enum { CUTOFF_MODES_FULL_CAPACITY = 100000 };
+
+// A SortedMoveList borrows its Move objects from the MoveList it was built
+// from, so the two live and die together.
+typedef struct CutoffModesGeneration {
+  MoveList *move_list;
+  SortedMoveList *sorted;
+} CutoffModesGeneration;
+
+static CutoffModesGeneration
+cutoff_modes_generate(Game *game, move_record_t record_type,
+                      move_sort_t sort_type, Equity eq_margin, int capacity) {
+  CutoffModesGeneration generation;
+  generation.move_list = move_list_create(capacity);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = generation.move_list,
+      .move_record_type = record_type,
+      .move_sort_type = sort_type,
+      .eq_margin_movegen = eq_margin,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  // Not generate_moves_for_game(): that replaces the record type with the
+  // on-turn player's configured one.
+  generate_moves(&args);
+  generation.sorted = sorted_move_list_create(generation.move_list);
+  return generation;
+}
+
+static void cutoff_modes_generation_destroy(CutoffModesGeneration *generation) {
+  sorted_move_list_destroy(generation->sorted);
+  move_list_destroy(generation->move_list);
+}
+
+static bool cutoff_modes_moves_match(const Move *move_1, const Move *move_2) {
+  if (move_get_type(move_1) != move_get_type(move_2) ||
+      move_get_row_start(move_1) != move_get_row_start(move_2) ||
+      move_get_col_start(move_1) != move_get_col_start(move_2) ||
+      move_get_dir(move_1) != move_get_dir(move_2) ||
+      move_get_tiles_played(move_1) != move_get_tiles_played(move_2) ||
+      move_get_tiles_length(move_1) != move_get_tiles_length(move_2) ||
+      move_get_score(move_1) != move_get_score(move_2) ||
+      move_get_equity(move_1) != move_get_equity(move_2)) {
+    return false;
+  }
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move_1); tile_idx++) {
+    if (move_get_tile(move_1, tile_idx) != move_get_tile(move_2, tile_idx)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void cutoff_modes_assert_in_list(const SortedMoveList *full,
+                                        const Move *move) {
+  for (int move_idx = 0; move_idx < full->count; move_idx++) {
+    if (cutoff_modes_moves_match(full->moves[move_idx], move)) {
+      return;
+    }
+  }
+  assert(false);
+}
+
+static int cutoff_modes_count_above(const SortedMoveList *sorted,
+                                    Equity cutoff) {
+  int count = 0;
+  while (count < sorted->count &&
+         move_get_equity(sorted->moves[count]) > cutoff) {
+    count++;
+  }
+  return count;
+}
+
+static void assert_cutoff_modes_are_complete(Game *game,
+                                             move_sort_t sort_type) {
+  CutoffModesGeneration full_generation = cutoff_modes_generate(
+      game, MOVE_RECORD_ALL, sort_type, 0, CUTOFF_MODES_FULL_CAPACITY);
+  const SortedMoveList *full = full_generation.sorted;
+  assert(full->count > 10);
+
+  CutoffModesGeneration best_generation =
+      cutoff_modes_generate(game, MOVE_RECORD_BEST, sort_type, 0, 1);
+  const SortedMoveList *best = best_generation.sorted;
+  assert(best->count == 1);
+  assert(move_get_equity(best->moves[0]) == move_get_equity(full->moves[0]));
+  cutoff_modes_assert_in_list(full, best->moves[0]);
+  cutoff_modes_generation_destroy(&best_generation);
+
+  const int margins[] = {0, 5, 20, 40};
+  const int num_margins = 4;
+  for (int margin_idx = 0; margin_idx < num_margins; margin_idx++) {
+    const Equity margin = int_to_equity(margins[margin_idx]);
+    CutoffModesGeneration within_generation =
+        cutoff_modes_generate(game, MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST,
+                              sort_type, margin, CUTOFF_MODES_FULL_CAPACITY);
+    const SortedMoveList *within = within_generation.sorted;
+    const Equity cutoff = move_get_equity(full->moves[0]) - margin;
+    assert(within->count > 0);
+    assert(move_get_equity(within->moves[0]) ==
+           move_get_equity(full->moves[0]));
+    assert(cutoff_modes_count_above(within, cutoff) ==
+           cutoff_modes_count_above(full, cutoff));
+    for (int move_idx = 0; move_idx < within->count; move_idx++) {
+      assert(move_get_equity(within->moves[move_idx]) >= cutoff);
+      cutoff_modes_assert_in_list(full, within->moves[move_idx]);
+    }
+    cutoff_modes_generation_destroy(&within_generation);
+  }
+  cutoff_modes_generation_destroy(&full_generation);
+}
+
+void test_wmp_cutoff_modes_are_complete(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1");
+  // Midgame boards with a full bag, racks holding blanks and fewer than seven
+  // tiles, late boards with a short bag, the same endgame board with the bag
+  // empty and with two tiles left, and an opening rack on an empty board.
+  const char *cgps[] = {
+      "cgp " DOUG_V_EMELY_CGP,
+      "cgp " GUY_VS_BOT_CGP,
+      "cgp " NOAH_VS_MISHU_CGP,
+      "cgp " JOSH2_CGP,
+      "cgp " SOME_ISC_GAME_CGP,
+      "cgp " UTF8_DOS_CGP,
+      "cgp " VS_FRENTZ_CGP,
+      "cgp " NOAH_VS_PETER_CGP,
+      "cgp " DOUG_V_EMELY_DOUBLE_CHALLENGE_CGP,
+      "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"
+      "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"
+      "4RENEGADE2P CDIOST?/AIINOOU 450/392 0 -lex CSW21;",
+      "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"
+      "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"
+      "4RENEGADE2P AIINOOU/CDIOS 392/450 0 -lex CSW21;",
+  };
+  const int num_cgps = 11;
+  for (int cgp_idx = 0; cgp_idx < num_cgps; cgp_idx++) {
+    load_and_exec_config_or_die(config, cgps[cgp_idx]);
+    Game *game = config_get_game(config);
+    assert_cutoff_modes_are_complete(game, MOVE_SORT_EQUITY);
+    assert_cutoff_modes_are_complete(game, MOVE_SORT_SCORE);
+  }
+  config_destroy(config);
+}
+
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
   test_nonplaythrough_subrack_enumeration();
   test_wit_prune_skips_block_longer_than_anchor_word();
   test_nonplaythrough_existence();
   test_playthrough_bingo_existence();
+  test_wmp_cutoff_modes_are_complete();
 }

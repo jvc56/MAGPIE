@@ -90,6 +90,10 @@ typedef struct MoveGen {
   int move_sort_type;
   move_record_t move_record_type;
   int number_of_tiles_in_bag;
+  // Whether a subrack's leave may take part in the bound that decides if the
+  // subrack can still beat the cutoff: only when the bag is not empty and
+  // the sort is by equity.
+  bool wmp_prune_subracks_by_leave;
   int player_index;
   Equity bingo_bonus;
   bool kwgs_are_shared;

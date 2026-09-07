@@ -888,7 +888,12 @@ static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor,
                            int subrack_idx) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
-  if (gen->number_of_tiles_in_bag > 0) {
+  // The anchor's score bound plus this subrack's leave bounds the equity of
+  // every play the subrack can make, so under equity sort a subrack whose
+  // bound cannot reach the cutoff is skipped. Under score sort the cutoff is
+  // a score, which the anchor-level check already bounded; adding a leave
+  // there would skip subracks that still hold plays above the cutoff.
+  if (gen->wmp_prune_subracks_by_leave) {
     const Equity leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
     if (better_play_has_been_found(gen, leave_value +
                                             anchor->highest_possible_score)) {
@@ -3030,6 +3035,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
+  gen->wmp_prune_subracks_by_leave = (gen->number_of_tiles_in_bag > 0) &&
+                                     (gen->move_sort_type == MOVE_SORT_EQUITY);
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_list = move_list;
   gen->cross_index =
