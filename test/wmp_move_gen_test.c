@@ -680,10 +680,66 @@ static void test_shadow_playthrough_restoration(void) {
   config_destroy(reference_config);
 }
 
+// Compare complete move sets against the independent recursive generator.
+// Reuse the same generator across empty boards, split blocks, board blanks,
+// edge words, and racks containing one or two blanks.
+static void test_playthrough_moves_against_recursive(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 100000");
+  Config *reference = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 100000");
+  static const char *const positions[] = {
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0",
+      "15/15/15/15/15/15/15/6CAT6/15/15/15/15/15/15/15 ??EINRS/ 0/0 0",
+      "15/15/15/15/15/15/15/6CaT6/15/15/15/15/15/15/15 ?DEIRTU/ 0/0 0",
+      "15/15/15/15/15/15/15/4AT1IN6/15/15/15/15/15/15/15 AEIRST?/ 0/0 0",
+      "AT13/15/15/15/15/15/15/15/15/15/15/15/15/15/13IN AEIRST?/ 0/0 0",
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0",
+  };
+  MoveList *list = move_list_create(100000);
+  MoveList *reference_list = move_list_create(100000);
+  for (size_t position_idx = 0;
+       position_idx < sizeof(positions) / sizeof(positions[0]);
+       position_idx++) {
+    char command[256];
+    (void)snprintf(command, sizeof(command), "cgp %s", positions[position_idx]);
+    load_and_exec_config_or_die(config, command);
+    load_and_exec_config_or_die(reference, command);
+    const MoveGenArgs args = {
+        .game = config_get_game(config),
+        .move_list = list,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    MoveGenArgs reference_args = args;
+    reference_args.game = config_get_game(reference);
+    reference_args.move_list = reference_list;
+    generate_moves_for_game(&args);
+    generate_moves_for_game(&reference_args);
+    SortedMoveList *sorted = sorted_move_list_create(list);
+    SortedMoveList *reference_sorted = sorted_move_list_create(reference_list);
+    assert(reference_sorted->count > 0);
+    assert(sorted->count == reference_sorted->count);
+    for (int move_idx = 0; move_idx < sorted->count; move_idx++) {
+      assert_moves_are_equal(sorted->moves[move_idx],
+                             reference_sorted->moves[move_idx]);
+    }
+    sorted_move_list_destroy(sorted);
+    sorted_move_list_destroy(reference_sorted);
+  }
+  move_list_destroy(list);
+  move_list_destroy(reference_list);
+  config_destroy(config);
+  config_destroy(reference);
+}
+
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
   test_shadow_playthrough_restoration();
   test_playthrough_positions_reset();
+  test_playthrough_moves_against_recursive();
   test_nonplaythrough_subrack_enumeration();
   test_wit_prune_skips_block_longer_than_anchor_word();
   test_nonplaythrough_existence();
@@ -745,7 +801,7 @@ void test_rit_toggle_subrack_cache(void) {
   static const char *const cgps[] = {
       "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0",
       "15/15/15/15/15/15/15/6CAT6/15/15/15/15/15/15/15 AEINRST/ 0/0 0",
-      "15/15/15/15/15/15/15/6CAT6/15/15/15/15/15/15/15 ?DEIRTU/ 0/0 0",
+      "15/15/15/15/15/15/15/6CAT6/15/15/15/15/15/15/15 ??EINRS/ 0/0 0",
   };
   // Use each config's own game: `set -rit ...` updates that game's players,
   // and the config only creates it once a command needs one.

@@ -973,27 +973,18 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
     }
     return true;
   }
+  // A zero mask means this anchor has no fixed letters. Check only crosses.
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
-    const int board_col = start_col + letter_idx;
-    assert(board_col < BOARD_DIM);
-    assert(board_col >= 0);
+    assert(start_col + letter_idx >= 0);
+    assert(start_col + letter_idx < BOARD_DIM);
+    assert(gen_cache_is_empty(gen, start_col + letter_idx));
     const MachineLetter word_letter = word[letter_idx];
-    if (gen_cache_is_empty(gen, board_col)) {
-      if (!board_is_letter_allowed_in_cross_set(
-              gen_cache_get_cross_set(gen, board_col), word_letter)) {
-        return false;
-      }
-      gen->playthrough_marked[letter_idx] = word_letter;
-      continue;
-    }
-    const MachineLetter board_letter =
-        get_unblanked_machine_letter(gen_cache_get_letter(gen, board_col));
-    assert(board_letter != ALPHABET_EMPTY_SQUARE_MARKER);
-    assert(!bonus_square_is_brick(gen_cache_get_bonus_square(gen, board_col)));
-    if (board_letter != word_letter) {
+    if (!board_is_letter_allowed_in_cross_set(
+            gen_cache_get_cross_set(gen, start_col + letter_idx),
+            word_letter)) {
       return false;
     }
-    gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
+    gen->playthrough_marked[letter_idx] = word_letter;
   }
   return true;
 }
