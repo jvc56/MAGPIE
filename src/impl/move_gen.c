@@ -913,31 +913,78 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
   }
 }
 
+// Index of the lowest set bit of a nonzero bitset, following
+// get_single_bit_index's guarded-intrinsic pattern. Undefined for zero, so
+// callers loop on `bitset != 0`.
+static inline int lowest_set_bit_index(uint32_t bitset) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+  return __builtin_ctz(bitset);
+#else
+  int index = 0;
+  while ((bitset & 1U) == 0) {
+    bitset >>= 1U;
+    index++;
+  }
+  return index;
+#endif
+}
+
 bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
-                                               int start_col) {
+                                               int start_col,
+                                               uint32_t playthrough_positions) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
-  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
-    const int board_col = start_col + letter_idx;
-    assert(board_col < BOARD_DIM);
-    assert(board_col >= 0);
-    const MachineLetter word_letter = word[letter_idx];
-    if (gen_cache_is_empty(gen, board_col)) {
+  if (playthrough_positions != 0) {
+    // WMP words are anagrams of the rack plus the playthrough tiles, but most
+    // anagrams do not put those tiles at the board's fixed positions. Check
+    // every fixed position before spending time on cross sets at empty
+    // squares. The positions were collected while building the playthrough
+    // BitRack, so this phase visits only actual board tiles.
+    uint32_t positions = playthrough_positions;
+    while (positions != 0) {
+      const int board_col = lowest_set_bit_index(positions);
+      const int letter_idx = board_col - start_col;
+      assert(board_col < BOARD_DIM);
+      assert(board_col >= 0);
+      assert(letter_idx >= 0);
+      assert(letter_idx < wgen->word_length);
+      const MachineLetter board_letter =
+          get_unblanked_machine_letter(gen_cache_get_letter(gen, board_col));
+      assert(board_letter != ALPHABET_EMPTY_SQUARE_MARKER);
+      assert(
+          !bonus_square_is_brick(gen_cache_get_bonus_square(gen, board_col)));
+      if (board_letter != word[letter_idx]) {
+        return false;
+      }
+      gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
+      positions &= positions - 1;
+    }
+    for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+      const int board_col = start_col + letter_idx;
+      if ((playthrough_positions & (1U << board_col)) != 0) {
+        continue;
+      }
+      const MachineLetter word_letter = word[letter_idx];
       if (!board_is_letter_allowed_in_cross_set(
               gen_cache_get_cross_set(gen, board_col), word_letter)) {
         return false;
       }
       gen->playthrough_marked[letter_idx] = word_letter;
-      continue;
     }
-    const MachineLetter board_letter =
-        get_unblanked_machine_letter(gen_cache_get_letter(gen, board_col));
-    assert(board_letter != ALPHABET_EMPTY_SQUARE_MARKER);
-    assert(!bonus_square_is_brick(gen_cache_get_bonus_square(gen, board_col)));
-    if (board_letter != word_letter) {
+    return true;
+  }
+  // A zero mask means this anchor has no fixed letters. Check only crosses.
+  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+    assert(start_col + letter_idx >= 0);
+    assert(start_col + letter_idx < BOARD_DIM);
+    assert(gen_cache_is_empty(gen, start_col + letter_idx));
+    const MachineLetter word_letter = word[letter_idx];
+    if (!board_is_letter_allowed_in_cross_set(
+            gen_cache_get_cross_set(gen, start_col + letter_idx),
+            word_letter)) {
       return false;
     }
-    gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
+    gen->playthrough_marked[letter_idx] = word_letter;
   }
   return true;
 }
@@ -955,7 +1002,12 @@ static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
                            bool lazy) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
-  if (gen->number_of_tiles_in_bag > 0) {
+  // The anchor's score bound plus this subrack's leave bounds the equity of
+  // every play the subrack can make, so under equity sort a subrack whose
+  // bound cannot reach the cutoff is skipped. Under score sort the cutoff is
+  // a score, which the anchor-level check already bounded; adding a leave
+  // there would skip subracks that still hold plays above the cutoff.
+  if (gen->wmp_prune_subracks_by_leave) {
     const Equity leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
     if (better_play_has_been_found(gen, leave_value +
                                             anchor->highest_possible_score)) {
@@ -981,7 +1033,8 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
   for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
     for (int start_col = anchor->leftmost_start_col;
          start_col <= anchor->rightmost_start_col; start_col++) {
-      if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx, start_col)) {
+      if (wordmap_gen_check_playthrough_and_crosses(
+              gen, word_idx, start_col, wgen->playthrough_positions)) {
         record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
         if (gen->threshold_exceeded) {
           return true;
@@ -1017,22 +1070,6 @@ wordmap_gen_forbidden_subracks(MoveGen *gen, const Anchor *anchor,
       return;
     }
   }
-}
-
-// Index of the lowest set bit of a nonzero bitset, following
-// get_single_bit_index's guarded-intrinsic pattern. Undefined for zero, so
-// callers loop on `bitset != 0`.
-static inline int lowest_set_bit_index(uint32_t bitset) {
-#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
-  return __builtin_ctz(bitset);
-#else
-  int index = 0;
-  while ((bitset & 1U) == 0) {
-    bitset >>= 1U;
-    index++;
-  }
-  return index;
-#endif
 }
 
 // Clears the lowest set bit, so a loop can visit each set bit in turn:
@@ -1074,7 +1111,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
         wgen->num_words = 1;
         for (int start_col = anchor->leftmost_start_col;
              start_col <= anchor->rightmost_start_col; start_col++) {
-          if (wordmap_gen_check_playthrough_and_crosses(gen, 0, start_col)) {
+          if (wordmap_gen_check_playthrough_and_crosses(gen, 0, start_col, 0)) {
             record_wmp_plays_for_word(gen, 0, start_col, 0, 0);
             if (gen->threshold_exceeded) {
               return;
@@ -1897,21 +1934,6 @@ static inline void shadow_record_small(MoveGen *gen) {
   }
 }
 
-static inline void insert_unrestricted_cross_word_multiplier(MoveGen *gen,
-                                                             uint8_t multiplier,
-                                                             int col) {
-  int insert_index = gen->num_unrestricted_multipliers;
-  for (; insert_index > 0 &&
-         gen->descending_cross_word_multipliers[insert_index - 1].multiplier <
-             multiplier;
-       insert_index--) {
-    gen->descending_cross_word_multipliers[insert_index] =
-        gen->descending_cross_word_multipliers[insert_index - 1];
-  }
-  gen->descending_cross_word_multipliers[insert_index].multiplier = multiplier;
-  gen->descending_cross_word_multipliers[insert_index].column = col;
-}
-
 static inline void
 insert_unrestricted_effective_letter_multiplier(MoveGen *gen,
                                                 uint8_t multiplier) {
@@ -1937,13 +1959,12 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
   const int original_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
   gen->num_unrestricted_multipliers = 0;
-  // We insert the columns with highest cross wordletter multipliers first
-  // so the list will mostly sort in the the order it is traversed,
-  // minimizing the number of swaps.
-  for (int i = 0; i < original_num_unrestricted_multipliers; i++) {
+  for (int multiplier_idx = 0;
+       multiplier_idx < original_num_unrestricted_multipliers;
+       multiplier_idx++) {
     const uint8_t xw_multiplier =
-        gen->descending_cross_word_multipliers[i].multiplier;
-    const uint8_t col = gen->descending_cross_word_multipliers[i].column;
+        gen->unrestricted_multipliers[multiplier_idx].multiplier;
+    const uint8_t col = gen->unrestricted_multipliers[multiplier_idx].column;
     const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, col);
     const uint8_t letter_multiplier =
         bonus_square_get_letter_multiplier(bonus_square);
@@ -1966,8 +1987,13 @@ static inline void insert_unrestricted_multipliers(MoveGen *gen, int col) {
       bonus_square_get_letter_multiplier(bonus_square);
   const uint8_t effective_cross_word_multiplier =
       letter_multiplier * this_word_multiplier * is_cross_word;
-  insert_unrestricted_cross_word_multiplier(
-      gen, effective_cross_word_multiplier, col);
+  // Cross-word multipliers only retain the information needed to rebuild the
+  // effective multipliers after the main-word multiplier changes. Their order
+  // has no effect on the resulting sorted effective-multiplier list, so append
+  // instead of maintaining a second sorted array in the shadow inner loop.
+  gen->unrestricted_multipliers[gen->num_unrestricted_multipliers].multiplier =
+      effective_cross_word_multiplier;
+  gen->unrestricted_multipliers[gen->num_unrestricted_multipliers].column = col;
   const uint8_t main_word_multiplier =
       gen->shadow_word_multiplier * letter_multiplier;
   insert_unrestricted_effective_letter_multiplier(
@@ -2129,7 +2155,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // they were before looking further left.
   const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
-  bool changed_any_restricted_multipliers = false;
+  bool changed_any_unrestricted_multipliers = false;
 
   const int original_current_right_col = gen->current_right_col;
   const int original_tiles_played = gen->tiles_played;
@@ -2195,15 +2221,13 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
           gen, possible_letters_here, letter_multiplier, this_word_multiplier,
           gen->current_right_col);
     } else {
-      if (!changed_any_restricted_multipliers) {
-        // First multiplier-array modification: save the arrays so they can
-        // be restored on exit.
-        memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
-               sizeof(gen->descending_cross_word_multipliers));
+      if (!changed_any_unrestricted_multipliers) {
+        // Backup entries are append-only: restoring the count discards the
+        // rightward additions. Only the sorted effective array needs a copy.
         memcpy(gen->desc_eff_letter_muls_copy,
                gen->descending_effective_letter_multipliers,
                sizeof(gen->descending_effective_letter_multipliers));
-        changed_any_restricted_multipliers = true;
+        changed_any_unrestricted_multipliers = true;
       }
       insert_unrestricted_multipliers(gen, gen->current_right_col);
     }
@@ -2280,10 +2304,8 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   }
 
   // Restore state for unrestricted squares
-  if (changed_any_restricted_multipliers) {
+  if (changed_any_unrestricted_multipliers) {
     gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
-    memcpy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
-           sizeof(gen->descending_cross_word_multipliers));
     memcpy(gen->descending_effective_letter_multipliers,
            gen->desc_eff_letter_muls_copy,
            sizeof(gen->descending_effective_letter_multipliers));
@@ -2322,7 +2344,7 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
   bool restricted_any_tiles = false;
   const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
-  bool changed_any_restricted_multipliers = false;
+  bool changed_any_unrestricted_multipliers = false;
 
   const int original_current_right_col = gen->current_right_col;
   const int original_tiles_played = gen->tiles_played;
@@ -2380,14 +2402,12 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
           gen, possible_letters_here, letter_multiplier, this_word_multiplier,
           gen->current_right_col);
     } else {
-      if (!changed_any_restricted_multipliers) {
-        // First unrestricted insertion: snapshot the multiplier arrays.
-        memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
-               sizeof(gen->descending_cross_word_multipliers));
+      if (!changed_any_unrestricted_multipliers) {
+        // Backup entries are append-only; only the sorted array is mutated.
         memcpy(gen->desc_eff_letter_muls_copy,
                gen->descending_effective_letter_multipliers,
                sizeof(gen->descending_effective_letter_multipliers));
-        changed_any_restricted_multipliers = true;
+        changed_any_unrestricted_multipliers = true;
       }
       insert_unrestricted_multipliers(gen, gen->current_right_col);
     }
@@ -2421,10 +2441,8 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
            sizeof(gen->descending_tile_scores));
   }
 
-  if (changed_any_restricted_multipliers) {
+  if (changed_any_unrestricted_multipliers) {
     gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
-    memcpy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
-           sizeof(gen->descending_cross_word_multipliers));
     memcpy(gen->descending_effective_letter_multipliers,
            gen->desc_eff_letter_muls_copy,
            sizeof(gen->descending_effective_letter_multipliers));
@@ -3135,6 +3153,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
+  gen->wmp_prune_subracks_by_leave = (gen->number_of_tiles_in_bag > 0) &&
+                                     (gen->move_sort_type == MOVE_SORT_EQUITY);
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_list = move_list;
   gen->cross_index =

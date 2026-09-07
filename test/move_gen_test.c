@@ -684,6 +684,68 @@ void small_play_recorder_test(void) {
   config_destroy(config);
 }
 
+// ALL_SMALL enumerates without shadow bounds. Use its exhaustive maximum to
+// check both shadow paths across letter premiums, cross words, multiple word
+// premiums, blanks, and repeated reuse of the generator's backup arrays.
+static void test_shadow_multiplier_rebuild(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21 -wmp false -s1 score -s2 score");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  static const char *const positions[] = {
+      TRIPLE_LETTERS_CGP, DOUG_V_EMELY_CGP, LATER_BETWEEN_DOUBLE_WORDS_CGP,
+      TRIPLE_DOUBLE_CGP,  VS_JEREMY,        EMPTY_CGP,
+  };
+  static const char *const racks[] = {
+      "ZLW?", "BOHGXZQ", "ZLIER", "KT?", "DDESW??", "AEINRST",
+  };
+  MoveList *all = move_list_create_small(100000);
+  MoveList *best_small = move_list_create_small(1);
+  MoveList *best = move_list_create(1);
+  for (int repeat = 0; repeat < 2; repeat++) {
+    for (size_t position_idx = 0;
+         position_idx < sizeof(positions) / sizeof(positions[0]);
+         position_idx++) {
+      load_cgp_or_die(game, positions[position_idx]);
+      rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)),
+                         racks[position_idx]);
+      MoveGenArgs args = {
+          .game = game,
+          .move_list = all,
+          .move_record_type = MOVE_RECORD_ALL_SMALL,
+          .move_sort_type = MOVE_SORT_SCORE,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&args);
+      assert(move_list_get_count(all) > 0);
+      int highest_score = 0;
+      for (int move_idx = 0; move_idx < move_list_get_count(all); move_idx++) {
+        const int score = small_move_get_score(all->small_moves[move_idx]);
+        if (score > highest_score) {
+          highest_score = score;
+        }
+      }
+      args.move_list = best_small;
+      args.move_record_type = MOVE_RECORD_BEST_SMALL;
+      generate_moves(&args);
+      assert(move_list_get_count(best_small) == 1);
+      assert(small_move_get_score(best_small->small_moves[0]) == highest_score);
+      args.move_list = best;
+      args.move_record_type = MOVE_RECORD_BEST;
+      generate_moves(&args);
+      assert(move_list_get_count(best) == 1);
+      assert(move_get_score(move_list_get_move(best, 0)) ==
+             int_to_equity(highest_score));
+    }
+  }
+  move_list_destroy(best);
+  small_move_list_destroy(best_small);
+  small_move_list_destroy(all);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void best_small_play_recorder_test(void) {
   Config *config =
       config_create_or_die("set -lex NWL20 -s1 score -s2 score -wmp false");
@@ -1833,6 +1895,7 @@ void test_move_gen(void) {
   top_equity_play_recorder_test();
   small_play_recorder_test();
   best_small_play_recorder_test();
+  test_shadow_multiplier_rebuild();
   distinct_lexica_test(false);
   distinct_lexica_test(true);
   consistent_tiebreaking_test();
