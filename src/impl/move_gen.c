@@ -1695,9 +1695,10 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
   }
 }
 
-static inline void shadow_record(MoveGen *gen) {
+static inline __attribute__((always_inline)) void
+shadow_record_impl(MoveGen *gen, bool wmp_active) {
   const Equity *best_leaves = gen->best_leaves;
-  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+  if (wmp_active) {
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen)) {
       // RIT fast path for single-playthrough anchors: the RIT's
       // playthrough_union[leave_size] holds a uint32 bitmask of letters L
@@ -1830,7 +1831,7 @@ static inline void shadow_record(MoveGen *gen) {
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
   }
-  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+  if (wmp_active) {
     const int word_length =
         gen->wmp_move_gen.num_tiles_played_through + gen->tiles_played;
     if (word_length >= MINIMUM_WORD_LENGTH) {
@@ -1838,6 +1839,10 @@ static inline void shadow_record(MoveGen *gen) {
                                        word_length, gen->current_left_col,
                                        score, equity);
     }
+    // WMP move generation consumes the per-slot bounds above. The global
+    // reductions below are only used to construct a legacy recursive-movegen
+    // anchor, so maintaining them here would duplicate the same maxima.
+    return;
   }
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
@@ -1847,6 +1852,22 @@ static inline void shadow_record(MoveGen *gen) {
   }
   if (gen->tiles_played > gen->max_tiles_to_play) {
     gen->max_tiles_to_play = gen->tiles_played;
+  }
+}
+
+static __attribute__((noinline)) void shadow_record_wmp(MoveGen *gen) {
+  shadow_record_impl(gen, true);
+}
+
+static __attribute__((noinline)) void shadow_record_recursive(MoveGen *gen) {
+  shadow_record_impl(gen, false);
+}
+
+static inline void shadow_record(MoveGen *gen) {
+  if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    shadow_record_wmp(gen);
+  } else {
+    shadow_record_recursive(gen);
   }
 }
 
@@ -2863,19 +2884,24 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   wmp_move_gen_reset_anchors(&gen->wmp_move_gen);
 
   shadow_start(gen);
-  if (gen->max_tiles_to_play == 0) {
-    return;
-  }
-
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    // The WMP slots carry their own bounds. A one-square perpendicular
+    // shadow may produce no slot here; its playthrough anchor is emitted
+    // in the opposite orientation. Avoid scanning an empty slot array.
+    if (gen->wmp_move_gen.num_touched_anchor_slots == 0) {
+      return;
+    }
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
                              gen->last_anchor_col, gen->dir,
                              gen->target_equity_cutoff, &gen->anchor_heap);
-  } else {
-    anchor_heap_add_unheaped_anchor(
-        &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
-        gen->dir, gen->highest_shadow_equity, gen->highest_shadow_score);
+    return;
   }
+  if (gen->max_tiles_to_play == 0) {
+    return;
+  }
+  anchor_heap_add_unheaped_anchor(
+      &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
+      gen->dir, gen->highest_shadow_equity, gen->highest_shadow_score);
 }
 
 // Simplified shadow_play_for_anchor for small move types (BEST_SMALL).
