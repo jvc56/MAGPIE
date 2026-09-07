@@ -888,8 +888,8 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
 // fuses exactly as it did before the prune; the second copy lands in the
 // out-of-line masked scan below, away from generate_moves.
 static inline __attribute__((always_inline)) bool
-wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor,
-                           int subrack_idx) {
+wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
+                           bool lazy) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
   if (gen->number_of_tiles_in_bag > 0) {
     const Equity leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
@@ -898,7 +898,7 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor,
       return false;
     }
   }
-  if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
+  if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy)) {
     return false;
   }
   if (gen->number_of_tiles_in_bag == 0) {
@@ -949,7 +949,7 @@ wordmap_gen_forbidden_subracks(MoveGen *gen, const Anchor *anchor,
                                  forbidden_subrack_high)) {
       continue;
     }
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx)) {
+    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, true)) {
       return;
     }
   }
@@ -978,7 +978,8 @@ static inline uint32_t clear_lowest_set_bit(uint32_t bitset) {
   return bitset & (bitset - 1U);
 }
 
-void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
+static inline __attribute__((always_inline)) void
+wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   assert(gen != NULL);
   assert(anchor != NULL);
   gen->max_tiles_to_play = anchor->tiles_to_play;
@@ -1080,7 +1081,7 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   }
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx)) {
+    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, lazy)) {
       return;
     }
   }
@@ -3306,7 +3307,8 @@ void gen_record_scoring_plays_small(MoveGen *gen) {
   }
 }
 
-void gen_record_scoring_plays(MoveGen *gen) {
+static inline __attribute__((always_inline)) void
+gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
   if (gen->threshold_exceeded) {
     return;
   }
@@ -3357,7 +3359,7 @@ void gen_record_scoring_plays(MoveGen *gen) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
     } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-      wordmap_gen(gen, &anchor);
+      wordmap_gen(gen, &anchor, lazy);
     } else {
       recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
                     anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
@@ -3367,6 +3369,20 @@ void gen_record_scoring_plays(MoveGen *gen) {
     // If a better play has been found than should have been possible for
     // this anchor, highest_possible_equity was invalid.
     assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
+  }
+}
+
+static __attribute__((noinline)) void
+gen_record_scoring_plays_eager(MoveGen *gen) {
+  gen_record_scoring_plays_impl(gen, false);
+}
+
+static inline __attribute__((always_inline)) void
+gen_record_scoring_plays(MoveGen *gen) {
+  if (gen->rit_entry == NULL) {
+    gen_record_scoring_plays_eager(gen);
+  } else {
+    gen_record_scoring_plays_impl(gen, true);
   }
 }
 
