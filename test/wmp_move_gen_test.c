@@ -73,6 +73,29 @@ void test_wit_prune_skips_block_longer_than_anchor_word(void) {
   assert(wmg.num_tiles_played_through == 3);
 }
 
+// Reusing the generator for a different anchor must replace every mask bit,
+// including when the new anchor has no fixed tiles.
+static void test_playthrough_positions_reset(void) {
+  WMPMoveGen wmg = {0};
+  Square row_cache[BOARD_DIM] = {0};
+  row_cache[1].letter = 1;
+  row_cache[3].letter = get_blanked_machine_letter(2);
+  Anchor anchor = {.playthrough_blocks = 2, .rightmost_start_col = 0};
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL);
+  assert(wmg.playthrough_positions == ((1U << 1) | (1U << 3)));
+  assert(wmg.num_tiles_played_through == 2);
+  anchor.playthrough_blocks = 1;
+  anchor.rightmost_start_col = BOARD_DIM - 1;
+  row_cache[BOARD_DIM - 1].letter = 3;
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL);
+  assert(wmg.playthrough_positions == (1U << (BOARD_DIM - 1)));
+  assert(wmg.num_tiles_played_through == 1);
+  anchor.playthrough_blocks = 0;
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL);
+  assert(wmg.playthrough_positions == 0);
+  assert(wmg.num_tiles_played_through == 0);
+}
+
 // Set empty leave to 0.0, all one-tile leaves to +1.0, two-tile leaves to +2.0,
 // etc.
 void set_dummy_leave_values(LeaveMap *leave_map) {
@@ -660,6 +683,7 @@ static void test_shadow_playthrough_restoration(void) {
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
   test_shadow_playthrough_restoration();
+  test_playthrough_positions_reset();
   test_nonplaythrough_subrack_enumeration();
   test_wit_prune_skips_block_longer_than_anchor_word();
   test_nonplaythrough_existence();

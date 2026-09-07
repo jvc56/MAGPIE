@@ -84,6 +84,9 @@ typedef struct WMPMoveGen {
   // be one of these letters, so move generation can skip the whole anchor when
   // the rack cannot supply enough of them. All-ones when no table is loaded.
   uint32_t playthrough_addable;
+  // Absolute row positions occupied by this anchor's playthrough tiles.
+  // Collected during the same block scan as playthrough_bit_rack.
+  uint32_t playthrough_positions;
   // When the caller has an active per-rack cache, lazily resolved
   // nonplaythrough WMP entries are written through to it for the next
   // occurrence of the rack. The cache stores the same three-state pointers.
@@ -610,6 +613,7 @@ static inline void wmp_move_gen_set_playthrough_bit_rack(
     const uint32_t *const *wit_row_lane, const uint8_t *wit_len_lane) {
   wmp_move_gen_reset_playthrough(wmp_move_gen);
   wmp_move_gen->playthrough_addable = 0xFFFFFFFFu;
+  wmp_move_gen->playthrough_positions = 0;
   if (anchor->playthrough_blocks == 0) {
     return;
   }
@@ -628,6 +632,7 @@ static inline void wmp_move_gen_set_playthrough_bit_rack(
     }
     const MachineLetter unblanked_ml = get_unblanked_machine_letter(ml);
     wmp_move_gen_add_playthrough_letter(wmp_move_gen, unblanked_ml);
+    wmp_move_gen->playthrough_positions |= 1U << col;
     if (!in_block) {
       in_block = true;
       blocks_found++;
