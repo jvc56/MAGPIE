@@ -1,8 +1,10 @@
 #include "wmp_move_gen_test.h"
 
 #include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/anchor.h"
 #include "../src/ent/bit_rack.h"
@@ -11,14 +13,18 @@
 #include "../src/ent/game.h"
 #include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 void test_wmp_move_gen_inactive(void) {
@@ -374,4 +380,189 @@ void test_wmp_move_gen(void) {
   test_wit_prune_skips_block_longer_than_anchor_word();
   test_nonplaythrough_existence();
   test_playthrough_bingo_existence();
+}
+
+// The RIT-backed path resolves nonplaythrough WMP entries lazily at record
+// time; the non-RIT path resolves them eagerly during shadow. Move generation
+// must not be able to tell the difference. Two games are driven in lockstep
+// from identical seeds, one with a RIT and one without, and at every
+// position the complete sorted move lists must match move for move.
+//
+// Needs <lexicon>.rit on the data path. The ap_rit CI shard builds it for
+// TWL98 before running this; test_autoplay_rit_correctness removes it after.
+// Stops at the first recorded play, as inference-mode generation does when a
+// play beats its target. Most subracks are then never asked for their words,
+// which is what leaves their lazily resolved entries unresolved.
+static void generate_until_first_play(Game *game, MoveList *move_list) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MIN_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves_for_game(&args);
+}
+
+static void generate_all_sorted(Game *game, MoveList *move_list,
+                                SortedMoveList **sorted_out) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves_for_game(&args);
+  *sorted_out = sorted_move_list_create(move_list);
+}
+
+// The per-thread subrack cache outlives set commands. A rack generated while
+// the RIT was loaded leaves lazily resolved entries in it that the eager path
+// must never see; switching the RIT invalidates the cache, and this keeps it
+// that way: generating the same rack across `set -rit false` and back must
+// match a generator that never had a RIT, from a config whose WMP object --
+// the cache's other key -- does not change across the switch.
+void test_rit_toggle_subrack_cache(void) {
+  const char *settings = "-wmp true -s1 equity -s2 equity -r1 all -r2 all "
+                         "-numplays 100000 -threads 1";
+  char cmd[256];
+  (void)snprintf(cmd, sizeof(cmd), "set -lex TWL98 -rit true %s", settings);
+  Config *config = config_create_or_die(cmd);
+  (void)snprintf(cmd, sizeof(cmd), "set -lex TWL98 -rit false %s", settings);
+  Config *plain_config = config_create_or_die(cmd);
+  static const char *const cgps[] = {
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0",
+      "15/15/15/15/15/15/15/6CAT6/15/15/15/15/15/15/15 AEINRST/ 0/0 0",
+      "15/15/15/15/15/15/15/6CAT6/15/15/15/15/15/15/15 ?DEIRTU/ 0/0 0",
+  };
+  // Use each config's own game: `set -rit ...` updates that game's players,
+  // and the config only creates it once a command needs one.
+  char cgp_cmd[256];
+  (void)snprintf(cgp_cmd, sizeof(cgp_cmd), "cgp %s", cgps[0]);
+  load_and_exec_config_or_die(config, cgp_cmd);
+  load_and_exec_config_or_die(plain_config, cgp_cmd);
+  Game *game = config_get_game(config);
+  Game *plain_game = config_get_game(plain_config);
+  assert(game != NULL && plain_game != NULL);
+  assert(player_get_rack_info_table(game_get_player(game, 0)) != NULL);
+  assert(player_get_rack_info_table(game_get_player(plain_game, 0)) == NULL);
+  MoveList *list = move_list_create(100000);
+  MoveList *plain_list = move_list_create(100000);
+  for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
+       cgp_idx++) {
+    (void)snprintf(cgp_cmd, sizeof(cgp_cmd), "cgp %s", cgps[cgp_idx]);
+    load_and_exec_config_or_die(config, cgp_cmd);
+    load_and_exec_config_or_die(plain_config, cgp_cmd);
+    game = config_get_game(config);
+    plain_game = config_get_game(plain_config);
+    SortedMoveList *sorted = NULL;
+    SortedMoveList *plain_sorted = NULL;
+    // RIT on, stopping at the first recorded play: most subracks never reach
+    // record time, so their cached entries stay unresolved -- the state the
+    // switch must not carry over.
+    generate_until_first_play(game, list);
+    // RIT off, same config and WMP, recording everything. A set command
+    // updates players_data only; the next game command refreshes the game's
+    // players from it, so reload the position before reading the game.
+    load_and_exec_config_or_die(config, "set -rit false");
+    load_and_exec_config_or_die(config, cgp_cmd);
+    game = config_get_game(config);
+    assert(player_get_rack_info_table(game_get_player(game, 0)) == NULL);
+    generate_all_sorted(game, list, &sorted);
+    generate_all_sorted(plain_game, plain_list, &plain_sorted);
+    assert(sorted->count == plain_sorted->count);
+    assert(plain_sorted->count > 0);
+    for (int move_idx = 0; move_idx < plain_sorted->count; move_idx++) {
+      assert_moves_are_equal(sorted->moves[move_idx],
+                             plain_sorted->moves[move_idx]);
+    }
+    sorted_move_list_destroy(sorted);
+    // And back on: resolved entries in a lazily resolving generation.
+    load_and_exec_config_or_die(config, "set -rit true");
+    load_and_exec_config_or_die(config, cgp_cmd);
+    game = config_get_game(config);
+    assert(player_get_rack_info_table(game_get_player(game, 0)) != NULL);
+    generate_all_sorted(game, list, &sorted);
+    assert(sorted->count == plain_sorted->count);
+    for (int move_idx = 0; move_idx < plain_sorted->count; move_idx++) {
+      assert_moves_are_equal(sorted->moves[move_idx],
+                             plain_sorted->moves[move_idx]);
+    }
+    sorted_move_list_destroy(sorted);
+    sorted_move_list_destroy(plain_sorted);
+  }
+  move_list_destroy(list);
+  move_list_destroy(plain_list);
+  config_destroy(plain_config);
+  config_destroy(config);
+}
+
+void test_rit_movegen_equality(void) {
+  const char *settings = "-wmp true -s1 equity -s2 equity -r1 all -r2 all "
+                         "-numplays 100000 -threads 1";
+  char cmd[256];
+  (void)snprintf(cmd, sizeof(cmd), "set -lex TWL98 -rit true %s", settings);
+  Config *rit_config = config_create_or_die(cmd);
+  (void)snprintf(cmd, sizeof(cmd), "set -lex TWL98 -rit false %s", settings);
+  Config *plain_config = config_create_or_die(cmd);
+  Game *rit_game = config_game_create(rit_config);
+  Game *plain_game = config_game_create(plain_config);
+  // The test is only meaningful if the RIT actually loaded on one side and
+  // not the other; assert it so a missing file cannot pass vacuously.
+  assert(player_get_rack_info_table(game_get_player(rit_game, 0)) != NULL);
+  assert(player_get_rack_info_table(game_get_player(plain_game, 0)) == NULL);
+
+  MoveList *rit_list = move_list_create(100000);
+  MoveList *plain_list = move_list_create(100000);
+  int positions = 0;
+  long moves = 0;
+  for (uint64_t seed = 1; seed <= 6; seed++) {
+    game_reset(rit_game);
+    game_reset(plain_game);
+    game_seed(rit_game, seed);
+    game_seed(plain_game, seed);
+    draw_starting_racks(rit_game);
+    draw_starting_racks(plain_game);
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      assert(racks_are_equal(
+          player_get_rack(game_get_player(rit_game, player_idx)),
+          player_get_rack(game_get_player(plain_game, player_idx))));
+    }
+    int turn = 0;
+    while (!game_over(plain_game)) {
+      SortedMoveList *rit_sorted = NULL;
+      SortedMoveList *plain_sorted = NULL;
+      generate_all_sorted(rit_game, rit_list, &rit_sorted);
+      generate_all_sorted(plain_game, plain_list, &plain_sorted);
+      assert(rit_sorted->count == plain_sorted->count);
+      assert(plain_sorted->count > 0);
+      for (int move_idx = 0; move_idx < plain_sorted->count; move_idx++) {
+        assert_moves_are_equal(rit_sorted->moves[move_idx],
+                               plain_sorted->moves[move_idx]);
+      }
+      moves += plain_sorted->count;
+      positions++;
+      // Same (asserted-equal) move on both sides keeps the games in lockstep.
+      play_move(rit_sorted->moves[0], rit_game, NULL);
+      play_move(plain_sorted->moves[0], plain_game, NULL);
+      sorted_move_list_destroy(rit_sorted);
+      sorted_move_list_destroy(plain_sorted);
+      turn++;
+      assert(turn < 200);
+    }
+    assert(game_over(rit_game));
+  }
+  assert(positions > 0);
+  printf("RIT movegen equality: %d positions, %ld moves identical\n", positions,
+         moves);
+
+  move_list_destroy(rit_list);
+  move_list_destroy(plain_list);
+  game_destroy(rit_game);
+  game_destroy(plain_game);
+  config_destroy(rit_config);
+  config_destroy(plain_config);
 }

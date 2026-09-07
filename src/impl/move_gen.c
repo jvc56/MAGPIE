@@ -41,6 +41,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// See WMP_ENTRY_UNRESOLVED in wmp_move_gen.h. Only its address is used.
+const WMPEntry wmp_entry_unresolved_sentinel = {0};
+
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
 // Cache move generators since destroying
@@ -885,8 +888,8 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
 // fuses exactly as it did before the prune; the second copy lands in the
 // out-of-line masked scan below, away from generate_moves.
 static inline __attribute__((always_inline)) bool
-wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor,
-                           int subrack_idx) {
+wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
+                           bool lazy) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
   if (gen->number_of_tiles_in_bag > 0) {
     const Equity leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
@@ -895,7 +898,7 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor,
       return false;
     }
   }
-  if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx)) {
+  if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy)) {
     return false;
   }
   if (gen->number_of_tiles_in_bag == 0) {
@@ -946,7 +949,7 @@ wordmap_gen_forbidden_subracks(MoveGen *gen, const Anchor *anchor,
                                  forbidden_subrack_high)) {
       continue;
     }
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx)) {
+    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, true)) {
       return;
     }
   }
@@ -975,7 +978,8 @@ static inline uint32_t clear_lowest_set_bit(uint32_t bitset) {
   return bitset & (bitset - 1U);
 }
 
-void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
+static inline __attribute__((always_inline)) void
+wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   assert(gen != NULL);
   assert(anchor != NULL);
   gen->max_tiles_to_play = anchor->tiles_to_play;
@@ -1077,7 +1081,7 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   }
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx)) {
+    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, lazy)) {
       return;
     }
   }
@@ -3303,7 +3307,8 @@ void gen_record_scoring_plays_small(MoveGen *gen) {
   }
 }
 
-void gen_record_scoring_plays(MoveGen *gen) {
+static inline __attribute__((always_inline)) void
+gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
   if (gen->threshold_exceeded) {
     return;
   }
@@ -3354,7 +3359,7 @@ void gen_record_scoring_plays(MoveGen *gen) {
       recursive_gen_alpha(gen, anchor.col, anchor.col, anchor.col,
                           gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
     } else if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-      wordmap_gen(gen, &anchor);
+      wordmap_gen(gen, &anchor, lazy);
     } else {
       recursive_gen(gen, anchor.col, kwg_root_node_index, anchor.col,
                     anchor.col, gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
@@ -3364,6 +3369,20 @@ void gen_record_scoring_plays(MoveGen *gen) {
     // If a better play has been found than should have been possible for
     // this anchor, highest_possible_equity was invalid.
     assert(!better_play_has_been_found(gen, anchor.highest_possible_equity));
+  }
+}
+
+static __attribute__((noinline)) void
+gen_record_scoring_plays_eager(MoveGen *gen) {
+  gen_record_scoring_plays_impl(gen, false);
+}
+
+static inline __attribute__((always_inline)) void
+gen_record_scoring_plays(MoveGen *gen) {
+  if (gen->rit_entry == NULL) {
+    gen_record_scoring_plays_eager(gen);
+  } else {
+    gen_record_scoring_plays_impl(gen, true);
   }
 }
 
@@ -3470,12 +3489,8 @@ void generate_moves(const MoveGenArgs *args) {
           leaves_are_populated && subrack_entry->valid &&
           bit_rack_equals(&subrack_entry->key, &wgen->player_bit_rack);
       if (subrack_cache_hit) {
-        // Restore enumerate_nonplaythrough_subracks output AND the
-        // per-subrack wmp_entry pointers from cache. Both pieces are
-        // rack-determined (subracks via combinatoric walk, wmp_entries
-        // via WMP hash), so on hit we skip both the enumeration and the
-        // per-subrack wmp_get_word_entry calls that the size walk would
-        // otherwise run.
+        // Restore the enumeration output and whichever per-subrack WMP
+        // entries prior occurrences of this rack actually needed.
         memcpy(wgen->count_by_size, subrack_entry->count_by_size,
                sizeof(wgen->count_by_size));
         for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
@@ -3486,16 +3501,16 @@ void generate_moves(const MoveGenArgs *args) {
               subrack_entry->wmp_entries[i];
         }
       }
+      if (leaves_are_populated) {
+        wgen->nonplaythrough_wmp_entry_cache = subrack_entry->wmp_entries;
+      }
       if (gen->rit_entry != NULL) {
-        // RIT-backed fast path: skip the per-size wmp_get_word_entry loop
-        // for any played size where the RIT entry says no canonical
-        // k-subrack of this rack forms a k-letter word on its own. Seeds
-        // nonplaythrough_best_leave_values directly from the cached max
-        // the RIT already computed at build time.
+        // The RIT supplies existence and best-leave bounds. Defer each
+        // per-subrack WMP lookup until wordmap generation survives those
+        // bounds and actually needs that subrack's words.
         wmp_move_gen_check_nonplaythrough_existence_with_rit(
             wgen, check_leaves, &gen->leave_map, gen->rit_entry,
-            /*subracks_precomputed=*/subrack_cache_hit,
-            /*wmp_entries_precomputed=*/subrack_cache_hit);
+            /*subracks_precomputed=*/subrack_cache_hit);
       } else {
         wmp_move_gen_check_nonplaythrough_existence(
             wgen, check_leaves, &gen->leave_map,
@@ -3503,8 +3518,8 @@ void generate_moves(const MoveGenArgs *args) {
             /*wmp_entries_precomputed=*/subrack_cache_hit);
       }
       if (!subrack_cache_hit && leaves_are_populated) {
-        // Store the newly-computed enumeration and wmp_entry pointers
-        // into the cache. Only cache when leaves_are_populated so we
+        // Store the newly computed enumeration and any WMP entries that have
+        // already been resolved. Only cache when leaves_are_populated so we
         // don't stash garbage leave_values from an uninitialized leave_map.
         subrack_entry->key = wgen->player_bit_rack;
         subrack_entry->valid = true;

@@ -10,6 +10,7 @@
 #include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "wmp_move_gen_test.h"
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -443,6 +444,12 @@ void test_autoplay_wmp_correctness(void) {
 }
 
 void test_autoplay_rit_correctness(void) {
+  // Fast, exact check first: the RIT-backed and plain move generators must
+  // produce identical move lists. Runs here because this shard is where the
+  // TWL98 RIT exists, and it must run before the cleanup below removes it.
+  test_rit_movegen_equality();
+  test_rit_toggle_subrack_cache();
+
   // Build a RIT for TWL98 using the release binary (fast), then run
   // game pairs under ASAN where player 1 uses RIT and player 2 does not.
   // Any divergence means the RIT changed move selection.
