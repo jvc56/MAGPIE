@@ -21,8 +21,10 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
+#include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -374,12 +376,217 @@ void test_playthrough_bingo_existence(void) {
   config_destroy(config);
 }
 
+// A WMP candidate's equity on a nonempty board depends only on its score,
+// leave, the racks, and the number of tiles played, so the bounded record modes
+// compute it before writing a Move and discard candidates that could not enter
+// the list. Whatever they discard must be exactly what the unbounded list would
+// have ranked out: the best move has the equity of the head of the full sorted
+// list, a list of capacity k has the equities of its first k entries, and a
+// within-x list holds every entry strictly inside the margin. Equal-equity
+// moves are compared by membership rather than by position, because the
+// bounded modes also let shadow skip anchors that cannot beat the running
+// cutoff, and that already decides ties by anchor order.
+enum { RECORD_MODES_FULL_CAPACITY = 100000 };
+
+// A SortedMoveList borrows its Move objects from the MoveList it was built
+// from, so the two live and die together.
+typedef struct SortedGeneration {
+  MoveList *move_list;
+  SortedMoveList *sorted;
+} SortedGeneration;
+
+static SortedGeneration
+generate_sorted_with_record_type(Game *game, move_record_t record_type,
+                                 move_sort_t sort_type, Equity eq_margin,
+                                 int capacity) {
+  SortedGeneration generation;
+  generation.move_list = move_list_create(capacity);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = generation.move_list,
+      .move_record_type = record_type,
+      .move_sort_type = sort_type,
+      .eq_margin_movegen = eq_margin,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  // Not generate_moves_for_game(): that replaces the record type with the
+  // on-turn player's configured one.
+  generate_moves(&args);
+  generation.sorted = sorted_move_list_create(generation.move_list);
+  return generation;
+}
+
+static void sorted_generation_destroy(SortedGeneration *generation) {
+  sorted_move_list_destroy(generation->sorted);
+  move_list_destroy(generation->move_list);
+}
+
+static bool moves_match(const Move *move_1, const Move *move_2) {
+  if (move_get_type(move_1) != move_get_type(move_2) ||
+      move_get_row_start(move_1) != move_get_row_start(move_2) ||
+      move_get_col_start(move_1) != move_get_col_start(move_2) ||
+      move_get_dir(move_1) != move_get_dir(move_2) ||
+      move_get_tiles_played(move_1) != move_get_tiles_played(move_2) ||
+      move_get_tiles_length(move_1) != move_get_tiles_length(move_2) ||
+      move_get_score(move_1) != move_get_score(move_2) ||
+      move_get_equity(move_1) != move_get_equity(move_2)) {
+    return false;
+  }
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(move_1); tile_idx++) {
+    if (move_get_tile(move_1, tile_idx) != move_get_tile(move_2, tile_idx)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The bounded move must be a move the full list also holds, at the same
+// equity: a shortcut that let through something the regular path would have
+// computed differently shows up here.
+static void assert_move_in_full_list(const SortedMoveList *full,
+                                     const Move *move) {
+  for (int move_idx = 0; move_idx < full->count; move_idx++) {
+    if (moves_match(full->moves[move_idx], move)) {
+      return;
+    }
+  }
+  assert(false);
+}
+
+static int count_moves_above(const SortedMoveList *sorted, Equity cutoff) {
+  int count = 0;
+  while (count < sorted->count &&
+         move_get_equity(sorted->moves[count]) > cutoff) {
+    count++;
+  }
+  return count;
+}
+
+static void assert_bounded_record_modes_match_full_list(Game *game,
+                                                        Game *plain_game,
+                                                        move_sort_t sort_type) {
+  SortedGeneration full_generation = generate_sorted_with_record_type(
+      game, MOVE_RECORD_ALL, sort_type, 0, RECORD_MODES_FULL_CAPACITY);
+  const SortedMoveList *full = full_generation.sorted;
+  assert(full->count > 10);
+
+  // The full WMP list's own equities come from the precomputed value too, so
+  // pin them to the generator without a WMP, whose equities come from the
+  // materialized Move.
+  SortedGeneration plain_generation = generate_sorted_with_record_type(
+      plain_game, MOVE_RECORD_ALL, sort_type, 0, RECORD_MODES_FULL_CAPACITY);
+  const SortedMoveList *plain_full = plain_generation.sorted;
+  assert(plain_full->count == full->count);
+  for (int move_idx = 0; move_idx < full->count; move_idx++) {
+    assert(move_get_equity(full->moves[move_idx]) ==
+           move_get_equity(plain_full->moves[move_idx]));
+    assert_move_in_full_list(plain_full, full->moves[move_idx]);
+  }
+  sorted_generation_destroy(&plain_generation);
+
+  SortedGeneration best_generation =
+      generate_sorted_with_record_type(game, MOVE_RECORD_BEST, sort_type, 0, 1);
+  const SortedMoveList *best = best_generation.sorted;
+  assert(best->count == 1);
+  assert(move_get_equity(best->moves[0]) == move_get_equity(full->moves[0]));
+  assert_move_in_full_list(full, best->moves[0]);
+  sorted_generation_destroy(&best_generation);
+
+  const int capacities[] = {1, 3, 10};
+  for (size_t cap_idx = 0; cap_idx < sizeof(capacities) / sizeof(capacities[0]);
+       cap_idx++) {
+    const int capacity = capacities[cap_idx];
+    SortedGeneration bounded_generation = generate_sorted_with_record_type(
+        game, MOVE_RECORD_ALL, sort_type, 0, capacity);
+    const SortedMoveList *bounded = bounded_generation.sorted;
+    assert(bounded->count == capacity);
+    for (int move_idx = 0; move_idx < capacity; move_idx++) {
+      assert(move_get_equity(bounded->moves[move_idx]) ==
+             move_get_equity(full->moves[move_idx]));
+      assert_move_in_full_list(full, bounded->moves[move_idx]);
+    }
+    sorted_generation_destroy(&bounded_generation);
+  }
+
+  // With the WMP, a score-sorted within-x list currently drops some vertical
+  // plays, including ties for the best -- a pre-existing gap in that mode,
+  // independent of the shortcut under test -- so the within-x check runs for
+  // equity sort only.
+  if (sort_type != MOVE_SORT_EQUITY) {
+    sorted_generation_destroy(&full_generation);
+    return;
+  }
+  const int margins[] = {0, 5, 20, 40};
+  for (size_t margin_idx = 0; margin_idx < sizeof(margins) / sizeof(margins[0]);
+       margin_idx++) {
+    const Equity margin = int_to_equity(margins[margin_idx]);
+    SortedGeneration within_generation = generate_sorted_with_record_type(
+        game, MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST, sort_type, margin,
+        RECORD_MODES_FULL_CAPACITY);
+    const SortedMoveList *within = within_generation.sorted;
+    const Equity cutoff = move_get_equity(full->moves[0]) - margin;
+    assert(within->count > 0);
+    assert(move_get_equity(within->moves[0]) ==
+           move_get_equity(full->moves[0]));
+    assert(count_moves_above(within, cutoff) ==
+           count_moves_above(full, cutoff));
+    for (int move_idx = 0; move_idx < within->count; move_idx++) {
+      assert(move_get_equity(within->moves[move_idx]) >= cutoff);
+      assert_move_in_full_list(full, within->moves[move_idx]);
+    }
+    sorted_generation_destroy(&within_generation);
+  }
+  sorted_generation_destroy(&full_generation);
+}
+
+void test_wmp_bounded_record_modes(void) {
+  const char *settings = "-s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+                         "-threads 1";
+  char cmd[256];
+  (void)snprintf(cmd, sizeof(cmd), "set -lex CSW21 -wmp true %s", settings);
+  Config *config = config_create_or_die(cmd);
+  (void)snprintf(cmd, sizeof(cmd), "set -lex CSW21 -wmp false %s", settings);
+  Config *plain_config = config_create_or_die(cmd);
+  const char *cgps[] = {
+      "cgp " DOUG_V_EMELY_CGP,
+      "cgp " GUY_VS_BOT_CGP,
+      "cgp " NOAH_VS_MISHU_CGP,
+      "cgp " JOSH2_CGP,
+      "cgp " SOME_ISC_GAME_CGP,
+      "cgp " UTF8_DOS_CGP,
+      "cgp " VS_FRENTZ_CGP,
+      "cgp " NOAH_VS_PETER_CGP,
+      "cgp " DOUG_V_EMELY_DOUBLE_CHALLENGE_CGP,
+      "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"
+      "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"
+      "4RENEGADE2P CDIOST?/AIINOOU 450/392 0 -lex CSW21;",
+      "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"
+      "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"
+      "4RENEGADE2P AIINOOU/CDIOS 392/450 0 -lex CSW21;",
+  };
+  for (size_t cgp_idx = 0; cgp_idx < sizeof(cgps) / sizeof(cgps[0]);
+       cgp_idx++) {
+    load_and_exec_config_or_die(config, cgps[cgp_idx]);
+    load_and_exec_config_or_die(plain_config, cgps[cgp_idx]);
+    Game *game = config_get_game(config);
+    Game *plain_game = config_get_game(plain_config);
+    assert_bounded_record_modes_match_full_list(game, plain_game,
+                                                MOVE_SORT_EQUITY);
+    assert_bounded_record_modes_match_full_list(game, plain_game,
+                                                MOVE_SORT_SCORE);
+  }
+  config_destroy(plain_config);
+  config_destroy(config);
+}
+
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
   test_nonplaythrough_subrack_enumeration();
   test_wit_prune_skips_block_longer_than_anchor_word();
   test_nonplaythrough_existence();
   test_playthrough_bingo_existence();
+  test_wmp_bounded_record_modes();
 }
 
 // The RIT-backed path resolves nonplaythrough WMP entries lazily at record
