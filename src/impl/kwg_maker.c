@@ -283,7 +283,9 @@ static inline void transition_stack_mark_accepts(TransitionStack *stack) {
 }
 
 // Build a DAWG/GADDAG using the transition stack approach
-// words must be sorted
+// words must be sorted. Callers that build their own lists satisfy this by
+// construction; the convert commands sort first, since text files carry no
+// ordering guarantee and unordered input silently inflates the graph.
 // Returns the index of the first state in the root's child chain
 static uint32_t build_dawg_from_sorted_words(const DictionaryWordList *words,
                                              StateList *states,
@@ -730,14 +732,22 @@ static uint32_t wolges_convert_chain(WolgesConverter *converter,
   uint8_t tiles[MACHINE_LETTER_MAX_VALUE];
   uint8_t accepts[MACHINE_LETTER_MAX_VALUE];
   uint32_t arcs[MACHINE_LETTER_MAX_VALUE];
+  // One node per distinct tile, so this bound cannot truncate a well-formed
+  // chain. A longer one is reported below rather than overrunning the buffers.
   uint32_t count = 0;
-  for (uint32_t s = src_head; s != 0;
+  uint32_t s = src_head;
+  for (; s != 0 && count < (MACHINE_LETTER_MAX_VALUE);
        s = converter->src->states[s].next_index) {
     tiles[count] = converter->src->states[s].tile;
     accepts[count] = converter->src->states[s].accepts;
     arcs[count] =
         wolges_convert_chain(converter, converter->src->states[s].arc_index);
     count++;
+  }
+  if (s != 0) {
+    log_fatal("sibling chain from state %u exceeds %d entries; the source "
+              "graph is malformed",
+              src_head, (MACHINE_LETTER_MAX_VALUE));
   }
   // Chaining next_index = previous insertion while iterating highest -> lowest
   // produces the ascending chain (head = lowest tile, highest carries
