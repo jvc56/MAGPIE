@@ -5,6 +5,7 @@
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/anchor.h"
 #include "../src/ent/bit_rack.h"
@@ -15,12 +16,15 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/wmp.h"
+#include "../src/ent/word_info_table.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
+#include "../src/impl/word_info_table_maker.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
@@ -580,8 +584,82 @@ void test_wmp_bounded_record_modes(void) {
   config_destroy(config);
 }
 
+// Shadowing right must restore the leftward playthrough state before the
+// next extension is explored. Compare against the recursive generator on
+// separated blocks, blanks, and edges, then reuse the generator on an empty
+// board. WIT-on also exercises early exits after entering a board block.
+static void test_shadow_playthrough_restoration(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -wit false -s1 equity -s2 equity "
+      "-r1 all -r2 all -numplays 100000");
+  Config *reference_config = config_create_or_die(
+      "set -lex CSW21 -wmp false -wit false -s1 equity -s2 equity "
+      "-r1 all -r2 all -numplays 100000");
+  static const char *const positions[] = {
+      "15/15/15/15/15/15/15/6CAT6/15/15/15/15/15/15/15 ??EINRS/ 0/0 0",
+      "15/15/15/15/15/15/15/6CaT6/15/15/15/15/15/15/15 ?DEIRTU/ 0/0 0",
+      "15/15/15/15/15/15/15/4AT2IN5/15/15/15/15/15/15/15 AEIRST?/ 0/0 0",
+      "15/15/15/15/15/15/15/3A1T1I1N5/15/15/15/15/15/15/15 AEIRST?/ 0/0 0",
+      "AT13/15/15/15/15/15/15/15/15/15/15/15/15/15/13IN AEIRST?/ 0/0 0",
+      // This played position takes a WIT early exit after entering a block.
+      ("15/5M9/5I9/5R9/4BI4P4/4ET3JIG3/4AI4N4/4K2TRaNQ1OY/4I5AINEE/4EPAULETS3/"
+       "4R5E4/8ENDEmIC/15/15/15 DEEMORS/AHLOORS 195/206 0"),
+      "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0",
+  };
+  MoveList *list = move_list_create(100000);
+  MoveList *reference_list = move_list_create(100000);
+  for (int wit_enabled = 0; wit_enabled <= 1; wit_enabled++) {
+    if (wit_enabled) {
+      PlayersData *players_data = config_get_players_data(config);
+      WordInfoTable *wit =
+          make_word_info_table_from_kwg(players_data_get_kwg(players_data, 0));
+      players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, wit);
+      players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, wit);
+    }
+    Game *game = config_game_create(config);
+    assert((player_get_word_info_table(game_get_player(game, 0)) != NULL) ==
+           (wit_enabled != 0));
+    Game *reference = config_game_create(reference_config);
+    for (size_t position_idx = 0;
+         position_idx < sizeof(positions) / sizeof(positions[0]);
+         position_idx++) {
+      load_cgp_or_die(game, positions[position_idx]);
+      load_cgp_or_die(reference, positions[position_idx]);
+      const MoveGenArgs args = {
+          .game = game,
+          .move_list = list,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      MoveGenArgs reference_args = args;
+      reference_args.game = reference;
+      reference_args.move_list = reference_list;
+      generate_moves_for_game(&args);
+      generate_moves_for_game(&reference_args);
+      SortedMoveList *sorted = sorted_move_list_create(list);
+      SortedMoveList *reference_sorted =
+          sorted_move_list_create(reference_list);
+      assert(reference_sorted->count > 0);
+      assert(sorted->count == reference_sorted->count);
+      for (int move_idx = 0; move_idx < sorted->count; move_idx++) {
+        assert_moves_are_equal(sorted->moves[move_idx],
+                               reference_sorted->moves[move_idx]);
+      }
+      sorted_move_list_destroy(sorted);
+      sorted_move_list_destroy(reference_sorted);
+    }
+    game_destroy(game);
+    game_destroy(reference);
+  }
+  move_list_destroy(list);
+  move_list_destroy(reference_list);
+  config_destroy(config);
+  config_destroy(reference_config);
+}
+
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
+  test_shadow_playthrough_restoration();
   test_nonplaythrough_subrack_enumeration();
   test_wit_prune_skips_block_longer_than_anchor_word();
   test_nonplaythrough_existence();
