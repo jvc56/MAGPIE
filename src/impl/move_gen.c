@@ -677,6 +677,13 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
 // record modes can discard a losing candidate without copying its strip.
 // Opening placement penalties inspect the Move and use the regular path
 // instead.
+//
+// The tile count is gen->max_tiles_to_play, which wordmap_gen sets to the
+// anchor's tiles_to_play: every word for a size-k subrack plays exactly k
+// tiles, so it is what set_play_for_record_wmp writes into the Move. If a WMP
+// anchor ever emitted plays of varying length, the pre-endgame adjustment
+// (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) would be the only place
+// this went wrong, and it would do so silently.
 static inline bool get_wmp_equity_without_move(const MoveGen *gen, Equity score,
                                                Equity leave_value,
                                                Equity *equity) {
@@ -1039,6 +1046,9 @@ static inline __attribute__((always_inline)) void
 wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   assert(gen != NULL);
   assert(anchor != NULL);
+  // Every play recorded for this anchor uses exactly this many rack tiles;
+  // get_wmp_equity_without_move relies on that to price a candidate before
+  // its Move exists.
   gen->max_tiles_to_play = anchor->tiles_to_play;
   assert(anchor->tiles_to_play <= rack_get_total_letters(&gen->player_rack));
   WMPMoveGen *wgen = &gen->wmp_move_gen;
