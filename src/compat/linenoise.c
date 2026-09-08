@@ -245,14 +245,18 @@ static int isUnsupportedTerm(void) {
 static int enableRawMode(int fd) {
   struct termios raw;
 
-  if (!isatty(linenoise_get_in_fileno()))
-    goto fatal;
+  if (!isatty(linenoise_get_in_fileno())) {
+    errno = ENOTTY;
+    return -1;
+  }
   if (!atexit_registered) {
     atexit(linenoiseAtExit);
     atexit_registered = 1;
   }
-  if (tcgetattr(fd, &orig_termios) == -1)
-    goto fatal;
+  if (tcgetattr(fd, &orig_termios) == -1) {
+    errno = ENOTTY;
+    return -1;
+  }
 
   raw = orig_termios; /* modify the original mode */
   /* input modes: no break, no CR to NL, no parity check, no strip char,
@@ -271,14 +275,12 @@ static int enableRawMode(int fd) {
   raw.c_cc[VTIME] = 0; /* 1 byte, no timer */
 
   /* put terminal in raw mode after flushing */
-  if (tcsetattr(fd, TCSAFLUSH, &raw) < 0)
-    goto fatal;
+  if (tcsetattr(fd, TCSAFLUSH, &raw) < 0) {
+    errno = ENOTTY;
+    return -1;
+  }
   rawmode = 1;
   return 0;
-
-fatal:
-  errno = ENOTTY;
-  return -1;
 }
 
 static void disableRawMode(int fd) {
@@ -328,15 +330,18 @@ static int getColumns(int ifd, int ofd) {
 
     /* Get the initial position so we can restore it later. */
     start = getCursorPosition(ifd, ofd);
-    if (start == -1)
-      goto failed;
+    if (start == -1) {
+      return 80;
+    }
 
     /* Go to right margin and get position. */
-    if (write(ofd, "\x1b[999C", 6) != 6)
-      goto failed;
+    if (write(ofd, "\x1b[999C", 6) != 6) {
+      return 80;
+    }
     cols = getCursorPosition(ifd, ofd);
-    if (cols == -1)
-      goto failed;
+    if (cols == -1) {
+      return 80;
+    }
 
     /* Restore position. */
     if (cols > start) {
@@ -350,9 +355,6 @@ static int getColumns(int ifd, int ofd) {
   } else {
     return ws.ws_col;
   }
-
-failed:
-  return 80;
 }
 
 /* Clear the screen. Used to handle ctrl+l */
