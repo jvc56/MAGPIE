@@ -32,6 +32,7 @@
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
 #include "../ent/wmp.h"
+#include "../ent/word_info_table.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
@@ -1737,9 +1738,14 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
 }
 
 static inline __attribute__((always_inline)) void
-shadow_record_impl(MoveGen *gen, bool wmp_active) {
+shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
   const Equity *best_leaves = gen->best_leaves;
   if (wmp_active) {
+    const int final_length =
+        gen->tiles_played + gen->wmp_move_gen.num_tiles_played_through;
+    if ((allowed_lengths & (UINT32_C(1) << final_length)) == 0) {
+      return;
+    }
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen)) {
       // RIT fast path for single-playthrough anchors: the RIT's
       // playthrough_union[leave_size] holds a uint32 bitmask of letters L
@@ -1896,17 +1902,18 @@ shadow_record_impl(MoveGen *gen, bool wmp_active) {
   }
 }
 
-static __attribute__((noinline)) void shadow_record_wmp(MoveGen *gen) {
-  shadow_record_impl(gen, true);
+static __attribute__((noinline)) void
+shadow_record_wmp(MoveGen *gen, uint32_t allowed_lengths) {
+  shadow_record_impl(gen, true, allowed_lengths);
 }
 
 static __attribute__((noinline)) void shadow_record_recursive(MoveGen *gen) {
-  shadow_record_impl(gen, false);
+  shadow_record_impl(gen, false, UINT32_MAX);
 }
 
-static inline void shadow_record(MoveGen *gen) {
+static inline void shadow_record(MoveGen *gen, uint32_t allowed_lengths) {
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    shadow_record_wmp(gen);
+    shadow_record_wmp(gen, allowed_lengths);
   } else {
     shadow_record_recursive(gen);
   }
@@ -2133,7 +2140,46 @@ static inline bool wit_shadow_right_block_dead(const MoveGen *gen,
   return true;
 }
 
-static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
+// Only a complete, owned block contained in this shadow span can constrain
+// word positions. Missing, foreign, and partial cached rows remain permissive.
+static inline const uint32_t *shadow_position_row_for_block(const MoveGen *gen,
+                                                            int block_col) {
+  if (!wmp_move_gen_is_active(&gen->wmp_move_gen) || gen->is_wordsmog ||
+      gen->word_info_table == NULL || gen->wit_row_lane == NULL ||
+      gen->wit_len_lane == NULL || block_col < gen->current_left_col ||
+      block_col < 0 || block_col >= BOARD_DIM) {
+    return NULL;
+  }
+  const int block_length = gen->wit_len_lane[block_col];
+  if (block_length < WIT_POSITION_MIN_BASE_LENGTH ||
+      block_length > WIT_POSITION_MAX_BASE_LENGTH ||
+      block_col + block_length - 1 > gen->current_right_col ||
+      (block_col > 0 && gen_cache_get_letter(gen, block_col - 1) !=
+                            ALPHABET_EMPTY_SQUARE_MARKER) ||
+      (block_col + block_length < BOARD_DIM &&
+       gen_cache_get_letter(gen, block_col + block_length) !=
+           ALPHABET_EMPTY_SQUARE_MARKER)) {
+    return NULL;
+  }
+  return word_info_table_get_position_lengths(
+      gen->word_info_table, gen->wit_row_lane[block_col], block_length);
+}
+
+static inline uint32_t shadow_initial_position_lengths(const MoveGen *gen) {
+  if (gen->shadow_position_row == NULL) {
+    return UINT32_MAX;
+  }
+  const int position = gen->shadow_position_col - gen->current_left_col;
+  if (position < 0 || position > BOARD_DIM - gen->shadow_position_length) {
+    return UINT32_MAX;
+  }
+  return gen->shadow_position_row[position];
+}
+
+static inline void shadow_play_right(MoveGen *gen, bool is_unique,
+                                     uint32_t allowed_lengths) {
+  int position_base_length = gen->shadow_position_length;
+
   // Save the score totals to be reset after shadowing right.
   const Equity orig_main_restricted_score =
       gen->shadow_mainword_restricted_score;
@@ -2169,6 +2215,15 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
 
   while (gen->current_right_col < (BOARD_DIM - 1) &&
          gen->tiles_played < gen->number_of_letters_on_rack) {
+    // The next empty square makes the word at least one letter longer.
+    // Keep this stop local to the rightward branch: extending left changes
+    // the base's position and may revive lengths excluded at this start.
+    const int next_min_length =
+        gen->current_right_col - gen->current_left_col + 2;
+    if (position_base_length != 0 &&
+        (allowed_lengths >> next_min_length) == 0) {
+      break;
+    }
     gen->current_right_col++;
     gen->tiles_played++;
 
@@ -2272,6 +2327,15 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
     }
 
+    if (found_playthrough_tile && position_base_length == 0) {
+      const uint32_t *position_row =
+          shadow_position_row_for_block(gen, right_block_col);
+      if (position_row != NULL) {
+        position_base_length = gen->wit_len_lane[right_block_col];
+        allowed_lengths = position_row[right_block_col - gen->current_left_col];
+      }
+    }
+
     // WordInfoTable shadow early-stop: if the tile just placed can never be an
     // addable letter of the right playthrough block at any reachable word
     // length, no rightward continuation forms a word, so stop shadowing right.
@@ -2290,7 +2354,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       // squares, in which case the restricted multiplier squares would
       // be invalidated.
       maybe_recalculate_effective_multipliers(gen);
-      shadow_record(gen);
+      shadow_record(gen, allowed_lengths);
     }
   }
 
@@ -2464,7 +2528,7 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_right != 0) {
-      shadow_play_right(gen, is_unique);
+      shadow_play_right(gen, is_unique, UINT32_MAX);
     }
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
     if (gen->current_left_col == 0 ||
@@ -2492,7 +2556,7 @@ static inline void nonplaythrough_shadow_play_left(MoveGen *gen,
             this_word_multiplier, gen->current_left_col)) {
       insert_unrestricted_multipliers(gen, gen->current_left_col);
     }
-    shadow_record(gen);
+    shadow_record(gen, UINT32_MAX);
   }
 }
 
@@ -2535,11 +2599,12 @@ static inline void nonplaythrough_shadow_play_left_small(MoveGen *gen,
 }
 
 static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
+  uint32_t allowed_lengths = shadow_initial_position_lengths(gen);
   for (;;) {
     const uint64_t possible_tiles_for_shadow_right =
         gen->anchor_right_extension_set & gen->rack_cross_set;
     if (possible_tiles_for_shadow_right != 0) {
-      shadow_play_right(gen, is_unique);
+      shadow_play_right(gen, is_unique, allowed_lengths);
     }
     gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
 
@@ -2600,8 +2665,9 @@ static inline void playthrough_shadow_play_left(MoveGen *gen, bool is_unique) {
       is_unique = true;
     }
 
+    allowed_lengths = shadow_initial_position_lengths(gen);
     if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
-      shadow_record(gen);
+      shadow_record(gen, allowed_lengths);
     }
   }
 }
@@ -2708,7 +2774,7 @@ static inline void shadow_start_nonplaythrough(MoveGen *gen) {
   if (!board_is_dir_vertical(gen->dir)) {
     // word_multiplier is always hard-coded as 0 since we are recording a
     // single tile
-    shadow_record(gen);
+    shadow_record(gen, UINT32_MAX);
   }
   gen->shadow_word_multiplier = this_word_multiplier;
   maybe_recalculate_effective_multipliers(gen);
@@ -2782,6 +2848,12 @@ static inline void shadow_start_playthrough(MoveGen *gen,
   }
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
+  }
+  gen->shadow_position_row =
+      shadow_position_row_for_block(gen, gen->current_left_col);
+  if (gen->shadow_position_row != NULL) {
+    gen->shadow_position_col = gen->current_left_col;
+    gen->shadow_position_length = gen->wit_len_lane[gen->current_left_col];
   }
   playthrough_shadow_play_left(gen, !board_is_dir_vertical(gen->dir));
 }
@@ -2875,6 +2947,10 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
                                     EQUITY_MAX_VALUE, EQUITY_MAX_VALUE);
     return;
   }
+
+  gen->shadow_position_row = NULL;
+  gen->shadow_position_col = 0;
+  gen->shadow_position_length = 0;
 
   // Set cols
   gen->current_left_col = col;

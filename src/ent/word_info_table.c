@@ -31,6 +31,7 @@ static void wit_clear(WordInfoTable *wit) {
     free(trie->node_value);
     free(trie->values);
     free(wit->word_plus_floater[length]);
+    free(wit->position_lengths[length]);
   }
   free(wit->name);
   memset(wit, 0, sizeof(*wit));
@@ -94,6 +95,99 @@ static bool wit_validate_trie(const WitTrie *trie, int length) {
   free(seen_values);
   free(seen_nodes);
   return valid;
+}
+
+// Sorted sibling lists let a failed native construction lookup stop as
+// soon as it passes the desired tile. The trie has already been validated.
+static int32_t wit_position_value(const WitTrie *trie,
+                                  const MachineLetter *letters, int length) {
+  uint32_t node = trie->root;
+  for (int position = 0; position < length; position++) {
+    if (node == 0) {
+      return -1;
+    }
+    while (trie->node_tile[node] < letters[position] &&
+           !trie->node_last[node]) {
+      node++;
+    }
+    if (trie->node_tile[node] != letters[position]) {
+      return -1;
+    }
+    if (position + 1 == length) {
+      return trie->node_value[node];
+    }
+    node = trie->node_child[node];
+  }
+  return -1;
+}
+
+static void wit_position_add_word(WordInfoTable *wit,
+                                  const MachineLetter *letters,
+                                  int final_length) {
+  const uint32_t length_bit = UINT32_C(1) << final_length;
+  for (int base_length = WIT_POSITION_MIN_BASE_LENGTH;
+       base_length <= final_length &&
+       base_length <= WIT_POSITION_MAX_BASE_LENGTH;
+       base_length++) {
+    const WitTrie *trie = &wit->tries[base_length];
+    if (trie->num_values == 0) {
+      continue;
+    }
+    const size_t stride = (size_t)wit_stride_for_len(base_length);
+    for (int position = 0; position + base_length <= final_length; position++) {
+      const int32_t value =
+          wit_position_value(trie, letters + position, base_length);
+      if (value >= 0) {
+        wit->position_lengths[base_length][((size_t)value * stride) +
+                                           position] |= length_bit;
+      }
+    }
+  }
+}
+
+static void wit_position_visit_words(WordInfoTable *wit, const WitTrie *trie,
+                                     uint32_t first_node, int depth, int length,
+                                     MachineLetter *letters) {
+  for (uint32_t node = first_node; node != 0; node++) {
+    letters[depth - 1] = trie->node_tile[node];
+    if (depth == length) {
+      if (trie->node_value[node] >= 0) {
+        wit_position_add_word(wit, letters, length);
+      }
+    } else if (trie->node_child[node] != 0) {
+      wit_position_visit_words(wit, trie, trie->node_child[node], depth + 1,
+                               length, letters);
+    }
+    if (trie->node_last[node]) {
+      break;
+    }
+  }
+}
+
+void word_info_table_build_position_lengths(WordInfoTable *wit) {
+  word_info_table_clear_position_lengths(wit);
+  if (wit->kwg_hash == 0) {
+    return;
+  }
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    const size_t rows = wit->tries[length].num_values;
+    const size_t stride = (size_t)wit_stride_for_len(length);
+    if (rows > SIZE_MAX / stride / sizeof(uint32_t)) {
+      word_info_table_clear_position_lengths(wit);
+      return;
+    }
+    if (rows != 0) {
+      wit->position_lengths[length] =
+          calloc_or_die(rows * stride, sizeof(uint32_t));
+    }
+  }
+  MachineLetter letters[BOARD_DIM];
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH; length <= BOARD_DIM;
+       length++) {
+    const WitTrie *trie = &wit->tries[length];
+    wit_position_visit_words(wit, trie, trie->root, 1, length, letters);
+  }
 }
 
 static bool wit_positional_alphabet_supported(const WordInfoTable *wit) {
@@ -344,6 +438,7 @@ void word_info_table_load(WordInfoTable *wit, const char *name,
     return;
   }
   wit->name = string_duplicate(name);
+  word_info_table_build_position_lengths(wit);
 }
 
 WordInfoTable *word_info_table_create(const char *data_paths,

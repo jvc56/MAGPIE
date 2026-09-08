@@ -4,6 +4,7 @@
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../util/io_util.h"
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -33,7 +34,11 @@ enum {
   WPF_MIN_BLOCK_LENGTH = 2,
   WPF_MAX_BLOCK_LENGTH = 4,
   WPF_ALPHABET_SIZE = 26,
+  WIT_POSITION_MIN_BASE_LENGTH = 2,
+  WIT_POSITION_MAX_BASE_LENGTH = BOARD_DIM,
 };
+
+static_assert(BOARD_DIM < 32, "WIT positional lengths must fit in uint32_t");
 
 typedef struct WitTrie {
   uint32_t num_nodes;
@@ -58,6 +63,10 @@ typedef struct WordInfoTable {
   WitTrie tries[BOARD_DIM + 1];
   // Optional positional table, indexed directly by this WIT's value IDs.
   uint32_t *word_plus_floater[BOARD_DIM + 1];
+  // Derived from this table's complete dictionary on construction/load.
+  // For each value ID, position p contains bits for absolute final lengths
+  // having this base at p. It does not change the serialized WIT format.
+  uint32_t *position_lengths[BOARD_DIM + 1];
 } WordInfoTable;
 
 static inline size_t word_plus_floater_cells_per_key(int block_length) {
@@ -118,6 +127,42 @@ static inline const uint32_t *word_info_table_lookup(const WordInfoTable *wit,
   return NULL;
 }
 
+// Return the derived row only when the borrowed ordinary row belongs to
+// this exact table. Shared-KWG board lanes can borrow the other player's WIT.
+static inline const uint32_t *word_info_table_get_position_lengths(
+    const WordInfoTable *wit, const uint32_t *ordinary_row, int base_length) {
+  if (wit == NULL || ordinary_row == NULL ||
+      base_length < WIT_POSITION_MIN_BASE_LENGTH ||
+      base_length > WIT_POSITION_MAX_BASE_LENGTH ||
+      wit->position_lengths[base_length] == NULL) {
+    return NULL;
+  }
+  const uintptr_t address = (uintptr_t)ordinary_row;
+  const uintptr_t values = (uintptr_t)wit->tries[base_length].values;
+  const size_t stride = (size_t)wit_stride_for_len(base_length);
+  const size_t row_bytes = stride * sizeof(uint32_t);
+  if (address < values) {
+    return NULL;
+  }
+  const uintptr_t offset = address - values;
+  if (offset >= (size_t)wit->tries[base_length].num_values * row_bytes ||
+      offset % row_bytes != 0) {
+    return NULL;
+  }
+  return wit->position_lengths[base_length] + ((offset / row_bytes) * stride);
+}
+
+static inline void word_info_table_clear_position_lengths(WordInfoTable *wit) {
+  for (int length = 0; length <= BOARD_DIM; length++) {
+    free(wit->position_lengths[length]);
+    wit->position_lengths[length] = NULL;
+  }
+}
+
+// Requires a complete validated WIT dictionary, as produced by the native
+// maker or loader. A zero source fingerprint leaves this optional cache absent.
+void word_info_table_build_position_lengths(WordInfoTable *wit);
+
 static inline void word_info_table_destroy(WordInfoTable *wit) {
   if (wit == NULL) {
     return;
@@ -130,6 +175,7 @@ static inline void word_info_table_destroy(WordInfoTable *wit) {
     free(trie->node_value);
     free(trie->values);
     free(wit->word_plus_floater[len]);
+    free(wit->position_lengths[len]);
   }
   free(wit->name);
   free(wit);

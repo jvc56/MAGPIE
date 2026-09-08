@@ -49,6 +49,7 @@
 #include "peg_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
+#include "position_lengths_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
 #include "rack_test.h"
@@ -92,6 +93,7 @@ static TestEntry test_table[] = {
     {"rit", test_rack_info_table},
     {"wit", test_word_info_table},
     {"wpfmaker", test_word_plus_floater_maker},
+    {"positionlengths", test_position_lengths},
     {"witcache", test_wit_cache},
     {"witsweep", test_wit_equivalence_sweep},
     {"kwg", test_kwg_alpha},
@@ -154,6 +156,7 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"positionloaded", test_position_lengths_loaded},
     {"witdiff", test_wit_cache_differential},
     {"witcopy", test_wit_cache_copy},
     {"witundo", test_wit_cache_undo},
@@ -243,6 +246,7 @@ void run_test(const char *subtest) {
 }
 
 void run_all_super(void) {
+  test_position_lengths();
   test_bit_rack();
   test_board_layout_super();
 }

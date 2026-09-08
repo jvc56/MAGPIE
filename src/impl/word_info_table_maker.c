@@ -245,5 +245,6 @@ WordInfoTable *make_word_info_table_from_kwg(const KWG *kwg) {
   WordInfoTable *wit = make_word_info_table_from_words(words);
   dictionary_word_list_destroy(words);
   wit->kwg_hash = kwg_get_hash(kwg);
+  word_info_table_build_position_lengths(wit);
   return wit;
 }
