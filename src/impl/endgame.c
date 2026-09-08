@@ -310,6 +310,14 @@ struct EndgameCtxWorker {
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
+// These consumers need root values beyond the best move and must share the
+// same search-mode decision in root PVS and outer aspiration setup.
+static bool solver_needs_exact_root_values(const EndgameCtx *solver) {
+  return solver->num_top_moves > 1 || solver->actual_move != NULL ||
+         solver->per_ply_callback != NULL ||
+         solver->per_root_move_callback != NULL;
+}
+
 // Insert a value into a sorted (descending) top-K array.
 // Returns the Kth-best value (or -LARGE_VALUE if fewer than K values stored).
 static inline int32_t topk_insert(int32_t *topk, int *n, int k, int32_t val) {
@@ -2552,9 +2560,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // PVS null-window probe and are re-searched at full width only if they
   // improve alpha.
   const bool exact_all_root_moves =
-      is_root && (multi_pv || worker->solver->actual_move != NULL ||
-                  worker->solver->per_ply_callback != NULL ||
-                  worker->solver->per_root_move_callback != NULL);
+      is_root && solver_needs_exact_root_values(worker->solver);
   // Sized for the live multi-PV leaderboard breadth (up to
   // MAX_ENDGAME_DISPLAY_PVS root moves), not the per-line depth. num_top_moves
   // is clamped to MAX_ENDGAME_DISPLAY_PVS in endgame_ctx_reset so topk_insert
@@ -3007,11 +3013,9 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // the root, so a narrow window around the preceding IDS value can prune the
   // whole tree without sacrificing an exact result (failures are widened and
   // re-searched below).
-  bool use_aspiration = worker->solver->threads > 1 ||
-                        (worker->solver->num_top_moves == 1 &&
-                         worker->solver->actual_move == NULL &&
-                         worker->solver->per_ply_callback == NULL &&
-                         worker->solver->per_root_move_callback == NULL);
+  const bool use_aspiration = worker->solver->threads > 1 ||
+                              (worker->solver->num_top_moves == 1 &&
+                               !solver_needs_exact_root_values(worker->solver));
 
   if (worker->solver->first_win_optim) {
     // search a very small window centered around 0; we're just trying to find
@@ -3585,9 +3589,12 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
   const int num_lines = (num_top < num_root_moves) ? num_top : num_root_moves;
   SmallMove *root_moves = (SmallMove *)best_worker->small_move_arena->memory;
 
-  // The estimated_value of each root move is the negamax value the search
-  // returned for it (small_move_set_estimated_value(small_move, -value) in
-  // the root move loop).
+  // Root estimated values can be fail-soft bounds. In top-one PVS mode,
+  // later roots that fail low retain upper bounds for next-iteration ordering.
+  // This extractor is only called for num_top_moves > 1, which selects
+  // solver_needs_exact_root_values and excludes that top-one PVS path.
+  // Multi-PV cutoffs and interrupted depths can still leave bounds or mixed
+  // depths; the sorting and full-window resolution below handle those cases.
 
   // Ensure the displayed best move is at root_moves[0] to avoid duplicates.
   // qsort is not stable, so tied values may place it elsewhere.
