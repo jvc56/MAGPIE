@@ -8,6 +8,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
+#include <assert.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -183,6 +184,7 @@ static void wpf_add_word(WordInfoTable *wit, const DictionaryWord *word) {
       if (value < 0) {
         continue;
       }
+      assert(wit->word_plus_floater[length] != NULL);
       uint32_t *row = wit->word_plus_floater[length] + ((size_t)value * stride);
       uint8_t residual_counts[WPF_ALPHABET_SIZE + 1];
       memcpy(residual_counts, counts, sizeof(residual_counts));

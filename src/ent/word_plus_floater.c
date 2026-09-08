@@ -45,12 +45,13 @@ static bool wpf_write_stream(const WordInfoTable *wit, FILE *stream) {
   const unsigned char magic[8] = {'W', 'P', 'F', 'M', '1', 'L', 'E', 0};
   const uint32_t header[4] = {BOARD_DIM, WPF_MIN_BLOCK_LENGTH,
                               WPF_MAX_BLOCK_LENGTH, 0};
-  const uint64_t hash = htole64(wit->kwg_hash);
-  const uint64_t layout_hash = htole64(word_plus_floater_layout_hash(wit));
+  const uint64_t layout_hash = word_plus_floater_layout_hash(wit);
+  const uint32_t fingerprints[4] = {
+      (uint32_t)wit->kwg_hash, (uint32_t)(wit->kwg_hash >> 32),
+      (uint32_t)layout_hash, (uint32_t)(layout_hash >> 32)};
   if (fwrite(magic, sizeof(magic), 1, stream) != 1 ||
       !wpf_write_uint32s(header, 4, stream) ||
-      fwrite(&hash, sizeof(hash), 1, stream) != 1 ||
-      fwrite(&layout_hash, sizeof(layout_hash), 1, stream) != 1) {
+      !wpf_write_uint32s(fingerprints, 4, stream)) {
     return false;
   }
   for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
