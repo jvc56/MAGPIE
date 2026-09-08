@@ -289,6 +289,75 @@ static bool wit_read_trie(WitTrie *trie, int length, size_t *remaining,
          wit_validate_trie(trie, length);
 }
 
+// The caller owns the stream and clears partial table allocations on failure.
+static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
+                            const char **message, error_code_t *status) {
+  if (fseek(stream, 0, SEEK_END) != 0) {
+    return false;
+  }
+  const long file_size = ftell(stream);
+  if (file_size < 12 || fseek(stream, 0, SEEK_SET) != 0) {
+    return false;
+  }
+  uint8_t header[4];
+  uint32_t fingerprint[2];
+  if (fread(header, sizeof(header), 1, stream) != 1 ||
+      !wit_read_uint32s(fingerprint, 2, stream)) {
+    return false;
+  }
+  if (header[0] < WIT_EARLIEST_SUPPORTED_VERSION || header[0] > WIT_VERSION) {
+    *message = "unsupported word info table version";
+    *status = ERROR_STATUS_WMP_UNSUPPORTED_VERSION;
+    return false;
+  }
+  if (header[1] != BOARD_DIM) {
+    *message = "word info table board dimension does not match this build";
+    *status = ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM;
+    return false;
+  }
+  if (header[3] != 0 || (header[2] & ~WIT_FLAG_WORD_PLUS_FLOATER) != 0 ||
+      (header[0] == 3 && header[2] != 0)) {
+    *message = "unsupported word info table flags";
+    return false;
+  }
+  wit->version = header[0];
+  wit->kwg_hash = (uint64_t)fingerprint[0] | ((uint64_t)fingerprint[1] << 32);
+  size_t remaining = (size_t)file_size - 12;
+  for (int length = 1; length <= BOARD_DIM; length++) {
+    if (!wit_read_trie(&wit->tries[length], length, &remaining, stream)) {
+      return false;
+    }
+  }
+  const bool positional = (header[2] & WIT_FLAG_WORD_PLUS_FLOATER) != 0;
+  if (positional &&
+      (wit->kwg_hash == 0 || !wit_positional_alphabet_supported(wit))) {
+    *message = "unsupported positional word info table";
+    return false;
+  }
+  for (int length = WPF_MIN_BLOCK_LENGTH;
+       positional && length <= WPF_MAX_BLOCK_LENGTH; length++) {
+    const uint64_t bytes = (uint64_t)wit->tries[length].num_values *
+                           word_plus_floater_cells_per_key(length) *
+                           sizeof(uint32_t);
+    if (bytes > remaining) {
+      *message = "truncated positional word info table";
+      return false;
+    }
+    remaining -= (size_t)bytes;
+    const size_t count = (size_t)bytes / sizeof(uint32_t);
+    wit->word_plus_floater[length] =
+        count != 0 ? malloc_or_die((size_t)bytes) : NULL;
+    if (!wit_read_uint32s(wit->word_plus_floater[length], count, stream)) {
+      return false;
+    }
+  }
+  if (remaining != 0 || fgetc(stream) != EOF || ferror(stream)) {
+    *message = "unexpected data after word info table";
+    return false;
+  }
+  return true;
+}
+
 void word_info_table_load(WordInfoTable *wit, const char *name,
                           const char *filename, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
@@ -301,77 +370,14 @@ void word_info_table_load(WordInfoTable *wit, const char *name,
   }
   const char *message = "invalid or truncated word info table";
   error_code_t status = ERROR_STATUS_RW_READ_ERROR;
-  if (fseek(stream, 0, SEEK_END) != 0) {
-    goto invalid;
-  }
-  const long file_size = ftell(stream);
-  if (file_size < 12 || fseek(stream, 0, SEEK_SET) != 0) {
-    goto invalid;
-  }
-  uint8_t header[4];
-  uint32_t fingerprint[2];
-  if (fread(header, sizeof(header), 1, stream) != 1 ||
-      !wit_read_uint32s(fingerprint, 2, stream)) {
-    goto invalid;
-  }
-  if (header[0] < WIT_EARLIEST_SUPPORTED_VERSION || header[0] > WIT_VERSION) {
-    message = "unsupported word info table version";
-    status = ERROR_STATUS_WMP_UNSUPPORTED_VERSION;
-    goto invalid;
-  }
-  if (header[1] != BOARD_DIM) {
-    message = "word info table board dimension does not match this build";
-    status = ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM;
-    goto invalid;
-  }
-  if (header[3] != 0 || (header[2] & ~WIT_FLAG_WORD_PLUS_FLOATER) != 0 ||
-      (header[0] == 3 && header[2] != 0)) {
-    message = "unsupported word info table flags";
-    goto invalid;
-  }
-  wit->version = header[0];
-  wit->kwg_hash = (uint64_t)fingerprint[0] | ((uint64_t)fingerprint[1] << 32);
-  size_t remaining = (size_t)file_size - 12;
-  for (int length = 1; length <= BOARD_DIM; length++) {
-    if (!wit_read_trie(&wit->tries[length], length, &remaining, stream)) {
-      goto invalid;
-    }
-  }
-  const bool positional = (header[2] & WIT_FLAG_WORD_PLUS_FLOATER) != 0;
-  if (positional &&
-      (wit->kwg_hash == 0 || !wit_positional_alphabet_supported(wit))) {
-    message = "unsupported positional word info table";
-    goto invalid;
-  }
-  for (int length = WPF_MIN_BLOCK_LENGTH;
-       positional && length <= WPF_MAX_BLOCK_LENGTH; length++) {
-    const uint64_t bytes = (uint64_t)wit->tries[length].num_values *
-                           word_plus_floater_cells_per_key(length) *
-                           sizeof(uint32_t);
-    if (bytes > remaining) {
-      message = "truncated positional word info table";
-      goto invalid;
-    }
-    remaining -= (size_t)bytes;
-    const size_t count = (size_t)bytes / sizeof(uint32_t);
-    wit->word_plus_floater[length] =
-        count != 0 ? malloc_or_die((size_t)bytes) : NULL;
-    if (!wit_read_uint32s(wit->word_plus_floater[length], count, stream)) {
-      goto invalid;
-    }
-  }
-  if (remaining != 0 || fgetc(stream) != EOF || ferror(stream)) {
-    message = "unexpected data after word info table";
-    goto invalid;
-  }
+  const bool valid = wit_read_stream(wit, stream, &message, &status);
   fclose_or_die(stream);
+  if (!valid) {
+    wit_clear(wit);
+    error_stack_push(error_stack, status, string_duplicate(message));
+    return;
+  }
   wit->name = string_duplicate(name);
-  return;
-
-invalid:
-  fclose_or_die(stream);
-  wit_clear(wit);
-  error_stack_push(error_stack, status, string_duplicate(message));
 }
 
 WordInfoTable *word_info_table_create(const char *data_paths,
