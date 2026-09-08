@@ -20,6 +20,9 @@ jobs:
       - name: Check circular dependencies
         run: python3 find_circ_deps.py
 
+      - name: Test WPF generator
+        run: python3 -m unittest discover -s test -p wpf_generator_test.py
+
       - name: Check formatting
         run: python3 ./format.py
 

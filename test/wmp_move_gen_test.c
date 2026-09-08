@@ -32,6 +32,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void test_wmp_move_gen_inactive(void) {
   WMPMoveGen wmg;
@@ -60,7 +61,7 @@ void test_wit_prune_skips_block_longer_than_anchor_word(void) {
   wit_len_lane[0] = 3;
 
   wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, wit_row_lane,
-                                        wit_len_lane);
+                                        wit_len_lane, NULL);
 
   // The cached block is not wholly contained in this shorter shadow word, so
   // it cannot constrain the optional WIT prune.
@@ -68,7 +69,8 @@ void test_wit_prune_skips_block_longer_than_anchor_word(void) {
   assert(wmg.num_tiles_played_through == 3);
   // WIT-disabled callers supply no row lane. Collect playthrough letters
   // without touching any cached table storage.
-  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL);
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL,
+                                        NULL);
   assert(wmg.playthrough_addable == UINT32_MAX);
   assert(wmg.num_tiles_played_through == 3);
 }
@@ -81,19 +83,194 @@ static void test_playthrough_positions_reset(void) {
   row_cache[1].letter = 1;
   row_cache[3].letter = get_blanked_machine_letter(2);
   Anchor anchor = {.playthrough_blocks = 2, .rightmost_start_col = 0};
-  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL);
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL,
+                                        NULL);
   assert(wmg.playthrough_positions == ((1U << 1) | (1U << 3)));
   assert(wmg.num_tiles_played_through == 2);
   anchor.playthrough_blocks = 1;
   anchor.rightmost_start_col = BOARD_DIM - 1;
   row_cache[BOARD_DIM - 1].letter = 3;
-  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL);
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL,
+                                        NULL);
   assert(wmg.playthrough_positions == (1U << (BOARD_DIM - 1)));
   assert(wmg.num_tiles_played_through == 1);
   anchor.playthrough_blocks = 0;
-  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL);
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, NULL, NULL,
+                                        NULL);
   assert(wmg.playthrough_positions == 0);
   assert(wmg.num_tiles_played_through == 0);
+}
+
+// Directly exercise signed offsets, all letters of another block, a
+// designated board blank, covered-empty cells and optional-data fallback.
+static void test_word_plus_floater_positional_intersection(void) {
+  WordInfoTable wit = {0};
+  uint32_t ordinary[BOARD_DIM];
+  for (int index = 0; index < BOARD_DIM; index++) {
+    ordinary[index] = UINT32_MAX;
+  }
+  wit.tries[2].values = ordinary;
+  wit.tries[2].num_values = 1;
+  uint32_t *positional =
+      calloc(word_plus_floater_cells_per_key(2), sizeof(uint32_t));
+  assert(positional != NULL);
+  wit.word_plus_floater[2] = positional;
+  Square row_cache[BOARD_DIM] = {0};
+  const uint32_t *rows[BOARD_DIM] = {0};
+  uint8_t lengths[BOARD_DIM] = {0};
+  WMPMoveGen wmg = {0};
+  Anchor anchor = {
+      .playthrough_blocks = 2, .word_length = 5, .rightmost_start_col = 1};
+  // BC.AT: B is at delta -3 and C at -2 from AT. Their independent
+  // addable masks overlap only in H, so both letters must be queried.
+  row_cache[1].letter = 2;
+  row_cache[2].letter = get_blanked_machine_letter(3);
+  row_cache[4].letter = 1;
+  row_cache[5].letter = 20;
+  rows[4] = ordinary;
+  lengths[4] = 2;
+  // extension=3: first cell=3*2, left deltas map to indices 0 and 1.
+  positional[((6 + 0) * WPF_ALPHABET_SIZE) + 2 - 1] = (1U << 8) | (1U << 19);
+  positional[((6 + 1) * WPF_ALPHABET_SIZE) + 3 - 1] = (1U << 8) | (1U << 18);
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
+                                        &wit);
+  assert(wmg.playthrough_addable == (1U << 8));
+  // A covered cell with no matching dictionary word excludes the anchor.
+  positional[((6 + 1) * WPF_ALPHABET_SIZE) + 3 - 1] = 0;
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
+                                        &wit);
+  assert(wmg.playthrough_addable == 0);
+  // Missing optional payload retains the ordinary WIT condition.
+  wit.word_plus_floater[2] = NULL;
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
+                                        &wit);
+  assert(wmg.playthrough_addable == UINT32_MAX);
+  wit.word_plus_floater[2] = positional;
+  // A same-content row borrowed from another WIT allocation must fail open,
+  // without subtracting pointers that belong to different objects.
+  uint32_t foreign_ordinary[BOARD_DIM];
+  memcpy(foreign_ordinary, ordinary, sizeof(ordinary));
+  rows[4] = foreign_ordinary;
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
+                                        &wit);
+  assert(wmg.playthrough_addable == UINT32_MAX);
+  // AT.C: extension=2, right delta=3 maps to index 3, and first cell=2.
+  memset(row_cache, 0, sizeof(row_cache));
+  memset(rows, 0, sizeof(rows));
+  memset(lengths, 0, sizeof(lengths));
+  row_cache[1].letter = 1;
+  row_cache[2].letter = 20;
+  row_cache[4].letter = 3;
+  rows[1] = ordinary;
+  lengths[1] = 2;
+  anchor.word_length = 4;
+  positional[((2 + 3) * WPF_ALPHABET_SIZE) + 3 - 1] = (1U << 19);
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
+                                        &wit);
+  assert(wmg.playthrough_addable == (1U << 19));
+  free(positional);
+}
+
+// Sparse IDs must distinguish omitted keys from covered empty rows, and a
+// longer omitted block must not hide a shorter covered base in either order.
+static void test_word_plus_floater_sparse_coverage(void) {
+  WordInfoTable wit = {0};
+  uint32_t ordinary_short[3 * (BOARD_DIM - 1)];
+  uint32_t ordinary_long[BOARD_DIM - 3];
+  for (size_t index = 0;
+       index < sizeof(ordinary_short) / sizeof(ordinary_short[0]); index++) {
+    ordinary_short[index] = UINT32_MAX;
+  }
+  for (size_t index = 0;
+       index < sizeof(ordinary_long) / sizeof(ordinary_long[0]); index++) {
+    ordinary_long[index] = UINT32_MAX;
+  }
+  int32_t short_ids[3] = {-1, -1, 0};
+  int32_t long_ids[1] = {-1};
+  const size_t short_cells = word_plus_floater_cells_per_key(2);
+  const size_t long_cells = word_plus_floater_cells_per_key(4);
+  uint32_t *short_masks = calloc(short_cells, sizeof(uint32_t));
+  uint32_t *long_masks = calloc(long_cells, sizeof(uint32_t));
+  assert(short_masks != NULL && long_masks != NULL);
+  for (size_t index = 0; index < short_cells; index++) {
+    short_masks[index] = 1U << 8;
+  }
+  for (size_t index = 0; index < long_cells; index++) {
+    long_masks[index] = 1U << 19;
+  }
+  wit.tries[2].values = ordinary_short;
+  wit.tries[2].num_values = 3;
+  wit.tries[4].values = ordinary_long;
+  wit.tries[4].num_values = 1;
+  wit.word_plus_floater[2] = short_masks;
+  wit.word_plus_floater[4] = long_masks;
+  wit.word_plus_floater_ids[2] = short_ids;
+  wit.word_plus_floater_ids[4] = long_ids;
+  WMPMoveGen wmg = {0};
+  Anchor anchor = {
+      .playthrough_blocks = 2, .word_length = 7, .rightmost_start_col = 1};
+  for (int reverse = 0; reverse < 2; reverse++) {
+    Square row_cache[BOARD_DIM] = {0};
+    const uint32_t *rows[BOARD_DIM] = {0};
+    uint8_t lengths[BOARD_DIM] = {0};
+    const int short_col = reverse ? 6 : 1;
+    const int long_col = reverse ? 1 : 4;
+    row_cache[short_col].letter = 1;
+    row_cache[short_col + 1].letter = 20;
+    for (int index = 0; index < 4; index++) {
+      row_cache[long_col + index].letter = (MachineLetter)(3 + index);
+    }
+    // Original row 2 has been compacted to payload row 0.
+    rows[short_col] = ordinary_short + (size_t)2 * wit_stride_for_len(2);
+    rows[long_col] = ordinary_long;
+    lengths[short_col] = 2;
+    lengths[long_col] = 4;
+    wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
+                                          lengths, &wit);
+    assert(wmg.playthrough_addable == (1U << 8));
+    // An omitted adjacent source key stays uncovered, even with row 0 present.
+    rows[short_col] = ordinary_short + wit_stride_for_len(2);
+    wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
+                                          lengths, &wit);
+    assert(wmg.playthrough_addable == UINT32_MAX);
+    rows[short_col] = ordinary_short + (size_t)2 * wit_stride_for_len(2);
+    // Dense length23 coverage omits the long-length payload entirely.
+    wit.word_plus_floater[4] = NULL;
+    wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
+                                          lengths, &wit);
+    assert(wmg.playthrough_addable == (1U << 8));
+    wit.word_plus_floater[4] = long_masks;
+    // Once the longer key is covered, choose it regardless of board order.
+    long_ids[0] = 0;
+    wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
+                                          lengths, &wit);
+    assert(wmg.playthrough_addable == (1U << 19));
+    // The next helper call reads this through the WIT remap pointer.
+    // cppcheck-suppress unreadVariable
+    long_ids[0] = -1;
+  }
+  // Keep original source row 2 covered but make its entire payload zero.
+  memset(short_masks, 0, short_cells * sizeof(uint32_t));
+  Square row_cache[BOARD_DIM] = {0};
+  const uint32_t *rows[BOARD_DIM] = {0};
+  uint8_t lengths[BOARD_DIM] = {0};
+  row_cache[1].letter = 1;
+  row_cache[2].letter = 20;
+  row_cache[4].letter = 3;
+  rows[1] = ordinary_short + (size_t)2 * wit_stride_for_len(2);
+  lengths[1] = 2;
+  anchor.word_length = 4;
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
+                                        &wit);
+  assert(wmg.playthrough_addable == 0);
+  // The next helper call reads this through the WIT remap pointer.
+  // cppcheck-suppress unreadVariable
+  short_ids[2] = -1;
+  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
+                                        &wit);
+  assert(wmg.playthrough_addable == UINT32_MAX);
+  free(short_masks);
+  free(long_masks);
 }
 
 // Set empty leave to 0.0, all one-tile leaves to +1.0, two-tile leaves to +2.0,
@@ -908,6 +1085,8 @@ void test_wmp_maximum_playthrough_blocks(void) {
 
 void test_wmp_move_gen(void) {
   test_wmp_maximum_playthrough_blocks();
+  test_word_plus_floater_positional_intersection();
+  test_word_plus_floater_sparse_coverage();
   test_wmp_move_gen_inactive();
   test_shadow_playthrough_restoration();
   test_playthrough_positions_reset();
