@@ -49,7 +49,8 @@
 // (~hundreds of seconds/position); the A/B times are the in-game-relevant ones.
 //
 // Configs (including the oracle) are hardcoded in the test_benchmark_peg_*
-// entry points below — there are deliberately no environment-variable knobs.
+// entry points below. The separate pegregretbench driver uses environment
+// variables to reproduce equal-budget common-oracle comparisons.
 // Positions come from the committed notes/peg_positions/random_Npeg.txt
 // fixtures (run from the repo root); each line's embedded "-lex CSW24" is
 // honored by loading via the cgp command. The on-demand entry points hardcode
@@ -1418,10 +1419,18 @@ static void peg_regret_collect(int stage, int rank, const Move *move,
   cpthread_mutex_unlock(&trace->mutex);
 }
 
+static int peg_regret_parse_int(const char *setting) {
+  ErrorStack *errors = error_stack_create();
+  const int value = string_to_int(setting, errors);
+  assert(error_stack_is_empty(errors));
+  error_stack_destroy(errors);
+  return value;
+}
+
 void test_peg_regret_bench(void) {
   log_set_level(LOG_FATAL);
   const char *setting = getenv("PEGP_GENERATE");
-  if (setting != NULL && atoi(setting)) {
+  if (setting != NULL && peg_regret_parse_int(setting)) {
     const char *path = getenv("PEGP_FILE");
     assert(path != NULL);
     const char *bag = getenv("PEGP_BAG");
@@ -1429,22 +1438,23 @@ void test_peg_regret_bench(void) {
     const char *seed = getenv("PEGP_SEED");
     assert(bag != NULL && count != NULL && seed != NULL);
     const char *contested = getenv("PEGP_CONTESTED");
-    generate_peg_cgps(strtoull(seed, NULL, 10), atoi(bag), atoi(count), path,
-                      false, contested != NULL && atoi(contested));
+    generate_peg_cgps(strtoull(seed, NULL, 10), peg_regret_parse_int(bag),
+                      peg_regret_parse_int(count), path, false,
+                      contested != NULL && peg_regret_parse_int(contested));
     return;
   }
   const char *cgp = getenv("PEGP_CGP");
   assert(cgp != NULL);
   setting = getenv("PEGP_ORACLE");
-  const bool oracle = setting != NULL && atoi(setting);
+  const bool oracle = setting != NULL && peg_regret_parse_int(setting);
   setting = getenv("PEGP_FIRSTWIN");
-  const bool first_win = setting != NULL && atoi(setting);
+  const bool first_win = setting != NULL && peg_regret_parse_int(setting);
   assert(!oracle || !first_win);
   setting = getenv("PEGP_SECONDS");
   assert(setting != NULL);
   const double seconds = strtod(setting, NULL);
   setting = getenv("PEGP_THREADS");
-  const int threads = setting == NULL ? 8 : atoi(setting);
+  const int threads = setting == NULL ? 8 : peg_regret_parse_int(setting);
   Config *config =
       config_create_or_die("set -lex CSW24 -wmp true -rit true -wit true");
   char command[4128];
@@ -1465,7 +1475,7 @@ void test_peg_regret_bench(void) {
   };
   PegArgs args;
   fill_peg_args(&args, config, &cfg);
-  args.first_win_optim = first_win; // Baseline has no first-win PEG path.
+  args.first_win_optim = first_win;
   ErrorStack *errors = error_stack_create();
   ValidatedMoves *validated = NULL;
   const Move *protected_moves[8];

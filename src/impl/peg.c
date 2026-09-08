@@ -1630,7 +1630,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
                               ctx->deadline_ns, ctx->thread_control,
                               &ctx->interrupted);
   }
-  // Exact endgame leaf. After the mover plays and draws it is the opponent's
+  // Endgame leaf. After the mover plays and draws it is the opponent's
   // turn, so the solved value is from the on-turn player's perspective; fold
   // it into the mover lead accordingly.
   //
