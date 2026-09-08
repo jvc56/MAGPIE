@@ -1,6 +1,5 @@
 #include "word_info_table_test.h"
 
-#include "../src/compat/endian_conv.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/data_filepaths.h"
@@ -146,11 +145,13 @@ static void write_word_plus_floater_fixture(FILE *stream,
   wit_write_uint32_or_die(2, stream, "minimum length");
   wit_write_uint32_or_die((uint32_t)maximum_length, stream, "maximum length");
   wit_write_uint32_or_die(0, stream, "reserved");
-  const uint64_t hash = htole64(wit->kwg_hash);
-  fwrite_or_die(&hash, sizeof(hash), 1, stream, "fixture KWG hash");
-  const uint64_t layout_hash = htole64(word_plus_floater_layout_hash(wit));
-  fwrite_or_die(&layout_hash, sizeof(layout_hash), 1, stream,
-                "fixture layout hash");
+  wit_write_uint32_or_die((uint32_t)wit->kwg_hash, stream, "KWG hash low");
+  wit_write_uint32_or_die((uint32_t)(wit->kwg_hash >> 32), stream,
+                          "KWG hash high");
+  const uint64_t layout_hash = word_plus_floater_layout_hash(wit);
+  wit_write_uint32_or_die((uint32_t)layout_hash, stream, "layout hash low");
+  wit_write_uint32_or_die((uint32_t)(layout_hash >> 32), stream,
+                          "layout hash high");
   for (int length = 2; length <= maximum_length; length++) {
     const uint32_t count = wit->tries[length].num_values;
     const uint32_t stored_count = empty ? 0 : 1;
@@ -215,8 +216,10 @@ static void test_word_plus_floater_subset_loading(void) {
       } else {
         const size_t count = (sparse ? 1 : wit->tries[length].num_values) *
                              word_plus_floater_cells_per_key(length);
-        assert(wit->word_plus_floater[length][0] == (uint32_t)length);
-        assert(wit->word_plus_floater[length][count - 1] == count - 1 + length);
+        const uint32_t *values = wit->word_plus_floater[length];
+        assert(values != NULL);
+        assert(values[0] == (uint32_t)length);
+        assert(values[count - 1] == count - 1 + length);
       }
     }
     word_info_table_destroy(wit);
