@@ -134,292 +134,253 @@ static void test_residual_letters_with_repeated_blocks(void) {
   dictionary_word_list_destroy(words);
 }
 
-static void write_word_plus_floater_fixture(FILE *stream,
-                                            const WordInfoTable *wit,
-                                            bool zero_masks) {
-  const unsigned char magic[8] = {'W', 'P', 'F', 'M', '1', 'L', 'E', 0};
-  fwrite_or_die(magic, sizeof(magic), 1, stream, "fixture magic");
-  wit_write_uint32_or_die(BOARD_DIM, stream, "dimension");
-  wit_write_uint32_or_die(2, stream, "minimum length");
-  wit_write_uint32_or_die(4, stream, "maximum length");
-  wit_write_uint32_or_die(0, stream, "reserved");
-  wit_write_uint32_or_die((uint32_t)wit->kwg_hash, stream, "KWG hash low");
-  wit_write_uint32_or_die((uint32_t)(wit->kwg_hash >> 32), stream,
-                          "KWG hash high");
-  const uint64_t layout_hash = word_plus_floater_layout_hash(wit);
-  wit_write_uint32_or_die((uint32_t)layout_hash, stream, "layout hash low");
-  wit_write_uint32_or_die((uint32_t)(layout_hash >> 32), stream,
-                          "layout hash high");
-  for (int length = 2; length <= 4; length++) {
-    const uint32_t count = wit->tries[length].num_values;
-    const uint32_t cells = (uint32_t)word_plus_floater_cells_per_key(length);
-    wit_write_uint32_or_die((uint32_t)length, stream, "key length");
-    wit_write_uint32_or_die(count, stream, "key count");
-    wit_write_uint32_or_die(cells, stream, "cell count");
-    wit_write_uint32_or_die(0, stream, "reserved section field");
-    const size_t total = (size_t)count * cells;
-    for (size_t index = 0; index < total; index++) {
-      wit_write_uint32_or_die(zero_masks ? 0 : (uint32_t)(index + length),
-                              stream, "mask");
-    }
+static void write_fixture_bytes(const char *filename, const uint8_t *bytes,
+                                size_t count) {
+  FILE *stream = fopen_or_die(filename, "wb");
+  if (count != 0) {
+    fwrite_or_die(bytes, 1, count, stream, "WIT fixture");
   }
-  fseek_or_die(stream, 0, SEEK_SET);
+  fclose_or_die(stream);
 }
 
-static void test_word_plus_floater_loading(void) {
-  ErrorStack *error_stack = error_stack_create();
-  // Full dense M1 and a dictionary with no length-three bases. Zero masks
-  // are still covered rows, independent of empty sections with no bases.
-  for (int variant = 0; variant < 2; variant++) {
-    WordInfoTable *wit = calloc_or_die(1, sizeof(WordInfoTable));
-    wit->kwg_hash = 1234567;
-    wit->tries[2].num_values = 3;
-    wit->tries[3].num_values = variant == 0 ? 2 : 0;
-    wit->tries[4].num_values = 1;
-    const bool zero_masks = variant == 1;
-    FILE *stream = tmpfile();
-    assert(stream != NULL);
-    write_word_plus_floater_fixture(stream, wit, zero_masks);
-    word_info_table_read_word_plus_floater(wit, stream, error_stack);
-    assert(error_stack_is_empty(error_stack));
-    fclose_or_die(stream);
-    for (int length = 2; length <= 4; length++) {
-      const size_t count = wit->tries[length].num_values *
-                           word_plus_floater_cells_per_key(length);
-      const uint32_t *values = wit->word_plus_floater[length];
-      if (count == 0) {
-        assert(values == NULL);
-        continue;
-      }
-      assert(values != NULL);
-      assert(values[0] == (zero_masks ? 0 : (uint32_t)length));
-      assert(values[count - 1] == (zero_masks ? 0 : count - 1 + length));
-    }
-    word_info_table_destroy(wit);
-  }
-  error_stack_destroy(error_stack);
-}
-
-static void assert_word_plus_floater_uncovered(const WordInfoTable *wit) {
+static void assert_no_positional_rows(const WordInfoTable *wit) {
   for (int length = 0; length <= BOARD_DIM; length++) {
     assert(wit->word_plus_floater[length] == NULL);
   }
 }
 
-static void test_word_plus_floater_invalid_files(void) {
-  // Offsets are from the documented little-endian dense M1 file format.
-  static const struct {
-    long offset;
-    uint32_t value;
-  } corruptions[] = {
-      {0, 0},  // magic
-      {12, 1}, // minimum key length
-      {16, 5}, // maximum key length
-      {16, 3}, // omitted length-four coverage
-      {20, 1}, // reserved header field
-      {32, 0}, // key-layout fingerprint
-      {40, 3}, // section key length
-      {44, 4}, // original value count
-      {48, 1}, // cells per key
-      {52, 1}, // reserved section field
-  };
-  WordInfoTable wit = {0};
-  wit.kwg_hash = 1234567;
-  wit.tries[2].num_values = 3;
-  wit.tries[3].num_values = 2;
-  wit.tries[4].num_values = 1;
+static void test_combined_wit_format(void) {
+  DictionaryWordList *words = dictionary_word_list_create();
+  static const MachineLetter at[] = {A, T};
+  static const MachineLetter atat[] = {A, T, A, T};
+  static const MachineLetter aa[] = {A, A};
+  static const MachineLetter ta[] = {T, A};
+  add_word(words, aa, 2);
+  add_word(words, ta, 2);
+  add_word(words, at, 2);
+  add_word(words, atat, 4);
+  WordInfoTable *wit = make_word_info_table_from_words(words);
+  wit->kwg_hash = 1234567;
+  size_t positional_bytes = 0;
+  for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
+       length++) {
+    const size_t count =
+        wit->tries[length].num_values * word_plus_floater_cells_per_key(length);
+    positional_bytes += count * sizeof(uint32_t);
+    if (count == 0) {
+      continue;
+    }
+    wit->word_plus_floater[length] = calloc_or_die(count, sizeof(uint32_t));
+    for (size_t cell = 0; cell < count; cell++) {
+      wit->word_plus_floater[length][cell] = (uint32_t)cell;
+    }
+  }
   ErrorStack *error_stack = error_stack_create();
+  char *filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, "wit_combined_format",
+      DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  word_info_table_write_to_file(wit, filename, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  FILE *stream = fopen_or_die(filename, "rb");
+  fseek_or_die(stream, 0, SEEK_END);
+  const long file_size = ftell(stream);
+  assert(file_size > 12 && (size_t)file_size > positional_bytes);
+  const size_t size = (size_t)file_size;
+  uint8_t *bytes = malloc_or_die(size + 1);
+  fseek_or_die(stream, 0, SEEK_SET);
+  const size_t read_size = fread(bytes, 1, size, stream);
+  assert(read_size == size);
+  fclose_or_die(stream);
+  assert(bytes[0] == 4 && bytes[1] == BOARD_DIM);
+  assert(bytes[2] == WIT_FLAG_WORD_PLUS_FLOATER && bytes[3] == 0);
+  WordInfoTable *loaded = calloc_or_die(1, sizeof(WordInfoTable));
+  word_info_table_load(loaded, "combined", filename, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_wits_equal(wit, loaded);
+  for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
+       length++) {
+    const size_t count =
+        wit->tries[length].num_values * word_plus_floater_cells_per_key(length);
+    if (count == 0) {
+      assert(loaded->word_plus_floater[length] == NULL);
+      continue;
+    }
+    assert(loaded->word_plus_floater[length] != NULL);
+    assert(memcmp(wit->word_plus_floater[length],
+                  loaded->word_plus_floater[length],
+                  count * sizeof(uint32_t)) == 0);
+  }
+
+  // The ordinary prefix remains exactly v3-compatible. Reloading v3 clears
+  // previously loaded positional rows, even when old sidecars still exist.
+  const size_t ordinary_size = size - positional_bytes;
+  bytes[0] = 3;
+  bytes[2] = 0;
+  write_fixture_bytes(filename, bytes, ordinary_size);
+  word_info_table_load(loaded, "legacy", filename, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(loaded->version == 3 && loaded->kwg_hash == wit->kwg_hash);
+  assert_no_positional_rows(loaded);
+  for (int length = 1; length <= BOARD_DIM; length++) {
+    assert_tries_equal(&wit->tries[length], &loaded->tries[length],
+                       wit_stride_for_len(length));
+  }
+  bytes[0] = 4;
+  write_fixture_bytes(filename, bytes, ordinary_size);
+  word_info_table_load(loaded, "ordinary-v4", filename, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(loaded->version == 4);
+  assert_no_positional_rows(loaded);
+  bytes[2] = WIT_FLAG_WORD_PLUS_FLOATER;
+
+  const size_t truncated_sizes[] = {0, 11, ordinary_size - 1, ordinary_size,
+                                    size - 1};
+  for (size_t index = 0;
+       index < sizeof(truncated_sizes) / sizeof(truncated_sizes[0]); index++) {
+    write_fixture_bytes(filename, bytes, truncated_sizes[index]);
+    word_info_table_load(loaded, "truncated", filename, error_stack);
+    assert(error_stack_top(error_stack) == ERROR_STATUS_RW_READ_ERROR);
+    assert_no_positional_rows(loaded);
+    assert(loaded->tries[2].node_tile == NULL);
+    error_stack_reset(error_stack);
+  }
+  static const struct {
+    size_t offset;
+    uint8_t value;
+    error_code_t status;
+  } corruptions[] = {
+      {0, 5, ERROR_STATUS_WMP_UNSUPPORTED_VERSION},
+      {1, 0, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM},
+      {2, 2, ERROR_STATUS_RW_READ_ERROR},
+      {3, 1, ERROR_STATUS_RW_READ_ERROR},
+      {12, 0, ERROR_STATUS_RW_READ_ERROR},
+      {16, 255, ERROR_STATUS_RW_READ_ERROR},
+      {20, 255, ERROR_STATUS_RW_READ_ERROR},
+  };
   for (size_t index = 0; index < sizeof(corruptions) / sizeof(corruptions[0]);
        index++) {
-    FILE *stream = tmpfile();
-    assert(stream != NULL);
-    write_word_plus_floater_fixture(stream, &wit, false);
-    fseek_or_die(stream, corruptions[index].offset, SEEK_SET);
-    wit_write_uint32_or_die(corruptions[index].value, stream, "corruption");
-    fseek_or_die(stream, 0, SEEK_SET);
-    word_info_table_read_word_plus_floater(&wit, stream, error_stack);
-    assert(error_stack_top(error_stack) == ERROR_STATUS_RW_READ_ERROR);
-    assert_word_plus_floater_uncovered(&wit);
+    const size_t offset = corruptions[index].offset;
+    const uint8_t original = bytes[offset];
+    bytes[offset] = corruptions[index].value;
+    write_fixture_bytes(filename, bytes, size);
+    word_info_table_load(loaded, "malformed", filename, error_stack);
+    assert(error_stack_top(error_stack) == corruptions[index].status);
+    assert_no_positional_rows(loaded);
     error_stack_reset(error_stack);
-    fclose_or_die(stream);
+    bytes[offset] = original;
   }
-  // Truncate at the magic, header, section and mask payload, including
-  // failure after preceding lengths have allocated and loaded successfully.
-  FILE *complete = tmpfile();
-  assert(complete != NULL);
-  write_word_plus_floater_fixture(complete, &wit, false);
-  fseek_or_die(complete, 0, SEEK_END);
-  const long file_size = ftell(complete);
-  assert(file_size > 68);
-  const size_t truncations[] = {7, 39, 55, 67, (size_t)file_size - 1};
-  unsigned char *bytes = malloc((size_t)file_size);
-  assert(bytes != NULL);
-  fseek_or_die(complete, 0, SEEK_SET);
-  const size_t bytes_read = fread(bytes, 1, (size_t)file_size, complete);
-  assert(bytes_read == (size_t)file_size);
-  fclose_or_die(complete);
-  for (size_t index = 0; index < sizeof(truncations) / sizeof(truncations[0]);
+  const WitTrie *first_trie = &wit->tries[1];
+  const size_t section_offset =
+      12 + 12 + ((size_t)first_trie->num_nodes * 10) +
+      ((size_t)first_trie->num_values * wit_stride_for_len(1) * 4);
+  const WitTrie *trie = &wit->tries[2];
+  const size_t tiles_offset = section_offset + 12;
+  const size_t last_offset = tiles_offset + trie->num_nodes;
+  const size_t children_offset = last_offset + trie->num_nodes;
+  const size_t values_offset = children_offset + ((size_t)trie->num_nodes * 4);
+  uint32_t first_terminal = 0;
+  uint32_t second_terminal = 0;
+  for (uint32_t node = 1; node < trie->num_nodes; node++) {
+    if (trie->node_value[node] >= 0) {
+      if (first_terminal == 0) {
+        first_terminal = node;
+      } else {
+        second_terminal = node;
+        break;
+      }
+    }
+  }
+  assert(first_terminal != 0 && second_terminal != 0);
+  assert(trie->node_last[trie->root] == 0);
+  const struct {
+    size_t offset;
+    uint32_t value;
+  } trie_corruptions[] = {
+      {section_offset, UINT32_MAX},
+      {children_offset + ((size_t)trie->root * 4), trie->root},
+      {children_offset + ((size_t)(trie->root + 1) * 4),
+       trie->node_child[trie->root]},
+      {values_offset + ((size_t)second_terminal * 4),
+       (uint32_t)trie->node_value[first_terminal]},
+      {values_offset + ((size_t)trie->root * 4), 0},
+  };
+  for (size_t index = 0;
+       index < sizeof(trie_corruptions) / sizeof(trie_corruptions[0]);
        index++) {
-    FILE *stream = tmpfile();
-    assert(stream != NULL);
-    fwrite_or_die(bytes, 1, truncations[index], stream, "truncated fixture");
-    fseek_or_die(stream, 0, SEEK_SET);
-    word_info_table_read_word_plus_floater(&wit, stream, error_stack);
+    const size_t offset = trie_corruptions[index].offset;
+    uint8_t original[4];
+    memcpy(original, bytes + offset, sizeof(original));
+    for (size_t byte = 0; byte < sizeof(original); byte++) {
+      bytes[offset + byte] =
+          (uint8_t)(trie_corruptions[index].value >> (byte * 8));
+    }
+    write_fixture_bytes(filename, bytes, size);
+    word_info_table_load(loaded, "malformed-trie", filename, error_stack);
     assert(error_stack_top(error_stack) == ERROR_STATUS_RW_READ_ERROR);
-    assert_word_plus_floater_uncovered(&wit);
+    assert_no_positional_rows(loaded);
+    assert(loaded->tries[2].node_tile == NULL);
     error_stack_reset(error_stack);
-    fclose_or_die(stream);
+    memcpy(bytes + offset, original, sizeof(original));
   }
-  free(bytes);
-  FILE *stream = tmpfile();
-  assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, &wit, false);
-  fseek_or_die(stream, 0, SEEK_END);
-  const int appended_byte = fputc(0, stream);
-  assert(appended_byte == 0);
-  fseek_or_die(stream, 0, SEEK_SET);
-  word_info_table_read_word_plus_floater(&wit, stream, error_stack);
+  const size_t invalid_byte_offsets[] = {tiles_offset + trie->root,
+                                         last_offset + trie->root};
+  const uint8_t invalid_byte_values[] = {MAX_ALPHABET_SIZE, 2};
+  for (size_t index = 0;
+       index < sizeof(invalid_byte_offsets) / sizeof(invalid_byte_offsets[0]);
+       index++) {
+    const size_t offset = invalid_byte_offsets[index];
+    const uint8_t original = bytes[offset];
+    bytes[offset] = invalid_byte_values[index];
+    write_fixture_bytes(filename, bytes, size);
+    word_info_table_load(loaded, "malformed-node", filename, error_stack);
+    assert(error_stack_top(error_stack) == ERROR_STATUS_RW_READ_ERROR);
+    assert_no_positional_rows(loaded);
+    error_stack_reset(error_stack);
+    bytes[offset] = original;
+  }
+  uint8_t saved_fingerprint[8];
+  memcpy(saved_fingerprint, bytes + 4, sizeof(saved_fingerprint));
+  memset(bytes + 4, 0, sizeof(saved_fingerprint));
+  write_fixture_bytes(filename, bytes, size);
+  word_info_table_load(loaded, "unidentified-positional", filename,
+                       error_stack);
   assert(error_stack_top(error_stack) == ERROR_STATUS_RW_READ_ERROR);
-  assert_word_plus_floater_uncovered(&wit);
+  assert_no_positional_rows(loaded);
   error_stack_reset(error_stack);
-  fclose_or_die(stream);
-
-  // Loading a different dimension or lexicon over an existing valid table
-  // must clear its coverage. A complete zero table replaces every old mask.
-  stream = tmpfile();
-  assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, &wit, false);
-  word_info_table_read_word_plus_floater(&wit, stream, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(wit.word_plus_floater[4] != NULL);
-  fclose_or_die(stream);
-  stream = tmpfile();
-  assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, &wit, true);
-  word_info_table_read_word_plus_floater(&wit, stream, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(wit.word_plus_floater[2] != NULL);
-  assert(wit.word_plus_floater[2][0] == 0);
-  assert(wit.word_plus_floater[4] != NULL);
-  assert(wit.word_plus_floater[4][0] == 0);
-  fclose_or_die(stream);
-  for (int mismatch = 0; mismatch < 2; mismatch++) {
-    stream = tmpfile();
-    assert(stream != NULL);
-    write_word_plus_floater_fixture(stream, &wit, false);
-    word_info_table_read_word_plus_floater(&wit, stream, error_stack);
-    assert(wit.word_plus_floater[2] != NULL);
-    fseek_or_die(stream, mismatch == 0 ? 8 : 24, SEEK_SET);
-    wit_write_uint32_or_die(mismatch == 0 ? BOARD_DIM + 1 : 0, stream,
-                            "foreign identity");
-    fseek_or_die(stream, 0, SEEK_SET);
-    word_info_table_read_word_plus_floater(&wit, stream, error_stack);
-    assert(error_stack_is_empty(error_stack));
-    assert_word_plus_floater_uncovered(&wit);
-    fclose_or_die(stream);
-  }
-  error_stack_destroy(error_stack);
-}
-
-static void write_word_plus_floater_file(const WordInfoTable *wit,
-                                         const char *filename, bool zero_masks,
-                                         ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "wb", error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, wit, zero_masks);
-  fclose_or_die(stream);
-}
-
-static void test_word_plus_floater_lexicon_loading(void) {
-  static const MachineLetter at[] = {A, T};
-  static const MachineLetter cat[] = {C, A, T};
-  static const MachineLetter cats[] = {C, A, T, S};
-  DictionaryWordList *words = dictionary_word_list_create();
-  add_word(words, at, 2);
-  add_word(words, cat, 3);
-  add_word(words, cats, 4);
-  WordInfoTable *original = make_word_info_table_from_words(words);
-  original->kwg_hash = 1234567;
-  ErrorStack *error_stack = error_stack_create();
-  const char *names[] = {"wit_test_wpf_alpha", "wit_test_wpf_beta"};
-  char *wit_paths[2];
-  char *wpf_paths[2];
-  for (int index = 0; index < 2; index++) {
-    wit_paths[index] = data_filepaths_get_writable_filename(
-        DEFAULT_TEST_DATA_PATH, names[index],
-        DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
-    wpf_paths[index] = data_filepaths_get_writable_filename(
-        DEFAULT_TEST_DATA_PATH, names[index],
-        DATA_FILEPATH_TYPE_WORD_PLUS_FLOATER, error_stack);
-    assert(error_stack_is_empty(error_stack));
-    word_info_table_write_to_file(original, wit_paths[index], error_stack);
-    assert(error_stack_is_empty(error_stack));
-    original->kwg_hash++;
-  }
-  // No optional file: ordinary WIT loading is unchanged. Search continues
-  // through the configured data paths to the actual WIT and WPF directory.
-  char *data_paths =
-      get_formatted_string("missing_wpf_data:%s", DEFAULT_TEST_DATA_PATH);
-  WordInfoTable *alpha =
-      word_info_table_create(data_paths, names[0], error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(alpha != NULL);
-  assert_word_plus_floater_uncovered(alpha);
-  write_word_plus_floater_file(alpha, wpf_paths[0], false, error_stack);
-  // The beta filename deliberately contains alpha's identity initially.
-  write_word_plus_floater_file(alpha, wpf_paths[1], false, error_stack);
-  WordInfoTable *beta =
-      word_info_table_create(data_paths, names[1], error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(beta != NULL);
-  assert_word_plus_floater_uncovered(beta);
-  write_word_plus_floater_file(beta, wpf_paths[1], true, error_stack);
-  word_info_table_destroy(alpha);
-  word_info_table_destroy(beta);
-  alpha = word_info_table_create(data_paths, names[0], error_stack);
-  beta = word_info_table_create(data_paths, names[1], error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(alpha != NULL && beta != NULL);
-  assert(alpha->kwg_hash != beta->kwg_hash);
-  assert(alpha->word_plus_floater[2] != NULL);
-  assert(alpha->word_plus_floater[2][0] == 2);
-  assert(beta->word_plus_floater[2] != NULL);
-  assert(beta->word_plus_floater[2][0] == 0);
-  word_info_table_destroy(beta);
-  assert(alpha->word_plus_floater[2][0] == 2);
-  word_info_table_destroy(alpha);
-
-  // A matching malformed optional file reports a load error, not a silently
-  // disabled optimization, and destroys the partially loaded WIT.
-  FILE *stream = fopen_safe(wpf_paths[0], "wb", error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(stream != NULL);
-  const int written_byte = fputc('W', stream);
-  assert(written_byte == 'W');
-  fclose_or_die(stream);
-  alpha = word_info_table_create(data_paths, names[0], error_stack);
-  assert(alpha == NULL);
+  memcpy(bytes + 4, saved_fingerprint, sizeof(saved_fingerprint));
+  bytes[size] = 0;
+  write_fixture_bytes(filename, bytes, size + 1);
+  word_info_table_load(loaded, "trailing", filename, error_stack);
   assert(error_stack_top(error_stack) == ERROR_STATUS_RW_READ_ERROR);
   error_stack_reset(error_stack);
-  for (int index = 0; index < 2; index++) {
-    const int wit_remove_status = remove(wit_paths[index]);
-    const int wpf_remove_status = remove(wpf_paths[index]);
-    assert(wit_remove_status == 0);
-    assert(wpf_remove_status == 0);
-    free(wit_paths[index]);
-    free(wpf_paths[index]);
+
+  // A present all-zero row is still a loaded positional table.
+  for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
+       length++) {
+    const size_t count =
+        wit->tries[length].num_values * word_plus_floater_cells_per_key(length);
+    if (count != 0) {
+      memset(wit->word_plus_floater[length], 0, count * sizeof(uint32_t));
+    }
   }
-  free(data_paths);
-  error_stack_destroy(error_stack);
-  word_info_table_destroy(original);
+  word_info_table_write_to_file(wit, filename, error_stack);
+  word_info_table_load(loaded, "zero", filename, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(loaded->word_plus_floater[2] != NULL);
+  assert(loaded->word_plus_floater[2][0] == 0);
+  word_info_table_destroy(loaded);
+  word_info_table_destroy(wit);
   dictionary_word_list_destroy(words);
+  free(bytes);
+  const int removed = remove(filename);
+  assert(removed == 0);
+  free(filename);
+  error_stack_destroy(error_stack);
 }
 
 void test_word_info_table(void) {
-  test_word_plus_floater_loading();
-  test_word_plus_floater_invalid_files();
-  test_word_plus_floater_lexicon_loading();
+  test_combined_wit_format();
   test_residual_letters_with_repeated_blocks();
   static const MachineLetter at[] = {A, T};
   static const MachineLetter cat[] = {C, A, T};

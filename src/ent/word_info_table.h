@@ -1,20 +1,12 @@
 #ifndef WORD_INFO_TABLE_H
 #define WORD_INFO_TABLE_H
 
-#include "../compat/endian_conv.h"
 #include "../def/board_defs.h"
-#include "../util/fileproxy.h"
+#include "../def/letter_distribution_defs.h"
 #include "../util/io_util.h"
-#include "../util/string_util.h"
-#include "data_filepaths.h"
-#include "letter_distribution.h"
-#include <limits.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 // WordInfoTable (parallel to RackInfoTable): one trie per key-word length. At a
 // length-`len` word's terminal node sits a value row of (BOARD_DIM - len + 1)
@@ -35,7 +27,8 @@
 // returns NULL and the caller permits all letters.
 enum {
   // Bump WIT_VERSION whenever the on-disk layout changes incompatibly.
-  WIT_VERSION = 3,
+  WIT_VERSION = 4,
+  WIT_FLAG_WORD_PLUS_FLOATER = 1,
   WIT_EARLIEST_SUPPORTED_VERSION = 3,
   WPF_MIN_BLOCK_LENGTH = 2,
   WPF_MAX_BLOCK_LENGTH = 4,
@@ -70,38 +63,6 @@ typedef struct WordInfoTable {
 static inline size_t word_plus_floater_cells_per_key(int block_length) {
   const size_t extension = (size_t)(BOARD_DIM - block_length);
   return WPF_ALPHABET_SIZE * extension * (extension + 1);
-}
-
-static inline uint64_t wpf_hash_uint32(uint64_t hash, uint32_t value) {
-  for (int shift = 0; shift < 32; shift += 8) {
-    hash = (hash ^ ((value >> shift) & 255U)) * 1099511628211ULL;
-  }
-  return hash;
-}
-
-static inline uint64_t word_plus_floater_layout_hash(const WordInfoTable *wit) {
-  uint64_t hash = 1469598103934665603ULL;
-  for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
-       length++) {
-    const WitTrie *trie = &wit->tries[length];
-    hash = wpf_hash_uint32(hash, (uint32_t)length);
-    hash = wpf_hash_uint32(hash, trie->num_nodes);
-    hash = wpf_hash_uint32(hash, trie->root);
-    hash = wpf_hash_uint32(hash, trie->num_values);
-    for (uint32_t index = 0; index < trie->num_nodes; index++) {
-      hash = (hash ^ trie->node_tile[index]) * 1099511628211ULL;
-    }
-    for (uint32_t index = 0; index < trie->num_nodes; index++) {
-      hash = (hash ^ trie->node_last[index]) * 1099511628211ULL;
-    }
-    for (uint32_t index = 0; index < trie->num_nodes; index++) {
-      hash = wpf_hash_uint32(hash, trie->node_child[index]);
-    }
-    for (uint32_t index = 0; index < trie->num_nodes; index++) {
-      hash = wpf_hash_uint32(hash, (uint32_t)trie->node_value[index]);
-    }
-  }
-  return hash;
 }
 
 // Number of value slots for a key of length `len`: total word lengths run
@@ -174,136 +135,7 @@ static inline void word_info_table_destroy(WordInfoTable *wit) {
   free(wit);
 }
 
-// ============================================================================
-// File I/O
-// ============================================================================
-//
-// On-disk layout (all integers little-endian):
-//   1 byte:  version (WIT_VERSION)
-//   1 byte:  board_dim (matches BOARD_DIM)
-//   2 bytes: zero padding (keeps the following u32s aligned)
-//   8 bytes: kwg_hash (uint64, 0 if unknown)
-//   For each key length len = 1..BOARD_DIM (in order), one trie:
-//     4 bytes: num_nodes
-//     4 bytes: root
-//     4 bytes: num_values
-//     num_nodes bytes:      node_tile (uint8)
-//     num_nodes bytes:      node_last (uint8)
-//     num_nodes * 4 bytes:  node_child (uint32)
-//     num_nodes * 4 bytes:  node_value (int32)
-//     num_values * stride * 4 bytes: values (uint32), stride = BOARD_DIM-len+1
-
-static inline void wit_write_uint32_or_die(uint32_t value, FILE *stream,
-                                           const char *description) {
-  const uint32_t le = htole32(value);
-  fwrite_or_die(&le, sizeof(le), 1, stream, description);
-}
-
-static inline void wit_write_uint32s_or_die(const uint32_t *values, size_t n,
-                                            FILE *stream,
-                                            const char *description) {
-#if IS_LITTLE_ENDIAN
-  fwrite_or_die(values, sizeof(uint32_t), n, stream, description);
-#else
-  for (size_t i = 0; i < n; i++) {
-    const uint32_t le = htole32(values[i]);
-    fwrite_or_die(&le, sizeof(uint32_t), 1, stream, description);
-  }
-#endif
-}
-
-static inline void wit_write_trie_or_die(const WitTrie *trie, int stride,
-                                         FILE *stream) {
-  wit_write_uint32_or_die(trie->num_nodes, stream, "wit num nodes");
-  wit_write_uint32_or_die(trie->root, stream, "wit root");
-  wit_write_uint32_or_die(trie->num_values, stream, "wit num values");
-  fwrite_or_die(trie->node_tile, sizeof(uint8_t), trie->num_nodes, stream,
-                "wit node tile");
-  fwrite_or_die(trie->node_last, sizeof(uint8_t), trie->num_nodes, stream,
-                "wit node last");
-  wit_write_uint32s_or_die(trie->node_child, trie->num_nodes, stream,
-                           "wit node child");
-  wit_write_uint32s_or_die((const uint32_t *)trie->node_value, trie->num_nodes,
-                           stream, "wit node value");
-  wit_write_uint32s_or_die(trie->values,
-                           (size_t)trie->num_values * (size_t)stride, stream,
-                           "wit values");
-}
-
-static inline void word_info_table_write_to_file(const WordInfoTable *wit,
-                                                 const char *filename,
-                                                 ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "wb", error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  const uint8_t version = wit->version;
-  fwrite_or_die(&version, sizeof(version), 1, stream, "wit version");
-  const uint8_t board_dim = (uint8_t)BOARD_DIM;
-  fwrite_or_die(&board_dim, sizeof(board_dim), 1, stream, "wit board dim");
-  const uint8_t padding[2] = {0, 0};
-  fwrite_or_die(padding, sizeof(uint8_t), 2, stream, "wit header padding");
-  const uint64_t kwg_hash_le = htole64(wit->kwg_hash);
-  fwrite_or_die(&kwg_hash_le, sizeof(kwg_hash_le), 1, stream, "wit kwg hash");
-  for (int len = 1; len <= BOARD_DIM; len++) {
-    wit_write_trie_or_die(&wit->tries[len], wit_stride_for_len(len), stream);
-  }
-  fclose_or_die(stream);
-}
-
-static inline void wit_read_uint32_or_die(uint32_t *out, FILE *stream) {
-  if (fread(out, sizeof(uint32_t), 1, stream) != 1) {
-    log_fatal("could not read uint32 from wit stream");
-  }
-  *out = le32toh(*out);
-}
-
-static inline void wit_read_uint32s_or_die(uint32_t *out, size_t n,
-                                           FILE *stream) {
-  if (n > 0 && fread(out, sizeof(uint32_t), n, stream) != n) {
-    log_fatal("could not read uint32s from wit stream");
-  }
-#if !IS_LITTLE_ENDIAN
-  for (size_t i = 0; i < n; i++) {
-    out[i] = le32toh(out[i]);
-  }
-#endif
-}
-
-static inline void wit_read_trie_or_die(WitTrie *trie, int stride,
-                                        FILE *stream) {
-  wit_read_uint32_or_die(&trie->num_nodes, stream);
-  wit_read_uint32_or_die(&trie->root, stream);
-  wit_read_uint32_or_die(&trie->num_values, stream);
-  trie->node_tile = (uint8_t *)malloc_or_die(trie->num_nodes * sizeof(uint8_t));
-  if (trie->num_nodes > 0 &&
-      fread(trie->node_tile, sizeof(uint8_t), trie->num_nodes, stream) !=
-          trie->num_nodes) {
-    log_fatal("could not read wit node tile");
-  }
-  trie->node_last = (uint8_t *)malloc_or_die(trie->num_nodes * sizeof(uint8_t));
-  if (trie->num_nodes > 0 &&
-      fread(trie->node_last, sizeof(uint8_t), trie->num_nodes, stream) !=
-          trie->num_nodes) {
-    log_fatal("could not read wit node last");
-  }
-  trie->node_child =
-      (uint32_t *)malloc_or_die(trie->num_nodes * sizeof(uint32_t));
-  wit_read_uint32s_or_die(trie->node_child, trie->num_nodes, stream);
-  trie->node_value =
-      (int32_t *)malloc_or_die(trie->num_nodes * sizeof(int32_t));
-  wit_read_uint32s_or_die((uint32_t *)trie->node_value, trie->num_nodes,
-                          stream);
-  const size_t num_value_words = (size_t)trie->num_values * (size_t)stride;
-  trie->values =
-      num_value_words > 0
-          ? (uint32_t *)malloc_or_die(num_value_words * sizeof(uint32_t))
-          : NULL;
-  wit_read_uint32s_or_die(trie->values, num_value_words, stream);
-}
-
-// M1 stores every 2..4-tile base directly in WIT value-ID order. An absent or
-// foreign-lexicon table permits all letters; a loaded zero row is exact.
+// Positional tables are optional for legacy WITs and unsupported alphabets.
 static inline void word_info_table_clear_word_plus_floater(WordInfoTable *wit) {
   for (int length = 0; length <= BOARD_DIM; length++) {
     free(wit->word_plus_floater[length]);
@@ -311,195 +143,15 @@ static inline void word_info_table_clear_word_plus_floater(WordInfoTable *wit) {
   }
 }
 
-static inline bool wpf_read_uint32s(uint32_t *values, size_t count,
-                                    FILE *stream) {
-  if (count != 0 && fread(values, sizeof(uint32_t), count, stream) != count) {
-    return false;
-  }
-#if !IS_LITTLE_ENDIAN
-  for (size_t index = 0; index < count; index++) {
-    values[index] = le32toh(values[index]);
-  }
-#endif
-  return true;
-}
-
-static inline void
-word_info_table_read_word_plus_floater(WordInfoTable *wit, FILE *stream,
-                                       ErrorStack *error_stack) {
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  word_info_table_clear_word_plus_floater(wit);
-  const char *error_message = "truncated WordPlusFloater header";
-  const unsigned char dense_magic[8] = {'W', 'P', 'F', 'M', '1', 'L', 'E', 0};
-  unsigned char magic[8];
-  if (fread(magic, 1, sizeof(magic), stream) != sizeof(magic)) {
-    goto invalid;
-  }
-  if (memcmp(magic, dense_magic, sizeof(magic)) != 0) {
-    error_message = "invalid WordPlusFloater header";
-    goto invalid;
-  }
-  uint32_t header[4];
-  uint64_t hash;
-  uint64_t layout_hash;
-  if (!wpf_read_uint32s(header, 4, stream) ||
-      fread(&hash, sizeof(hash), 1, stream) != 1 ||
-      fread(&layout_hash, sizeof(layout_hash), 1, stream) != 1) {
-    goto invalid;
-  }
-  hash = le64toh(hash);
-  layout_hash = le64toh(layout_hash);
-  if (header[0] != BOARD_DIM || hash != wit->kwg_hash || hash == 0) {
-    return;
-  }
-  const uint32_t minimum_length = header[1];
-  const uint32_t maximum_length = header[2];
-  if (minimum_length != WPF_MIN_BLOCK_LENGTH ||
-      maximum_length != WPF_MAX_BLOCK_LENGTH || header[3] != 0) {
-    error_message = "unsupported WordPlusFloater coverage";
-    goto invalid;
-  }
-  if (layout_hash != word_plus_floater_layout_hash(wit)) {
-    error_message = "WordPlusFloater key IDs do not match this WIT";
-    goto invalid;
-  }
-  for (uint32_t length = minimum_length; length <= maximum_length; length++) {
-    uint32_t section[4];
-    error_message = "truncated WordPlusFloater section";
-    if (!wpf_read_uint32s(section, 4, stream)) {
-      goto invalid;
-    }
-    const uint32_t num_values = section[1];
-    const uint32_t cells_per_key = section[2];
-    if (section[0] != length || num_values != wit->tries[length].num_values ||
-        cells_per_key != word_plus_floater_cells_per_key((int)length) ||
-        section[3] != 0) {
-      error_message = "WordPlusFloater section does not match WIT key layout";
-      goto invalid;
-    }
-    if (num_values > INT32_MAX || num_values > SIZE_MAX / cells_per_key ||
-        (size_t)num_values * cells_per_key > SIZE_MAX / sizeof(uint32_t)) {
-      error_message = "WordPlusFloater allocation would overflow";
-      goto invalid;
-    }
-    const size_t count = (size_t)num_values * cells_per_key;
-    wit->word_plus_floater[length] =
-        count != 0 ? malloc_or_die(count * sizeof(uint32_t)) : NULL;
-    error_message = "truncated WordPlusFloater masks";
-    if (!wpf_read_uint32s(wit->word_plus_floater[length], count, stream)) {
-      goto invalid;
-    }
-  }
-  if (fgetc(stream) != EOF || ferror(stream)) {
-    error_message = "unexpected data after WordPlusFloater table";
-    goto invalid;
-  }
-  return;
-
-invalid:
-  word_info_table_clear_word_plus_floater(wit);
-  error_stack_push(error_stack, ERROR_STATUS_RW_READ_ERROR,
-                   string_duplicate(error_message));
-}
-
-static inline void
-word_info_table_load_word_plus_floater(WordInfoTable *wit,
-                                       const char *data_paths, const char *name,
-                                       ErrorStack *error_stack) {
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  word_info_table_clear_word_plus_floater(wit);
-  char *filename = data_filepaths_get_readable_filename(
-      data_paths, name, DATA_FILEPATH_TYPE_WORD_PLUS_FLOATER, error_stack);
-  if (filename == NULL) {
-    if (error_stack_top(error_stack) == ERROR_STATUS_FILEPATH_FILE_NOT_FOUND) {
-      error_stack_reset(error_stack);
-    }
-    return;
-  }
-  FILE *stream = stream_from_filename(filename, error_stack);
-  if (error_stack_is_empty(error_stack)) {
-    word_info_table_read_word_plus_floater(wit, stream, error_stack);
-    fclose_or_die(stream);
-  }
-  free(filename);
-}
-
-static inline void word_info_table_load(WordInfoTable *wit, const char *name,
-                                        const char *filename,
-                                        ErrorStack *error_stack) {
-  FILE *stream = stream_from_filename(filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  uint8_t version;
-  if (fread(&version, sizeof(version), 1, stream) != 1) {
-    log_fatal("could not read wit version");
-  }
-  if (version < WIT_EARLIEST_SUPPORTED_VERSION) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
-        get_formatted_string(
-            "detected wit version %d but only %d or greater is supported: %s\n",
-            version, WIT_EARLIEST_SUPPORTED_VERSION, filename));
-    fclose_or_die(stream);
-    return;
-  }
-  wit->version = version;
-
-  uint8_t board_dim;
-  if (fread(&board_dim, sizeof(board_dim), 1, stream) != 1) {
-    log_fatal("could not read wit board dim");
-  }
-  if (board_dim != (uint8_t)BOARD_DIM) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
-        get_formatted_string(
-            "wit board dim %d does not match build board dim %d: %s\n",
-            board_dim, BOARD_DIM, filename));
-    fclose_or_die(stream);
-    return;
-  }
-  uint8_t padding[2];
-  if (fread(padding, sizeof(uint8_t), 2, stream) != 2) {
-    log_fatal("could not read wit header padding");
-  }
-  uint64_t kwg_hash_le;
-  if (fread(&kwg_hash_le, sizeof(kwg_hash_le), 1, stream) != 1) {
-    log_fatal("could not read wit kwg hash");
-  }
-  wit->kwg_hash = le64toh(kwg_hash_le);
-
-  for (int len = 1; len <= BOARD_DIM; len++) {
-    wit_read_trie_or_die(&wit->tries[len], wit_stride_for_len(len), stream);
-  }
-  fclose_or_die(stream);
-  wit->name = string_duplicate(name);
-}
-
-static inline WordInfoTable *word_info_table_create(const char *data_paths,
-                                                    const char *wit_name,
-                                                    ErrorStack *error_stack) {
-  char *wit_filename = data_filepaths_get_readable_filename(
-      data_paths, wit_name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
-  WordInfoTable *wit = NULL;
-  if (error_stack_is_empty(error_stack)) {
-    wit = (WordInfoTable *)calloc_or_die(1, sizeof(WordInfoTable));
-    word_info_table_load(wit, wit_name, wit_filename, error_stack);
-    if (error_stack_is_empty(error_stack)) {
-      word_info_table_load_word_plus_floater(wit, data_paths, wit_name,
-                                             error_stack);
-    }
-  }
-  free(wit_filename);
-  if (!error_stack_is_empty(error_stack)) {
-    word_info_table_destroy(wit);
-    wit = NULL;
-  }
-  return wit;
-}
+// Version 4 keeps the version-3 trie representation and appends optional
+// positional masks. Both use one KWG identity and the same terminal IDs.
+void word_info_table_write_to_file(const WordInfoTable *wit,
+                                   const char *filename,
+                                   ErrorStack *error_stack);
+void word_info_table_load(WordInfoTable *wit, const char *name,
+                          const char *filename, ErrorStack *error_stack);
+WordInfoTable *word_info_table_create(const char *data_paths,
+                                      const char *wit_name,
+                                      ErrorStack *error_stack);
 
 #endif

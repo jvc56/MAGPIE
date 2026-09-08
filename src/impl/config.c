@@ -1219,13 +1219,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_CONVERT:
       usages[0] = "<type> <name_without_extension> [<letter_distribution>]";
       examples[0] = "klv2csv CSW21";
-      examples[1] = "kwg2wpf CSW24";
+      examples[1] = "kwg2wit CSW24";
       examples[2] = "text2wordmap NWL20";
       text =
           "Runs the convert command for the specified type with the given "
           "input and output name, using different file extensions. The letter "
-          "distribution defaults to the lexicon's distribution. kwg2wpf reads "
-          "the KWG and matching WIT and covers every 2..4-tile base word.";
+          "distribution defaults to the lexicon's distribution. kwg2wit reads "
+          "the KWG and creates ordinary and positional word-info tables.";
       break;
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "

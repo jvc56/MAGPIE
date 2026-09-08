@@ -7,7 +7,6 @@
 #include "../src/ent/dictionary_word.h"
 #include "../src/ent/kwg.h"
 #include "../src/ent/word_info_table.h"
-#include "../src/ent/word_plus_floater.h"
 #include "../src/impl/kwg_maker.h"
 #include "../src/impl/word_info_table_maker.h"
 #include "../src/impl/word_plus_floater_maker.h"
@@ -20,6 +19,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 enum {
   BAD_TRIE_ROOT,
@@ -159,7 +160,11 @@ static void assert_tables_equal(const WordInfoTable *first,
       assert(second->word_plus_floater[length] == NULL);
       continue;
     }
-    assert(first->word_plus_floater[length] != NULL);
+    assert((first->word_plus_floater[length] == NULL) ==
+           (second->word_plus_floater[length] == NULL));
+    if (first->word_plus_floater[length] == NULL) {
+      continue;
+    }
     assert(second->word_plus_floater[length] != NULL);
     assert(memcmp(first->word_plus_floater[length],
                   second->word_plus_floater[length],
@@ -190,33 +195,19 @@ static void reverse_value_ids(WordInfoTable *wit) {
   }
 }
 
-static void assert_roundtrip(const KWG *kwg, const WordInfoTable *original,
-                             bool reversed, ErrorStack *error_stack) {
+static void assert_roundtrip(const WordInfoTable *original,
+                             ErrorStack *error_stack) {
   char *filename = data_filepaths_get_writable_filename(
       DEFAULT_TEST_DATA_PATH, "wpf_maker_roundtrip",
-      DATA_FILEPATH_TYPE_WORD_PLUS_FLOATER, error_stack);
+      DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
   assert(error_stack_is_empty(error_stack));
-  word_plus_floater_write_to_file(original, filename, error_stack);
+  word_info_table_write_to_file(original, filename, error_stack);
   assert(error_stack_is_empty(error_stack));
-  WordInfoTable *loaded = make_word_info_table_from_kwg(kwg);
-  if (reversed) {
-    reverse_value_ids(loaded);
-  }
-  FILE *stream = fopen_safe(filename, "rb", error_stack);
+  WordInfoTable *loaded = calloc_or_die(1, sizeof(WordInfoTable));
+  word_info_table_load(loaded, "wpf_maker_roundtrip", filename, error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert(stream != NULL);
-  const unsigned char expected_magic[8] = {'W', 'P', 'F', 'M',
-                                           '1', 'L', 'E', 0};
-  unsigned char actual_magic[8];
-  const size_t magic_read =
-      fread(actual_magic, sizeof(actual_magic), 1, stream);
-  assert(magic_read == 1);
-  assert(memcmp(actual_magic, expected_magic, sizeof(actual_magic)) == 0);
-  fseek_or_die(stream, 0, SEEK_SET);
-  word_info_table_read_word_plus_floater(loaded, stream, error_stack);
-  assert(error_stack_is_empty(error_stack));
+  assert(loaded->version == WIT_VERSION);
   assert_tables_equal(original, loaded);
-  fclose_or_die(stream);
   const int remove_status = remove(filename);
   assert(remove_status == 0);
   free(filename);
@@ -232,7 +223,7 @@ static void test_full_tables(void) {
   make_word_plus_floater_from_kwg(kwg, wit, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert_table_matches_reference(wit, words);
-  assert_roundtrip(kwg, wit, false, error_stack);
+  assert_roundtrip(wit, error_stack);
 
   // Value IDs need not be in alphabetic order. Rebuilding also replaces an
   // existing positional table, and ZZ remains covered with an all-zero row.
@@ -240,7 +231,7 @@ static void test_full_tables(void) {
   make_word_plus_floater_from_kwg(kwg, wit, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert_table_matches_reference(wit, words);
-  assert_roundtrip(kwg, wit, true, error_stack);
+  assert_roundtrip(wit, error_stack);
 
   word_info_table_destroy(wit);
   dictionary_word_list_destroy(words);
@@ -263,7 +254,7 @@ static void test_no_covered_base_lengths(void) {
     assert(wit->tries[length].num_values == 0);
     assert(wit->word_plus_floater[length] == NULL);
   }
-  assert_roundtrip(kwg, wit, false, error_stack);
+  assert_roundtrip(wit, error_stack);
   word_info_table_destroy(wit);
   kwg_destroy(kwg);
   dictionary_word_list_destroy(words);
@@ -298,7 +289,7 @@ static void test_invalid_inputs(void) {
   wit->kwg_hash = correct_hash;
 
   // A valid KWG can contain machine letters outside the supported WPF
-  // alphabet. Reject it before attempting any table bit operations.
+  // alphabet. Leave the positional section absent before any bit operations.
   DictionaryWordList *unsupported_words = dictionary_word_list_create();
   static const MachineLetter unsupported[] = {1, 27};
   dictionary_word_list_add_word(unsupported_words, unsupported, 2);
@@ -308,8 +299,9 @@ static void test_invalid_inputs(void) {
       make_word_info_table_from_kwg(unsupported_kwg);
   make_word_plus_floater_from_kwg(unsupported_kwg, unsupported_wit,
                                   error_stack);
-  assert(error_stack_top(error_stack) == ERROR_STATUS_CONVERT_INPUT_FILE_ERROR);
+  assert(error_stack_is_empty(error_stack));
   assert_uncovered(unsupported_wit);
+  assert_roundtrip(unsupported_wit, error_stack);
   error_stack_reset(error_stack);
 
   word_info_table_destroy(unsupported_wit);
@@ -420,34 +412,39 @@ static void test_writer_preserves_existing_output(void) {
   assert(error_stack_is_empty(error_stack));
   char *filename = data_filepaths_get_writable_filename(
       DEFAULT_TEST_DATA_PATH, "wpf_maker_preserve",
-      DATA_FILEPATH_TYPE_WORD_PLUS_FLOATER, error_stack);
+      DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
   assert(error_stack_is_empty(error_stack));
-  word_plus_floater_write_to_file(wit, filename, error_stack);
+  word_info_table_write_to_file(wit, filename, error_stack);
   assert(error_stack_is_empty(error_stack));
 
   uint32_t *const original_masks = wit->word_plus_floater[2];
   wit->word_plus_floater[2] = NULL;
-  word_plus_floater_write_to_file(wit, filename, error_stack);
+  word_info_table_write_to_file(wit, filename, error_stack);
   assert(error_stack_top(error_stack) == ERROR_STATUS_RW_WRITE_ERROR);
   error_stack_reset(error_stack);
   wit->word_plus_floater[2] = original_masks;
   const uint64_t original_hash = wit->kwg_hash;
   wit->kwg_hash = 0;
-  word_plus_floater_write_to_file(wit, filename, error_stack);
+  word_info_table_write_to_file(wit, filename, error_stack);
   assert(error_stack_top(error_stack) == ERROR_STATUS_RW_WRITE_ERROR);
   error_stack_reset(error_stack);
   wit->kwg_hash = original_hash;
 
-  WordInfoTable *loaded = make_word_info_table_from_kwg(kwg);
-  FILE *stream = fopen_safe(filename, "rb", error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(stream != NULL);
-  word_info_table_read_word_plus_floater(loaded, stream, error_stack);
+  WordInfoTable *loaded = calloc_or_die(1, sizeof(WordInfoTable));
+  word_info_table_load(loaded, "wpf_maker_preserve", filename, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert_tables_equal(wit, loaded);
-  fclose_or_die(stream);
   const int remove_status = remove(filename);
   assert(remove_status == 0);
+  // An existing directory cannot be replaced by the atomic rename. The
+  // writer must report the failure and leave that destination intact.
+  const int made_directory = mkdir(filename, 0700);
+  assert(made_directory == 0);
+  word_info_table_write_to_file(wit, filename, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_RW_WRITE_ERROR);
+  error_stack_reset(error_stack);
+  const int removed_directory = rmdir(filename);
+  assert(removed_directory == 0);
   free(filename);
   word_info_table_destroy(loaded);
   word_info_table_destroy(wit);

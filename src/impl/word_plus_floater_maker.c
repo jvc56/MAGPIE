@@ -227,6 +227,20 @@ void make_word_plus_floater_from_kwg(const KWG *kwg, WordInfoTable *wit,
   }
   DictionaryWordList *words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
+  // Positional masks currently encode machine letters 1..26. Other
+  // alphabets retain ordinary WIT masks with no positional section.
+  for (int word_idx = 0; word_idx < dictionary_word_list_get_count(words);
+       word_idx++) {
+    const DictionaryWord *word = dictionary_word_list_get_word(words, word_idx);
+    const MachineLetter *letters = dictionary_word_get_word(word);
+    for (int position = 0; position < dictionary_word_get_length(word);
+         position++) {
+      if (letters[position] > WPF_ALPHABET_SIZE) {
+        dictionary_word_list_destroy(words);
+        return;
+      }
+    }
+  }
   if (!wpf_words_match_wit(words, wit)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
