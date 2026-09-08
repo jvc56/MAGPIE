@@ -1,0 +1,18 @@
+{
+  "claim_token": "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c",
+  "reason": "missing_data",
+  "missing": [
+    {
+      "role": "kwg",
+      "name": "CSW24",
+      "expected": "3e74af981fdd974e107283f686da0fe4b7ec84ad0d825d444330c338c33b91ba",
+      "actual": null
+    },
+    {
+      "role": "winpct",
+      "name": "winpct",
+      "expected": "51b651f149760a2b3385e8c2ef979032299a1e35ccb23170b4f492126e363a81",
+      "actual": "4f2a1c3e9b7d05a8c6e4f2b1d3a509c7e8b6d4f2a0c8e6b4d2f0a8c6e4b2d0f8"
+    }
+  ]
+}

@@ -53,6 +53,7 @@
 #include "../str/rack_string.h"
 #include "../str/sim_string.h"
 #include "../str/validated_moves_string.h"
+#include "../util/hash.h"
 #include "../util/io_util.h"
 #include "../util/json.h"
 #include "../util/string_util.h"
@@ -6955,19 +6956,70 @@ static bool contribute_wants_wordmap(const JsonValue *settings) {
 // the size of everything else MAGPIE ships -- so the client derives them
 // from the .kwg it already has. The whole chain costs about a second per
 // lexicon, once.
+// The sidecar beside a wordmap, naming the .kwg digest it was built from.
+//
+// A wordmap is derived from a lexicon, and nothing else notices when the
+// lexicon changes underneath it: download_data.sh overwrites the .kwg in place
+// and leaves the old .wmp sitting next to it, which passes every check --  the
+// .kwg genuinely is the right lexicon, and the .wmp is not covered by any
+// digest because the server never pinned a file the contributor generated
+// locally. The worker then plays with a wordmap describing a lexicon that no
+// longer exists on its disk.
+static char *wordmap_source_path(const char *wmp_path) {
+  return get_formatted_string("%s.src", wmp_path);
+}
+
+// True when `wmp_path` was built from the .kwg currently on disk. A wordmap
+// with no sidecar at all -- every wordmap a contributor already has -- is
+// stale by this rule, and is rebuilt once. That is correct: nothing recorded
+// what it was built from.
+static bool wordmap_is_current(const char *wmp_path, const char *kwg_digest) {
+  if (!kwg_digest) {
+    return true;
+  }
+  char *src_path = wordmap_source_path(wmp_path);
+  ErrorStack *errors = error_stack_create();
+  char *recorded = get_string_from_file(src_path, errors);
+  const bool current =
+      error_stack_is_empty(errors) && recorded && has_prefix(kwg_digest, recorded);
+  free(recorded);
+  error_stack_destroy(errors);
+  free(src_path);
+  return current;
+}
+
 static void config_contribute_ensure_wordmap(Config *config,
                                              const char *lexicon,
                                              ErrorStack *error_stack) {
   const char *data_paths = config_get_data_paths(config);
 
+  // The digest of the lexicon the wordmap must match. Missing is not an error
+  // here: without a .kwg there is nothing to build from either, and the
+  // conversion below reports that far better than this could.
+  char *kwg_path = data_filepaths_get_readable_filename(
+      data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, error_stack);
+  char *kwg_digest = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    kwg_digest = sha256_hash_file(kwg_path, error_stack);
+  }
+  error_stack_reset(error_stack);
+  free(kwg_path);
+
   char *wmp_path = data_filepaths_get_readable_filename(
       data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
   if (error_stack_is_empty(error_stack)) {
+    if (wordmap_is_current(wmp_path, kwg_digest)) {
+      free(wmp_path);
+      free(kwg_digest);
+      return;
+    }
+    // Built from a lexicon that is no longer here. Rebuilding costs about a
+    // second; playing with it costs a corrupt contribution nobody would catch.
     free(wmp_path);
-    return;
+  } else {
+    // Absent, which is the normal first-run case rather than a failure.
+    error_stack_reset(error_stack);
   }
-  // Absent, which is the normal first-run case rather than a failure.
-  error_stack_reset(error_stack);
 
   char *txt_path = data_filepaths_get_readable_filename(
       data_paths, lexicon, DATA_FILEPATH_TYPE_LEXICON, error_stack);
@@ -7006,6 +7058,7 @@ static void config_contribute_ensure_wordmap(Config *config,
       data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_reset(error_stack);
+    free(kwg_digest);
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
         get_formatted_string(
@@ -7014,6 +7067,21 @@ static void config_contribute_ensure_wordmap(Config *config,
             lexicon));
     return;
   }
+
+  // Written only now, *after* the wordmap itself is in place: a sidecar
+  // written first and then interrupted claims a wordmap that does not exist,
+  // and the next run would trust it.
+  if (kwg_digest) {
+    char *src_path = wordmap_source_path(wmp_path);
+    ErrorStack *sidecar_errors = error_stack_create();
+    write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
+    // A missing sidecar only costs one rebuild next time, which is not worth
+    // failing a task over.
+    error_stack_reset(sidecar_errors);
+    error_stack_destroy(sidecar_errors);
+    free(src_path);
+  }
+  free(kwg_digest);
   free(wmp_path);
 }
 
@@ -7917,11 +7985,18 @@ void impl_contribute(Config *config, const char *settings_path,
     const JsonValue *request = NULL;
     const contribute_claim_outcome_t outcome = contribute_claim_task(
         &state, settings_path, config_get_magpie_version(),
-        config_get_thread_control(config), &job_type, &request, error_stack);
-    if (outcome == CONTRIBUTE_CLAIM_FAILED) {
+        config_get_data_paths(config), config_get_thread_control(config),
+        &job_type, &request, error_stack);
+    if (outcome == CONTRIBUTE_CLAIM_FAILED ||
+        outcome == CONTRIBUTE_CLAIM_SHUTDOWN) {
+      // A shutdown has already printed why; a failure carries its reason on
+      // the error stack.
       break;
     }
-    if (outcome == CONTRIBUTE_CLAIM_NO_WORK) {
+    if (outcome == CONTRIBUTE_CLAIM_NO_WORK ||
+        outcome == CONTRIBUTE_CLAIM_DECLINED) {
+      // Declining is an ordinary outcome: the job is remembered as
+      // unsupported and the next claim lands somewhere else.
       continue;
     }
 
@@ -7942,18 +8017,21 @@ void impl_contribute(Config *config, const char *settings_path,
                                                 error_stack);
     } else {
       // A job type this build does not recognise means the server is newer
-      // than this MAGPIE, which is the same situation as a version mismatch.
-      fatal = true;
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE,
-          get_formatted_string(
-              "this MAGPIE does not know the job type '%s'. Update MAGPIE to "
-              "continue contributing.",
-              job_type));
+      // than this MAGPIE for *this job* -- not for every job. A client that
+      // predates the leave_generation executor can still play games all day,
+      // so decline and carry on rather than ending the session. Exit is
+      // reserved for the case where nothing at all is doable, which the server
+      // detects and reports as a shutdown.
+      contribute_decline_task(state, config_get_thread_control(config),
+                              "unknown_job_type", error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        break;
+      }
+      continue;
     }
-    // execute_leave_gen and the unknown-job-type branch both push
-    // ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE; either way this run cannot
-    // make progress on this class of job, so treat it as fatal.
+    // execute_leave_gen pushes ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE when
+    // this build cannot run the requested generation; that is a property of
+    // the build rather than of one task, so it stops the run.
     fatal = fatal || error_stack_top(error_stack) ==
                          ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE;
 

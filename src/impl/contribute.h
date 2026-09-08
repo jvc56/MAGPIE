@@ -19,11 +19,33 @@
 
 typedef struct ContributeState ContributeState;
 
+// Identity of a file's contents as far as the filesystem can report it: path,
+// size, mtime, inode and ctime. Digests are cached under this key so a 15 MB
+// lexicon is hashed once per run rather than once per task.
+//
+// Size and mtime alone are not enough -- a file replaced with different bytes
+// of the same size inside one mtime tick keys identically, and extracting an
+// archive routinely sets mtimes rather than letting them fall to now. Exposed
+// for tests, which is the only way that collision gets checked.
+//
+// Returns NULL if the file cannot be stat'ed; the caller frees.
+char *contribute_digest_cache_key(const char *path);
+
 typedef enum {
   CONTRIBUTE_CLAIM_GOT_TASK,
   CONTRIBUTE_CLAIM_NO_WORK,
-  // error_stack has the reason (a request failure, a bad HTTP status, or this
-  // build being too old for the claimed job); the caller should stop.
+  // A task was claimed and handed straight back: its data does not match what
+  // the job pins, or it needs a newer MAGPIE. The job is remembered as
+  // unsupported and not offered again this run, so the caller should simply
+  // claim again -- this is an ordinary outcome, not a failure.
+  CONTRIBUTE_CLAIM_DECLINED,
+  // The server says nothing it has is doable until this worker changes
+  // something -- its data, its MAGPIE, or both. The reason and the
+  // accumulated gaps have already been printed; the caller should stop, and
+  // contribute_should_stop is true from here on.
+  CONTRIBUTE_CLAIM_SHUTDOWN,
+  // error_stack has the reason (a request failure or a bad HTTP status); the
+  // caller should stop.
   CONTRIBUTE_CLAIM_FAILED,
 } contribute_claim_outcome_t;
 
@@ -33,9 +55,17 @@ typedef enum {
 // same *state into every later call this run, and free it with
 // contribute_state_destroy once contribute_should_stop(state) is true.
 //
-// this_magpie_version is this build's own version string, compared against
-// the claimed job's minimum ("MAGPIE too old" is reported as
-// CONTRIBUTE_CLAIM_FAILED, same as any other claim failure).
+// this_magpie_version is this build's own version string. It is sent with
+// every claim so the server can filter jobs this build cannot run, and
+// checked again against the claimed job's minimum as a cross-check -- a job
+// above this build's version is declined, not fatal, because other jobs may
+// still be within reach.
+//
+// data_paths is the client's own data search list. Every file the claimed
+// task will load is resolved through it and hashed, and a task whose files do
+// not match the digests the job pins is declined rather than run: results
+// computed from different bytes are worse than no results, because nothing
+// downstream would notice.
 //
 // On CONTRIBUTE_CLAIM_GOT_TASK: *out_job_type and *out_task_request are
 // borrowed views, valid only until the matching contribute_submit_result
@@ -49,10 +79,24 @@ typedef enum {
 // destroyed by this module.
 contribute_claim_outcome_t
 contribute_claim_task(ContributeState **state, const char *settings_path,
-                      const char *this_magpie_version,
+                      const char *this_magpie_version, const char *data_paths,
                       ThreadControl *thread_control, const char **out_job_type,
                       const JsonValue **out_task_request,
                       ErrorStack *error_stack);
+
+// Hands a claimed task back without running it, for a reason the caller
+// discovered after the claim -- currently only a job type this build does not
+// know. Stops the heartbeat, releases the claim immediately rather than
+// letting it lapse on the timeout, and remembers the job as unsupported so it
+// is not claimed again this run.
+//
+// An unrecognised job type is not fatal: a client that predates the
+// leave_generation executor can still play games all day. Exit is reserved
+// for the case where nothing at all is doable, which the server detects and
+// reports as a shutdown.
+void contribute_decline_task(ContributeState *state,
+                             ThreadControl *thread_control, const char *reason,
+                             ErrorStack *error_stack);
 
 // Submits the result for the task claimed by the last contribute_claim_task
 // call and stops its heartbeat. Exactly one of result_json/error_message

@@ -1,0 +1,45 @@
+{
+  "claim_token": "b1d0b2b6-0f8f-4a4b-9a5f-6f4a2f2a1c33",
+  "job_id": "9c2f1a48-5f3b-4c2a-8a7d-1b0e3f7c9d20",
+  "min_magpie_version": "0.0.1",
+  "expected_data": {
+    "algorithm": "sha256",
+    "files": [
+      {
+        "role": "kwg",
+        "name": "NWL23",
+        "path": "lexica/NWL23.kwg",
+        "sha256": "3e74af981fdd974e107283f686da0fe4b7ec84ad0d825d444330c338c33b91ba",
+        "bytes": 4719596,
+        "tarball_date": "20251004"
+      },
+      {
+        "role": "letterdist",
+        "name": "english",
+        "path": "letterdistributions/english.csv",
+        "sha256": "e698ce0b93e025daccd3390107a914d74581c4603de38df65131768b1c6f9102",
+        "bytes": 489,
+        "tarball_date": "20251004"
+      },
+      {
+        "role": "layout",
+        "name": "standard15",
+        "path": "layouts/standard15.txt",
+        "sha256": "c1a81c35a7730f64abcca23c8c56cc872e892a68f95289a4189b373c8cc5a01f",
+        "bytes": 244,
+        "tarball_date": "20251004"
+      }
+    ]
+  },
+  "task_request": {
+    "job_type": "leave_generation",
+    "lexicon": "NWL23",
+    "variant": "classic",
+    "letter_distribution": "english",
+    "generation": 1,
+    "forced_racks": ["AA", "AB"],
+    "previous_artifact_key": "leaves/9c2f1a48-5f3b-4c2a-8a7d-1b0e3f7c9d20/generation-0.klv2",
+    "num_games": 10000,
+    "use_wordmap": true
+  }
+}

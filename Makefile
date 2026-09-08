@@ -30,7 +30,9 @@ endif
 OBJ_ROOT := obj
 OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
 
-SRC  := $(wildcard $(SRC_DIR)/**/*.c)
+# find, not a wildcard: `**` is not recursive in make, and vendored code sits
+# two levels down (src/compat/sha256/sha256.c).
+SRC  := $(shell find $(SRC_DIR) -name '*.c')
 TEST := $(wildcard $(TEST_DIR)/*.c)
 CMD := $(wildcard $(CMD_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
