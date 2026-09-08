@@ -1,5 +1,6 @@
 #include "word_info_table_test.h"
 
+#include "../src/compat/endian_io.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/data_filepaths.h"
@@ -10,6 +11,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -379,7 +381,40 @@ static void test_combined_wit_format(void) {
   error_stack_destroy(error_stack);
 }
 
+// Check the wire bytes independently of a writer/reader round trip so the
+// same conversion mistake in both directions cannot cancel itself out.
+static void test_little_endian_uint32_io(void) {
+  const uint32_t values[] = {0, 1, 0x01234567U, 0x89abcdefU, UINT32_MAX};
+  const unsigned char expected[] = {
+      0,    0,    0,    0,    1,    0,    0,    0,    0x67, 0x45,
+      0x23, 0x01, 0xef, 0xcd, 0xab, 0x89, 0xff, 0xff, 0xff, 0xff,
+  };
+  FILE *stream = tmpfile();
+  assert(stream != NULL);
+  const bool empty_write = fwrite_le_uint32s(NULL, 0, NULL);
+  const bool empty_read = fread_le_uint32s(NULL, 0, NULL);
+  assert(empty_write && empty_read);
+  const bool written = fwrite_le_uint32s(values, 5, stream);
+  assert(written);
+  rewind(stream);
+  unsigned char bytes[sizeof(expected)];
+  const size_t bytes_read = fread(bytes, 1, sizeof(bytes), stream);
+  assert(bytes_read == sizeof(bytes));
+  assert(memcmp(bytes, expected, sizeof(expected)) == 0);
+  rewind(stream);
+  uint32_t actual[6] = {0};
+  const bool read_success = fread_le_uint32s(actual, 5, stream);
+  assert(read_success);
+  assert(memcmp(actual, values, sizeof(values)) == 0);
+  rewind(stream);
+  const bool short_read = fread_le_uint32s(actual, 6, stream);
+  assert(!short_read);
+  const int closed = fclose(stream);
+  assert(closed == 0);
+}
+
 void test_word_info_table(void) {
+  test_little_endian_uint32_io();
   test_combined_wit_format();
   test_residual_letters_with_repeated_blocks();
   static const MachineLetter at[] = {A, T};

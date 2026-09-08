@@ -1,6 +1,6 @@
 #include "word_info_table.h"
 
-#include "../compat/endian_conv.h"
+#include "../compat/endian_io.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../util/fileproxy.h"
@@ -22,40 +22,6 @@
 // ordinary sections are unchanged. If flagged, append every length-2..4
 // positional row in terminal-ID order, with sizes derived from those tries.
 // All integers are little-endian; there is no second identity or key layout.
-static bool wit_write_uint32s(const uint32_t *values, size_t count,
-                              FILE *stream) {
-  if (count == 0) {
-    return true;
-  }
-#if IS_LITTLE_ENDIAN
-  return fwrite(values, sizeof(uint32_t), count, stream) == count;
-#else
-  for (size_t index = 0; index < count; index++) {
-    const uint32_t value = values[index];
-    const uint8_t bytes[4] = {(uint8_t)value, (uint8_t)(value >> 8),
-                              (uint8_t)(value >> 16), (uint8_t)(value >> 24)};
-    if (fwrite(bytes, sizeof(bytes), 1, stream) != 1) {
-      return false;
-    }
-  }
-  return true;
-#endif
-}
-
-static bool wit_read_uint32s(uint32_t *values, size_t count, FILE *stream) {
-  if (count != 0 && fread(values, sizeof(uint32_t), count, stream) != count) {
-    return false;
-  }
-#if !IS_LITTLE_ENDIAN
-  for (size_t index = 0; index < count; index++) {
-    const uint32_t value = values[index];
-    values[index] = (value >> 24) | ((value >> 8) & 0xff00U) |
-                    ((value << 8) & 0xff0000U) | (value << 24);
-  }
-#endif
-  return true;
-}
-
 static void wit_clear(WordInfoTable *wit) {
   for (int length = 0; length <= BOARD_DIM; length++) {
     WitTrie *trie = &wit->tries[length];
@@ -149,21 +115,21 @@ static bool wit_write_stream(const WordInfoTable *wit, bool positional,
   const uint32_t fingerprint[2] = {(uint32_t)wit->kwg_hash,
                                    (uint32_t)(wit->kwg_hash >> 32)};
   if (fwrite(header, sizeof(header), 1, stream) != 1 ||
-      !wit_write_uint32s(fingerprint, 2, stream)) {
+      !fwrite_le_uint32s(fingerprint, 2, stream)) {
     return false;
   }
   for (int length = 1; length <= BOARD_DIM; length++) {
     const WitTrie *trie = &wit->tries[length];
     const uint32_t section[3] = {trie->num_nodes, trie->root, trie->num_values};
-    if (!wit_write_uint32s(section, 3, stream) ||
+    if (!fwrite_le_uint32s(section, 3, stream) ||
         fwrite(trie->node_tile, 1, trie->num_nodes, stream) !=
             trie->num_nodes ||
         fwrite(trie->node_last, 1, trie->num_nodes, stream) !=
             trie->num_nodes ||
-        !wit_write_uint32s(trie->node_child, trie->num_nodes, stream) ||
-        !wit_write_uint32s((const uint32_t *)trie->node_value, trie->num_nodes,
+        !fwrite_le_uint32s(trie->node_child, trie->num_nodes, stream) ||
+        !fwrite_le_uint32s((const uint32_t *)trie->node_value, trie->num_nodes,
                            stream) ||
-        !wit_write_uint32s(
+        !fwrite_le_uint32s(
             trie->values, (size_t)trie->num_values * wit_stride_for_len(length),
             stream)) {
       return false;
@@ -171,7 +137,7 @@ static bool wit_write_stream(const WordInfoTable *wit, bool positional,
   }
   for (int length = WPF_MIN_BLOCK_LENGTH;
        positional && length <= WPF_MAX_BLOCK_LENGTH; length++) {
-    if (!wit_write_uint32s(wit->word_plus_floater[length],
+    if (!fwrite_le_uint32s(wit->word_plus_floater[length],
                            wit->tries[length].num_values *
                                word_plus_floater_cells_per_key(length),
                            stream)) {
@@ -259,7 +225,7 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
 static bool wit_read_trie(WitTrie *trie, int length, size_t *remaining,
                           FILE *stream) {
   uint32_t section[3];
-  if (*remaining < sizeof(section) || !wit_read_uint32s(section, 3, stream)) {
+  if (*remaining < sizeof(section) || !fread_le_uint32s(section, 3, stream)) {
     return false;
   }
   *remaining -= sizeof(section);
@@ -283,9 +249,9 @@ static bool wit_read_trie(WitTrie *trie, int length, size_t *remaining,
   trie->values = count != 0 ? malloc_or_die(count * sizeof(uint32_t)) : NULL;
   return fread(trie->node_tile, 1, nodes, stream) == nodes &&
          fread(trie->node_last, 1, nodes, stream) == nodes &&
-         wit_read_uint32s(trie->node_child, nodes, stream) &&
-         wit_read_uint32s((uint32_t *)trie->node_value, nodes, stream) &&
-         wit_read_uint32s(trie->values, count, stream) &&
+         fread_le_uint32s(trie->node_child, nodes, stream) &&
+         fread_le_uint32s((uint32_t *)trie->node_value, nodes, stream) &&
+         fread_le_uint32s(trie->values, count, stream) &&
          wit_validate_trie(trie, length);
 }
 
@@ -302,7 +268,7 @@ static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
   uint8_t header[4];
   uint32_t fingerprint[2];
   if (fread(header, sizeof(header), 1, stream) != 1 ||
-      !wit_read_uint32s(fingerprint, 2, stream)) {
+      !fread_le_uint32s(fingerprint, 2, stream)) {
     return false;
   }
   if (header[0] < WIT_EARLIEST_SUPPORTED_VERSION || header[0] > WIT_VERSION) {
@@ -347,7 +313,7 @@ static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
     const size_t count = (size_t)bytes / sizeof(uint32_t);
     wit->word_plus_floater[length] =
         count != 0 ? malloc_or_die((size_t)bytes) : NULL;
-    if (!wit_read_uint32s(wit->word_plus_floater[length], count, stream)) {
+    if (!fread_le_uint32s(wit->word_plus_floater[length], count, stream)) {
       return false;
     }
   }
