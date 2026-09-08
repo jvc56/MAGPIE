@@ -19,8 +19,9 @@
 
 enum {
   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
+  // Block count zero also occupies a row in the anchor table.
   MAX_WMP_MOVE_GEN_ANCHORS =
-      ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS),
+      ((RACK_SIZE + 1) * (MAX_POSSIBLE_PLAYTHROUGH_BLOCKS + 1)),
 };
 
 typedef struct SubrackInfo {

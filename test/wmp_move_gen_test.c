@@ -890,7 +890,24 @@ void test_wmp_cutoff_modes_are_complete(void) {
   config_destroy(config);
 }
 
+void test_wmp_maximum_playthrough_blocks(void) {
+  WMPMoveGen wmg = {0};
+  for (int block = 0; block < MAX_POSSIBLE_PLAYTHROUGH_BLOCKS; block++) {
+    wmp_move_gen_increment_playthrough_blocks(&wmg);
+  }
+  wmp_move_gen_maybe_update_anchor(&wmg, RACK_SIZE,
+                                   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS + RACK_SIZE,
+                                   0, int_to_equity(50), int_to_equity(50));
+  const Anchor *anchor =
+      wmp_move_gen_get_anchor(&wmg, MAX_POSSIBLE_PLAYTHROUGH_BLOCKS, RACK_SIZE);
+  assert(anchor->tiles_to_play == RACK_SIZE);
+  assert(anchor->playthrough_blocks == MAX_POSSIBLE_PLAYTHROUGH_BLOCKS);
+  wmp_move_gen_reset_anchors(&wmg);
+  assert(anchor->tiles_to_play == 0);
+}
+
 void test_wmp_move_gen(void) {
+  test_wmp_maximum_playthrough_blocks();
   test_wmp_move_gen_inactive();
   test_shadow_playthrough_restoration();
   test_playthrough_positions_reset();
