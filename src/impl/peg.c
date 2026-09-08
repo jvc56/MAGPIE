@@ -1189,7 +1189,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
       peg_worker_get_endgame_tt(worker),
       // nested endgames are small and many; no core injection
-      /*max_workers=*/0, /*first_win=*/worker->first_win_optim,
+      /*max_workers=*/0, /*first_win=*/false,
       /*first_win_fallback_moves=*/0,
       /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
       deadline_ns, /*actual_move=*/NULL, &ea);

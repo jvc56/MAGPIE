@@ -1687,11 +1687,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_ENDGAME_FIRST_WIN:
       usages[0] = "<true/false>";
       examples[0] = "true";
-      text =
-          "First-win-optim: search the narrow (-1, 1) alpha-beta window to "
-          "prove win/loss only, instead of computing the exact value and "
-          "best line. Much faster, but the reported PV/value is only a bound. "
-          "Default false.";
+      text = "Search the narrow (-1, 1) endgame window. Decisive results may "
+             "be bounds rather than full spread values. Default false.";
       break;
     case ARG_TOKEN_PEG_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
@@ -1756,13 +1753,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PEG_FIRST_WIN:
       usages[0] = "<true/false>";
       examples[0] = "false";
-      text =
-          "PEG emptier-leaf endgame solves (both per-scenario cand solves and "
-          "the nested lookahead's inner emptier leaves): true (default) = "
-          "first-win-optim, proving win/loss only via the narrow (-1, 1) "
-          "window; false = solve the exact value. win_pct stays exact either "
-          "way; the tradeoff is mean_spread precision, which collapses toward "
-          "+-1 under the optimized window whenever a leaf is decisive.";
+      text = "Use a narrow (-1, 1) window for direct bag-empty endgame leaves. "
+             "Decisive leaf values may be bounds, changing spread estimates, "
+             "candidate rankings and later-stage survivors. "
+             "Nested leaves keep full-spread searches. Default true; false "
+             "uses full-spread searches.";
       break;
     case ARG_TOKEN_PEG_OUTCOMES:
       usages[0] = "<true/false>";
@@ -3439,15 +3434,9 @@ static void config_load_peg_stage_top_k(Config *config,
 static const int PEG_NESTED_DEFAULT_CAND_CAPS[] = {8, 4, 2};
 
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
-  // Nested inner-peg lookahead for non-emptier leaves is on by default at depth
-  // 1 with the default inner stage schedule and the bag-size default scenario
-  // stride (0). -pegnested false restores the flat rollout. Emptier (bag-empty)
-  // leaves always solve an endgame; -pegfw (on by default) narrows that solve
-  // to the first-win-optim window, trading exact spread for speed since PEG's
-  // primary metric (win_pct) stays exact either way.
-  // stage_top_k is the per-stage candidate-count override (NULL = built-in
-  // default schedule). poll and the only/protect move sets are left unset here;
-  // config_peg installs them after this call.
+  // Nested lookahead is enabled by default at depth 1. -pegnested false
+  // restores flat rollouts; -pegfw independently controls narrow-window
+  // endgame leaves and can change the resulting spread/ranking estimates.
   peg_args_fill(
       config->game, config->thread_control, config->num_threads,
       /*time_budget_seconds=*/config->peg_time_limit_seconds != 0

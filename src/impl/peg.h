@@ -160,15 +160,12 @@ typedef struct PegArgs {
   // PEG_OPP_RATIONAL (the zero value).
   PegOppModel opp_model;
 
-  // Every emptier (bag-empty) leaf solved during this PEG run -- both the
-  // per-scenario cand solves and the nested lookahead's inner emptier leaves
-  // -- uses the endgame's first-win-optim alpha-beta window ((-1, 1) instead
-  // of the full range): win/tie/loss classification (and therefore win_pct)
-  // stays exact, but the returned leaf value collapses to roughly +-1 instead
-  // of the real spread whenever the result is decisive, so mean_spread and
-  // any displayed per-scenario magnitudes lose precision. A zero-initialized
-  // PegArgs leaves this off; the CLI defaults it on (-pegfw) since PEG's
-  // primary metric is win_pct, not spread.
+  // Use a narrow (-1, 1) window for direct bag-empty endgame leaves.
+  // Nested leaves retain full-spread searches because their values are
+  // averaged before classification.
+  // Decisive leaf results may be bounds. Their spread estimates can change
+  // candidate rankings and later-stage survivors. Zero-initialized PegArgs
+  // leave this off; the PEG CLI enables it by default through -pegfw.
   bool first_win_optim;
 
   // Scenario stride: weight-stratified sampling. 1 = full enumeration.
