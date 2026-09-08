@@ -1127,7 +1127,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
       wgen, anchor, gen->row_squares,
       gen->word_info_table != NULL ? gen->wit_row_lane : NULL,
       gen->wit_len_lane, gen->word_info_table);
-  wmp_move_gen_playthrough_subracks_init(wgen, anchor);
+  wmp_move_gen_playthrough_metadata_init(wgen, anchor);
 
   assert(anchor->leftmost_start_col <= anchor->rightmost_start_col);
   assert(anchor->leftmost_start_col <= anchor->col);
@@ -1173,6 +1173,10 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
       return;
     }
   }
+
+  // Neither whole-anchor rejection above needs combined subracks. Build
+  // them sequentially once for either surviving subrack scan below.
+  wmp_move_gen_build_playthrough_subracks(wgen);
 
   // The forbidden set is the same for every subrack, so decide once per
   // anchor. The masked scan lives out of line; this loop stays the one the

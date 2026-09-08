@@ -25,6 +25,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "../src/impl/word_info_table_maker.h"
+#include "../src/util/io_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
@@ -1056,7 +1057,104 @@ void test_wmp_maximum_playthrough_blocks(void) {
   assert(anchor->tiles_to_play == 0);
 }
 
+// Metadata remains current even when an anchor is rejected before any
+// combined row is built. Model each rejection boundary, then reuse rows for
+// a different block/size and compare the words with the direct WMP API.
+static void test_playthrough_preparation_after_rejection(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const WMP *wmp = player_get_wmp(game_get_player(game, 0));
+  Rack *rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, rack, "C??");
+  WMPMoveGen wmg = {0};
+  wmp_move_gen_init(&wmg, ld, rack, wmp);
+  MachineLetter *expected_words = malloc_or_die(wmp->max_word_lookup_bytes);
+  const struct {
+    const char *block;
+    const char *subracks[2];
+  } cases[] = {
+      {"AT", {"C", "?"}},    {"A", {"C?", "??"}}, {"IT", {"?", "C"}},
+      {"ZZ", {"C?", "??"}},  {"AA", {"C", "?"}},  {"AT", {"??", "C?"}},
+      {"AT", {"C??", NULL}},
+  };
+  for (size_t case_idx = 0; case_idx < sizeof(cases) / sizeof(cases[0]);
+       case_idx++) {
+    // Shadow can populate a scratch row independently of generation.
+    wmg.playthrough_bit_rack = string_to_bit_rack(ld, "QI");
+    wmg.num_tiles_played_through = 2;
+    (void)wmp_move_gen_check_playthrough_full_rack_existence(&wmg);
+    for (int rejection = 0; rejection < 2; rejection++) {
+      const Anchor skipped = {.tiles_to_play = 3, .word_length = 5};
+      wmg.playthrough_bit_rack = string_to_bit_rack(ld, "QI");
+      wmg.playthrough_addable = rejection == 0 ? 0 : (1U << 1);
+      wmp_move_gen_playthrough_metadata_init(&wmg, &skipped);
+      assert(wmg.word_length == 5 && wmg.tiles_to_play == 3 &&
+             wmg.num_tiles_played_through == 2);
+      if (rejection == 0) {
+        assert(wmg.playthrough_addable == 0);
+      } else {
+        // Only the two rack blanks are usable when A is the sole addable
+        // letter, but this rejected anchor needs three tiles.
+        assert(bit_rack_get_letter(&wmg.player_bit_rack, 1) == 0);
+        assert(bit_rack_get_letter(&wmg.player_bit_rack, BLANK_MACHINE_LETTER) <
+               skipped.tiles_to_play);
+      }
+      // The rejected path omits the builder. A later surviving anchor must
+      // not trust any scratch row left by a different length or shadow.
+      const int size = (int)strlen(cases[case_idx].subracks[0]);
+      const int offset = subracks_get_combination_offset(size);
+      const int count = cases[case_idx].subracks[1] != NULL ? 2 : 1;
+      wmg.count_by_size[size] = (uint8_t)count;
+      for (int idx = 0; idx < count; idx++) {
+        wmg.nonplaythrough_infos[offset + idx].subrack =
+            string_to_bit_rack(ld, cases[case_idx].subracks[idx]);
+      }
+      const Anchor anchor = {
+          .tiles_to_play = (unsigned int)size,
+          .word_length = (unsigned int)(size + strlen(cases[case_idx].block))};
+      wmg.playthrough_bit_rack = string_to_bit_rack(ld, cases[case_idx].block);
+      wmp_move_gen_playthrough_metadata_init(&wmg, &anchor);
+      assert(wmp_move_gen_get_num_subrack_combinations(&wmg) == count);
+      wmp_move_gen_build_playthrough_subracks(&wmg);
+      for (int idx = count - 1; idx >= 0; idx--) {
+        BitRack expected =
+            string_to_bit_rack(ld, cases[case_idx].subracks[idx]);
+        const BitRack canonical = expected;
+        bit_rack_add_bit_rack(&expected, &wmg.playthrough_bit_rack);
+        const int expected_bytes = wmp_write_words_to_buffer(
+            wmp, &expected, (int)anchor.word_length, expected_words);
+        const bool found = wmp_move_gen_get_subrack_words(&wmg, idx, true);
+        assert(found == (expected_bytes > 0));
+        if (found) {
+          assert(wmg.num_words * wmg.word_length == expected_bytes);
+          assert(wmg.words != NULL);
+          assert(memcmp(wmg.words, expected_words, (size_t)expected_bytes) ==
+                 0);
+        }
+        assert(bit_rack_equals(
+            &canonical, &wmg.nonplaythrough_infos[offset + idx].subrack));
+      }
+      // The original one-call initializer keeps its complete semantics for
+      // callers that do not need to put an anchor-level check in between.
+      wmp_move_gen_playthrough_subracks_init(&wmg, &anchor);
+      for (int idx = 0; idx < count; idx++) {
+        BitRack expected =
+            string_to_bit_rack(ld, cases[case_idx].subracks[idx]);
+        bit_rack_add_bit_rack(&expected, &wmg.playthrough_bit_rack);
+        assert(bit_rack_equals(&expected,
+                               &wmg.playthrough_infos[offset + idx].subrack));
+      }
+    }
+  }
+  free(expected_words);
+  rack_destroy(rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_wmp_move_gen(void) {
+  test_playthrough_preparation_after_rejection();
   test_wmp_maximum_playthrough_blocks();
   test_word_plus_floater_positional_intersection();
   test_word_plus_floater_dense_coverage();

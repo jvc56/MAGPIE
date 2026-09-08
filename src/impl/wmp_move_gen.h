@@ -212,12 +212,19 @@ wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
 }
 
 static inline void
-wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
+wmp_move_gen_playthrough_metadata_init(WMPMoveGen *wmp_move_gen,
                                        const Anchor *anchor) {
-  const int subrack_size = anchor->tiles_to_play;
   wmp_move_gen->word_length = anchor->word_length;
-  wmp_move_gen->num_tiles_played_through = anchor->word_length - subrack_size;
-  wmp_move_gen->tiles_to_play = subrack_size;
+  wmp_move_gen->num_tiles_played_through =
+      anchor->word_length - anchor->tiles_to_play;
+  wmp_move_gen->tiles_to_play = anchor->tiles_to_play;
+}
+
+// Preserve the sequential preparation loop for anchors that survive the
+// whole-anchor mask and rack-capacity checks.
+static inline void
+wmp_move_gen_build_playthrough_subracks(WMPMoveGen *wmp_move_gen) {
+  const int subrack_size = wmp_move_gen->tiles_to_play;
   if (wmp_move_gen->num_tiles_played_through == 0) {
     // We can use nonplaythrough subracks
     return;
@@ -233,6 +240,13 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
     bit_rack_add_bit_rack(&playthrough_subrack_info->subrack,
                           &wmp_move_gen->playthrough_bit_rack);
   }
+}
+
+static inline void
+wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
+                                       const Anchor *anchor) {
+  wmp_move_gen_playthrough_metadata_init(wmp_move_gen, anchor);
+  wmp_move_gen_build_playthrough_subracks(wmp_move_gen);
 }
 
 // Necessary-only prune for a multi-playthrough case. Tests each
