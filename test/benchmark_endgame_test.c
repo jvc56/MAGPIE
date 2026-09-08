@@ -989,12 +989,14 @@ void test_endgame_root_bench(void) {
         continue;
       }
       char *cgp = game_get_cgp(game, true);
-      assert(fprintf(output, "%s\n", cgp) > 0);
+      const int written = fprintf(output, "%s\n", cgp);
+      assert(written > 0);
       free(cgp);
       found++;
     }
     assert(found == count);
-    assert(fclose(output) == 0);
+    const int close_status = fclose(output);
+    assert(close_status == 0);
     move_list_destroy(moves);
     config_destroy(config);
     return;
@@ -1003,7 +1005,8 @@ void test_endgame_root_bench(void) {
   assert(input != NULL);
   char cgp[4096];
   for (int position = 0; position < count; position++) {
-    assert(fgets(cgp, sizeof(cgp), input) != NULL);
+    const char *line = fgets(cgp, sizeof(cgp), input);
+    assert(line != NULL);
     ErrorStack *errors = error_stack_create();
     game_load_cgp(game, cgp, errors);
     assert(error_stack_is_empty(errors));
@@ -1025,6 +1028,10 @@ void test_endgame_root_bench(void) {
     };
     Timer timer;
     ctimer_start(&timer);
+    if (args.hard_time_limit > 0) {
+      args.external_deadline_ns =
+          ctimer_monotonic_ns() + (int64_t)(args.hard_time_limit * 1e9);
+    }
     endgame_solve(&solver, &args, results, errors);
     const double elapsed = ctimer_elapsed_seconds(&timer);
     assert(error_stack_is_empty(errors));
@@ -1042,6 +1049,7 @@ void test_endgame_root_bench(void) {
     endgame_results_destroy(results);
     error_stack_destroy(errors);
   }
-  assert(fclose(input) == 0);
+  const int close_status = fclose(input);
+  assert(close_status == 0);
   config_destroy(config);
 }
