@@ -7,12 +7,16 @@
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
+#include "../src/ent/word_info_table.h"
 #include "../src/impl/config.h"
 #include "../src/impl/convert.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void convert_and_assert_status(const ConversionArgs *args,
                                ConversionResults *results,
@@ -34,7 +38,7 @@ void test_convert_error(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   ConversionResults *conversion_results = conversion_results_create();
-  ConversionArgs args;
+  ConversionArgs args = {0};
   args.conversion_type_string = NULL;
   args.data_paths = NULL;
   args.input_and_output_name = NULL;
@@ -187,7 +191,71 @@ void test_convert_success(void) {
   error_stack_destroy(error_stack);
 }
 
+static void test_convert_word_plus_floater(void) {
+  ErrorStack *error_stack = error_stack_create();
+  ConversionResults *results = conversion_results_create();
+  const char *name = "wpf_convert_test";
+  char *text_filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, name, DATA_FILEPATH_TYPE_LEXICON, error_stack);
+  char *wpf_filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, name, DATA_FILEPATH_TYPE_WORD_PLUS_FLOATER,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  write_string_to_file(text_filename, "w", "AT\nCAT\nTAT\nTATA\nATAT\n",
+                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  ConversionArgs args = {.conversion_type_string = "text2kwg",
+                         .data_paths = DEFAULT_TEST_DATA_PATH,
+                         .input_and_output_name = name,
+                         .ld_name = "english"};
+  convert_and_assert_status(&args, results, ERROR_STATUS_SUCCESS);
+  args.conversion_type_string = "kwg2wit";
+  convert_and_assert_status(&args, results, ERROR_STATUS_SUCCESS);
+  args.conversion_type_string = "kwg2wpf";
+  convert_and_assert_status(&args, results, ERROR_STATUS_SUCCESS);
+  WordInfoTable *full =
+      word_info_table_create(DEFAULT_TEST_DATA_PATH, name, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(full != NULL);
+  assert(full->word_plus_floater[2] != NULL);
+
+  // Exercise the actual command parser and bypass a damaged old sidecar.
+  write_string_to_file(wpf_filename, "w", "damaged old sidecar", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false -wit false");
+  load_and_exec_config_or_die(config,
+                              "convert kwg2wpf wpf_convert_test english");
+  WordInfoTable *rebuilt =
+      word_info_table_create(DEFAULT_TEST_DATA_PATH, name, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(rebuilt != NULL);
+  assert(rebuilt->word_plus_floater[2] != NULL);
+  assert(memcmp(rebuilt->word_plus_floater[2], full->word_plus_floater[2],
+                word_plus_floater_cells_per_key(2) * sizeof(uint32_t)) == 0);
+  config_destroy(config);
+  word_info_table_destroy(rebuilt);
+  word_info_table_destroy(full);
+  conversion_results_destroy(results);
+  free(text_filename);
+  free(wpf_filename);
+  const data_filepath_t generated_types[] = {
+      DATA_FILEPATH_TYPE_LEXICON, DATA_FILEPATH_TYPE_KWG,
+      DATA_FILEPATH_TYPE_WORD_INFO_TABLE, DATA_FILEPATH_TYPE_WORD_PLUS_FLOATER};
+  for (size_t type_idx = 0;
+       type_idx < sizeof(generated_types) / sizeof(generated_types[0]);
+       type_idx++) {
+    char *filename = data_filepaths_get_readable_filename(
+        DEFAULT_TEST_DATA_PATH, name, generated_types[type_idx], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    const int status = remove(filename);
+    assert(status == 0);
+    free(filename);
+  }
+  error_stack_destroy(error_stack);
+}
+
 void test_convert(void) {
   test_convert_error();
   test_convert_success();
+  test_convert_word_plus_floater();
 }

@@ -171,9 +171,9 @@ static void test_word_plus_floater_positional_intersection(void) {
   free(positional);
 }
 
-// Sparse IDs must distinguish omitted keys from covered empty rows, and a
-// longer omitted block must not hide a shorter covered base in either order.
-static void test_word_plus_floater_sparse_coverage(void) {
+// Dense payloads retain the WIT's original value IDs. Choose the longest
+// usable base in either scan order, and preserve covered zero masks.
+static void test_word_plus_floater_dense_coverage(void) {
   WordInfoTable wit = {0};
   uint32_t ordinary_short[3 * (BOARD_DIM - 1)];
   uint32_t ordinary_long[BOARD_DIM - 3];
@@ -185,15 +185,14 @@ static void test_word_plus_floater_sparse_coverage(void) {
        index < sizeof(ordinary_long) / sizeof(ordinary_long[0]); index++) {
     ordinary_long[index] = UINT32_MAX;
   }
-  int32_t short_ids[3] = {-1, -1, 0};
-  int32_t long_ids[1] = {-1};
   const size_t short_cells = word_plus_floater_cells_per_key(2);
   const size_t long_cells = word_plus_floater_cells_per_key(4);
-  uint32_t *short_masks = calloc(short_cells, sizeof(uint32_t));
+  uint32_t *short_masks = calloc(3 * short_cells, sizeof(uint32_t));
   uint32_t *long_masks = calloc(long_cells, sizeof(uint32_t));
   assert(short_masks != NULL && long_masks != NULL);
   for (size_t index = 0; index < short_cells; index++) {
-    short_masks[index] = 1U << 8;
+    short_masks[short_cells + index] = 1U << 18;
+    short_masks[(2 * short_cells) + index] = 1U << 8;
   }
   for (size_t index = 0; index < long_cells; index++) {
     long_masks[index] = 1U << 19;
@@ -204,8 +203,6 @@ static void test_word_plus_floater_sparse_coverage(void) {
   wit.tries[4].num_values = 1;
   wit.word_plus_floater[2] = short_masks;
   wit.word_plus_floater[4] = long_masks;
-  wit.word_plus_floater_ids[2] = short_ids;
-  wit.word_plus_floater_ids[4] = long_ids;
   WMPMoveGen wmg = {0};
   Anchor anchor = {
       .playthrough_blocks = 2, .word_length = 7, .rightmost_start_col = 1};
@@ -220,55 +217,31 @@ static void test_word_plus_floater_sparse_coverage(void) {
     for (int index = 0; index < 4; index++) {
       row_cache[long_col + index].letter = (MachineLetter)(3 + index);
     }
-    // Original row 2 has been compacted to payload row 0.
     rows[short_col] = ordinary_short + (size_t)2 * wit_stride_for_len(2);
     rows[long_col] = ordinary_long;
     lengths[short_col] = 2;
     lengths[long_col] = 4;
     wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
                                           lengths, &wit);
+    assert(wmg.playthrough_addable == (1U << 19));
+
+    // A stale cached long row must not hide a valid shorter row. The
+    // short lookup uses original value ID 2 rather than payload row 0.
+    uint32_t foreign_long[BOARD_DIM - 3];
+    memcpy(foreign_long, ordinary_long, sizeof(ordinary_long));
+    rows[long_col] = foreign_long;
+    wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
+                                          lengths, &wit);
     assert(wmg.playthrough_addable == (1U << 8));
-    // An omitted adjacent source key stays uncovered, even with row 0 present.
     rows[short_col] = ordinary_short + wit_stride_for_len(2);
     wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
                                           lengths, &wit);
-    assert(wmg.playthrough_addable == UINT32_MAX);
-    rows[short_col] = ordinary_short + (size_t)2 * wit_stride_for_len(2);
-    // Dense length23 coverage omits the long-length payload entirely.
-    wit.word_plus_floater[4] = NULL;
+    assert(wmg.playthrough_addable == (1U << 18));
+    rows[short_col] = ordinary_short;
     wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
                                           lengths, &wit);
-    assert(wmg.playthrough_addable == (1U << 8));
-    wit.word_plus_floater[4] = long_masks;
-    // Once the longer key is covered, choose it regardless of board order.
-    long_ids[0] = 0;
-    wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows,
-                                          lengths, &wit);
-    assert(wmg.playthrough_addable == (1U << 19));
-    // The next helper call reads this through the WIT remap pointer.
-    // cppcheck-suppress unreadVariable
-    long_ids[0] = -1;
+    assert(wmg.playthrough_addable == 0);
   }
-  // Keep original source row 2 covered but make its entire payload zero.
-  memset(short_masks, 0, short_cells * sizeof(uint32_t));
-  Square row_cache[BOARD_DIM] = {0};
-  const uint32_t *rows[BOARD_DIM] = {0};
-  uint8_t lengths[BOARD_DIM] = {0};
-  row_cache[1].letter = 1;
-  row_cache[2].letter = 20;
-  row_cache[4].letter = 3;
-  rows[1] = ordinary_short + (size_t)2 * wit_stride_for_len(2);
-  lengths[1] = 2;
-  anchor.word_length = 4;
-  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
-                                        &wit);
-  assert(wmg.playthrough_addable == 0);
-  // The next helper call reads this through the WIT remap pointer.
-  // cppcheck-suppress unreadVariable
-  short_ids[2] = -1;
-  wmp_move_gen_set_playthrough_bit_rack(&wmg, &anchor, row_cache, rows, lengths,
-                                        &wit);
-  assert(wmg.playthrough_addable == UINT32_MAX);
   free(short_masks);
   free(long_masks);
 }
@@ -1086,7 +1059,7 @@ void test_wmp_maximum_playthrough_blocks(void) {
 void test_wmp_move_gen(void) {
   test_wmp_maximum_playthrough_blocks();
   test_word_plus_floater_positional_intersection();
-  test_word_plus_floater_sparse_coverage();
+  test_word_plus_floater_dense_coverage();
   test_wmp_move_gen_inactive();
   test_shadow_playthrough_restoration();
   test_playthrough_positions_reset();

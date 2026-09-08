@@ -676,17 +676,11 @@ static inline void wmp_move_gen_set_playthrough_bit_rack(
                       (size_t)wit->tries[block_len].num_values * row_bytes &&
                   offset % row_bytes == 0) {
                 const size_t value_index = (size_t)offset / row_bytes;
-                const int32_t *row_ids = wit->word_plus_floater_ids[block_len];
-                const int32_t row_id = row_ids != NULL ? row_ids[value_index]
-                                                       : (int32_t)value_index;
-                if (row_id >= 0) {
-                  positional_values =
-                      wit->word_plus_floater[block_len] +
-                      (size_t)row_id *
-                          word_plus_floater_cells_per_key(block_len);
-                  positional_block_length = block_len;
-                  positional_block_col = col;
-                }
+                positional_values =
+                    wit->word_plus_floater[block_len] +
+                    value_index * word_plus_floater_cells_per_key(block_len);
+                positional_block_length = block_len;
+                positional_block_col = col;
               }
             }
           }

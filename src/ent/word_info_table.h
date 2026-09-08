@@ -63,13 +63,8 @@ typedef struct WordInfoTable {
   // Indexed by key-word length; tries[0] is unused, tries[len] holds the
   // length-`len` words. Lengths run 1..BOARD_DIM.
   WitTrie tries[BOARD_DIM + 1];
-  // Optional positional table, indexed by this WIT's value
-  // IDs for dense payloads; sparse payloads remap through
-  // word_plus_floater_ids.
+  // Optional positional table, indexed directly by this WIT's value IDs.
   uint32_t *word_plus_floater[BOARD_DIM + 1];
-  // NULL means dense value IDs. Otherwise -1 marks an uncovered base; a
-  // nonnegative ID addresses a covered row, even when every mask is zero.
-  int32_t *word_plus_floater_ids[BOARD_DIM + 1];
 } WordInfoTable;
 
 static inline size_t word_plus_floater_cells_per_key(int block_length) {
@@ -174,7 +169,6 @@ static inline void word_info_table_destroy(WordInfoTable *wit) {
     free(trie->node_value);
     free(trie->values);
     free(wit->word_plus_floater[len]);
-    free(wit->word_plus_floater_ids[len]);
   }
   free(wit->name);
   free(wit);
@@ -308,16 +302,12 @@ static inline void wit_read_trie_or_die(WitTrie *trie, int stride,
   wit_read_uint32s_or_die(trie->values, num_value_words, stream);
 }
 
-// M1 stores dense value-ID rows over its inclusive key-length interval. M2
-// stores an int32 ID for each original WIT value (-1 is uncovered), then only
-// covered rows. Both bind to the complete 2..4 WIT key layout. An absent or
-// foreign-lexicon table permits all letters; a covered zero row is exact.
+// M1 stores every 2..4-tile base directly in WIT value-ID order. An absent or
+// foreign-lexicon table permits all letters; a loaded zero row is exact.
 static inline void word_info_table_clear_word_plus_floater(WordInfoTable *wit) {
   for (int length = 0; length <= BOARD_DIM; length++) {
     free(wit->word_plus_floater[length]);
-    free(wit->word_plus_floater_ids[length]);
     wit->word_plus_floater[length] = NULL;
-    wit->word_plus_floater_ids[length] = NULL;
   }
 }
 
@@ -342,15 +332,12 @@ word_info_table_read_word_plus_floater(WordInfoTable *wit, FILE *stream,
   }
   word_info_table_clear_word_plus_floater(wit);
   const char *error_message = "truncated WordPlusFloater header";
-  uint8_t *seen = NULL;
   const unsigned char dense_magic[8] = {'W', 'P', 'F', 'M', '1', 'L', 'E', 0};
-  const unsigned char sparse_magic[8] = {'W', 'P', 'F', 'M', '2', 'L', 'E', 0};
   unsigned char magic[8];
   if (fread(magic, 1, sizeof(magic), stream) != sizeof(magic)) {
     goto invalid;
   }
-  const bool sparse = memcmp(magic, sparse_magic, sizeof(magic)) == 0;
-  if (!sparse && memcmp(magic, dense_magic, sizeof(magic)) != 0) {
+  if (memcmp(magic, dense_magic, sizeof(magic)) != 0) {
     error_message = "invalid WordPlusFloater header";
     goto invalid;
   }
@@ -369,9 +356,8 @@ word_info_table_read_word_plus_floater(WordInfoTable *wit, FILE *stream,
   }
   const uint32_t minimum_length = header[1];
   const uint32_t maximum_length = header[2];
-  if (minimum_length < WPF_MIN_BLOCK_LENGTH ||
-      maximum_length > WPF_MAX_BLOCK_LENGTH ||
-      minimum_length > maximum_length || header[3] != 0) {
+  if (minimum_length != WPF_MIN_BLOCK_LENGTH ||
+      maximum_length != WPF_MAX_BLOCK_LENGTH || header[3] != 0) {
     error_message = "unsupported WordPlusFloater coverage";
     goto invalid;
   }
@@ -387,54 +373,18 @@ word_info_table_read_word_plus_floater(WordInfoTable *wit, FILE *stream,
     }
     const uint32_t num_values = section[1];
     const uint32_t cells_per_key = section[2];
-    uint32_t stored_values = section[3];
     if (section[0] != length || num_values != wit->tries[length].num_values ||
         cells_per_key != word_plus_floater_cells_per_key((int)length) ||
-        (!sparse && stored_values != 0)) {
+        section[3] != 0) {
       error_message = "WordPlusFloater section does not match WIT key layout";
       goto invalid;
     }
-    if (!sparse) {
-      stored_values = num_values;
-    }
-    if (stored_values > num_values || stored_values > INT32_MAX ||
-        stored_values > SIZE_MAX / cells_per_key ||
-        (size_t)stored_values * cells_per_key > SIZE_MAX / sizeof(uint32_t) ||
-        (uint64_t)num_values * sizeof(int32_t) > SIZE_MAX) {
+    if (num_values > INT32_MAX || num_values > SIZE_MAX / cells_per_key ||
+        (size_t)num_values * cells_per_key > SIZE_MAX / sizeof(uint32_t)) {
       error_message = "WordPlusFloater allocation would overflow";
       goto invalid;
     }
-    if (sparse) {
-      int32_t *ids = num_values != 0
-                         ? malloc_or_die((size_t)num_values * sizeof(int32_t))
-                         : NULL;
-      wit->word_plus_floater_ids[length] = ids;
-      error_message = "truncated WordPlusFloater row IDs";
-      if (!wpf_read_uint32s((uint32_t *)ids, num_values, stream)) {
-        goto invalid;
-      }
-      seen = stored_values != 0 ? calloc_or_die(stored_values, 1) : NULL;
-      uint32_t covered = 0;
-      for (uint32_t index = 0; index < num_values; index++) {
-        const int32_t row_id = ids[index];
-        if (row_id == -1) {
-          continue;
-        }
-        if (row_id < 0 || (uint32_t)row_id >= stored_values || seen[row_id]) {
-          error_message = "invalid WordPlusFloater row ID";
-          goto invalid;
-        }
-        seen[row_id] = 1;
-        covered++;
-      }
-      free(seen);
-      seen = NULL;
-      if (covered != stored_values) {
-        error_message = "incomplete WordPlusFloater row ID coverage";
-        goto invalid;
-      }
-    }
-    const size_t count = (size_t)stored_values * cells_per_key;
+    const size_t count = (size_t)num_values * cells_per_key;
     wit->word_plus_floater[length] =
         count != 0 ? malloc_or_die(count * sizeof(uint32_t)) : NULL;
     error_message = "truncated WordPlusFloater masks";
@@ -449,7 +399,6 @@ word_info_table_read_word_plus_floater(WordInfoTable *wit, FILE *stream,
   return;
 
 invalid:
-  free(seen);
   word_info_table_clear_word_plus_floater(wit);
   error_stack_push(error_stack, ERROR_STATUS_RW_READ_ERROR,
                    string_duplicate(error_message));

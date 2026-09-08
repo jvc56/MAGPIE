@@ -15,6 +15,7 @@
 #include "../ent/rack_info_table.h"
 #include "../ent/wmp.h"
 #include "../ent/word_info_table.h"
+#include "../ent/word_plus_floater.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -22,9 +23,59 @@
 #include "rack_info_table_maker.h"
 #include "wmp_maker.h"
 #include "word_info_table_maker.h"
+#include "word_plus_floater_maker.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+static void convert_kwg_to_wpf(const ConversionArgs *args,
+                               ConversionResults *results,
+                               ErrorStack *error_stack) {
+  const char *name = args->input_and_output_name;
+  KWG *kwg = kwg_create(args->data_paths, name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    kwg_destroy(kwg);
+    return;
+  }
+  WordInfoTable *wit = NULL;
+  char *output_filename = NULL;
+  char *wit_filename = data_filepaths_get_readable_filename(
+      args->data_paths, name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    goto cleanup;
+  }
+  wit = calloc_or_die(1, sizeof(WordInfoTable));
+  // Read only the WIT. A stale or damaged WPF must not prevent regeneration.
+  word_info_table_load(wit, name, wit_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    goto cleanup;
+  }
+  make_word_plus_floater_from_kwg(kwg, wit, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    goto cleanup;
+  }
+  output_filename = data_filepaths_get_writable_filename(
+      args->data_paths, name, DATA_FILEPATH_TYPE_WORD_PLUS_FLOATER,
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    goto cleanup;
+  }
+  word_plus_floater_write_to_file(wit, output_filename, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    int covered = 0;
+    for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
+         length++) {
+      covered += (int)wit->tries[length].num_values;
+    }
+    conversion_results_set_number_of_strings(results, covered);
+  }
+
+cleanup:
+  free(wit_filename);
+  free(output_filename);
+  word_info_table_destroy(wit);
+  kwg_destroy(kwg);
+}
 
 void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 conversion_type_t conversion_type,
@@ -337,6 +388,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_KLVWMP2RIT;
   } else if (strings_equal(conversion_type_string, "kwg2wit")) {
     conversion_type = CONVERT_KWG2WIT;
+  } else if (strings_equal(conversion_type_string, "kwg2wpf")) {
+    conversion_type = CONVERT_KWG2WPF;
   }
   return conversion_type;
 }
@@ -373,13 +426,17 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
   }
 
   LetterDistribution *ld = ld_create(args->data_paths, ld_name, error_stack);
+  free(ld_name);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  free(ld_name);
 
-  convert_with_names(ld, conversion_type, args->data_paths,
-                     args->input_and_output_name, args->input_and_output_name,
-                     conversion_results, args->num_threads, error_stack);
+  if (conversion_type == CONVERT_KWG2WPF) {
+    convert_kwg_to_wpf(args, conversion_results, error_stack);
+  } else {
+    convert_with_names(ld, conversion_type, args->data_paths,
+                       args->input_and_output_name, args->input_and_output_name,
+                       conversion_results, args->num_threads, error_stack);
+  }
   ld_destroy(ld);
 }

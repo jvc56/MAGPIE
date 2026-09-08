@@ -66,6 +66,7 @@
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
 #include "word_info_table_test.h"
+#include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
@@ -90,6 +91,7 @@ static TestEntry test_table[] = {
     {"leavemap", test_leave_map},
     {"rit", test_rack_info_table},
     {"wit", test_word_info_table},
+    {"wpfmaker", test_word_plus_floater_maker},
     {"witcache", test_wit_cache},
     {"witsweep", test_wit_equivalence_sweep},
     {"kwg", test_kwg_alpha},

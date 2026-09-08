@@ -136,14 +136,12 @@ static void test_residual_letters_with_repeated_blocks(void) {
 
 static void write_word_plus_floater_fixture(FILE *stream,
                                             const WordInfoTable *wit,
-                                            bool sparse, int maximum_length,
-                                            bool empty) {
-  const unsigned char magic[8] = {'W', 'P', 'F', 'M', sparse ? '2' : '1',
-                                  'L', 'E', 0};
+                                            bool zero_masks) {
+  const unsigned char magic[8] = {'W', 'P', 'F', 'M', '1', 'L', 'E', 0};
   fwrite_or_die(magic, sizeof(magic), 1, stream, "fixture magic");
   wit_write_uint32_or_die(BOARD_DIM, stream, "dimension");
   wit_write_uint32_or_die(2, stream, "minimum length");
-  wit_write_uint32_or_die((uint32_t)maximum_length, stream, "maximum length");
+  wit_write_uint32_or_die(4, stream, "maximum length");
   wit_write_uint32_or_die(0, stream, "reserved");
   wit_write_uint32_or_die((uint32_t)wit->kwg_hash, stream, "KWG hash low");
   wit_write_uint32_or_die((uint32_t)(wit->kwg_hash >> 32), stream,
@@ -152,94 +150,52 @@ static void write_word_plus_floater_fixture(FILE *stream,
   wit_write_uint32_or_die((uint32_t)layout_hash, stream, "layout hash low");
   wit_write_uint32_or_die((uint32_t)(layout_hash >> 32), stream,
                           "layout hash high");
-  for (int length = 2; length <= maximum_length; length++) {
+  for (int length = 2; length <= 4; length++) {
     const uint32_t count = wit->tries[length].num_values;
-    const uint32_t stored_count = empty ? 0 : 1;
     const uint32_t cells = (uint32_t)word_plus_floater_cells_per_key(length);
     wit_write_uint32_or_die((uint32_t)length, stream, "key length");
     wit_write_uint32_or_die(count, stream, "key count");
     wit_write_uint32_or_die(cells, stream, "cell count");
-    wit_write_uint32_or_die(sparse ? stored_count : 0, stream, "stored count");
-    if (sparse) {
-      for (uint32_t index = 0; index < count; index++) {
-        wit_write_uint32_or_die(!empty && index == count - 1 ? 0 : UINT32_MAX,
-                                stream, "row ID");
-      }
-    }
-    const size_t total = (size_t)(sparse ? stored_count : count) * cells;
+    wit_write_uint32_or_die(0, stream, "reserved section field");
+    const size_t total = (size_t)count * cells;
     for (size_t index = 0; index < total; index++) {
-      wit_write_uint32_or_die((uint32_t)(index + length), stream, "mask");
+      wit_write_uint32_or_die(zero_masks ? 0 : (uint32_t)(index + length),
+                              stream, "mask");
     }
   }
   fseek_or_die(stream, 0, SEEK_SET);
 }
 
-static void test_word_plus_floater_subset_loading(void) {
+static void test_word_plus_floater_loading(void) {
   ErrorStack *error_stack = error_stack_create();
-  // Legacy full M1, reduced dense M1, sparse M2 and an entirely uncovered M2.
-  for (int variant = 0; variant < 4; variant++) {
-    WordInfoTable *wit = calloc(1, sizeof(WordInfoTable));
-    assert(wit != NULL);
+  // Full dense M1 and a dictionary with no length-three bases. Zero masks
+  // are still covered rows, independent of empty sections with no bases.
+  for (int variant = 0; variant < 2; variant++) {
+    WordInfoTable *wit = calloc_or_die(1, sizeof(WordInfoTable));
     wit->kwg_hash = 1234567;
     wit->tries[2].num_values = 3;
-    wit->tries[3].num_values = 2;
+    wit->tries[3].num_values = variant == 0 ? 2 : 0;
     wit->tries[4].num_values = 1;
-    const bool sparse = variant >= 2;
-    const bool empty = variant == 3;
-    const int maximum_length = variant == 1 ? 3 : 4;
+    const bool zero_masks = variant == 1;
     FILE *stream = tmpfile();
     assert(stream != NULL);
-    write_word_plus_floater_fixture(stream, wit, sparse, maximum_length, empty);
+    write_word_plus_floater_fixture(stream, wit, zero_masks);
     word_info_table_read_word_plus_floater(wit, stream, error_stack);
     assert(error_stack_is_empty(error_stack));
     fclose_or_die(stream);
     for (int length = 2; length <= 4; length++) {
-      if (length > maximum_length) {
-        assert(wit->word_plus_floater[length] == NULL);
-        assert(wit->word_plus_floater_ids[length] == NULL);
+      const size_t count = wit->tries[length].num_values *
+                           word_plus_floater_cells_per_key(length);
+      const uint32_t *values = wit->word_plus_floater[length];
+      if (count == 0) {
+        assert(values == NULL);
         continue;
       }
-      if (sparse) {
-        const int32_t *ids = wit->word_plus_floater_ids[length];
-        assert(ids != NULL);
-        for (uint32_t index = 0; index < wit->tries[length].num_values;
-             index++) {
-          assert(
-              ids[index] ==
-              (!empty && index == wit->tries[length].num_values - 1 ? 0 : -1));
-        }
-      } else {
-        assert(wit->word_plus_floater_ids[length] == NULL);
-      }
-      if (empty) {
-        assert(wit->word_plus_floater[length] == NULL);
-      } else {
-        const size_t count = (sparse ? 1 : wit->tries[length].num_values) *
-                             word_plus_floater_cells_per_key(length);
-        const uint32_t *values = wit->word_plus_floater[length];
-        assert(values != NULL);
-        assert(values[0] == (uint32_t)length);
-        assert(values[count - 1] == count - 1 + length);
-      }
+      assert(values != NULL);
+      assert(values[0] == (zero_masks ? 0 : (uint32_t)length));
+      assert(values[count - 1] == (zero_masks ? 0 : count - 1 + length));
     }
     word_info_table_destroy(wit);
-  }
-  // A sidecar from a different lexicon leaves all lengths uncovered.
-  WordInfoTable wit = {0};
-  wit.kwg_hash = 1234567;
-  wit.tries[2].num_values = 3;
-  wit.tries[3].num_values = 2;
-  wit.tries[4].num_values = 1;
-  FILE *stream = tmpfile();
-  assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, &wit, true, 4, false);
-  wit.kwg_hash++;
-  word_info_table_read_word_plus_floater(&wit, stream, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  fclose_or_die(stream);
-  for (int length = 0; length <= BOARD_DIM; length++) {
-    assert(wit.word_plus_floater[length] == NULL);
-    assert(wit.word_plus_floater_ids[length] == NULL);
   }
   error_stack_destroy(error_stack);
 }
@@ -247,30 +203,25 @@ static void test_word_plus_floater_subset_loading(void) {
 static void assert_word_plus_floater_uncovered(const WordInfoTable *wit) {
   for (int length = 0; length <= BOARD_DIM; length++) {
     assert(wit->word_plus_floater[length] == NULL);
-    assert(wit->word_plus_floater_ids[length] == NULL);
   }
 }
 
 static void test_word_plus_floater_invalid_files(void) {
-  // Offsets are from the documented little-endian file format. Each sparse
-  // fixture stores one row, mapping original ID 2 to compact ID 0 at length 2.
+  // Offsets are from the documented little-endian dense M1 file format.
   static const struct {
     long offset;
     uint32_t value;
   } corruptions[] = {
-      {0, 0},               // magic
-      {12, 1},              // minimum key length
-      {16, 5},              // maximum key length
-      {20, 1},              // reserved header field
-      {32, 0},              // key-layout fingerprint
-      {40, 3},              // section key length
-      {44, 4},              // original value count
-      {48, 1},              // cells per key
-      {52, 4},              // more stored rows than original rows
-      {56, UINT32_MAX - 1}, // invalid negative ID
-      {64, 1},              // out-of-range compact ID
-      {56, 0},              // duplicate compact ID 0
-      {64, UINT32_MAX},     // stored row has no original ID
+      {0, 0},  // magic
+      {12, 1}, // minimum key length
+      {16, 5}, // maximum key length
+      {16, 3}, // omitted length-four coverage
+      {20, 1}, // reserved header field
+      {32, 0}, // key-layout fingerprint
+      {40, 3}, // section key length
+      {44, 4}, // original value count
+      {48, 1}, // cells per key
+      {52, 1}, // reserved section field
   };
   WordInfoTable wit = {0};
   wit.kwg_hash = 1234567;
@@ -282,7 +233,7 @@ static void test_word_plus_floater_invalid_files(void) {
        index++) {
     FILE *stream = tmpfile();
     assert(stream != NULL);
-    write_word_plus_floater_fixture(stream, &wit, true, 4, false);
+    write_word_plus_floater_fixture(stream, &wit, false);
     fseek_or_die(stream, corruptions[index].offset, SEEK_SET);
     wit_write_uint32_or_die(corruptions[index].value, stream, "corruption");
     fseek_or_die(stream, 0, SEEK_SET);
@@ -292,11 +243,11 @@ static void test_word_plus_floater_invalid_files(void) {
     error_stack_reset(error_stack);
     fclose_or_die(stream);
   }
-  // Truncate at the magic, header, section, row map and final mask, including
+  // Truncate at the magic, header, section and mask payload, including
   // failure after preceding lengths have allocated and loaded successfully.
   FILE *complete = tmpfile();
   assert(complete != NULL);
-  write_word_plus_floater_fixture(complete, &wit, true, 4, false);
+  write_word_plus_floater_fixture(complete, &wit, false);
   fseek_or_die(complete, 0, SEEK_END);
   const long file_size = ftell(complete);
   assert(file_size > 68);
@@ -322,7 +273,7 @@ static void test_word_plus_floater_invalid_files(void) {
   free(bytes);
   FILE *stream = tmpfile();
   assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, &wit, true, 4, false);
+  write_word_plus_floater_fixture(stream, &wit, false);
   fseek_or_die(stream, 0, SEEK_END);
   const int appended_byte = fputc(0, stream);
   assert(appended_byte == 0);
@@ -334,27 +285,28 @@ static void test_word_plus_floater_invalid_files(void) {
   fclose_or_die(stream);
 
   // Loading a different dimension or lexicon over an existing valid table
-  // must clear its coverage. Reloading a reduced table clears omitted lengths.
+  // must clear its coverage. A complete zero table replaces every old mask.
   stream = tmpfile();
   assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, &wit, true, 4, false);
+  write_word_plus_floater_fixture(stream, &wit, false);
   word_info_table_read_word_plus_floater(&wit, stream, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(wit.word_plus_floater[4] != NULL);
   fclose_or_die(stream);
   stream = tmpfile();
   assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, &wit, false, 3, false);
+  write_word_plus_floater_fixture(stream, &wit, true);
   word_info_table_read_word_plus_floater(&wit, stream, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(wit.word_plus_floater[2] != NULL);
-  assert(wit.word_plus_floater_ids[2] == NULL);
-  assert(wit.word_plus_floater[4] == NULL);
+  assert(wit.word_plus_floater[2][0] == 0);
+  assert(wit.word_plus_floater[4] != NULL);
+  assert(wit.word_plus_floater[4][0] == 0);
   fclose_or_die(stream);
   for (int mismatch = 0; mismatch < 2; mismatch++) {
     stream = tmpfile();
     assert(stream != NULL);
-    write_word_plus_floater_fixture(stream, &wit, true, 4, false);
+    write_word_plus_floater_fixture(stream, &wit, false);
     word_info_table_read_word_plus_floater(&wit, stream, error_stack);
     assert(wit.word_plus_floater[2] != NULL);
     fseek_or_die(stream, mismatch == 0 ? 8 : 24, SEEK_SET);
@@ -370,12 +322,12 @@ static void test_word_plus_floater_invalid_files(void) {
 }
 
 static void write_word_plus_floater_file(const WordInfoTable *wit,
-                                         const char *filename, bool empty,
+                                         const char *filename, bool zero_masks,
                                          ErrorStack *error_stack) {
   FILE *stream = fopen_safe(filename, "wb", error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(stream != NULL);
-  write_word_plus_floater_fixture(stream, wit, true, 4, empty);
+  write_word_plus_floater_fixture(stream, wit, zero_masks);
   fclose_or_die(stream);
 }
 
@@ -432,8 +384,8 @@ static void test_word_plus_floater_lexicon_loading(void) {
   assert(alpha->kwg_hash != beta->kwg_hash);
   assert(alpha->word_plus_floater[2] != NULL);
   assert(alpha->word_plus_floater[2][0] == 2);
-  assert(beta->word_plus_floater[2] == NULL);
-  assert(beta->word_plus_floater_ids[2][0] == -1);
+  assert(beta->word_plus_floater[2] != NULL);
+  assert(beta->word_plus_floater[2][0] == 0);
   word_info_table_destroy(beta);
   assert(alpha->word_plus_floater[2][0] == 2);
   word_info_table_destroy(alpha);
@@ -465,7 +417,7 @@ static void test_word_plus_floater_lexicon_loading(void) {
 }
 
 void test_word_info_table(void) {
-  test_word_plus_floater_subset_loading();
+  test_word_plus_floater_loading();
   test_word_plus_floater_invalid_files();
   test_word_plus_floater_lexicon_loading();
   test_residual_letters_with_repeated_blocks();
