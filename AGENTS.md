@@ -123,6 +123,7 @@ When comparing two solver modes, the second benefits unfairly from the first's T
 7. **Tests in test files** — Test-only code belongs in `test/*.c`, not `src/`.
 8. **Equity is millipoints** — `Equity` (`int32_t`) = millipoints (42 points = `42000`). Use `int_to_equity()` / `equity_to_int()` / `double_to_equity()`.
 9. **Resource leaks on error paths** — Release all resources before error returns. cppcheck catches missing `fclose`/`free`.
+10. **Endian I/O belongs in `src/compat`.** Use `fread_le_uint32s` and `fwrite_le_uint32s` from `src/compat/endian_io.h` for little-endian uint32 array I/O. Keep host-endian checks (`IS_LITTLE_ENDIAN`) and byte swapping inside the compatibility layer. If another type or operation needs support, add a shared helper there; serializers and loaders should call the helpers.
 
 ## Keep PRs focused
 Large PRs with multiple concerns get closed. Split into smaller, focused units.
