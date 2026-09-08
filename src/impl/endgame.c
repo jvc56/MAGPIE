@@ -2545,13 +2545,15 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   }
   const int multi_pv_k = worker->solver->num_top_moves;
   const bool multi_pv = is_root && multi_pv_k > 1;
-  // Multi-PV and reporting callbacks expose values for multiple root moves, so
+  // Multi-PV, actual-move extraction, and reporting callbacks expose values
+  // for multiple root moves, so
   // those callers need full-width searches at the root. A top-1 solve without
   // either callback only needs the best move: later roots can use the normal
   // PVS null-window probe and are re-searched at full width only if they
   // improve alpha.
   const bool exact_all_root_moves =
-      is_root && (multi_pv || worker->solver->per_ply_callback != NULL ||
+      is_root && (multi_pv || worker->solver->actual_move != NULL ||
+                  worker->solver->per_ply_callback != NULL ||
                   worker->solver->per_root_move_callback != NULL);
   // Sized for the live multi-PV leaderboard breadth (up to
   // MAX_ENDGAME_DISPLAY_PVS root moves), not the per-line depth. num_top_moves
@@ -3007,6 +3009,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // re-searched below).
   bool use_aspiration = worker->solver->threads > 1 ||
                         (worker->solver->num_top_moves == 1 &&
+                         worker->solver->actual_move == NULL &&
                          worker->solver->per_ply_callback == NULL &&
                          worker->solver->per_root_move_callback == NULL);
 
