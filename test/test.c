@@ -63,6 +63,7 @@
 #include "validated_move_test.h"
 #include "win_pct_test.h"
 #include "wit_cache_test.h"
+#include "wit_upgrade_test.h"
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
@@ -246,6 +247,7 @@ void run_test(const char *subtest) {
 }
 
 void run_all_super(void) {
+  test_wit_upgrade();
   test_position_lengths();
   test_bit_rack();
   test_board_layout_super();

@@ -23,9 +23,13 @@
 #include "wmp_maker.h"
 #include "word_info_table_maker.h"
 #include "word_plus_floater_maker.h"
+#include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 
 void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 conversion_type_t conversion_type,
@@ -182,6 +186,135 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
   }
 }
 
+// Unlike the ordinary readable-file search, do not skip an existing file that
+// cannot be opened. In particular, an unreadable future-version file must not
+// be mistaken for a missing file and replaced by an output-path override.
+static char *get_existing_wit_filename(const char *data_paths, const char *name,
+                                       ErrorStack *error_stack) {
+  if (data_paths == NULL) {
+    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_NULL_PATH,
+                     string_duplicate("word info table data path is empty"));
+    return NULL;
+  }
+  StringSplitter *paths = split_string(data_paths, ':', true);
+  char *filename = NULL;
+  const int count = string_splitter_get_number_of_items(paths);
+  for (int path_index = 0; path_index < count; path_index++) {
+    char *candidate = get_filepath(string_splitter_get_item(paths, path_index),
+                                   name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
+    struct stat file_status;
+    if (fileproxy_file_exists(candidate) ||
+        stat(candidate, &file_status) == 0) {
+      filename = candidate;
+      break;
+    }
+    const int error_number = errno;
+    if (error_number != ENOENT) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
+          get_formatted_string("could not inspect word info table %s: %s",
+                               candidate, strerror(error_number)));
+      free(candidate);
+      break;
+    }
+    free(candidate);
+  }
+  string_splitter_destroy(paths);
+  return filename;
+}
+
+static bool wit_has_required_positional_masks(const WordInfoTable *wit,
+                                              const KWG *kwg) {
+  // Match the native maker's alphabet decision using playable DAWG words,
+  // rather than the letter distribution or unrelated/unplayable KWG nodes.
+  // Verify the complete terminal set before treating empty base rows as having
+  // no positional requirement; a matching fingerprint alone is insufficient.
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
+  bool supported = true;
+  bool complete = true;
+  uint32_t words_per_length[BOARD_DIM + 1] = {0};
+  const int count = dictionary_word_list_get_count(words);
+  for (int word_index = 0; complete && word_index < count; word_index++) {
+    const DictionaryWord *word =
+        dictionary_word_list_get_word(words, word_index);
+    const MachineLetter *letters = dictionary_word_get_word(word);
+    const int length = dictionary_word_get_length(word);
+    if (length < 1 || length > BOARD_DIM ||
+        word_info_table_lookup(wit, letters, length) == NULL) {
+      complete = false;
+      break;
+    }
+    words_per_length[length]++;
+    for (int position = 0; position < length; position++) {
+      if (letters[position] > WPF_ALPHABET_SIZE) {
+        supported = false;
+        break;
+      }
+    }
+  }
+  dictionary_word_list_destroy(words);
+  for (int length = 1; complete && length <= BOARD_DIM; length++) {
+    complete = words_per_length[length] == wit->tries[length].num_values;
+  }
+  if (!complete) {
+    return false;
+  }
+  if (!supported) {
+    return true;
+  }
+  for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
+       length++) {
+    if (wit->tries[length].num_values != 0 &&
+        wit->word_plus_floater[length] == NULL) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool wit_file_is_current(const KWG *kwg, const char *name,
+                                const char *filename, ErrorStack *error_stack) {
+  FILE *stream = stream_from_filename(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  // This byte only prevents downgrading newer files. Reuse still requires the
+  // full native loader's structural, payload and trailing-data validation.
+  const int version = fgetc(stream);
+  bool read_failed = ferror(stream) != 0;
+  if (fclose(stream) != 0) {
+    read_failed = true;
+  }
+  if (read_failed) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("could not read word info table %s", filename));
+    return false;
+  }
+  if (version > WIT_VERSION) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
+        get_formatted_string("word info table %s has newer version %d than %d",
+                             filename, version, WIT_VERSION));
+    return false;
+  }
+  ErrorStack *load_errors = error_stack_create();
+  WordInfoTable *wit = calloc_or_die(1, sizeof(WordInfoTable));
+  word_info_table_load(wit, name, filename, load_errors);
+  const bool current = error_stack_is_empty(load_errors) &&
+                       wit->version == WIT_VERSION && wit->kwg_hash != 0 &&
+                       wit->kwg_hash == kwg_get_hash(kwg) &&
+                       wit_has_required_positional_masks(wit, kwg);
+  if (error_stack_top(load_errors) == ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM) {
+    error_stack_push(error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
+                     error_stack_get_string_and_reset(load_errors));
+  }
+  word_info_table_destroy(wit);
+  error_stack_destroy(load_errors);
+  return current;
+}
+
 void convert_with_names(const LetterDistribution *ld,
                         conversion_type_t conversion_type,
                         const char *data_paths, const char *input_name,
@@ -279,9 +412,21 @@ void convert_with_names(const LetterDistribution *ld,
     free(rit_output_filename);
     wmp_destroy(wmp);
     klv_destroy(klv);
-  } else if (conversion_type == CONVERT_KWG2WIT) {
+  } else if (conversion_type == CONVERT_KWG2WIT ||
+             conversion_type == CONVERT_KWG2WIT_IF_NEEDED) {
     KWG *kwg = kwg_create(data_paths, input_name, error_stack);
-    if (error_stack_is_empty(error_stack)) {
+    bool current = false;
+    if (error_stack_is_empty(error_stack) &&
+        conversion_type == CONVERT_KWG2WIT_IF_NEEDED) {
+      char *existing_filename =
+          get_existing_wit_filename(data_paths, output_name, error_stack);
+      if (existing_filename != NULL && error_stack_is_empty(error_stack)) {
+        current = wit_file_is_current(kwg, output_name, existing_filename,
+                                      error_stack);
+      }
+      free(existing_filename);
+    }
+    if (!current && error_stack_is_empty(error_stack)) {
       char *wit_output_filename = data_filepaths_get_writable_filename(
           data_paths, output_name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
           error_stack);
@@ -341,6 +486,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_KLVWMP2RIT;
   } else if (strings_equal(conversion_type_string, "kwg2wit")) {
     conversion_type = CONVERT_KWG2WIT;
+  } else if (strings_equal(conversion_type_string, "kwg2witifneeded")) {
+    conversion_type = CONVERT_KWG2WIT_IF_NEEDED;
   }
   return conversion_type;
 }

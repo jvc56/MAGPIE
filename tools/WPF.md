@@ -15,16 +15,31 @@ and positional masks in `NAME.wit`. Every dictionary base of lengths two
 through four receives a complete positional row; no frequency list or cutoff
 is needed.
 
-The release build creates a WIT when missing and preserves an existing one.
-To upgrade an existing version-3 WIT, regenerate it explicitly before training
-PGO:
+The PGO release build runs `make prepare_data` before clearing profiles or
+starting training. Its uninstrumented native C converter creates a missing WIT
+and upgrades an existing version-3 file automatically. It reuses a current
+matching version-4 file without rewriting it, after validating the complete
+file, KWG identity and required positional rows. Truncated, incompatible or
+incomplete tables are regenerated atomically. A newer unsupported version is
+preserved and reported as an error.
+
+Run the same preparation explicitly for CSW24 before a non-PGO job:
 
 ```sh
-make magpie BUILD=no_pgo_release
-printf 'convert kwg2wit CSW24\n' | \
-  bin/magpie 'set -lex CSW24 -wmp true -rit false -wit false'
-make release
+make prepare_data
 ```
+
+For another lexicon, use the batch converter directly:
+
+```sh
+make magpie_convert BUILD=no_pgo_release
+bin/magpie_convert kwg2witifneeded NWL23 ./data
+```
+
+The batch converter returns a failing exit status on conversion errors, so
+PGO cannot continue after failed preparation. `convert kwg2witifneeded NAME`
+is also available in the interactive CLI. `convert kwg2wit NAME` continues
+to force regeneration, including when deliberately replacing a newer file.
 
 Version-3 WITs remain readable and retain ordinary WIT filtering. Version-4
 WITs contain the positional masks as an optional section in the same file;
@@ -36,10 +51,16 @@ outside its playable dictionary.
 The maker checks the KWG identity and complete WIT terminal set, including
 lengths outside the indexed bases. Conversion creates both from the same KWG
 and publishes the complete file by renaming a temporary sibling, so validation
-and write failures preserve an existing table. An old WIT is not loaded during
-conversion and cannot prevent its replacement. No separate text lexicon or
+and write failures preserve an existing table. Explicit `kwg2wit` conversion
+does not load the old WIT, so it cannot prevent forced replacement. No separate text lexicon or
 Python runtime is required. Build/train PGO with the same WIT that will be
 used for production work.
+
+WMP, RIT, WIT and WPF construction all run in C. Make and shell scripts
+coordinate builds and downloads; none of these table generators requires
+Python. Repository Python utilities serve other purposes, including formatting,
+dependency checks and the separate `create_normal_data.py` statistical-test
+fixture helper.
 
 The 15-square CSW24 positional section covers all 7,140 two-to-four-letter
 bases and uses 102,050,416 bytes (97.32 MiB) of shared mask memory. Both kinds

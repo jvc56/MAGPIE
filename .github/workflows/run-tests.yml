@@ -138,6 +138,19 @@ jobs:
       - name: Build dev test binary
         run: make magpie_test
 
+      - name: Check native batch conversion failures
+        if: matrix.shard == 'rest'
+        run: |
+          make magpie_convert
+          if ./bin/magpie_convert invalid_conversion CSW21; then
+            echo 'Invalid conversion unexpectedly succeeded'
+            exit 1
+          fi
+          if ./bin/magpie_convert; then
+            echo 'Missing conversion arguments unexpectedly succeeded'
+            exit 1
+          fi
+
       - name: Run dev tests
         run: ./bin/magpie_test ${{ matrix.tests }}
 

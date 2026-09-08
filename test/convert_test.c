@@ -12,6 +12,7 @@
 #include "../src/impl/convert.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
+#include "wit_upgrade_test.h"
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -256,4 +257,5 @@ void test_convert(void) {
   test_convert_error();
   test_convert_success();
   test_convert_word_plus_floater();
+  test_wit_upgrade();
 }

@@ -194,6 +194,7 @@ char *data_filepaths_get_writable_filename(const char *data_paths,
         get_formatted_string(
             "file %s exists but does not have required write permissions",
             writable_filepath));
+    free(writable_filepath);
     return NULL;
   }
   char *dir_path = get_dirpath_from_filepath(writable_filepath);
