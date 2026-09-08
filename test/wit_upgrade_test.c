@@ -44,6 +44,8 @@ typedef struct WitUpgradeFixture {
 typedef struct WitFileSnapshot {
   uint8_t *bytes;
   size_t size;
+  // sys/stat.h is the public header for glibc's private struct stat definition.
+  // NOLINTNEXTLINE(misc-include-cleaner)
   struct stat metadata;
 } WitFileSnapshot;
 
@@ -92,6 +94,8 @@ static void assert_file_matches(const char *path,
   if (unchanged) {
     assert(actual.metadata.st_dev == expected->metadata.st_dev);
     assert(actual.metadata.st_ino == expected->metadata.st_ino);
+    // glibc's st_mtime macro is likewise provided through sys/stat.h.
+    // NOLINTNEXTLINE(misc-include-cleaner)
     assert(actual.metadata.st_mtime == expected->metadata.st_mtime);
     assert(actual.metadata.st_mode == expected->metadata.st_mode);
   }

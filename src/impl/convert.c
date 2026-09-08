@@ -202,6 +202,9 @@ static char *get_existing_wit_filename(const char *data_paths, const char *name,
   for (int path_index = 0; path_index < count; path_index++) {
     char *candidate = get_filepath(string_splitter_get_item(paths, path_index),
                                    name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
+    // sys/stat.h supplies this type; clang-tidy 18 attributes it to a private
+    // glibc header instead of the public header included above.
+    // NOLINTNEXTLINE(misc-include-cleaner)
     struct stat file_status;
     if (fileproxy_file_exists(candidate) ||
         stat(candidate, &file_status) == 0) {
