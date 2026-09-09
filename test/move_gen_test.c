@@ -678,6 +678,46 @@ void small_play_recorder_test(void) {
                 (MachineLetter[]){8 | 0x80, 5, 1 | 0x80, 4, 23, 0, 0, 4, 19},
                 9) == 0);
 
+  // Compare complete small-record output with the independent full-Move
+  // traversal, including repeated letters and both blanks. Also check that
+  // changing anchor traversal order preserves bounded-list tie breaking.
+  MoveList *full_moves = move_list_create(100000);
+  MoveList *decoded_moves = move_list_create(expected_count);
+  move_gen_args.move_list = full_moves;
+  move_gen_args.move_record_type = MOVE_RECORD_ALL;
+  move_gen_args.move_sort_type = MOVE_SORT_SCORE;
+  generate_moves(&move_gen_args);
+  assert(move_list_get_count(full_moves) == expected_count);
+  move_list_sort_moves(full_moves);
+  for (int move_idx = 0; move_idx < expected_count; move_idx++) {
+    Move *decoded = move_list_get_spare_move(decoded_moves);
+    small_move_to_move(decoded, move_list->small_moves[move_idx],
+                       game_get_board(game));
+    const Equity equity = move_get_type(decoded) == GAME_EVENT_PASS
+                              ? EQUITY_PASS_VALUE
+                              : move_get_score(decoded);
+    move_list_insert_spare_move(decoded_moves, equity);
+  }
+  move_list_sort_moves(decoded_moves);
+  for (int move_idx = 0; move_idx < expected_count; move_idx++) {
+    assert(compare_moves_without_equity(
+               move_list_get_move(full_moves, move_idx),
+               move_list_get_move(decoded_moves, move_idx), true) == -1);
+  }
+  MoveList *limited_moves = move_list_create(7);
+  move_gen_args.move_list = limited_moves;
+  generate_moves(&move_gen_args);
+  move_list_sort_moves(limited_moves);
+  assert(move_list_get_count(limited_moves) == 7);
+  for (int move_idx = 0; move_idx < 7; move_idx++) {
+    assert(compare_moves_without_equity(
+               move_list_get_move(full_moves, move_idx),
+               move_list_get_move(limited_moves, move_idx), true) == -1);
+  }
+  move_list_destroy(limited_moves);
+  move_list_destroy(decoded_moves);
+  move_list_destroy(full_moves);
+
   free(temp_small_moves);
   small_move_list_destroy(move_list);
   game_destroy(game);
