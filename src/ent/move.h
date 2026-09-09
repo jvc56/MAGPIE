@@ -522,12 +522,21 @@ static inline void move_list_load_with_empty_small_moves(MoveList *ml,
                                                          int capacity) {
   ml->capacity = capacity;
 
-  ml->small_moves =
-      (SmallMove **)malloc_or_die(sizeof(SmallMove *) * ml->capacity);
-  for (int i = 0; i < ml->capacity; i++) {
-    // FIXME: maybe don't alloc for moves here
-    ml->small_moves[i] = (SmallMove *)malloc_or_die(sizeof(SmallMove));
+  // Keep pointer slots, moves and spare in one allocation. Round the pointer
+  // region to whole SmallMove slots so the moves stay aligned even for odd
+  // capacities on 32-bit targets. Pointer swaps never change the owned base.
+  const size_t pointer_bytes =
+      ((sizeof(SmallMove *) * (size_t)capacity + sizeof(SmallMove) - 1) /
+       sizeof(SmallMove)) *
+      sizeof(SmallMove);
+  ml->small_moves = malloc_or_die(pointer_bytes +
+                                  (sizeof(SmallMove) * ((size_t)capacity + 1)));
+  SmallMove *storage =
+      (SmallMove *)((unsigned char *)ml->small_moves + pointer_bytes);
+  for (int move_idx = 0; move_idx < capacity; move_idx++) {
+    ml->small_moves[move_idx] = &storage[move_idx];
   }
+  ml->spare_small_move = &storage[capacity];
 }
 
 static inline void moves_for_move_list_destroy(MoveList *ml) {
@@ -550,7 +559,6 @@ static inline MoveList *move_list_create(int capacity) {
 static inline MoveList *move_list_create_small(int capacity) {
   MoveList *ml = (MoveList *)malloc_or_die(sizeof(MoveList));
   ml->count = 0;
-  ml->spare_small_move = (SmallMove *)malloc_or_die(sizeof(SmallMove));
   // Create spare_move as well, so that we can use it as a placeholder when
   // converting small moves.
   ml->spare_move = move_create();
@@ -732,9 +740,6 @@ static inline bool move_list_move_exists(const MoveList *ml, const Move *m) {
 }
 
 static inline void small_moves_for_move_list_destroy(MoveList *ml) {
-  for (int i = 0; i < ml->capacity; i++) {
-    small_move_destroy(ml->small_moves[i]);
-  }
   free(ml->small_moves);
 }
 
@@ -756,7 +761,6 @@ static inline void small_move_list_destroy(MoveList *ml) {
     return;
   }
   small_moves_for_move_list_destroy(ml);
-  small_move_destroy(ml->spare_small_move);
   move_destroy(ml->spare_move);
   free(ml);
 }
