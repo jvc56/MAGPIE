@@ -552,6 +552,64 @@ void test_ctx_reuse(void) {
   config_destroy(config);
 }
 
+// Regression for transposition-table bound handling at PV nodes in
+// abdada_negamax. Before the fix, a PV node whose window a stored bound had
+// closed (alpha >= beta) kept searching: its children ran with inverted
+// windows, their beta cutoffs were stored as upper bounds, and a later
+// aspiration re-search that trusted one of those bounds published a wrong
+// "exact" root value (here 10 with a 4-point one-tile play instead of 8).
+// The trigger is a nine-thread race that hit roughly 4-6% of depth-2 solves
+// of this position before the fix and never at one thread, so this test
+// repeats the solve and is on-demand only (egttpvbound).
+void test_endgame_tt_pv_bound_repeat(void) {
+  const char *cgp =
+      "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
+      "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
+      "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24";
+  Config *config = config_create_or_die(
+      "set -wmp true -s1 equity -s2 equity -threads 9 -eplies 2");
+  load_and_exec_config_or_die(config, cgp);
+
+  Game *game = config_get_game(config);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+
+  const int num_solves = 400;
+  const int expected_score = 8;
+  for (int solve_idx = 0; solve_idx < num_solves; solve_idx++) {
+    EndgameArgs endgame_args = {0};
+    endgame_args.thread_control = config_get_thread_control(config);
+    endgame_args.game = game;
+    endgame_args.plies = config_get_endgame_plies(config);
+    endgame_args.tt_fraction_of_mem = 0.01;
+    endgame_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    endgame_args.num_threads = 9;
+    endgame_args.use_heuristics = true;
+    endgame_args.num_top_moves = 1;
+    endgame_args.seed = 42;
+    if (endgame_ctx != NULL) {
+      endgame_ctx_clear_transposition_table(endgame_ctx);
+    }
+    endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv_line =
+        endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+    if (pv_line->score != expected_score) {
+      printf("solve %d of %d returned %d, expected %d\n", solve_idx + 1,
+             num_solves, (int)pv_line->score, expected_score);
+    }
+    assert(pv_line->score == expected_score);
+  }
+  printf("%d nine-thread solves all returned %d\n", num_solves, expected_score);
+
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_solve_standard(void) {
   // A standard out-in-two endgame.
   test_single_endgame(

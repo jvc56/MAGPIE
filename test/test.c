@@ -164,6 +164,7 @@ static TestEntry on_demand_test_table[] = {
     {"ap_rest", test_autoplay_remaining},
     {"endgame_wasm", test_endgame_wasm},
     {"endgameinject", test_endgame_dynamic_worker_injection},
+    {"egttpvbound", test_endgame_tt_pv_bound_repeat},
     {"viamover", test_via_mover_must_bingo_every_depth},
     {"viaopp", test_via_opp_must_block_every_depth},
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
