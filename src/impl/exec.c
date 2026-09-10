@@ -293,7 +293,9 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
       continue;
     }
 
-    if (strings_iequal(TERMINATE_KEYWORD, input)) {
+    if (strings_iequal(TERMINATE_KEYWORD, input) ||
+        strings_iequal(TERMINATE_KEYWORD_ALIAS_EXIT, input) ||
+        strings_iequal(TERMINATE_KEYWORD_ALIAS_SHORT, input)) {
       break;
     }
 

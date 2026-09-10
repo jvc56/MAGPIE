@@ -72,6 +72,60 @@ void test_sim_error_cases(void) {
   config_destroy(config);
 }
 
+// Builds a known opponent rack from opp_rack_str (NULL means leave it
+// empty/unknown), runs simulate() through config_simulate_and_return_status,
+// and asserts the resulting status matches expected_status.
+static void
+assert_simulate_known_opp_rack_status(Config *config, const char *opp_rack_str,
+                                      error_code_t expected_status) {
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
+  if (opp_rack_str) {
+    rack_set_to_string(config_get_ld(config), &known_opp_rack, opp_rack_str);
+  }
+  error_code_t status = config_simulate_and_return_status(
+      config, NULL, &known_opp_rack, config_get_sim_results(config));
+  assert(status == expected_status);
+}
+
+// A known opponent rack that cannot actually be drawn from the bag (either
+// because the letters are already spoken for by the player's own rack or
+// board tiles, or because the letter distribution simply doesn't have
+// enough of them) must be rejected with an error rather than reaching
+// set_random_rack() during simulation, which fatally crashes the process.
+// Covers an empty, a partially known, and a fully known opponent rack, each
+// with both a drawable (pass) and an undrawable (fail) case.
+void test_sim_opp_rack_not_in_bag(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 15 -plies "
+                           "2 -threads 1 -iter 1 -scond none");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AAADERW");
+  load_and_exec_config_or_die(config, "gen");
+
+  // Empty: bypasses the bag check entirely, so it must always succeed.
+  assert_simulate_known_opp_rack_status(config, NULL, ERROR_STATUS_SUCCESS);
+
+  // Partially known (fewer than RACK_SIZE letters).
+  assert_simulate_known_opp_rack_status(config, "BC", ERROR_STATUS_SUCCESS);
+  // Only a single Z exists in the English tile distribution, so requesting
+  // two of them for the opponent's known rack is impossible.
+  assert_simulate_known_opp_rack_status(config, "ZZ",
+                                        ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+
+  // Fully known (RACK_SIZE letters).
+  assert_simulate_known_opp_rack_status(config, "BCFGHIL",
+                                        ERROR_STATUS_SUCCESS);
+  // The rack AAADERW already claimed 3 of the 9 A's, leaving only 6, so 7
+  // A's for the opponent can never be drawn.
+  assert_simulate_known_opp_rack_status(config, "AAAAAAA",
+                                        ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
+
+  config_destroy(config);
+}
+
 void test_sim_single_iteration(void) {
   Config *config =
       config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
@@ -690,8 +744,9 @@ void test_sim_perf(const char *sim_perf_iters) {
           config_simulate_and_return_status(config, NULL, NULL, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
 
-      char *sim_stats_str = sim_results_get_string(
-          game, sim_results, 100, 100, -1, -1, NULL, 0, false, true, NULL);
+      char *sim_stats_str =
+          sim_results_get_string(game, sim_results, 100, 100, -1, -1, NULL, 0,
+                                 false, true, false, NULL);
       if (i < details_limit) {
         append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
       }
@@ -1179,6 +1234,52 @@ void test_sim_best_move_equity_tiebreak(void) {
   config_destroy(config);
 }
 
+void test_sim_show_bu(void) {
+  // Regression for the -showbu flag: it must parse correctly, default to
+  // false, and gate the BU column in the rendered sim-results string. BU is
+  // still omitted even when -showbu is true if the sim used a zero spread
+  // weight, since BU would then be identical to Wp.
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 5 -plies 2 -threads 1 -iter 200 -uspread 0.5");
+  assert(!config_get_show_bu(config));
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  SimResults *sim_results = config_get_sim_results(config);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+
+  char *sim_str_default = sim_results_get_string(
+      config_get_game(config), sim_results, 5, 2, -1, -1, NULL, 0, false, false,
+      config_get_show_bu(config), NULL);
+  assert(!has_substring(sim_str_default, "BU"));
+  free(sim_str_default);
+
+  load_and_exec_config_or_die(config, "set -showbu true");
+  assert(config_get_show_bu(config));
+
+  char *sim_str_shown = sim_results_get_string(
+      config_get_game(config), sim_results, 5, 2, -1, -1, NULL, 0, false, false,
+      config_get_show_bu(config), NULL);
+  assert(has_substring(sim_str_shown, "BU"));
+  free(sim_str_shown);
+
+  // -showbu true still hides BU when the sim itself used a zero spread
+  // weight, since BU is then identical to Wp.
+  load_and_exec_config_or_die(config, "set -uspread 0");
+  status = config_simulate_and_return_status(config, NULL, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  char *sim_str_zero_spread = sim_results_get_string(
+      config_get_game(config), sim_results, 5, 2, -1, -1, NULL, 0, false, false,
+      config_get_show_bu(config), NULL);
+  assert(!has_substring(sim_str_zero_spread, "BU"));
+  free(sim_str_zero_spread);
+
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -1187,6 +1288,7 @@ void test_sim(void) {
     test_similar_play_consistency(1);
     test_similar_play_consistency(10);
     test_sim_error_cases();
+    test_sim_opp_rack_not_in_bag();
     test_sim_single_iteration();
     test_sim_threshold();
     test_sim_time_limit();
@@ -1201,6 +1303,7 @@ void test_sim(void) {
     test_sim_ctx();
     test_sim_endgame();
     test_sim_best_move_equity_tiebreak();
+    test_sim_show_bu();
     test_sim_avoid_prune();
     test_sim_avoid_prune_multi();
     test_sim_avoid_prune_cmd();

@@ -191,15 +191,18 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
                                 ErrorStack *error_stack) {
   Rack leave_rack;
   rack_set_dist_size(&leave_rack, ld_get_size(ld));
-  char line[LEAVES_CSV_MAX_LINE_LENGTH];
-  while (fgets(line, sizeof(line), leaves_stream)) {
-    if (strchr(line, '\n') == NULL && !feof(leaves_stream)) {
+  char *line = NULL;
+  size_t line_capacity = 0;
+  ssize_t line_length;
+  while ((line_length = getline_ignore_carriage_return(&line, &line_capacity,
+                                                       leaves_stream)) != -1) {
+    if (line_length >= LEAVES_CSV_MAX_LINE_LENGTH) {
       error_stack_push(
           error_stack, ERROR_STATUS_KLV_LINE_EXCEEDS_MAX_LENGTH,
           get_formatted_string(
               "line in klv csv file '%s' exceeds max length of %d: %s",
               leaves_filename, LEAVES_CSV_MAX_LINE_LENGTH, line));
-      return;
+      break;
     }
     char *leave_str = strtok(line, ",");
     trim_whitespace(leave_str);
@@ -213,7 +216,7 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
             error_stack, ERROR_STATUS_KLV_DUPLICATE_LEAVE,
             get_formatted_string("duplicate leave found in klv csv file %s: %s",
                                  leaves_filename, leave_str));
-        return;
+        break;
       }
       const double value = string_to_double(value_str, error_stack);
       if (!error_stack_is_empty(error_stack)) {
@@ -221,7 +224,7 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
             error_stack, ERROR_STATUS_KLV_INVALID_LEAVE,
             get_formatted_string("invalid leave found in klv csv file %s: %s",
                                  leaves_filename, line));
-        return;
+        break;
       }
       klv_set_indexed_leave_value(klv, leave_index, double_to_equity(value));
       leave_was_set[leave_index] = true;
@@ -230,9 +233,10 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
           error_stack, ERROR_STATUS_KLV_INVALID_ROW,
           get_formatted_string("invalid row found in klv csv file %s: %s",
                                leaves_filename, line));
-      return;
+      break;
     }
   }
+  free(line);
 }
 
 KLV *klv_read_from_csv(const LetterDistribution *ld, const char *data_paths,

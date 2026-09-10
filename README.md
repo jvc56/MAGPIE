@@ -41,6 +41,60 @@ You should now be able to run the compiled MAGPIE executable:
 
 This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
 
+### Release builds
+
+The production release is a native profile-guided build. It needs Clang and
+`llvm-profdata`; with no clang on PATH it builds the plain optimized release
+instead and says so. Run:
+
+```
+make release
+```
+
+This always discards old profile data, reuses `data/lexica/CSW24.rit` when it is
+already present (and creates it otherwise), and replaces `bin/magpie` with a
+profile-guided native build. The release profile comes from short static
+autoplay games using production WMP and RIT data. This was the fastest general
+profile across simulation, PlayChooser, endgame, and full PEG measurements.
+
+To build the former optimized release without PGO:
+
+```
+make magpie BUILD=no_pgo_release
+```
+
+Focused targets are available when the resulting binary will spend most of a
+long-running job in one workload:
+
+```
+make leavegen_pgo_release  # leave generation
+make pgo_sim               # experimental simulation profile
+make pgo_peg               # experimental pre-endgame profile
+make pgo_eg                # experimental endgame profile
+make pgo                   # experimental mixed PlayChooser profile
+```
+
+The defaults train 16 games, give each player a 1000 ms clock in the mixed
+PlayChooser workload, use 0.05 seconds per move in focused game workloads, and
+use the machine's detected hardware concurrency. Override them with
+`PGO_TRAIN_GAMES`, `PGO_TRAIN_TIME_MS`, `PGO_TRAIN_SECONDS`, and
+`PGO_TRAIN_THREADS`.
+
+The result is tailored to the machine that ran the build, making it suitable
+for long-running jobs and release builds on that target.
+
+Run the selected release target again after changing source, and run it
+separately on each target architecture. Versioned LLVM binaries (`clang-18`,
+`llvm-profdata-18`) are found automatically; override the tool names only when
+they live outside `PATH` or you want a particular version:
+
+```
+make release \
+  PGO_CC=clang-18 \
+  LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata \
+  PGO_LDFLAGS=-fuse-ld=lld
+```
+
 ## Usage
 
 ### Commands and Settings
@@ -62,6 +116,56 @@ magpie> autoplay games 50 -lex CSW21 -threads 4 -hr true
 ```
 
 will play 50 games in the CSW21 lexicon with 4 threads and print the results in a human readable format.
+
+Autoplay can use `PlayChooser` for either or both players. `-pc1` and `-pc2`
+set each player's total per-game clock in milliseconds; `-1` disables it (the
+default), and `0` enables it without a clock. For example, this gives both
+players a 30-second clock:
+
+```
+magpie> autoplay games 100 -pc1 30000 -pc2 30000 -hr true
+```
+
+PlayChooser selects its evaluation mode from the position, using simulation,
+pre-endgame, or endgame analysis as appropriate. Timed games deduct 10 points
+per started minute of overtime by default. The penalty and period are
+configurable independently, so blitz runs can deduct one point per started
+second:
+
+```
+magpie> autoplay games 100 -pc1 5000 -pc2 5000 -otpenalty 1 -otperiod 1000 -hr true
+```
+
+When at least one player uses PlayChooser, the final report includes clock
+usage, overtime, and deducted penalty points for each active player.
+
+Games with a clocked player are **not reproducible from the seed**. How much
+search fits in the budget varies with machine load, thread count, and build, so
+the same `-seed` will not replay the same moves, and the overtime penalty itself
+varies between runs. This is inherent to timed play rather than a defect, but it
+is worth knowing because the rest of autoplay *is* seed-deterministic. The
+intended output is the aggregate: win percentage, spread, and penalty points
+over enough games. Individual games are not meant to be replayed.
+
+For the same reason, game pairs (`-gp`) lose their variance-reduction property
+when combined with a clock. Pairs work by having both games see identical draws
+so that only the players' decisions differ; with timing on, the two games can
+diverge for reasons unrelated to strategy.
+
+How much search a clock buys also depends on the threading mode, so the same
+`-pc1` value is not comparable across `-mtmode` settings:
+
+- Per-game parallelism (`-mtmode pgp`, the default) runs `-threads` games at
+  once and gives each game's PlayChooser a single thread. Raising `-threads`
+  finishes the run sooner but does not give any player more search per second
+  of clock — until the thread count exceeds the machine's available cores, at
+  which point games contend for CPU and the same budget buys measurably less.
+- Intra-game parallelism (`-mtmode igp`) plays one game at a time and gives
+  that game's PlayChooser every thread, so the same clock buys roughly
+  `-threads` times as much search per move.
+
+Compare timed runs only against other runs with the same `-mtmode` and
+`-threads`.
 
 All commands and settings can be specified by the shortest unambiguous string. For example, the generate command can be specified by any of the following strings:
 
@@ -142,9 +246,17 @@ For running many commands programatically from another process, it is recommende
 
 ### API Library
 
-For programs embedding magpie as a library, all commands have a corresponding `str_api_*` function. The `str_api_*` functions all have the signature `char* func(Config*, ErrorStack*, char* cmd)` and use the same parser as the `execute` commands, but return the output as a string instead of printing the output to `stdout`.
+Programs can embed MAGPIE through a string -> string C API. Build the shared library with
 
-Currently, the API library has no clients, so if you are interested in this feature, please feel free to reach out to the developers if you run into any issues.
+```
+make libmagpie
+```
+
+which produces `bin/libmagpie.so` (`bin/libmagpie.dylib` on macOS) exporting only the `magpie_*` functions declared in `src/impl/cmd_api.h` — that header plus the shared library is the entire embedding surface.
+
+The API is command-oriented: callers create an opaque `Magpie` handle, pass it the same command strings the console accepts, and read the resulting output back as a string. Output is machine readable by default; the `*_human_readable` function variants format it for display instead. Commands can run synchronously (`magpie_run_sync`) or on a background thread (`magpie_run_async`), with `magpie_get_last_command_status_message` for mid-run progress, `magpie_stop_current_command` to interrupt, and `magpie_await` to collect the result. All returned strings are owned by the caller and freed with `magpie_free_string`.
+
+See `examples/generate_moves.c` for a minimal C client (build it with `make examples`) and `examples/magpie.py` for a Python ctypes wrapper with an interactive REPL.
 
 ## Data
 
@@ -166,7 +278,7 @@ This directory contains the layout files which specify the start square and bonu
 The height and width of the board are denoted by the compile time constant `BOARD_DIM` which can be overwritten during compilation. For example, compiling with:
 
 ```
-make magpie BUILD=release BOARD_DIM=21
+make magpie BUILD=no_pgo_release BOARD_DIM=21
 ```
 
 will compile a MAGPIE executable that only accepts layouts of 21x21.
@@ -339,20 +451,29 @@ magpie> peg
 ```
 
 By default the solver generates all root moves and assumes a **rational**
-opponent (it replies with its best-equity move). Several settings tune the
-search; see `help peg`, `help pegonly`, etc. for full descriptions:
+opponent (it replies with its best-equity move). An optional positional
+argument restricts the search to a fixed set of root candidates instead of
+generating all moves. Moves are comma-separated UCGI with no spaces —
+coordinate and tiles joined by a period, pass as `pass` (exchanges are not
+valid PEG moves):
+
+```
+magpie> peg 13L.ONYX,13L.OXY
+```
+
+The case-insensitive word `empty` restricts the search to every generated
+move that would empty the bag (plays at least as many tiles as remain in the
+bag):
+
+```
+magpie> peg empty
+```
+
+Several settings tune the search further; see `help peg`, `help pnoprune`,
+etc. for full descriptions:
 
 - `-pegpess true` switches to the **pessimistic** opponent model (the opponent
   plays the worst-for-you reply) — i.e. guaranteed-win analysis.
-- `-pegonly <moves>` restricts the search to a fixed set of root candidates
-  instead of generating all moves. Moves are comma-separated UCGI with no
-  spaces — coordinate and tiles joined by a period, pass as `pass` (exchanges
-  are not valid PEG moves):
-
-  ```
-  magpie> peg -pegonly 13L.ONYX,13L.OXY
-  ```
-
 - `-pnoprune <moves>` protects moves from being cut by the halving cascade so
   they are evaluated at full fidelity even if their win% rank falls below the cut.
 - `-pegtopk <count1>,<count2>,...` overrides the per-stage halving counts
@@ -365,7 +486,7 @@ search; see `help peg`, `help pegonly`, etc. for full descriptions:
   `-pegstride`).
 - `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
 
-Use `-` to clear `pegonly` or `pnoprune`.
+Use `-` to clear `pnoprune`.
 
 #### Speed vs. accuracy
 

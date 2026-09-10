@@ -29,6 +29,18 @@ void test_rack_main(void) {
   rack_set_to_string(ld, rack_to_update, "AABBEWW");
   assert_rack_score(ld, rack_to_update, 17);
 
+  // "." is an alias for "?" (blank tile) in rack strings.
+  Rack *rack_with_question_mark = rack_create(ld_size);
+  Rack *rack_with_dot = rack_create(ld_size);
+  rack_set_to_string(ld, rack_with_question_mark, "?QWERTY");
+  rack_set_to_string(ld, rack_with_dot, ".QWERTY");
+  assert(racks_are_equal(rack_with_question_mark, rack_with_dot));
+  rack_set_to_string(ld, rack_with_question_mark, "AB??CD");
+  rack_set_to_string(ld, rack_with_dot, "AB..CD");
+  assert(racks_are_equal(rack_with_question_mark, rack_with_dot));
+  rack_destroy(rack_with_question_mark);
+  rack_destroy(rack_with_dot);
+
   // Test subtraction
   rack_set_to_string(ld, rack_to_update, "ABCDEFG");
   rack_set_to_string(ld, rack_to_sub, "ABC");

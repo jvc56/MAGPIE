@@ -134,6 +134,58 @@ static void test_analyze_directory(void) {
   char *cmd = get_formatted_string("analyze %s", tmp_dir);
   assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
   free(cmd);
+
+  // -mistakes defaults to false: no mistake fields in the trailer or
+  // tournament summary.
+  char *report_path = get_formatted_string("%s/test_game_report.txt", tmp_dir);
+  char *report = get_string_from_file_or_die(report_path);
+  assert(!has_substring(report, "small="));
+  free(report);
+  free(report_path);
+
+  char *summary_path =
+      get_formatted_string("%s/tournament_summary.txt", tmp_dir);
+  char *tournament_summary = get_string_from_file_or_die(summary_path);
+  assert(!has_substring(tournament_summary, "Mistakes:"));
+  assert(!has_substring(tournament_summary, "Average MI"));
+  free(tournament_summary);
+  (void)remove(summary_path);
+  free(summary_path);
+
+  remove_temp_gcg_dir(tmp_dir);
+  free(tmp_dir);
+  config_destroy(config);
+}
+
+// PATH B1 + -mistakes true: directory mode threads the mistake-grading
+// fields through the trailer and tournament summary end to end.
+static void test_analyze_directory_with_mistakes(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21 -plies 0 -mistakes true");
+  char *tmp_dir = make_temp_gcg_dir();
+  char *cmd = get_formatted_string("analyze %s", tmp_dir);
+  assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
+  free(cmd);
+
+  // Both plays in the fixture GCG are optimal (single legal move each), so
+  // the trailer and tournament summary should report zero mistakes.
+  char *report_path = get_formatted_string("%s/test_game_report.txt", tmp_dir);
+  char *report = get_string_from_file_or_die(report_path);
+  assert(has_substring(report, "small=0 medium=0 large=0 mi=0.00"));
+  free(report);
+  free(report_path);
+
+  char *summary_path =
+      get_formatted_string("%s/tournament_summary.txt", tmp_dir);
+  char *tournament_summary = get_string_from_file_or_die(summary_path);
+  assert(has_substring(tournament_summary, "Mistakes: 0 small, 0 medium, 0 "
+                                           "large (MI 0.00)"));
+  assert(has_substring(tournament_summary, "Average MI per turn: 0.00"));
+  assert(has_substring(tournament_summary, "Average MI per game: 0.00"));
+  free(tournament_summary);
+  (void)remove(summary_path);
+  free(summary_path);
+
   remove_temp_gcg_dir(tmp_dir);
   free(tmp_dir);
   config_destroy(config);
@@ -186,6 +238,47 @@ static void test_analyze_vertical_opening_transposable(void) {
   assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
   char *report = get_string_from_file_or_die(PLAYER_NAMES_REPORT_PATH);
   assert(has_substring(report, "H7 QI,-,0.00"));
+  // -mistakes defaults to false: no mistake_size/mistake_index CSV columns.
+  assert(!has_substring(report, "mistake_size"));
+  free(report);
+  remove_or_die(PLAYER_NAMES_REPORT_PATH);
+  config_destroy(config);
+}
+
+// -mistakes true: CSV gains mistake_size/mistake_index columns.
+static void test_analyze_mistakes_flag_csv(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21 -plies 0 -mistakes true");
+  load_game_history_with_gcg_string(config, MINIMAL_GCG_HEADER,
+                                    ">Tim: QIRESIT H7 QI +22 22\n");
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
+  assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
+  char *report = get_string_from_file_or_die(PLAYER_NAMES_REPORT_PATH);
+  assert(has_substring(report,
+                       "turn,player,rack,actual,best,equity_lost,win_pct_lost,"
+                       "adjusted_equity_lost,mistake_size,mistake_index"));
+  // Optimal play (no mistake): mistake_size/mistake_index CSV columns are
+  // appended after win_pct_lost/adjusted_equity_lost.
+  assert(has_substring(report, "H7 QI,-,0.00,0.00,0.00,none,0.00"));
+  free(report);
+  remove_or_die(PLAYER_NAMES_REPORT_PATH);
+  config_destroy(config);
+}
+
+// -mistakes true, -hr true: Game Summary gains the MI column and a
+// "Mistakes: ..." line.
+static void test_analyze_mistakes_flag_human_readable(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21 -plies 0 -hr true -mistakes true");
+  load_game_history_with_gcg_string(config, MINIMAL_GCG_HEADER,
+                                    ">Tim: AEITW 8D WAITE +24 24\n"
+                                    ">Josh: DEEFINO 7C DEFO +22 22\n");
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
+  assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
+  char *report = get_string_from_file_or_die(PLAYER_NAMES_REPORT_PATH);
+  assert(has_substring(report, "MI"));
+  assert(has_substring(report, "Mistakes: 0 small, 0 medium, 0 large (MI "
+                               "0.00)"));
   free(report);
   remove_or_die(PLAYER_NAMES_REPORT_PATH);
   config_destroy(config);
@@ -199,11 +292,14 @@ void test_analyze(void) {
   test_analyze_player_filter_partial_match();
   test_analyze_gcg_and_player();
   test_analyze_directory();
+  test_analyze_directory_with_mistakes();
   test_analyze_directory_with_player();
   test_analyze_no_lexicon();
   test_analyze_no_game();
   test_analyze_unknown_player();
   test_analyze_vertical_opening_transposable();
+  test_analyze_mistakes_flag_csv();
+  test_analyze_mistakes_flag_human_readable();
 }
 
 // Slow test: plies=2 simulation on a real GCG. Invoked only when explicitly

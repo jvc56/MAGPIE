@@ -30,8 +30,7 @@ typedef struct KLV {
   // leave-derived data (subrack cache, anchor cache upper bounds, etc.)
   // compare this counter to the value captured at the last gen_load_position
   // and invalidate when it has changed, even when the KLV pointer itself
-  // hasn't moved. Only test code currently mutates leave_values in-place;
-  // production KLVs are loaded once and treated as immutable.
+  // hasn't moved.
   uint64_t mutation_counter;
 } KLV;
 
@@ -66,6 +65,11 @@ static inline void klv_set_all_leave_values_to_zero(KLV *klv) {
 
 static inline uint64_t klv_get_mutation_counter(const KLV *klv) {
   return klv->mutation_counter;
+}
+
+// Call once after directly mutating one or more leave_values in a batch.
+static inline void klv_mark_leave_values_mutated(KLV *klv) {
+  klv->mutation_counter++;
 }
 
 static inline Equity klv_get_indexed_leave_value(const KLV *klv,

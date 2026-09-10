@@ -2,6 +2,8 @@
 #define EXEC_DEFS_H
 
 #define TERMINATE_KEYWORD "quit"
+#define TERMINATE_KEYWORD_ALIAS_EXIT "exit"
+#define TERMINATE_KEYWORD_ALIAS_SHORT "q"
 
 typedef enum {
   ASYNC_STOP_COMMAND_TOKEN,
