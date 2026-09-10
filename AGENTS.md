@@ -65,6 +65,8 @@ C99 with two C11 exceptions: `_Atomic`/`<stdatomic.h>` and `static_assert`. Do n
 
 Always use `{}` braces for `if`, `else if`, and `else` blocks, even when the body is a single statement. No exceptions.
 
+**No `goto` statements.** Use structured loops, conditionals, early returns, and helper functions. Keep resource ownership explicit so every error path releases what it owns. This rule applies to C control flow; the MAGPIE `goto` navigation command is unrelated.
+
 **No forward declarations** — Never forward-declare a struct that is already defined in another module's header. Use `#include` to bring in that header instead. Forward declarations are only acceptable when the struct or function is defined in the same file.
 
 **Declare enum constants at file scope, never inside a function body.** Named constants belong with the other enum values, not buried where a reader can't find them. A constant shared across modules goes in the relevant `src/def/*_defs.h` header. A constant private to one `.c` file goes in that file's top-of-file anonymous `enum { ... }` block (see `src/impl/endgame.c`). An `enum { FOO = 12 };` declared inside a function is a bug — move it out.
