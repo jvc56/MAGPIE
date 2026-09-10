@@ -1488,7 +1488,63 @@ void test_endgame_progress_stream(void) {
   prng_destroy(prng);
 }
 
+// An actual historical move can be much worse than the best root. Its value
+// must remain exact even when top-1 searches use an outer aspiration window.
+static void test_root_pvs_actual_pass(void) {
+  Config *config = config_create_or_die("set -lex CSW24 -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/"
+              "5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/"
+              "4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0");
+  Game *game = config_get_game(config);
+  Move pass_move;
+  move_set_as_pass(&pass_move);
+  EndgameArgs args = {
+      .game = game,
+      .thread_control = config_get_thread_control(config),
+      .plies = 10,
+      .tt_fraction_of_mem = 0.0001,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 1,
+      .num_top_moves = 1,
+      .use_heuristics = true,
+      .forced_pass_bypass = true,
+      .seed = 42,
+  };
+  EndgameResults *results = endgame_results_create();
+  EndgameCtx *solver = NULL;
+  ErrorStack *errors = error_stack_create();
+  endgame_solve(&solver, &args, results, errors);
+  assert(error_stack_is_empty(errors));
+  const int32_t best_value =
+      endgame_results_get_value(results, ENDGAME_RESULT_BEST);
+  args.actual_move = &pass_move;
+  endgame_solve(&solver, &args, results, errors);
+  assert(error_stack_is_empty(errors));
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_BEST) == best_value);
+  const int32_t pass_value =
+      endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL);
+  assert(pass_value < best_value);
+  // Independent child solve: after our pass the opponent owns the move, so
+  // negate its net spread change to obtain the exact value of our pass.
+  play_move(&pass_move, game, NULL);
+  args.actual_move = NULL;
+  args.plies--;
+  endgame_ctx_destroy(solver);
+  solver = NULL;
+  endgame_solve(&solver, &args, results, errors);
+  assert(error_stack_is_empty(errors));
+  assert(pass_value ==
+         -endgame_results_get_value(results, ENDGAME_RESULT_BEST));
+  endgame_ctx_destroy(solver);
+  endgame_results_destroy(results);
+  error_stack_destroy(errors);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
+  test_root_pvs_actual_pass();
   test_before_search_callback();
   test_single_pv_display();
   test_ctx_reuse();
