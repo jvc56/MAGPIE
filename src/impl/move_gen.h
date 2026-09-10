@@ -16,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
+#include "../ent/word_info_table.h"
 #include "wmp_move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -61,9 +62,9 @@ typedef struct SubrackEnumCacheEntry {
   // Flat array indexed by subracks_get_combination_offset(size) + idx_for_size.
   BitRack subracks[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   Equity leave_values[MOVEGEN_SUBRACK_CACHE_ENTRIES];
-  // wmp_entry pointers per subrack, also rack-determined. Storing them
-  // lets us skip the per-subrack wmp_get_word_entry hash lookups on
-  // cache hit. Invalidated when the WMP pointer changes.
+  // Lazily populated wmp_entry pointers per subrack, also rack-determined:
+  // WMP_ENTRY_UNRESOLVED, a resolved miss (NULL), or a resolved entry.
+  // Invalidated when the WMP pointer changes.
   const WMPEntry *wmp_entries[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   uint8_t count_by_size[RACK_SIZE + 1];
 } SubrackEnumCacheEntry;
@@ -89,6 +90,10 @@ typedef struct MoveGen {
   int move_sort_type;
   move_record_t move_record_type;
   int number_of_tiles_in_bag;
+  // Whether a subrack's leave may take part in the bound that decides if the
+  // subrack can still beat the cutoff: only when the bag is not empty and
+  // the sort is by equity.
+  bool wmp_prune_subracks_by_leave;
   int player_index;
   Equity bingo_bonus;
   bool kwgs_are_shared;
@@ -105,8 +110,16 @@ typedef struct MoveGen {
   Rack leave;
   // Read-only view into the board's lanes for the current cross index;
   // refreshed by gen_load_position each call.
-  const Square *lanes_cache;
-  Square row_cache[BOARD_DIM];
+  // Direct views into the board (not copies): board_lanes points at all lane
+  // squares for the cross index, row_squares at the current row/dir within it.
+  // Square grew large enough that copying a row per anchor cost more than the
+  // locality it bought, so move generation reads the board in place.
+  const Square *board_lanes;
+  const Square *row_squares;
+  // Parallel WIT block data for the current lane (see Board.wit_block_rows),
+  // set alongside row_squares. NULL when no word info table is loaded.
+  const uint32_t *const *wit_row_lane;
+  const uint8_t *wit_len_lane;
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
   Equity opening_move_penalties[(BOARD_DIM) * 2];
   int board_number_of_tiles_played;
@@ -143,20 +156,18 @@ typedef struct MoveGen {
   int current_left_col;
   int current_right_col;
 
-  // Used to insert "unrestricted" multipliers into a descending list for
-  // calculating the maximum score for an anchor. We don't know which tiles will
-  // go in which multipliers so we keep a sorted list. The inner product of
-  // those and the descending tile scores is the highest possible score of a
-  // permutation of tiles in those squares.
-  UnrestrictedMultiplier
-      descending_cross_word_multipliers[WORD_ALIGNING_RACK_SIZE];
+  // Used to calculate the maximum score for an anchor. We don't know which
+  // tiles will go in which unrestricted squares, so effective multipliers are
+  // kept in descending order. The cross-word components need no ordering; they
+  // are retained only to rebuild the effective list when the main-word
+  // multiplier changes.
+  UnrestrictedMultiplier unrestricted_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint16_t descending_effective_letter_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint8_t num_unrestricted_multipliers;
   uint8_t last_word_multiplier;
 
-  // Used to reset the arrays after finishing shadow_play_right, which may have
-  // rearranged the ordering of the multipliers used while shadowing left.
-  UnrestrictedMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
+  // Rightward exploration can reorder the effective array. The append-only
+  // backup entries need only their count restored, so they need no copy.
   uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
 
   // Since shadow does not have backtracking besides when switching from going
@@ -198,6 +209,10 @@ typedef struct MoveGen {
   uint64_t klv_instance_fp_at_load;
   uint64_t wmp_instance_fp_at_load;
   const RackInfoTable *rack_info_table;
+  // Optional precomputed word info table (loaded with -wit). When non-NULL,
+  // wmp_move_gen prunes subracks whose letters cannot appear in any word
+  // containing the playthrough blocks. NULL disables the optimization.
+  const WordInfoTable *word_info_table;
   // RIT entry for the current player_rack, looked up once in
   // gen_look_up_leaves_and_record_exchanges and cached here for the duration
   // of this move generation. NULL if rack_info_table is NULL, the rack isn't

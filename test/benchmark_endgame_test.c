@@ -944,3 +944,112 @@ void test_endgame_move1(void) {
   endgame_results_destroy(results);
   config_destroy(config);
 }
+
+// Reproducible corpus and solver measurements for root-search changes. Each
+// record is a separate solve with a fresh TT; output includes values and moves
+// so timing comparisons cannot silently hide changed answers.
+void test_endgame_root_bench(void) {
+  log_set_level(LOG_FATAL);
+  const char *path = getenv("MAGPIE_ROOT_FILE");
+  assert(path != NULL);
+  const int count = env_int("MAGPIE_ROOT_COUNT", 64);
+  const int threads = env_int("MAGPIE_ROOT_THREADS", 1);
+  char settings[256];
+  (void)snprintf(settings, sizeof(settings),
+                 "set -lex CSW24 -threads %d -wmp true -rit true -wit true "
+                 "-s1 equity -s2 equity",
+                 threads);
+  Config *config = config_create_or_die(settings);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  if (env_int("MAGPIE_ROOT_GENERATE", 0)) {
+    FILE *output = fopen(path, "we");
+    assert(output != NULL);
+    MoveList *moves = move_list_create(1);
+    int found = 0;
+    const int seed = env_int("MAGPIE_ROOT_SEED", 420000103);
+    for (int attempt = 0; found < count && attempt < count * 100; attempt++) {
+      game_reset(game);
+      game_seed(game, (uint64_t)seed + (uint64_t)attempt);
+      draw_starting_racks(game);
+      if (!play_until_bag_empty(game, moves)) {
+        continue;
+      }
+      if (env_int("MAGPIE_ROOT_SMALL", 0)) {
+        while (
+            rack_get_total_letters(player_get_rack(game_get_player(game, 0))) +
+                    rack_get_total_letters(
+                        player_get_rack(game_get_player(game, 1))) >
+                6 &&
+            game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+          play_move(get_top_equity_move(game, moves), game, NULL);
+        }
+      }
+      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+        continue;
+      }
+      char *cgp = game_get_cgp(game, true);
+      const int written = fprintf(output, "%s\n", cgp);
+      assert(written > 0);
+      free(cgp);
+      found++;
+    }
+    assert(found == count);
+    const int close_status = fclose(output);
+    assert(close_status == 0);
+    move_list_destroy(moves);
+    config_destroy(config);
+    return;
+  }
+  FILE *input = fopen(path, "re");
+  assert(input != NULL);
+  char cgp[4096];
+  for (int position = 0; position < count; position++) {
+    const char *line = fgets(cgp, sizeof(cgp), input);
+    assert(line != NULL);
+    ErrorStack *errors = error_stack_create();
+    game_load_cgp(game, cgp, errors);
+    assert(error_stack_is_empty(errors));
+    EndgameCtx *solver = NULL;
+    EndgameResults *results = endgame_results_create();
+    EndgameArgs args = {
+        .game = game,
+        .thread_control = config_get_thread_control(config),
+        .plies = env_int("MAGPIE_ROOT_PLIES", 4),
+        .tt_fraction_of_mem = 0.01,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = threads,
+        .num_top_moves = env_int("MAGPIE_ROOT_TOPK", 1),
+        .use_heuristics = true,
+        .forced_pass_bypass = true,
+        .first_win = env_int("MAGPIE_ROOT_FIRSTWIN", 0) != 0,
+        .hard_time_limit = env_double("MAGPIE_ROOT_SECONDS", 0),
+        .seed = 42,
+    };
+    Timer timer;
+    ctimer_start(&timer);
+    if (args.hard_time_limit > 0) {
+      args.external_deadline_ns =
+          ctimer_monotonic_ns() + (int64_t)(args.hard_time_limit * 1e9);
+    }
+    endgame_solve(&solver, &args, results, errors);
+    const double elapsed = ctimer_elapsed_seconds(&timer);
+    assert(error_stack_is_empty(errors));
+    const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    printf(
+        "ROOTROW %d value=%d spread=%d depth=%d nodes=%llu seconds=%.9f "
+        "move=%llu\n",
+        position, pv->score,
+        endgame_results_get_spread(results, ENDGAME_RESULT_BEST, game),
+        endgame_results_get_depth(results, ENDGAME_RESULT_BEST),
+        (unsigned long long)endgame_ctx_get_nodes_searched(solver), elapsed,
+        (unsigned long long)(pv->num_moves > 0 ? pv->moves[0].tiny_move : 0));
+    (void)fflush(stdout);
+    endgame_ctx_destroy(solver);
+    endgame_results_destroy(results);
+    error_stack_destroy(errors);
+  }
+  const int close_status = fclose(input);
+  assert(close_status == 0);
+  config_destroy(config);
+}

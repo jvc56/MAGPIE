@@ -120,16 +120,19 @@ typedef enum {
   ARG_TOKEN_USE_WMP,
   ARG_TOKEN_USE_RIT,
   ARG_TOKEN_USE_MMAP_FOR_RIT,
+  ARG_TOKEN_USE_WIT,
   ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_USE_RIT,
+  ARG_TOKEN_P1_USE_WIT,
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
   ARG_TOKEN_P2_USE_WMP,
   ARG_TOKEN_P2_USE_RIT,
+  ARG_TOKEN_P2_USE_WIT,
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
@@ -1555,6 +1558,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "loading the file but pages are faulted on demand during play. "
              "Only supported on little-endian architectures.";
       break;
+    case ARG_TOKEN_USE_WIT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use the precomputed word info table when "
+             "generating moves. The table stores, for each word, the letters "
+             "usable in longer words containing it as a substring, letting "
+             "movegen prune subracks that cannot fit. Off by default because "
+             ".wit files must be built with the kwg2wit convert command.";
+      break;
     case ARG_TOKEN_LEAVES:
       usages[0] = "<leaves>";
       examples[0] = "CSW21";
@@ -1585,6 +1598,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether to use the precomputed rack info table when "
+             "generating moves for the given player.";
+      break;
+    case ARG_TOKEN_P1_USE_WIT:
+    case ARG_TOKEN_P2_USE_WIT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use the precomputed word info table when "
              "generating moves for the given player.";
       break;
     case ARG_TOKEN_P1_LEAVES:
@@ -2356,6 +2377,9 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_GAME_VARIANT,        /* var */
         ARG_TOKEN_P1_USE_WMP,          /* w1 */
         ARG_TOKEN_P2_USE_WMP,          /* w2 */
+        ARG_TOKEN_USE_WIT,             /* wit */
+        ARG_TOKEN_P1_USE_WIT,          /* wit1 */
+        ARG_TOKEN_P2_USE_WIT,          /* wit2 */
         ARG_TOKEN_USE_WMP,             /* wmp */
     };
     // Game Analysis Options (alphabetical by name)
@@ -4742,77 +4766,80 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  // Add the consecutive pass rack end penalties for both players
-  int player_index = game_get_player_on_turn_index(game);
+  // Add the consecutive pass rack end penalties for both players.
+  //
+  // The racks for both players are resolved before either is drawn. When the
+  // game ends on consecutive passes with an empty (or nearly empty) bag, the
+  // tiles one player must draw are sitting on the other player's rack, so
+  // drawing them one player at a time would fail.
+  const int first_player_index = game_get_player_on_turn_index(game);
   const LetterDistribution *ld = game_get_ld(game);
+  const Rack *racks_to_draw[2] = {NULL, NULL};
   for (int i = 0; i < 2; i++) {
-    if (i == 1) {
-      player_index = 1 - player_index;
-    }
-    const Player *player = game_get_player(game, player_index);
-    const Rack *player_rack = player_get_rack(player);
+    const int player_index =
+        i == 0 ? first_player_index : 1 - first_player_index;
     const Rack *rack_to_draw_before_pass_out_game_end =
         game_history_player_get_rack_to_draw_before_pass_out_game_end(
             game_history, player_index);
     if (rack_get_dist_size(rack_to_draw_before_pass_out_game_end) != 0) {
-      if (!rack_is_drawable(game, player_index,
-                            rack_to_draw_before_pass_out_game_end)) {
-        StringBuilder *sb = string_builder_create();
-        string_builder_add_rack(sb, rack_to_draw_before_pass_out_game_end, ld,
-                                false);
-        error_stack_push(
-            error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
-            get_formatted_string(
-                "rack to draw before game end pass out '%s' for player '%s'"
-                "is not available in the bag",
-                string_builder_peek(sb),
-                game_history_player_get_name(game_history, player_index)));
-        string_builder_destroy(sb);
-        return;
-      }
-      return_rack_to_bag(game, player_index);
-      draw_rack_from_bag(game, player_index,
-                         rack_to_draw_before_pass_out_game_end);
-    } else {
-      // Get the rack from the previous pass
-      bool found_pass = false;
-      for (int j = num_events - 1; j >= 0; j--) {
-        GameEvent *game_event = game_history_get_event(game_history, j);
-        if (game_event_get_type(game_event) == GAME_EVENT_PASS &&
-            game_event_get_player_index(game_event) == player_index) {
-          const Rack *prev_pass_rack = game_event_get_rack(game_event);
-          if (!rack_is_drawable(game, player_index, prev_pass_rack)) {
-            StringBuilder *sb = string_builder_create();
-            string_builder_add_rack(sb, prev_pass_rack, ld, false);
-            error_stack_push(
-                error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
-                get_formatted_string(
-                    "rack to draw before game end pass out "
-                    "'%s' for player '%s'"
-                    "is not available in the bag",
-                    string_builder_peek(sb),
-                    game_history_player_get_name(game_history, player_index)));
-            string_builder_destroy(sb);
-            return;
-          }
-          return_rack_to_bag(game, player_index);
-          draw_rack_from_bag(game, player_index, prev_pass_rack);
-          found_pass = true;
-          break;
-        }
-      }
-      if (!found_pass) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND,
-            get_formatted_string(
-                "did not find expected previous pass for player '%s' when "
-                "processing consecutive pass game end penalty",
-                game_history_player_get_name(game_history, player_index)));
+      racks_to_draw[i] = rack_to_draw_before_pass_out_game_end;
+      continue;
+    }
+    // Get the rack from the previous pass
+    for (int j = num_events - 1; j >= 0; j--) {
+      const GameEvent *game_event = game_history_get_event(game_history, j);
+      if (game_event_get_type(game_event) == GAME_EVENT_PASS &&
+          game_event_get_player_index(game_event) == player_index) {
+        racks_to_draw[i] = game_event_get_const_rack(game_event);
+        break;
       }
     }
+    if (!racks_to_draw[i]) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND,
+          get_formatted_string(
+              "did not find expected previous pass for player '%s' when "
+              "processing consecutive pass game end penalty",
+              game_history_player_get_name(game_history, player_index)));
+      return;
+    }
+  }
 
+  // Both racks go back to the bag before either player draws so that the
+  // tiles held by one player are available to the other.
+  return_rack_to_bag(game, 0);
+  return_rack_to_bag(game, 1);
+
+  for (int i = 0; i < 2; i++) {
+    const int player_index =
+        i == 0 ? first_player_index : 1 - first_player_index;
+    if (!rack_is_drawable(game, player_index, racks_to_draw[i])) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_rack(sb, racks_to_draw[i], ld, false);
+      error_stack_push(
+          error_stack, ERROR_STATUS_COMMIT_PASS_OUT_RACK_NOT_IN_BAG,
+          get_formatted_string(
+              "rack to draw before game end pass out '%s' for player '%s'"
+              "is not available in the bag",
+              string_builder_peek(sb),
+              game_history_player_get_name(game_history, player_index)));
+      string_builder_destroy(sb);
+      return;
+    }
+    draw_rack_from_bag(game, player_index, racks_to_draw[i]);
+  }
+
+  for (int i = 0; i < 2; i++) {
+    const int player_index =
+        i == 0 ? first_player_index : 1 - first_player_index;
     draw_to_full_rack(game, player_index);
+  }
 
+  for (int i = 0; i < 2; i++) {
+    const int player_index =
+        i == 0 ? first_player_index : 1 - first_player_index;
+    const Player *player = game_get_player(game, player_index);
+    const Rack *player_rack = player_get_rack(player);
     const Equity end_rack_penalty = calculate_end_rack_penalty(player_rack, ld);
     GameEvent *rack_penalty_event =
         game_history_add_game_event(game_history, error_stack);
@@ -6175,8 +6202,10 @@ void config_load_lexicon_dependent_data(
     const bool use_wmp_has_value, const bool p1_use_wmp_has_value,
     const bool p2_use_wmp_has_value, const bool use_rit_has_value,
     const bool p1_use_rit_has_value, const bool p2_use_rit_has_value,
-    const bool use_mmap_for_rit_has_value, const bool disable_rit,
-    const bool is_loading_game_history, ErrorStack *error_stack) {
+    const bool use_mmap_for_rit_has_value, const bool use_wit_has_value,
+    const bool p1_use_wit_has_value, const bool p2_use_wit_has_value,
+    const bool disable_rit, const bool is_loading_game_history,
+    ErrorStack *error_stack) {
   // Lexical player data
 
   // For both the kwg and klv, we disallow any non-NULL -> NULL transitions.
@@ -6323,6 +6352,46 @@ void config_load_lexicon_dependent_data(
     }
   }
 
+  // Determine the status of the word info table for both players, mirroring
+  // the WMP/RIT arg pattern (wit / wit1 / wit2).
+  bool p1_wit_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_WIT, 0);
+  bool p2_wit_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_WIT, 1);
+
+  if (use_wit_has_value) {
+    config_load_bool(config, ARG_TOKEN_USE_WIT, &p1_wit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    p2_wit_use_when_available = p1_wit_use_when_available;
+  }
+
+  // The "wit1" and "wit2" args override the "wit" arg.
+  if (p1_use_wit_has_value) {
+    config_load_bool(config, ARG_TOKEN_P1_USE_WIT, &p1_wit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (p2_use_wit_has_value) {
+    config_load_bool(config, ARG_TOKEN_P2_USE_WIT, &p2_wit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_WIT, 0,
+                                      p1_wit_use_when_available);
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_WIT, 1,
+                                      p2_wit_use_when_available);
+
   // Both lexicons are not specified, so we don't
   // load any of the lexicon dependent data
   if (!updated_p1_lexicon_name && !updated_p2_lexicon_name) {
@@ -6463,6 +6532,29 @@ void config_load_lexicon_dependent_data(
     return;
   }
 
+  // Load word info tables (if enabled). Like the WMP, the .wit file shares
+  // the lexicon name and non-NULL -> NULL transitions are allowed.
+  const char *p1_wit_name = NULL;
+  if (p1_wit_use_when_available) {
+    p1_wit_name = updated_p1_lexicon_name;
+  }
+  const char *p2_wit_name = NULL;
+  if (p2_wit_use_when_available) {
+    p2_wit_name = updated_p2_lexicon_name;
+  }
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WIT,
+                   config->data_paths, p1_wit_name, p2_wit_name,
+                   /*use_mmap_for_rit=*/false, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  // Every data type is now in place; a table that does not match its KWG
+  // must not survive the set.
+  players_data_validate_word_info_tables(config->players_data, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Load letter distribution
 
   const char *existing_ld_name = NULL;
@@ -6565,9 +6657,10 @@ void config_load_game_history(Config *config, const GameHistory *game_history,
       game_history_get_board_layout_name(game_history);
   const game_variant_t game_variant =
       game_history_get_game_variant(game_history);
-  config_load_lexicon_dependent_data(
-      config, lexicon, NULL, NULL, NULL, NULL, NULL, ld_name, false, false,
-      false, false, false, false, false, false, true, error_stack);
+  config_load_lexicon_dependent_data(config, lexicon, NULL, NULL, NULL, NULL,
+                                     NULL, ld_name, false, false, false, false,
+                                     false, false, false, false, false, false,
+                                     false, true, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -8087,12 +8180,19 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const bool use_mmap_for_rit =
       config_get_parg_value(config, ARG_TOKEN_USE_MMAP_FOR_RIT, 0);
 
+  // WIT settings
+  const bool use_wit = config_get_parg_value(config, ARG_TOKEN_USE_WIT, 0);
+  const bool p1_use_wit =
+      config_get_parg_value(config, ARG_TOKEN_P1_USE_WIT, 0);
+  const bool p2_use_wit =
+      config_get_parg_value(config, ARG_TOKEN_P2_USE_WIT, 0);
+
   config_load_lexicon_dependent_data(
       config, new_lexicon_name, new_p1_lexicon_name, new_p2_lexicon_name,
       new_leaves_name, new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
       use_wmp, p1_use_wmp, p2_use_wmp, use_rit, p1_use_rit, p2_use_rit,
-      use_mmap_for_rit, config->exec_parg_token == ARG_TOKEN_LEAVE_GEN, false,
-      error_stack);
+      use_mmap_for_rit, use_wit, p1_use_wit, p2_use_wit,
+      config->exec_parg_token == ARG_TOKEN_LEAVE_GEN, false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -9270,16 +9370,19 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_WMP, "wmp", 1, 1);
   arg(ARG_TOKEN_USE_RIT, "rit", 1, 1);
   arg(ARG_TOKEN_USE_MMAP_FOR_RIT, "ritmmap", 1, 1);
+  arg(ARG_TOKEN_USE_WIT, "wit", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
+  arg(ARG_TOKEN_P1_USE_WIT, "wit1", 1, 1);
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
   arg(ARG_TOKEN_P2_USE_RIT, "rit2", 1, 1);
+  arg(ARG_TOKEN_P2_USE_WIT, "wit2", 1, 1);
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
@@ -9680,6 +9783,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_LEXICON:
     case ARG_TOKEN_USE_WMP:
     case ARG_TOKEN_USE_RIT:
+    case ARG_TOKEN_USE_WIT:
     case ARG_TOKEN_LEAVES:
       // Set these values on a per-player basis
       break;
@@ -9704,6 +9808,12 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           players_data_get_use_when_available(config->players_data,
                                               PLAYERS_DATA_TYPE_RIT, 0));
+      break;
+    case ARG_TOKEN_P1_USE_WIT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_use_when_available(config->players_data,
+                                              PLAYERS_DATA_TYPE_WIT, 0));
       break;
     case ARG_TOKEN_P1_LEAVES:
       config_add_string_setting_to_string_builder(
@@ -9740,6 +9850,12 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           players_data_get_use_when_available(config->players_data,
                                               PLAYERS_DATA_TYPE_RIT, 1));
+      break;
+    case ARG_TOKEN_P2_USE_WIT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_use_when_available(config->players_data,
+                                              PLAYERS_DATA_TYPE_WIT, 1));
       break;
     case ARG_TOKEN_P2_LEAVES:
       config_add_string_setting_to_string_builder(

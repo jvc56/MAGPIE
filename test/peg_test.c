@@ -239,6 +239,41 @@ static void test_peg_main_4bag_single(void) {
                          PEG_OPP_RATIONAL, /*out_spread=*/NULL);
 }
 
+// A short clock must bound the whole PEG solve, including worker setup and an
+// in-flight stage-0 scenario. This 4-in-bag position has enough candidates and
+// bag orderings to run well past the budget without the inner cancellation
+// checks; the generous wall-clock assertion avoids scheduler flakes while
+// still catching unbounded setup or scenario completion.
+static void test_peg_short_budget_interrupts(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+      "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
+      "12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24");
+  ErrorStack *error_stack = error_stack_create();
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = config_get_game(config);
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 4;
+  args.time_budget_seconds = 0.05;
+  args.opp_model = PEG_OPP_RATIONAL;
+
+  Timer timer;
+  ctimer_start(&timer);
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  ctimer_stop(&timer);
+
+  assert(error_stack_is_empty(error_stack));
+  assert(ctimer_elapsed_seconds(&timer) < 1.0);
+  peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // Opponent modeling: rational vs pessimistic. Uses the 4-in-bag position with a
 // single pinned bag ordering; the top candidate leaves the bag non-empty, so
 // the opponent still draws and the opponent model actually drives the playout.
@@ -1110,13 +1145,15 @@ static void peg_test_on_stage_start(int stage_idx, int k_cands, int inner_d,
 static void peg_test_on_cand_done(int stage_idx, int cand_rank,
                                   const Move *cand, double win_pct,
                                   double mean_spread, int scen_done,
-                                  bool reordered, void *user_data) {
+                                  int64_t completed_ns, bool reordered,
+                                  void *user_data) {
   (void)stage_idx;
   (void)cand_rank;
   (void)mean_spread;
   (void)reordered;
   assert(cand != NULL);
   assert(scen_done >= 1);
+  assert(completed_ns > 0);
   assert(win_pct >= 0.0 && win_pct <= 1.0);
   PegCallbackCounters *counters = user_data;
   atomic_fetch_add(&counters->cand_dones, 1);
@@ -1211,15 +1248,15 @@ typedef struct PegDiscardStageContext {
 // Interrupt the second halving stage after its first candidate finishes. The
 // solver must discard that one-candidate stage and keep every published result,
 // including its captured outcomes, at the preceding fidelity.
-static void peg_test_interrupt_discarded_stage(int stage_idx, int cand_rank,
-                                               const Move *cand, double win_pct,
-                                               double mean_spread,
-                                               int scen_done, bool reordered,
-                                               void *user_data) {
+static void peg_test_interrupt_discarded_stage(
+    int stage_idx, int cand_rank, const Move *cand, double win_pct,
+    double mean_spread, int scen_done, int64_t completed_ns, bool reordered,
+    void *user_data) {
   (void)cand;
   (void)win_pct;
   (void)mean_spread;
   (void)scen_done;
+  (void)completed_ns;
   (void)reordered;
   if (stage_idx == 2 && cand_rank == 0) {
     PegDiscardStageContext *context = user_data;
@@ -1282,6 +1319,111 @@ static void test_peg_discarded_stage_outcomes(void) {
     assert(result.cand_outcomes[outcome_idx].fidelity == 2);
   }
 
+  peg_result_destroy(&result);
+  peg_poll_destroy(poll);
+  validated_moves_destroy(moves);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+typedef struct PegInterruptedCandidateContext {
+  ThreadControl *thread_control;
+  int completed_candidates;
+  bool interrupted;
+} PegInterruptedCandidateContext;
+
+static void peg_test_count_completed_candidates(
+    int stage_idx, int cand_rank, const Move *cand, double win_pct,
+    double mean_spread, int scen_done, int64_t completed_ns, bool reordered,
+    void *user_data) {
+  (void)cand_rank;
+  (void)cand;
+  (void)win_pct;
+  (void)mean_spread;
+  (void)scen_done;
+  (void)completed_ns;
+  (void)reordered;
+  if (stage_idx == 2) {
+    PegInterruptedCandidateContext *context = user_data;
+    context->completed_candidates++;
+  }
+}
+
+static void peg_test_interrupt_partial_candidate(int stage_idx, int cand_rank,
+                                                 int scenario_idx,
+                                                 int32_t value, int64_t weight,
+                                                 void *user_data) {
+  (void)cand_rank;
+  (void)scenario_idx;
+  (void)value;
+  (void)weight;
+  PegInterruptedCandidateContext *context = user_data;
+  if (stage_idx == 2 && context->completed_candidates == 1 &&
+      !context->interrupted) {
+    context->interrupted = true;
+    thread_control_set_status(context->thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+}
+
+// Complete one 3-ply candidate, then interrupt the second after its first
+// scenario. A partial candidate must not make the stage look accepted; both
+// rankings and captured outcomes must remain at the completed 2-ply stage.
+void test_peg_interrupted_candidate_outcomes(void) {
+  Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+  const Game *game = config_get_game(config);
+  ErrorStack *error_stack = error_stack_create();
+  ValidatedMoves *moves = validated_moves_create(
+      game, game_get_player_on_turn_index(game), "13L ONYX,13L OXY",
+      /*allow_phonies=*/false, /*allow_playthrough=*/true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(validated_moves_get_number_of_moves(moves) == 2);
+  const Move *only_moves[] = {validated_moves_get_move(moves, 0),
+                              validated_moves_get_move(moves, 1)};
+  static const int stage_top_k[] = {2, 2};
+  PegPoll *poll = peg_poll_create();
+  PegInterruptedCandidateContext context = {
+      .thread_control = config_get_thread_control(config),
+  };
+  PegArgs args = {0};
+  args.game = game;
+  args.thread_control = context.thread_control;
+  // One worker makes callback ordering deterministic. No wall-clock timeout:
+  // only the callback above can interrupt this test.
+  args.num_threads = 1;
+  args.stage_top_k = stage_top_k;
+  args.num_stages = 2;
+  args.only_moves = only_moves;
+  args.n_only_moves = 2;
+  args.include_per_scenario = true;
+  args.poll = poll;
+  args.on_cand_done = peg_test_count_completed_candidates;
+  args.on_scenario_done = peg_test_interrupt_partial_candidate;
+  args.user_data = &context;
+  PegResult result = {0};
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(context.interrupted);
+  assert(context.completed_candidates == 1);
+  assert(result.last_completed_stage == 1);
+  assert(result.n_top_cands == 2);
+  assert(result.n_cand_outcomes == 2);
+  for (int cand_idx = 0; cand_idx < result.n_top_cands; cand_idx++) {
+    assert(result.top_cands[cand_idx].weight_sum == 8);
+    assert(result.top_cands[cand_idx].n_scenarios == 7);
+    const PegCandOutcomes *outcomes = &result.cand_outcomes[cand_idx];
+    assert(outcomes->fidelity == 2);
+    int64_t captured_weight = 0;
+    for (int row_idx = 0; row_idx < outcomes->n_rows; row_idx++) {
+      captured_weight += outcomes->rows[row_idx].weight;
+    }
+    assert(captured_weight == 8);
+  }
   peg_result_destroy(&result);
   peg_poll_destroy(poll);
   validated_moves_destroy(moves);
@@ -1865,10 +2007,12 @@ void test_peg(void) {
   test_peg_main_2bag_single();
   test_peg_main_3bag_single();
   test_peg_main_4bag_single();
+  test_peg_short_budget_interrupts();
   test_peg_main_opp_models();
   test_peg_main_pnoprune();
   test_peg_main_progress_detail();
   test_peg_discarded_stage_outcomes();
+  test_peg_interrupted_candidate_outcomes();
   test_peg_main_inner_top_k();
   // Cases drawn from the macondo codebase + pre-endgame manual.
   test_peg_macondo_only_onyx();
