@@ -1,3 +1,5 @@
+#include "math_util_test.h"
+
 #include "../src/util/math_util.h"
 #include "test_util.h"
 #include <assert.h>

@@ -1,3 +1,5 @@
+#include "move_gen_test.h"
+
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"

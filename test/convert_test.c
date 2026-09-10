@@ -1,3 +1,5 @@
+#include "convert_test.h"
+
 #include "../src/ent/conversion_results.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"

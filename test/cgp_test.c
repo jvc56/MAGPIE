@@ -1,3 +1,5 @@
+#include "cgp_test.h"
+
 #include "../src/def/game_defs.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/game.h"
@@ -19,7 +21,7 @@ void assert_game_matches_cgp_with_options(const Config *config,
                                           const Game *game,
                                           const char *expected_cgp_with_options,
                                           bool write_player_on_turn_first) {
-  PlayersData *players_data = config_get_players_data(config);
+  const PlayersData *players_data = config_get_players_data(config);
   int bingo_bonus = config_get_bingo_bonus(config);
   const char *board_layout_name =
       board_layout_get_name(config_get_board_layout(config));

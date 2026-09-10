@@ -1,3 +1,5 @@
+#include "bag_test.h"
+
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/letter_distribution.h"

@@ -1,3 +1,5 @@
+#include "checkpoint_test.h"
+
 #include "../src/compat/cpthread.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/ent/checkpoint.h"

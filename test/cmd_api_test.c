@@ -1,3 +1,5 @@
+#include "cmd_api_test.h"
+
 #include "../src/impl/cmd_api.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"

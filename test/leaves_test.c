@@ -1,3 +1,5 @@
+#include "leaves_test.h"
+
 #include "../src/def/equity_defs.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"

@@ -1,3 +1,5 @@
+#include "dawg_packed_test.h"
+
 #include "../src/def/kwg_defs.h"
 #include "../src/ent/dawg_packed.h"
 #include "../src/ent/dictionary_word.h"

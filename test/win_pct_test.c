@@ -1,3 +1,5 @@
+#include "win_pct_test.h"
+
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "test_util.h"

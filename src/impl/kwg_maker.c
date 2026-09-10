@@ -1,3 +1,5 @@
+#include "kwg_maker.h"
+
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/kwg_defs.h"

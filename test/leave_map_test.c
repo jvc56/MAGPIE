@@ -1,3 +1,5 @@
+#include "leave_map_test.h"
+
 #include "../src/ent/equity.h"
 #include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"

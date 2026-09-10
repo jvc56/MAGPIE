@@ -1,3 +1,5 @@
+#include "endgame_string.h"
+
 #include "../def/game_defs.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"

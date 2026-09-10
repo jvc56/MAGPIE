@@ -1,3 +1,5 @@
+#include "letter_distribution_test.h"
+
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/letter_distribution.h"

@@ -1,3 +1,5 @@
+#include "bai_test.h"
+
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/bai_defs.h"

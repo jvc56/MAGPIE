@@ -1,8 +1,13 @@
 #ifndef INFERENCE_STRING_H
 #define INFERENCE_STRING_H
 
+#include "../ent/inference_results.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
+#include "../ent/thread_control.h"
 #include "../util/string_util.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 void print_ucgi_inference_current_rack(uint64_t current_rack_index,
                                        ThreadControl *thread_control);

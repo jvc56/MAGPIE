@@ -1,3 +1,5 @@
+#include "endgame_test.h"
+
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/def/cpthread_defs.h"

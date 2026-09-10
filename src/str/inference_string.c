@@ -1,3 +1,5 @@
+#include "inference_string.h"
+
 #include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"

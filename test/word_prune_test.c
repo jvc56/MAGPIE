@@ -1,3 +1,5 @@
+#include "word_prune_test.h"
+
 #include "../src/ent/dictionary_word.h"
 #include "../src/ent/game.h"
 #include "../src/impl/config.h"
