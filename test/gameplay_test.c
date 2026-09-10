@@ -801,7 +801,8 @@ void test_moves_are_similar(void) {
 // update_cross_set_for_move_from_undo a descendant node performs before move
 // generation, then unplay_move_incremental must restore the board (letters,
 // cross sets, cross scores, extension sets, anchors, flags) byte-for-byte.
-static void assert_incremental_play_roundtrip(Game *game) {
+static void assert_incremental_play_roundtrip(Game *game,
+                                              bool require_both_directions) {
   game_gen_all_cross_sets(game);
   Board *board = game_get_board(game);
   board_set_cross_sets_valid(board, true);
@@ -847,6 +848,10 @@ static void assert_incremental_play_roundtrip(Game *game) {
                    board_get_cross_set(fresh_board, r, c, d, 0));
             assert(board_get_cross_set(board, r, c, d, 1) ==
                    board_get_cross_set(fresh_board, r, c, d, 1));
+            for (int ci = 0; ci < 2; ci++) {
+              assert(board_get_cross_score(board, r, c, d, ci) ==
+                     board_get_cross_score(fresh_board, r, c, d, ci));
+            }
           }
         }
       }
@@ -876,8 +881,11 @@ static void assert_incremental_play_roundtrip(Game *game) {
     }
   }
   // The position must exercise both branches of the transposed lazy update.
-  assert(tested_vertical > 0);
-  assert(tested_horizontal > 0);
+  assert(tested_vertical + tested_horizontal > 0);
+  if (require_both_directions) {
+    assert(tested_vertical > 0);
+    assert(tested_horizontal > 0);
+  }
 
   // A pass round-trips too (no tiles: nothing to update, flags restored).
   Move pass;
@@ -899,7 +907,7 @@ void test_incremental_cross_set_undo(void) {
   Config *config = config_create_or_die("set -lex CSW21 -s1 score -s2 score");
   Game *game = config_game_create(config);
   load_cgp_or_die(game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
-  assert_incremental_play_roundtrip(game);
+  assert_incremental_play_roundtrip(game, true);
   game_destroy(game);
   config_destroy(config);
 
@@ -909,9 +917,19 @@ void test_incremental_cross_set_undo(void) {
       config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 score -s2 score");
   Game *dual_game = config_game_create(dual_config);
   load_cgp_or_die(dual_game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
-  assert_incremental_play_roundtrip(dual_game);
+  assert_incremental_play_roundtrip(dual_game, true);
   game_destroy(dual_game);
   config_destroy(dual_config);
+
+  Config *wordsmog_config = config_create_or_die(
+      "set -lex CSW21_alpha -wmp false -var wordsmog -s1 score -s2 score");
+  Game *wordsmog_game = config_game_create(wordsmog_config);
+  load_cgp_or_die(wordsmog_game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
+  // The bounded top-score list can contain only horizontal Wordsmog plays.
+  // Both directions' cross fields are still compared after every play.
+  assert_incremental_play_roundtrip(wordsmog_game, false);
+  game_destroy(wordsmog_game);
+  config_destroy(wordsmog_config);
 }
 
 // Regression test: get_top_move_for_player_on_turn (used by autoplay's

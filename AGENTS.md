@@ -16,6 +16,7 @@ Crossword game engine in C (C99 with some C11). Move generation, Monte Carlo sim
 ```bash
 make magpie                    # dev build (ASAN/UBSAN enabled)
 make release                   # production static-trained PGO build
+make prepare_data              # validate/upgrade CSW24 WIT; create missing RIT
 make magpie BUILD=no_pgo_release # optimized build without PGO
 make magpie_test               # build test binary
 make magpie_test BUILD=no_pgo_release # optimized test binary
@@ -26,9 +27,12 @@ make libmagpie                 # shared library; API is src/impl/cmd_api.h
 make clean                     # remove build artifacts
 ```
 
-The local PGO build uses Clang and `llvm-profdata`, reuses an existing production
-CSW24 RIT (or creates it when missing), discards old profile data, and trains
-the current source on static autoplay. Experimental `pgo`, `pgo_sim`,
+The local PGO build uses Clang and `llvm-profdata`, found under their plain or
+distro-versioned names (`clang-18`, `llvm-profdata-18`); with no clang on PATH,
+`make release` builds the plain optimized release and says so. It reuses an
+existing production CSW24 RIT (or creates it when missing), validates/upgrades
+the CSW24 WIT with the native C converter before training, discards old
+profile data, and trains the current source on static autoplay. Experimental `pgo`, `pgo_sim`,
 `pgo_peg`, and `pgo_eg` targets are also available. Each produces a
 `-march=native` binary for the build machine. Rerun the selected target after
 source changes and on each target architecture. Override `PGO_CC`,
@@ -63,6 +67,8 @@ C99 with two C11 exceptions: `_Atomic`/`<stdatomic.h>` and `static_assert`. Do n
 
 Always use `{}` braces for `if`, `else if`, and `else` blocks, even when the body is a single statement. No exceptions.
 
+**No `goto` statements.** Use structured loops, conditionals, early returns, and helper functions. Keep resource ownership explicit so every error path releases what it owns. This rule applies to C control flow; the MAGPIE `goto` navigation command is unrelated.
+
 **No forward declarations** — Never forward-declare a struct that is already defined in another module's header. Use `#include` to bring in that header instead. Forward declarations are only acceptable when the struct or function is defined in the same file.
 
 **Declare enum constants at file scope, never inside a function body.** Named constants belong with the other enum values, not buried where a reader can't find them. A constant shared across modules goes in the relevant `src/def/*_defs.h` header. A constant private to one `.c` file goes in that file's top-of-file anonymous `enum { ... }` block (see `src/impl/endgame.c`). An `enum { FOO = 12 };` declared inside a function is a bug — move it out.
@@ -82,6 +88,12 @@ Keep performance work and quality work separate.
 ### Performance work
 
 Make it faster **without changing behavior**. Validate with autoplay or on-demand tests comparing before/after. Profile with `BUILD=profile` and `sample <pid>` on macOS. Measure the specific functions changed, not just wall-clock time.
+
+### Feature flags must be free when off
+
+A flag-gated optimization (RIT, WMP, WIT, PGO paths, ...) must cost nothing measurable on the path where the flag is off. Do not add struct fields, per-item stores, cache copies, or branches that the disabled path pays for. Put the mechanism's state where only the enabled path touches it — a sentinel value written by that path beats a flag every path must maintain.
+
+Benchmark both states. The flag-off run is the control and must measure ~0; a flag-off regression means the mechanism is in the wrong place, not that the change is a wash. #614's first port gained +0.7% with RIT on and lost −0.7% with RIT off from exactly this, and the fix removed the loss without touching the gain.
 
 ### Quality work
 
@@ -115,6 +127,7 @@ When comparing two solver modes, the second benefits unfairly from the first's T
 7. **Tests in test files** — Test-only code belongs in `test/*.c`, not `src/`.
 8. **Equity is millipoints** — `Equity` (`int32_t`) = millipoints (42 points = `42000`). Use `int_to_equity()` / `equity_to_int()` / `double_to_equity()`.
 9. **Resource leaks on error paths** — Release all resources before error returns. cppcheck catches missing `fclose`/`free`.
+10. **Endian I/O belongs in `src/compat`.** Use `fread_le_uint32s` and `fwrite_le_uint32s` from `src/compat/endian_io.h` for little-endian uint32 array I/O. Keep host-endian checks (`IS_LITTLE_ENDIAN`) and byte swapping inside the compatibility layer. If another type or operation needs support, add a shared helper there; serializers and loaders should call the helpers.
 
 ## Keep PRs focused
 Large PRs with multiple concerns get closed. Split into smaller, focused units.

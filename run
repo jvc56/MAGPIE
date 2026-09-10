@@ -65,8 +65,7 @@ xdg-open covhtml/index.html
 
 # Build the production release version of magpie
 elif [ "$1" == "r" ]; then
-make release
-./bin/magpie
+make release && ./bin/magpie
 
 # Run an autoplay perf test
 

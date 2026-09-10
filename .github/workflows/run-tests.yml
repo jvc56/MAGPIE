@@ -102,7 +102,7 @@ jobs:
           - shard: config
             tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest
-            tests: "hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load"
+            tests: "hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep"
           - shard: ap_rit
             tests: "ap_rit"
     steps:
@@ -137,6 +137,19 @@ jobs:
 
       - name: Build dev test binary
         run: make magpie_test
+
+      - name: Check native batch conversion failures
+        if: matrix.shard == 'rest'
+        run: |
+          make magpie_convert
+          if ./bin/magpie_convert invalid_conversion CSW21; then
+            echo 'Invalid conversion unexpectedly succeeded'
+            exit 1
+          fi
+          if ./bin/magpie_convert; then
+            echo 'Missing conversion arguments unexpectedly succeeded'
+            exit 1
+          fi
 
       - name: Run dev tests
         run: ./bin/magpie_test ${{ matrix.tests }}

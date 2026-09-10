@@ -30,6 +30,8 @@ void generate_moves_for_game_override_record_type(
     const MoveGenArgs *args, move_record_t move_record_type);
 void generate_moves_for_game(const MoveGenArgs *args);
 void draw_to_full_rack(const Game *game, int player_index);
+// Returns the number of letters drawn, or a DRAW_RACK_STRING_* code from
+// def/gameplay_defs.h.
 int draw_rack_string_from_bag(const Game *game, int player_index,
                               const char *rack_string);
 bool draw_rack_from_bag(const Game *game, int player_index,
@@ -55,7 +57,8 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game);
 // MoveUndo-based cross-set update for the move region (forward, lazy).
 // Saves the previous contents of every square it modifies into the same
 // undo, so unplay_move_incremental's square restore reverts the cross-set
-// updates exactly — no recompute is needed after unplay.
+// updates exactly — no recompute is needed after unplay. This excludes the
+// parallel WIT block caches; unplay invalidates those derived entries.
 void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game);
 
 void game_play_n_events(GameHistory *game_history, Game *game,
