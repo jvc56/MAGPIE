@@ -143,12 +143,14 @@ typedef enum {
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_ENDGAME_TIME_LIMIT,
+  ARG_TOKEN_ENDGAME_FIRST_WIN,
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_NESTED,
+  ARG_TOKEN_PEG_FIRST_WIN,
   ARG_TOKEN_PEG_OUTCOMES,
   ARG_TOKEN_PEG_OUT_WIDTH,
   ARG_TOKEN_PEG_OUT_LINES,
@@ -273,6 +275,8 @@ typedef struct ParsedArg {
 
 struct Config {
   char *data_paths;
+  bool endgame_first_win_optim;
+  bool peg_first_win_optim;
   // PEG "never prune" move list (space-free UCGI, comma-separated), persisted
   // across commands since pargs reset each parse. NULL = no protected moves.
   // The "only solve" restriction is instead a per-invocation positional
@@ -1682,6 +1686,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the time limit in seconds for the endgame solver. A "
              "value of 0 (the default) falls back to -tlim.";
       break;
+    case ARG_TOKEN_ENDGAME_FIRST_WIN:
+      usages[0] = "<true/false>";
+      examples[0] = "true";
+      text = "Search the narrow (-1, 1) endgame window. Decisive results may "
+             "be bounds rather than full spread values. Default false.";
+      break;
     case ARG_TOKEN_PEG_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
       text = "Specifies the time limit in seconds for the pre-endgame solver. "
@@ -1741,6 +1751,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "lookahead (solve the opponent's sub-pre-endgame, depth 1); false = "
           "flat greedy/pessimistic rollout. Nested wins more decisions but "
           "costs more per solve.";
+      break;
+    case ARG_TOKEN_PEG_FIRST_WIN:
+      usages[0] = "<true/false>";
+      examples[0] = "false";
+      text = "Use a narrow (-1, 1) window for direct bag-empty endgame leaves. "
+             "Decisive leaf values may be bounds, changing spread estimates, "
+             "candidate rankings and later-stage survivors. "
+             "Nested leaves keep full-spread searches. Default true; false "
+             "uses full-spread searches.";
       break;
     case ARG_TOKEN_PEG_OUTCOMES:
       usages[0] = "<true/false>";
@@ -2385,6 +2404,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
         ARG_TOKEN_CUTOFF,                  /* cutoff */
+        ARG_TOKEN_ENDGAME_FIRST_WIN,       /* efw */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
         ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
         ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
@@ -2409,6 +2429,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
         ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
         ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
+        ARG_TOKEN_PEG_FIRST_WIN,           /* pegfw */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
         ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
@@ -3313,9 +3334,10 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       /*soft_time_limit=*/config->endgame_time_limit_seconds,
       /*hard_time_limit=*/config->endgame_time_limit_seconds, config->seed,
       /*skip_word_pruning=*/false, /*shared_tt=*/NULL, /*max_workers=*/0,
-      /*first_win=*/false, /*first_win_fallback_moves=*/0,
-      /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
-      /*external_deadline_ns=*/0, /*actual_move=*/NULL, endgame_args);
+      /*first_win=*/config->endgame_first_win_optim,
+      /*first_win_fallback_moves=*/0, /*use_initial_window=*/false,
+      /*initial_alpha=*/0, /*initial_beta=*/0, /*external_deadline_ns=*/0,
+      /*actual_move=*/NULL, endgame_args);
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
@@ -3414,13 +3436,9 @@ static void config_load_peg_stage_top_k(Config *config,
 static const int PEG_NESTED_DEFAULT_CAND_CAPS[] = {8, 4, 2};
 
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
-  // Nested inner-peg lookahead for non-emptier leaves is on by default at depth
-  // 1 with the default inner stage schedule and the bag-size default scenario
-  // stride (0). -pegnested false restores the flat rollout. Emptier (bag-empty)
-  // leaves are unaffected -- they always solve exact endgames.
-  // stage_top_k is the per-stage candidate-count override (NULL = built-in
-  // default schedule). poll and the only/protect move sets are left unset here;
-  // config_peg installs them after this call.
+  // Nested lookahead is enabled by default at depth 1. -pegnested false
+  // restores flat rollouts; -pegfw independently controls narrow-window
+  // endgame leaves and can change the resulting spread/ranking estimates.
   peg_args_fill(
       config->game, config->thread_control, config->num_threads,
       /*time_budget_seconds=*/config->peg_time_limit_seconds != 0
@@ -3431,7 +3449,8 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL,
       config->peg_num_stages, /*inner_top_k=*/0,
       config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
-      config->peg_scenario_stride, /*nested_enabled=*/config->peg_nested,
+      config->peg_first_win_optim, config->peg_scenario_stride,
+      /*nested_enabled=*/config->peg_nested,
       /*nested_cand_cap=*/0, PEG_NESTED_DEFAULT_CAND_CAPS,
       (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
             sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0])),
@@ -7241,6 +7260,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_ENDGAME_FIRST_WIN,
+                   &config->endgame_first_win_optim, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_double(config, ARG_TOKEN_PEG_TIME_LIMIT, 0, 1e9,
                      &config->peg_time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7278,6 +7303,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_bool(config, ARG_TOKEN_PEG_NESTED, &config->peg_nested,
                    error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_bool(config, ARG_TOKEN_PEG_FIRST_WIN,
+                   &config->peg_first_win_optim, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -9384,12 +9415,14 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TIME_LIMIT, "etlim", 1, 1);
+  arg(ARG_TOKEN_ENDGAME_FIRST_WIN, "efw", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
   arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
+  arg(ARG_TOKEN_PEG_FIRST_WIN, "pegfw", 1, 1);
   arg(ARG_TOKEN_PEG_OUTCOMES, "pegoutcomes", 1, 1);
   arg(ARG_TOKEN_PEG_OUT_WIDTH, "pegoutwidth", 1, 1);
   arg(ARG_TOKEN_PEG_OUT_LINES, "pegoutlines", 1, 1);
@@ -9505,6 +9538,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->show_bu = false;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
+  config->endgame_first_win_optim = false;
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
   // default; rational opponent; no only-solve / never-prune restrictions.
   config->peg_result.last_completed_stage = -1;
@@ -9512,6 +9546,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;
+  config->peg_first_win_optim = true;
   config->peg_show_outcomes = true;
   config->peg_out_width = 100;
   config->peg_out_lines = 1;
@@ -9926,6 +9961,10 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->peg_nested);
       break;
+    case ARG_TOKEN_PEG_FIRST_WIN:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->peg_first_win_optim);
+      break;
     case ARG_TOKEN_ENDGAME_TOP_K:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->endgame_top_k);
@@ -9933,6 +9972,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->endgame_time_limit_seconds);
+      break;
+    case ARG_TOKEN_ENDGAME_FIRST_WIN:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token, config->endgame_first_win_optim);
       break;
     case ARG_TOKEN_PEG_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
