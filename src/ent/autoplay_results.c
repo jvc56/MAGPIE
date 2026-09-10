@@ -526,21 +526,40 @@ char *game_data_str(const GameData *gd, bool human_readable, bool divergent,
   return game_data_ucgi_str(gd, recorder_context);
 }
 
+// Buckets of the pentanomial distribution over completed pairs, indexed by
+// player 0's score across the pair in half-points: 0 = lost both, 1 = lost one
+// and drew one, 2 = split (which is where every identically-played pair
+// lands), 3 = won one and drew one, 4 = won both.
+enum { NUMBER_OF_PENTANOMIAL_BUCKETS = 5 };
+
 typedef struct GameDataSets {
   GameData *all_games;
   GameData *divergent_games;
+  // Pair-level, so it lives here rather than on either GameData: a pair is one
+  // observation spanning two games. Populated only in paired mode.
+  uint64_t pentanomial[NUMBER_OF_PENTANOMIAL_BUCKETS];
+  cpthread_mutex_t pentanomial_mutex;
 } GameDataSets;
 
 void game_data_sets_reset(Recorder *recorder) {
   GameDataSets *sets = (GameDataSets *)recorder->data;
   game_data_reset(sets->all_games);
   game_data_reset(sets->divergent_games);
+  cpthread_mutex_lock(&sets->pentanomial_mutex);
+  for (int i = 0; i < NUMBER_OF_PENTANOMIAL_BUCKETS; i++) {
+    sets->pentanomial[i] = 0;
+  }
+  cpthread_mutex_unlock(&sets->pentanomial_mutex);
 }
 
 void game_data_sets_create(Recorder *recorder) {
   GameDataSets *sets = malloc_or_die(sizeof(GameDataSets));
   sets->all_games = game_data_create();
   sets->divergent_games = game_data_create();
+  cpthread_mutex_init(&sets->pentanomial_mutex);
+  for (int i = 0; i < NUMBER_OF_PENTANOMIAL_BUCKETS; i++) {
+    sets->pentanomial[i] = 0;
+  }
   recorder->data = sets;
   recorder->thread_shared_data = NULL;
 }
@@ -550,6 +569,32 @@ void game_data_sets_destroy(Recorder *recorder) {
   game_data_destroy(sets->all_games);
   game_data_destroy(sets->divergent_games);
   free(sets);
+}
+
+// Player 0's score in a finished game, in half-points: 2 for a win, 1 for a
+// tie, 0 for a loss. Kept next to game_data_add_game's own win/loss/tie test
+// so the two can never disagree about what a tie is.
+static int game_p0_half_points(const Game *game) {
+  const int p0_game_score =
+      equity_to_int(player_get_score(game_get_player(game, 0)));
+  const int p1_game_score =
+      equity_to_int(player_get_score(game_get_player(game, 1)));
+  if (p0_game_score > p1_game_score) {
+    return 2;
+  }
+  if (p1_game_score > p0_game_score) {
+    return 0;
+  }
+  return 1;
+}
+
+void game_data_sets_add_game_pair(Recorder *recorder, const Game *game1,
+                                  const Game *game2) {
+  GameDataSets *sets = (GameDataSets *)recorder->data;
+  const int bucket = game_p0_half_points(game1) + game_p0_half_points(game2);
+  cpthread_mutex_lock(&sets->pentanomial_mutex);
+  sets->pentanomial[bucket]++;
+  cpthread_mutex_unlock(&sets->pentanomial_mutex);
 }
 
 void game_data_sets_add_game(Recorder *recorder, const RecorderArgs *args) {
@@ -623,6 +668,19 @@ void game_data_sets_consolidate(Recorder **recorder_list,
                                     primary_recorder, false);
   game_data_sets_consolidate_subset(recorder_list, recorder_list_size,
                                     primary_recorder, true);
+
+  // Outside consolidate_subset because the pentanomial is neither the "all"
+  // nor the "divergent" set: it is one array per recorder, and running this
+  // in the subset helper would double it.
+  GameDataSets *sets_primary = (GameDataSets *)primary_recorder->data;
+  for (int i = 0; i < recorder_list_size; i++) {
+    GameDataSets *sets_i = (GameDataSets *)recorder_list[i]->data;
+    cpthread_mutex_lock(&sets_i->pentanomial_mutex);
+    for (int j = 0; j < NUMBER_OF_PENTANOMIAL_BUCKETS; j++) {
+      sets_primary->pentanomial[j] += sets_i->pentanomial[j];
+    }
+    cpthread_mutex_unlock(&sets_i->pentanomial_mutex);
+  }
 }
 
 char *game_data_sets_str(Recorder *recorder, const RecorderArgs *args) {
@@ -666,10 +724,14 @@ static void write_game_data_json(StringBuilder *sb, const GameData *gd) {
   json_write_object_end(sb);
 }
 
-// "all_games" and, when the caller asked for it, "divergent_games" -- pairs
-// whose two games did not play identically, which is where a paired run's
-// signal lives, since identically-played pairs are guaranteed ties carrying
-// no information.
+// "all_games" and, for a paired run, "pentanomial" plus "divergent_games".
+//
+// The pentanomial is the one a test should consume: five counts over every
+// completed pair, which keeps the pair as the unit of observation and keeps
+// identically-played pairs (guaranteed 1-1 ties) in the sample. The divergent
+// set is reported alongside it as a diagnostic -- how often the two players
+// actually diverge -- and not as a sample, because selecting on divergence
+// conditions on the outcome and inflates the apparent difference.
 char *game_data_sets_json(Recorder *recorder, const RecorderArgs *args) {
   const GameDataSets *sets = (const GameDataSets *)recorder->data;
   StringBuilder *sb = string_builder_create();
@@ -679,6 +741,16 @@ char *game_data_sets_json(Recorder *recorder, const RecorderArgs *args) {
   write_game_data_json(sb, sets->all_games);
 
   if (args->divergent) {
+    json_write_array_start(sb, CONTRIBUTE_KEY_PENTANOMIAL, &first);
+    for (int i = 0; i < NUMBER_OF_PENTANOMIAL_BUCKETS; i++) {
+      if (i > 0) {
+        string_builder_add_string(sb, ",");
+      }
+      string_builder_add_formatted_string(
+          sb, "%llu", (unsigned long long)sets->pentanomial[i]);
+    }
+    json_write_array_end(sb);
+
     json_write_raw_key(sb, CONTRIBUTE_KEY_DIVERGENT_GAMES, &first);
     write_game_data_json(sb, sets->divergent_games);
   }
@@ -2033,6 +2105,19 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
       recorder_add_game(autoplay_results->recorders[i], &args);
     }
   }
+}
+
+// Unlike add_game, this goes straight to the game recorder rather than
+// fanning out to every recorder: a pair is a game-recorder concept, and the
+// pairable options are exactly the ones that ignore it.
+void autoplay_results_add_game_pair(AutoplayResults *autoplay_results,
+                                    const Game *game1, const Game *game2) {
+  Recorder *game_recorder =
+      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_GAME];
+  if (!game_recorder) {
+    return;
+  }
+  game_data_sets_add_game_pair(game_recorder, game1, game2);
 }
 
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,

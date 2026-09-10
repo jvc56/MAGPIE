@@ -1017,6 +1017,13 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
     // does not use game pairs and therefore does not have a second
     // game runner.
     autoplay_add_game(autoplay_worker, game_runner2, games_are_divergent);
+    // Both games of the pair are final here, which is the only point at which
+    // the pair's own outcome exists. Recorded whether or not the two games
+    // diverged: an identically-played pair is a 1-1 tie and belongs in the
+    // distribution, since dropping it would condition the sample on its
+    // outcome.
+    autoplay_results_add_game_pair(autoplay_worker->autoplay_results,
+                                   game_runner1->game, game_runner2->game);
   }
 }
 

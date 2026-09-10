@@ -72,6 +72,14 @@
 #define CONTRIBUTE_KEY_P1_SCORE_SD "p1_score_sd"
 #define CONTRIBUTE_KEY_P2_SCORE_MEAN "p2_score_mean"
 #define CONTRIBUTE_KEY_P2_SCORE_SD "p2_score_sd"
+// Paired runs only: the pentanomial distribution over completed pairs. Five
+// counts, indexed by player 1's score across the pair in half-points, so
+// index 0 is "player 1 lost both games" and index 4 is "player 1 won both".
+// Every completed pair lands in exactly one bucket, including the pairs whose
+// two games played identically -- those are guaranteed 1-1 ties and land in
+// index 2. A consumer that drops them is conditioning on the outcome and will
+// badly overstate the difference between the players.
+#define CONTRIBUTE_KEY_PENTANOMIAL "pentanomial"
 
 // Positions recorder ("positions" autoplay option) and opening-rack
 // analysis, which share the same per-move shape.

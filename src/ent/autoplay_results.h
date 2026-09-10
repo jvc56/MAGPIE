@@ -51,6 +51,20 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
                                            const Game *game, int turns,
                                            bool divergent, uint64_t seed,
                                            const AutoplayGameTiming *timing);
+
+// Records one completed game pair as a single pentanomial observation.
+// `game1` and `game2` are the two games of the pair, which share a seed and
+// differ only in which player moved first; player index 0 is the same player
+// in both. The pair lands in the bucket given by player 0's score across the
+// two games in half-points (0 = lost both, 2 = split, 4 = won both).
+//
+// Called once per pair, in addition to the two per-game
+// autoplay_results_add_game calls, and only in paired mode. The pair -- not
+// the game -- is the independent unit of a paired run, which is why the
+// counts this builds are what a statistical test should consume: the two
+// games of a pair share a seed and are not independent observations.
+void autoplay_results_add_game_pair(AutoplayResults *autoplay_results,
+                                    const Game *game1, const Game *game2);
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary);
 
@@ -65,10 +79,18 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
 //
 // The game recorder (when active) writes "all_games" (game counts and score
 // moments, read straight out of the recorder rather than parsed back out of
-// formatted output) and, when `show_divergent` is true, "divergent_games"
-// alongside it -- pairs whose two games did not play identically, which is
-// where a paired run's signal lives, since identically-played pairs are
-// guaranteed ties carrying no information.
+// formatted output) and, when `show_divergent` is true, two more entries
+// describing the paired run:
+//
+//   "pentanomial"     five counts over *every* completed pair, indexed by
+//                     player 1's half-point score across the pair. This is
+//                     the statistically meaningful summary of a paired run:
+//                     the pair is the independent unit, and pairs that played
+//                     identically are 1-1 ties that belong in the sample.
+//   "divergent_games" the subset whose two games did not play identically.
+//                     A diagnostic -- it says how often the two players
+//                     actually differ -- and NOT a sample to run a test on,
+//                     since selecting it conditions on the outcome.
 //
 // The positions recorder (when active) writes "positions": each worker
 // thread accumulates its own captures, and consolidation renders all of them

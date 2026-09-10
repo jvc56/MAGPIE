@@ -22,6 +22,11 @@ int json_array_length(const JsonValue *array);
 const JsonValue *json_array_get(const JsonValue *array, int index);
 // The string at `index`, or NULL if the element is absent or not a string.
 const char *json_array_get_string(const JsonValue *array, int index);
+// The integer at `index`, or `fallback` if the element is absent or not a
+// number. For fixed-length numeric arrays where a missing element is a bug in
+// the producer rather than a condition worth threading an ErrorStack through.
+int64_t json_array_get_int_or(const JsonValue *array, int index,
+                              int64_t fallback);
 
 // Each pushes onto the error stack when the key is absent or the wrong type,
 // and returns a zero value. Callers check the stack once at the end rather

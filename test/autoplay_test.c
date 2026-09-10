@@ -7,6 +7,7 @@
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
+#include "../src/util/json.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
@@ -561,11 +562,95 @@ void test_autoplay_play_chooser(void) {
   config_destroy(config);
 }
 
+// Reads the five pentanomial counts out of a finished paired run's JSON, and
+// checks them against the game-level totals in the same JSON. The two are
+// different views of the same games, so they must agree exactly:
+//
+//   sum(counts)              == pairs             (every pair lands in one bucket)
+//   sum(i * counts[i])       == 2*wins + ties     (both count player 1's
+//                                                  half-points over the pair)
+//
+// The second is the load-bearing one: it fails if a pair is ever dropped,
+// double-counted, or filed in the wrong bucket.
+static void assert_pentanomial_agrees_with_games(AutoplayResults *ar,
+                                                 uint64_t expected_pairs,
+                                                 uint64_t expected_bucket_2) {
+  const char *json = autoplay_results_get_json(ar, true);
+  ErrorStack *error_stack = error_stack_create();
+  JsonValue *parsed = json_parse(json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(parsed);
+
+  const JsonValue *pentanomial = json_object_get(parsed, "pentanomial");
+  assert(pentanomial);
+  assert(json_is_array(pentanomial));
+  assert(json_array_length(pentanomial) == 5);
+
+  uint64_t counts[5];
+  uint64_t total_pairs = 0;
+  uint64_t total_half_points = 0;
+  for (int i = 0; i < 5; i++) {
+    counts[i] = (uint64_t)json_array_get_int_or(pentanomial, i, -1);
+    total_pairs += counts[i];
+    total_half_points += (uint64_t)i * counts[i];
+  }
+
+  const JsonValue *all_games = json_object_get(parsed, "all_games");
+  assert(all_games);
+  const int64_t games = json_get_int(all_games, "games", error_stack);
+  const int64_t wins = json_get_int(all_games, "wins", error_stack);
+  const int64_t ties = json_get_int(all_games, "ties", error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  assert(total_pairs == expected_pairs);
+  assert(total_pairs * 2 == (uint64_t)games);
+  assert(total_half_points == (uint64_t)(2 * wins + ties));
+  assert(counts[2] == expected_bucket_2);
+
+  json_destroy(parsed);
+  error_stack_destroy(error_stack);
+}
+
+void test_autoplay_pentanomial(void) {
+  Config *csw_config = config_create_or_die("set -lex CSW21");
+
+  // Both players sort the same way, so no pair diverges. Every pair is then a
+  // guaranteed 1-1 split and lands in bucket 2 -- and this is exactly the run
+  // where a consumer that looked only at divergent games would see an empty
+  // sample and conclude nothing, or worse, conclude something. The pentanomial
+  // reports all 50 pairs.
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 equity -gp true");
+  assert_pentanomial_agrees_with_games(
+      config_get_autoplay_results(csw_config), 50, 50);
+
+  // One player sorts by score and the other by equity, so essentially every
+  // pair diverges and the counts spread across the buckets.
+  load_and_exec_config_or_die(
+      csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 score -gp true");
+  const char *json =
+      autoplay_results_get_json(config_get_autoplay_results(csw_config), true);
+  ErrorStack *error_stack = error_stack_create();
+  JsonValue *parsed = json_parse(json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *pentanomial = json_object_get(parsed, "pentanomial");
+  const int64_t split_pairs = json_array_get_int_or(pentanomial, 2, -1);
+  json_destroy(parsed);
+  error_stack_destroy(error_stack);
+  assert(split_pairs >= 0);
+  assert(split_pairs < 50);
+  assert_pentanomial_agrees_with_games(
+      config_get_autoplay_results(csw_config), 50, (uint64_t)split_pairs);
+
+  config_destroy(csw_config);
+}
+
 void test_autoplay_remaining(void) {
   test_odds_that_player_is_better();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
   test_autoplay_sort_type_divergence();
+  test_autoplay_pentanomial();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
   test_autoplay_leavegen_force_racks();
