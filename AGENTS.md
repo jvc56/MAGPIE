@@ -16,6 +16,7 @@ Crossword game engine in C (C99 with some C11). Move generation, Monte Carlo sim
 ```bash
 make magpie                    # dev build (ASAN/UBSAN enabled)
 make release                   # production static-trained PGO build
+make prepare_data              # validate/upgrade CSW24 WIT; create missing RIT
 make magpie BUILD=no_pgo_release # optimized build without PGO
 make magpie_test               # build test binary
 make magpie_test BUILD=no_pgo_release # optimized test binary
@@ -29,7 +30,8 @@ make clean                     # remove build artifacts
 The local PGO build uses Clang and `llvm-profdata`, found under their plain or
 distro-versioned names (`clang-18`, `llvm-profdata-18`); with no clang on PATH,
 `make release` builds the plain optimized release and says so. It reuses an
-existing production CSW24 RIT (or creates it when missing), discards old
+existing production CSW24 RIT (or creates it when missing), validates/upgrades
+the CSW24 WIT with the native C converter before training, discards old
 profile data, and trains the current source on static autoplay. Experimental `pgo`, `pgo_sim`,
 `pgo_peg`, and `pgo_eg` targets are also available. Each produces a
 `-march=native` binary for the build machine. Rerun the selected target after

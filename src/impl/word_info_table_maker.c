@@ -178,8 +178,12 @@ make_word_info_table_from_words(const DictionaryWordList *words) {
     }
   }
 
-  // For each word V and each contiguous substring W that is itself a word, OR
-  // V's letter-set into W's value row at slot (|V| - |W|).
+  // For each word V and each contiguous substring W that is itself a word,
+  // OR the letters outside this occurrence of W into its value row. The
+  // consumers query newly placed tiles, which cannot occupy W's board cells.
+  // Prefix/suffix unions preserve a repeated letter when another occurrence
+  // remains outside W; subtracting W's letter bitmask would incorrectly lose
+  // it.
   for (int i = 0; i < num_words; i++) {
     const DictionaryWord *dw = dictionary_word_list_get_word(words, i);
     const MachineLetter *v = dictionary_word_get_word(dw);
@@ -187,9 +191,13 @@ make_word_info_table_from_words(const DictionaryWordList *words) {
     if (vlen < 1 || vlen > BOARD_DIM) {
       continue;
     }
-    uint32_t lv = 0;
+    uint32_t prefix_letters[BOARD_DIM + 1] = {0};
+    uint32_t suffix_letters[BOARD_DIM + 1] = {0};
     for (int k = 0; k < vlen; k++) {
-      lv |= 1U << v[k];
+      prefix_letters[k + 1] = prefix_letters[k] | (1U << v[k]);
+    }
+    for (int k = vlen; k-- > 0;) {
+      suffix_letters[k] = suffix_letters[k + 1] | (1U << v[k]);
     }
     for (int start = 0; start < vlen; start++) {
       const int max_wlen = vlen - start;
@@ -202,13 +210,14 @@ make_word_info_table_from_words(const DictionaryWordList *words) {
           }
         }
         if (node != NULL && node->value != NULL) {
-          node->value[vlen - wlen] |= lv;
+          node->value[vlen - wlen] |=
+              prefix_letters[start] | suffix_letters[start + wlen];
         }
       }
     }
   }
 
-  WordInfoTable *wit = malloc_or_die(sizeof(WordInfoTable));
+  WordInfoTable *wit = calloc_or_die(1, sizeof(WordInfoTable));
   wit->name = NULL;
   wit->version = WIT_VERSION;
   // Unknown source graph until a KWG-based builder stamps it.
@@ -236,5 +245,6 @@ WordInfoTable *make_word_info_table_from_kwg(const KWG *kwg) {
   WordInfoTable *wit = make_word_info_table_from_words(words);
   dictionary_word_list_destroy(words);
   wit->kwg_hash = kwg_get_hash(kwg);
+  word_info_table_build_position_lengths(wit);
   return wit;
 }

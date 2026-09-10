@@ -89,6 +89,7 @@ OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
 PGO_TRAIN_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/pgo_train.o
+CONVERT_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/convert.o
 
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
@@ -164,7 +165,7 @@ LDLIBS   := -lm
 
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
 	pgo_toolchain_check \
-	pgo_eg peg_eg pgo_workload libmagpie examples
+	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples
 
 all: magpie magpie_test
 
@@ -215,6 +216,9 @@ magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
+magpie_convert: $(OBJ_SRC) $(CONVERT_OBJ) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
@@ -228,7 +232,7 @@ $(OBJ_DIR)/$(TOOLS_DIR)/%.o: $(TOOLS_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TOOLS_DI
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Compiler and linker flag changes in this file invalidate every object.
-$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ): Makefile
+$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ): Makefile
 
 # A newly merged profile must rebuild every profile-use object. Without this
 # dependency, make would reuse objects optimized against an older corpus.
@@ -309,38 +313,24 @@ pgo_toolchain_check:
 		echo '*** PGO needs llvm-profdata (llvm-profdata, llvm-profdata-20 .. -15, or xcrun on macOS); pass LLVM_PROFDATA=<path>.'; exit 1; \
 	fi
 
-# Reuse or build the production RIT and WIT, discard all previous profile data,
+# Validate or upgrade the production WIT with the native C converter. This
+# separate uninstrumented executable cannot load stale tables through engine
+# configuration, and a conversion error exits nonzero before training begins.
+prepare_data:
+	$(MAKE) magpie_convert BUILD=no_pgo_release
+	./$(BIN_DIR)/magpie_convert kwg2witifneeded CSW24 ./data
+	@if test -f data/lexica/CSW24.rit; then \
+		echo 'Using existing data/lexica/CSW24.rit'; \
+	else \
+		./$(BIN_DIR)/magpie_convert klvwmp2rit CSW24 ./data; \
+	fi
+
+# Prepare the production RIT and WIT, discard all previous profile data,
 # train a freshly instrumented production engine, and replace bin/magpie with
 # the profile-guided native build. The dedicated driver contains no benchmark
 # harness; it invokes real engine workloads directly.
 pgo_workload: pgo_toolchain_check
-	@set -e; need_converter=false; \
-	if test -f data/lexica/CSW24.rit; then \
-		echo 'Using existing data/lexica/CSW24.rit'; \
-	else \
-		need_converter=true; \
-	fi; \
-	if test -f data/lexica/CSW24.wit; then \
-		echo 'Using existing data/lexica/CSW24.wit'; \
-	else \
-		need_converter=true; \
-	fi; \
-	if $$need_converter; then \
-		$(MAKE) -B magpie \
-			BUILD=no_pgo_release \
-			CC="$(PGO_CC)" \
-			LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"; \
-	fi; \
-	if ! test -f data/lexica/CSW24.rit; then \
-		printf 'convert klvwmp2rit CSW24\n' | \
-			./$(BIN_DIR)/magpie \
-				"set -lex CSW24 -wmp true -rit false -wit false"; \
-	fi; \
-	if ! test -f data/lexica/CSW24.wit; then \
-		printf 'convert kwg2wit CSW24\n' | \
-			./$(BIN_DIR)/magpie \
-				"set -lex CSW24 -wmp true -rit false -wit false"; \
-	fi
+	$(MAKE) prepare_data CC="$(PGO_CC)" LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"
 	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE)
 	mkdir -p $(PGO_RAW_DIR)
 	@if test "$(PGO_WORKLOAD)" = leavegen; then \
@@ -368,3 +358,4 @@ pgo_workload: pgo_toolchain_check
 -include $(OBJ_CMD:.o=.d)
 -include $(OBJ_TEST:.o=.d)
 -include $(PGO_TRAIN_OBJ:.o=.d)
+-include $(CONVERT_OBJ:.o=.d)

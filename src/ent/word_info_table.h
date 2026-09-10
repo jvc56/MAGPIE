@@ -1,23 +1,20 @@
 #ifndef WORD_INFO_TABLE_H
 #define WORD_INFO_TABLE_H
 
-#include "../compat/endian_conv.h"
 #include "../def/board_defs.h"
-#include "../util/fileproxy.h"
+#include "../def/letter_distribution_defs.h"
 #include "../util/io_util.h"
-#include "../util/string_util.h"
-#include "data_filepaths.h"
-#include "letter_distribution.h"
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 // WordInfoTable (parallel to RackInfoTable): one trie per key-word length. At a
 // length-`len` word's terminal node sits a value row of (BOARD_DIM - len + 1)
-// bitvectors. Entry i is the union of the letters appearing in any
-// length-(len + i) word that contains that word as a contiguous substring.
+// bitvectors. Entry i is the union of letters outside each occurrence of
+// that substring in any length-(len + i) word. Repeated letters outside the
+// fixed substring remain available. Older version-3 files include the fixed
+// letters too; those broader masks remain conservative.
 //
 // Splitting by length lets each trie's value table use a stride sized to that
 // length: a length-`len` key can only be a substring of words of length
@@ -31,9 +28,17 @@
 // returns NULL and the caller permits all letters.
 enum {
   // Bump WIT_VERSION whenever the on-disk layout changes incompatibly.
-  WIT_VERSION = 3,
+  WIT_VERSION = 4,
+  WIT_FLAG_WORD_PLUS_FLOATER = 1,
   WIT_EARLIEST_SUPPORTED_VERSION = 3,
+  WPF_MIN_BLOCK_LENGTH = 2,
+  WPF_MAX_BLOCK_LENGTH = 4,
+  WPF_ALPHABET_SIZE = 26,
+  WIT_POSITION_MIN_BASE_LENGTH = 2,
+  WIT_POSITION_MAX_BASE_LENGTH = BOARD_DIM,
 };
+
+static_assert(BOARD_DIM < 32, "WIT positional lengths must fit in uint32_t");
 
 typedef struct WitTrie {
   uint32_t num_nodes;
@@ -56,7 +61,18 @@ typedef struct WordInfoTable {
   // Indexed by key-word length; tries[0] is unused, tries[len] holds the
   // length-`len` words. Lengths run 1..BOARD_DIM.
   WitTrie tries[BOARD_DIM + 1];
+  // Optional positional table, indexed directly by this WIT's value IDs.
+  uint32_t *word_plus_floater[BOARD_DIM + 1];
+  // Derived from this table's complete dictionary on construction/load.
+  // For each value ID, position p contains bits for absolute final lengths
+  // having this base at p. It does not change the serialized WIT format.
+  uint32_t *position_lengths[BOARD_DIM + 1];
 } WordInfoTable;
+
+static inline size_t word_plus_floater_cells_per_key(int block_length) {
+  const size_t extension = (size_t)(BOARD_DIM - block_length);
+  return WPF_ALPHABET_SIZE * extension * (extension + 1);
+}
 
 // Number of value slots for a key of length `len`: total word lengths run
 // len..BOARD_DIM inclusive.
@@ -72,8 +88,8 @@ static inline uint64_t word_info_table_get_kwg_hash(const WordInfoTable *wit) {
 
 // Returns the value row for `block` (a word of length `len`), or NULL if
 // `block` is not a real word of that length. The row has
-// wit_stride_for_len(len) entries; entry i is the union of letter-sets of all
-// length-(len + i) words that contain `block` as a contiguous substring.
+// wit_stride_for_len(len) entries; entry i is the union of letters outside
+// each occurrence of `block` in length-(len + i) words.
 static inline const uint32_t *word_info_table_lookup(const WordInfoTable *wit,
                                                      const MachineLetter *block,
                                                      int len) {
@@ -111,6 +127,42 @@ static inline const uint32_t *word_info_table_lookup(const WordInfoTable *wit,
   return NULL;
 }
 
+// Return the derived row only when the borrowed ordinary row belongs to
+// this exact table. Shared-KWG board lanes can borrow the other player's WIT.
+static inline const uint32_t *word_info_table_get_position_lengths(
+    const WordInfoTable *wit, const uint32_t *ordinary_row, int base_length) {
+  if (wit == NULL || ordinary_row == NULL ||
+      base_length < WIT_POSITION_MIN_BASE_LENGTH ||
+      base_length > WIT_POSITION_MAX_BASE_LENGTH ||
+      wit->position_lengths[base_length] == NULL) {
+    return NULL;
+  }
+  const uintptr_t address = (uintptr_t)ordinary_row;
+  const uintptr_t values = (uintptr_t)wit->tries[base_length].values;
+  const size_t stride = (size_t)wit_stride_for_len(base_length);
+  const size_t row_bytes = stride * sizeof(uint32_t);
+  if (address < values) {
+    return NULL;
+  }
+  const uintptr_t offset = address - values;
+  if (offset >= (size_t)wit->tries[base_length].num_values * row_bytes ||
+      offset % row_bytes != 0) {
+    return NULL;
+  }
+  return wit->position_lengths[base_length] + ((offset / row_bytes) * stride);
+}
+
+static inline void word_info_table_clear_position_lengths(WordInfoTable *wit) {
+  for (int length = 0; length <= BOARD_DIM; length++) {
+    free(wit->position_lengths[length]);
+    wit->position_lengths[length] = NULL;
+  }
+}
+
+// Requires a complete validated WIT dictionary, as produced by the native
+// maker or loader. A zero source fingerprint leaves this optional cache absent.
+void word_info_table_build_position_lengths(WordInfoTable *wit);
+
 static inline void word_info_table_destroy(WordInfoTable *wit) {
   if (wit == NULL) {
     return;
@@ -122,207 +174,30 @@ static inline void word_info_table_destroy(WordInfoTable *wit) {
     free(trie->node_child);
     free(trie->node_value);
     free(trie->values);
+    free(wit->word_plus_floater[len]);
+    free(wit->position_lengths[len]);
   }
   free(wit->name);
   free(wit);
 }
 
-// ============================================================================
-// File I/O
-// ============================================================================
-//
-// On-disk layout (all integers little-endian):
-//   1 byte:  version (WIT_VERSION)
-//   1 byte:  board_dim (matches BOARD_DIM)
-//   2 bytes: zero padding (keeps the following u32s aligned)
-//   8 bytes: kwg_hash (uint64, 0 if unknown)
-//   For each key length len = 1..BOARD_DIM (in order), one trie:
-//     4 bytes: num_nodes
-//     4 bytes: root
-//     4 bytes: num_values
-//     num_nodes bytes:      node_tile (uint8)
-//     num_nodes bytes:      node_last (uint8)
-//     num_nodes * 4 bytes:  node_child (uint32)
-//     num_nodes * 4 bytes:  node_value (int32)
-//     num_values * stride * 4 bytes: values (uint32), stride = BOARD_DIM-len+1
-
-static inline void wit_write_uint32_or_die(uint32_t value, FILE *stream,
-                                           const char *description) {
-  const uint32_t le = htole32(value);
-  fwrite_or_die(&le, sizeof(le), 1, stream, description);
+// Positional tables are optional for legacy WITs and unsupported alphabets.
+static inline void word_info_table_clear_word_plus_floater(WordInfoTable *wit) {
+  for (int length = 0; length <= BOARD_DIM; length++) {
+    free(wit->word_plus_floater[length]);
+    wit->word_plus_floater[length] = NULL;
+  }
 }
 
-static inline void wit_write_uint32s_or_die(const uint32_t *values, size_t n,
-                                            FILE *stream,
-                                            const char *description) {
-#if IS_LITTLE_ENDIAN
-  fwrite_or_die(values, sizeof(uint32_t), n, stream, description);
-#else
-  for (size_t i = 0; i < n; i++) {
-    const uint32_t le = htole32(values[i]);
-    fwrite_or_die(&le, sizeof(uint32_t), 1, stream, description);
-  }
-#endif
-}
-
-static inline void wit_write_trie_or_die(const WitTrie *trie, int stride,
-                                         FILE *stream) {
-  wit_write_uint32_or_die(trie->num_nodes, stream, "wit num nodes");
-  wit_write_uint32_or_die(trie->root, stream, "wit root");
-  wit_write_uint32_or_die(trie->num_values, stream, "wit num values");
-  fwrite_or_die(trie->node_tile, sizeof(uint8_t), trie->num_nodes, stream,
-                "wit node tile");
-  fwrite_or_die(trie->node_last, sizeof(uint8_t), trie->num_nodes, stream,
-                "wit node last");
-  wit_write_uint32s_or_die(trie->node_child, trie->num_nodes, stream,
-                           "wit node child");
-  wit_write_uint32s_or_die((const uint32_t *)trie->node_value, trie->num_nodes,
-                           stream, "wit node value");
-  wit_write_uint32s_or_die(trie->values,
-                           (size_t)trie->num_values * (size_t)stride, stream,
-                           "wit values");
-}
-
-static inline void word_info_table_write_to_file(const WordInfoTable *wit,
-                                                 const char *filename,
-                                                 ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "wb", error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  const uint8_t version = wit->version;
-  fwrite_or_die(&version, sizeof(version), 1, stream, "wit version");
-  const uint8_t board_dim = (uint8_t)BOARD_DIM;
-  fwrite_or_die(&board_dim, sizeof(board_dim), 1, stream, "wit board dim");
-  const uint8_t padding[2] = {0, 0};
-  fwrite_or_die(padding, sizeof(uint8_t), 2, stream, "wit header padding");
-  const uint64_t kwg_hash_le = htole64(wit->kwg_hash);
-  fwrite_or_die(&kwg_hash_le, sizeof(kwg_hash_le), 1, stream, "wit kwg hash");
-  for (int len = 1; len <= BOARD_DIM; len++) {
-    wit_write_trie_or_die(&wit->tries[len], wit_stride_for_len(len), stream);
-  }
-  fclose_or_die(stream);
-}
-
-static inline void wit_read_uint32_or_die(uint32_t *out, FILE *stream) {
-  if (fread(out, sizeof(uint32_t), 1, stream) != 1) {
-    log_fatal("could not read uint32 from wit stream");
-  }
-  *out = le32toh(*out);
-}
-
-static inline void wit_read_uint32s_or_die(uint32_t *out, size_t n,
-                                           FILE *stream) {
-  if (n > 0 && fread(out, sizeof(uint32_t), n, stream) != n) {
-    log_fatal("could not read uint32s from wit stream");
-  }
-#if !IS_LITTLE_ENDIAN
-  for (size_t i = 0; i < n; i++) {
-    out[i] = le32toh(out[i]);
-  }
-#endif
-}
-
-static inline void wit_read_trie_or_die(WitTrie *trie, int stride,
-                                        FILE *stream) {
-  wit_read_uint32_or_die(&trie->num_nodes, stream);
-  wit_read_uint32_or_die(&trie->root, stream);
-  wit_read_uint32_or_die(&trie->num_values, stream);
-  trie->node_tile = (uint8_t *)malloc_or_die(trie->num_nodes * sizeof(uint8_t));
-  if (trie->num_nodes > 0 &&
-      fread(trie->node_tile, sizeof(uint8_t), trie->num_nodes, stream) !=
-          trie->num_nodes) {
-    log_fatal("could not read wit node tile");
-  }
-  trie->node_last = (uint8_t *)malloc_or_die(trie->num_nodes * sizeof(uint8_t));
-  if (trie->num_nodes > 0 &&
-      fread(trie->node_last, sizeof(uint8_t), trie->num_nodes, stream) !=
-          trie->num_nodes) {
-    log_fatal("could not read wit node last");
-  }
-  trie->node_child =
-      (uint32_t *)malloc_or_die(trie->num_nodes * sizeof(uint32_t));
-  wit_read_uint32s_or_die(trie->node_child, trie->num_nodes, stream);
-  trie->node_value =
-      (int32_t *)malloc_or_die(trie->num_nodes * sizeof(int32_t));
-  wit_read_uint32s_or_die((uint32_t *)trie->node_value, trie->num_nodes,
-                          stream);
-  const size_t num_value_words = (size_t)trie->num_values * (size_t)stride;
-  trie->values =
-      num_value_words > 0
-          ? (uint32_t *)malloc_or_die(num_value_words * sizeof(uint32_t))
-          : NULL;
-  wit_read_uint32s_or_die(trie->values, num_value_words, stream);
-}
-
-static inline void word_info_table_load(WordInfoTable *wit, const char *name,
-                                        const char *filename,
-                                        ErrorStack *error_stack) {
-  FILE *stream = stream_from_filename(filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  uint8_t version;
-  if (fread(&version, sizeof(version), 1, stream) != 1) {
-    log_fatal("could not read wit version");
-  }
-  if (version < WIT_EARLIEST_SUPPORTED_VERSION) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
-        get_formatted_string(
-            "detected wit version %d but only %d or greater is supported: %s\n",
-            version, WIT_EARLIEST_SUPPORTED_VERSION, filename));
-    fclose_or_die(stream);
-    return;
-  }
-  wit->version = version;
-
-  uint8_t board_dim;
-  if (fread(&board_dim, sizeof(board_dim), 1, stream) != 1) {
-    log_fatal("could not read wit board dim");
-  }
-  if (board_dim != (uint8_t)BOARD_DIM) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
-        get_formatted_string(
-            "wit board dim %d does not match build board dim %d: %s\n",
-            board_dim, BOARD_DIM, filename));
-    fclose_or_die(stream);
-    return;
-  }
-  uint8_t padding[2];
-  if (fread(padding, sizeof(uint8_t), 2, stream) != 2) {
-    log_fatal("could not read wit header padding");
-  }
-  uint64_t kwg_hash_le;
-  if (fread(&kwg_hash_le, sizeof(kwg_hash_le), 1, stream) != 1) {
-    log_fatal("could not read wit kwg hash");
-  }
-  wit->kwg_hash = le64toh(kwg_hash_le);
-
-  for (int len = 1; len <= BOARD_DIM; len++) {
-    wit_read_trie_or_die(&wit->tries[len], wit_stride_for_len(len), stream);
-  }
-  fclose_or_die(stream);
-  wit->name = string_duplicate(name);
-}
-
-static inline WordInfoTable *word_info_table_create(const char *data_paths,
-                                                    const char *wit_name,
-                                                    ErrorStack *error_stack) {
-  char *wit_filename = data_filepaths_get_readable_filename(
-      data_paths, wit_name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
-  WordInfoTable *wit = NULL;
-  if (error_stack_is_empty(error_stack)) {
-    wit = (WordInfoTable *)calloc_or_die(1, sizeof(WordInfoTable));
-    word_info_table_load(wit, wit_name, wit_filename, error_stack);
-  }
-  free(wit_filename);
-  if (!error_stack_is_empty(error_stack)) {
-    word_info_table_destroy(wit);
-    wit = NULL;
-  }
-  return wit;
-}
+// Version 4 keeps the version-3 trie representation and appends optional
+// positional masks. Both use one KWG identity and the same terminal IDs.
+void word_info_table_write_to_file(const WordInfoTable *wit,
+                                   const char *filename,
+                                   ErrorStack *error_stack);
+void word_info_table_load(WordInfoTable *wit, const char *name,
+                          const char *filename, ErrorStack *error_stack);
+WordInfoTable *word_info_table_create(const char *data_paths,
+                                      const char *wit_name,
+                                      ErrorStack *error_stack);
 
 #endif

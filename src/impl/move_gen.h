@@ -155,6 +155,11 @@ typedef struct MoveGen {
   // Shadow plays
   int current_left_col;
   int current_right_col;
+  // The initial complete board block is immutable while shadow explores
+  // left starts. Each rightward branch keeps its allowed lengths locally.
+  const uint32_t *shadow_position_row;
+  int shadow_position_col;
+  int shadow_position_length;
 
   // Used to calculate the maximum score for an anchor. We don't know which
   // tiles will go in which unrestricted squares, so effective multipliers are

@@ -11,6 +11,7 @@
 #include "../ent/leave_map.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/wmp.h"
+#include "../ent/word_info_table.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -211,12 +212,19 @@ wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
 }
 
 static inline void
-wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
+wmp_move_gen_playthrough_metadata_init(WMPMoveGen *wmp_move_gen,
                                        const Anchor *anchor) {
-  const int subrack_size = anchor->tiles_to_play;
   wmp_move_gen->word_length = anchor->word_length;
-  wmp_move_gen->num_tiles_played_through = anchor->word_length - subrack_size;
-  wmp_move_gen->tiles_to_play = subrack_size;
+  wmp_move_gen->num_tiles_played_through =
+      anchor->word_length - anchor->tiles_to_play;
+  wmp_move_gen->tiles_to_play = anchor->tiles_to_play;
+}
+
+// Preserve the sequential preparation loop for anchors that survive the
+// whole-anchor mask and rack-capacity checks.
+static inline void
+wmp_move_gen_build_playthrough_subracks(WMPMoveGen *wmp_move_gen) {
+  const int subrack_size = wmp_move_gen->tiles_to_play;
   if (wmp_move_gen->num_tiles_played_through == 0) {
     // We can use nonplaythrough subracks
     return;
@@ -232,6 +240,13 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
     bit_rack_add_bit_rack(&playthrough_subrack_info->subrack,
                           &wmp_move_gen->playthrough_bit_rack);
   }
+}
+
+static inline void
+wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
+                                       const Anchor *anchor) {
+  wmp_move_gen_playthrough_metadata_init(wmp_move_gen, anchor);
+  wmp_move_gen_build_playthrough_subracks(wmp_move_gen);
 }
 
 // Necessary-only prune for a multi-playthrough case. Tests each
@@ -611,7 +626,8 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
 
 static inline void wmp_move_gen_set_playthrough_bit_rack(
     WMPMoveGen *wmp_move_gen, const Anchor *anchor, const Square *row_cache,
-    const uint32_t *const *wit_row_lane, const uint8_t *wit_len_lane) {
+    const uint32_t *const *wit_row_lane, const uint8_t *wit_len_lane,
+    const WordInfoTable *wit) {
   wmp_move_gen_reset_playthrough(wmp_move_gen);
   wmp_move_gen->playthrough_addable = 0xFFFFFFFFu;
   wmp_move_gen->playthrough_positions = 0;
@@ -620,6 +636,9 @@ static inline void wmp_move_gen_set_playthrough_bit_rack(
   }
   bool in_block = false;
   int blocks_found = 0;
+  const uint32_t *positional_values = NULL;
+  int positional_block_length = 0;
+  int positional_block_col = 0;
   for (int col = anchor->rightmost_start_col; col < BOARD_DIM; col++) {
     const MachineLetter ml = row_cache[col].letter;
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
@@ -637,8 +656,8 @@ static inline void wmp_move_gen_set_playthrough_bit_rack(
     if (!in_block) {
       in_block = true;
       blocks_found++;
-      // `col` is this block's leftmost tile; fold in the cached letter set of
-      // words of this length that contain the block. A NULL row means uncached
+      // `col` is this block's leftmost tile; fold in the cached letters
+      // outside this fixed block. A NULL row means uncached
       // or no table loaded (treat as permit-all).
       const uint32_t *block_row =
           wit_row_lane != NULL ? wit_row_lane[col] : NULL;
@@ -652,11 +671,78 @@ static inline void wmp_move_gen_set_playthrough_bit_rack(
         // still rejects candidates that do not match the board.
         if (extension_len >= 0) {
           wmp_move_gen->playthrough_addable &= block_row[extension_len];
+          if (anchor->playthrough_blocks >= 2 && wit != NULL &&
+              block_len >= WPF_MIN_BLOCK_LENGTH &&
+              block_len <= WPF_MAX_BLOCK_LENGTH &&
+              block_len > positional_block_length &&
+              wit->word_plus_floater[block_len] != NULL) {
+            // Shared-KWG board lanes can borrow the other player's WIT.
+            // Derive a value ID only for rows owned by the passed table;
+            // pointer subtraction between different allocations is undefined.
+            const uintptr_t row_address = (uintptr_t)block_row;
+            const uintptr_t values_address =
+                (uintptr_t)wit->tries[block_len].values;
+            const size_t row_bytes =
+                (size_t)wit_stride_for_len(block_len) * sizeof(uint32_t);
+            if (row_address >= values_address) {
+              const uintptr_t offset = row_address - values_address;
+              if (offset <
+                      (size_t)wit->tries[block_len].num_values * row_bytes &&
+                  offset % row_bytes == 0) {
+                const size_t value_index = (size_t)offset / row_bytes;
+                positional_values =
+                    wit->word_plus_floater[block_len] +
+                    value_index * word_plus_floater_cells_per_key(block_len);
+                positional_block_length = block_len;
+                positional_block_col = col;
+              }
+            }
+          }
         }
       }
     }
   }
   assert(blocks_found == anchor->playthrough_blocks);
+  if (positional_values == NULL || anchor->playthrough_blocks < 2 ||
+      wmp_move_gen->playthrough_addable == 0) {
+    return;
+  }
+  const int extension = anchor->word_length - positional_block_length;
+  const int first_length_cell = extension * (extension - 1);
+  for (int col = anchor->rightmost_start_col; col < BOARD_DIM; col++) {
+    if ((wmp_move_gen->playthrough_positions & (1U << col)) == 0 ||
+        (col >= positional_block_col &&
+         col < positional_block_col + positional_block_length)) {
+      continue;
+    }
+    const MachineLetter floater =
+        get_unblanked_machine_letter(row_cache[col].letter);
+    if (floater < 1 || floater > WPF_ALPHABET_SIZE) {
+      continue;
+    }
+    const int delta = col - positional_block_col;
+    int offset_index;
+    if (delta < 0) {
+      if (delta < -extension) {
+        wmp_move_gen->playthrough_addable = 0;
+        return;
+      }
+      offset_index = delta + extension;
+    } else {
+      if (delta >= positional_block_length + extension) {
+        wmp_move_gen->playthrough_addable = 0;
+        return;
+      }
+      offset_index = extension + delta - positional_block_length;
+    }
+    const size_t cell =
+        (size_t)(first_length_cell + offset_index) * WPF_ALPHABET_SIZE +
+        floater - 1;
+    wmp_move_gen->playthrough_addable &= positional_values[cell];
+    if (wmp_move_gen->playthrough_addable == 0) {
+      return;
+    }
+  }
 }
 
 static inline int
