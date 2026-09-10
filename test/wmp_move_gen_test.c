@@ -76,6 +76,56 @@ void test_wit_prune_skips_block_longer_than_anchor_word(void) {
   assert(wmg.num_tiles_played_through == 3);
 }
 
+void test_sparse_anchor_slot_order_and_reset(void) {
+  WMPMoveGen wmg = {0};
+  WMP fake_wmp = {0};
+  fake_wmp.board_dim = BOARD_DIM;
+  wmg.wmp = &fake_wmp;
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    wmg.anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
+    wmg.anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
+    wmg.anchors[i].leftmost_start_col = BOARD_DIM - 1;
+  }
+
+  // Touch slots in descending mask-word/slot order. Emission must retain the
+  // old full-array scan's ascending order, including for super boards where
+  // the final slot is in a second mask word.
+  wmg.playthrough_blocks = MAX_POSSIBLE_PLAYTHROUGH_BLOCKS - 1;
+  wmp_move_gen_maybe_update_anchor(&wmg, RACK_SIZE, BOARD_DIM, 3,
+                                   int_to_equity(30), int_to_equity(31));
+  wmg.playthrough_blocks = 1;
+  wmp_move_gen_maybe_update_anchor(&wmg, 1, 2, 2, int_to_equity(20),
+                                   int_to_equity(21));
+  wmg.playthrough_blocks = 0;
+  wmp_move_gen_maybe_update_anchor(&wmg, RACK_SIZE, RACK_SIZE, 1,
+                                   int_to_equity(10), int_to_equity(11));
+
+  AnchorHeap anchor_heap = {0};
+  wmp_move_gen_add_anchors(&wmg, /*row=*/0, /*col=*/0,
+                           /*last_anchor_col=*/0,
+                           /*dir=*/BOARD_HORIZONTAL_DIRECTION,
+                           /*inference_cutoff_equity=*/EQUITY_MAX_VALUE,
+                           &anchor_heap);
+  assert(anchor_heap.count == 3);
+  assert(anchor_heap.anchors[0].playthrough_blocks == 0);
+  assert(anchor_heap.anchors[1].playthrough_blocks == 1);
+  assert(anchor_heap.anchors[2].playthrough_blocks ==
+         MAX_POSSIBLE_PLAYTHROUGH_BLOCKS - 1);
+
+  wmp_move_gen_reset_anchors(&wmg);
+  for (int i = 0; i < WMP_ANCHOR_MASK_WORDS; i++) {
+    assert(wmg.touched_anchor_masks[i] == 0);
+  }
+  for (int i = 0; i < anchor_heap.count; i++) {
+    const Anchor *emitted = &anchor_heap.anchors[i];
+    const Anchor *reset = wmp_move_gen_get_anchor(
+        &wmg, emitted->playthrough_blocks, emitted->tiles_to_play);
+    assert(reset->tiles_to_play == 0);
+    assert(reset->highest_possible_equity == EQUITY_MIN_VALUE);
+    assert(reset->highest_possible_score == EQUITY_MIN_VALUE);
+  }
+}
+
 // Reusing the generator for a different anchor must replace every mask bit,
 // including when the new anchor has no fixed tiles.
 static void test_playthrough_positions_reset(void) {
@@ -1160,6 +1210,7 @@ void test_wmp_move_gen(void) {
   test_word_plus_floater_dense_coverage();
   test_wmp_move_gen_inactive();
   test_shadow_playthrough_restoration();
+  test_sparse_anchor_slot_order_and_reset();
   test_playthrough_positions_reset();
   test_playthrough_moves_against_recursive();
   test_nonplaythrough_subrack_enumeration();
