@@ -6919,25 +6919,42 @@ static bool contribute_is_safe_data_name(const char *name) {
   return true;
 }
 
+// A lexicon belongs to a *player*, not to a job: MAGPIE takes -l1 and -l2
+// independently, and a job may deliberately pit two lexicons against each
+// other. So only leave_generation -- which has a single bot and no player
+// object to hold one -- sends a top-level "lexicon". For every other job type
+// this is NULL here and each player's own field supplies it.
+//
+// The variant is genuinely job-wide (two players cannot play different rules)
+// and stays required.
 static bool contribute_validate_common(const JsonValue *request,
                                        const char **lexicon,
                                        const char **variant,
                                        ErrorStack *error_stack) {
-  *lexicon = json_get_string(request, CONTRIBUTE_KEY_LEXICON, error_stack);
+  *lexicon = json_get_string_or_null(request, CONTRIBUTE_KEY_LEXICON);
   *variant = json_get_string(request, CONTRIBUTE_KEY_VARIANT, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return false;
   }
-  if (!contribute_is_safe_data_name(*lexicon) ||
+  if ((*lexicon && !contribute_is_safe_data_name(*lexicon)) ||
       !contribute_is_safe_data_name(*variant)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string(
             "server sent an unusable lexicon or variant name: '%s' / '%s'",
-            *lexicon, *variant));
+            *lexicon ? *lexicon : "(absent)", *variant));
     return false;
   }
   return true;
+}
+
+// The lexicon to fall back on where one is needed but not stated per player.
+// With a top-level lexicon absent, player 1's stands in: for a games task both
+// players state their own and this is never consulted, and for an opening-rack
+// task there is only one player anyway.
+static const char *contribute_shared_lexicon(const char *lexicon,
+                                             const char *p1_lexicon) {
+  return lexicon ? lexicon : p1_lexicon;
 }
 
 // True if the settings the server sent ask for a wordmap. Wordmaps are not
@@ -7416,15 +7433,17 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   // shared lexicon otherwise -- so two players on the same lexicon only need
   // it built once, and a player that did not ask for one never triggers a
   // build.
+  const char *shared_lexicon = contribute_shared_lexicon(lexicon, p1_lexicon);
+
   if (contribute_wants_wordmap(player1)) {
-    config_contribute_ensure_wordmap(config, p1_lexicon ? p1_lexicon : lexicon,
+    config_contribute_ensure_wordmap(config, p1_lexicon ? p1_lexicon : shared_lexicon,
                                      error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }
   }
   if (contribute_wants_wordmap(player2)) {
-    config_contribute_ensure_wordmap(config, p2_lexicon ? p2_lexicon : lexicon,
+    config_contribute_ensure_wordmap(config, p2_lexicon ? p2_lexicon : shared_lexicon,
                                      error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
@@ -7432,7 +7451,7 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   }
 
   config_contribute_load_lexicon_and_variant(
-      config, lexicon, variant, p1_lexicon, p2_lexicon,
+      config, shared_lexicon, variant, p1_lexicon, p2_lexicon,
       json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
       json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES), error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7657,15 +7676,16 @@ static char *config_contribute_opening_rack(Config *config,
       json_get_string_or_null(player, CONTRIBUTE_KEY_PLAYER_LEXICON);
 
   if (contribute_wants_wordmap(player)) {
-    config_contribute_ensure_wordmap(config, p1_lexicon ? p1_lexicon : lexicon,
-                                     error_stack);
+    config_contribute_ensure_wordmap(
+        config, contribute_shared_lexicon(lexicon, p1_lexicon), error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }
   }
 
   config_contribute_load_lexicon_and_variant(
-      config, lexicon, variant, p1_lexicon, NULL,
+      config, contribute_shared_lexicon(lexicon, p1_lexicon), variant,
+      p1_lexicon, NULL,
       json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES), NULL,
       error_stack);
   if (!error_stack_is_empty(error_stack)) {
