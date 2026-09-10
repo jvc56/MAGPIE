@@ -2370,16 +2370,21 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         beta = MIN(beta, score);
       }
       if (alpha >= beta) {
-        if (!pv_node) {
-          // ABDADA: leave node before returning
-          if (abdada_active) {
-            transposition_table_leave_node(worker->solver->transposition_table,
-                                           node_key);
-          }
-          // don't cut-off PV node
-          return score;
+        // The stored bound proves this node cannot improve the caller's
+        // window, so return it at PV nodes too. Continuing the search here
+        // with alpha >= beta gave every child an inverted window; a child's
+        // beta cutoff then also satisfied best_value <= alpha_orig and was
+        // stored as an upper bound, and a later PV re-search that trusted
+        // that bound reported a wrong root value. A root fail is widened and
+        // re-searched by iterative_deepening like any other aspiration fail.
+        // ABDADA: leave node before returning
+        if (abdada_active) {
+          transposition_table_leave_node(worker->solver->transposition_table,
+                                         node_key);
         }
+        return score;
       }
+      assert(alpha < beta);
       // search hash move first
       tt_move = ttentry_move(tt_entry);
     }
