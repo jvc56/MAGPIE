@@ -3387,7 +3387,8 @@ void gen_shadow_small(MoveGen *gen) {
   anchor_heapify_all(&gen->anchor_heap);
 }
 
-void gen_record_scoring_plays_small(MoveGen *gen) {
+static inline __attribute__((always_inline)) void
+gen_record_scoring_plays_unordered(MoveGen *gen, bool record_small) {
   gen->tiles_played = 0;
   const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
 
@@ -3416,8 +3417,14 @@ void gen_record_scoring_plays_small(MoveGen *gen) {
               gen_cache_get_right_extension_set(gen, col);
           gen->current_anchor_highest_possible_score = EQUITY_MAX_VALUE;
 
-          recursive_gen_small(gen, col, kwg_root_node_index, col, col,
-                              gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+          if (record_small) {
+            recursive_gen_small(gen, col, kwg_root_node_index, col, col,
+                                gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
+                                0);
+          } else {
+            recursive_gen(gen, col, kwg_root_node_index, col, col,
+                          gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+          }
           last_anchor_col = col;
           if (!gen_cache_is_empty(gen, col)) {
             last_anchor_col++;
@@ -3563,7 +3570,7 @@ void generate_moves(const MoveGenArgs *args) {
           (gen->tiles_played_bv & gen->target_tiles_bv) == gen->target_tiles_bv;
     }
     if (!gen->threshold_exceeded) {
-      gen_record_scoring_plays_small(gen);
+      gen_record_scoring_plays_unordered(gen, true);
     }
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
       // Write the bitvector to the caller's output pointer
@@ -3657,6 +3664,18 @@ void generate_moves(const MoveGenArgs *args) {
     }
 
     if (gen->stop_on_threshold && gen->threshold_exceeded) {
+      gen_record_pass(gen);
+      return;
+    }
+
+    if (gen->move_record_type == MOVE_RECORD_ALL && !gen->stop_on_threshold &&
+        !gen->is_wordsmog && !wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+      // Exhaustive traversal needs no shadow bounds or anchor ordering. The
+      // MoveList still applies its usual capacity and score/equity tie breaks.
+      leave_map_set_current_index(
+          &gen->leave_map,
+          (1 << rack_get_total_letters(&gen->player_rack)) - 1);
+      gen_record_scoring_plays_unordered(gen, false);
       gen_record_pass(gen);
       return;
     }
