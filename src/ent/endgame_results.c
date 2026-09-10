@@ -72,6 +72,74 @@ EndgameResults *endgame_results_create(void) {
   return endgame_results;
 }
 
+// A full, independent deep copy. Every PVLine.game field is cleared
+// rather than copied: it's a borrowed scratch Game (e.g. worker->game_copy
+// during an active solve, see endgame.c) that's only dereferenced while a
+// solve is in progress and immediately overwritten by
+// endgame_results_prepare_ext_game before use (see
+// string_builder_endgame_single_pv_with_lock's num_pvs==0 branch in
+// endgame_string.c); a finished/duplicated PVLine's own .game is never
+// read, but copying its (likely already-freed) value would still be an
+// unnecessary dangling pointer to carry around, so it's cleared instead.
+// start_game/ext_game (the results' own owned Game snapshots) and tt (a
+// borrowed, never-owned reference, same as the original) are handled
+// separately below.
+EndgameResults *
+endgame_results_duplicate(const EndgameResults *endgame_results) {
+  if (!endgame_results) {
+    return NULL;
+  }
+  EndgameResults *new_er = malloc_or_die(sizeof(EndgameResults));
+
+  new_er->best_pv_data.pv_line = endgame_results->best_pv_data.pv_line;
+  new_er->best_pv_data.pv_line.game = NULL;
+  new_er->best_pv_data.value = endgame_results->best_pv_data.value;
+  new_er->best_pv_data.depth = endgame_results->best_pv_data.depth;
+  cpthread_mutex_init(&new_er->best_pv_data.mutex);
+
+  new_er->display_pv_data.pv_line = endgame_results->display_pv_data.pv_line;
+  new_er->display_pv_data.pv_line.game = NULL;
+  new_er->display_pv_data.value = endgame_results->display_pv_data.value;
+  new_er->display_pv_data.depth = endgame_results->display_pv_data.depth;
+  cpthread_mutex_init(&new_er->display_pv_data.mutex);
+
+  new_er->actual_pv_data.pv_line = endgame_results->actual_pv_data.pv_line;
+  new_er->actual_pv_data.pv_line.game = NULL;
+  new_er->actual_pv_data.value = endgame_results->actual_pv_data.value;
+  new_er->actual_pv_data.depth = endgame_results->actual_pv_data.depth;
+  cpthread_mutex_init(&new_er->actual_pv_data.mutex);
+
+  new_er->actual_move_found = endgame_results->actual_move_found;
+  new_er->valid_for_current_game_state =
+      endgame_results->valid_for_current_game_state;
+  new_er->timer = endgame_results->timer;
+  new_er->seconds_elapsed = endgame_results->seconds_elapsed;
+  new_er->start_game = endgame_results->start_game
+                           ? game_duplicate(endgame_results->start_game)
+                           : NULL;
+
+  const int num_pvs = atomic_load(&endgame_results->num_pvs);
+  atomic_init(&new_er->num_pvs, num_pvs);
+  new_er->multi_pvs_capacity = num_pvs;
+  new_er->multi_pvs = NULL;
+  if (num_pvs > 0) {
+    new_er->multi_pvs = malloc_or_die(sizeof(PVLine) * (size_t)num_pvs);
+    for (int i = 0; i < num_pvs; i++) {
+      new_er->multi_pvs[i] = endgame_results->multi_pvs[i];
+      new_er->multi_pvs[i].game = NULL;
+    }
+  }
+
+  new_er->tt = endgame_results->tt;
+  new_er->solving_player = endgame_results->solving_player;
+  new_er->max_depth = endgame_results->max_depth;
+  // A reusable scratch buffer for PV extension, not part of the result
+  // itself; lazily (re)created via endgame_results_prepare_ext_game.
+  new_er->ext_game = NULL;
+  new_er->status = endgame_results->status;
+  return new_er;
+}
+
 void endgame_results_destroy(EndgameResults *endgame_results) {
   if (!endgame_results) {
     return;
@@ -194,6 +262,17 @@ int endgame_results_get_depth(const EndgameResults *endgame_results,
 double
 endgame_results_get_seconds_elapsed(const EndgameResults *endgame_results) {
   return endgame_results->seconds_elapsed;
+}
+
+// Live read of the solve timer. Unlike seconds_elapsed, which is only
+// refreshed by endgame_results_update_display_data (i.e. only when someone
+// renders status), this always reflects the real elapsed time: while the
+// timer runs it reads the clock, and after endgame_results_stop_ctimer it
+// returns the total time the solve took. Callers that must not overrun a
+// wall-clock budget need this, not the cached value.
+double endgame_results_get_timer_elapsed_seconds(
+    const EndgameResults *endgame_results) {
+  return ctimer_elapsed_seconds(&endgame_results->timer);
 }
 
 void endgame_results_lock(EndgameResults *endgame_results,

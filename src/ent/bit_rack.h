@@ -167,6 +167,36 @@ static inline uint64_t bit_rack_get_low_64(const BitRack *bit_rack) {
 #endif
 }
 
+// Sets `ml`'s four-bit lane in a 128-bit mask held as two 64-bit halves.
+// ANDing a BitRack half against the matching mask half is then nonzero exactly
+// when the BitRack holds at least one `ml`, whichever half the lane falls in.
+static inline void bit_rack_add_letter_to_mask(uint64_t *low_mask,
+                                               uint64_t *high_mask,
+                                               MachineLetter ml) {
+  const int shift = ml * BIT_RACK_BITS_PER_LETTER;
+  const uint64_t lane_mask = (1ULL << BIT_RACK_BITS_PER_LETTER) - 1;
+  if (shift < 64) {
+    *low_mask |= lane_mask << shift;
+  } else {
+    *high_mask |= lane_mask << (shift - 64);
+  }
+}
+
+// True if `bit_rack` holds at least one letter whose lane is set in the mask.
+static inline bool bit_rack_intersects_mask(const BitRack *bit_rack,
+                                            uint64_t low_mask,
+                                            uint64_t high_mask) {
+  return (bit_rack_get_low_64(bit_rack) & low_mask) != 0 ||
+         (bit_rack_get_high_64(bit_rack) & high_mask) != 0;
+}
+
+// True if any letter's lane is set in the mask. Sits on move generation's
+// per-anchor path, so keep it from ever becoming a call.
+static inline __attribute__((always_inline)) bool
+bit_rack_mask_has_letters(uint64_t low_mask, uint64_t high_mask) {
+  return (low_mask | high_mask) != 0;
+}
+
 static inline bool bit_rack_equals(const BitRack *a, const BitRack *b) {
 #if USE_INT128_INTRINSIC
   return *a == *b;

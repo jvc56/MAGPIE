@@ -205,7 +205,7 @@ def main():
         nargs='?', # Makes the argument optional
         help="Optional: Basename (e.g., 'my_file.c' or 'my_header.h') of a single "
              "file to format. If not provided, all .c and .h files in 'src/', 'cmd/', "
-             "and 'test/' directories will be processed recursively."
+             "'test/', and 'tools/' directories will be processed recursively."
     )
     parser.add_argument(
         '--write',
@@ -216,7 +216,7 @@ def main():
     args = parser.parse_args()
 
     # Define the target directories for recursive processing
-    target_directories: List[str] = ['src', 'cmd', 'test']
+    target_directories: List[str] = ['src', 'cmd', 'test', 'tools']
     files_to_process: List[str] = []
 
     if args.filename:
@@ -293,4 +293,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

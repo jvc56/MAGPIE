@@ -8,13 +8,18 @@ endif
 SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := cmd
+TOOLS_DIR := tools
 BIN_DIR := bin
 COV_DIR := cov
 
 # Build knobs that change the compiled objects. Defined up here (before OBJ_DIR)
 # so object files can be keyed by them.
-#dev is default, for another flavor : make BUILD=release
+# dev is the default. Use `make release` for the production PGO build, or
+# BUILD=no_pgo_release for the old optimized build without PGO.
 BUILD ?= dev
+ifeq ($(BUILD),release)
+$(error release is a target; run 'make release', or use BUILD=no_pgo_release)
+endif
 ifndef BOARD_DIM
 BOARD_DIM = 15
 endif
@@ -30,12 +35,61 @@ endif
 OBJ_ROOT := obj
 OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
 
+# Profile-guided optimization data. The default lives below OBJ_ROOT so it is
+# ignored by git and removed by `make clean` with the other build artifacts.
+PGO_DIR ?= $(OBJ_ROOT)/pgo-data
+PGO_RAW_DIR ?= $(PGO_DIR)/raw
+PGO_PROFILE ?= $(abspath $(PGO_DIR)/magpie.profdata)
+# PGO needs clang's instrumentation and llvm-profdata. Distros often install
+# only versioned names (clang-18, llvm-profdata-18), so look for those too. An
+# explicit PGO_CC or LLVM_PROFDATA on the command line wins. With no clang at
+# all, `make release` builds the plain optimized release and says so.
+PGO_TOOL_VERSIONS := 20 19 18 17 16 15
+# The oldest clang the PGO build supports; matches the versioned names above.
+# Older clangs (Ubuntu 20.04 ships clang 10) lack flags the instrumented build
+# relies on, so auto-selection skips them and `make release` degrades to the
+# plain optimized build with a one-line explanation instead of failing on
+# every object file.
+PGO_MIN_CLANG_MAJOR := 15
+# Major version of a clang ("Apple clang version 17.0.0", "clang version
+# 10.0.0-4ubuntu1"), or empty if the command is missing or is not clang.
+pgo_clang_major = $(shell $(1) --version 2>/dev/null | sed -n '1s/.*clang version \([0-9][0-9]*\).*/\1/p')
+PGO_CC_CANDIDATES := clang $(addprefix clang-,$(PGO_TOOL_VERSIONS))
+# Expanded once: a recursive `?=` would rerun every probe on each reference.
+ifeq ($(origin PGO_CC),undefined)
+PGO_CC := $(firstword $(foreach c,$(PGO_CC_CANDIDATES),$(shell v=$$($(c) --version 2>/dev/null | sed -n '1s/.*clang version \([0-9][0-9]*\).*/\1/p'); if test -n "$$v" && test "$$v" -ge $(PGO_MIN_CLANG_MAJOR); then echo $(c); fi)))
+endif
+# For diagnostics: the clang that would have been used, even if it is too old.
+PGO_CC_FOUND := $(if $(PGO_CC),$(PGO_CC),$(firstword $(foreach c,$(PGO_CC_CANDIDATES),$(if $(shell command -v $(c) 2>/dev/null),$(c),))))
+PGO_CC_FOUND_MAJOR := $(if $(PGO_CC_FOUND),$(call pgo_clang_major,$(PGO_CC_FOUND)))
+# Non-empty when PGO_CC exists, is clang, and is new enough to train with.
+PGO_CC_USABLE := $(if $(PGO_CC),$(shell if test -n "$(PGO_CC_FOUND_MAJOR)" && test "$(PGO_CC_FOUND_MAJOR)" -ge $(PGO_MIN_CLANG_MAJOR); then echo yes; fi))
+PGO_LDFLAGS ?=
+PGO_TRAIN_GAMES ?= 16
+PGO_TRAIN_TIME_MS ?= 1000
+PGO_TRAIN_SECONDS ?= 0.05
+PGO_TRAIN_THREADS ?= $(NPROCS)
+PGO_LEAVEGEN_TARGET ?= 100
+PGO_LEAVEGEN_DATA_DIR ?= $(abspath $(PGO_DIR)/leavegen-data)
+# Prefer the llvm-profdata matching a versioned clang (clang-18 pairs with
+# llvm-profdata-18), then the unversioned one, then any versioned one; on macOS
+# Xcode provides it through xcrun.
+PGO_CC_VERSION_SUFFIX := $(patsubst clang%,%,$(notdir $(PGO_CC)))
+LLVM_PROFDATA ?= $(firstword $(foreach p,llvm-profdata$(PGO_CC_VERSION_SUFFIX) llvm-profdata $(addprefix llvm-profdata-,$(PGO_TOOL_VERSIONS)),$(if $(shell command -v $(p) 2>/dev/null),$(p),)))
+ifeq ($(LLVM_PROFDATA),)
+ifneq ($(shell command -v xcrun 2>/dev/null),)
+LLVM_PROFDATA := xcrun llvm-profdata
+endif
+endif
+
 SRC  := $(wildcard $(SRC_DIR)/**/*.c)
 TEST := $(wildcard $(TEST_DIR)/*.c)
 CMD := $(wildcard $(CMD_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
+PGO_TRAIN_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/pgo_train.o
+CONVERT_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/convert.o
 
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
@@ -57,16 +111,35 @@ cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -
 cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
-# Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
-cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
+# Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
+cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+# Training runs multithreaded, so counter updates must be atomic. clang 17
+# added the GCC-style -fprofile-update=atomic; older clangs get the LLVM-native
+# equivalent. Probed only for the instrumented builds, with the compiler that
+# will do the compiling.
+ifneq ($(filter pgo_generate test_pgo_generate,$(BUILD)),)
+pgo_atomic_flag := $(shell if printf 'int main(void) { return 0; }\n' | $(CC) -fprofile-instr-generate -fprofile-update=atomic -x c -c - -o /dev/null >/dev/null 2>&1; then echo -fprofile-update=atomic; else echo -mllvm -instrprof-atomic-counter-update-all; fi)
+endif
+cflags.pgo_generate := $(cflags.no_pgo_release) -fprofile-instr-generate $(pgo_atomic_flag)
+cflags.test_pgo_generate := $(cflags.test_no_pgo_release) -fprofile-instr-generate $(pgo_atomic_flag)
+pgo_use_flags := -fprofile-instr-use=$(PGO_PROFILE) \
+                 -Werror=profile-instr-out-of-date \
+                 -Wno-profile-instr-unprofiled
+cflags.pgo_use := $(cflags.no_pgo_release) $(pgo_use_flags)
+cflags.test_pgo_use := $(cflags.test_no_pgo_release) $(pgo_use_flags)
+# Shared library flavor: release optimization plus -fPIC, no sanitizers
+cflags.lib := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -fPIC
 cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
+ldflags.lib := -pthread
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
-ldflags.release := -pthread
+ldflags.no_pgo_release := -pthread -flto
+ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
+ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.profile := -pthread
 ldflags.cov := -pthread
 
@@ -79,18 +152,60 @@ CFLAGS := ${cflags.${BUILD}}
 DEPFLAGS := -MMD -MP
 
 CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+ifeq ($(BUILD),pgo_use)
+CMD_CFLAGS := $(cflags.no_pgo_release) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+else
+CMD_CFLAGS := $(CFLAGS)
+endif
 
 
 LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu
+.PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
+	pgo_toolchain_check \
+	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples
 
 all: magpie magpie_test
 
 libmagpie_core.a: $(OBJ_SRC)
 	ar rcs $@ $^
+
+# Shared library for embedding magpie; the API surface is src/impl/cmd_api.h
+# and only magpie_* symbols are exported. Re-invokes make with BUILD=lib so
+# objects are always compiled with -fPIC and without sanitizers.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+SHARED_LIB := $(BIN_DIR)/libmagpie.dylib
+else
+SHARED_LIB := $(BIN_DIR)/libmagpie.so
+endif
+
+libmagpie:
+	@$(MAKE) BUILD=lib $(SHARED_LIB)
+
+$(OBJ_DIR)/libmagpie.map: | $(OBJ_DIR)
+	printf '{ global: magpie_*; local: *; };\n' > $@
+
+$(OBJ_DIR)/libmagpie.exports: | $(OBJ_DIR)
+	printf '_magpie_*\n' > $@
+
+$(BIN_DIR)/libmagpie.so: $(OBJ_SRC) $(OBJ_DIR)/libmagpie.map | $(BIN_DIR)
+	$(CC) -shared $(LDFLAGS) $(LFLAGS) $(OBJ_SRC) $(LDLIBS) -Wl,--version-script=$(OBJ_DIR)/libmagpie.map -o $@
+
+$(BIN_DIR)/libmagpie.dylib: $(OBJ_SRC) $(OBJ_DIR)/libmagpie.exports | $(BIN_DIR)
+	$(CC) -dynamiclib $(LDFLAGS) $(LFLAGS) $(OBJ_SRC) $(LDLIBS) -Wl,-exported_symbols_list,$(OBJ_DIR)/libmagpie.exports -o $@
+
+# Example programs embedding magpie through the shared library
+ifeq ($(UNAME_S),Darwin)
+EXAMPLE_RPATH := -Wl,-rpath,@loader_path
+else
+EXAMPLE_RPATH := -Wl,-rpath,'$$ORIGIN'
+endif
+
+examples: libmagpie
+	$(CC) -O2 -Wall -Werror examples/generate_moves.c -L$(BIN_DIR) -lmagpie $(EXAMPLE_RPATH) -o $(BIN_DIR)/generate_moves
 
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
@@ -98,22 +213,149 @@ magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
+magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+
+magpie_convert: $(OBJ_SRC) $(CONVERT_OBJ) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+# The training executable and CLI executable have different `main` functions.
+# Keep the CLI entry point out of profile use so its shared symbol name is not
+# mistaken for stale profile data; all shared Magpie code remains profiled.
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
+	$(CC) $(CMD_CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/$(TOOLS_DIR)/%.o: $(TOOLS_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TOOLS_DIR)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-# Test files: use test_release flags if BUILD=release, otherwise use dev flags
-$(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(if $(filter release,$(BUILD)),${cflags.test_release},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+# Compiler and linker flag changes in this file invalidate every object.
+$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ) $(CONVERT_OBJ): Makefile
 
-$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
+# A newly merged profile must rebuild every profile-use object. Without this
+# dependency, make would reuse objects optimized against an older corpus.
+ifeq ($(BUILD),pgo_use)
+$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST): $(PGO_PROFILE)
+endif
+
+# Optimized test builds keep assertions enabled.
+$(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
+	$(CC) $(if $(filter no_pgo_release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+
+$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
 
+# The production release is trained on static autoplay, the best general
+# profile in the measured workload matrix. Without clang there is nothing to
+# train with, so build the plain optimized release rather than fail.
+release:
+	@if test -n "$(PGO_CC_USABLE)"; then \
+		$(MAKE) pgo_workload PGO_WORKLOAD=static; \
+	else \
+		if test -n "$(PGO_CC_FOUND_MAJOR)"; then \
+			echo '*** $(PGO_CC_FOUND) is clang $(PGO_CC_FOUND_MAJOR); the profile-guided release needs clang $(PGO_MIN_CLANG_MAJOR) or newer. Building the plain optimized release instead.'; \
+		elif test -n "$(PGO_CC_FOUND)"; then \
+			echo '*** $(PGO_CC_FOUND) is not clang; the profile-guided release needs clang $(PGO_MIN_CLANG_MAJOR) or newer. Building the plain optimized release instead.'; \
+		else \
+			echo '*** No clang on PATH for the profile-guided release; building the plain optimized release instead.'; \
+		fi; \
+		echo '*** Install clang $(PGO_MIN_CLANG_MAJOR) or newer (Debian/Ubuntu: apt.llvm.org), or pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata>, to train the PGO build.'; \
+		$(MAKE) magpie BUILD=no_pgo_release; \
+	fi
+
+# Leave generation benefits from its own focused profile.
+leavegen_pgo_release:
+	$(MAKE) pgo_workload PGO_WORKLOAD=leavegen
+
+# Build a balanced profile using fast PlayChooser games. The chooser sims in
+# the midgame, runs PEG with 1..4 tiles in the bag, and solves the endgame.
+pgo:
+	$(MAKE) pgo_workload PGO_WORKLOAD=general
+
+# Focused profiles for long-running workloads. These all replace bin/magpie
+# with a fresh build optimized for the selected workload.
+pgo_sim:
+	$(MAKE) pgo_workload PGO_WORKLOAD=sim
+
+pgo_peg:
+	$(MAKE) pgo_workload PGO_WORKLOAD=peg
+
+pgo_eg:
+	$(MAKE) pgo_workload PGO_WORKLOAD=eg
+
+# Accept the originally proposed endgame spelling as an alias.
+peg_eg: pgo_eg
+
+# Refuse to start a PGO build without its toolchain, instead of failing on the
+# first object file. The instrumentation flags are clang's, so PGO_CC must be
+# some clang; LLVM_PROFDATA may carry an `xcrun` prefix.
+pgo_toolchain_check:
+	@if test -z "$(PGO_CC)"; then \
+		echo '*** PGO needs clang $(PGO_MIN_CLANG_MAJOR) or newer and none was found on PATH (clang, clang-20 .. clang-15).'; \
+		echo '*** Install clang, or pass PGO_CC=<clang> LLVM_PROFDATA=<llvm-profdata>.'; \
+		exit 1; \
+	fi
+	@if ! command -v "$(PGO_CC)" >/dev/null 2>&1; then \
+		echo '*** PGO_CC=$(PGO_CC) was not found on PATH.'; exit 1; \
+	fi
+	@if ! "$(PGO_CC)" --version 2>/dev/null | grep -qi clang; then \
+		echo '*** PGO_CC=$(PGO_CC) is not clang; the PGO instrumentation flags are clang-specific.'; exit 1; \
+	fi
+	@if test -z "$(PGO_CC_USABLE)"; then \
+		echo '*** PGO_CC=$(PGO_CC) is clang $(PGO_CC_FOUND_MAJOR); PGO needs clang $(PGO_MIN_CLANG_MAJOR) or newer (Debian/Ubuntu: apt.llvm.org, e.g. PGO_CC=clang-18 LLVM_PROFDATA=llvm-profdata-18).'; exit 1; \
+	fi
+	@if test -z "$(LLVM_PROFDATA)" || ! command -v $(firstword $(LLVM_PROFDATA)) >/dev/null 2>&1; then \
+		echo '*** PGO needs llvm-profdata (llvm-profdata, llvm-profdata-20 .. -15, or xcrun on macOS); pass LLVM_PROFDATA=<path>.'; exit 1; \
+	fi
+
+# Validate or upgrade the production WIT with the native C converter. This
+# separate uninstrumented executable cannot load stale tables through engine
+# configuration, and a conversion error exits nonzero before training begins.
+prepare_data:
+	$(MAKE) magpie_convert BUILD=no_pgo_release
+	./$(BIN_DIR)/magpie_convert kwg2witifneeded CSW24 ./data
+	@if test -f data/lexica/CSW24.rit; then \
+		echo 'Using existing data/lexica/CSW24.rit'; \
+	else \
+		./$(BIN_DIR)/magpie_convert klvwmp2rit CSW24 ./data; \
+	fi
+
+# Prepare the production RIT and WIT, discard all previous profile data,
+# train a freshly instrumented production engine, and replace bin/magpie with
+# the profile-guided native build. The dedicated driver contains no benchmark
+# harness; it invokes real engine workloads directly.
+pgo_workload: pgo_toolchain_check
+	$(MAKE) prepare_data CC="$(PGO_CC)" LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"
+	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE)
+	mkdir -p $(PGO_RAW_DIR)
+	@if test "$(PGO_WORKLOAD)" = leavegen; then \
+		$(RM) -r "$(PGO_LEAVEGEN_DATA_DIR)"; \
+		mkdir -p "$(PGO_LEAVEGEN_DATA_DIR)/lexica"; \
+	fi
+	$(MAKE) -B magpie_pgo_train BUILD=pgo_generate PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
+	LLVM_PROFILE_FILE="$(abspath $(PGO_RAW_DIR))/magpie-%p.profraw" \
+		./$(BIN_DIR)/magpie_pgo_train \
+			"$(PGO_WORKLOAD)" \
+			"$(PGO_TRAIN_GAMES)" \
+			"$(PGO_TRAIN_TIME_MS)" \
+			"$(PGO_TRAIN_SECONDS)" \
+			"$(PGO_TRAIN_THREADS)" \
+			"$(PGO_LEAVEGEN_DATA_DIR):./data" \
+			"$(PGO_LEAVEGEN_TARGET)"
+	$(LLVM_PROFDATA) merge -sparse -o $(PGO_PROFILE) $(PGO_RAW_DIR)/*.profraw
+	$(MAKE) -B magpie \
+		BUILD=pgo_use \
+		PGO_PROFILE="$(PGO_PROFILE)" \
+		CC="$(PGO_CC)" \
+		PGO_LDFLAGS="$(PGO_LDFLAGS)"
+
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)
 -include $(OBJ_TEST:.o=.d)
+-include $(PGO_TRAIN_OBJ:.o=.d)
+-include $(CONVERT_OBJ:.o=.d)

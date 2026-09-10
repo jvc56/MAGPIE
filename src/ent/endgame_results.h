@@ -4,7 +4,6 @@
 #include "../def/thread_control_defs.h"
 #include "../ent/transposition_table.h"
 #include "game.h"
-#include "game_history.h"
 #include "move.h"
 #include <stdatomic.h>
 
@@ -37,6 +36,8 @@ typedef struct PVLine {
 typedef struct EndgameResults EndgameResults;
 
 EndgameResults *endgame_results_create(void);
+EndgameResults *
+endgame_results_duplicate(const EndgameResults *endgame_results);
 void endgame_results_destroy(EndgameResults *endgame_results);
 void endgame_results_reset(EndgameResults *endgame_results);
 bool endgame_results_get_valid_for_current_game_state(
@@ -53,6 +54,8 @@ int endgame_results_get_depth(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
 double
 endgame_results_get_seconds_elapsed(const EndgameResults *endgame_results);
+double endgame_results_get_timer_elapsed_seconds(
+    const EndgameResults *endgame_results);
 void endgame_results_lock(EndgameResults *endgame_results,
                           endgame_result_t type);
 void endgame_results_unlock(EndgameResults *endgame_results,

@@ -33,6 +33,7 @@ typedef struct AnalyzeArgs {
   PegArgs peg_args;
 
   bool human_readable;
+  bool show_mistakes;
   int max_num_display_plays;
   const char *config_settings_str; // non-owning; set by caller, freed by caller
 } AnalyzeArgs;

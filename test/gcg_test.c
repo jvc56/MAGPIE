@@ -140,6 +140,33 @@ void test_game_history(GameHistory *game_history) {
                        "some_game" GCG_EXTENSION);
 }
 
+// A minimal valid GCG (the pragma block from the fixtures plus two exchange
+// events) with the first rack substituted, so the rack-size bound can be
+// tested without a fixture file.
+static void test_first_rack_size_case(Config *config, GameHistory *game_history,
+                                      const char *first_rack,
+                                      const bool expect_too_many) {
+  char gcg[1024];
+  (void)snprintf(gcg, sizeof(gcg),
+                 "#character-encoding UTF-8\n"
+                 "#lexicon CSW21\n"
+                 "#game-type classic\n"
+                 "#board-layout standard15\n"
+                 "#tile-set english set\n"
+                 "#tile-distribution english\n"
+                 "#player1 HastyBot HastyBot\n"
+                 "#player2 RightBehindYou RightBehindYou\n"
+                 ">HastyBot: %s -IIILU +0 0\n"
+                 ">RightBehindYou: AEINRST -AEINRST +0 0\n",
+                 first_rack);
+  const error_code_t status = test_parse_gcg_string(gcg, config, game_history);
+  if (expect_too_many) {
+    assert(status == ERROR_STATUS_GCG_PARSE_RACK_TOO_MANY_LETTERS);
+  } else {
+    assert(status != ERROR_STATUS_GCG_PARSE_RACK_TOO_MANY_LETTERS);
+  }
+}
+
 void test_error_cases(GameHistory *game_history) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -176,8 +203,12 @@ void test_error_cases(GameHistory *game_history) {
                          ERROR_STATUS_GCG_PARSE_PLAYED_LETTERS_NOT_IN_RACK);
   test_single_error_case("exchange_not_in_rack", config, game_history,
                          ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
+  // The rack in this fixture ("AEEG.TTV") uses "." where the file's author
+  // intended a malformed character; since "." is now a valid alias for "?"
+  // (blank), it parses as a well-formed 8-letter rack and instead fails
+  // later, when that rack doesn't match the tracked game state.
   test_single_error_case("exchange_malformed", config, game_history,
-                         ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
+                         ERROR_STATUS_GCG_PARSE_MOVE_VALIDATION_ERROR);
   test_single_error_case("pass_rack_malformed", config, game_history,
                          ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   test_single_error_case("challenge_bonus_rack_malformed", config, game_history,
@@ -224,6 +255,12 @@ void test_error_cases(GameHistory *game_history) {
                          ERROR_STATUS_GCG_PARSE_END_GAME_EVENT_BEFORE_GAME_END);
   test_single_error_case("first_rack_not_in_bag", config, game_history,
                          ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
+  // A rack wider than RACK_SIZE parses (rack_set_to_string allows up to
+  // MAX_RACK_SIZE) but must be refused when replay puts it on the player.
+  // 7 is the control; 8 is one over; 10 is what a hand-edited GCG might hold.
+  test_first_rack_size_case(config, game_history, "DIIIILU", false);
+  test_first_rack_size_case(config, game_history, "DIIIILUA", true);
+  test_first_rack_size_case(config, game_history, "DIIIILUAEN", true);
   test_single_error_case("midgame_rack_not_in_bag", config, game_history,
                          ERROR_STATUS_GCG_PARSE_RACK_NOT_IN_BAG);
   test_single_error_case("event_after_last_rack", config, game_history,

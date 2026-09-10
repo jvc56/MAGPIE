@@ -64,7 +64,7 @@ echo "Using ${MAX_CORES} CPU cores for cppcheck analysis."
 mkdir -p "${CPPCHECK_BUILD_DIR}"
 
 # --- Run cppcheck command ---
-echo "Running cppcheck analysis on src/, test/, and cmd/ directories..."
+echo "Running cppcheck analysis on src/, test/, cmd/, and tools/ directories..."
 "${CPPCHECK_EXECUTABLE}" \
     --check-level=reduced \
     --enable=all \
@@ -85,7 +85,7 @@ echo "Running cppcheck analysis on src/, test/, and cmd/ directories..."
     -U__APPLE__ \
     -U__EMSCRIPTEN__ \
     -j "${MAX_CORES}" \
-    src/ test/ cmd/
+    src/ test/ cmd/ tools/
 
 # --- Check exit code of cppcheck ---
 CPPCHECK_EXIT_CODE=$?

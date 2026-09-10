@@ -7,6 +7,7 @@
 #include "../ent/sim_args.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
+#include "play_chooser.h"
 #include <stdbool.h>
 
 typedef struct GameStringOptions GameStringOptions;
@@ -40,6 +41,14 @@ typedef struct AutoplayArgs {
   double cutoff;
   SimArgs p1_sim_args;
   SimArgs p2_sim_args;
+  bool use_play_chooser[2];
+  // Total clock for each PlayChooser player. Zero means untimed.
+  double time_control_seconds[2];
+  int overtime_penalty_points;
+  double overtime_period_seconds;
+  // Templates copied into each game runner, which supplies the per-game
+  // timer and seed before constructing its choosers.
+  PlayChooserStrategy play_chooser_strategies[2];
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
@@ -56,5 +65,9 @@ void autoplay_reset_total_sim_iterations(void);
 // trajectory so RIT/BAI variants can be compared over identical positions.
 void autoplay_set_bench_static_move(bool enabled);
 bool autoplay_get_bench_static_move(void);
+
+int autoplay_overtime_penalty_points(double overtime_seconds,
+                                     int points_per_period,
+                                     double period_seconds);
 
 #endif

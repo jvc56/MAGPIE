@@ -3,6 +3,7 @@
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -234,7 +235,8 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game) {
 // The saved squares are the cross-set square itself plus the extension-set
 // squares in the through direction (the word edges adjacent to this square).
 // With these saves, unplay_move_incremental's square restore reverts the
-// lazy cross-set updates exactly and no recompute is needed after unplay.
+// Square-backed lazy cross-set updates exactly and no recompute is needed after
+// unplay. Board's parallel WIT block caches are invalidated on unplay.
 static void game_gen_cross_set_tracked(const Game *game, int row, int col,
                                        int csd, int cross_set_index,
                                        MoveUndo *undo) {
@@ -287,11 +289,9 @@ static void calc_for_across_from_undo(MoveUndo *undo, const Game *game,
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
     game_gen_cross_set_tracked(game, row, right_col + 1, csd, 0, undo);
     game_gen_cross_set_tracked(game, row, left_col - 1, csd, 0, undo);
-    game_gen_cross_set_tracked(game, row, col_start, csd, 0, undo);
     if (!kwgs_are_shared) {
       game_gen_cross_set_tracked(game, row, right_col + 1, csd, 1, undo);
       game_gen_cross_set_tracked(game, row, left_col - 1, csd, 1, undo);
-      game_gen_cross_set_tracked(game, row, col_start, csd, 1, undo);
     }
   }
 }
@@ -299,15 +299,15 @@ static void calc_for_across_from_undo(MoveUndo *undo, const Game *game,
 // calc_for_self using MoveUndo (doesn't need tiles info, just length)
 static void calc_for_self_from_undo(MoveUndo *undo, const Game *game,
                                     int row_start, int col_start, int csd) {
-  for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
-       col++) {
-    game_gen_cross_set_tracked(game, row_start, col, csd, 0, undo);
-  }
+  // The move's interior is occupied. New tiles were initialized during
+  // placement; played-through tiles already had zero cross sets/scores.
+  game_gen_cross_set_tracked(game, row_start, col_start - 1, csd, 0, undo);
+  game_gen_cross_set_tracked(game, row_start,
+                             col_start + undo->move_tiles_length, csd, 0, undo);
   if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
-    for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
-         col++) {
-      game_gen_cross_set_tracked(game, row_start, col, csd, 1, undo);
-    }
+    game_gen_cross_set_tracked(game, row_start, col_start - 1, csd, 1, undo);
+    game_gen_cross_set_tracked(
+        game, row_start, col_start + undo->move_tiles_length, csd, 1, undo);
   }
 }
 
@@ -392,6 +392,10 @@ bool draw_rack_from_bag(const Game *game, const int player_index,
     // Rack is effectively NULL
     return true;
   }
+  // Every path that puts an externally supplied rack on a player (CGP, GCG
+  // replay, known racks) comes through here. The callers validate the size
+  // and report it; this is the backstop for the ones that forget.
+  assert(rack_get_total_letters(rack_to_draw) <= RACK_SIZE);
   Bag *bag = game_get_bag(game);
   Rack *player_rack = player_get_rack(game_get_player(game, player_index));
   int player_draw_index = game_get_player_draw_index(game, player_index);
@@ -427,25 +431,31 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
 
 // Draws a nonrandom set of letters specified by rack_string from the
 // bag to the rack. Assumes the rack is empty.
-// Returns number of letters drawn on success
-// Returns -1 if the string was malformed.
-// Returns -2 if the tiles were not in the bag.
+// Returns the number of letters drawn on success, or one of the
+// DRAW_RACK_STRING_* codes declared in def/gameplay_defs.h.
 int draw_rack_string_from_bag(const Game *game, const int player_index,
                               const char *rack_string) {
   const LetterDistribution *ld = game_get_ld(game);
   Rack player_rack_copy;
   rack_set_dist_size_and_reset(&player_rack_copy, ld_get_size(ld));
-  int number_of_letters_set =
+  const int number_of_letters_set =
       rack_set_to_string(ld, &player_rack_copy, rack_string);
-
-  if (number_of_letters_set != -1) {
-    if (!rack_is_drawable(game, player_index, &player_rack_copy)) {
-      number_of_letters_set = -2;
-    } else {
-      draw_rack_from_bag(game, player_index, &player_rack_copy);
-    }
+  if (number_of_letters_set == -1) {
+    // rack_set_to_string reports a malformed string as -1.
+    return DRAW_RACK_STRING_MALFORMED;
   }
-
+  if (number_of_letters_set > RACK_SIZE) {
+    // rack_set_to_string bounds the string by MAX_RACK_SIZE, which is far
+    // larger than RACK_SIZE. Racks wider than RACK_SIZE must be rejected
+    // here: move generation indexes several RACK_SIZE-sized arrays by the
+    // rack size, so drawing one would be memory-unsafe rather than merely
+    // wrong.
+    return DRAW_RACK_STRING_TOO_MANY_LETTERS;
+  }
+  if (!rack_is_drawable(game, player_index, &player_rack_copy)) {
+    return DRAW_RACK_STRING_NOT_IN_BAG;
+  }
+  draw_rack_from_bag(game, player_index, &player_rack_copy);
   return number_of_letters_set;
 }
 
@@ -653,6 +663,20 @@ static void play_move_on_board_tracked(const Move *move, const Game *game,
       continue;
     }
     board_set_letter_tracked(board, row_start, col_start + idx, letter, undo);
+    // Occupied squares have no cross set or cross score. The letter write
+    // already saved these squares, so initialize them here without a later
+    // tracked generator call. Preserve the inactive cross index in shared
+    // lexicon mode, matching the existing incremental update policy.
+    const int cross_indices =
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) ? 1 : 2;
+    for (int ci = 0; ci < cross_indices; ci++) {
+      for (int dir = 0; dir < 2; dir++) {
+        Square *square = board_get_writable_square(board, row_start,
+                                                   col_start + idx, dir, ci);
+        square_set_cross_set(square, 0);
+        square_set_cross_score(square, 0);
+      }
+    }
     if (get_is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }
@@ -799,6 +823,7 @@ void unplay_move_incremental(Game *game, const MoveUndo *undo) {
   // Restore board
   Board *board = game_get_board(game);
   move_undo_restore_squares(undo, board);
+  board_clear_wit_cache(board);
   board_set_tiles_played(board, undo->old_tiles_played);
   board_set_cross_sets_valid(board, undo->old_cross_sets_valid);
   memcpy(board->number_of_row_anchors, undo->old_number_of_row_anchors,
@@ -891,6 +916,21 @@ const Move *get_top_equity_move(Game *game, MoveList *move_list) {
                             .target_leave_size_for_exchange_cutoff =
                                 UNSET_LEAVE_SIZE};
   generate_moves(&args);
+  return move_list_get_move(move_list, 0);
+}
+
+// Like get_top_equity_move, but sorts by the move_sort_type configured for
+// the player on turn instead of always using MOVE_SORT_EQUITY. This is what
+// static (non-simming) play should use so that per-player sort type settings
+// (e.g. the "s1"/"s2" args) actually affect play.
+const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list) {
+  const MoveGenArgs args = {.game = game,
+                            .move_list = move_list,
+                            .eq_margin_movegen = 0,
+                            .target_equity = EQUITY_MAX_VALUE,
+                            .target_leave_size_for_exchange_cutoff =
+                                UNSET_LEAVE_SIZE};
+  generate_moves_for_game_override_record_type(&args, MOVE_RECORD_BEST);
   return move_list_get_move(move_list, 0);
 }
 
@@ -1213,6 +1253,26 @@ void set_rack_from_bag_or_push_to_error_stack(const Game *game,
                                               const int player_index,
                                               const Rack *rack_to_draw,
                                               ErrorStack *error_stack) {
+  // GCG racks are parsed without a size bound (rack_set_to_string allows
+  // MAX_RACK_SIZE tiles), and this is the point where a replayed rack becomes
+  // the live player rack. Move generation indexes RACK_SIZE-sized arrays by
+  // the rack size, so refuse an over-full rack here, before the game state
+  // is touched, rather than letting it reach the generator.
+  const int number_of_letters = rack_get_total_letters(rack_to_draw);
+  if (number_of_letters > RACK_SIZE) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_string(sb, "rack of ");
+    string_builder_add_rack(sb, rack_to_draw, game_get_ld(game), false);
+    string_builder_add_formatted_string(
+        sb,
+        " for player %d has %d tiles which exceeds the maximum rack size of %d",
+        player_index + 1, number_of_letters, RACK_SIZE);
+    char *err_msg = string_builder_dump(sb, NULL);
+    string_builder_destroy(sb);
+    error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_RACK_TOO_MANY_LETTERS,
+                     err_msg);
+    return;
+  }
   return_rack_to_bag(game, player_index);
   if (!draw_rack_from_bag(game, player_index, rack_to_draw)) {
     StringBuilder *sb = string_builder_create();

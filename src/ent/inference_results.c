@@ -56,6 +56,43 @@ InferenceResults *inference_results_create(AliasMethod *alias_method) {
   return results;
 }
 
+// A full, independent deep copy: the equity stats, subtotals, leave rack
+// list, and racks are duplicated rather than shared. The alias method is
+// not duplicated: it only drives active inference execution
+// (sampling/table generation), and a sim that needs an inference result
+// always reruns the inference rather than reading one of these duplicates,
+// which exist purely for display.
+InferenceResults *
+inference_results_duplicate(const InferenceResults *inference_results) {
+  if (!inference_results) {
+    return NULL;
+  }
+  InferenceResults *new_results = malloc_or_die(sizeof(InferenceResults));
+  for (int i = 0; i < NUMBER_OF_INFER_TYPES; i++) {
+    new_results->equity_values[i] = stat_create(false);
+    stat_copy(new_results->equity_values[i],
+              inference_results->equity_values[i]);
+  }
+  memcpy(new_results->subtotals, inference_results->subtotals,
+         sizeof(new_results->subtotals));
+  new_results->leave_rack_list =
+      leave_rack_list_duplicate(inference_results->leave_rack_list);
+  new_results->alias_method = NULL;
+  new_results->alias_method_created_internally = false;
+  new_results->target_number_of_tiles_exchanged =
+      inference_results->target_number_of_tiles_exchanged;
+  new_results->target_score = inference_results->target_score;
+  new_results->equity_margin = inference_results->equity_margin;
+  new_results->target_played_tiles = inference_results->target_played_tiles;
+  new_results->target_known_unplayed_tiles =
+      inference_results->target_known_unplayed_tiles;
+  new_results->bag_as_rack = inference_results->bag_as_rack;
+  new_results->valid_for_current_game_state =
+      inference_results->valid_for_current_game_state;
+  new_results->interrupted = inference_results->interrupted;
+  return new_results;
+}
+
 void inference_results_destroy(InferenceResults *results) {
   if (!results) {
     return;
