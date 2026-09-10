@@ -49,6 +49,7 @@
 #include "peg_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
+#include "position_lengths_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
 #include "rack_test.h"
@@ -62,10 +63,12 @@
 #include "validated_move_test.h"
 #include "win_pct_test.h"
 #include "wit_cache_test.h"
+#include "wit_upgrade_test.h"
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
 #include "word_info_table_test.h"
+#include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
@@ -90,6 +93,8 @@ static TestEntry test_table[] = {
     {"leavemap", test_leave_map},
     {"rit", test_rack_info_table},
     {"wit", test_word_info_table},
+    {"wpfmaker", test_word_plus_floater_maker},
+    {"positionlengths", test_position_lengths},
     {"witcache", test_wit_cache},
     {"witsweep", test_wit_equivalence_sweep},
     {"kwg", test_kwg_alpha},
@@ -152,6 +157,7 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"positionloaded", test_position_lengths_loaded},
     {"witdiff", test_wit_cache_differential},
     {"witcopy", test_wit_cache_copy},
     {"witundo", test_wit_cache_undo},
@@ -164,6 +170,7 @@ static TestEntry on_demand_test_table[] = {
     {"ap_rest", test_autoplay_remaining},
     {"endgame_wasm", test_endgame_wasm},
     {"endgameinject", test_endgame_dynamic_worker_injection},
+    {"egttpvbound", test_endgame_tt_pv_bound_repeat},
     {"viamover", test_via_mover_must_bingo_every_depth},
     {"viaopp", test_via_opp_must_block_every_depth},
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
@@ -180,6 +187,7 @@ static TestEntry on_demand_test_table[] = {
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
     {"egspeedbench", test_endgame_speed_bench},
+    {"egrootbench", test_endgame_root_bench},
     {"egplayout", test_endgame_playout_bench},
     {"egmove1", test_endgame_move1},
     {"multipv", test_multi_pv},
@@ -239,6 +247,8 @@ void run_test(const char *subtest) {
 }
 
 void run_all_super(void) {
+  test_wit_upgrade();
+  test_position_lengths();
   test_bit_rack();
   test_board_layout_super();
 }

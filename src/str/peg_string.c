@@ -601,44 +601,11 @@ static bool peg_moves_match(const Move *m1, const Move *m2);
 static double peg_graded_history_time(const PegPollSnapshot *snap, int slot,
                                       const Move *move);
 
-// Append `text` (an outcomes cell like "W: tok tok ...") wrapped to `avail`
-// columns per line, breaking only at spaces (defensive char-break if a single
-// token exceeds `avail`). The first line continues from whatever the caller
-// already emitted on the current line; each continuation line is preceded by a
-// newline and `indent` spaces so the column stays aligned. At most `max_lines`
-// lines are emitted (0 = unlimited); if more tokens remain, the last line ends
-// with " ..." (kept within `avail`) and *truncated is set true. avail >= 1.
-static void peg_append_wrapped(StringBuilder *sb, const char *text, int indent,
-                               int avail, int max_lines, bool *truncated) {
-  if (avail < 1) {
-    avail = 1;
-  }
-  // Tokenize on spaces (the label "W:"/"L:" is just the first token).
-  int cap = 16;
-  int n_tok = 0;
-  const char **tok = malloc_or_die((size_t)cap * sizeof(char *));
-  int *tok_len = malloc_or_die((size_t)cap * sizeof(int));
-  for (const char *cursor = text; *cursor != '\0';) {
-    while (*cursor == ' ') {
-      cursor++;
-    }
-    if (*cursor == '\0') {
-      break;
-    }
-    const char *start = cursor;
-    while (*cursor != '\0' && *cursor != ' ') {
-      cursor++;
-    }
-    if (n_tok == cap) {
-      cap *= 2;
-      tok = realloc_or_die(tok, (size_t)cap * sizeof(char *));
-      tok_len = realloc_or_die(tok_len, (size_t)cap * sizeof(int));
-    }
-    tok[n_tok] = start;
-    tok_len[n_tok] = (int)(cursor - start);
-    n_tok++;
-  }
-
+// Render borrowed token arrays; the tokenizer retains ownership of them.
+static void peg_append_wrapped_tokens(StringBuilder *sb, const char *const *tok,
+                                      const int *tok_len, int n_tok, int indent,
+                                      int avail, int max_lines,
+                                      bool *truncated) {
   const int ELLIPSIS = 4; // " ..."
   int idx = 0;
   int line = 0;
@@ -668,7 +635,7 @@ static void peg_append_wrapped(StringBuilder *sb, const char *text, int indent,
                 string_builder_truncate(sb, cur_len - 3);
               }
               string_builder_add_string(sb, "...");
-              goto cleanup;
+              return;
             }
             string_builder_add_char(sb, '\n');
             string_builder_add_spaces(sb, indent);
@@ -710,7 +677,48 @@ static void peg_append_wrapped(StringBuilder *sb, const char *text, int indent,
     }
     line++;
   }
-cleanup:
+}
+
+// Append `text` (an outcomes cell like "W: tok tok ...") wrapped to `avail`
+// columns per line, breaking only at spaces (defensive char-break if a single
+// token exceeds `avail`). The first line continues from whatever the caller
+// already emitted on the current line; each continuation line is preceded by a
+// newline and `indent` spaces so the column stays aligned. At most `max_lines`
+// lines are emitted (0 = unlimited); if more tokens remain, the last line ends
+// with " ..." (kept within `avail`) and *truncated is set true. avail >= 1.
+static void peg_append_wrapped(StringBuilder *sb, const char *text, int indent,
+                               int avail, int max_lines, bool *truncated) {
+  if (avail < 1) {
+    avail = 1;
+  }
+  // Tokenize on spaces (the label "W:"/"L:" is just the first token).
+  int cap = 16;
+  int n_tok = 0;
+  const char **tok = malloc_or_die((size_t)cap * sizeof(char *));
+  int *tok_len = malloc_or_die((size_t)cap * sizeof(int));
+  for (const char *cursor = text; *cursor != '\0';) {
+    while (*cursor == ' ') {
+      cursor++;
+    }
+    if (*cursor == '\0') {
+      break;
+    }
+    const char *start = cursor;
+    while (*cursor != '\0' && *cursor != ' ') {
+      cursor++;
+    }
+    if (n_tok == cap) {
+      cap *= 2;
+      tok = realloc_or_die(tok, (size_t)cap * sizeof(char *));
+      tok_len = realloc_or_die(tok_len, (size_t)cap * sizeof(int));
+    }
+    tok[n_tok] = start;
+    tok_len[n_tok] = (int)(cursor - start);
+    n_tok++;
+  }
+
+  peg_append_wrapped_tokens(sb, tok, tok_len, n_tok, indent, avail, max_lines,
+                            truncated);
   free(tok);
   free(tok_len);
 }

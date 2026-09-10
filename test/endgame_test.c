@@ -552,6 +552,64 @@ void test_ctx_reuse(void) {
   config_destroy(config);
 }
 
+// Regression for transposition-table bound handling at PV nodes in
+// abdada_negamax. Before the fix, a PV node whose window a stored bound had
+// closed (alpha >= beta) kept searching: its children ran with inverted
+// windows, their beta cutoffs were stored as upper bounds, and a later
+// aspiration re-search that trusted one of those bounds published a wrong
+// "exact" root value (here 10 with a 4-point one-tile play instead of 8).
+// The trigger is a nine-thread race that hit roughly 4-6% of depth-2 solves
+// of this position before the fix and never at one thread, so this test
+// repeats the solve and is on-demand only (egttpvbound).
+void test_endgame_tt_pv_bound_repeat(void) {
+  const char *cgp =
+      "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
+      "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
+      "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24";
+  Config *config = config_create_or_die(
+      "set -wmp true -s1 equity -s2 equity -threads 9 -eplies 2");
+  load_and_exec_config_or_die(config, cgp);
+
+  Game *game = config_get_game(config);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+
+  const int num_solves = 400;
+  const int expected_score = 8;
+  for (int solve_idx = 0; solve_idx < num_solves; solve_idx++) {
+    EndgameArgs endgame_args = {0};
+    endgame_args.thread_control = config_get_thread_control(config);
+    endgame_args.game = game;
+    endgame_args.plies = config_get_endgame_plies(config);
+    endgame_args.tt_fraction_of_mem = 0.01;
+    endgame_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    endgame_args.num_threads = 9;
+    endgame_args.use_heuristics = true;
+    endgame_args.num_top_moves = 1;
+    endgame_args.seed = 42;
+    if (endgame_ctx != NULL) {
+      endgame_ctx_clear_transposition_table(endgame_ctx);
+    }
+    endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv_line =
+        endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+    if (pv_line->score != expected_score) {
+      printf("solve %d of %d returned %d, expected %d\n", solve_idx + 1,
+             num_solves, (int)pv_line->score, expected_score);
+    }
+    assert(pv_line->score == expected_score);
+  }
+  printf("%d nine-thread solves all returned %d\n", num_solves, expected_score);
+
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_solve_standard(void) {
   // A standard out-in-two endgame.
   test_single_endgame(
@@ -1488,7 +1546,63 @@ void test_endgame_progress_stream(void) {
   prng_destroy(prng);
 }
 
+// An actual historical move can be much worse than the best root. Its value
+// must remain exact even when top-1 searches use an outer aspiration window.
+static void test_root_pvs_actual_pass(void) {
+  Config *config = config_create_or_die("set -lex CSW24 -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/"
+              "5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/"
+              "4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0");
+  Game *game = config_get_game(config);
+  Move pass_move;
+  move_set_as_pass(&pass_move);
+  EndgameArgs args = {
+      .game = game,
+      .thread_control = config_get_thread_control(config),
+      .plies = 10,
+      .tt_fraction_of_mem = 0.0001,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 1,
+      .num_top_moves = 1,
+      .use_heuristics = true,
+      .forced_pass_bypass = true,
+      .seed = 42,
+  };
+  EndgameResults *results = endgame_results_create();
+  EndgameCtx *solver = NULL;
+  ErrorStack *errors = error_stack_create();
+  endgame_solve(&solver, &args, results, errors);
+  assert(error_stack_is_empty(errors));
+  const int32_t best_value =
+      endgame_results_get_value(results, ENDGAME_RESULT_BEST);
+  args.actual_move = &pass_move;
+  endgame_solve(&solver, &args, results, errors);
+  assert(error_stack_is_empty(errors));
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_BEST) == best_value);
+  const int32_t pass_value =
+      endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL);
+  assert(pass_value < best_value);
+  // Independent child solve: after our pass the opponent owns the move, so
+  // negate its net spread change to obtain the exact value of our pass.
+  play_move(&pass_move, game, NULL);
+  args.actual_move = NULL;
+  args.plies--;
+  endgame_ctx_destroy(solver);
+  solver = NULL;
+  endgame_solve(&solver, &args, results, errors);
+  assert(error_stack_is_empty(errors));
+  assert(pass_value ==
+         -endgame_results_get_value(results, ENDGAME_RESULT_BEST));
+  endgame_ctx_destroy(solver);
+  endgame_results_destroy(results);
+  error_stack_destroy(errors);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
+  test_root_pvs_actual_pass();
   test_before_search_callback();
   test_single_pv_display();
   test_ctx_reuse();

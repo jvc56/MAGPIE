@@ -30,6 +30,8 @@ typedef enum {
   DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
 } data_filepath_t;
 
+char *get_filepath(const char *data_path, const char *data_name,
+                   data_filepath_t type);
 char *data_filepaths_get_readable_filename(const char *data_paths,
                                            const char *data_name,
                                            data_filepath_t type,

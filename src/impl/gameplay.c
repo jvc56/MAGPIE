@@ -289,11 +289,9 @@ static void calc_for_across_from_undo(MoveUndo *undo, const Game *game,
         board_get_word_edge(board, row, col_start, WORD_DIRECTION_LEFT);
     game_gen_cross_set_tracked(game, row, right_col + 1, csd, 0, undo);
     game_gen_cross_set_tracked(game, row, left_col - 1, csd, 0, undo);
-    game_gen_cross_set_tracked(game, row, col_start, csd, 0, undo);
     if (!kwgs_are_shared) {
       game_gen_cross_set_tracked(game, row, right_col + 1, csd, 1, undo);
       game_gen_cross_set_tracked(game, row, left_col - 1, csd, 1, undo);
-      game_gen_cross_set_tracked(game, row, col_start, csd, 1, undo);
     }
   }
 }
@@ -301,15 +299,15 @@ static void calc_for_across_from_undo(MoveUndo *undo, const Game *game,
 // calc_for_self using MoveUndo (doesn't need tiles info, just length)
 static void calc_for_self_from_undo(MoveUndo *undo, const Game *game,
                                     int row_start, int col_start, int csd) {
-  for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
-       col++) {
-    game_gen_cross_set_tracked(game, row_start, col, csd, 0, undo);
-  }
+  // The move's interior is occupied. New tiles were initialized during
+  // placement; played-through tiles already had zero cross sets/scores.
+  game_gen_cross_set_tracked(game, row_start, col_start - 1, csd, 0, undo);
+  game_gen_cross_set_tracked(game, row_start,
+                             col_start + undo->move_tiles_length, csd, 0, undo);
   if (!game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
-    for (int col = col_start - 1; col <= col_start + undo->move_tiles_length;
-         col++) {
-      game_gen_cross_set_tracked(game, row_start, col, csd, 1, undo);
-    }
+    game_gen_cross_set_tracked(game, row_start, col_start - 1, csd, 1, undo);
+    game_gen_cross_set_tracked(
+        game, row_start, col_start + undo->move_tiles_length, csd, 1, undo);
   }
 }
 
@@ -665,6 +663,20 @@ static void play_move_on_board_tracked(const Move *move, const Game *game,
       continue;
     }
     board_set_letter_tracked(board, row_start, col_start + idx, letter, undo);
+    // Occupied squares have no cross set or cross score. The letter write
+    // already saved these squares, so initialize them here without a later
+    // tracked generator call. Preserve the inactive cross index in shared
+    // lexicon mode, matching the existing incremental update policy.
+    const int cross_indices =
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG) ? 1 : 2;
+    for (int ci = 0; ci < cross_indices; ci++) {
+      for (int dir = 0; dir < 2; dir++) {
+        Square *square = board_get_writable_square(board, row_start,
+                                                   col_start + idx, dir, ci);
+        square_set_cross_set(square, 0);
+        square_set_cross_score(square, 0);
+      }
+    }
     if (get_is_blanked(letter)) {
       letter = BLANK_MACHINE_LETTER;
     }

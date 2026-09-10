@@ -90,6 +90,10 @@ typedef struct MoveGen {
   int move_sort_type;
   move_record_t move_record_type;
   int number_of_tiles_in_bag;
+  // Whether a subrack's leave may take part in the bound that decides if the
+  // subrack can still beat the cutoff: only when the bag is not empty and
+  // the sort is by equity.
+  bool wmp_prune_subracks_by_leave;
   int player_index;
   Equity bingo_bonus;
   bool kwgs_are_shared;
@@ -151,21 +155,24 @@ typedef struct MoveGen {
   // Shadow plays
   int current_left_col;
   int current_right_col;
+  // The initial complete board block is immutable while shadow explores
+  // left starts. Each rightward branch keeps its allowed lengths locally.
+  const uint32_t *shadow_position_row;
+  int shadow_position_col;
+  int shadow_position_length;
 
-  // Used to insert "unrestricted" multipliers into a descending list for
-  // calculating the maximum score for an anchor. We don't know which tiles will
-  // go in which multipliers so we keep a sorted list. The inner product of
-  // those and the descending tile scores is the highest possible score of a
-  // permutation of tiles in those squares.
-  UnrestrictedMultiplier
-      descending_cross_word_multipliers[WORD_ALIGNING_RACK_SIZE];
+  // Used to calculate the maximum score for an anchor. We don't know which
+  // tiles will go in which unrestricted squares, so effective multipliers are
+  // kept in descending order. The cross-word components need no ordering; they
+  // are retained only to rebuild the effective list when the main-word
+  // multiplier changes.
+  UnrestrictedMultiplier unrestricted_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint16_t descending_effective_letter_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint8_t num_unrestricted_multipliers;
   uint8_t last_word_multiplier;
 
-  // Used to reset the arrays after finishing shadow_play_right, which may have
-  // rearranged the ordering of the multipliers used while shadowing left.
-  UnrestrictedMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
+  // Rightward exploration can reorder the effective array. The append-only
+  // backup entries need only their count restored, so they need no copy.
   uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
 
   // Since shadow does not have backtracking besides when switching from going
@@ -192,8 +199,8 @@ typedef struct MoveGen {
   const KLV *klv;
   // Snapshot of klv->mutation_counter captured at the last gen_load_position
   // call. If the KLV's leave_values have been mutated in place since then
-  // (test-only set_klv_leave_value path), leave-derived caches (the subrack
-  // cache) must be invalidated even though the KLV pointer is unchanged.
+  // (including between leavegen generations), leave-derived caches must be
+  // invalidated even though the KLV pointer is unchanged.
   uint64_t klv_mutation_counter_at_load;
   // Instance fingerprints of the KLV and WMP captured at the last
   // gen_load_position call. The MoveGen cache is pooled per thread and
