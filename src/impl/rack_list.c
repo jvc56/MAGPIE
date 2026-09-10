@@ -578,6 +578,7 @@ void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
       klv->leave_values[i] = 0;
     }
   }
+  klv_mark_leave_values_mutated(klv);
   free(leave_list);
 }
 
