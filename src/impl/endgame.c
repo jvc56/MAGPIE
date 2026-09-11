@@ -139,6 +139,13 @@ struct EndgameCtx {
 
   KWG *pruned_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
+  // Per-root-child pruned lexicons (see RepruneSlot). NULL when disabled.
+  struct RepruneSlot *reprune_slots;
+  bool reprune_optim;
+  _Atomic size_t reprune_bytes;
+  _Atomic int reprune_builds;
+  _Atomic uint64_t reprune_uses;
+  _Atomic uint64_t reprune_build_ns;
   double soft_time_limit;
   double hard_time_limit;
 
@@ -245,6 +252,10 @@ struct EndgameCtxWorker {
   int completed_depth;     // Depth this thread completed
   int n_initial_moves;     // Number of root moves (thread-local to avoid races)
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
+  // Non-NULL while this worker is inside a root child that has its own pruned
+  // lexicon; every move generation beneath it uses this instead of the root
+  // prune.
+  const KWG *subtree_kwg;
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
 
@@ -538,6 +549,137 @@ static inline const KWG *solver_get_pruned_kwg(const EndgameCtx *solver,
 // solver is nullable; when non-NULL an interrupt check is performed before
 // the expensive generate_moves call so a fired interrupt cuts the work short.
 // Callers detect the interrupt themselves after this returns.
+// Reprune: a root child's subtree can only form words that are formable from
+// the child's own board and (smaller) unseen pool, so a GADDAG pruned at the
+// child is a subset of the root prune and stays valid for everything searched
+// beneath that child, including leaf playouts. Slots are keyed by the root
+// move; a child gets its lexicon built lazily on its second visit with at
+// least REPRUNE_MIN_CHILD_DEPTH plies remaining, by whichever worker gets
+// there first, and shared read-only afterwards. Workers that arrive while a
+// build is in flight keep using the root prune, which is always valid.
+#define REPRUNE_TABLE_SIZE 8192
+#define REPRUNE_MIN_CHILD_DEPTH 3
+#define REPRUNE_BYTES_BUDGET ((size_t)64 << 20)
+#define REPRUNE_MAX_PROBES 16
+// Build a child lexicon only once its subtree in a previous iteration was at
+// least this many nodes; the next iteration's subtree is several times larger.
+#define REPRUNE_MIN_NODES 32768
+
+typedef struct RepruneSlot {
+  _Atomic uint64_t key; // tiny_move + 1; 0 = empty
+  _Atomic int state;    // 0 = not built, 1 = building, 2 = ready, 3 = declined
+  KWG *_Atomic kwg;
+  _Atomic uint64_t nodes; // largest subtree (nodes) searched under this child
+} RepruneSlot;
+
+static void reprune_slots_clear(EndgameCtx *solver) {
+  if (solver->reprune_slots == NULL) {
+    return;
+  }
+  const int builds = atomic_load(&solver->reprune_builds);
+  if (builds > 0 && getenv("MAGPIE_EG_REPRUNE_STATS") != NULL) {
+    fprintf(stderr, "REPRUNE builds=%d bytes=%zu uses=%llu build_ms=%.1f\n",
+            builds, atomic_load(&solver->reprune_bytes),
+            (unsigned long long)atomic_load(&solver->reprune_uses),
+            (double)atomic_load(&solver->reprune_build_ns) / 1e6);
+  }
+  for (int i = 0; i < REPRUNE_TABLE_SIZE; i++) {
+    kwg_destroy(atomic_load(&solver->reprune_slots[i].kwg));
+  }
+  memset(solver->reprune_slots, 0, REPRUNE_TABLE_SIZE * sizeof(RepruneSlot));
+  atomic_store(&solver->reprune_bytes, 0);
+  atomic_store(&solver->reprune_builds, 0);
+  atomic_store(&solver->reprune_uses, 0);
+  atomic_store(&solver->reprune_build_ns, 0);
+}
+
+static inline const KWG *worker_get_pruned_kwg(const EndgameCtxWorker *worker,
+                                               int player_index) {
+  if (worker->subtree_kwg != NULL) {
+    return worker->subtree_kwg;
+  }
+  return solver_get_pruned_kwg(worker->solver, player_index);
+}
+
+// Finds (or claims) the slot for a root move. Returns NULL when the table is
+// full for this key, meaning keep the root prune.
+static RepruneSlot *reprune_slot_lookup(EndgameCtx *solver,
+                                        const SmallMove *small_move) {
+  const uint64_t key = small_move->tiny_move + 1;
+  const uint64_t hash = key * 0x9E3779B97F4A7C15ULL;
+  for (int probe = 0; probe < REPRUNE_MAX_PROBES; probe++) {
+    RepruneSlot *slot = &solver->reprune_slots[(hash + (uint64_t)probe) &
+                                               (REPRUNE_TABLE_SIZE - 1)];
+    uint64_t seen = atomic_load_explicit(&slot->key, memory_order_acquire);
+    if (seen == 0) {
+      uint64_t expected = 0;
+      if (atomic_compare_exchange_strong(&slot->key, &expected, key)) {
+        return slot;
+      }
+      seen = expected;
+    }
+    if (seen == key) {
+      return slot;
+    }
+  }
+  return NULL;
+}
+
+// Called with worker->game_copy already at the child position. Returns the
+// child's lexicon when it is ready, building it if the child's subtree has
+// proven large enough; otherwise NULL, meaning keep the root prune.
+static const KWG *reprune_slot_kwg(EndgameCtxWorker *worker,
+                                   RepruneSlot *slot) {
+  EndgameCtx *solver = worker->solver;
+  const int state = atomic_load_explicit(&slot->state, memory_order_acquire);
+  if (state == 2) {
+    atomic_fetch_add_explicit(&solver->reprune_uses, 1, memory_order_relaxed);
+    return atomic_load_explicit(&slot->kwg, memory_order_acquire);
+  }
+  static uint64_t min_nodes = REPRUNE_MIN_NODES; // prototype knob
+  static bool min_nodes_read = false;
+  if (!min_nodes_read) {
+    const char *env = getenv("MAGPIE_EG_REPRUNE_MIN_NODES");
+    if (env != NULL) {
+      min_nodes = strtoull(env, NULL, 10);
+    }
+    min_nodes_read = true;
+  }
+  if (state != 0 ||
+      atomic_load_explicit(&slot->nodes, memory_order_relaxed) < min_nodes) {
+    return NULL;
+  }
+  int expected_state = 0;
+  if (!atomic_compare_exchange_strong(&slot->state, &expected_state, 1)) {
+    return NULL;
+  }
+  if (atomic_load(&solver->reprune_bytes) > REPRUNE_BYTES_BUDGET) {
+    atomic_store_explicit(&slot->state, 3, memory_order_release);
+    return NULL;
+  }
+  struct timespec build_start;
+  clock_gettime(CLOCK_MONOTONIC, &build_start);
+  DictionaryWordList *word_list = dictionary_word_list_create();
+  generate_possible_words_with_cross_checks(worker->game_copy,
+                                            solver->pruned_kwgs[0], word_list);
+  KWG *kwg = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
+                                       KWG_MAKER_MERGE_EXACT);
+  dictionary_word_list_destroy(word_list);
+  atomic_fetch_add(&solver->reprune_bytes,
+                   (size_t)kwg_get_number_of_nodes(kwg) * sizeof(uint32_t));
+  atomic_fetch_add(&solver->reprune_builds, 1);
+  struct timespec build_end;
+  clock_gettime(CLOCK_MONOTONIC, &build_end);
+  atomic_fetch_add(
+      &solver->reprune_build_ns,
+      (uint64_t)((build_end.tv_sec - build_start.tv_sec) * 1000000000LL +
+                 (build_end.tv_nsec - build_start.tv_nsec)));
+  atomic_store_explicit(&slot->kwg, kwg, memory_order_release);
+  atomic_store_explicit(&slot->state, 2, memory_order_release);
+  atomic_fetch_add_explicit(&solver->reprune_uses, 1, memory_order_relaxed);
+  return kwg;
+}
+
 static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
                                         const KWG *pruned_kwg, int opp_idx,
                                         uint64_t *tiles_played_bv_out,
@@ -697,6 +839,10 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
 
+  reprune_slots_clear(es);
+  const char *reprune_env = getenv("MAGPIE_EG_REPRUNE");
+  const bool reprune_enabled = reprune_env == NULL || reprune_env[0] != '0';
+  es->reprune_optim = false;
   kwg_destroy(es->pruned_kwgs[0]);
   kwg_destroy(es->pruned_kwgs[1]);
   es->pruned_kwgs[0] = NULL;
@@ -737,6 +883,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
           shared_kwg) {
         generate_possible_words_with_cross_checks(endgame_args->game, full_kwg,
                                                   word_list);
+        es->reprune_optim = reprune_enabled;
       } else {
         generate_possible_words(endgame_args->game, full_kwg, word_list);
       }
@@ -820,6 +967,8 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 
 EndgameCtx *endgame_ctx_create(void) {
   EndgameCtx *solver = calloc_or_die(1, sizeof(EndgameCtx));
+  solver->reprune_slots =
+      calloc_or_die(REPRUNE_TABLE_SIZE, sizeof(RepruneSlot));
   cpthread_mutex_init(&solver->add_mutex);
   // Closed until a solve opens the window; otherwise a never-solved ctx (calloc
   // zeroes adding_closed) would look injectable to an external monitor.
@@ -1020,6 +1169,8 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
   if (!ctx->tt_is_external) {
     transposition_table_destroy(ctx->transposition_table);
   }
+  reprune_slots_clear(ctx);
+  free(ctx->reprune_slots);
   kwg_destroy(ctx->pruned_kwgs[0]);
   kwg_destroy(ctx->pruned_kwgs[1]);
   game_destroy(ctx->ext_game);
@@ -1458,7 +1609,7 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
       .move_list = worker->move_list,
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
+      .override_kwg = worker_get_pruned_kwg(worker, stm_idx),
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1805,8 +1956,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     int opp_idx = 1 - solving_player;
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
-        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
-        worker->solver);
+        worker_get_pruned_kwg(worker, opp_idx), opp_idx, NULL, worker->solver);
   }
 
   bool playout_interrupted = false;
@@ -1857,8 +2007,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
           .move_list = worker->move_list,
           .move_record_type = MOVE_RECORD_BEST_SMALL,
           .move_sort_type = MOVE_SORT_SCORE,
-          .override_kwg = solver_get_pruned_kwg(
-              worker->solver, game_get_player_on_turn_index(worker->game_copy)),
+          .override_kwg = worker_get_pruned_kwg(
+              worker, game_get_player_on_turn_index(worker->game_copy)),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
           .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1871,8 +2021,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
           .move_list = worker->move_list,
           .move_record_type = MOVE_RECORD_ALL_SMALL,
           .move_sort_type = MOVE_SORT_SCORE,
-          .override_kwg = solver_get_pruned_kwg(
-              worker->solver, game_get_player_on_turn_index(worker->game_copy)),
+          .override_kwg = worker_get_pruned_kwg(
+              worker, game_get_player_on_turn_index(worker->game_copy)),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
           .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -2057,10 +2207,10 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
     }
   }
   if (worker->solver->use_heuristics) {
-    *opp_stuck_frac = compute_opp_stuck_fraction(
-        worker->game_copy, worker->move_list,
-        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, &opp_tiles_bv,
-        worker->solver);
+    *opp_stuck_frac =
+        compute_opp_stuck_fraction(worker->game_copy, worker->move_list,
+                                   worker_get_pruned_kwg(worker, opp_idx),
+                                   opp_idx, &opp_tiles_bv, worker->solver);
     // Check for interrupt between the two expensive operations so threads
     // don't run a second full movegen after the timer has already fired.
     if (iterative_deepening_should_stop(worker->solver)) {
@@ -2681,6 +2831,24 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       const uint64_t child_key = play_small_move_and_hash(
           worker, small_move, node_key, &worker->move_undos[undo_index]);
 
+      const KWG *saved_subtree_kwg = worker->subtree_kwg;
+      RepruneSlot *reprune_slot = NULL;
+      const uint64_t reprune_nodes_before = worker->local_nodes_searched;
+      if (is_root && worker->solver->reprune_optim &&
+          depth - 1 >= REPRUNE_MIN_CHILD_DEPTH &&
+          small_move_get_tiles_played(small_move) > 0 &&
+          game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
+        reprune_slot = reprune_slot_lookup(worker->solver, small_move);
+        if (reprune_slot != NULL) {
+          const KWG *child_kwg = reprune_slot_kwg(worker, reprune_slot);
+          if (child_kwg != NULL) {
+            worker->subtree_kwg = child_kwg;
+            game_set_override_kwgs(worker->game_copy, child_kwg, NULL,
+                                   worker->solver->dual_lexicon_mode);
+          }
+        }
+      }
+
       // Per-root-move aspiration: at root after depth 1, each move gets its
       // own aspiration window centered on its estimated_value from the previous
       // ID iteration. This gives accurate values for all root moves (needed for
@@ -2744,6 +2912,22 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       unplay_move_incremental(worker->game_copy,
                               &worker->move_undos[undo_index]);
+      if (reprune_slot != NULL) {
+        const uint64_t subtree_nodes =
+            worker->local_nodes_searched - reprune_nodes_before;
+        uint64_t prev_nodes =
+            atomic_load_explicit(&reprune_slot->nodes, memory_order_relaxed);
+        while (subtree_nodes > prev_nodes &&
+               !atomic_compare_exchange_weak(&reprune_slot->nodes, &prev_nodes,
+                                             subtree_nodes)) {
+        }
+      }
+      if (worker->subtree_kwg != saved_subtree_kwg) {
+        worker->subtree_kwg = saved_subtree_kwg;
+        game_set_override_kwgs(
+            worker->game_copy, worker->solver->pruned_kwgs[0],
+            worker->solver->pruned_kwgs[1], worker->solver->dual_lexicon_mode);
+      }
       // Cross-sets need no recompute here: any lazy cross-set update in the
       // child's subtree was saved into this undo (or a descendant's undo that
       // was already restored), so the square restore reverted them exactly.
@@ -3007,6 +3191,7 @@ static void force_actual_move_to_front(const EndgameCtxWorker *worker,
 }
 
 void iterative_deepening(EndgameCtxWorker *worker, int plies) {
+  worker->subtree_kwg = NULL;
 
   int32_t alpha = -LARGE_VALUE;
   int32_t beta = LARGE_VALUE;
