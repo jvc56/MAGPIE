@@ -731,7 +731,15 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
       const KWG *full_kwg =
           player_get_kwg(game_get_player(endgame_args->game, player_idx));
       DictionaryWordList *word_list = dictionary_word_list_create();
-      generate_possible_words(endgame_args->game, full_kwg, word_list);
+      // Cross-check-aware pruning is only sound for classic play with a
+      // shared lexicon; see generate_possible_words_with_cross_checks.
+      if (game_get_variant(endgame_args->game) == GAME_VARIANT_CLASSIC &&
+          shared_kwg) {
+        generate_possible_words_with_cross_checks(endgame_args->game, full_kwg,
+                                                  word_list);
+      } else {
+        generate_possible_words(endgame_args->game, full_kwg, word_list);
+      }
       es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
           word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
       dictionary_word_list_destroy(word_list);
