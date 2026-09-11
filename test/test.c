@@ -67,6 +67,7 @@
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
+#include "wordprune_bench_test.h"
 #include "word_info_table_test.h"
 #include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
@@ -157,6 +158,7 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"wordprunebench", test_wordprune_bench},
     {"positionloaded", test_position_lengths_loaded},
     {"witdiff", test_wit_cache_differential},
     {"witcopy", test_wit_cache_copy},
