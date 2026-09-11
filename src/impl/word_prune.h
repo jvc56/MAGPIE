@@ -17,4 +17,24 @@ typedef struct BoardRows {
 void generate_possible_words(const Game *game, const KWG *override_kwg,
                              DictionaryWordList *possible_word_list);
 
+typedef struct WordPruneRefineStats {
+  int passes;
+  int nonplaythrough_words;
+  int words_after_pass[8];
+} WordPruneRefineStats;
+
+// PROTOTYPE: like generate_possible_words, but iteratively removes playthrough
+// placements whose letters cannot be part of any word in the perpendicular
+// lane through an existing tile (cross-check awareness). Every pass records,
+// per lane and square, the letters that some accepted placement puts there;
+// the next pass only lets a pool letter onto an empty square with a fixed
+// perpendicular neighbor if the perpendicular lane's previous pass recorded
+// that letter there. Pass 0 is unconstrained, so the result is always a
+// subset of generate_possible_words and a superset of every word playable in
+// any reachable position.
+void generate_possible_words_refined(const Game *game, const KWG *override_kwg,
+                                     DictionaryWordList *possible_word_list,
+                                     int max_passes,
+                                     WordPruneRefineStats *stats);
+
 #endif // WORD_PRUNE_H

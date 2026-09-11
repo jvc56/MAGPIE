@@ -159,6 +159,7 @@ static TestEntry test_table[] = {
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
     {"wordprunebench", test_wordprune_bench},
+    {"wordprunesafety", test_wordprune_safety},
     {"positionloaded", test_position_lengths_loaded},
     {"witdiff", test_wit_cache_differential},
     {"witcopy", test_wit_cache_copy},

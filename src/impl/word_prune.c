@@ -433,3 +433,319 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
   dictionary_word_list_unique(temp_list, possible_word_list);
   dictionary_word_list_destroy(temp_list);
 }
+
+// ---------------------------------------------------------------------------
+// PROTOTYPE: cross-check-aware refinement.
+// ---------------------------------------------------------------------------
+
+enum { WP_LANES = BOARD_DIM * 2 };
+
+typedef struct LaneMasks {
+  uint32_t allowed[WP_LANES][BOARD_DIM];
+} LaneMasks;
+
+// Lanes 0..BOARD_DIM-1 are rows (position = column); lanes BOARD_DIM.. are
+// columns (position = row). The square at (lane, pos) is crossed by the
+// perpendicular lane perp_lane at position perp_pos.
+static inline int wp_perp_lane(int lane, int pos) {
+  return lane < BOARD_DIM ? BOARD_DIM + pos : pos;
+}
+static inline int wp_perp_pos(int lane) {
+  return lane < BOARD_DIM ? lane : lane - BOARD_DIM;
+}
+
+static BoardRows *wp_lanes_create(const Game *game) {
+  BoardRows *container = malloc_or_die(sizeof(BoardRows));
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const MachineLetter unblanked =
+          get_unblanked_machine_letter(board_get_letter(board, row, col));
+      container->rows[row].letters[col] = unblanked;
+      container->rows[BOARD_DIM + col].letters[row] = unblanked;
+    }
+  }
+  container->num_rows = WP_LANES;
+  return container;
+}
+
+// True when the square at (lane, pos) already has a tile directly before or
+// after it in the perpendicular lane, so every final board's perpendicular
+// word through it contains that tile.
+static inline bool wp_has_fixed_perp_neighbor(const BoardRows *lanes, int lane,
+                                              int pos) {
+  const BoardRow *perp = &lanes->rows[wp_perp_lane(lane, pos)];
+  const int p = wp_perp_pos(lane);
+  return (p > 0 && perp->letters[p - 1] != ALPHABET_EMPTY_SQUARE_MARKER) ||
+         (p < BOARD_DIM - 1 &&
+          perp->letters[p + 1] != ALPHABET_EMPTY_SQUARE_MARKER);
+}
+
+static inline bool wp_letter_allowed(const BoardRows *lanes,
+                                     const LaneMasks *prev, int lane, int pos,
+                                     MachineLetter ml) {
+  if (prev == NULL || !wp_has_fixed_perp_neighbor(lanes, lane, pos)) {
+    return true;
+  }
+  return (prev->allowed[wp_perp_lane(lane, pos)][wp_perp_pos(lane)] >> ml) & 1;
+}
+
+typedef struct WpCtx {
+  const BoardRows *lanes;
+  int lane;
+  const LaneMasks *prev;
+  LaneMasks *cur;
+  DictionaryWordList *list;
+} WpCtx;
+
+static void wp_record_word(WpCtx *ctx, const MachineLetter *strip,
+                           int leftstrip, int rightstrip) {
+  const BoardRow *row = &ctx->lanes->rows[ctx->lane];
+  for (int pos = leftstrip; pos <= rightstrip; pos++) {
+    if (row->letters[pos] == ALPHABET_EMPTY_SQUARE_MARKER) {
+      ctx->cur->allowed[ctx->lane][pos] |= (uint32_t)1 << strip[pos];
+    }
+  }
+  dictionary_word_list_add_word(ctx->list, strip + leftstrip,
+                                rightstrip - leftstrip + 1);
+}
+
+static void wp_go_on(WpCtx *ctx, const KWG *kwg, Rack *rack, int current_col,
+                     int anchor_col, MachineLetter current_letter,
+                     uint32_t new_node_index, bool accepts, int leftstrip,
+                     int rightstrip, int leftmost_col, int tiles_played,
+                     MachineLetter *strip);
+
+static void wp_recursive_gen(WpCtx *ctx, const KWG *kwg, Rack *rack, int col,
+                             int anchor_col, uint32_t node_index,
+                             int leftstrip, int rightstrip, int leftmost_col,
+                             int tiles_played, MachineLetter *strip) {
+  const BoardRow *board_row = &ctx->lanes->rows[ctx->lane];
+  const MachineLetter current_letter = board_row->letters[col];
+  if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+    uint32_t next_node_index = 0;
+    bool accepts = false;
+    for (uint32_t i = node_index;; i++) {
+      const uint32_t node = kwg_node(kwg, i);
+      if (kwg_node_tile(node) == current_letter) {
+        next_node_index = kwg_node_arc_index_prefetch(node, kwg);
+        accepts = kwg_node_accepts(node);
+        break;
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+    wp_go_on(ctx, kwg, rack, col, anchor_col, current_letter, next_node_index,
+             accepts, leftstrip, rightstrip, leftmost_col, tiles_played, strip);
+  } else if (!rack_is_empty(rack)) {
+    for (uint32_t i = node_index;; i++) {
+      const uint32_t node = kwg_node(kwg, i);
+      const MachineLetter ml = kwg_node_tile(node);
+      if (ml != SEPARATION_MACHINE_LETTER &&
+          wp_letter_allowed(ctx->lanes, ctx->prev, ctx->lane, col, ml)) {
+        const uint32_t next_node_index = kwg_node_arc_index_prefetch(node, kwg);
+        const bool accepts = kwg_node_accepts(node);
+        if (rack_get_letter(rack, ml) > 0) {
+          rack_take_letter(rack, ml);
+          wp_go_on(ctx, kwg, rack, col, anchor_col, ml, next_node_index,
+                   accepts, leftstrip, rightstrip, leftmost_col,
+                   tiles_played + 1, strip);
+          rack_add_letter(rack, ml);
+        } else if (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0) {
+          rack_take_letter(rack, BLANK_MACHINE_LETTER);
+          wp_go_on(ctx, kwg, rack, col, anchor_col, ml, next_node_index,
+                   accepts, leftstrip, rightstrip, leftmost_col,
+                   tiles_played + 1, strip);
+          rack_add_letter(rack, BLANK_MACHINE_LETTER);
+        }
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+  }
+}
+
+static void wp_go_on(WpCtx *ctx, const KWG *kwg, Rack *rack, int current_col,
+                     int anchor_col, MachineLetter current_letter,
+                     uint32_t new_node_index, bool accepts, int leftstrip,
+                     int rightstrip, int leftmost_col, int tiles_played,
+                     MachineLetter *strip) {
+  const BoardRow *board_row = &ctx->lanes->rows[ctx->lane];
+  if (current_col <= anchor_col) {
+    strip[current_col] =
+        board_row->letters[current_col] != ALPHABET_EMPTY_SQUARE_MARKER
+            ? board_row->letters[current_col]
+            : current_letter;
+    leftstrip = current_col;
+    if (accepts && tiles_played > 0) {
+      wp_record_word(ctx, strip, leftstrip, rightstrip);
+    }
+    if (new_node_index == 0) {
+      return;
+    }
+    if (current_col > leftmost_col) {
+      wp_recursive_gen(ctx, kwg, rack, current_col - 1, anchor_col,
+                       new_node_index, leftstrip, rightstrip, leftmost_col,
+                       tiles_played, strip);
+    }
+    const bool no_letter_directly_left =
+        current_col == 0 ||
+        board_row->letters[current_col - 1] == ALPHABET_EMPTY_SQUARE_MARKER;
+    const uint32_t separation_node_index =
+        kwg_get_next_node_index(kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+    if (separation_node_index != 0 && no_letter_directly_left &&
+        anchor_col < BOARD_DIM - 1) {
+      wp_recursive_gen(ctx, kwg, rack, anchor_col + 1, anchor_col,
+                       separation_node_index, leftstrip, rightstrip,
+                       leftmost_col, tiles_played, strip);
+    }
+  } else {
+    strip[current_col] =
+        board_row->letters[current_col] != ALPHABET_EMPTY_SQUARE_MARKER
+            ? board_row->letters[current_col]
+            : current_letter;
+    rightstrip = current_col;
+    const bool no_letter_directly_right =
+        current_col == BOARD_DIM - 1 ||
+        board_row->letters[current_col + 1] == ALPHABET_EMPTY_SQUARE_MARKER;
+    if (accepts && no_letter_directly_right && tiles_played > 0) {
+      wp_record_word(ctx, strip, leftstrip, rightstrip);
+    }
+    if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
+      wp_recursive_gen(ctx, kwg, rack, current_col + 1, anchor_col,
+                       new_node_index, leftstrip, rightstrip, leftmost_col,
+                       tiles_played, strip);
+    }
+  }
+}
+
+static void wp_add_playthrough_words_from_lane(WpCtx *ctx, const KWG *kwg,
+                                               Rack *pool) {
+  const BoardRow *board_row = &ctx->lanes->rows[ctx->lane];
+  MachineLetter strip[BOARD_DIM];
+  const uint32_t gaddag_root = kwg_get_root_node_index(kwg);
+  int leftmost_col = 0;
+  for (int col = 0; col < BOARD_DIM; col++) {
+    MachineLetter current_letter = board_row->letters[col];
+    if (current_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+      continue;
+    }
+    while (col < BOARD_DIM - 1 &&
+           board_row->letters[col + 1] != ALPHABET_EMPTY_SQUARE_MARKER) {
+      col++;
+    }
+    current_letter = board_row->letters[col];
+    uint32_t next_node_index = 0;
+    for (uint32_t i = gaddag_root;; i++) {
+      const uint32_t node = kwg_node(kwg, i);
+      if (kwg_node_tile(node) == current_letter) {
+        next_node_index = kwg_node_arc_index_prefetch(node, kwg);
+        break;
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+    wp_go_on(ctx, kwg, pool, col, col, current_letter, next_node_index, false,
+             col, col, leftmost_col, 0, strip);
+    leftmost_col = col + 2;
+  }
+}
+
+void generate_possible_words_refined(const Game *game, const KWG *override_kwg,
+                                     DictionaryWordList *possible_word_list,
+                                     int max_passes,
+                                     WordPruneRefineStats *stats) {
+  const KWG *kwg = override_kwg;
+  if (kwg == NULL) {
+    kwg = player_get_kwg(
+        game_get_player(game, game_get_player_on_turn_index(game)));
+  }
+  const int ld_size = ld_get_size(game_get_ld(game));
+  Rack pool;
+  rack_set_dist_size_and_reset(&pool, ld_size);
+  const Bag *bag = game_get_bag(game);
+  for (int i = 0; i < ld_size; i++) {
+    for (int j = 0; j < bag_get_letter(bag, i); j++) {
+      rack_add_letter(&pool, i);
+    }
+    for (int player_index = 0; player_index < 2; player_index++) {
+      const Rack *rack = player_get_rack(game_get_player(game, player_index));
+      for (int j = 0; j < rack_get_letter(rack, i); j++) {
+        rack_add_letter(&pool, i);
+      }
+    }
+  }
+  BoardRows *lanes = wp_lanes_create(game);
+  int max_nonplaythrough_spaces = 0;
+  for (int i = 0; i < lanes->num_rows; i++) {
+    const int spaces = max_nonplaythrough_spaces_in_row(&lanes->rows[i]);
+    if (spaces > max_nonplaythrough_spaces) {
+      max_nonplaythrough_spaces = spaces;
+    }
+  }
+  MachineLetter word[BOARD_DIM];
+  DictionaryWordList *nonplaythrough = dictionary_word_list_create();
+  add_words_without_playthrough_gaddag(kwg, &pool, max_nonplaythrough_spaces,
+                                       word, nonplaythrough);
+  if (stats != NULL) {
+    stats->nonplaythrough_words =
+        dictionary_word_list_get_count(nonplaythrough);
+    stats->passes = 0;
+  }
+
+  LaneMasks *prev = NULL; // pass 0: unconstrained
+  LaneMasks *cur = malloc_or_die(sizeof(LaneMasks));
+  LaneMasks *prev_storage = malloc_or_die(sizeof(LaneMasks));
+  DictionaryWordList *result = NULL;
+  int previous_count = -1;
+  if (max_passes < 1) {
+    max_passes = 1;
+  }
+  for (int pass = 0; pass < max_passes; pass++) {
+    memset(cur, 0, sizeof(LaneMasks));
+    DictionaryWordList *temp = dictionary_word_list_create();
+    for (int i = 0; i < dictionary_word_list_get_count(nonplaythrough); i++) {
+      const DictionaryWord *w = dictionary_word_list_get_word(nonplaythrough, i);
+      dictionary_word_list_add_word(temp, dictionary_word_get_word(w),
+                                    dictionary_word_get_length(w));
+    }
+    for (int lane = 0; lane < lanes->num_rows; lane++) {
+      WpCtx ctx = {.lanes = lanes, .lane = lane, .prev = prev, .cur = cur,
+                   .list = temp};
+      wp_add_playthrough_words_from_lane(&ctx, kwg, &pool);
+    }
+    DictionaryWordList *unique = dictionary_word_list_create();
+    dictionary_word_list_sort(temp);
+    dictionary_word_list_unique(temp, unique);
+    dictionary_word_list_destroy(temp);
+    const int count = dictionary_word_list_get_count(unique);
+    if (stats != NULL && pass < 8) {
+      stats->words_after_pass[pass] = count;
+      stats->passes = pass + 1;
+    }
+    if (result != NULL) {
+      dictionary_word_list_destroy(result);
+    }
+    result = unique;
+    if (count == previous_count) {
+      break;
+    }
+    previous_count = count;
+    // Next pass constrains by this pass's masks.
+    memcpy(prev_storage, cur, sizeof(LaneMasks));
+    prev = prev_storage;
+  }
+  for (int i = 0; i < dictionary_word_list_get_count(result); i++) {
+    const DictionaryWord *w = dictionary_word_list_get_word(result, i);
+    dictionary_word_list_add_word(possible_word_list, dictionary_word_get_word(w),
+                                  dictionary_word_get_length(w));
+  }
+  dictionary_word_list_destroy(result);
+  dictionary_word_list_destroy(nonplaythrough);
+  free(cur);
+  free(prev_storage);
+  board_rows_destroy(lanes);
+}
