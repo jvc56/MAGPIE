@@ -433,3 +433,314 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
   dictionary_word_list_unique(temp_list, possible_word_list);
   dictionary_word_list_destroy(temp_list);
 }
+// ---------------------------------------------------------------------------
+// Cross-check-aware pruning. See word_prune.h.
+// ---------------------------------------------------------------------------
+
+enum { WORD_PRUNE_NUM_LANES = BOARD_DIM * 2 };
+
+// Letters that some accepted playthrough placement put on each empty square,
+// per lane. Lanes 0..BOARD_DIM-1 are rows indexed by column; the rest are
+// columns indexed by row.
+typedef struct LaneLetterSets {
+  uint32_t letters[WORD_PRUNE_NUM_LANES][BOARD_DIM];
+} LaneLetterSets;
+
+typedef struct CrossCheckContext {
+  const BoardRows *lanes;
+  int lane;
+  // Letter sets recorded by the previous pass, or NULL on the first pass.
+  const LaneLetterSets *previous;
+  LaneLetterSets *current;
+  DictionaryWordList *word_list;
+} CrossCheckContext;
+
+static inline int perpendicular_lane(int lane, int pos) {
+  return lane < BOARD_DIM ? BOARD_DIM + pos : pos;
+}
+
+static inline int perpendicular_pos(int lane) {
+  return lane < BOARD_DIM ? lane : lane - BOARD_DIM;
+}
+
+// True when the square at (lane, pos) already has a tile directly before or
+// after it in the perpendicular lane.
+static inline bool has_fixed_perpendicular_neighbor(const BoardRows *lanes,
+                                                    int lane, int pos) {
+  const BoardRow *perp = &lanes->rows[perpendicular_lane(lane, pos)];
+  const int perp_pos = perpendicular_pos(lane);
+  return (perp_pos > 0 &&
+          perp->letters[perp_pos - 1] != ALPHABET_EMPTY_SQUARE_MARKER) ||
+         (perp_pos < BOARD_DIM - 1 &&
+          perp->letters[perp_pos + 1] != ALPHABET_EMPTY_SQUARE_MARKER);
+}
+
+static inline bool cross_check_allows(const CrossCheckContext *ctx, int pos,
+                                      MachineLetter ml) {
+  if (ctx->previous == NULL ||
+      !has_fixed_perpendicular_neighbor(ctx->lanes, ctx->lane, pos)) {
+    return true;
+  }
+  const uint32_t letters =
+      ctx->previous->letters[perpendicular_lane(ctx->lane, pos)]
+                            [perpendicular_pos(ctx->lane)];
+  return (letters >> ml) & 1;
+}
+
+static BoardRows *all_lanes_create(const Game *game) {
+  BoardRows *container = malloc_or_die(sizeof(BoardRows));
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const MachineLetter unblanked =
+          get_unblanked_machine_letter(board_get_letter(board, row, col));
+      container->rows[row].letters[col] = unblanked;
+      container->rows[BOARD_DIM + col].letters[row] = unblanked;
+    }
+  }
+  container->num_rows = WORD_PRUNE_NUM_LANES;
+  return container;
+}
+
+static void cross_check_record_word(CrossCheckContext *ctx,
+                                    const MachineLetter *strip, int leftstrip,
+                                    int rightstrip) {
+  const BoardRow *row = &ctx->lanes->rows[ctx->lane];
+  for (int pos = leftstrip; pos <= rightstrip; pos++) {
+    if (row->letters[pos] == ALPHABET_EMPTY_SQUARE_MARKER) {
+      ctx->current->letters[ctx->lane][pos] |= (uint32_t)1 << strip[pos];
+    }
+  }
+  dictionary_word_list_add_word(ctx->word_list, strip + leftstrip,
+                                rightstrip - leftstrip + 1);
+}
+
+static void cross_check_words_go_on(CrossCheckContext *ctx, const KWG *kwg,
+                                    Rack *rack, int current_col, int anchor_col,
+                                    MachineLetter current_letter,
+                                    uint32_t new_node_index, bool accepts,
+                                    int leftstrip, int rightstrip,
+                                    int leftmost_col, int tiles_played,
+                                    MachineLetter *strip);
+
+// Mirrors playthrough_words_recursive_gen, with the cross-check on pool
+// letters placed on empty squares.
+static void cross_check_words_recursive_gen(CrossCheckContext *ctx,
+                                            const KWG *kwg, Rack *rack, int col,
+                                            int anchor_col, uint32_t node_index,
+                                            int leftstrip, int rightstrip,
+                                            int leftmost_col, int tiles_played,
+                                            MachineLetter *strip) {
+  const BoardRow *board_row = &ctx->lanes->rows[ctx->lane];
+  const MachineLetter current_letter = board_row->letters[col];
+  if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+    uint32_t next_node_index = 0;
+    bool accepts = false;
+    for (uint32_t node_idx = node_index;; node_idx++) {
+      const uint32_t node = kwg_node(kwg, node_idx);
+      if (kwg_node_tile(node) == current_letter) {
+        next_node_index = kwg_node_arc_index_prefetch(node, kwg);
+        accepts = kwg_node_accepts(node);
+        break;
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+    cross_check_words_go_on(ctx, kwg, rack, col, anchor_col, current_letter,
+                            next_node_index, accepts, leftstrip, rightstrip,
+                            leftmost_col, tiles_played, strip);
+  } else if (!rack_is_empty(rack)) {
+    for (uint32_t node_idx = node_index;; node_idx++) {
+      const uint32_t node = kwg_node(kwg, node_idx);
+      const MachineLetter ml = kwg_node_tile(node);
+      if (ml != SEPARATION_MACHINE_LETTER && cross_check_allows(ctx, col, ml)) {
+        const uint32_t next_node_index = kwg_node_arc_index_prefetch(node, kwg);
+        const bool accepts = kwg_node_accepts(node);
+        if (rack_get_letter(rack, ml) > 0) {
+          rack_take_letter(rack, ml);
+          cross_check_words_go_on(
+              ctx, kwg, rack, col, anchor_col, ml, next_node_index, accepts,
+              leftstrip, rightstrip, leftmost_col, tiles_played + 1, strip);
+          rack_add_letter(rack, ml);
+        } else if (rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0) {
+          rack_take_letter(rack, BLANK_MACHINE_LETTER);
+          cross_check_words_go_on(
+              ctx, kwg, rack, col, anchor_col, ml, next_node_index, accepts,
+              leftstrip, rightstrip, leftmost_col, tiles_played + 1, strip);
+          rack_add_letter(rack, BLANK_MACHINE_LETTER);
+        }
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+  }
+}
+
+// Mirrors playthrough_words_go_on, recording accepted placements.
+static void cross_check_words_go_on(CrossCheckContext *ctx, const KWG *kwg,
+                                    Rack *rack, int current_col, int anchor_col,
+                                    MachineLetter current_letter,
+                                    uint32_t new_node_index, bool accepts,
+                                    int leftstrip, int rightstrip,
+                                    int leftmost_col, int tiles_played,
+                                    MachineLetter *strip) {
+  const BoardRow *board_row = &ctx->lanes->rows[ctx->lane];
+  if (current_col <= anchor_col) {
+    strip[current_col] =
+        board_row->letters[current_col] != ALPHABET_EMPTY_SQUARE_MARKER
+            ? board_row->letters[current_col]
+            : current_letter;
+    leftstrip = current_col;
+    if (accepts && tiles_played > 0) {
+      cross_check_record_word(ctx, strip, leftstrip, rightstrip);
+    }
+    if (new_node_index == 0) {
+      return;
+    }
+    if (current_col > leftmost_col) {
+      cross_check_words_recursive_gen(
+          ctx, kwg, rack, current_col - 1, anchor_col, new_node_index,
+          leftstrip, rightstrip, leftmost_col, tiles_played, strip);
+    }
+    const bool no_letter_directly_left =
+        current_col == 0 ||
+        board_row->letters[current_col - 1] == ALPHABET_EMPTY_SQUARE_MARKER;
+    const uint32_t separation_node_index =
+        kwg_get_next_node_index(kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+    if (separation_node_index != 0 && no_letter_directly_left &&
+        anchor_col < BOARD_DIM - 1) {
+      cross_check_words_recursive_gen(
+          ctx, kwg, rack, anchor_col + 1, anchor_col, separation_node_index,
+          leftstrip, rightstrip, leftmost_col, tiles_played, strip);
+    }
+  } else {
+    strip[current_col] =
+        board_row->letters[current_col] != ALPHABET_EMPTY_SQUARE_MARKER
+            ? board_row->letters[current_col]
+            : current_letter;
+    rightstrip = current_col;
+    const bool no_letter_directly_right =
+        current_col == BOARD_DIM - 1 ||
+        board_row->letters[current_col + 1] == ALPHABET_EMPTY_SQUARE_MARKER;
+    if (accepts && no_letter_directly_right && tiles_played > 0) {
+      cross_check_record_word(ctx, strip, leftstrip, rightstrip);
+    }
+    if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
+      cross_check_words_recursive_gen(
+          ctx, kwg, rack, current_col + 1, anchor_col, new_node_index,
+          leftstrip, rightstrip, leftmost_col, tiles_played, strip);
+    }
+  }
+}
+
+// Mirrors add_playthrough_words_from_row for one lane of the context.
+static void cross_check_add_playthrough_words_from_lane(CrossCheckContext *ctx,
+                                                        const KWG *kwg,
+                                                        Rack *pool) {
+  const BoardRow *board_row = &ctx->lanes->rows[ctx->lane];
+  MachineLetter strip[BOARD_DIM];
+  const uint32_t gaddag_root = kwg_get_root_node_index(kwg);
+  int leftmost_col = 0;
+  for (int col = 0; col < BOARD_DIM; col++) {
+    if (board_row->letters[col] == ALPHABET_EMPTY_SQUARE_MARKER) {
+      continue;
+    }
+    while (col < BOARD_DIM - 1 &&
+           board_row->letters[col + 1] != ALPHABET_EMPTY_SQUARE_MARKER) {
+      col++;
+    }
+    const MachineLetter current_letter = board_row->letters[col];
+    uint32_t next_node_index = 0;
+    for (uint32_t node_idx = gaddag_root;; node_idx++) {
+      const uint32_t node = kwg_node(kwg, node_idx);
+      if (kwg_node_tile(node) == current_letter) {
+        next_node_index = kwg_node_arc_index_prefetch(node, kwg);
+        break;
+      }
+      if (kwg_node_is_end(node)) {
+        break;
+      }
+    }
+    cross_check_words_go_on(ctx, kwg, pool, col, col, current_letter,
+                            next_node_index, false, col, col, leftmost_col, 0,
+                            strip);
+    // leave an empty-space gap
+    leftmost_col = col + 2;
+  }
+}
+
+void generate_possible_words_with_cross_checks(
+    const Game *game, const KWG *override_kwg,
+    DictionaryWordList *possible_word_list) {
+  const KWG *kwg = override_kwg;
+  if (kwg == NULL) {
+    kwg = player_get_kwg(
+        game_get_player(game, game_get_player_on_turn_index(game)));
+  }
+  const int ld_size = ld_get_size(game_get_ld(game));
+  Rack pool;
+  rack_set_dist_size_and_reset(&pool, ld_size);
+  const Bag *bag = game_get_bag(game);
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int count = 0; count < bag_get_letter(bag, ml); count++) {
+      rack_add_letter(&pool, ml);
+    }
+    for (int player_index = 0; player_index < 2; player_index++) {
+      const Rack *rack = player_get_rack(game_get_player(game, player_index));
+      for (int count = 0; count < rack_get_letter(rack, ml); count++) {
+        rack_add_letter(&pool, ml);
+      }
+    }
+  }
+  BoardRows *lanes = all_lanes_create(game);
+  int max_nonplaythrough_spaces = 0;
+  for (int lane = 0; lane < lanes->num_rows; lane++) {
+    const int spaces = max_nonplaythrough_spaces_in_row(&lanes->rows[lane]);
+    if (spaces > max_nonplaythrough_spaces) {
+      max_nonplaythrough_spaces = spaces;
+    }
+  }
+
+  DictionaryWordList *temp_list = dictionary_word_list_create();
+  MachineLetter word[BOARD_DIM];
+  add_words_without_playthrough_gaddag(kwg, &pool, max_nonplaythrough_spaces,
+                                       word, temp_list);
+
+  // Pass one: unconstrained, recording which letters each placement puts on
+  // each empty square. Nearly all of the reduction comes from applying those
+  // sets once; iterating to a fixed point removes about two percent more at
+  // more than double the cost, so exactly two passes are made.
+  LaneLetterSets *first_pass = malloc_or_die(sizeof(LaneLetterSets));
+  memset(first_pass, 0, sizeof(LaneLetterSets));
+  DictionaryWordList *discarded = dictionary_word_list_create();
+  for (int lane = 0; lane < lanes->num_rows; lane++) {
+    CrossCheckContext ctx = {.lanes = lanes,
+                             .lane = lane,
+                             .previous = NULL,
+                             .current = first_pass,
+                             .word_list = discarded};
+    cross_check_add_playthrough_words_from_lane(&ctx, kwg, &pool);
+  }
+  dictionary_word_list_destroy(discarded);
+
+  // Pass two: constrained by the first pass's letter sets.
+  LaneLetterSets *second_pass = malloc_or_die(sizeof(LaneLetterSets));
+  memset(second_pass, 0, sizeof(LaneLetterSets));
+  for (int lane = 0; lane < lanes->num_rows; lane++) {
+    CrossCheckContext ctx = {.lanes = lanes,
+                             .lane = lane,
+                             .previous = first_pass,
+                             .current = second_pass,
+                             .word_list = temp_list};
+    cross_check_add_playthrough_words_from_lane(&ctx, kwg, &pool);
+  }
+  free(second_pass);
+  free(first_pass);
+  board_rows_destroy(lanes);
+
+  dictionary_word_list_sort(temp_list);
+  dictionary_word_list_unique(temp_list, possible_word_list);
+  dictionary_word_list_destroy(temp_list);
+}
