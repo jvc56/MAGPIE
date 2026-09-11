@@ -598,6 +598,11 @@ void test_endgame_speed_bench(void) {
     Timer t;
     ctimer_start(&t);
     err = error_stack_create();
+    const uint64_t visits_before = kwg_node_visits;
+    const uint64_t scans_before = mg_sibling_scans;
+    const uint64_t pass_before = mg_sibling_pass;
+    const uint64_t goon_before = mg_go_on_calls;
+    const uint64_t pt_before = mg_playthrough_scans;
     endgame_solve(&solver, &args, results, err);
     double elapsed = ctimer_elapsed_seconds(&t);
     assert(error_stack_is_empty(err));
@@ -609,6 +614,13 @@ void test_endgame_speed_bench(void) {
 
     printf("BENCHROW %d %d %llu %.6f\n", ci, value, (unsigned long long)nodes,
            elapsed);
+    printf("KWGVISITS %d %llu\n", ci,
+           (unsigned long long)(kwg_node_visits - visits_before));
+    printf("MGCOUNTS %d scans=%llu pass=%llu goon=%llu pt=%llu\n", ci,
+           (unsigned long long)(mg_sibling_scans - scans_before),
+           (unsigned long long)(mg_sibling_pass - pass_before),
+           (unsigned long long)(mg_go_on_calls - goon_before),
+           (unsigned long long)(mg_playthrough_scans - pt_before));
     total_time += elapsed;
     total_nodes += nodes;
     if ((ci + 1) % 25 == 0) {

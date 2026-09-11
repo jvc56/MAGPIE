@@ -1230,6 +1230,7 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
+      mg_playthrough_scans++;
       if (kwg_node_tile(node) == raw) {
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
@@ -1406,6 +1407,14 @@ static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
 
 // Specialized recursive_gen for MOVE_RECORD_ALL_SMALL that skips leave_map
 // operations. Only tracks rack state directly.
+// Prototype instrumentation (see logs/reprune): splits cheap rejected sibling
+// scans from the expensive continuations, to test whether a smaller lexicon
+// removes real work or only rejected entries.
+uint64_t mg_sibling_scans = 0;
+uint64_t mg_sibling_pass = 0;
+uint64_t mg_go_on_calls = 0;
+uint64_t mg_playthrough_scans = 0;
+
 static inline void recursive_gen_small(MoveGen *gen, int col,
                                        uint32_t node_index, int leftstrip,
                                        int rightstrip, bool unique_play,
@@ -1458,8 +1467,10 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
       const uint32_t node = kwg_node(gen->kwg, i);
       const MachineLetter ml = kwg_node_tile(node);
       const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
+      mg_sibling_scans++;
       if (ml != 0 && (number_of_ml != 0 || num_blanks != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
+        mg_sibling_pass++;
         const uint32_t next_node_index =
             kwg_node_arc_index_prefetch(node, gen->kwg);
         bool accepts = kwg_node_accepts(node);
@@ -1496,6 +1507,7 @@ static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
                                int leftstrip, int rightstrip, bool unique_play,
                                Equity main_word_score, int word_multiplier,
                                Equity cross_score) {
+  mg_go_on_calls++;
   const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, current_col);
   uint8_t letter_multiplier = 1;
   uint8_t this_word_multiplier = 1;
