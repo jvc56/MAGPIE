@@ -46,6 +46,7 @@
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
 #include "peg_pool_test.h"
+#include "peg_speed_bench_test.h"
 #include "peg_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
@@ -157,6 +158,8 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"pegspeedbench1", test_peg_speed_bench_1},
+    {"pegspeedbench2", test_peg_speed_bench_2},
     {"positionloaded", test_position_lengths_loaded},
     {"witdiff", test_wit_cache_differential},
     {"witcopy", test_wit_cache_copy},

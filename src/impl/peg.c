@@ -11,6 +11,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/peg_defs.h"
+#include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
@@ -1057,6 +1058,19 @@ static uint64_t peg_board_signature(const Game *game) {
   return hash == 0 ? 1 : hash; // reserve 0 as the empty-slot sentinel
 }
 
+// Prunes the lexicon to the words this position can still form. Cross-check
+// aware pruning is only sound for classic play with one shared lexicon; see
+// generate_possible_words_with_cross_checks.
+static void peg_generate_possible_words(const Game *game, const KWG *kwg,
+                                        DictionaryWordList *word_list) {
+  if (game_get_variant(game) == GAME_VARIANT_CLASSIC &&
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG)) {
+    generate_possible_words_with_cross_checks(game, kwg, word_list);
+  } else {
+    generate_possible_words(game, kwg, word_list);
+  }
+}
+
 // Return the per-candidate pruned KWG for this leaf's board, building it once
 // (chained off the parent prune on the game) and caching it by board signature.
 // Builds run outside the lock; a rare insert race just discards the loser's
@@ -1080,7 +1094,7 @@ static const KWG *peg_prune_cache_get(PegPruneCache *cache, const Game *game,
 
   const KWG *parent_kwg = game_get_effective_kwg(game, mover_idx);
   DictionaryWordList *word_list = dictionary_word_list_create();
-  generate_possible_words(game, parent_kwg, word_list);
+  peg_generate_possible_words(game, parent_kwg, word_list);
   KWG *built = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
                                          KWG_MAKER_MERGE_EXACT);
   dictionary_word_list_destroy(word_list);
@@ -2704,7 +2718,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // regenerates all cross-sets (the dominant per-leaf cost).
   DictionaryWordList *word_list = dictionary_word_list_create();
   const KWG *full_kwg = player_get_kwg(game_get_player(game, mover_idx));
-  generate_possible_words(game, full_kwg, word_list);
+  peg_generate_possible_words(game, full_kwg, word_list);
   KWG *pruned_kwg = make_kwg_from_words_small(
       word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
   dictionary_word_list_destroy(word_list);
