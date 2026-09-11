@@ -958,6 +958,20 @@ char *str_api_fatal(Config *config,
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
+int config_get_player_sim_plies(const Config *config, int player_index) {
+  return player_index == 0 ? config->p1_sim_plies : config->p2_sim_plies;
+}
+
+int config_get_player_num_plays(const Config *config, int player_index) {
+  return player_index == 0 ? config->p1_num_plays : config->p2_num_plays;
+}
+
+uint64_t config_get_player_max_iterations(const Config *config,
+                                          int player_index) {
+  return player_index == 0 ? config->p1_max_iterations
+                           : config->p2_max_iterations;
+}
+
 void execute_version(Config *config,
                      ErrorStack __attribute__((unused)) * error_stack) {
   thread_control_print(config->thread_control, MAGPIE_VERSION "\n");
@@ -6892,6 +6906,24 @@ void string_builder_add_move_record_type(StringBuilder *sb,
   }
 }
 
+// Per-player defaults, shared by config_create and the contribute path. The
+// contribute path resets every per-player setting a task request can leave
+// null back to these before applying the request, so they have to be exactly
+// the values a fresh Config starts with; one copy is what keeps the two from
+// drifting apart.
+enum {
+  CONFIG_DEFAULT_NUM_PLAYS = 100,
+  CONFIG_DEFAULT_SHPLIES = 2,
+  CONFIG_DEFAULT_MIN_PLAY_ITERATIONS = 500,
+  CONFIG_DEFAULT_STOP_COND_PCT = 99,
+  CONFIG_DEFAULT_TIME_LIMIT_SECONDS = 60,
+  CONFIG_DEFAULT_EQ_MARGIN = 5,
+};
+#define CONFIG_DEFAULT_MAX_ITERATIONS 1000000000000ULL
+#define CONFIG_DEFAULT_UTILITY_W_WINPCT 1.0
+#define CONFIG_DEFAULT_UTILITY_W_SPREAD 0.5
+#define CONFIG_DEFAULT_UTILITY_SPREAD_SCALE 100.0
+
 // Contribute
 //
 // contribute.c owns only the birdtest HTTP/JSON protocol (claiming,
@@ -6927,22 +6959,39 @@ static bool contribute_is_safe_data_name(const char *name) {
 //
 // The variant is genuinely job-wide (two players cannot play different rules)
 // and stays required.
+//
+// The letter distribution and board layout are job-wide as well, and both are
+// pinned by digest in expected_data. They are read here so every executor
+// applies them: optional on the wire, so that absent means MAGPIE's defaults
+// (see config_contribute_load_lexicon_and_variant), never whatever an earlier
+// task or the contributor's settings.txt last loaded.
 static bool contribute_validate_common(const JsonValue *request,
                                        const char **lexicon,
                                        const char **variant,
+                                       const char **letter_distribution,
+                                       const char **board_layout,
                                        ErrorStack *error_stack) {
   *lexicon = json_get_string_or_null(request, CONTRIBUTE_KEY_LEXICON);
   *variant = json_get_string(request, CONTRIBUTE_KEY_VARIANT, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return false;
   }
+  *letter_distribution =
+      json_get_string_or_null(request, CONTRIBUTE_KEY_LETTER_DISTRIBUTION);
+  *board_layout = json_get_string_or_null(request, CONTRIBUTE_KEY_BOARD_LAYOUT);
   if ((*lexicon && !contribute_is_safe_data_name(*lexicon)) ||
-      !contribute_is_safe_data_name(*variant)) {
+      !contribute_is_safe_data_name(*variant) ||
+      (*letter_distribution &&
+       !contribute_is_safe_data_name(*letter_distribution)) ||
+      (*board_layout && !contribute_is_safe_data_name(*board_layout))) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string(
-            "server sent an unusable lexicon or variant name: '%s' / '%s'",
-            *lexicon ? *lexicon : "(absent)", *variant));
+            "server sent an unusable data name: lexicon '%s', variant '%s', "
+            "letter distribution '%s', board layout '%s'",
+            *lexicon ? *lexicon : "(absent)", *variant,
+            *letter_distribution ? *letter_distribution : "(absent)",
+            *board_layout ? *board_layout : "(absent)"));
     return false;
   }
   return true;
@@ -7102,27 +7151,53 @@ static void config_contribute_ensure_wordmap(Config *config,
   free(wmp_path);
 }
 
-// Sets the lexicon, variant and (for each player) leaves that config_autoplay
-// or game_load_cgp then need already loaded, always with the wordmap on --
-// the direct-value equivalent of "-lex/-var/-k1/-k2", never a command string.
-// p1_lexicon/p2_lexicon (from each player's own "lexicon" field, -l1/-l2)
-// override the job's shared lexicon for that player only, e.g. to compare
-// bots on different lexicons; NULL means "use the shared lexicon".
+// Sets the variant, board layout, lexicon, letter distribution and (for each
+// player) leaves that config_autoplay or game_load_cgp then need already
+// loaded -- the direct-value equivalent of "-var/-bdn/-lex/-ld/-k1/-k2", never
+// a command string. p1_lexicon/p2_lexicon (from each player's own "lexicon"
+// field, -l1/-l2) override the job's shared lexicon for that player only, e.g.
+// to compare bots on different lexicons; NULL means "use the shared lexicon".
+//
+// letter_distribution and board_layout are the files the job pins and the
+// worker has just verified by digest. NULL for either means MAGPIE's default
+// -- the lexicon's own distribution, standard15 -- and never the one an
+// earlier task or the contributor's settings.txt last loaded: a worker whose
+// settings left standard21 loaded would otherwise verify standard15.txt and
+// play every game on the other board.
 static void config_contribute_load_lexicon_and_variant(
     Config *config, const char *lexicon, const char *variant,
+    const char *letter_distribution, const char *board_layout,
     const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
     const char *p2_leaves, ErrorStack *error_stack) {
   config_load_game_variant(config, variant, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  char *default_layout = board_layout_get_default_name();
+  config_load_board_layout(config, board_layout ? board_layout : default_layout,
+                           error_stack);
+  free(default_layout);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const char *ld_source_lexicon = p1_lexicon ? p1_lexicon : lexicon;
+  char *default_ld = NULL;
+  if (!letter_distribution && ld_source_lexicon) {
+    default_ld =
+        ld_get_default_name_from_lexicon_name(ld_source_lexicon, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
   config_load_lexicon_dependent_data(
-      config, lexicon, p1_lexicon, p2_lexicon, NULL, p1_leaves, p2_leaves, NULL,
+      config, lexicon, p1_lexicon, p2_lexicon, NULL, p1_leaves, p2_leaves,
+      letter_distribution ? letter_distribution : default_ld,
       /*use_wmp_has_value=*/false, /*p1_use_wmp_has_value=*/false,
       /*p2_use_wmp_has_value=*/false, /*use_rit_has_value=*/false,
       /*p1_use_rit_has_value=*/false, /*p2_use_rit_has_value=*/false,
       /*use_mmap_for_rit_has_value=*/false, /*is_loading_game_history=*/false,
       error_stack);
+  free(default_ld);
 }
 
 // Overrides one player's wordmap/rack-info-table use from the task request,
@@ -7183,13 +7258,70 @@ static void config_contribute_parse_sampling_rule(const char *value,
   }
 }
 
-// Applies one player's settings from a task request's "player1"/"player2"/
-// "player" object. A field absent from the JSON is left at whatever it
-// already was, matching how an omitted CLI flag leaves a value unchanged.
-static void config_contribute_apply_player_settings(Config *config,
-                                                    const JsonValue *player,
+// Resets every per-player setting a task request can leave null to MAGPIE's
+// own defaults: static play (no plies), the default play count, stopping
+// condition, iteration limits, BAI settings and utility weights, "best"
+// recording and "equity" sorting, and PlayChooser off.
+//
+// A null in a request has to mean the same thing on every contributor's
+// machine. Without this it meant "whatever this process last had": the
+// contributor's settings.txt, a command run before contribute -- or, the case
+// that actually bites, the previous task in the same run. A job pitting two
+// static players, claimed right after one with a simming player, would have
+// simulated every move, because a null num_plies left the previous job's
+// plies in place.
+//
+// PlayChooser is reset for the same reason: birdtest has no field for -pcN
+// (it is a different move-selection algorithm from everything else here), so
+// a PlayChooser left on from an earlier manual session would otherwise govern
+// how this player plays.
+static void config_contribute_reset_player_settings(Config *config,
                                                     int player_index,
                                                     ErrorStack *error_stack) {
+  const bool p1 = player_index == 0;
+  *(p1 ? &config->p1_max_iterations : &config->p2_max_iterations) =
+      CONFIG_DEFAULT_MAX_ITERATIONS;
+  *(p1 ? &config->p1_sim_plies : &config->p2_sim_plies) = 0;
+  *(p1 ? &config->p1_num_plays : &config->p2_num_plays) =
+      CONFIG_DEFAULT_NUM_PLAYS;
+  *(p1 ? &config->p1_stop_cond_pct : &config->p2_stop_cond_pct) =
+      CONFIG_DEFAULT_STOP_COND_PCT;
+  *(p1 ? &config->p1_sim_with_inference : &config->p2_sim_with_inference) =
+      true;
+  *(p1 ? &config->p1_time_limit_seconds : &config->p2_time_limit_seconds) =
+      CONFIG_DEFAULT_TIME_LIMIT_SECONDS;
+  *(p1 ? &config->p1_min_play_iterations : &config->p2_min_play_iterations) =
+      CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
+  *(p1 ? &config->p1_threshold : &config->p2_threshold) = BAI_THRESHOLD_GK16;
+  *(p1 ? &config->p1_sampling_rule : &config->p2_sampling_rule) =
+      BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  *(p1 ? &config->p1_eq_margin_inference : &config->p2_eq_margin_inference) =
+      int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  *(p1 ? &config->p1_utility_w_winpct : &config->p2_utility_w_winpct) =
+      CONFIG_DEFAULT_UTILITY_W_WINPCT;
+  *(p1 ? &config->p1_utility_w_spread : &config->p2_utility_w_spread) =
+      CONFIG_DEFAULT_UTILITY_W_SPREAD;
+  *(p1 ? &config->p1_utility_spread_scale : &config->p2_utility_spread_scale) =
+      CONFIG_DEFAULT_UTILITY_SPREAD_SCALE;
+  *(p1 ? &config->p1_play_chooser_time_ms : &config->p2_play_chooser_time_ms) =
+      -1.0;
+  config_load_record_type(config, MOVE_RECORD_BEST_STRING, player_index,
+                          error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_sort_type(config, MOVE_SORT_EQUITY_STRING, player_index,
+                        error_stack);
+}
+
+// Applies one player's settings from a task request's "player1"/"player2"/
+// "player" object, on top of config_contribute_reset_player_settings: a field
+// absent or null in the JSON takes MAGPIE's default, not the value a previous
+// command or task left behind.
+void config_contribute_apply_player_settings(Config *config,
+                                             const JsonValue *player,
+                                             int player_index,
+                                             ErrorStack *error_stack) {
   uint64_t *max_iterations = player_index == 0 ? &config->p1_max_iterations
                                                : &config->p2_max_iterations;
   int *sim_plies =
@@ -7220,21 +7352,11 @@ static void config_contribute_apply_player_settings(Config *config,
   double *utility_spread_scale = player_index == 0
                                      ? &config->p1_utility_spread_scale
                                      : &config->p2_utility_spread_scale;
-  double *play_chooser_time_ms = player_index == 0
-                                     ? &config->p1_play_chooser_time_ms
-                                     : &config->p2_play_chooser_time_ms;
 
-  // birdtest's player_configs has no field for -pcN yet (see MAGPIE-CLIENT.md
-  // "Player configuration"): PlayChooser is a different move-selection
-  // algorithm from the simple recorder_type/sort_strategy or simming path
-  // every other option here assumes, and birdtest has no fields for the rest
-  // of PlayChooserStrategy (opening/pre-endgame/endgame eval) to go with it.
-  // Since the request never carries this field, leaving it untouched would
-  // mean whatever a worker's Config already had -- including PlayChooser
-  // left on from an earlier manual session -- silently governs how this
-  // player plays. Force it to config_create's own default (negative =
-  // disabled) on every contribute request instead.
-  *play_chooser_time_ms = -1.0;
+  config_contribute_reset_player_settings(config, player_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   const char *recorder =
       json_get_string_or_null(player, CONTRIBUTE_KEY_RECORDER_TYPE);
@@ -7267,26 +7389,27 @@ static void config_contribute_apply_player_settings(Config *config,
     }
     *max_iterations = (uint64_t)value;
   }
-  const JsonValue *plies = json_object_get(player, CONTRIBUTE_KEY_PLIES);
+  // A player simulates exactly when this is above zero: autoplay decides
+  // per player on sim_args->num_plies, so a null here is a static player.
+  const JsonValue *plies = json_object_get(player, CONTRIBUTE_KEY_NUM_PLIES);
   if (plies && !json_is_null(plies)) {
-    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_PLIES, 0);
+    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES, -1);
     if (value < 0 || value > MAX_PLIES) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-          get_formatted_string("server sent an invalid plies: %lld",
+          get_formatted_string("server sent an invalid num_plies: %lld",
                                (long long)value));
       return;
     }
     *sim_plies = (int)value;
   }
-  const JsonValue *top_plays =
-      json_object_get(player, CONTRIBUTE_KEY_TOP_PLAYS);
-  if (top_plays && !json_is_null(top_plays)) {
-    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_TOP_PLAYS, 0);
+  const JsonValue *plays = json_object_get(player, CONTRIBUTE_KEY_NUM_PLAYS);
+  if (plays && !json_is_null(plays)) {
+    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLAYS, 0);
     if (value < 1) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-          get_formatted_string("server sent an invalid top_plays: %lld",
+          get_formatted_string("server sent an invalid num_plays: %lld",
                                (long long)value));
       return;
     }
@@ -7402,7 +7525,11 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
                                      ErrorStack *error_stack) {
   const char *lexicon = NULL;
   const char *variant = NULL;
-  if (!contribute_validate_common(request, &lexicon, &variant, error_stack)) {
+  const char *letter_distribution = NULL;
+  const char *board_layout = NULL;
+  if (!contribute_validate_common(request, &lexicon, &variant,
+                                  &letter_distribution, &board_layout,
+                                  error_stack)) {
     return NULL;
   }
 
@@ -7451,7 +7578,8 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   }
 
   config_contribute_load_lexicon_and_variant(
-      config, shared_lexicon, variant, p1_lexicon, p2_lexicon,
+      config, shared_lexicon, variant, letter_distribution, board_layout,
+      p1_lexicon, p2_lexicon,
       json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
       json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES), error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7481,6 +7609,8 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       json_get_string_or_null(player1, CONTRIBUTE_KEY_WIN_PCT_MODEL);
   const JsonValue *movegen_margin =
       json_object_get(player1, CONTRIBUTE_KEY_MOVEGEN_MARGIN);
+  // Reset first, like the per-player settings: a null means MAGPIE's default.
+  config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
   if (movegen_margin && !json_is_null(movegen_margin)) {
     const double value =
         json_get_double_or(player1, CONTRIBUTE_KEY_MOVEGEN_MARGIN, 0.0);
@@ -7527,6 +7657,10 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       json_object_get(request, CONTRIBUTE_KEY_PLAYER1);
   config->max_num_display_plays =
       json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, 10);
+  // And how many plies to report, the other half of that pair.
+  config->shplies =
+      json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED,
+                      CONFIG_DEFAULT_SHPLIES);
   autoplay_results_set_options(config->autoplay_results,
                                capture_positions ? "games,positions" : "games",
                                error_stack);
@@ -7658,7 +7792,11 @@ static char *config_contribute_opening_rack(Config *config,
                                             ErrorStack *error_stack) {
   const char *lexicon = NULL;
   const char *variant = NULL;
-  if (!contribute_validate_common(request, &lexicon, &variant, error_stack)) {
+  const char *letter_distribution = NULL;
+  const char *board_layout = NULL;
+  if (!contribute_validate_common(request, &lexicon, &variant,
+                                  &letter_distribution, &board_layout,
+                                  error_stack)) {
     return NULL;
   }
 
@@ -7685,7 +7823,7 @@ static char *config_contribute_opening_rack(Config *config,
 
   config_contribute_load_lexicon_and_variant(
       config, contribute_shared_lexicon(lexicon, p1_lexicon), variant,
-      p1_lexicon, NULL,
+      letter_distribution, board_layout, p1_lexicon, NULL,
       json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES), NULL,
       error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7706,9 +7844,23 @@ static char *config_contribute_opening_rack(Config *config,
   }
   config_init_game(config);
 
-  const JsonValue *iterations =
-      json_object_get(player, CONTRIBUTE_KEY_MAX_ITERATIONS);
-  const bool simming = iterations && !json_is_null(iterations);
+  // Decided the way autoplay decides it for a player in a game -- by plies --
+  // so a player config means the same thing in both job types.
+  const bool simming = config->p1_sim_plies > 0;
+  if (simming) {
+    const char *win_pct_model =
+        json_get_string_or_null(player, CONTRIBUTE_KEY_WIN_PCT_MODEL);
+    if (win_pct_model) {
+      win_pct_destroy(config->win_pcts);
+      config->win_pcts =
+          win_pct_create(config->data_paths, win_pct_model, error_stack);
+    } else {
+      config_load_win_pcts(config, error_stack);
+    }
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
 
   StringBuilder *sb = string_builder_create();
   bool first = true;
@@ -7749,15 +7901,11 @@ static char *config_contribute_opening_rack(Config *config,
 // server holds the running per-rack counts, so no single task can tell
 // whether the generation's target has been met overall.
 //
-// target_rack_count is that generation's minimum rack target -- the number
-// of times every rack must occur before the generation closes, which a
-// hand-run `leavegen` passes as one entry of a per-generation list like
-// "100,200,500,1000,1000,1000". It is the server's number, not a per-task
-// one, and it is only ever an early-out here: a task whose own forced racks
-// all reach it before num_games games stops early instead of playing games
-// that can no longer change its report. Whether the task's own run reaches
-// it or is cut off by num_games, the racks that did occur are reported
-// either way and the server folds them into its own totals.
+// The generation's rack target is deliberately not part of the request, and
+// num_games alone ends the task. A game contributes an occurrence for every
+// rack it draws, not only the forced ones, and the server folds all of them
+// into totals no single task can observe; stopping early when this task's own
+// racks looked done would throw away coverage the server counts.
 static char *config_contribute_leave_gen(Config *config,
                                          const JsonValue *request, int threads,
                                          ContributeState *state,
@@ -7765,7 +7913,11 @@ static char *config_contribute_leave_gen(Config *config,
   char *result = NULL;
   const char *lexicon = NULL;
   const char *variant = NULL;
-  if (!contribute_validate_common(request, &lexicon, &variant, error_stack)) {
+  const char *letter_distribution = NULL;
+  const char *board_layout = NULL;
+  if (!contribute_validate_common(request, &lexicon, &variant,
+                                  &letter_distribution, &board_layout,
+                                  error_stack)) {
     return NULL;
   }
 
@@ -7791,19 +7943,6 @@ static char *config_contribute_leave_gen(Config *config,
                              (long long)num_games));
     return NULL;
   }
-  const int64_t target_rack_count =
-      json_get_int(request, CONTRIBUTE_KEY_TARGET_RACK_COUNT, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  if (target_rack_count <= 0 || target_rack_count > INT_MAX) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-        get_formatted_string(
-            "server sent an out-of-range minimum rack target: %lld",
-            (long long)target_rack_count));
-    return NULL;
-  }
   const char *previous_artifact_key =
       json_get_string_or_null(request, CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY);
 
@@ -7820,12 +7959,16 @@ static char *config_contribute_leave_gen(Config *config,
   // The fetched KLV below is written under the existing "lexica" directory
   // data_filepaths already resolves DATA_FILEPATH_TYPE_KLV/LEAVES to -- the
   // same directory the shipped lexicon data lives in, so it is guaranteed to
-  // already exist (MAGPIE has no directory-creation utility; birdtest's own
-  // server-side run_transition creates its own scratch "lexica" dir for the
-  // same reason, but a worker's data_paths already has one). A fixed name,
-  // overwritten on every task: a contribute run handles one task at a time,
-  // so nothing else is reading or writing it concurrently.
-  const char *leaves_name = NULL;
+  // already exist (MAGPIE has no directory-creation utility). A fixed name per
+  // lexicon, overwritten on every task: a contribute run handles one task at a
+  // time, so nothing else is reading or writing it concurrently.
+  //
+  // The name starts with the lexicon's. MAGPIE checks leaves against their
+  // lexicon by inferring a letter distribution from each *name's* prefix
+  // (lexicons_and_leaves_compat), so a bare "birdtest_leavegen_previous" was
+  // refused with "default letter distribution not found" on every
+  // leave_generation task, before a single game was played.
+  char *leaves_name = NULL;
   if (previous_artifact_key) {
     ChttpResponse artifact;
     contribute_fetch_artifact(state, previous_artifact_key, &artifact,
@@ -7833,11 +7976,12 @@ static char *config_contribute_leave_gen(Config *config,
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }
+    leaves_name = get_formatted_string("%s_birdtest_previous", lexicon);
     char *klv_path = data_filepaths_get_writable_filename(
-        config->data_paths, "birdtest_leavegen_previous",
-        DATA_FILEPATH_TYPE_KLV, error_stack);
+        config->data_paths, leaves_name, DATA_FILEPATH_TYPE_KLV, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       chttp_response_destroy(&artifact);
+      free(leaves_name);
       return NULL;
     }
     FILE *klv_file = fopen(klv_path, "wb");
@@ -7853,16 +7997,27 @@ static char *config_contribute_leave_gen(Config *config,
     free(klv_path);
     chttp_response_destroy(&artifact);
     if (!error_stack_is_empty(error_stack)) {
+      free(leaves_name);
       return NULL;
     }
-    leaves_name = "birdtest_leavegen_previous";
   }
 
-  config_contribute_load_lexicon_and_variant(config, lexicon, variant, NULL,
-                                             NULL, leaves_name, leaves_name,
-                                             error_stack);
+  config_contribute_load_lexicon_and_variant(
+      config, lexicon, variant, letter_distribution, board_layout, NULL, NULL,
+      leaves_name, leaves_name, error_stack);
+  free(leaves_name);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
+  }
+  // The leave-generating bot plays statically, on MAGPIE's default static
+  // settings. Nothing in the request states them, so they are reset rather
+  // than inherited: a simming games task earlier in this run would otherwise
+  // leave the bot simulating every move of every leavegen game.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    config_contribute_reset_player_settings(config, player_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
   }
   // Stated for both players for the same reason config_contribute_apply_wmp_rit
   // states it: a wordmap left on disk by an earlier job would otherwise be
@@ -7909,12 +8064,12 @@ static char *config_contribute_leave_gen(Config *config,
   config->num_threads = threads;
   config->human_readable = false;
   config->print_on_finish = false;
-  // One generation, at the server's target for it. A hand-run `leavegen`
-  // takes a comma-separated target per generation and plays as many games as
-  // that takes; here the run is a single generation, and num_games bounds it
-  // -- leavegen has no per-generation game cap of its own, so
-  // leavegen_max_games is what keeps one task's share of the work finite.
-  char *min_rack_targets = get_formatted_string("%d", (int)target_rack_count);
+  // One generation, ended by num_games alone. A hand-run `leavegen` takes a
+  // comma-separated target per generation and plays until every rack reaches
+  // it; here that target is the server's, so the run is given one no rack can
+  // reach, and leavegen_max_games -- leavegen has no per-generation game cap
+  // of its own -- is what ends it.
+  char *min_rack_targets = get_formatted_string("%d", INT_MAX);
   config->leavegen_max_games = (uint64_t)num_games;
   autoplay_results_set_options(config->autoplay_results, "games", error_stack);
   if (error_stack_is_empty(error_stack)) {
@@ -10570,11 +10725,11 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->exec_mode = EXEC_MODE_ASYNC;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
-  config->num_plays = 100;
+  config->num_plays = CONFIG_DEFAULT_NUM_PLAYS;
   config->max_num_display_plays = 15;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 5;
-  config->shplies = 2;
+  config->shplies = CONFIG_DEFAULT_SHPLIES;
   config->show_bu = false;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
@@ -10590,16 +10745,16 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_out_width = 100;
   config->peg_out_lines = 1;
   config->peg_noprune_str = NULL;
-  config->eq_margin_inference = int_to_equity(5);
-  config->eq_margin_movegen = int_to_equity(5);
-  config->min_play_iterations = 500;
-  config->max_iterations = 1000000000000;
-  config->stop_cond_pct = 99;
+  config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
+  config->max_iterations = CONFIG_DEFAULT_MAX_ITERATIONS;
+  config->stop_cond_pct = CONFIG_DEFAULT_STOP_COND_PCT;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
-  config->utility_w_winpct = 1.0;
-  config->utility_w_spread = 0.5;
-  config->utility_spread_scale = 100.0;
-  config->time_limit_seconds = 60;
+  config->utility_w_winpct = CONFIG_DEFAULT_UTILITY_W_WINPCT;
+  config->utility_w_spread = CONFIG_DEFAULT_UTILITY_W_SPREAD;
+  config->utility_spread_scale = CONFIG_DEFAULT_UTILITY_SPREAD_SCALE;
+  config->time_limit_seconds = CONFIG_DEFAULT_TIME_LIMIT_SECONDS;
   config->endgame_time_limit_seconds = 0;
   config->peg_time_limit_seconds = 0;
   config->num_threads = get_num_cores();

@@ -1,6 +1,8 @@
 #include "contribute_test.h"
 
+#include "../src/def/contribute_defs.h"
 #include "../src/ent/client_state.h"
+#include "../src/impl/config.h"
 #include "../src/impl/contribute.h"
 #include "../src/util/hash.h"
 #include "../src/util/io_util.h"
@@ -257,6 +259,132 @@ static void test_digest_cache_key_notices_a_same_size_replacement(void) {
   (void)remove(path);
 }
 
+// birdtest's contract fixtures, copied from its contract-fixtures/. The server
+// asserts its half of the contract against the same files.
+static const char *const BIRDTEST_GAMES_FIXTURE =
+    "test/birdtest_contract/assignment-games.json";
+static const char *const BIRDTEST_LEAVE_FIXTURE =
+    "test/birdtest_contract/assignment-leave-generation.json";
+
+static JsonValue *load_task_request_fixture(const char *path,
+                                            const JsonValue **request) {
+  ErrorStack *error_stack = error_stack_create();
+  char *text = get_string_from_file_or_die(path);
+  JsonValue *fixture = json_parse(text, error_stack);
+  free(text);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  *request = json_object_get(fixture, "task_request");
+  assert(*request);
+  return fixture;
+}
+
+static void assert_fixture_has_keys(const JsonValue *object,
+                                    const char *const *keys, int num_keys,
+                                    const char *where) {
+  for (int i = 0; i < num_keys; i++) {
+    if (!json_object_get(object, keys[i])) {
+      log_fatal("birdtest's %s has no '%s', which contribute reads", where,
+                keys[i]);
+    }
+  }
+}
+
+// Every key the contribute executors read has to be one birdtest sends. This
+// is the check that would have caught "plies" and "top_plays" being read while
+// birdtest sent "num_plies" and "num_plays": every simming player ran on the
+// worker's own ambient settings and nothing failed.
+static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
+  const JsonValue *request = NULL;
+  JsonValue *games =
+      load_task_request_fixture(BIRDTEST_GAMES_FIXTURE, &request);
+  const char *const request_keys[] = {
+      CONTRIBUTE_KEY_VARIANT,      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
+      CONTRIBUTE_KEY_BOARD_LAYOUT, CONTRIBUTE_KEY_SEED,
+      CONTRIBUTE_KEY_NUM_GAMES,    CONTRIBUTE_KEY_CAPTURE_POSITIONS,
+      CONTRIBUTE_KEY_PLAYER1,      CONTRIBUTE_KEY_PLAYER2,
+  };
+  assert_fixture_has_keys(request, request_keys,
+                          sizeof(request_keys) / sizeof(request_keys[0]),
+                          "games task_request");
+  const char *const player_keys[] = {
+      CONTRIBUTE_KEY_PLAYER_LEXICON,       CONTRIBUTE_KEY_LEAVES,
+      CONTRIBUTE_KEY_RECORDER_TYPE,        CONTRIBUTE_KEY_SORT_STRATEGY,
+      CONTRIBUTE_KEY_MAX_ITERATIONS,       CONTRIBUTE_KEY_NUM_PLIES,
+      CONTRIBUTE_KEY_NUM_PLIES_RECORDED,   CONTRIBUTE_KEY_NUM_PLAYS,
+      CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,   CONTRIBUTE_KEY_STOPPING_PCT,
+      CONTRIBUTE_KEY_USE_INFERENCE,        CONTRIBUTE_KEY_TIME_LIMIT_SECS,
+      CONTRIBUTE_KEY_USE_WORDMAP,          CONTRIBUTE_KEY_USE_RIT,
+      CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS,  CONTRIBUTE_KEY_THRESHOLD,
+      CONTRIBUTE_KEY_SAMPLING_RULE,        CONTRIBUTE_KEY_INFERENCE_MARGIN,
+      CONTRIBUTE_KEY_UTILITY_W_WINPCT,     CONTRIBUTE_KEY_UTILITY_W_SPREAD,
+      CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE, CONTRIBUTE_KEY_WIN_PCT_MODEL,
+      CONTRIBUTE_KEY_MOVEGEN_MARGIN,
+  };
+  const int num_player_keys = sizeof(player_keys) / sizeof(player_keys[0]);
+  assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER1),
+                          player_keys, num_player_keys, "games player1");
+  assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER2),
+                          player_keys, num_player_keys, "games player2");
+  json_destroy(games);
+
+  JsonValue *leave =
+      load_task_request_fixture(BIRDTEST_LEAVE_FIXTURE, &request);
+  const char *const leave_keys[] = {
+      CONTRIBUTE_KEY_LEXICON,
+      CONTRIBUTE_KEY_VARIANT,
+      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
+      CONTRIBUTE_KEY_BOARD_LAYOUT,
+      CONTRIBUTE_KEY_FORCED_RACKS,
+      CONTRIBUTE_KEY_NUM_GAMES,
+      CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY,
+      CONTRIBUTE_KEY_USE_WORDMAP,
+  };
+  assert_fixture_has_keys(request, leave_keys,
+                          sizeof(leave_keys) / sizeof(leave_keys[0]),
+                          "leave_generation task_request");
+  // The generation's rack target is server-only state; a client that
+  // required it would fail every leave_generation task.
+  assert(!json_object_get(request, "target_rack_count"));
+  json_destroy(leave);
+}
+
+// A null in a request means MAGPIE's default, not whatever the process last
+// had. The case this pins: a static player applied after a simming one -- or
+// after the contributor's own settings asked for plies -- must not simulate.
+static void test_player_settings_do_not_leak_between_tasks(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -plies 5");
+  const JsonValue *request = NULL;
+  JsonValue *games =
+      load_task_request_fixture(BIRDTEST_GAMES_FIXTURE, &request);
+  const JsonValue *simmer = json_object_get(request, CONTRIBUTE_KEY_PLAYER1);
+  const JsonValue *static_player =
+      json_object_get(request, CONTRIBUTE_KEY_PLAYER2);
+  ErrorStack *error_stack = error_stack_create();
+
+  assert(config_get_player_sim_plies(config, 1) == 5);
+  config_contribute_apply_player_settings(config, simmer, 0, error_stack);
+  config_contribute_apply_player_settings(config, static_player, 1,
+                                          error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(config_get_player_sim_plies(config, 0) == 4);
+  assert(config_get_player_num_plays(config, 0) == 10);
+  assert(config_get_player_max_iterations(config, 0) == 1000);
+  // The contributor's -plies 5 does not survive a request that says static.
+  assert(config_get_player_sim_plies(config, 1) == 0);
+
+  // Nor does the previous task's simulation.
+  config_contribute_apply_player_settings(config, static_player, 0,
+                                          error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(config_get_player_sim_plies(config, 0) == 0);
+  assert(config_get_player_num_plays(config, 0) == 100);
+
+  error_stack_destroy(error_stack);
+  json_destroy(games);
+  config_destroy(config);
+}
+
 void test_contribute(void) {
   test_version_comparison();
   test_json_wrapper();
@@ -264,4 +392,6 @@ void test_contribute(void) {
   test_client_state();
   test_sha256();
   test_digest_cache_key_notices_a_same_size_replacement();
+  test_contract_fixtures_carry_every_key_contribute_reads();
+  test_player_settings_do_not_leak_between_tasks();
 }

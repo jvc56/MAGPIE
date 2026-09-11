@@ -20,7 +20,19 @@
 #define CONTRIBUTE_KEY_RECORDER_TYPE "recorder_type"
 #define CONTRIBUTE_KEY_SORT_STRATEGY "sort_strategy"
 #define CONTRIBUTE_KEY_MAX_ITERATIONS "max_iterations"
-#define CONTRIBUTE_KEY_TOP_PLAYS "top_plays"
+// How many plies to simulate (-pl1/-pl2) and how many plays to generate and
+// simulate (-np1/-np2). These were once read as "plies" and "top_plays",
+// which birdtest never sent, so every simming player silently ran on the
+// worker's own ambient plies and play count.
+#define CONTRIBUTE_KEY_NUM_PLIES "num_plies"
+#define CONTRIBUTE_KEY_NUM_PLAYS "num_plays"
+// How many plies to report (shplies). Read from player1, like
+// num_plays_recorded: MAGPIE has one value for the whole run.
+#define CONTRIBUTE_KEY_NUM_PLIES_RECORDED "num_plies_recorded"
+// The job's pinned letter distribution (-ld) and board layout (-bdn), whose
+// digests the worker verifies before running the task.
+#define CONTRIBUTE_KEY_LETTER_DISTRIBUTION "letter_distribution"
+#define CONTRIBUTE_KEY_BOARD_LAYOUT "board_layout"
 #define CONTRIBUTE_KEY_STOPPING_PCT "stopping_pct"
 #define CONTRIBUTE_KEY_USE_INFERENCE "use_inference"
 #define CONTRIBUTE_KEY_TIME_LIMIT_SECS "time_limit_secs"
@@ -111,11 +123,9 @@
 #define CONTRIBUTE_KEY_GENERATION "generation"
 #define CONTRIBUTE_KEY_FORCED_RACKS "forced_racks"
 #define CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY "previous_artifact_key"
-// The minimum number of times every forced rack must occur before this
-// generation closes -- leavegen's per-generation "minimum rack target", the
-// value the CLI passes positionally as one entry of e.g.
-// "100,200,500,1000,1000,1000".
-#define CONTRIBUTE_KEY_TARGET_RACK_COUNT "target_rack_count"
+// There is deliberately no target_rack_count: the generation's rack target is
+// server-only state (see config_contribute_leave_gen), and a task ends on
+// num_games alone.
 #define CONTRIBUTE_KEY_COUNT "count"
 #define CONTRIBUTE_KEY_MEAN "mean"
 

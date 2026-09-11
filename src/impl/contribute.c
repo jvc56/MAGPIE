@@ -748,9 +748,25 @@ void contribute_decline_task(ContributeState *state,
   release_claim(state);
 }
 
-static void submit_result_over_http(HttpClient *client, const char *claim_token,
-                                    const char *result_json,
-                                    ErrorStack *error_stack) {
+typedef enum {
+  CONTRIBUTE_SUBMIT_ACCEPTED,
+  // 200 with {"accepted": false}: the claim had lapsed and been reassigned,
+  // or this result was already accepted. Nothing to fix and nothing to count.
+  CONTRIBUTE_SUBMIT_NOT_ACCEPTED,
+  // A 4xx other than 429 (which the HTTP client retries): the server refused
+  // this result. That is a property of this task -- or of a disagreement
+  // between this build and the server -- not of the connection, so it counts
+  // as one task failure rather than ending the run.
+  CONTRIBUTE_SUBMIT_REJECTED,
+} contribute_submit_outcome_t;
+
+// On CONTRIBUTE_SUBMIT_REJECTED, *rejection is set to a message the caller
+// frees. A transport failure or a 5xx that outlasted the client's retries
+// goes on error_stack and ends the run, as before.
+static contribute_submit_outcome_t
+submit_result_over_http(HttpClient *client, const char *claim_token,
+                        const char *result_json, char **rejection,
+                        ErrorStack *error_stack) {
   StringBuilder *sb = string_builder_create();
   bool first = true;
   json_write_object_start(sb);
@@ -765,10 +781,26 @@ static void submit_result_over_http(HttpClient *client, const char *claim_token,
                         error_stack);
   free(body);
   if (!error_stack_is_empty(error_stack)) {
-    return;
+    return CONTRIBUTE_SUBMIT_REJECTED;
   }
 
-  if (response.status_code != 200) {
+  contribute_submit_outcome_t outcome = CONTRIBUTE_SUBMIT_ACCEPTED;
+  if (response.status_code == 200) {
+    ErrorStack *parse_errors = error_stack_create();
+    JsonValue *ack =
+        response.body ? json_parse(response.body, parse_errors) : NULL;
+    if (ack && error_stack_is_empty(parse_errors) &&
+        !json_get_bool_or(ack, "accepted", true)) {
+      outcome = CONTRIBUTE_SUBMIT_NOT_ACCEPTED;
+    }
+    json_destroy(ack);
+    error_stack_destroy(parse_errors);
+  } else if (response.status_code >= 400 && response.status_code < 500) {
+    *rejection = get_formatted_string(
+        "the server rejected the result with HTTP %ld: %.200s",
+        response.status_code, response.body ? response.body : "");
+    outcome = CONTRIBUTE_SUBMIT_REJECTED;
+  } else {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string("submitting a result failed with HTTP %ld: %.200s",
@@ -776,6 +808,7 @@ static void submit_result_over_http(HttpClient *client, const char *claim_token,
                              response.body ? response.body : ""));
   }
   chttp_response_destroy(&response);
+  return outcome;
 }
 
 void contribute_submit_result(ContributeState *state,
@@ -799,12 +832,33 @@ void contribute_submit_result(ContributeState *state,
   }
 
   if (result_json) {
-    submit_result_over_http(state->http_client, state->claim_token, result_json,
-                            error_stack);
-    state->completed++;
-    state->consecutive_failures = 0;
-    thread_control_print_formatted(thread_control, "completed %d task(s)\n",
-                                   state->completed);
+    char *rejection = NULL;
+    const contribute_submit_outcome_t outcome =
+        submit_result_over_http(state->http_client, state->claim_token,
+                                result_json, &rejection, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      switch (outcome) {
+      case CONTRIBUTE_SUBMIT_ACCEPTED:
+        state->completed++;
+        state->consecutive_failures = 0;
+        thread_control_print_formatted(thread_control, "completed %d task(s)\n",
+                                       state->completed);
+        break;
+      case CONTRIBUTE_SUBMIT_NOT_ACCEPTED:
+        thread_control_print_formatted(
+            thread_control, "result not accepted: the claim had already "
+                            "lapsed or been submitted\n");
+        break;
+      case CONTRIBUTE_SUBMIT_REJECTED:
+        thread_control_print_formatted(thread_control, "%s\n", rejection);
+        state->consecutive_failures++;
+        free(state->last_failure);
+        state->last_failure = rejection;
+        rejection = NULL;
+        break;
+      }
+    }
+    free(rejection);
   }
 
   free(state->claim_token);
@@ -840,9 +894,34 @@ int contribute_get_threads(const ContributeState *state) {
   return state->threads;
 }
 
+// Server-minted artifact keys look like leaves/<uuid>/generation-<n>.klv2.
+// The key is untrusted and goes into a URL, so anything outside that alphabet,
+// an absolute path or a parent-directory segment is refused rather than sent.
+static bool contribute_is_safe_artifact_key(const char *key) {
+  if (!key || *key == '\0' || *key == '/' || strstr(key, "..")) {
+    return false;
+  }
+  for (const char *c = key; *c; c++) {
+    const bool allowed = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+                         (*c >= '0' && *c <= '9') || *c == '_' || *c == '-' ||
+                         *c == '.' || *c == '/';
+    if (!allowed) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void contribute_fetch_artifact(ContributeState *state, const char *key,
                                ChttpResponse *response,
                                ErrorStack *error_stack) {
+  if (!contribute_is_safe_artifact_key(key)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string("server sent an unusable artifact "
+                                          "key: '%.200s'",
+                                          key ? key : "(absent)"));
+    return;
+  }
   char *path = get_formatted_string("/api/worker/artifact?key=%s", key);
   http_client_get(state->http_client, path, response, error_stack);
   free(path);

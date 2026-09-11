@@ -20,6 +20,7 @@
 #include "../ent/win_pct.h"
 #include "../impl/simmer.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "peg.h"
 #include <stdbool.h>
 
@@ -34,6 +35,21 @@ typedef struct ConfigArgs {
 // Constructors and Destructors
 // This build's version, for the contribution client's version negotiation.
 const char *config_get_magpie_version(void);
+
+// One player's simulation settings, for tests of the contribute path.
+int config_get_player_sim_plies(const Config *config, int player_index);
+int config_get_player_num_plays(const Config *config, int player_index);
+uint64_t config_get_player_max_iterations(const Config *config,
+                                          int player_index);
+
+// Applies one player object from a birdtest task request to player
+// `player_index`, first resetting every per-player setting the request can
+// leave null to MAGPIE's defaults. Exposed so the reset can be tested: it is
+// what stops one task's settings leaking into the next.
+void config_contribute_apply_player_settings(Config *config,
+                                             const JsonValue *player,
+                                             int player_index,
+                                             ErrorStack *error_stack);
 
 Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
