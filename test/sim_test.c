@@ -4,6 +4,7 @@
 #include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/autoplay_results.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
 #include "../src/ent/equity.h"
@@ -22,6 +23,7 @@
 #include "../src/str/move_string.h"
 #include "../src/str/sim_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/json.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -123,6 +125,77 @@ void test_sim_opp_rack_not_in_bag(void) {
   assert_simulate_known_opp_rack_status(config, "AAAAAAA",
                                         ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG);
 
+  config_destroy(config);
+}
+
+// The plays a contribute task reports for an analysed position -- an opening
+// rack or a position captured during a game -- come in the simulation's
+// ranking, carrying its win percentage, blended utility and per-ply
+// statistics, not in the move list's equity order with those attached.
+void test_sim_ranked_plays_json(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 15 -plies "
+                           "2 -threads 1 -iter 300 -scond none -seed 10");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AAADERW");
+  load_and_exec_config_or_die(config, "gen");
+  SimResults *sim_results = config_get_sim_results(config);
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = config_get_ld(config);
+
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  const int ranked = autoplay_results_write_ranked_plays_json(
+      sb, &first, game, config_get_move_list(config), sim_results, 5, 1);
+  json_write_object_end(sb);
+  assert(ranked == sim_results_get_number_of_plays(sim_results));
+
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *root = json_parse(string_builder_peek(sb), error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *moves = json_object_get(root, "moves");
+  assert(json_array_length(moves) == 5);
+
+  assert(sim_results_lock_and_sort_display_simmed_plays(sim_results));
+  for (int i = 0; i < 5; i++) {
+    const JsonValue *entry = json_array_get(moves, i);
+    StringBuilder *move_sb = string_builder_create();
+    string_builder_add_move(
+        move_sb, game_get_board(game),
+        simmed_play_get_move(
+            sim_results_get_display_simmed_play(sim_results, i)),
+        ld, false);
+    assert_strings_equal(json_get_string_or_null(entry, "move"),
+                         string_builder_peek(move_sb));
+    string_builder_destroy(move_sb);
+    assert(!json_is_null(json_object_get(entry, "win_percentage")));
+    assert(!json_is_null(json_object_get(entry, "blended_utility")));
+    assert(json_array_length(json_object_get(entry, "plies")) == 1);
+  }
+  sim_results_unlock_display_infos(sim_results);
+  json_destroy(root);
+  string_builder_destroy(sb);
+
+  // A static player: move-list order, no simulation statistics.
+  sb = string_builder_create();
+  first = true;
+  json_write_object_start(sb);
+  autoplay_results_write_ranked_plays_json(
+      sb, &first, game, config_get_move_list(config), NULL, 3, 1);
+  json_write_object_end(sb);
+  root = json_parse(string_builder_peek(sb), error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *static_moves = json_object_get(root, "moves");
+  assert(json_array_length(static_moves) == 3);
+  assert(json_object_get(json_array_get(static_moves, 0), "win_percentage") ==
+         NULL);
+  json_destroy(root);
+  string_builder_destroy(sb);
+  error_stack_destroy(error_stack);
   config_destroy(config);
 }
 
@@ -1290,6 +1363,7 @@ void test_sim(void) {
     test_sim_error_cases();
     test_sim_opp_rack_not_in_bag();
     test_sim_single_iteration();
+    test_sim_ranked_plays_json();
     test_sim_threshold();
     test_sim_time_limit();
     test_all_plays_are_similar();

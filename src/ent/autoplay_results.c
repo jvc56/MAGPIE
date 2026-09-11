@@ -51,7 +51,7 @@ typedef struct RecorderArgs {
   const MoveList *move_list;
   // The simulation behind this turn, when the player simmed. Carries the
   // per-play win percentage and per-ply statistics the move list does not.
-  const SimResults *sim_results;
+  SimResults *sim_results;
   int game_number;
   int pair_game_number;
   int turn_number;
@@ -1617,6 +1617,22 @@ static void captured_play_fill_from_simmed_play(CapturedPlay *play,
                                                 const SimmedPlay *simmed_play,
                                                 const Game *game,
                                                 const LetterDistribution *ld,
+                                                int num_plies);
+
+// The i-th play in the simulation's ranking. SimResults keeps its plays in
+// move-list (equity) order; the ranking lives in the sorted display copies,
+// which carry the same statistics. *sorted says whether the display lock is
+// held and must be released with sim_results_unlock_display_infos.
+static const SimmedPlay *ranked_simmed_play(SimResults *sim_results, int i,
+                                            bool sorted) {
+  return sorted ? sim_results_get_display_simmed_play(sim_results, i)
+                : sim_results_get_simmed_play(sim_results, i);
+}
+
+static void captured_play_fill_from_simmed_play(CapturedPlay *play,
+                                                const SimmedPlay *simmed_play,
+                                                const Game *game,
+                                                const LetterDistribution *ld,
                                                 int num_plies) {
   captured_play_fill_common(play, simmed_play_get_move(simmed_play), game, ld);
   play->iterations =
@@ -1716,11 +1732,17 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
     position->time_elapsed = bai_result_get_elapsed_seconds(bai_result);
     position->status = bai_result_get_status(bai_result);
     const int num_plies = sim_results_get_num_plies(args->sim_results);
+    // Stored in the simulation's ranking, not move-list order: the first play
+    // recorded is the one the simulation rated best.
+    const bool sorted =
+        sim_results_lock_and_sort_display_simmed_plays(args->sim_results);
     for (int i = 0; i < position->num_stored_plays; i++) {
-      const SimmedPlay *simmed_play =
-          sim_results_get_simmed_play(args->sim_results, i);
-      captured_play_fill_from_simmed_play(&position->plays[i], simmed_play,
-                                          game, ld, num_plies);
+      captured_play_fill_from_simmed_play(
+          &position->plays[i], ranked_simmed_play(args->sim_results, i, sorted),
+          game, ld, num_plies);
+    }
+    if (sorted) {
+      sim_results_unlock_display_infos(args->sim_results);
     }
   } else {
     position->total_iterations = 0;
@@ -1767,6 +1789,51 @@ static void write_captured_play(StringBuilder *sb, const CapturedPlay *play) {
     json_write_array_end(sb);
   }
   json_write_object_end(sb);
+}
+
+int autoplay_results_write_ranked_plays_json(StringBuilder *sb, bool *first,
+                                             const Game *game,
+                                             const MoveList *move_list,
+                                             SimResults *sim_results,
+                                             int play_cap, int max_plies) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const bool simmed =
+      sim_results && sim_results_get_number_of_plays(sim_results) > 0;
+  const int num_moves = simmed ? sim_results_get_number_of_plays(sim_results)
+                               : move_list_get_count(move_list);
+  const int count = play_cap > 0 && play_cap < num_moves ? play_cap : num_moves;
+  int num_plies = 0;
+  bool sorted = false;
+  if (simmed) {
+    num_plies = sim_results_get_num_plies(sim_results);
+    if (max_plies < num_plies) {
+      num_plies = max_plies < 0 ? 0 : max_plies;
+    }
+    sorted = sim_results_lock_and_sort_display_simmed_plays(sim_results);
+  }
+
+  json_write_array_start(sb, CONTRIBUTE_KEY_MOVES, first);
+  CapturedPlay play;
+  for (int i = 0; i < count; i++) {
+    if (i > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    if (simmed) {
+      captured_play_fill_from_simmed_play(
+          &play, ranked_simmed_play(sim_results, i, sorted), game, ld,
+          num_plies);
+    } else {
+      captured_play_fill_from_move(&play, move_list_get_move(move_list, i),
+                                   game, ld);
+    }
+    write_captured_play(sb, &play);
+  }
+  json_write_array_end(sb);
+
+  if (sorted) {
+    sim_results_unlock_display_infos(sim_results);
+  }
+  return num_moves;
 }
 
 static void write_captured_position(StringBuilder *sb,
@@ -2062,7 +2129,7 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
                                const Move *previous_move, const Rack *leave,
                                const MoveList *move_list,
-                               const SimResults *sim_results, int game_number,
+                               SimResults *sim_results, int game_number,
                                int pair_game_number, int turn_number,
                                int play_cap) {
   RecorderArgs args = {0};

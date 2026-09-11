@@ -7,6 +7,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/rack_list.h"
 #include "../src/util/io_util.h"
+#include "../src/util/json.h"
 #include "../src/util/math_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -201,6 +202,15 @@ void test_rack_list_forced_racks(void) {
   char *rack_equity_json = rack_list_get_rack_equity_json(rack_list, ld);
   assert(has_substring(rack_equity_json,
                        "{\"rack\":\"AAAAABB\",\"count\":2,\"mean\":6.000000}"));
+  // It is the whole body of a leave_generation result, so it must be a JSON
+  // object, not just contain the right fragments: it was once a bare
+  // `"racks":[...]` that every server refused.
+  ErrorStack *json_error_stack = error_stack_create();
+  const JsonValue *parsed = json_parse(rack_equity_json, json_error_stack);
+  assert(error_stack_is_empty(json_error_stack));
+  assert(json_array_length(json_object_get(parsed, "racks")) == 1);
+  json_destroy(parsed);
+  error_stack_destroy(json_error_stack);
   free(rack_equity_json);
 
   rack_list_destroy(rack_list);

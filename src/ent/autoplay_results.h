@@ -41,9 +41,22 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
                                const Move *previous_move, const Rack *leave,
                                const MoveList *move_list,
-                               const SimResults *sim_results, int game_number,
+                               SimResults *sim_results, int game_number,
                                int pair_game_number, int turn_number,
                                int play_cap);
+// Appends a "moves" array field -- the ranked plays of one analysed position --
+// to the JSON object being written to sb. With sim_results (a simming player)
+// the plays come in the simulation's ranking, each with its win percentage,
+// blended utility and up to max_plies per-ply statistics; without it they come
+// in move-list order with score and equity only. play_cap > 0 limits how many
+// plays are written. Shared by captured in-game positions and the contribute
+// opening-rack executor, so both report the same fields the same way. Returns
+// how many plays were ranked before the cap.
+int autoplay_results_write_ranked_plays_json(StringBuilder *sb, bool *first,
+                                             const Game *game,
+                                             const MoveList *move_list,
+                                             SimResults *sim_results,
+                                             int play_cap, int max_plies);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);

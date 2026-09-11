@@ -357,6 +357,9 @@ struct Config {
   // targets rather than by a game count); only the contribute
   // leave_generation executor sets this.
   uint64_t leavegen_max_games;
+  // AUTOPLAY_TYPE_LEAVE_GEN only: see AutoplayArgs.leavegen_write_files. True
+  // except while the contribute leave_generation executor runs.
+  bool leavegen_write_files;
   // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
   // the cell always fits the label + a worst-case token) and max wrapped lines
   // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
@@ -954,7 +957,7 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.0.0"
+#define MAGPIE_VERSION "0.1.0"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -3689,6 +3692,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->forced_racks = forced_racks;
   autoplay_args->num_forced_racks = num_forced_racks;
   autoplay_args->leavegen_max_games = config->leavegen_max_games;
+  autoplay_args->leavegen_write_files = config->leavegen_write_files;
   autoplay_args->position_play_cap = config->max_num_display_plays;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
@@ -7706,7 +7710,6 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
                                            const JsonValue *player,
                                            bool simming, StringBuilder *sb,
                                            ErrorStack *error_stack) {
-  (void)player;
   game_reset(config->game);
   config_reset_move_list_and_invalidate_sim_results(config);
   if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
@@ -7730,54 +7733,27 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
     }
   }
 
-  const MoveList *moves = config->move_list;
-  const Game *game = config->game;
-  const LetterDistribution *ld = config->ld;
-  const int count = move_list_get_count(moves);
-  if (count == 0) {
+  if (move_list_get_count(config->move_list) == 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string("no moves generated for rack '%s'", rack_str));
     return false;
   }
 
-  // Every ranked move is reported. How many are worth keeping is the server's
-  // decision -- it stores only the leading few per rack, which is a different
-  // number from how many the player config asked to generate or simulate.
+  // Every ranked move is reported; how many are worth keeping is the server's
+  // decision. A simming player's moves come in the simulation's ranking with
+  // win percentage, blended utility and per-ply statistics (up to the
+  // player's num_plies_recorded), written by the same code that writes a
+  // position captured during a game -- an opening rack is just a position on
+  // an empty board.
+  const int max_plies =
+      json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED, INT_MAX);
   bool rack_first = true;
   json_write_object_start(sb);
   json_write_string_field(sb, CONTRIBUTE_KEY_RACK, rack_str, &rack_first);
-  json_write_array_start(sb, CONTRIBUTE_KEY_MOVES, &rack_first);
-  for (int i = 0; i < count; i++) {
-    const Move *move = move_list_get_move(moves, i);
-    if (i > 0) {
-      string_builder_add_string(sb, ",");
-    }
-    bool move_first = true;
-    json_write_object_start(sb);
-
-    StringBuilder *move_sb = string_builder_create();
-    string_builder_add_move(move_sb, game_get_board(game), move, ld, false);
-    char *move_string = string_builder_dump_and_destroy(move_sb, NULL);
-    json_write_string_field(sb, CONTRIBUTE_KEY_MOVE, move_string, &move_first);
-    free(move_string);
-
-    // A pass carries a sentinel equity that equity_to_double refuses to
-    // convert, and a pass has no score. Reporting zeros keeps the whole
-    // ranked list submittable, which matters for a `-r all` config where the
-    // pass is a legitimate entry rather than an error.
-    const Equity score = move_get_score(move);
-    const Equity equity = move_get_equity(move);
-    json_write_int_field(
-        sb, CONTRIBUTE_KEY_SCORE,
-        equity_is_convertible(score) ? equity_to_int(score) : 0, &move_first);
-    json_write_double_field(
-        sb, CONTRIBUTE_KEY_EQUITY,
-        equity_is_convertible(equity) ? equity_to_double(equity) : 0.0,
-        &move_first);
-    json_write_object_end(sb);
-  }
-  json_write_array_end(sb);
+  autoplay_results_write_ranked_plays_json(
+      sb, &rack_first, config->game, config->move_list,
+      simming ? config->sim_results : NULL, /*play_cap=*/0, max_plies);
   json_write_object_end(sb);
   return true;
 }
@@ -8071,12 +8047,17 @@ static char *config_contribute_leave_gen(Config *config,
   // of its own -- is what ends it.
   char *min_rack_targets = get_formatted_string("%d", INT_MAX);
   config->leavegen_max_games = (uint64_t)num_games;
+  // No per-generation KLV, CSV or report files: the results go back in the
+  // response, and nothing should be written into a contributor's data
+  // directory on every task.
+  config->leavegen_write_files = false;
   autoplay_results_set_options(config->autoplay_results, "games", error_stack);
   if (error_stack_is_empty(error_stack)) {
     config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                     min_rack_targets, 0, forced_racks, forced_racks_count,
                     error_stack);
   }
+  config->leavegen_write_files = true;
   free(min_rack_targets);
   free(forced_racks);
   if (!error_stack_is_empty(error_stack)) {
@@ -10738,6 +10719,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_result.last_completed_stage = -1;
   config->peg_num_stages = 0;
   config->leavegen_max_games = 0;
+  config->leavegen_write_files = true;
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;

@@ -106,6 +106,12 @@ typedef struct LeavegenSharedData {
   Checkpoint *postgen_checkpoint;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
+  // See AutoplayArgs.leavegen_write_files.
+  bool write_files;
+  // The first generation-file write that failed, if any. Recorded rather
+  // than fatal -- postgen runs on a worker thread with no error stack to
+  // push to -- and pushed onto the caller's stack when autoplay returns.
+  char *postgen_error;
 } LeavegenSharedData;
 
 typedef struct AutoplaySharedData {
@@ -180,6 +186,109 @@ void autoplay_shared_data_copy_to_dst_and_jump(AutoplaySharedData *shared_data,
   prng_jump(shared_data->prng);
 }
 
+// Writes the generation's KLV, leaves CSV and report into the data directory.
+// A failed write is recorded in postgen_error (the first one only) and ends
+// this generation's writes; it does not end the process.
+static void leavegen_write_generation_files(AutoplaySharedData *shared_data) {
+  LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
+  char *label = get_formatted_string("_gen_%d", lg_shared_data->gens_completed);
+  char *gen_labeled_klv_name =
+      insert_before_dot(lg_shared_data->klv->name, label);
+  ErrorStack *error_stack = error_stack_create();
+  const char *failure = NULL;
+
+  char *gen_labeled_klv_filename = data_filepaths_get_writable_filename(
+      lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV,
+      error_stack);
+  char *leaves_filename = data_filepaths_get_writable_filename(
+      lg_shared_data->data_paths, gen_labeled_klv_name,
+      DATA_FILEPATH_TYPE_LEAVES, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    failure = "leavegen could not find a writable location for its results";
+  }
+
+  if (!failure) {
+    klv_write(lg_shared_data->klv, lg_shared_data->data_paths,
+              gen_labeled_klv_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      failure = "leavegen failed to write the generation's klv";
+    }
+  }
+
+  if (!failure) {
+    klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld,
+                     lg_shared_data->data_paths, gen_labeled_klv_name, NULL,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      failure = "leavegen failed to write the generation's klv to CSV";
+    }
+  }
+
+  if (!failure) {
+    // Print info about the current state.
+    StringBuilder *leave_gen_sb = string_builder_create();
+
+    string_builder_add_string(
+        leave_gen_sb, "************************\n"
+                      "Cumulative Autoplay Data\n************************\n\n");
+
+    string_builder_add_formatted_string(
+        leave_gen_sb, "Seconds: %f\n",
+        ctimer_elapsed_seconds(&shared_data->timer));
+    char *cumul_game_data_str = autoplay_results_to_string(
+        lg_shared_data->primary_autoplay_results, true, false);
+    string_builder_add_string(leave_gen_sb, cumul_game_data_str);
+    free(cumul_game_data_str);
+
+    string_builder_add_string(
+        leave_gen_sb,
+        "\n**************************\n"
+        "Generational Autoplay Data\n**************************\n\n");
+
+    char *gen_game_data_str = autoplay_results_to_string(
+        lg_shared_data->gen_autoplay_results, true, false);
+    string_builder_add_string(leave_gen_sb, gen_game_data_str);
+    free(gen_game_data_str);
+
+    string_builder_add_formatted_string(
+        leave_gen_sb,
+        "\nTarget Minimum "
+        "Leave "
+        "Count: %d\nLeaves Under "
+        "Target Minimum Leave Count: %d\n\n",
+        rack_list_get_target_rack_count(lg_shared_data->rack_list),
+        rack_list_get_racks_below_target_count(lg_shared_data->rack_list));
+
+    char *report_name_prefix =
+        cut_off_after_last_char(gen_labeled_klv_filename, '.');
+    char *report_name =
+        get_formatted_string("%s_report.txt", report_name_prefix);
+
+    write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb),
+                         error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      failure = "leavegen failed to write the generation's report";
+    }
+    string_builder_destroy(leave_gen_sb);
+    free(report_name);
+    free(report_name_prefix);
+  }
+
+  if (failure) {
+    error_stack_print_and_reset(error_stack);
+    if (!lg_shared_data->postgen_error) {
+      lg_shared_data->postgen_error = get_formatted_string(
+          "%s (generation %d)", failure, lg_shared_data->gens_completed);
+    }
+  }
+
+  error_stack_destroy(error_stack);
+  free(gen_labeled_klv_filename);
+  free(gen_labeled_klv_name);
+  free(label);
+  free(leaves_filename);
+}
+
 void postgen_prebroadcast_func(void *data) {
   AutoplaySharedData *shared_data = (AutoplaySharedData *)data;
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
@@ -193,41 +302,6 @@ void postgen_prebroadcast_func(void *data) {
       rack_list_get_rack_equity_json(lg_shared_data->rack_list,
                                      lg_shared_data->ld));
   lg_shared_data->gens_completed++;
-
-  // Write the KLV for the current generation.
-  char *label = get_formatted_string("_gen_%d", lg_shared_data->gens_completed);
-  char *gen_labeled_klv_name =
-      insert_before_dot(lg_shared_data->klv->name, label);
-
-  ErrorStack *error_stack = error_stack_create();
-
-  char *gen_labeled_klv_filename = data_filepaths_get_writable_filename(
-      lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV,
-      error_stack);
-  char *leaves_filename = data_filepaths_get_writable_filename(
-      lg_shared_data->data_paths, gen_labeled_klv_name,
-      DATA_FILEPATH_TYPE_LEAVES, error_stack);
-
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("leavegen failed to write results to file");
-  }
-
-  klv_write(lg_shared_data->klv, lg_shared_data->data_paths,
-            gen_labeled_klv_name, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("leavegen failed to write klv to file: %s",
-              gen_labeled_klv_filename);
-  }
-
-  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld,
-                   lg_shared_data->data_paths, gen_labeled_klv_name, NULL,
-                   error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("leavegen failed to write klv to CSV");
-  }
 
   // Get total game data.
   autoplay_results_consolidate(lg_shared_data->autoplay_results_list,
@@ -244,60 +318,9 @@ void postgen_prebroadcast_func(void *data) {
     autoplay_results_reset(lg_shared_data->autoplay_results_list[i]);
   }
 
-  // Print info about the current state.
-  StringBuilder *leave_gen_sb = string_builder_create();
-
-  string_builder_add_string(
-      leave_gen_sb, "************************\n"
-                    "Cumulative Autoplay Data\n************************\n\n");
-
-  string_builder_add_formatted_string(
-      leave_gen_sb, "Seconds: %f\n",
-      ctimer_elapsed_seconds(&shared_data->timer));
-  char *cumul_game_data_str = autoplay_results_to_string(
-      lg_shared_data->primary_autoplay_results, true, false);
-  string_builder_add_string(leave_gen_sb, cumul_game_data_str);
-  free(cumul_game_data_str);
-
-  string_builder_add_string(
-      leave_gen_sb,
-      "\n**************************\n"
-      "Generational Autoplay Data\n**************************\n\n");
-
-  char *gen_game_data_str = autoplay_results_to_string(
-      lg_shared_data->gen_autoplay_results, true, false);
-  string_builder_add_string(leave_gen_sb, gen_game_data_str);
-  free(gen_game_data_str);
-
-  string_builder_add_formatted_string(
-      leave_gen_sb,
-      "\nTarget Minimum "
-      "Leave "
-      "Count: %d\nLeaves Under "
-      "Target Minimum Leave Count: %d\n\n",
-      rack_list_get_target_rack_count(lg_shared_data->rack_list),
-      rack_list_get_racks_below_target_count(lg_shared_data->rack_list));
-
-  char *report_name_prefix =
-      cut_off_after_last_char(gen_labeled_klv_filename, '.');
-  char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);
-
-  write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb),
-                       error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("leavegen failed to write result summary to file");
+  if (lg_shared_data->write_files) {
+    leavegen_write_generation_files(shared_data);
   }
-
-  string_builder_destroy(leave_gen_sb);
-  error_stack_destroy(error_stack);
-
-  free(report_name);
-  free(report_name_prefix);
-  free(gen_labeled_klv_filename);
-  free(gen_labeled_klv_name);
-  free(label);
-  free(leaves_filename);
 
   // Reset data for the next generation.
   if (lg_shared_data->gens_completed < lg_shared_data->num_gens) {
@@ -433,6 +456,8 @@ LeavegenSharedData *leavegen_shared_data_create(
 
   shared_data->num_gens = num_gens;
   shared_data->gens_completed = 0;
+  shared_data->write_files = true;
+  shared_data->postgen_error = NULL;
   shared_data->gen_start_games = 0;
   shared_data->klv = klv;
   shared_data->gen_autoplay_results =
@@ -489,6 +514,7 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
       free(shared_data);
       return NULL;
     }
+    shared_data->leavegen_shared_data->write_files = args->leavegen_write_files;
   }
   return shared_data;
 }
@@ -500,6 +526,7 @@ void leavegen_shared_data_destroy(LeavegenSharedData *lg_shared_data) {
   rack_list_destroy(lg_shared_data->rack_list);
   checkpoint_destroy(lg_shared_data->postgen_checkpoint);
   autoplay_results_destroy(lg_shared_data->gen_autoplay_results);
+  free(lg_shared_data->postgen_error);
   free(lg_shared_data);
 }
 
@@ -1271,6 +1298,11 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   free(autoplay_workers);
   free(worker_ids);
+  char *postgen_error = NULL;
+  if (shared_data->leavegen_shared_data) {
+    postgen_error = shared_data->leavegen_shared_data->postgen_error;
+    shared_data->leavegen_shared_data->postgen_error = NULL;
+  }
   autoplay_shared_data_destroy(shared_data);
   free(min_rack_targets);
 
@@ -1278,6 +1310,9 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   if (is_leavegen_mode) {
     players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
                         args->data_paths, error_stack);
+  }
+  if (postgen_error) {
+    error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR, postgen_error);
   }
 
   char *autoplay_results_string = autoplay_results_to_string(

@@ -1,7 +1,7 @@
 {
   "claim_token": "b1d0b2b6-0f8f-4a4b-9a5f-6f4a2f2a1c33",
   "job_id": "9c2f1a48-5f3b-4c2a-8a7d-1b0e3f7c9d20",
-  "min_magpie_version": "0.0.1",
+  "min_magpie_version": "0.1.0",
   "expected_data": {
     "algorithm": "sha256",
     "files": [
@@ -38,7 +38,7 @@
     "letter_distribution": "english",
     "board_layout": "standard15",
     "generation": 1,
-    "forced_racks": ["AA", "AB"],
+    "forced_racks": ["AEINRST", "?AEGLNT"],
     "previous_artifact_key": "leaves/9c2f1a48-5f3b-4c2a-8a7d-1b0e3f7c9d20/generation-0.klv2",
     "num_games": 10000,
     "use_wordmap": true

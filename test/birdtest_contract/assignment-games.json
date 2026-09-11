@@ -1,7 +1,7 @@
 {
   "claim_token": "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c",
   "job_id": "1d4a7f60-3c1e-4a55-9f2e-2f0f5d9e6a31",
-  "min_magpie_version": "0.0.1",
+  "min_magpie_version": "0.1.0",
   "expected_data": {
     "algorithm": "sha256",
     "files": [

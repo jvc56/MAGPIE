@@ -37,6 +37,12 @@ typedef struct AutoplayArgs {
   // cannot run indefinitely when its own forced-rack subset never reaches
   // that target.
   uint64_t leavegen_max_games;
+  // AUTOPLAY_TYPE_LEAVE_GEN only: whether each generation's KLV, leaves CSV
+  // and report are written into the data directory. The CLI leavegen command
+  // writes them. A contribute leave_generation task does not: its results go
+  // back in the task response, and a contributor's data directory need not be
+  // writable.
+  bool leavegen_write_files;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;

@@ -591,6 +591,7 @@ char *rack_list_get_rack_equity_json(const RackList *rack_list,
                                      const LetterDistribution *ld) {
   StringBuilder *sb = string_builder_create();
   bool first = true;
+  json_write_object_start(sb);
   json_write_array_start(sb, CONTRIBUTE_KEY_RACKS, &first);
   Rack rack;
   rack_set_dist_size(&rack, ld_get_size(ld));
@@ -616,6 +617,9 @@ char *rack_list_get_rack_equity_json(const RackList *rack_list,
     json_write_object_end(sb);
   }
   json_write_array_end(sb);
+  // The enclosing object: without it the result was a bare `"racks":[...]`,
+  // which is not JSON, and the server refused every leave result.
+  json_write_object_end(sb);
   char *json = string_builder_dump_and_destroy(sb, NULL);
   return json;
 }
