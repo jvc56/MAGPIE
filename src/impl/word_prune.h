@@ -21,6 +21,7 @@ typedef struct WordPruneRefineStats {
   int passes;
   int nonplaythrough_words;
   int words_after_pass[8];
+  long dp_rejected;
 } WordPruneRefineStats;
 
 // PROTOTYPE: like generate_possible_words, but iteratively removes playthrough

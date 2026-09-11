@@ -45,7 +45,11 @@ void test_wordprune_bench(void) {
   // WPB_MODE1: "full" (mode 1 skips pruning) or "refined" (mode 1 uses the
   // cross-check-aware prototype prune); mode 0 is always the current prune.
   const char *mode1 = getenv("WPB_MODE1") ? getenv("WPB_MODE1") : "full";
-  const bool mode1_refined = strcmp(mode1, "refined") == 0;
+  const bool mode1_refined = strcmp(mode1, "refined") == 0 ||
+                             strcmp(mode1, "refineddp") == 0 ||
+                             strcmp(mode1, "refinednpt") == 0;
+  const bool mode1_dp = strcmp(mode1, "refineddp") == 0;
+  const bool mode1_npt = strcmp(mode1, "refinednpt") == 0;
   long sum_refined_words = 0;
   double sum_refined_gen = 0;
   double sum_solve_pruned = 0;
@@ -135,12 +139,20 @@ void test_wordprune_bench(void) {
         }
         if (mode == 1 && mode1_refined) {
           setenv("WORDPRUNE_REFINE", "8", 1);
+          if (mode1_dp) {
+            setenv("WORDPRUNE_RACKDP", "1", 1);
+          }
+          if (mode1_npt) {
+            setenv("WORDPRUNE_NPT", "1", 1);
+          }
         }
         Timer timer;
         ctimer_start(&timer);
         endgame_solve(&solver, &args, results, solve_error);
         const double elapsed = ctimer_elapsed_seconds(&timer);
         unsetenv("WORDPRUNE_REFINE");
+        unsetenv("WORDPRUNE_RACKDP");
+        unsetenv("WORDPRUNE_NPT");
         assert(error_stack_is_empty(solve_error));
         nodes_by_mode[mode] = endgame_ctx_get_nodes_searched(solver);
         value_by_mode[mode] =
@@ -190,10 +202,11 @@ void test_wordprune_bench(void) {
       ctimer_start(&rtimer);
       generate_possible_words_refined(game, full_kwg, refined_list, 8, &rstats);
       const double rgen = ctimer_elapsed_seconds(&rtimer);
-      printf("WPBREF,%d,%.6f,%d,%d,%d,%d,%d,%d\n", index, rgen,
+      printf("WPBREF,%d,%.6f,%d,%d,%d,%d,%d,%d,%ld\n", index, rgen,
              dictionary_word_list_get_count(refined_list), rstats.passes,
              rstats.nonplaythrough_words, rstats.words_after_pass[0],
-             rstats.words_after_pass[1], rstats.words_after_pass[2]);
+             rstats.words_after_pass[1], rstats.words_after_pass[2],
+             rstats.dp_rejected);
       sum_refined_words += dictionary_word_list_get_count(refined_list);
       sum_refined_gen += rgen;
       dictionary_word_list_destroy(refined_list);

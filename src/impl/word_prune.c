@@ -490,17 +490,193 @@ static inline bool wp_letter_allowed(const BoardRows *lanes,
   return (prev->allowed[wp_perp_lane(lane, pos)][wp_perp_pos(lane)] >> ml) & 1;
 }
 
+// Single-rack realizability (PROTOTYPE). A placement's pool letters must be
+// laid down by a sequence of moves, each drawing from one player's original
+// rack (racks only shrink once the bag is empty; blanks are wildcards), each
+// filling its own span, and each leaving the run it touches a dictionary word
+// when that run has two or more tiles. Runs of one tile are allowed (they may
+// be justified perpendicularly). Player alternation, connectivity and
+// cross-group depletion are deliberately ignored, so this is a necessary
+// condition and the filtered set stays a superset of the reachable words.
+enum { WP_RACKDP_MAX_POOL = 10 };
+
+typedef struct WpRacks {
+  int counts[2][MACHINE_LETTER_MAX_VALUE + 1];
+  int blanks[2];
+  bool enabled;
+  const KWG *kwg;
+  uint32_t dawg_root;
+} WpRacks;
+
 typedef struct WpCtx {
   const BoardRows *lanes;
   int lane;
   const LaneMasks *prev;
   LaneMasks *cur;
   DictionaryWordList *list;
+  const WpRacks *racks;
+  long dp_rejected;
 } WpCtx;
+
+static bool wp_run_is_word(const WpRacks *racks, const MachineLetter *letters,
+                           int len) {
+  uint32_t node_index = racks->dawg_root;
+  for (int i = 0; i < len; i++) {
+    uint32_t next = 0;
+    bool accepts = false;
+    for (uint32_t j = node_index;; j++) {
+      const uint32_t node = kwg_node(racks->kwg, j);
+      if (kwg_node_tile(node) == letters[i]) {
+        next = kwg_node_arc_index_prefetch(node, racks->kwg);
+        accepts = kwg_node_accepts(node);
+        break;
+      }
+      if (kwg_node_is_end(node)) {
+        return false;
+      }
+    }
+    if (i == len - 1) {
+      return accepts;
+    }
+    if (next == 0) {
+      return false;
+    }
+    node_index = next;
+  }
+  return false;
+}
+
+static bool wp_group_fits_rack(const WpRacks *racks, int player,
+                               const MachineLetter *letters, int mask, int k) {
+  int need[MACHINE_LETTER_MAX_VALUE + 1] = {0};
+  int deficit = 0;
+  for (int i = 0; i < k; i++) {
+    if (mask & (1 << i)) {
+      need[letters[i]]++;
+    }
+  }
+  for (int ml = 0; ml <= MACHINE_LETTER_MAX_VALUE; ml++) {
+    if (need[ml] > racks->counts[player][ml]) {
+      deficit += need[ml] - racks->counts[player][ml];
+    }
+  }
+  return deficit <= racks->blanks[player];
+}
+
+// strip holds the placement's letters for [left, right]; fixed[pos] says the
+// square already holds a tile. Returns true when some single-rack move
+// sequence can lay down every pool letter.
+static bool wp_placement_realizable(const WpRacks *racks,
+                                    const MachineLetter *strip, int left,
+                                    int right, const bool *fixed) {
+  int pool_pos[WP_RACKDP_MAX_POOL];
+  MachineLetter pool_letters[WP_RACKDP_MAX_POOL];
+  int k = 0;
+  for (int pos = left; pos <= right; pos++) {
+    if (!fixed[pos]) {
+      if (k == WP_RACKDP_MAX_POOL) {
+        return true; // too many pool tiles to check cheaply: keep it
+      }
+      pool_pos[k] = pos;
+      pool_letters[k] = strip[pos];
+      k++;
+    }
+  }
+  if (k == 0) {
+    return true;
+  }
+  const int full = (1 << k) - 1;
+  bool fits[2][1 << WP_RACKDP_MAX_POOL];
+  for (int mask = 1; mask <= full; mask++) {
+    fits[0][mask] = wp_group_fits_rack(racks, 0, pool_letters, mask, k);
+    fits[1][mask] = wp_group_fits_rack(racks, 1, pool_letters, mask, k);
+  }
+  // run validity memo keyed by [start][end] within [left,right]
+  signed char run_valid[BOARD_DIM][BOARD_DIM];
+  memset(run_valid, -1, sizeof(run_valid));
+  bool reachable[1 << WP_RACKDP_MAX_POOL];
+  memset(reachable, 0, sizeof(bool) * (size_t)(1 << k));
+  reachable[0] = true;
+  for (int set = 0; set < full; set++) {
+    if (!reachable[set]) {
+      continue;
+    }
+    const int rest = full & ~set;
+    for (int group = rest; group > 0; group = (group - 1) & rest) {
+      if (!fits[0][group] && !fits[1][group]) {
+        continue;
+      }
+      const int after = set | group;
+      if (reachable[after]) {
+        continue;
+      }
+      // occupied after the move: fixed squares plus pool squares in `after`
+      bool occ[BOARD_DIM];
+      for (int pos = left; pos <= right; pos++) {
+        occ[pos] = fixed[pos];
+      }
+      int gmin = BOARD_DIM;
+      int gmax = -1;
+      for (int i = 0; i < k; i++) {
+        if (after & (1 << i)) {
+          occ[pool_pos[i]] = true;
+        }
+        if (group & (1 << i)) {
+          if (pool_pos[i] < gmin) {
+            gmin = pool_pos[i];
+          }
+          if (pool_pos[i] > gmax) {
+            gmax = pool_pos[i];
+          }
+        }
+      }
+      bool span_full = true;
+      for (int pos = gmin; pos <= gmax; pos++) {
+        if (!occ[pos]) {
+          span_full = false;
+          break;
+        }
+      }
+      if (!span_full) {
+        continue;
+      }
+      int rs = gmin;
+      int re = gmax;
+      while (rs > left && occ[rs - 1]) {
+        rs--;
+      }
+      while (re < right && occ[re + 1]) {
+        re++;
+      }
+      bool ok = true;
+      if (re > rs) {
+        if (run_valid[rs][re] < 0) {
+          run_valid[rs][re] = wp_run_is_word(racks, strip + rs, re - rs + 1);
+        }
+        ok = run_valid[rs][re] != 0;
+      }
+      if (ok) {
+        reachable[after] = true;
+      }
+    }
+  }
+  return reachable[full];
+}
 
 static void wp_record_word(WpCtx *ctx, const MachineLetter *strip,
                            int leftstrip, int rightstrip) {
   const BoardRow *row = &ctx->lanes->rows[ctx->lane];
+  if (ctx->racks != NULL && ctx->racks->enabled) {
+    bool fixed[BOARD_DIM];
+    for (int pos = 0; pos < BOARD_DIM; pos++) {
+      fixed[pos] = row->letters[pos] != ALPHABET_EMPTY_SQUARE_MARKER;
+    }
+    if (!wp_placement_realizable(ctx->racks, strip, leftstrip, rightstrip,
+                                 fixed)) {
+      ctx->dp_rejected++;
+      return;
+    }
+  }
   for (int pos = leftstrip; pos <= rightstrip; pos++) {
     if (row->letters[pos] == ALPHABET_EMPTY_SQUARE_MARKER) {
       ctx->cur->allowed[ctx->lane][pos] |= (uint32_t)1 << strip[pos];
@@ -621,6 +797,73 @@ static void wp_go_on(WpCtx *ctx, const KWG *kwg, Rack *rack, int current_col,
   }
 }
 
+
+// Non-playthrough words placed inside an empty run of a lane, constrained by
+// the perpendicular masks of each square (PROTOTYPE). A non-playthrough
+// placement occupies squares with no tile before or after it in its own lane,
+// so its squares never feed the masks consumed by the perpendicular lanes; it
+// only consumes them. Forward DAWG walk from each start square of each usable
+// run, taking pool letters allowed at that square.
+static void wp_npt_walk(WpCtx *ctx, const KWG *kwg, Rack *pool,
+                        uint32_t node_index, int pos, int last_pos,
+                        MachineLetter *word, int len) {
+  if (node_index == 0 || pos > last_pos || rack_is_empty(pool)) {
+    return;
+  }
+  for (uint32_t i = node_index;; i++) {
+    const uint32_t node = kwg_node(kwg, i);
+    const MachineLetter ml = kwg_node_tile(node);
+    if (ml != SEPARATION_MACHINE_LETTER &&
+        wp_letter_allowed(ctx->lanes, ctx->prev, ctx->lane, pos, ml)) {
+      const bool have_natural = rack_get_letter(pool, ml) > 0;
+      const bool have_blank = rack_get_letter(pool, BLANK_MACHINE_LETTER) > 0;
+      if (have_natural || have_blank) {
+        const MachineLetter consumed = have_natural ? ml : BLANK_MACHINE_LETTER;
+        rack_take_letter(pool, consumed);
+        word[len] = ml;
+        if (kwg_node_accepts(node) && len + 1 >= 2) {
+          dictionary_word_list_add_word(ctx->list, word, len + 1);
+        }
+        wp_npt_walk(ctx, kwg, pool, kwg_node_arc_index_prefetch(node, kwg),
+                    pos + 1, last_pos, word, len + 1);
+        rack_add_letter(pool, consumed);
+      }
+    }
+    if (kwg_node_is_end(node)) {
+      break;
+    }
+  }
+}
+
+static void wp_add_nonplaythrough_words_from_lane(WpCtx *ctx, const KWG *kwg,
+                                                  Rack *pool) {
+  const BoardRow *row = &ctx->lanes->rows[ctx->lane];
+  const uint32_t dawg_root = kwg_get_dawg_root_node_index(kwg);
+  if (dawg_root == 0) {
+    return;
+  }
+  MachineLetter word[BOARD_DIM];
+  int pos = 0;
+  while (pos < BOARD_DIM) {
+    if (row->letters[pos] != ALPHABET_EMPTY_SQUARE_MARKER) {
+      pos++;
+      continue;
+    }
+    int end = pos;
+    while (end + 1 < BOARD_DIM &&
+           row->letters[end + 1] == ALPHABET_EMPTY_SQUARE_MARKER) {
+      end++;
+    }
+    // Usable squares: not adjacent to a tile in this lane.
+    const int first = pos == 0 ? 0 : pos + 1;
+    const int last = end == BOARD_DIM - 1 ? end : end - 1;
+    for (int start = first; start + 1 <= last; start++) {
+      wp_npt_walk(ctx, kwg, pool, dawg_root, start, last, word, 0);
+    }
+    pos = end + 1;
+  }
+}
+
 static void wp_add_playthrough_words_from_lane(WpCtx *ctx, const KWG *kwg,
                                                Rack *pool) {
   const BoardRow *board_row = &ctx->lanes->rows[ctx->lane];
@@ -679,6 +922,25 @@ void generate_possible_words_refined(const Game *game, const KWG *override_kwg,
     }
   }
   BoardRows *lanes = wp_lanes_create(game);
+  WpRacks racks;
+  memset(&racks, 0, sizeof(racks));
+  racks.kwg = kwg;
+  racks.dawg_root = kwg_get_dawg_root_node_index(kwg);
+  // Only sound with an empty bag: unseen tiles could otherwise reach either
+  // rack. WORDPRUNE_RACKDP enables the prototype filter.
+  racks.enabled = getenv("WORDPRUNE_RACKDP") != NULL &&
+                  bag_get_letters(bag) == 0 && racks.dawg_root != 0;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const Rack *rack = player_get_rack(game_get_player(game, player_index));
+    for (int ml = 0; ml < ld_size && ml <= MACHINE_LETTER_MAX_VALUE; ml++) {
+      racks.counts[player_index][ml] = rack_get_letter(rack, ml);
+    }
+    racks.blanks[player_index] = rack_get_letter(rack, BLANK_MACHINE_LETTER);
+    racks.counts[player_index][BLANK_MACHINE_LETTER] = 0;
+  }
+  if (stats != NULL) {
+    stats->dp_rejected = 0;
+  }
   int max_nonplaythrough_spaces = 0;
   for (int i = 0; i < lanes->num_rows; i++) {
     const int spaces = max_nonplaythrough_spaces_in_row(&lanes->rows[i]);
@@ -707,15 +969,26 @@ void generate_possible_words_refined(const Game *game, const KWG *override_kwg,
   for (int pass = 0; pass < max_passes; pass++) {
     memset(cur, 0, sizeof(LaneMasks));
     DictionaryWordList *temp = dictionary_word_list_create();
-    for (int i = 0; i < dictionary_word_list_get_count(nonplaythrough); i++) {
-      const DictionaryWord *w = dictionary_word_list_get_word(nonplaythrough, i);
-      dictionary_word_list_add_word(temp, dictionary_word_get_word(w),
-                                    dictionary_word_get_length(w));
+    const bool npt_per_lane = getenv("WORDPRUNE_NPT") != NULL;
+    if (!npt_per_lane) {
+      for (int i = 0; i < dictionary_word_list_get_count(nonplaythrough);
+           i++) {
+        const DictionaryWord *w =
+            dictionary_word_list_get_word(nonplaythrough, i);
+        dictionary_word_list_add_word(temp, dictionary_word_get_word(w),
+                                      dictionary_word_get_length(w));
+      }
     }
     for (int lane = 0; lane < lanes->num_rows; lane++) {
       WpCtx ctx = {.lanes = lanes, .lane = lane, .prev = prev, .cur = cur,
-                   .list = temp};
+                   .list = temp, .racks = &racks, .dp_rejected = 0};
+      if (npt_per_lane) {
+        wp_add_nonplaythrough_words_from_lane(&ctx, kwg, &pool);
+      }
       wp_add_playthrough_words_from_lane(&ctx, kwg, &pool);
+      if (stats != NULL) {
+        stats->dp_rejected += ctx.dp_rejected;
+      }
     }
     DictionaryWordList *unique = dictionary_word_list_create();
     dictionary_word_list_sort(temp);
