@@ -82,6 +82,9 @@ double config_get_p2_utility_spread_scale(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);
+// Fills peg_args with the peg command's arguments (defaults plus any -peg*
+// settings), leaving the poll and only/protect move sets unset.
+void config_fill_peg_args(Config *config, PegArgs *peg_args);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 GameHistory *config_get_game_history(const Config *config);
