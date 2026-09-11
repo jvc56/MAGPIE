@@ -299,6 +299,7 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
                                       : move_get_score(move);
     return;
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_UNORDERED:
     // No Move object; best_move_equity_or_score is already the best score.
     gen->cutoff_equity_or_score = gen->best_move_equity_or_score;
     return;
@@ -390,7 +391,8 @@ static inline void update_best_move_or_insert_into_movelist(
       gen->threshold_exceeded = true;
     }
     break;
-  case MOVE_RECORD_BEST_SMALL:;
+  case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_UNORDERED:;
     SmallMove *best_sm = small_move_list_get_spare_move(gen->move_list);
     set_small_play_for_record(best_sm, move_type, leftstrip, rightstrip, score,
                               start_row, start_col, tiles_played, dir, strip);
@@ -464,6 +466,7 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BEST_SMALL_UNORDERED:
     return false;
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
@@ -487,6 +490,7 @@ static inline void record_exchange(MoveGen *gen) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BEST_SMALL_UNORDERED:
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
   case MOVE_RECORD_BEST:
@@ -782,9 +786,10 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_UNORDERED:
     log_fatal("update_best_move_or_insert_into_movelist_wmp called with "
-              "MOVE_RECORD_ALL_SMALL, MOVE_RECORD_TILES_PLAYED, or "
-              "MOVE_RECORD_BEST_SMALL");
+              "MOVE_RECORD_ALL_SMALL, MOVE_RECORD_TILES_PLAYED, "
+              "MOVE_RECORD_BEST_SMALL, or MOVE_RECORD_BEST_SMALL_UNORDERED");
 #if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
     __builtin_unreachable();
 #else
@@ -3252,10 +3257,13 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // Reset the move list
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-      gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
-    if (gen->move_record_type == MOVE_RECORD_BEST_SMALL &&
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL ||
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL_UNORDERED) {
+    if ((gen->move_record_type == MOVE_RECORD_BEST_SMALL ||
+         gen->move_record_type == MOVE_RECORD_BEST_SMALL_UNORDERED) &&
         gen->move_sort_type != MOVE_SORT_SCORE) {
-      log_fatal("MOVE_RECORD_BEST_SMALL only supports MOVE_SORT_SCORE");
+      log_fatal("MOVE_RECORD_BEST_SMALL(_UNORDERED) only supports "
+                "MOVE_SORT_SCORE");
     }
     small_move_list_reset(gen->move_list);
   } else {
@@ -3291,7 +3299,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // read it, so skip the per-node 120-byte copy for them.
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
       gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
-      gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
+      gen->move_record_type != MOVE_RECORD_BEST_SMALL &&
+      gen->move_record_type != MOVE_RECORD_BEST_SMALL_UNORDERED) {
     board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
   }
 
@@ -3629,6 +3638,7 @@ void gen_record_pass(MoveGen *gen) {
     // Pass doesn't use any tiles — nothing to record.
     break;
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_UNORDERED:
     if (gen->conservation_stuck_frac > 0.0F) {
       // Pass is not reachable through the anchor-based traversal above, so
       // it is compared here against the best tile move found (or against
@@ -3654,7 +3664,12 @@ void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
-      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+      gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
+      gen->move_record_type == MOVE_RECORD_BEST_SMALL_UNORDERED) {
+    // BEST_SMALL_UNORDERED shares ALL_SMALL's traversal (recursive_gen_small/
+    // go_on_small, unordered and unbounded -- no shadow pass, no anchor
+    // heap); only how a candidate is recorded differs, in
+    // update_best_move_or_insert_into_movelist's shared BEST_SMALL case.
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
       gen->tiles_played_bv = args->initial_tiles_bv;
       gen->stop_on_threshold = true;

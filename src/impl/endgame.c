@@ -2035,17 +2035,24 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       worker->move_list->count = 1;
       nplays = 1;
     } else {
-      // MOVE_RECORD_BEST_SMALL prunes during generation via shadow upper
-      // bounds, producing a SmallMove directly without full enumeration. When
-      // conserve is set, the running best is tracked by conservation-adjusted
-      // value instead of raw score (conservation_stuck_frac), and the pass
-      // candidate -- not reachable through the anchor-based traversal -- is
-      // folded in via conservation_pass_penalty, so the winning move already
-      // accounts for conservation with no separate scan needed afterward.
+      // Not conserving: keep the shadow-pruned MOVE_RECORD_BEST_SMALL
+      // lookup, which skips whole anchors that can't beat the current best
+      // without ever generating their candidates -- cheaper than exhaustive
+      // traversal whenever there's more than a handful of moves. Only when
+      // conserve is set does the running best need MOVE_RECORD_BEST_SMALL_
+      // UNORDERED's unbounded recursive_gen_small/go_on_small traversal (no
+      // shadow pass, no anchor heap): the running best there is tracked by
+      // conservation-adjusted value instead of raw score
+      // (conservation_stuck_frac), and the pass candidate -- not reachable
+      // through the traversal -- is folded in via conservation_pass_penalty.
+      // A conservation-adjusted value can be lower than another candidate's
+      // raw score, so the shadow bound (computed on raw score) would not
+      // safely prune here.
       const MoveGenArgs pargs = {
           .game = worker->game_copy,
           .move_list = worker->move_list,
-          .move_record_type = MOVE_RECORD_BEST_SMALL,
+          .move_record_type = conserve ? MOVE_RECORD_BEST_SMALL_UNORDERED
+                                       : MOVE_RECORD_BEST_SMALL,
           .move_sort_type = MOVE_SORT_SCORE,
           .override_kwg = worker_get_pruned_kwg(worker, stm_idx_p),
           .eq_margin_movegen = 0,

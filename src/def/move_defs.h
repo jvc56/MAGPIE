@@ -23,6 +23,11 @@ typedef enum {
   MOVE_RECORD_ALL_SMALL,
   MOVE_RECORD_TILES_PLAYED,
   MOVE_RECORD_BEST_SMALL,
+  // Like MOVE_RECORD_BEST_SMALL but skips gen_shadow_small's per-anchor
+  // upper-bound pass entirely: it runs the same unordered, unbounded
+  // recursive_gen_small/go_on_small traversal MOVE_RECORD_ALL_SMALL uses,
+  // just tracking a running best instead of materializing every candidate.
+  MOVE_RECORD_BEST_SMALL_UNORDERED,
 } move_record_t;
 
 #define MOVE_SORT_EQUITY_STRING "equity"

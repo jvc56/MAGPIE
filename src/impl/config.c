@@ -6997,6 +6997,7 @@ void string_builder_add_move_record_type(StringBuilder *sb,
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BEST_SMALL_UNORDERED:
     log_fatal("cannot serialize internal move record type: %d", record_type);
   }
 }
