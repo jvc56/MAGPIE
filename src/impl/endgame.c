@@ -142,10 +142,14 @@ struct EndgameCtx {
   // Per-root-child pruned lexicons (see RepruneSlot). NULL when disabled.
   struct RepruneSlot *reprune_slots;
   bool reprune_optim;
+  bool reprune_stats;
+  uint64_t reprune_min_nodes;
   _Atomic size_t reprune_bytes;
   _Atomic int reprune_builds;
   _Atomic uint64_t reprune_uses;
   _Atomic uint64_t reprune_build_ns;
+  _Atomic uint64_t reprune_gen_specialized;
+  _Atomic uint64_t reprune_gen_total;
   double soft_time_limit;
   double hard_time_limit;
 
@@ -560,10 +564,13 @@ static inline const KWG *solver_get_pruned_kwg(const EndgameCtx *solver,
 #define REPRUNE_TABLE_SIZE 8192
 #define REPRUNE_MIN_CHILD_DEPTH 3
 #define REPRUNE_BYTES_BUDGET ((size_t)64 << 20)
+// Below this many unseen tiles a solve is short enough that the per-root-child
+// bookkeeping costs more than the narrower lexicon saves.
+#define REPRUNE_MIN_UNSEEN_TILES 8
 #define REPRUNE_MAX_PROBES 16
 // Build a child lexicon only once its subtree in a previous iteration was at
 // least this many nodes; the next iteration's subtree is several times larger.
-#define REPRUNE_MIN_NODES 32768
+#define REPRUNE_MIN_NODES 4096
 
 typedef struct RepruneSlot {
   _Atomic uint64_t key; // tiny_move + 1; 0 = empty
@@ -577,11 +584,17 @@ static void reprune_slots_clear(EndgameCtx *solver) {
     return;
   }
   const int builds = atomic_load(&solver->reprune_builds);
-  if (builds > 0 && getenv("MAGPIE_EG_REPRUNE_STATS") != NULL) {
-    fprintf(stderr, "REPRUNE builds=%d bytes=%zu uses=%llu build_ms=%.1f\n",
+  if (builds > 0 && solver->reprune_stats) {
+    const uint64_t gen_total = atomic_load(&solver->reprune_gen_total);
+    const uint64_t gen_spec = atomic_load(&solver->reprune_gen_specialized);
+    fprintf(stderr,
+            "REPRUNE builds=%d bytes=%zu uses=%llu build_ms=%.1f "
+            "gen_specialized=%llu gen_total=%llu coverage=%.1f%%\n",
             builds, atomic_load(&solver->reprune_bytes),
             (unsigned long long)atomic_load(&solver->reprune_uses),
-            (double)atomic_load(&solver->reprune_build_ns) / 1e6);
+            (double)atomic_load(&solver->reprune_build_ns) / 1e6,
+            (unsigned long long)gen_spec, (unsigned long long)gen_total,
+            gen_total > 0 ? 100.0 * (double)gen_spec / (double)gen_total : 0.0);
   }
   for (int i = 0; i < REPRUNE_TABLE_SIZE; i++) {
     kwg_destroy(atomic_load(&solver->reprune_slots[i].kwg));
@@ -591,10 +604,21 @@ static void reprune_slots_clear(EndgameCtx *solver) {
   atomic_store(&solver->reprune_builds, 0);
   atomic_store(&solver->reprune_uses, 0);
   atomic_store(&solver->reprune_build_ns, 0);
+  atomic_store(&solver->reprune_gen_specialized, 0);
+  atomic_store(&solver->reprune_gen_total, 0);
 }
 
 static inline const KWG *worker_get_pruned_kwg(const EndgameCtxWorker *worker,
                                                int player_index) {
+  if (worker->solver->reprune_stats) {
+    EndgameCtx *solver = (EndgameCtx *)worker->solver;
+    atomic_fetch_add_explicit(&solver->reprune_gen_total, 1,
+                              memory_order_relaxed);
+    if (worker->subtree_kwg != NULL) {
+      atomic_fetch_add_explicit(&solver->reprune_gen_specialized, 1,
+                                memory_order_relaxed);
+    }
+  }
   if (worker->subtree_kwg != NULL) {
     return worker->subtree_kwg;
   }
@@ -606,7 +630,15 @@ static inline const KWG *worker_get_pruned_kwg(const EndgameCtxWorker *worker,
 static RepruneSlot *reprune_slot_lookup(EndgameCtx *solver,
                                         const SmallMove *small_move) {
   const uint64_t key = small_move->tiny_move + 1;
-  const uint64_t hash = key * 0x9E3779B97F4A7C15ULL;
+  // Full-width finalizer: the move's tile letters live above bit 18, so a bare
+  // multiply would leave the low bucket bits depending only on row/column/
+  // direction and every move from one square would share a bucket.
+  uint64_t hash = key * 0x9E3779B97F4A7C15ULL;
+  hash ^= hash >> 30;
+  hash *= 0xBF58476D1CE4E5B9ULL;
+  hash ^= hash >> 27;
+  hash *= 0x94D049BB133111EBULL;
+  hash ^= hash >> 31;
   for (int probe = 0; probe < REPRUNE_MAX_PROBES; probe++) {
     RepruneSlot *slot = &solver->reprune_slots[(hash + (uint64_t)probe) &
                                                (REPRUNE_TABLE_SIZE - 1)];
@@ -633,20 +665,13 @@ static const KWG *reprune_slot_kwg(EndgameCtxWorker *worker,
   EndgameCtx *solver = worker->solver;
   const int state = atomic_load_explicit(&slot->state, memory_order_acquire);
   if (state == 2) {
-    atomic_fetch_add_explicit(&solver->reprune_uses, 1, memory_order_relaxed);
+    if (solver->reprune_stats) {
+      atomic_fetch_add_explicit(&solver->reprune_uses, 1, memory_order_relaxed);
+    }
     return atomic_load_explicit(&slot->kwg, memory_order_acquire);
   }
-  static uint64_t min_nodes = REPRUNE_MIN_NODES; // prototype knob
-  static bool min_nodes_read = false;
-  if (!min_nodes_read) {
-    const char *env = getenv("MAGPIE_EG_REPRUNE_MIN_NODES");
-    if (env != NULL) {
-      min_nodes = strtoull(env, NULL, 10);
-    }
-    min_nodes_read = true;
-  }
-  if (state != 0 ||
-      atomic_load_explicit(&slot->nodes, memory_order_relaxed) < min_nodes) {
+  if (state != 0 || atomic_load_explicit(&slot->nodes, memory_order_relaxed) <
+                        solver->reprune_min_nodes) {
     return NULL;
   }
   int expected_state = 0;
@@ -676,7 +701,6 @@ static const KWG *reprune_slot_kwg(EndgameCtxWorker *worker,
                  (build_end.tv_nsec - build_start.tv_nsec)));
   atomic_store_explicit(&slot->kwg, kwg, memory_order_release);
   atomic_store_explicit(&slot->state, 2, memory_order_release);
-  atomic_fetch_add_explicit(&solver->reprune_uses, 1, memory_order_relaxed);
   return kwg;
 }
 
@@ -842,6 +866,11 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   reprune_slots_clear(es);
   const char *reprune_env = getenv("MAGPIE_EG_REPRUNE");
   const bool reprune_enabled = reprune_env == NULL || reprune_env[0] != '0';
+  const char *min_nodes_env = getenv("MAGPIE_EG_REPRUNE_MIN_NODES");
+  es->reprune_min_nodes = min_nodes_env != NULL
+                              ? strtoull(min_nodes_env, NULL, 10)
+                              : REPRUNE_MIN_NODES;
+  es->reprune_stats = getenv("MAGPIE_EG_REPRUNE_STATS") != NULL;
   es->reprune_optim = false;
   kwg_destroy(es->pruned_kwgs[0]);
   kwg_destroy(es->pruned_kwgs[1]);
@@ -883,7 +912,12 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
           shared_kwg) {
         generate_possible_words_with_cross_checks(endgame_args->game, full_kwg,
                                                   word_list);
-        es->reprune_optim = reprune_enabled;
+        es->reprune_optim =
+            reprune_enabled &&
+            bag_get_letters(game_get_bag(endgame_args->game)) +
+                    rack_get_total_letters(player_get_rack(player)) +
+                    rack_get_total_letters(player_get_rack(opponent)) >=
+                REPRUNE_MIN_UNSEEN_TILES;
       } else {
         generate_possible_words(endgame_args->game, full_kwg, word_list);
       }
