@@ -795,6 +795,29 @@ static inline bool small_move_is_pass(const SmallMove *sm) {
   return sm->tiny_move == 0;
 }
 
+// Weights for the endgame's stuck-tile conservation heuristic: when the
+// opponent has unplayable ("stuck") tiles, a greedy playout favors holding
+// tiles over playing them. The penalty scales with how many tiles a move
+// plays and their face value, prorated by how stuck the opponent's rack is.
+#define SMALL_MOVE_CONSERVATION_TILE_WEIGHT 7
+#define SMALL_MOVE_CONSERVATION_VALUE_WEIGHT 2
+
+static inline int small_move_get_conservation_bonus(
+    const SmallMove *sm, const LetterDistribution *ld, float opp_stuck_frac) {
+  int n = sm->metadata.tiles_played;
+  int face_value = 0;
+  uint64_t tm = sm->tiny_move;
+  for (int i = 0; i < n; i++) {
+    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml =
+        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
+    face_value += equity_to_int(ld_get_score(ld, ml));
+  }
+  return (int)((float)(SMALL_MOVE_CONSERVATION_TILE_WEIGHT * n +
+                       SMALL_MOVE_CONSERVATION_VALUE_WEIGHT * face_value) *
+               opp_stuck_frac);
+}
+
 // Sort function from highest to lowest value:
 static inline int compare_small_moves_by_estimated_value(const void *a,
                                                          const void *b) {

@@ -134,6 +134,16 @@ typedef struct MoveGen {
   Equity best_move_equity_or_score;
   Equity eq_margin_movegen;
 
+  // MOVE_RECORD_BEST_SMALL only: when > 0, the running best is tracked by
+  // (score - conservation bonus) instead of raw score, and a pass move (not
+  // reachable by the anchor-based traversal) is compared against that same
+  // running best using conservation_pass_penalty as its own adjustment, so
+  // the two candidate kinds are found with the identical single-pass
+  // generator instead of enumerating everything and scanning it afterward.
+  // 0 (the default) reproduces plain best-by-score.
+  float conservation_stuck_frac;
+  int conservation_pass_penalty;
+
   // Inference cutoff fields
   Equity target_equity_cutoff;
   int target_leave_size;
@@ -291,6 +301,10 @@ typedef struct MoveGenArgs {
   // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
   // Movegen ORs further discoveries in. Default 0 (no known tiles).
   uint64_t initial_tiles_bv;
+  // MOVE_RECORD_BEST_SMALL only; see the MoveGen struct fields of the same
+  // name. Default 0 disables the adjustment.
+  float conservation_stuck_frac;
+  int conservation_pass_penalty;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);

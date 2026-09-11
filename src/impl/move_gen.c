@@ -395,6 +395,15 @@ static inline void update_best_move_or_insert_into_movelist(
     set_small_play_for_record(best_sm, move_type, leftstrip, rightstrip, score,
                               start_row, start_col, tiles_played, dir, strip);
     move_equity_or_score = score;
+    if (gen->conservation_stuck_frac > 0.0F) {
+      // score (and best_move_equity_or_score, and the shadow bounds this is
+      // compared against) are still in scaled Equity units here -- the
+      // Equity-to-int conversion happens below in set_small_play_for_record.
+      // small_move_get_conservation_bonus returns plain point units, so it
+      // must be scaled back up before subtracting.
+      move_equity_or_score -= int_to_equity(small_move_get_conservation_bonus(
+          best_sm, &gen->ld, gen->conservation_stuck_frac));
+    }
     if (move_equity_or_score > gen->best_move_equity_or_score) {
       need_to_update_best_move_equity_or_score = true;
       gen->best_move_equity_or_score = move_equity_or_score;
@@ -3137,6 +3146,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->eq_margin_movegen = args->eq_margin_movegen;
   gen->target_equity_cutoff = args->target_equity;
   gen->target_leave_size = args->target_leave_size_for_exchange_cutoff;
+  gen->conservation_stuck_frac = args->conservation_stuck_frac;
+  gen->conservation_pass_penalty = args->conservation_pass_penalty;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
@@ -3630,7 +3641,18 @@ void gen_record_pass(MoveGen *gen) {
     // Pass doesn't use any tiles — nothing to record.
     break;
   case MOVE_RECORD_BEST_SMALL:
-    if (gen->best_move_equity_or_score < EQUITY_PASS_VALUE) {
+    if (gen->conservation_stuck_frac > 0.0F) {
+      // Pass is not reachable through the anchor-based traversal above, so
+      // it is compared here against the best tile move found (or against
+      // EQUITY_INITIAL_VALUE if none was), using strict '>' so a tie goes to
+      // the tile move -- matching the order a full enumeration would find
+      // them in, since every tile move is generated before this pass check.
+      if (int_to_equity(-gen->conservation_pass_penalty) >
+          gen->best_move_equity_or_score) {
+        small_move_set_as_pass(gen->move_list->small_moves[0]);
+        gen->move_list->count = 1;
+      }
+    } else if (gen->best_move_equity_or_score < EQUITY_PASS_VALUE) {
       // No scoring play was found; result is a pass.
       small_move_set_as_pass(gen->move_list->small_moves[0]);
       gen->move_list->count = 1;

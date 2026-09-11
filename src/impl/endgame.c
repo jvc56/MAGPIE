@@ -74,9 +74,6 @@ enum {
   // usually happen within the first few moves, so most nodes never pay for
   // a full sort of the move list.
   LAZY_SELECTION_LIMIT = 8,
-  // Conservation bonus weights: penalize playing tiles when opponent is stuck
-  CONSERVATION_TILE_WEIGHT = 7,
-  CONSERVATION_VALUE_WEIGHT = 2,
   // Random noise range for thread jitter, centered around zero
   THREAD_JITTER_NOISE = 8,
   // Max top-K ranked PVLines built for the per-ply display/callback.
@@ -1673,26 +1670,6 @@ static int compute_played_tiles_face_value(const SmallMove *sm,
   return face_value;
 }
 
-// Conservation bonus: penalize playing tiles when opponent has stuck tiles.
-// Returns (CONSERVATION_TILE_WEIGHT * tile_count +
-//          CONSERVATION_VALUE_WEIGHT * face_value) * opp_stuck_frac.
-static int compute_conservation_bonus(const SmallMove *sm,
-                                      const LetterDistribution *ld,
-                                      float opp_stuck_frac) {
-  int n = sm->metadata.tiles_played;
-  int face_value = 0;
-  uint64_t tm = sm->tiny_move;
-  for (int i = 0; i < n; i++) {
-    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml =
-        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
-    face_value += equity_to_int(ld_get_score(ld, ml));
-  }
-  return (int)((float)(CONSERVATION_TILE_WEIGHT * n +
-                       CONSERVATION_VALUE_WEIGHT * face_value) *
-               opp_stuck_frac);
-}
-
 // Thread jitter for ABDADA search diversity: each thread gets a unique bias
 // based on tiles played. Odd threads favor aggressive play, even threads favor
 // conservative play. Returns 0 for single-threaded or thread 0.
@@ -1884,8 +1861,8 @@ void assign_estimates(EndgameCtxWorker *worker, int move_count,
     // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
     int conservation_bonus = 0;
     if (opp_stuck_frac > 0.0F && is_non_pass_partial) {
-      conservation_bonus =
-          compute_conservation_bonus(current_move, est_ld, opp_stuck_frac);
+      conservation_bonus = small_move_get_conservation_bonus(
+          current_move, est_ld, opp_stuck_frac);
     }
 
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
@@ -2018,12 +1995,37 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     int stm_idx_p = game_get_player_on_turn_index(worker->game_copy);
     const Rack *stm_rack_p =
         player_get_rack(game_get_player(worker->game_copy, stm_idx_p));
+    // When opponent has stuck tiles and solving player is on turn, prefer
+    // conservation: penalize playing many tiles / high-value tiles. With
+    // conserve false the adjustment below is a no-op, so the single-pass
+    // best-score generator always finds the identical winner a full
+    // enumeration and scan would -- there is no separate plain-best-score
+    // path to fall back to.
+    bool conserve = opp_stuck_frac > 0.0F && stm_idx_p == solving_player;
+
+    // Pre-compute voluntary pass penalty for conservation mode.
+    // By passing instead of going out, the game heads toward a 6-zero
+    // ending where both players lose 1x their rack value, instead of
+    // gaining 2x opponent's rack. Cost: (own_rack + opp_rack) * stuck_frac.
+    int pass_penalty = 0;
+    if (conserve && worker->solver->forced_pass_bypass) {
+      const LetterDistribution *ld = game_get_ld(worker->game_copy);
+      const Rack *opp_rack =
+          player_get_rack(game_get_player(worker->game_copy, 1 - stm_idx_p));
+      pass_penalty =
+          (int)((float)(equity_to_int(rack_get_score(ld, stm_rack_p)) +
+                        equity_to_int(rack_get_score(ld, opp_rack))) *
+                opp_stuck_frac);
+    }
+
     int nplays;
     if (stm_rack_p->number_of_letters == 1) {
       // Single-tile fast path: cross-set scan instead of KWG traversal.
       // generate_single_tile_plays allocs to the arena; copy the result into
       // move_list and immediately pop the arena so the per-node dealloc in
-      // abdada_negamax stays correct.
+      // abdada_negamax stays correct. There is only ever one candidate here,
+      // so conservation adjustment (which only matters when choosing among
+      // alternatives) cannot change the outcome.
       size_t arena_before = worker->small_move_arena->size;
       generate_single_tile_plays(worker);
       const SmallMove *arena_sm =
@@ -2032,34 +2034,25 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
       worker->move_list->count = 1;
       nplays = 1;
-    } else if (opp_stuck_frac == 0.0F) {
-      // No stuck tiles: only the highest-scoring play is needed.
+    } else {
       // MOVE_RECORD_BEST_SMALL prunes during generation via shadow upper
-      // bounds, producing a SmallMove directly without full enumeration.
+      // bounds, producing a SmallMove directly without full enumeration. When
+      // conserve is set, the running best is tracked by conservation-adjusted
+      // value instead of raw score (conservation_stuck_frac), and the pass
+      // candidate -- not reachable through the anchor-based traversal -- is
+      // folded in via conservation_pass_penalty, so the winning move already
+      // accounts for conservation with no separate scan needed afterward.
       const MoveGenArgs pargs = {
           .game = worker->game_copy,
           .move_list = worker->move_list,
           .move_record_type = MOVE_RECORD_BEST_SMALL,
           .move_sort_type = MOVE_SORT_SCORE,
-          .override_kwg = worker_get_pruned_kwg(
-              worker, game_get_player_on_turn_index(worker->game_copy)),
+          .override_kwg = worker_get_pruned_kwg(worker, stm_idx_p),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
           .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      };
-      generate_moves(&pargs);
-      nplays = worker->move_list->count;
-    } else {
-      const MoveGenArgs pargs = {
-          .game = worker->game_copy,
-          .move_list = worker->move_list,
-          .move_record_type = MOVE_RECORD_ALL_SMALL,
-          .move_sort_type = MOVE_SORT_SCORE,
-          .override_kwg = worker_get_pruned_kwg(
-              worker, game_get_player_on_turn_index(worker->game_copy)),
-          .eq_margin_movegen = 0,
-          .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+          .conservation_stuck_frac = conserve ? opp_stuck_frac : 0.0F,
+          .conservation_pass_penalty = pass_penalty,
       };
       generate_moves(&pargs);
       nplays = worker->move_list->count;
@@ -2075,53 +2068,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       break; // would be 6 consecutive zeros
     }
 
-    // Pick best move by adjusted score.
-    // When opponent has stuck tiles and solving player is on turn,
-    // prefer conservation: penalize playing many tiles / high-value tiles.
-    int best_idx = 0;
-    int playout_on_turn = game_get_player_on_turn_index(worker->game_copy);
-    bool conserve = opp_stuck_frac > 0.0F && playout_on_turn == solving_player;
-
-    // Pre-compute voluntary pass penalty for conservation mode.
-    // By passing instead of going out, the game heads toward a 6-zero
-    // ending where both players lose 1x their rack value, instead of
-    // gaining 2x opponent's rack. Cost: (own_rack + opp_rack) * stuck_frac.
-    int pass_penalty = 0;
-    if (conserve && worker->solver->forced_pass_bypass) {
-      const LetterDistribution *ld = game_get_ld(worker->game_copy);
-      const Rack *own_rack =
-          player_get_rack(game_get_player(worker->game_copy, playout_on_turn));
-      const Rack *opp_rack = player_get_rack(
-          game_get_player(worker->game_copy, 1 - playout_on_turn));
-      pass_penalty =
-          (int)((float)(equity_to_int(rack_get_score(ld, own_rack)) +
-                        equity_to_int(rack_get_score(ld, opp_rack))) *
-                opp_stuck_frac);
-    }
-
-    int best_adj = INT32_MIN;
-    for (int j = 0; j < nplays; j++) {
-      const SmallMove *sm = worker->move_list->small_moves[j];
-      int score = small_move_get_score(sm);
-      int adj;
-      if (conserve) {
-        if (small_move_is_pass(sm)) {
-          adj = score - pass_penalty;
-        } else {
-          int conservation_bonus = compute_conservation_bonus(
-              sm, game_get_ld(worker->game_copy), opp_stuck_frac);
-          adj = score - conservation_bonus;
-        }
-      } else {
-        adj = score;
-      }
-      if (adj > best_adj) {
-        best_adj = adj;
-        best_idx = j;
-      }
-    }
-
-    SmallMove best_sm = *(worker->move_list->small_moves[best_idx]);
+    // Both paths above always leave the (possibly conservation-adjusted)
+    // winner in slot 0.
+    SmallMove best_sm = *(worker->move_list->small_moves[0]);
     small_move_to_move(worker->move_list->spare_move, &best_sm,
                        game_get_board(worker->game_copy));
 
