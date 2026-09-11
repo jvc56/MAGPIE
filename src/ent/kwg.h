@@ -41,15 +41,7 @@ static inline uint64_t kwg_get_hash(const KWG *kwg) {
   return hash;
 }
 
-// Prototype instrumentation: every GADDAG/DAWG node read, single-thread only.
-extern uint64_t kwg_node_visits;
-extern uint64_t mg_sibling_scans;
-extern uint64_t mg_sibling_pass;
-extern uint64_t mg_go_on_calls;
-extern uint64_t mg_playthrough_scans;
-
 static inline uint32_t kwg_node(const KWG *kwg, uint32_t node_index) {
-  kwg_node_visits++;
   return kwg->nodes[node_index];
 }
 

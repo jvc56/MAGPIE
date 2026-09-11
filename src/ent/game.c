@@ -1,7 +1,5 @@
 #include "game.h"
 
-uint64_t kwg_node_visits = 0;
-
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/game_defs.h"
