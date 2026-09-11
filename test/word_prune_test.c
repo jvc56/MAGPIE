@@ -1,8 +1,10 @@
 #include "word_prune_test.h"
 
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
-#include "../src/ent/board.h"
 #include "../src/ent/dictionary_word.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/game.h"
@@ -18,6 +20,7 @@
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
