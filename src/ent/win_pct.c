@@ -20,6 +20,10 @@ struct WinPct {
 
 const char *win_pct_get_name(const WinPct *wp) { return wp->name; }
 
+int win_pct_get_max_tiles_unseen(const WinPct *wp) {
+  return (int)wp->max_tiles_unseen;
+}
+
 float win_pct_get(const WinPct *wp, int spread_plus_leftover,
                   unsigned int game_unseen_tiles) {
   if (spread_plus_leftover > wp->max_spread) {
