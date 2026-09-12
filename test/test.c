@@ -207,6 +207,10 @@ static TestEntry on_demand_test_table[] = {
     {"pcbench", test_play_chooser_benchmark},
     // Simmed inference (simulation-based opponent-leave inference)
     {"simmedinf_exchange", test_simmedinf},
+    {"simmedinf_mc_weight",
+     test_simmedinf_mc_weight_is_composition_independent},
+    {"simmedinf_force_ins_eq", test_simmedinf_force_inserted_equity},
+    {"simmedinf_exch_split", test_simmedinf_exchange_leave_split},
     {"simmedinf", test_simmedinf_benchmark},
     {"qintar", test_qintar_simmedinf},
     {"dings", test_dings_simmedinf},

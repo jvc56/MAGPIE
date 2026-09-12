@@ -2,6 +2,9 @@
 #define SIMMEDINF_TEST_H
 
 void test_simmedinf(void);
+void test_simmedinf_mc_weight_is_composition_independent(void);
+void test_simmedinf_force_inserted_equity(void);
+void test_simmedinf_exchange_leave_split(void);
 void test_qintar_simmedinf(void);
 void test_dings_simmedinf(void);
 void test_qi_simmedinf(void);

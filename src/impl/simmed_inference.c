@@ -20,6 +20,7 @@
 #include "../compat/ctime.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/rack_defs.h"
@@ -57,6 +58,12 @@
 // Standard Scrabble has 100 tiles; even with small racks and bags this fits.
 #define MAX_SAMPLE_POOL 200
 
+// Weighted-draw-count scale for Monte Carlo-sampled leaves (see
+// record_candidate_leave). Only needs to be large enough that compute_weight's
+// logistic output survives rounding to an integer without small weights
+// collapsing to zero.
+#define MC_SAMPLE_WEIGHT_SCALE 1000000ULL
+
 // ── Internal context
 // ──────────────────────────────────────────────────────────
 
@@ -93,6 +100,20 @@ typedef struct {
   int target_index;
   int ld_size;
   int leave_size;
+
+  // True when current_leave comes from sample_leave_mc (bag_as_rack is never
+  // depleted there), false for exhaustive enumeration (bag_as_rack tracks
+  // pool-minus-current-leave throughout exhaust_leaves's recursion) and for
+  // the single leave_size==0 candidate. record_candidate_leave's weighting
+  // differs between the two: see its comment.
+  bool is_monte_carlo;
+
+  // Index into inner_move_list of the observed move for the leave currently
+  // being recorded, set by sim_evaluate_candidate_leave whenever it returns
+  // a positive weight. For exchange observations this points at the specific
+  // make_best_exchange_move arm that matched the observed exchange count, so
+  // record_candidate_leave can recover which tiles that hypothesis exchanged.
+  int last_obs_idx;
 
   // Tuning parameters.
   int num_candidate_plays;
@@ -402,6 +423,21 @@ static double sim_evaluate_candidate_leave(SimmedInferCtx *ctx) {
     if (obs_idx < 0) {
       Move *extra = ctx->inner_move_list->moves[num_static];
       move_copy(extra, &ctx->observed_move_copy);
+      // observed_move_copy's equity was computed once, under the rack the
+      // move was actually played from -- not under this candidate rack. The
+      // static pre-filter just below compares equities across the whole
+      // list, so a stale equity here would put this candidate on unequal
+      // footing with the freshly generated moves. Recompute score + leave
+      // value under the current candidate rack (target_known_combined +
+      // current_leave, already drawn into inner_game's target rack above).
+      const KLV *klv =
+          player_get_klv(game_get_player(ctx->inner_game, ctx->target_index));
+      Rack rack_after_move;
+      rack_copy(&rack_after_move, player_get_rack(game_get_player(
+                                      ctx->inner_game, ctx->target_index)));
+      const Equity leave_value =
+          get_leave_value_for_move(klv, extra, &rack_after_move);
+      move_set_equity(extra, move_get_score(extra) + leave_value);
       ctx->inner_move_list->count = num_static + 1;
       obs_idx = num_static;
     }
@@ -409,6 +445,7 @@ static double sim_evaluate_candidate_leave(SimmedInferCtx *ctx) {
   if (obs_idx < 0) {
     return 0.0; // observed move not playable with this rack
   }
+  ctx->last_obs_idx = obs_idx;
   if (ctx->inner_move_list->count == 1) {
     return 1.0; // only one legal move; trivially consistent
   }
@@ -539,38 +576,100 @@ invoke_callback:
 // ── Recording a candidate leave
 // ───────────────────────────────────────────────
 //
-// Weights the leave's combinatorial draw count by the sim acceptance weight
-// and records it into InferenceResults.
+// Exposed (see simmed_inference.h) for direct unit testing of the weighting
+// rule in isolation from sampling/enumeration and the game/sim machinery.
+//
+// The weighting differs by how the leave was produced: exhaustive enumeration
+// (exhaust_leaves) visits each distinct leave composition exactly once, so it
+// must be reweighted by raw_draws (get_number_of_draws_for_rack: the number
+// of physical-tile combinations that produce it) to reconstruct the true
+// probability mass. Monte Carlo sampling (sample_leave_mc) draws directly
+// from the undepleted pool, so the frequency a composition is drawn across
+// many iterations already equals its true probability -- applying the same
+// combinatorial reweighting on top would double-count it (raw_draws also
+// assumes the pool it was computed against already has this leave's tiles
+// removed, which holds during exhaust_leaves's recursion but never for
+// sample_leave_mc). is_monte_carlo therefore selects a flat per-draw scale
+// instead of raw_draws; raw_draws is ignored when is_monte_carlo is true.
+uint64_t compute_leave_draw_weight(bool is_monte_carlo, uint64_t raw_draws,
+                                   double sim_weight) {
+  if (is_monte_carlo) {
+    return (uint64_t)((MC_SAMPLE_WEIGHT_SCALE * sim_weight) + 0.5);
+  }
+  // Rounding 0.5 * 1 → 1 is acceptable: uncertain single-draw leaves are
+  // included at full weight, matching the "hedge" intent.
+  return (uint64_t)(((double)raw_draws * sim_weight) + 0.5);
+}
+
 static void record_candidate_leave(SimmedInferCtx *ctx, double weight) {
   if (weight <= 0.0) {
     return;
   }
 
-  uint64_t raw_draws =
-      get_number_of_draws_for_rack(&ctx->bag_as_rack, &ctx->current_leave);
-  if (raw_draws == 0) {
-    return;
+  uint64_t weighted;
+  if (ctx->is_monte_carlo) {
+    weighted = compute_leave_draw_weight(true, 0, weight);
+  } else {
+    const uint64_t raw_draws =
+        get_number_of_draws_for_rack(&ctx->bag_as_rack, &ctx->current_leave);
+    if (raw_draws == 0) {
+      return;
+    }
+    weighted = compute_leave_draw_weight(false, raw_draws, weight);
   }
-
-  // Scale draw count by sim acceptance weight.
-  // Rounding 0.5 * 1 → 1 is acceptable: uncertain single-draw leaves are
-  // included at full weight, matching the "hedge" intent.
-  uint64_t weighted = (uint64_t)(raw_draws * weight + 0.5);
   if (weighted == 0) {
     return;
   }
 
   const KLV *klv =
       player_get_klv(game_get_player(ctx->base_inner_game, ctx->target_index));
-  Equity leave_equity = klv_get_leave_value(klv, &ctx->current_leave);
 
-  record_valid_leave(&ctx->current_leave, ctx->results, INFERENCE_TYPE_LEAVE,
+  // For an exchange observation, current_leave (the enumerated/sampled
+  // *unknown* portion of the rack) is not the tiles a downstream sampler
+  // should treat as retained: the matching exchange arm (last_obs_idx) was
+  // chosen by make_best_exchange_move over the FULL candidate rack
+  // (target_known_combined + current_leave), so it may exchange known tiles
+  // that were never part of current_leave at all. Only the overlap between
+  // current_leave and the exchange arm's tiles is relevant to what's being
+  // inferred about the unknown leave -- take the intersection (element-wise
+  // min) rather than assuming the exchange is fully contained in
+  // current_leave, mirroring the rack/leave/exchanged split static inference
+  // does in inference.c.
+  const Rack *leave_to_record = &ctx->current_leave;
+  Rack retained;
+  Rack exchanged;
+  bool has_exchanged = false;
+  if (ctx->observed_move_type == GAME_EVENT_EXCHANGE) {
+    const Move *obs_move = ctx->inner_move_list->moves[ctx->last_obs_idx];
+    Rack full_exchanged;
+    rack_set_dist_size_and_reset(&full_exchanged, ctx->ld_size);
+    const int n_exch = move_get_tiles_played(obs_move);
+    for (int i = 0; i < n_exch; i++) {
+      rack_add_letter(&full_exchanged, move_get_tile(obs_move, i));
+    }
+    rack_set_dist_size_and_reset(&exchanged, ctx->ld_size);
+    for (int i = 0; i < ctx->ld_size; i++) {
+      const uint16_t in_leave = rack_get_letter(&ctx->current_leave, i);
+      const uint16_t in_exch = rack_get_letter(&full_exchanged, i);
+      rack_add_letters(&exchanged, i, in_leave < in_exch ? in_leave : in_exch);
+    }
+    rack_copy(&retained, &ctx->current_leave);
+    // exchanged is constructed as a per-letter min against current_leave, so
+    // it is always a subset and this cannot fail.
+    (void)rack_subtract(&retained, &exchanged);
+    leave_to_record = &retained;
+    has_exchanged = true;
+  }
+
+  Equity leave_equity = klv_get_leave_value(klv, leave_to_record);
+
+  record_valid_leave(leave_to_record, ctx->results, INFERENCE_TYPE_LEAVE,
                      equity_to_double(leave_equity), weighted);
   alias_method_add_rack(inference_results_get_alias_method(ctx->results),
-                        &ctx->current_leave, (int)weighted);
+                        leave_to_record, (int)weighted);
   leave_rack_list_insert_rack(
-      &ctx->current_leave, /*exchanged=*/NULL, (int)weighted, leave_equity,
-      inference_results_get_leave_rack_list(ctx->results));
+      leave_to_record, has_exchanged ? &exchanged : NULL, (int)weighted,
+      leave_equity, inference_results_get_leave_rack_list(ctx->results));
 }
 
 // ── Evaluate + record
@@ -769,11 +868,14 @@ void simmed_infer(const SimmedInferenceArgs *args, InferenceResults *results,
 
   if (leave_size == 0) {
     // Bingo or full exchange: leave is empty, only one candidate.
+    ctx.is_monte_carlo = false;
     rack_reset(&ctx.current_leave);
     evaluate_and_record(&ctx);
   } else if (leave_size <= SIMMED_INFER_EXHAUSTIVE_MAX) {
+    ctx.is_monte_carlo = false;
     exhaust_leaves(&ctx, leave_size, BLANK_MACHINE_LETTER);
   } else {
+    ctx.is_monte_carlo = true;
     Timer mc_timer;
     ctimer_reset(&mc_timer);
     ctimer_start(&mc_timer);

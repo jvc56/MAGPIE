@@ -24,6 +24,7 @@
 #include "../src/ent/validated_move.h"
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
 #include "../src/impl/inference.h"
 #include "../src/impl/simmed_inference.h"
 #include "../src/str/move_string.h"
@@ -33,6 +34,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -125,7 +127,294 @@ void test_simmedinf_exchange_no_crash(void) {
   assert_simmedinf_exchange_no_crash(7, 4);
 }
 
-void test_simmedinf(void) { test_simmedinf_exchange_no_crash(); }
+// Regression tests for bugs found reviewing simmed_inference.c for the
+// nested-sim/rack-inference oracle-eval investigation (2026-09-11): a Monte
+// Carlo double-counting bug, a stale-equity bug on force-inserted moves, and
+// an exchange-leave-splitting bug. See compute_leave_draw_weight's and
+// record_candidate_leave's comments in simmed_inference.c for the full
+// explanation of each.
+
+// Bug 1: Monte Carlo-sampled leaves were reweighted by
+// get_number_of_draws_for_rack (a combinatorial multiplier meant for
+// exhaustive enumeration, where the pool already has the leave's tiles
+// removed) even though sample_leave_mc draws directly from the undepleted
+// pool -- already correctly weighting composition frequency by how often it
+// samples each one. Astra's counterexample: pool {A:2, B:1}, a 1-tile leave,
+// constant acceptance (weight=1.0 for every draw). The old code weighted A by
+// choose(2+1,1)=3 and B by choose(1+1,1)=2, giving a posterior
+// P(A) = (2/3*3)/((2/3*3)+(1/3*2)) = 3/4 instead of the correct 2/3 (the true
+// fraction of physical tiles that are A). Fix: for Monte Carlo leaves, every
+// draw gets the same flat weight regardless of which leave it is.
+void test_simmedinf_mc_weight_is_composition_independent(void) {
+  // A composition that would have looked "common" (raw_draws=3, matching
+  // Astra's A) and one that would have looked "rare" (raw_draws=2, matching
+  // Astra's B) must receive identical recorded weight under Monte Carlo
+  // sampling at equal sim acceptance: raw_draws must be ignored entirely.
+  const uint64_t w_common =
+      compute_leave_draw_weight(/*is_monte_carlo=*/true, /*raw_draws=*/3, 1.0);
+  const uint64_t w_rare =
+      compute_leave_draw_weight(/*is_monte_carlo=*/true, /*raw_draws=*/2, 1.0);
+  assert(w_common == w_rare);
+  assert(w_common > 0);
+
+  // Weight still scales the recorded count proportionally to sim acceptance.
+  const uint64_t w_half = compute_leave_draw_weight(
+      /*is_monte_carlo=*/true, /*raw_draws=*/999, 0.5);
+  assert(w_half > 0);
+  assert(w_half < w_common);
+
+  // Exhaustive enumeration is unchanged: raw_draws still multiplies weight.
+  assert(compute_leave_draw_weight(/*is_monte_carlo=*/false, /*raw_draws=*/5,
+                                   1.0) == 5);
+  assert(compute_leave_draw_weight(/*is_monte_carlo=*/false, /*raw_draws=*/5,
+                                   0.0) == 0);
+}
+
+// Bug 3: a tile-placement move force-inserted into the candidate list
+// (because it wasn't among the top num_candidate_plays by static equity)
+// kept its equity from observed_move_copy, computed once under the rack the
+// move was actually played from -- not under whichever candidate rack is
+// currently being evaluated. Regression: for every evaluated candidate, the
+// observed move's equity in the move list must equal score + the leave value
+// of the CURRENT candidate rack after removing the move's tiles, whether or
+// not the move needed force-insertion.
+typedef struct {
+  int target_index;
+  int checked;
+  int mismatches;
+} EquityGroundTruthCtx;
+
+static void equity_ground_truth_callback(const Rack *leave, const MoveList *ml,
+                                         const SimResults *sr, int obs_idx,
+                                         double gap, double weight,
+                                         const Game *inner_game,
+                                         void *user_data) {
+  (void)leave;
+  (void)sr;
+  (void)gap;
+  (void)weight;
+  EquityGroundTruthCtx *ctx = (EquityGroundTruthCtx *)user_data;
+  const Move *obs_move = move_list_get_move(ml, obs_idx);
+  const KLV *klv =
+      player_get_klv(game_get_player(inner_game, ctx->target_index));
+  Rack rack_after_move;
+  rack_copy(&rack_after_move,
+            player_get_rack(game_get_player(inner_game, ctx->target_index)));
+  const Equity expected_leave_value =
+      get_leave_value_for_move(klv, obs_move, &rack_after_move);
+  const Equity expected_equity =
+      move_get_score(obs_move) + expected_leave_value;
+  ctx->checked++;
+  if (move_get_equity(obs_move) != expected_equity) {
+    ctx->mismatches++;
+  }
+}
+
+void test_simmedinf_force_inserted_equity(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 4");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
+              "QIAAAAA/ABCDEFG 0/0 0 -lex CSW21");
+
+  ErrorStack *error_stack = error_stack_create();
+  WinPct *win_pcts = win_pct_create(config_get_data_paths(config),
+                                    DEFAULT_WIN_PCT, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+
+  ValidatedMoves *vms = validated_moves_create(
+      game, /*player_index=*/0, "8G QI",
+      /*allow_phonies=*/true, /*allow_playthrough=*/false, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(validated_moves_get_number_of_moves(vms) == 1);
+  const Move *observed_move = validated_moves_get_move(vms, 0);
+
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  const int tiles_length = move_get_tiles_length(observed_move);
+  for (int i = 0; i < tiles_length; i++) {
+    MachineLetter tile = move_get_tile(observed_move, i);
+    if (tile != PLAYED_THROUGH_MARKER) {
+      rack_add_letter(&target_played_tiles,
+                      get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile);
+    }
+  }
+
+  Rack target_known_rack;
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  rack_copy(&nontarget_known_rack, player_get_rack(game_get_player(game, 1)));
+
+  InferenceArgs base_args;
+  infer_args_fill(&base_args, /*leave_list_capacity=*/2000, int_to_equity(0),
+                  NULL, game, /*num_threads=*/4,
+                  /*parent_worker_thread_index=*/0, /*print_interval=*/0,
+                  config_get_thread_control(config),
+                  /*use_game_history=*/false,
+                  /*use_inference_cutoff_optimization=*/true,
+                  /*target_index=*/0,
+                  /*target_score=*/move_get_score(observed_move),
+                  /*target_num_exch=*/0, &target_played_tiles,
+                  &target_known_rack, &nontarget_known_rack);
+
+  InferenceResults *results = inference_results_create(NULL);
+  EquityGroundTruthCtx cb_ctx = {.target_index = 0};
+
+  // num_candidate_plays=1 keeps only the single best static move naturally,
+  // so QI (a weak 2-tile play) is force-inserted for the large majority of
+  // the 5-tile leaves this samples (Monte Carlo: leave_size=5).
+  SimmedInferenceArgs si_args = {
+      .base = &base_args,
+      .observed_move = observed_move,
+      .win_pcts = win_pcts,
+      .num_candidate_plays = 1,
+      .num_inner_sim_plies = 2,
+      .probe_iterations = 20,
+      .full_iterations = 40,
+      .time_budget_s = 2.0,
+      .sim_equity_margin = 3.0,
+      .leave_callback = equity_ground_truth_callback,
+      .leave_callback_data = &cb_ctx,
+  };
+
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  simmed_infer(&si_args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  assert(cb_ctx.checked > 0);
+  assert(cb_ctx.mismatches == 0);
+
+  inference_results_destroy(results);
+  validated_moves_destroy(vms);
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Bug 4: exchange hypotheses were recorded under INFERENCE_TYPE_LEAVE using
+// the full pre-exchange candidate rack, with exchanged always passed as NULL
+// -- so what should have been "the retained leave" was actually still the
+// full rack, never split by what the hypothesis exchanged. Regression: for a
+// small, exhaustive-mode exchange observation, every recorded LeaveRack must
+// have exactly observed_num_exch exchanged tiles, and its leave (retained)
+// size plus its exchanged size must account for exactly the full candidate
+// leave_size.
+void test_simmedinf_exchange_leave_split(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 4");
+  load_and_exec_config_or_die(config, "cgp " OPENING_CGP);
+
+  ErrorStack *error_stack = error_stack_create();
+  WinPct *win_pcts = win_pct_create(config_get_data_paths(config),
+                                    DEFAULT_WIN_PCT, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+
+  Rack target_played_tiles;
+  Rack target_known_rack;
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+
+  // 5 known target tiles -> leave_size = RACK_SIZE(7) - 5 = 2, small enough
+  // for exhaustive enumeration (every candidate visited deterministically).
+  const int leave_size = 2;
+  rack_set_to_string(ld, &target_known_rack, "AEINR");
+  rack_copy(&nontarget_known_rack, player_get_rack(game_get_player(game, 1)));
+
+  const int exch_count = 1;
+  Move observed_move;
+  memset(&observed_move, 0, sizeof(observed_move));
+  move_set_type(&observed_move, GAME_EVENT_EXCHANGE);
+  move_set_tiles_played(&observed_move, exch_count);
+  move_set_score(&observed_move, int_to_equity(0));
+
+  InferenceArgs base_args;
+  infer_args_fill(&base_args, /*leave_list_capacity=*/2000, int_to_equity(0),
+                  NULL, game, /*num_threads=*/4,
+                  /*parent_worker_thread_index=*/0, /*print_interval=*/0,
+                  config_get_thread_control(config),
+                  /*use_game_history=*/false,
+                  /*use_inference_cutoff_optimization=*/true,
+                  /*target_index=*/0, /*target_score=*/int_to_equity(0),
+                  exch_count, &target_played_tiles, &target_known_rack,
+                  &nontarget_known_rack);
+
+  InferenceResults *results = inference_results_create(NULL);
+
+  SimmedInferenceArgs si_args = {
+      .base = &base_args,
+      .observed_move = &observed_move,
+      .win_pcts = win_pcts,
+      .num_candidate_plays = 5,
+      .num_inner_sim_plies = 2,
+      .probe_iterations = 20,
+      .full_iterations = 40,
+      .time_budget_s = 0.3,
+      .sim_equity_margin = 3.0,
+  };
+
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  simmed_infer(&si_args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const LeaveRackList *lrl = inference_results_get_leave_rack_list(results);
+  assert(lrl);
+  const int n = leave_rack_list_get_count(lrl);
+  assert(n > 0); // at least one candidate should have been accepted
+
+  // The KLV-optimal exchange is chosen over the full candidate rack (known
+  // tiles + this sampled leave), so it may prefer to exchange a known tile
+  // instead of one from the leave -- in that case the recorded "exchanged"
+  // is only the overlap (possibly empty) and is <= exch_count, not always
+  // equal to it. What must always hold, regardless of overlap, is that
+  // leave + exchanged reconstructs exactly the sampled leave_size: nothing
+  // is lost or double-recorded relative to the pre-split current_leave.
+  Rack leave;
+  Rack exchanged;
+  rack_set_dist_size_and_reset(&leave, ld_size);
+  rack_set_dist_size_and_reset(&exchanged, ld_size);
+  int entries_with_overlap = 0;
+  for (int i = 0; i < n; i++) {
+    const LeaveRack *entry = leave_rack_list_get_rack(lrl, i);
+    leave_rack_get_leave(entry, &leave);
+    leave_rack_get_exchanged(entry, &exchanged);
+    assert(rack_get_total_letters(&exchanged) <= (uint16_t)exch_count);
+    assert(rack_get_total_letters(&leave) +
+               rack_get_total_letters(&exchanged) ==
+           leave_size);
+    if (rack_get_total_letters(&exchanged) > 0) {
+      entries_with_overlap++;
+    }
+  }
+  // The fixed behavior must differ from the old bug (leave == full
+  // current_leave, exchanged always NULL/empty) for at least one candidate,
+  // or this test would pass under the bug too.
+  assert(entries_with_overlap > 0);
+
+  inference_results_destroy(results);
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+void test_simmedinf(void) {
+  test_simmedinf_exchange_no_crash();
+  test_simmedinf_mc_weight_is_composition_independent();
+  test_simmedinf_force_inserted_equity();
+  test_simmedinf_exchange_leave_split();
+}
 
 // ── Leave callback: prints per-leave inner-sim detail to a FILE* ─────────────
 

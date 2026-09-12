@@ -1,12 +1,16 @@
 #ifndef SIMMED_INFERENCE_H
 #define SIMMED_INFERENCE_H
 
+#include "../ent/game.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/move.h"
+#include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 // Maximum leave size for which exhaustive enumeration is used.
 // For leave_size > this value, Monte Carlo sampling is used instead.
@@ -93,5 +97,11 @@ typedef struct SimmedInferenceArgs {
 // base->num_threads are used for each inner sim evaluation.
 void simmed_infer(const SimmedInferenceArgs *args, InferenceResults *results,
                   ErrorStack *error_stack);
+
+// Exposed for unit testing (see simmed_inference.c): the draw-count weight a
+// single evaluated candidate leave should contribute, given whether it came
+// from Monte Carlo sampling (raw_draws is ignored) or exhaustive enumeration.
+uint64_t compute_leave_draw_weight(bool is_monte_carlo, uint64_t raw_draws,
+                                   double sim_weight);
 
 #endif
