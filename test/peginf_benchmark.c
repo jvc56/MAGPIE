@@ -933,12 +933,49 @@ static int peg_bench_static_playout(Game *game, MoveList *move_list,
   return inferring_player == 0 ? p0 - p1 : p1 - p0;
 }
 
+// Seed strides for peg_bench_draw_rack_containing: each sample r gets its own
+// block of seeds, and each rejection-sampling attempt within that block gets
+// its own seed, so no two (r, attempt) pairs alias.
+#define PEG_BENCH_DRAW_SEED_STRIDE 1000000ULL
+#define PEG_BENCH_DRAW_MAX_ATTEMPTS 100000ULL
+
+// Draw a uniformly random rack for opp_idx, REJECTING and redrawing until the
+// result contains actual_leave as a subset. This matches the conditional law
+// peg_enum_splits computes (weight every split by the full unseen-pool
+// multinomial, restricted to splits where the complement retains the leave --
+// see peg_enum_total's regression test): rejection sampling from an
+// unconstrained draw is exact for that conditional distribution by
+// construction. A "reserve the leave, then draw the rest from the reduced
+// pool" shortcut is NOT equivalent when the leave is a strict subset of a
+// duplicated letter's unseen copies -- e.g. unseen AABCDEFG with a retained
+// leave of one A: the correct P(some other spot is the second A) is 2/8 (2 of
+// 8 unseen tiles are A, and the leave alone can never account for both), while
+// reserve-then-draw incorrectly removes the retained A from circulation first
+// and answers 1/7.
+static void peg_bench_draw_rack_containing(Game *g, int opp_idx,
+                                           const Rack *actual_leave,
+                                           uint64_t seed_base) {
+  Rack scratch;
+  rack_set_dist_size_and_reset(&scratch, rack_get_dist_size(actual_leave));
+  for (uint64_t attempt = 0; attempt < PEG_BENCH_DRAW_MAX_ATTEMPTS; attempt++) {
+    game_seed(g, seed_base + attempt);
+    set_random_rack(g, opp_idx, NULL);
+    rack_copy(&scratch, player_get_rack(game_get_player(g, opp_idx)));
+    if (rack_subtract(&scratch, actual_leave)) {
+      return;
+    }
+  }
+  log_fatal("peg_bench_ground_truth: actual_leave not drawable after %llu "
+           "attempts -- is it consistent with the bag?",
+           (unsigned long long)PEG_BENCH_DRAW_MAX_ATTEMPTS);
+}
+
 // Ground-truth expected value of playing `move` from `pos`: for each of n
-// samples, pin the opponent's rack to (actual_leave + a random completion) and
-// reseed the bag (game_seed then set_random_rack, the sim model), play the move,
-// then static-playout to the end. Averages the inferring player's spread and
-// counts wins. The per-sample seeds are shared across the moves being compared
-// so the draws are paired.
+// samples, draw the opponent's rack conditioned on retaining actual_leave
+// (peg_bench_draw_rack_containing), play the move, then static-playout to the
+// end. Averages the inferring player's spread and counts wins. The per-sample
+// seed blocks are shared across the moves being compared so the draws are
+// paired.
 static void peg_bench_ground_truth(const Game *pos, const Move *move,
                                    const Rack *actual_leave, int opp_idx,
                                    int inferring_player, int n,
@@ -950,8 +987,9 @@ static void peg_bench_ground_truth(const Game *pos, const Move *move,
   double win_pts = 0.0;
   for (int r = 0; r < n; r++) {
     Game *g = game_duplicate(pos);
-    game_seed(g, base_seed + (uint64_t)r);
-    set_random_rack(g, opp_idx, actual_leave);
+    peg_bench_draw_rack_containing(
+        g, opp_idx, actual_leave,
+        base_seed + (uint64_t)r * PEG_BENCH_DRAW_SEED_STRIDE);
     Move m;
     move_copy(&m, move);
     play_move(&m, g, NULL);
@@ -2161,6 +2199,79 @@ void test_peginf_benchmark_groundtruth(void) {
   win_pct_destroy(win_pcts);
   move_list_destroy(move_list);
   error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Regression test for a ground-truth sampling bug: peg_bench_draw_rack_
+// containing used to reserve the pinned leave's tiles and draw the rest from
+// the reduced pool ("reserve-then-draw"), which computes a DIFFERENT
+// conditional distribution than peg_enum_splits (the actual PEG solver's
+// pinned-leave enumeration) whenever the leave is a strict subset of a
+// duplicated letter's unseen copies, AND when the opponent's rack is not
+// almost the entire unseen pool (with opp = all-but-1-of-unseen, "the
+// opponent retained an A" is a near-certainty regardless of method, which
+// does not distinguish the two conventions -- an earlier, smaller version of
+// this test used exactly that degenerate shape and passed under BOTH the
+// correct and the buggy implementation, catching nothing). Strip the bag down
+// to exactly 2 "A"s, leaving every other tile (CSW21's other ~91 tiles)
+// untouched, pin a one-tile leave of "A", and repeatedly draw a 7-tile
+// opponent rack (bag keeps the rest, ~86 tiles). Since the opponent only
+// takes 7 of ~93 unseen tiles, "the opponent kept an A" is real evidence that
+// shifts where the second A more likely ended up: peg_enum_splits' full-pool
+// conditioning (derived independently below, and cross-checked against the
+// unconditional multivariate-hypergeometric formula) puts P(2nd A in bag) ~=
+// 0.966. Manually reinstating the old set_random_rack(actual_leave)
+// reserve-then-draw call in place of the fix (adversarial check, not kept)
+// empirically measured ~0.995 here -- a large, easy-to-catch departure from
+// the derived value in either direction.
+void test_peginf_benchmark_groundtruth_leave_weighting(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  Bag *bag = game_get_bag(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int opp_idx = 1;
+
+  const MachineLetter a_ml = ld_hl_to_ml(ld, "A");
+  const int ld_size = ld_get_size(ld);
+  while (bag_get_letter(bag, a_ml) > 2) {
+    assert(bag_draw_letter(bag, a_ml, 0));
+  }
+  const int unseen_total = bag_get_letters(bag);
+  assert(bag_get_letter(bag, a_ml) == 2);
+
+  Rack actual_leave;
+  rack_set_dist_size_and_reset(&actual_leave, ld_size);
+  rack_add_letter(&actual_leave, a_ml); // one "A"
+
+  // Warm-up: on the very first draw, opp's rack is empty, so
+  // set_random_rack's return-to-bag step has nothing to reshuffle and the
+  // draw order is whatever the stripping loop above left behind. One
+  // discarded draw seeds opp's rack so every counted trial's return-then-draw
+  // is genuinely reseeded and randomized.
+  peg_bench_draw_rack_containing(game, opp_idx, &actual_leave,
+                                 PEG_BENCH_DRAW_SEED_STRIDE);
+
+  const int trials = 20000;
+  int bag_is_a = 0;
+  for (int t = 0; t < trials; t++) {
+    peg_bench_draw_rack_containing(
+        game, opp_idx, &actual_leave,
+        (uint64_t)(t + 2) * PEG_BENCH_DRAW_SEED_STRIDE);
+    if (bag_get_letter(bag, a_ml) == 1) {
+      bag_is_a++;
+    }
+  }
+  const double empirical = (double)bag_is_a / trials;
+  // Full-pool correct: P(2nd A in bag) = (U-7)/(U-4), U = unseen_total. See
+  // logs/inference-bugs/RESULTS.md for the derivation.
+  const double u = (double)unseen_total;
+  const double correct = (u - 7.0) / (u - 4.0);
+  printf("  groundtruth leave weighting: P(bag=A)=%.4f (correct=%.4f, U=%d)\n",
+        empirical, correct, unseen_total);
+  assert(fabs(empirical - correct) < 0.01);
+
+  game_destroy(game);
   config_destroy(config);
 }
 
