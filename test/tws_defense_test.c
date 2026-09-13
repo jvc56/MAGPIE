@@ -183,7 +183,7 @@ static void test_twd_extract_features_floater_board(void) {
   const Square *lanes = board_get_readonly_lanes(board, 0);
 
   int32_t features[TWD_NUM_FEATURES];
-  twd_extract_features(lanes, ld, NULL, features);
+  twd_extract_features(lanes, ld, NULL, NULL, features);
 
   // The floater E at (14,5) is two empties from the TWS at (14,7) and five
   // empties from the TWS at (14,0); E scores one point.
@@ -222,7 +222,7 @@ static void test_twd_move_penalty(void) {
   const LetterDistribution *ld = game_get_ld(game);
   const Square *lanes = board_get_readonly_lanes(board, 0);
   int32_t features[TWD_NUM_FEATURES];
-  twd_extract_features(lanes, ld, NULL, features);
+  twd_extract_features(lanes, ld, NULL, NULL, features);
   const int32_t float_flex_d5 = features[TWD_FEATURE_FLOAT_FLEX_START + 4];
 
   TWDWeights *twd = twd_create_zeroed("penalty_test");
