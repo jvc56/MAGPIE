@@ -3,7 +3,11 @@
 
 #include "../def/tws_defense_defs.h"
 #include "../util/io_util.h"
+#include "board.h"
 #include "equity.h"
+#include "kwg.h"
+#include "letter_distribution.h"
+#include "move.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,5 +42,58 @@ void twd_write(const TWDWeights *twd, const char *data_paths,
 // Writes the canonical name of a feature index into buf (e.g. "hook_d2",
 // "float_flex_d1", "tt_floater").
 void twd_feature_name(int feature_index, char *buf, size_t buf_size);
+// Builds the per-letter flexibility table (the number of two-letter words
+// containing each letter) from the lexicon. Used to approximate the hook
+// and extension flexibility of squares whose real cross and extension sets
+// do not exist yet because they are created by the move being evaluated.
+// Must be called before the weights are used for evaluation; kwg may be
+// NULL, which zeroes the table.
+void twd_prepare_hook_flex(TWDWeights *twd, const KWG *kwg,
+                           const LetterDistribution *ld);
+// Returns the flexibility table entry for an (unblanked) machine letter.
+int twd_get_hook_flex(const TWDWeights *twd, MachineLetter ml);
+
+enum {
+  TWD_MAX_TWS = BOARD_DIM * BOARD_DIM,
+};
+
+// Per-position evaluation state, rebuilt by each movegen position load (and
+// on the stack for validated moves). Holds the position-constant part of the
+// defense term (pre_penalty, the penalty for the opponent's TWS access on
+// the board as it stands) plus what is needed to compute the per-move delta:
+// the lanes view, the empty TWS list, and touch masks that let moves far
+// from every TWS lane skip the delta scan entirely.
+//
+// The lanes pointer is only valid while the board is alive, untransposed,
+// and unmutated, which holds for the duration of a move generation call and
+// for a stack-scoped validated-move evaluation.
+typedef struct TWDEvalContext {
+  // NULL means the context is disabled and the defense term is zero.
+  const TWDWeights *weights;
+  const LetterDistribution *ld;
+  const Square *lanes;
+  Equity pre_penalty;
+  uint64_t touched_rows_mask;
+  uint64_t touched_cols_mask;
+  int num_tws;
+  uint8_t tws_rows[TWD_MAX_TWS];
+  uint8_t tws_cols[TWD_MAX_TWS];
+} TWDEvalContext;
+
+void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx);
+void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
+                           const TWDWeights *weights, const Square *lanes,
+                           const LetterDistribution *ld);
+// Returns the defense term for the move: the penalty for the opponent's TWS
+// access after the move is played, which is always <= 0. Returns 0 when the
+// context is NULL or disabled. Non-placement moves return the position
+// baseline (their play leaves the board unchanged).
+Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
+                             const Move *move);
+// Extracts the feature vector for the board as it stands (no move overlay).
+// Used for the context baseline and, exactly as-is, by the training loop on
+// post-move boards. features must have TWD_NUM_FEATURES elements.
+void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
+                          int32_t *features);
 
 #endif
