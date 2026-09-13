@@ -1357,6 +1357,13 @@ static void pat_eval_context_load_units(
   if (!weights) {
     return;
   }
+  pat_eval_ctx->active_classes_mask = 0;
+  for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
+       premium_class++) {
+    if (pat_class_is_weighted(weights, premium_class, enabled_classes_mask)) {
+      pat_eval_ctx->active_classes_mask |= 1u << premium_class;
+    }
+  }
   pat_eval_ctx->ld = ld;
   pat_eval_ctx->lanes = lanes;
   pat_compute_unseen_counts(lanes, ld, player_rack,

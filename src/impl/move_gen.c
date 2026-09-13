@@ -206,7 +206,8 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
-      gen->opening_move_penalties, &gen->pat_eval_ctx,
+      gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
+      pat_eval_ctx_active_classes(&gen->pat_eval_ctx), &gen->pat_eval_ctx,
       gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
@@ -222,12 +223,18 @@ static inline bool gen_pat_is_active(const MoveGen *gen) {
   return gen->pat_eval_ctx.weights != NULL;
 }
 
+// Passes the mover's real active PAT classes (cheap: a field read, not a
+// scan) even though pat_eval_ctx itself is NULL here to skip the expensive
+// per-move term, so this and gen_get_static_equity agree on the legacy
+// opening-penalty gating and differ only in that (sound, since it is <= 0)
+// omitted term.
 static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
                                                        const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
-      gen->opening_move_penalties, NULL, gen->board_number_of_tiles_played,
-      gen->number_of_tiles_in_bag,
+      gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
+      pat_eval_ctx_active_classes(&gen->pat_eval_ctx), NULL,
+      gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
 
@@ -708,7 +715,8 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
   case MOVE_SORT_EQUITY:
     return static_eval_get_move_equity_with_leave_value(
         &gen->ld, move, &gen->leave, &gen->opponent_rack,
-        gen->opening_move_penalties, &gen->pat_eval_ctx,
+        gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
+        pat_eval_ctx_active_classes(&gen->pat_eval_ctx), &gen->pat_eval_ctx,
         gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
         leave_value);
   case MOVE_SORT_SCORE:
@@ -824,7 +832,9 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
               ? precomputed_equity
               : static_eval_get_move_equity_with_leave_value(
                     &gen->ld, current_move, &gen->leave, &gen->opponent_rack,
-                    gen->opening_move_penalties, NULL,
+                    gen->opening_move_word_penalties,
+                    gen->opening_move_letter_penalties,
+                    pat_eval_ctx_active_classes(&gen->pat_eval_ctx), NULL,
                     gen->board_number_of_tiles_played,
                     gen->number_of_tiles_in_bag, leave_value);
       const Equity best_equity =
@@ -3380,13 +3390,14 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                                          gen->row_number_of_anchors_cache);
   gen->board_lanes = board_get_readonly_lanes(gen->board, gen->cross_index);
 
-  // opening_move_penalties is read only by gen_get_static_equity (the
-  // equity-recording paths). The endgame's small-record movegen types never
-  // read it, so skip the per-node 120-byte copy for them.
+  // opening_move_word/letter_penalties is read only by gen_get_static_equity
+  // (the equity-recording paths). The endgame's small-record movegen types
+  // never read it, so skip the per-node 240-byte copy for them.
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
       gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
       gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
-    board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+    board_copy_opening_penalties(gen->board, gen->opening_move_word_penalties,
+                                 gen->opening_move_letter_penalties);
     // The PAT term is equity-only, bag-gated like the leave value,
     // and requires valid cross sets (its scans read them). The weights are
     // re-read from the player on every position load, so a training loop

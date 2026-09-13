@@ -44,8 +44,12 @@ typedef struct Board {
   // Stores the penalties to be applied to
   // the opening move for each square in both
   // horizontal and vertical directions if the
-  // tile is a vowel.
-  Equity opening_move_penalties[BOARD_DIM * 2];
+  // tile is a vowel, split by which square multiplier drove it (word vs
+  // letter) so a caller whose PAT weights already price that axis can skip
+  // it instead of double-charging the same square (see
+  // placement_adjustment).
+  Equity opening_move_word_penalties[BOARD_DIM * 2];
+  Equity opening_move_letter_penalties[BOARD_DIM * 2];
 
   uint8_t number_of_row_anchors[BOARD_DIM * 2];
   int transposed;
@@ -493,8 +497,13 @@ static inline void board_reset_is_cross_word(Board *b, int row, int col,
 // Board: opening penalties
 
 static inline const Equity *
-board_get_opening_move_penalties(const Board *board) {
-  return board->opening_move_penalties;
+board_get_opening_move_word_penalties(const Board *board) {
+  return board->opening_move_word_penalties;
+}
+
+static inline const Equity *
+board_get_opening_move_letter_penalties(const Board *board) {
+  return board->opening_move_letter_penalties;
 }
 
 // Board: Transposed
@@ -798,9 +807,12 @@ static inline void update_opening_penalty(Board *board, int dir, int i,
       bonus_square_get_letter_multiplier(bonus_square);
 
   // Very basic heuristic which will undoubtedly be greatly improved
-  // at a later time.
-  board->opening_move_penalties[dir * BOARD_DIM + i] +=
-      (OPENING_HOTSPOT_PENALTY / 2) * (word_multiplier - 1) +
+  // at a later time. Kept split by axis (word vs letter multiplier) so a
+  // live PAT class pricing one axis for this square can suppress just that
+  // half instead of the whole thing; see placement_adjustment.
+  board->opening_move_word_penalties[dir * BOARD_DIM + i] +=
+      (OPENING_HOTSPOT_PENALTY / 2) * (word_multiplier - 1);
+  board->opening_move_letter_penalties[dir * BOARD_DIM + i] +=
       (OPENING_HOTSPOT_PENALTY / 2) * (letter_multiplier - 1);
 }
 
@@ -825,8 +837,10 @@ static inline void board_apply_layout(const BoardLayout *bl, Board *board) {
     }
   }
 
-  memset(board->opening_move_penalties, 0,
-         sizeof(board->opening_move_penalties));
+  memset(board->opening_move_word_penalties, 0,
+         sizeof(board->opening_move_word_penalties));
+  memset(board->opening_move_letter_penalties, 0,
+         sizeof(board->opening_move_letter_penalties));
 
   // Calculate opening penalties
 
@@ -881,7 +895,7 @@ static inline void board_copy(Board *dst, const Board *src) {
   // Both caches are entirely NULL, so the region needs no traffic at all. This
   // is the WIT-disabled path, where game_copy runs once per sim rollout.
   memcpy(dst, src, offsetof(Board, wit_block_rows));
-  const size_t after_wit = offsetof(Board, opening_move_penalties);
+  const size_t after_wit = offsetof(Board, opening_move_word_penalties);
   memcpy((char *)dst + after_wit, (const char *)src + after_wit,
          sizeof(Board) - after_wit);
   dst->wit_cache_populated = false;
@@ -957,8 +971,11 @@ static inline void board_copy_row_cache(const Square *lanes_cache,
 }
 
 static inline void board_copy_opening_penalties(const Board *board,
-                                                Equity *opening_penalties) {
-  memcpy(opening_penalties, board->opening_move_penalties,
+                                                Equity *word_penalties,
+                                                Equity *letter_penalties) {
+  memcpy(word_penalties, board->opening_move_word_penalties,
+         sizeof(Equity) * 2 * BOARD_DIM);
+  memcpy(letter_penalties, board->opening_move_letter_penalties,
          sizeof(Equity) * 2 * BOARD_DIM);
 }
 
