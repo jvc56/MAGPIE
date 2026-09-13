@@ -1,0 +1,84 @@
+{
+  "claim_token": "2b1c4e7a-9d30-4f61-b2cf-70d5a1e8c934",
+  "job_id": "9a2f61c4-5e07-4b13-8d6a-c31f70b2ae58",
+  "min_magpie_version": "0.1.0",
+  "expected_data": {
+    "algorithm": "sha256",
+    "files": [
+      {
+        "role": "kwg",
+        "name": "NWL23",
+        "path": "lexica/NWL23.kwg",
+        "sha256": "3e74af981fdd974e107283f686da0fe4b7ec84ad0d825d444330c338c33b91ba",
+        "bytes": 4719596,
+        "tarball_date": "20251004"
+      },
+      {
+        "role": "klv",
+        "name": "NWL23",
+        "path": "lexica/NWL23.klv2",
+        "sha256": "37dea945c29c3773eb4cd5a4117f3d3256c8b548cd3bf3b5ce8a219cb5e0a3fa",
+        "bytes": 3667340,
+        "tarball_date": "20251004"
+      },
+      {
+        "role": "winpct",
+        "name": "winpct",
+        "path": "strategy/winpct.csv",
+        "sha256": "51b651f149760a2b3385e8c2ef979032299a1e35ccb23170b4f492126e363a81",
+        "bytes": 836150,
+        "tarball_date": "20251004"
+      },
+      {
+        "role": "letterdist",
+        "name": "english",
+        "path": "letterdistributions/english.csv",
+        "sha256": "e698ce0b93e025daccd3390107a914d74581c4603de38df65131768b1c6f9102",
+        "bytes": 489,
+        "tarball_date": "20251004"
+      },
+      {
+        "role": "layout",
+        "name": "standard15",
+        "path": "layouts/standard15.txt",
+        "sha256": "c1a81c35a7730f64abcca23c8c56cc872e892a68f95289a4189b373c8cc5a01f",
+        "bytes": 244,
+        "tarball_date": "20251004"
+      }
+    ]
+  },
+  "task_request": {
+    "job_type": "opening_rack",
+    "variant": "classic",
+    "letter_distribution": "english",
+    "board_layout": "standard15",
+    "racks": ["AEINRST", "?AEILNT", "AABBCDE"],
+    "previous_play": null,
+    "player": {
+      "name": "simmer-NWL23-4ply@20251004",
+      "recorder_type": "best",
+      "sort_strategy": null,
+      "lexicon": "NWL23",
+      "leaves": "NWL23",
+      "win_pct_model": "winpct",
+      "max_iterations": 1000,
+      "num_plies": 4,
+      "num_plies_recorded": 2,
+      "num_plays": 10,
+      "num_plays_recorded": 10,
+      "stopping_pct": 99.0,
+      "use_inference": false,
+      "time_limit_secs": null,
+      "use_wordmap": true,
+      "use_rit": false,
+      "min_play_iterations": null,
+      "threshold": null,
+      "sampling_rule": null,
+      "inference_margin": null,
+      "utility_w_winpct": null,
+      "utility_w_spread": null,
+      "utility_spread_scale": null,
+      "movegen_margin": null
+    }
+  }
+}

@@ -265,6 +265,8 @@ static const char *const BIRDTEST_GAMES_FIXTURE =
     "test/birdtest_contract/assignment-games.json";
 static const char *const BIRDTEST_LEAVE_FIXTURE =
     "test/birdtest_contract/assignment-leave-generation.json";
+static const char *const BIRDTEST_OPENING_RACK_FIXTURE =
+    "test/birdtest_contract/assignment-opening-rack.json";
 
 static JsonValue *load_task_request_fixture(const char *path,
                                             const JsonValue **request) {
@@ -327,6 +329,33 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER2),
                           player_keys, num_player_keys, "games player2");
   json_destroy(games);
+
+  // Opening racks are the one job type whose request carries "racks" and a
+  // single "player" rather than a player pair, so nothing else pins those two
+  // names -- a rename on either side would have passed both test suites and
+  // broken every opening-rack contributor.
+  JsonValue *opening_rack =
+      load_task_request_fixture(BIRDTEST_OPENING_RACK_FIXTURE, &request);
+  const char *const opening_rack_keys[] = {
+      CONTRIBUTE_KEY_VARIANT,
+      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
+      CONTRIBUTE_KEY_BOARD_LAYOUT,
+      CONTRIBUTE_KEY_RACKS,
+      CONTRIBUTE_KEY_PLAYER,
+  };
+  assert_fixture_has_keys(
+      request, opening_rack_keys,
+      sizeof(opening_rack_keys) / sizeof(opening_rack_keys[0]),
+      "opening_rack task_request");
+  // The batch is the racks themselves, not a range: an empty one is a task
+  // with nothing to do, which the executor refuses.
+  assert(json_array_length(json_object_get(request, CONTRIBUTE_KEY_RACKS)) > 0);
+  // The executor applies the player the same way the games executor applies
+  // player1, so it needs the same keys -- including the win% model, which it
+  // loads itself when the player simulates.
+  assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER),
+                          player_keys, num_player_keys, "opening_rack player");
+  json_destroy(opening_rack);
 
   JsonValue *leave =
       load_task_request_fixture(BIRDTEST_LEAVE_FIXTURE, &request);
