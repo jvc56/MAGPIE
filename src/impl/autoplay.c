@@ -8,10 +8,10 @@
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/pat_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
-#include "../def/tws_defense_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -26,12 +26,12 @@
 #include "../ent/klv_csv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat.h"
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
-#include "../ent/tws_defense.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
@@ -40,10 +40,10 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "pat_gen.h"
 #include "play_chooser.h"
 #include "rack_list.h"
 #include "simmer.h"
-#include "twd_gen.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -116,7 +116,7 @@ typedef struct LeavegenSharedData {
   AutoplayResults **autoplay_results_list;
 } LeavegenSharedData;
 
-// Shared state for AUTOPLAY_TYPE_TWS_DEFENSE_GEN: the live weights object
+// Shared state for AUTOPLAY_TYPE_PAT_GEN: the live weights object
 // (owned by players_data and shared by both players), one regression
 // accumulator per worker thread (lock-free; consolidated single-threaded
 // at the generation-boundary checkpoint), and the per-generation game
@@ -128,27 +128,27 @@ typedef struct LeavegenSharedData {
 // and the observing player's own moves negatively, so a board that hands
 // the opponent a big play but pays it back next turn is not scored as a
 // mistake.
-typedef struct TWDPendingObservation {
+typedef struct PATPendingObservation {
   bool valid;
   int plies_seen;
   double label;
-  double features[TWD_NUM_FEATURES];
-} TWDPendingObservation;
+  double features[PAT_NUM_FEATURES];
+} PATPendingObservation;
 
-typedef struct TWDGenSharedData {
+typedef struct PATGenSharedData {
   // Plies of net result the label spans (1 reproduces the original
   // opponent-reply-score label).
   int label_plies;
   int num_gens;
   int gens_completed;
   uint64_t *games_per_gen;
-  TWDWeights *twd;
+  PATWeights *pat;
   const char *data_paths;
   const char *output_name;
-  TWDRegression *regressions;
+  PATRegression *regressions;
   int num_threads;
   Checkpoint *postgen_checkpoint;
-} TWDGenSharedData;
+} PATGenSharedData;
 
 typedef struct AutoplaySharedData {
   int num_threads;
@@ -163,7 +163,7 @@ typedef struct AutoplaySharedData {
   cpthread_mutex_t iter_completed_mutex;
   ThreadControl *thread_control;
   LeavegenSharedData *leavegen_shared_data;
-  TWDGenSharedData *twd_gen_shared_data;
+  PATGenSharedData *pat_gen_shared_data;
 } AutoplaySharedData;
 
 typedef struct AutoplayIterOutput {
@@ -360,51 +360,51 @@ void postgen_prebroadcast_func(void *data) {
   }
 }
 
-// Per-observation ridge strength for the TWS defense regression, in
+// Per-observation ridge strength for the PAT regression, in
 // (points per feature unit)^2. Tuned conservatively; revisit once real
 // training runs exist.
-static const double TWD_GEN_RIDGE_LAMBDA = 1.0;
+static const double PAT_GEN_RIDGE_LAMBDA = 1.0;
 
-// Runs single-threaded at the TWS defense generation boundary while every
+// Runs single-threaded at the PAT generation boundary while every
 // worker is parked in checkpoint_wait: consolidates the per-thread
-// regressions, refits the weights (rewriting the live TWDWeights that
+// regressions, refits the weights (rewriting the live PATWeights that
 // every subsequent gen_load_position re-reads), snapshots the generation's
 // weights and a fit report, and extends the game budget for the next
 // generation.
-void twd_postgen_prebroadcast_func(void *data) {
+void pat_postgen_prebroadcast_func(void *data) {
   AutoplaySharedData *shared_data = (AutoplaySharedData *)data;
-  TWDGenSharedData *twd_gen_shared_data = shared_data->twd_gen_shared_data;
+  PATGenSharedData *pat_gen_shared_data = shared_data->pat_gen_shared_data;
 
-  TWDRegression total_regression;
-  twd_regression_reset(&total_regression);
-  for (int thread_index = 0; thread_index < twd_gen_shared_data->num_threads;
+  PATRegression total_regression;
+  pat_regression_reset(&total_regression);
+  for (int thread_index = 0; thread_index < pat_gen_shared_data->num_threads;
        thread_index++) {
-    twd_regression_merge(&total_regression,
-                         &twd_gen_shared_data->regressions[thread_index]);
-    twd_regression_reset(&twd_gen_shared_data->regressions[thread_index]);
+    pat_regression_merge(&total_regression,
+                         &pat_gen_shared_data->regressions[thread_index]);
+    pat_regression_reset(&pat_gen_shared_data->regressions[thread_index]);
   }
 
-  const TWDSolveResult solve_result = twd_regression_solve_into_weights(
-      &total_regression, TWD_GEN_RIDGE_LAMBDA, twd_gen_shared_data->twd);
+  const PATSolveResult solve_result = pat_regression_solve_into_weights(
+      &total_regression, PAT_GEN_RIDGE_LAMBDA, pat_gen_shared_data->pat);
 
-  twd_gen_shared_data->gens_completed++;
+  pat_gen_shared_data->gens_completed++;
 
-  char *gen_labeled_twd_name =
-      get_formatted_string("%s_gen_%d", twd_gen_shared_data->output_name,
-                           twd_gen_shared_data->gens_completed);
+  char *gen_labeled_pat_name =
+      get_formatted_string("%s_gen_%d", pat_gen_shared_data->output_name,
+                           pat_gen_shared_data->gens_completed);
 
   ErrorStack *error_stack = error_stack_create();
-  twd_write(twd_gen_shared_data->twd, twd_gen_shared_data->data_paths,
-            gen_labeled_twd_name, error_stack);
+  pat_write(pat_gen_shared_data->pat, pat_gen_shared_data->data_paths,
+            gen_labeled_pat_name, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
-    log_fatal("twdgen failed to write weights to file");
+    log_fatal("patgen failed to write weights to file");
   }
 
   StringBuilder *report_sb = string_builder_create();
   string_builder_add_formatted_string(
-      report_sb, "TWS defense generation %d\nSeconds: %f\nObservations: %llu\n",
-      twd_gen_shared_data->gens_completed,
+      report_sb, "PAT generation %d\nSeconds: %f\nObservations: %llu\n",
+      pat_gen_shared_data->gens_completed,
       ctimer_elapsed_seconds(&shared_data->timer),
       (unsigned long long)solve_result.num_observations);
   if (solve_result.solved) {
@@ -415,13 +415,13 @@ void twd_postgen_prebroadcast_func(void *data) {
         solve_result.intercept, solve_result.mean_squared_error,
         solve_result.baseline_mean_squared_error);
     char feature_name[64];
-    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
          feature_index++) {
-      twd_feature_name(feature_index, feature_name, sizeof(feature_name));
+      pat_feature_name(feature_index, feature_name, sizeof(feature_name));
       string_builder_add_formatted_string(
           report_sb, "%s,%f,%d\n", feature_name,
           solve_result.coefficients[feature_index],
-          twd_get_weight(twd_gen_shared_data->twd, feature_index));
+          pat_get_weight(pat_gen_shared_data->pat, feature_index));
     }
   } else {
     string_builder_add_string(
@@ -429,35 +429,35 @@ void twd_postgen_prebroadcast_func(void *data) {
                    "left unchanged.\n");
   }
 
-  char *gen_labeled_twd_filename = data_filepaths_get_writable_filename(
-      twd_gen_shared_data->data_paths, gen_labeled_twd_name,
-      DATA_FILEPATH_TYPE_TWS_DEFENSE, error_stack);
+  char *gen_labeled_pat_filename = data_filepaths_get_writable_filename(
+      pat_gen_shared_data->data_paths, gen_labeled_pat_name,
+      DATA_FILEPATH_TYPE_PAT, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
-    log_fatal("twdgen failed to build the report filename");
+    log_fatal("patgen failed to build the report filename");
   }
   char *report_name_prefix =
-      cut_off_after_last_char(gen_labeled_twd_filename, '.');
+      cut_off_after_last_char(gen_labeled_pat_filename, '.');
   char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);
   write_string_to_file(report_name, "w", string_builder_peek(report_sb),
                        error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
-    log_fatal("twdgen failed to write the fit report to file");
+    log_fatal("patgen failed to write the fit report to file");
   }
 
   string_builder_destroy(report_sb);
   error_stack_destroy(error_stack);
   free(report_name);
   free(report_name_prefix);
-  free(gen_labeled_twd_filename);
-  free(gen_labeled_twd_name);
+  free(gen_labeled_pat_filename);
+  free(gen_labeled_pat_name);
 
   // Extend the game budget for the next generation. Every worker is parked
   // in checkpoint_wait, so this is safe without the iter mutex.
-  if (twd_gen_shared_data->gens_completed < twd_gen_shared_data->num_gens) {
+  if (pat_gen_shared_data->gens_completed < pat_gen_shared_data->num_gens) {
     shared_data->max_iter_count +=
-        twd_gen_shared_data->games_per_gen[twd_gen_shared_data->gens_completed];
+        pat_gen_shared_data->games_per_gen[pat_gen_shared_data->gens_completed];
   }
 }
 
@@ -616,7 +616,7 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
   cpthread_mutex_init(&shared_data->iter_completed_mutex);
   shared_data->thread_control = args->thread_control;
   shared_data->leavegen_shared_data = NULL;
-  shared_data->twd_gen_shared_data = NULL;
+  shared_data->pat_gen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
@@ -641,36 +641,36 @@ void leavegen_shared_data_destroy(LeavegenSharedData *lg_shared_data) {
   free(lg_shared_data);
 }
 
-TWDGenSharedData *twd_gen_shared_data_create(
-    TWDWeights *twd, const char *data_paths, const char *output_name,
+PATGenSharedData *pat_gen_shared_data_create(
+    PATWeights *pat, const char *data_paths, const char *output_name,
     int num_threads, int num_gens, uint64_t *games_per_gen, int label_plies) {
-  TWDGenSharedData *twd_gen_shared_data =
-      malloc_or_die(sizeof(TWDGenSharedData));
-  twd_gen_shared_data->label_plies = label_plies;
-  twd_gen_shared_data->num_gens = num_gens;
-  twd_gen_shared_data->gens_completed = 0;
-  twd_gen_shared_data->games_per_gen = games_per_gen;
-  twd_gen_shared_data->twd = twd;
-  twd_gen_shared_data->data_paths = data_paths;
-  twd_gen_shared_data->output_name = output_name;
-  twd_gen_shared_data->num_threads = num_threads;
-  twd_gen_shared_data->regressions =
-      malloc_or_die(sizeof(TWDRegression) * (size_t)num_threads);
+  PATGenSharedData *pat_gen_shared_data =
+      malloc_or_die(sizeof(PATGenSharedData));
+  pat_gen_shared_data->label_plies = label_plies;
+  pat_gen_shared_data->num_gens = num_gens;
+  pat_gen_shared_data->gens_completed = 0;
+  pat_gen_shared_data->games_per_gen = games_per_gen;
+  pat_gen_shared_data->pat = pat;
+  pat_gen_shared_data->data_paths = data_paths;
+  pat_gen_shared_data->output_name = output_name;
+  pat_gen_shared_data->num_threads = num_threads;
+  pat_gen_shared_data->regressions =
+      malloc_or_die(sizeof(PATRegression) * (size_t)num_threads);
   for (int thread_index = 0; thread_index < num_threads; thread_index++) {
-    twd_regression_reset(&twd_gen_shared_data->regressions[thread_index]);
+    pat_regression_reset(&pat_gen_shared_data->regressions[thread_index]);
   }
-  twd_gen_shared_data->postgen_checkpoint =
-      checkpoint_create(num_threads, twd_postgen_prebroadcast_func);
-  return twd_gen_shared_data;
+  pat_gen_shared_data->postgen_checkpoint =
+      checkpoint_create(num_threads, pat_postgen_prebroadcast_func);
+  return pat_gen_shared_data;
 }
 
-void twd_gen_shared_data_destroy(TWDGenSharedData *twd_gen_shared_data) {
-  if (!twd_gen_shared_data) {
+void pat_gen_shared_data_destroy(PATGenSharedData *pat_gen_shared_data) {
+  if (!pat_gen_shared_data) {
     return;
   }
-  checkpoint_destroy(twd_gen_shared_data->postgen_checkpoint);
-  free(twd_gen_shared_data->regressions);
-  free(twd_gen_shared_data);
+  checkpoint_destroy(pat_gen_shared_data->postgen_checkpoint);
+  free(pat_gen_shared_data->regressions);
+  free(pat_gen_shared_data);
 }
 
 void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
@@ -679,7 +679,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   }
   prng_destroy(shared_data->prng);
   leavegen_shared_data_destroy(shared_data->leavegen_shared_data);
-  twd_gen_shared_data_destroy(shared_data->twd_gen_shared_data);
+  pat_gen_shared_data_destroy(shared_data->pat_gen_shared_data);
   free(shared_data);
 }
 
@@ -695,12 +695,12 @@ typedef struct GameRunner {
   Game *game_one_move_behind;
   Move previous_move;
   Move play_chooser_move;
-  // TWS defense training (AUTOPLAY_TYPE_TWS_DEFENSE_GEN): observations
+  // PAT training (AUTOPLAY_TYPE_PAT_GEN): observations
   // opened by recent moves of this game, each still accumulating its label.
   // One opens per move and one closes every label_plies plies later, so at
   // most that many are ever in flight. Observations still unlabeled when
   // the game ends are dropped: their plies do not exist.
-  TWDPendingObservation twd_obs[TWD_MAX_LABEL_PLIES];
+  PATPendingObservation pat_obs[PAT_MAX_LABEL_PLIES];
   PlayChooser *play_choosers[2];
   GameTimer game_timer;
   AutoplayGameTiming timing;
@@ -788,8 +788,8 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
 
   game_runner->turn_number = 0;
   game_runner->force_draw = false;
-  for (int obs_index = 0; obs_index < TWD_MAX_LABEL_PLIES; obs_index++) {
-    game_runner->twd_obs[obs_index].valid = false;
+  for (int obs_index = 0; obs_index < PAT_MAX_LABEL_PLIES; obs_index++) {
+    game_runner->pat_obs[obs_index].valid = false;
   }
   if (game_runner->shared_data->leavegen_shared_data &&
       // We only force draws if we've played enough games for this
@@ -988,18 +988,18 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        equity_to_double(move_get_equity(move)));
   }
 
-  // TWS defense training: the move just chosen is the next ply for every
+  // PAT training: the move just chosen is the next ply for every
   // observation still open in this game. It counts against the observing
   // player when the opponent made it and for them when they made it
   // themselves; an observation that has now seen all its plies is complete
   // and goes to the regression. A pass or exchange scores zero, which is a
   // legitimate "nothing happened" ply.
-  TWDGenSharedData *twd_gen_shared_data =
-      game_runner->shared_data->twd_gen_shared_data;
-  if (twd_gen_shared_data) {
+  PATGenSharedData *pat_gen_shared_data =
+      game_runner->shared_data->pat_gen_shared_data;
+  if (pat_gen_shared_data) {
     const double move_score = equity_to_double(move_get_score(move));
-    for (int obs_index = 0; obs_index < TWD_MAX_LABEL_PLIES; obs_index++) {
-      TWDPendingObservation *observation = &game_runner->twd_obs[obs_index];
+    for (int obs_index = 0; obs_index < PAT_MAX_LABEL_PLIES; obs_index++) {
+      PATPendingObservation *observation = &game_runner->pat_obs[obs_index];
       if (!observation->valid) {
         continue;
       }
@@ -1008,16 +1008,16 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       observation->label +=
           (observation->plies_seen % 2 == 0) ? move_score : -move_score;
       observation->plies_seen++;
-      if (observation->plies_seen >= twd_gen_shared_data->label_plies) {
-        twd_regression_add_observation_double(
-            &twd_gen_shared_data->regressions[autoplay_worker->worker_index],
+      if (observation->plies_seen >= pat_gen_shared_data->label_plies) {
+        pat_regression_add_observation_double(
+            &pat_gen_shared_data->regressions[autoplay_worker->worker_index],
             observation->features, observation->label);
         observation->valid = false;
       }
     }
   }
-  const int twd_pre_move_bag_count =
-      twd_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
+  const int pat_pre_move_bag_count =
+      pat_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, move, &rare_rack_or_move_leave);
@@ -1066,13 +1066,13 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
 
   play_move(move, game, NULL);
 
-  // TWS defense training: open the next observation from the post-move
+  // PAT training: open the next observation from the post-move
   // board. Gated on the pre-move bag matching the deployment gate for the
   // defense term, and skipped when the move ended the game (its
   // observation could never be labeled).
-  if (twd_gen_shared_data && twd_pre_move_bag_count > 0 && !game_over(game)) {
-    for (int obs_index = 0; obs_index < TWD_MAX_LABEL_PLIES; obs_index++) {
-      TWDPendingObservation *observation = &game_runner->twd_obs[obs_index];
+  if (pat_gen_shared_data && pat_pre_move_bag_count > 0 && !game_over(game)) {
+    for (int obs_index = 0; obs_index < PAT_MAX_LABEL_PLIES; obs_index++) {
+      PATPendingObservation *observation = &game_runner->pat_obs[obs_index];
       if (observation->valid) {
         continue;
       }
@@ -1080,10 +1080,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       // after play_move has already been drawn back to full. The row is
       // the one the live weights' combination rule makes linear, so that
       // fitting and evaluating agree; with gamma 1 it is the plain sum.
-      twd_extract_features_combined(
+      pat_extract_features_combined(
           board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
           player_get_rack(game_get_player(game, player_on_turn_index)),
-          twd_gen_shared_data->twd, observation->features);
+          pat_gen_shared_data->pat, observation->features);
       observation->plies_seen = 0;
       observation->label = 0.0;
       observation->valid = true;
@@ -1283,14 +1283,14 @@ void autoplay_leave_gen(AutoplayWorker *autoplay_worker,
   }
 }
 
-void autoplay_twd_gen(AutoplayWorker *autoplay_worker,
+void autoplay_pat_gen(AutoplayWorker *autoplay_worker,
                       GameRunner *game_runner) {
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
-  TWDGenSharedData *twd_gen_shared_data = shared_data->twd_gen_shared_data;
-  for (int gen_index = 0; gen_index < twd_gen_shared_data->num_gens;
+  PATGenSharedData *pat_gen_shared_data = shared_data->pat_gen_shared_data;
+  for (int gen_index = 0; gen_index < pat_gen_shared_data->num_gens;
        gen_index++) {
     autoplay_single_generation(autoplay_worker, game_runner, NULL);
-    checkpoint_wait(twd_gen_shared_data->postgen_checkpoint, shared_data);
+    checkpoint_wait(pat_gen_shared_data->postgen_checkpoint, shared_data);
     if (thread_control_get_status(shared_data->thread_control) ==
         THREAD_CONTROL_STATUS_USER_INTERRUPT) {
       break;
@@ -1332,8 +1332,8 @@ void *autoplay_worker(void *uncasted_autoplay_worker) {
   case AUTOPLAY_TYPE_LEAVE_GEN:
     autoplay_leave_gen(autoplay_worker, game_runner1);
     break;
-  case AUTOPLAY_TYPE_TWS_DEFENSE_GEN:
-    autoplay_twd_gen(autoplay_worker, game_runner1);
+  case AUTOPLAY_TYPE_PAT_GEN:
+    autoplay_pat_gen(autoplay_worker, game_runner1);
     break;
   }
 
@@ -1391,26 +1391,26 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   }
 
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
-  const bool is_twdgen_mode = args->type == AUTOPLAY_TYPE_TWS_DEFENSE_GEN;
+  const bool is_patgen_mode = args->type == AUTOPLAY_TYPE_PAT_GEN;
   autoplay_results_set_play_chooser_config(
       autoplay_results, args->use_play_chooser, args->time_control_seconds,
       args->overtime_penalty_points, args->overtime_period_seconds);
   int num_gens = 1;
   int *min_rack_targets = NULL;
-  uint64_t *twd_games_per_gen = NULL;
+  uint64_t *pat_games_per_gen = NULL;
   uint64_t first_gen_num_games;
-  if (is_twdgen_mode) {
+  if (is_patgen_mode) {
     // The first argument is a comma-separated list of games per generation.
     StringSplitter *split_games_per_gen =
         split_string(args->num_games_or_min_rack_targets, ',', false);
     num_gens = string_splitter_get_number_of_items(split_games_per_gen);
-    twd_games_per_gen = malloc_or_die(sizeof(uint64_t) * (size_t)num_gens);
+    pat_games_per_gen = malloc_or_die(sizeof(uint64_t) * (size_t)num_gens);
     for (int gen_index = 0; gen_index < num_gens; gen_index++) {
-      twd_games_per_gen[gen_index] = string_to_uint64(
+      pat_games_per_gen[gen_index] = string_to_uint64(
           string_splitter_get_item(split_games_per_gen, gen_index),
           error_stack);
       if (!error_stack_is_empty(error_stack) ||
-          twd_games_per_gen[gen_index] == 0) {
+          pat_games_per_gen[gen_index] == 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES,
             get_formatted_string(
@@ -1418,12 +1418,12 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
                 "needs at least one game): %s",
                 args->num_games_or_min_rack_targets));
         string_splitter_destroy(split_games_per_gen);
-        free(twd_games_per_gen);
+        free(pat_games_per_gen);
         return;
       }
     }
     string_splitter_destroy(split_games_per_gen);
-    first_gen_num_games = twd_games_per_gen[0];
+    first_gen_num_games = pat_games_per_gen[0];
   } else if (is_leavegen_mode) {
     StringSplitter *split_min_rack_targets =
         split_string(args->num_games_or_min_rack_targets, ',', false);
@@ -1464,8 +1464,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     // players share the the KLV.
     klv = players_data_get_klv(args->game_args->players_data, 0);
     show_divergent_results = false;
-  } else if (is_twdgen_mode) {
-    // Like leavegen, twdgen never uses game pairs.
+  } else if (is_patgen_mode) {
+    // Like leavegen, patgen never uses game pairs.
     show_divergent_results = false;
   }
 
@@ -1481,20 +1481,20 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   if (!error_stack_is_empty(error_stack)) {
     free(autoplay_results_list);
     free(min_rack_targets);
-    free(twd_games_per_gen);
+    free(pat_games_per_gen);
     return;
   }
 
-  if (is_twdgen_mode) {
+  if (is_patgen_mode) {
     // We can use player index 0 here since it is guaranteed that the
-    // players share the TWS defense weights (see impl_twd_gen).
-    TWDWeights *twd = players_data_get_twd(args->game_args->players_data, 0);
-    if (!twd) {
-      log_fatal("twdgen started without TWS defense weights loaded");
+    // players share the PAT weights (see impl_pat_gen).
+    PATWeights *pat = players_data_get_pat(args->game_args->players_data, 0);
+    if (!pat) {
+      log_fatal("patgen started without PAT weights loaded");
     }
-    shared_data->twd_gen_shared_data = twd_gen_shared_data_create(
-        twd, args->data_paths, args->twd_gen_output_name, autoplay_num_threads,
-        num_gens, twd_games_per_gen, args->twd_label_plies);
+    shared_data->pat_gen_shared_data = pat_gen_shared_data_create(
+        pat, args->data_paths, args->pat_gen_output_name, autoplay_num_threads,
+        num_gens, pat_games_per_gen, args->pat_label_plies);
   }
 
   AutoplayWorker **autoplay_workers =
@@ -1538,19 +1538,19 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     autoplay_worker_destroy(autoplay_workers[thread_index]);
   }
 
-  // The trained weights live in the players_data-owned TWDWeights object,
+  // The trained weights live in the players_data-owned PATWeights object,
   // which every position load re-reads, so no reload is needed; write the
   // final weights under the plain output name for convenience.
-  if (is_twdgen_mode) {
-    twd_write(shared_data->twd_gen_shared_data->twd, args->data_paths,
-              args->twd_gen_output_name, error_stack);
+  if (is_patgen_mode) {
+    pat_write(shared_data->pat_gen_shared_data->pat, args->data_paths,
+              args->pat_gen_output_name, error_stack);
   }
 
   free(autoplay_workers);
   free(worker_ids);
   autoplay_shared_data_destroy(shared_data);
   free(min_rack_targets);
-  free(twd_games_per_gen);
+  free(pat_games_per_gen);
 
   // Only reload KLV if it was modified during leavegen
   if (is_leavegen_mode) {

@@ -10,7 +10,7 @@
 #define KLV_EXTENSION ".klv2"
 #define RACK_INFO_TABLE_EXTENSION ".rit"
 #define WORD_INFO_TABLE_EXTENSION ".wit"
-#define TWS_DEFENSE_EXTENSION ".twd"
+#define PAT_EXTENSION ".pat"
 #define TXT_EXTENSION ".txt"
 #define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
@@ -29,7 +29,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
   DATA_FILEPATH_TYPE_DAWG_PACKED,
   DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
-  DATA_FILEPATH_TYPE_TWS_DEFENSE,
+  DATA_FILEPATH_TYPE_PAT,
 } data_filepath_t;
 
 char *get_filepath(const char *data_path, const char *data_name,
