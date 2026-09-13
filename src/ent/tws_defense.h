@@ -66,6 +66,8 @@ typedef enum {
   TWD_PREMIUM_TWS,
   TWD_PREMIUM_DWS,
   TWD_PREMIUM_TLS,
+  TWD_PREMIUM_QWS,
+  TWD_PREMIUM_QLS,
   TWD_NUM_PREMIUM_CLASSES,
 } twd_premium_class_t;
 
@@ -78,11 +80,13 @@ enum {
   // square near the cap shifts which squares each side sees. Keep the cap
   // above every layout that is built.
   TWD_MAX_TWS = 24,
-  TWD_MAX_PREMIUM = 80,
+  // The super board walks 89 premium squares (4 quad word, 16 triple word,
+  // 41 double word, 8 quad letter, 20 triple letter) and has 72 windows.
+  TWD_MAX_PREMIUM = 96,
   // The standard board has 16 double-double windows (8 in rows and 8 in
   // columns) and the super board 40. Windows are found horizontally first,
   // so a cap below the count silently drops every vertical window.
-  TWD_MAX_DD = 48,
+  TWD_MAX_DD = 80,
   // The unit masks are 64-bit, so this is the hard ceiling (see the
   // static_assert in tws_defense.c).
   TWD_MAX_SCAN_UNITS = TWD_MAX_PREMIUM * 2 + TWD_MAX_DD,
@@ -126,6 +130,8 @@ typedef struct TWDEvalContext {
   uint8_t dd_lanes[TWD_MAX_DD];
   uint8_t dd_los[TWD_MAX_DD];
   uint8_t dd_his[TWD_MAX_DD];
+  // Which product tier each window's two multipliers put it in.
+  uint8_t dd_tiers[TWD_MAX_DD];
   // Units 2*i and 2*i+1 are TWS i's horizontal and vertical walks; the
   // num_dd units after those are the double-double windows in order.
   int num_units;
