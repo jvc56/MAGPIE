@@ -88,6 +88,18 @@ enum {
   PAT_CLASS_MASK_ALL =
       PAT_CLASS_MASK_WINDOWS | ((1u << PAT_NUM_PREMIUM_CLASSES) - 1),
   PAT_CLASS_MASK_TWS_ONLY = 1u << PAT_PREMIUM_TWS,
+  // Which square-multiplier axis each premium class draws its
+  // opening_move_word_penalties/opening_move_letter_penalties contribution
+  // from (see placement_adjustment and board.h's update_opening_penalty):
+  // word squares triple or double the whole word, letter squares multiply
+  // one tile. Used to skip whichever axis a live PAT class already prices,
+  // so the legacy per-square opening penalty and a trained PAT weight for
+  // the same square never both apply.
+  PAT_CLASS_MASK_WORD_MULT = (1u << PAT_PREMIUM_TWS) | (1u << PAT_PREMIUM_DWS) |
+                             (1u << PAT_PREMIUM_QWS),
+  PAT_CLASS_MASK_LETTER_MULT = (1u << PAT_PREMIUM_TLS) |
+                               (1u << PAT_PREMIUM_DLS) |
+                               (1u << PAT_PREMIUM_QLS),
 };
 
 enum {
@@ -194,6 +206,11 @@ typedef struct PATEvalContext {
   // <= 0, so the bounds stay valid, and it is a plain array lookup so the
   // shadow hot path pays nothing for it.
   Equity lane_penalty_bound[2][BOARD_DIM];
+  // Bitmask of PAT_CLASS_MASK_* classes this context actually applies
+  // (weighted in the file and not excluded by the runtime mask); see
+  // pat_eval_ctx_active_classes, the safe way to read this from outside
+  // pat.c since it is meaningless (and left unset) while weights is NULL.
+  uint32_t active_classes_mask;
 } PATEvalContext;
 
 void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
@@ -239,6 +256,18 @@ pat_eval_non_placement_penalty(const PATEvalContext *pat_eval_ctx) {
     return 0;
   }
   return pat_eval_ctx->pre_penalty;
+}
+// Bitmask of PAT_CLASS_MASK_* classes this context actually applies, or 0
+// when the context is NULL or disabled. See placement_adjustment, which
+// uses PAT_CLASS_MASK_WORD_MULT/PAT_CLASS_MASK_LETTER_MULT against this to
+// skip whichever axis of the legacy opening penalty a live class already
+// prices.
+static inline uint32_t
+pat_eval_ctx_active_classes(const PATEvalContext *pat_eval_ctx) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights) {
+    return 0;
+  }
+  return pat_eval_ctx->active_classes_mask;
 }
 // The upper bound on the defense term of every tile placement in lane
 // `lane` of direction `dir` (see lane_penalty_bound). Zero when the context

@@ -16,6 +16,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/static_eval.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
@@ -265,6 +266,78 @@ static void test_pat_extract_features_floater_board(void) {
   config_destroy(config);
 }
 
+// placement_adjustment (the legacy per-square opening penalty; see
+// update_opening_penalty) must skip whichever axis a live PAT class already
+// prices, and only that axis, so the crude fixed penalty and a trained PAT
+// weight for the same square never both apply.
+static void test_pat_opening_penalty_gating(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -numplays 5");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Square *lanes = board_get_readonly_lanes(board, 0);
+
+  Equity word_penalties[BOARD_DIM * 2] = {0};
+  Equity letter_penalties[BOARD_DIM * 2] = {0};
+  word_penalties[3] = -700;
+  letter_penalties[3] = -350;
+
+  const MachineLetter e_ml = ld_hl_to_ml(ld, "E");
+  Move move;
+  set_single_tile_move(&move, e_ml, 7, 3);
+
+  // No PAT context: both axes apply, matching PAT-off behavior exactly.
+  assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
+                              pat_eval_ctx_active_classes(NULL)) == -1050);
+  PATEvalContext disabled_ctx;
+  pat_eval_context_disable(&disabled_ctx);
+  assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
+                              pat_eval_ctx_active_classes(&disabled_ctx)) ==
+         -1050);
+
+  // Only a letter-multiplier class (DLS) weighted: the letter axis is
+  // suppressed, the word axis is untouched.
+  PATWeights *dls_only = pat_create_zeroed("dls_only_gate");
+  pat_set_weight(dls_only, PAT_FEATURE_DLS_HOOK_START, -5);
+  PATEvalContext ctx;
+  pat_eval_context_load(&ctx, dls_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  const uint32_t dls_active = pat_eval_ctx_active_classes(&ctx);
+  assert(dls_active & PAT_CLASS_MASK_LETTER_MULT);
+  assert(!(dls_active & PAT_CLASS_MASK_WORD_MULT));
+  assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
+                              dls_active) == -700);
+  pat_destroy(dls_only);
+
+  // Only a word-multiplier class (TWS) weighted: the word axis is
+  // suppressed, the letter axis is untouched.
+  PATWeights *tws_only = pat_create_zeroed("tws_only_gate");
+  pat_set_weight(tws_only, PAT_FEATURE_HOOK_START, -5);
+  pat_eval_context_load(&ctx, tws_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  const uint32_t tws_active = pat_eval_ctx_active_classes(&ctx);
+  assert(tws_active & PAT_CLASS_MASK_WORD_MULT);
+  assert(!(tws_active & PAT_CLASS_MASK_LETTER_MULT));
+  assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
+                              tws_active) == -350);
+  pat_destroy(tws_only);
+
+  // A runtime mask excluding DLS even though the file has real DLS weights
+  // must not suppress the legacy penalty: gating follows what actually
+  // applies, not what the file merely contains.
+  PATWeights *dls_weighted = pat_create_zeroed("dls_masked_off_gate");
+  pat_set_weight(dls_weighted, PAT_FEATURE_DLS_HOOK_START, -5);
+  pat_eval_context_load(&ctx, dls_weighted, lanes, ld, NULL,
+                        PAT_CLASS_MASK_TWS_ONLY);
+  const uint32_t masked_active = pat_eval_ctx_active_classes(&ctx);
+  assert(!(masked_active & PAT_CLASS_MASK_LETTER_MULT));
+  assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
+                              masked_active) == -1050);
+  pat_destroy(dls_weighted);
+
+  config_destroy(config);
+}
+
 static void test_pat_move_penalty(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
@@ -350,8 +423,13 @@ static void test_pat_move_penalty(void) {
 static void test_pat_dls_features_land_in_dls_channels(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  // Places Q directly above the double letter square at (7, 3) (0-indexed),
+  // giving it a real, non-trivial cross set (only I completes QI): hooks
+  // cannot exist on a truly empty board (there is nothing to hook onto), so
+  // this is the minimum board state that can ever produce a nonzero hook
+  // feature.
   load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+      config, "cgp 15/15/15/15/15/15/3Q11/15/15/15/15/15/15/15/15 / 0/0 0");
   const Game *game = config_get_game(config);
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -585,6 +663,7 @@ void test_pat(void) {
   test_pat_extract_features_floater_board();
   test_pat_move_penalty();
   test_pat_dls_features_land_in_dls_channels();
+  test_pat_opening_penalty_gating();
   test_pat_unweighted_units_dropped();
   test_pat_opening_and_hook_flex();
   test_pat_movegen_integration();

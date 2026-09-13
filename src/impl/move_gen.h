@@ -122,7 +122,8 @@ typedef struct MoveGen {
   const uint32_t *const *wit_row_lane;
   const uint8_t *wit_len_lane;
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
-  Equity opening_move_penalties[(BOARD_DIM) * 2];
+  Equity opening_move_word_penalties[(BOARD_DIM) * 2];
+  Equity opening_move_letter_penalties[(BOARD_DIM) * 2];
   // PAT evaluation state; disabled (weights NULL) unless the player
   // has PAT weights loaded and the record/sort types use static equity.
   PATEvalContext pat_eval_ctx;
