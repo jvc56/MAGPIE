@@ -33,12 +33,19 @@ typedef struct PATMoveChoiceResult {
 // The champion's own equity player config, with the board loaded.
 Config *pat_move_choice_config_create(void);
 
+// num_worlds paired reference worlds per disagreement (at most
+// PAT_MOVE_CHOICE_MAX_WORLDS).
 void pat_move_choice_compare(Config *config, const PATMoveChooser *baseline,
                              const PATMoveChooser *candidate,
                              uint64_t seed_base, int num_positions,
-                             PATMoveChoiceResult *result_out);
+                             int num_worlds, PATMoveChoiceResult *result_out);
+
+#define PAT_MOVE_CHOICE_MAX_WORLDS 300
+// What every comparison used before the decomposition was measured.
+#define PAT_MOVE_CHOICE_DEFAULT_WORLDS 30
 
 void test_pat_move_choice_controls(void);
+void test_pat_move_choice_targeted_controls(void);
 void test_pat_overlap_step3_dev(void);
 void test_pat_overlap_step3_confirm(void);
 

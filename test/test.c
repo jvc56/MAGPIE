@@ -234,6 +234,7 @@ static TestEntry on_demand_test_table[] = {
     {"patlexfloatconfirm", test_pat_lexfloat_isolated_confirm},
     {"patoverlap", test_pat_overlap_pilot},
     {"patmovechoicecontrols", test_pat_move_choice_controls},
+    {"patmovechoicetargeted", test_pat_move_choice_targeted_controls},
     {"patoverlapstep3dev", test_pat_overlap_step3_dev},
     {"patoverlapstep3confirm", test_pat_overlap_step3_confirm},
     {NULL, NULL} // Sentinel value to mark end of array

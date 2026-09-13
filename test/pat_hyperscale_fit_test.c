@@ -67,8 +67,12 @@
 #define PAT_LEXFLOAT_PAT_NAME "pat_lexfloat_frozen_v1"
 #define PAT_LEGACY_FROZEN_PAT_NAME "pat_legacy_frozen_v1"
 
-// A chooser that generates moves under a PAT file; NULL name means the
-// champion.
+// Loads a PAT file the way the config path does: pat_create alone leaves
+// the lexicon tables (hook_flex, through_score, through_count) empty, and
+// a candidate loaded that way disagrees with the same weights fully
+// prepared on ~12% of positions (see test_pat_move_choice_targeted_
+// controls), which silently handicapped every file-backed candidate in
+// this file's earlier runs.
 static PATWeights *pat_hyperscale_load(Config *config, const char *name) {
   ErrorStack *error_stack = error_stack_create();
   PATWeights *pat =
@@ -76,6 +80,9 @@ static PATWeights *pat_hyperscale_load(Config *config, const char *name) {
   assert(error_stack_is_empty(error_stack));
   assert(pat);
   error_stack_destroy(error_stack);
+  const Game *game = config_get_game(config);
+  pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
   return pat;
 }
 
@@ -87,7 +94,8 @@ static PATWeights *pat_hyperscale_load(Config *config, const char *name) {
 // an earlier exploratory run already looked at.
 static void pat_move_choice_benefit(const char *baseline_pat_name,
                                     const char *candidate_pat_name,
-                                    uint64_t seed_base, int num_positions) {
+                                    uint64_t seed_base, int num_positions,
+                                    int num_worlds) {
   Config *config = pat_move_choice_config_create();
   Game *game = config_get_game(config);
   const PATWeights *champion = player_get_pat(game_get_player(game, 0));
@@ -105,7 +113,7 @@ static void pat_move_choice_benefit(const char *baseline_pat_name,
                                     .overlap_correction = 0.0};
   PATMoveChoiceResult result;
   pat_move_choice_compare(config, &baseline, &candidate, seed_base,
-                          num_positions, &result);
+                          num_positions, num_worlds, &result);
   assert(result.positions_considered > 0);
   pat_destroy(candidate_pat);
   if (baseline_pat) {
@@ -116,7 +124,8 @@ static void pat_move_choice_benefit(const char *baseline_pat_name,
 
 void test_pat_hyperscale_fit(void) {
   pat_move_choice_benefit(NULL, PAT_HYPERSCALE_FIT_SCALED_PAT_NAME,
-                          700000000ULL, PAT_HYPERSCALE_FIT_NUM_POSITIONS);
+                          701000000ULL, PAT_HYPERSCALE_FIT_NUM_POSITIONS,
+                          PAT_MOVE_CHOICE_DEFAULT_WORLDS);
 }
 
 // The lexicon-aware floater refit (pat_lexfloat_frozen_v1: one frozen-
@@ -127,10 +136,12 @@ void test_pat_hyperscale_fit(void) {
 // off (pat_legacy_frozen_v1, byte-for-byte pat_hyper_frozen_v1 plus the
 // flag row), which isolates the semantics change from the refit itself.
 void test_pat_lexfloat_move_choice(void) {
-  pat_move_choice_benefit(NULL, PAT_LEXFLOAT_PAT_NAME, 800000000ULL,
-                          PAT_HYPERSCALE_FIT_NUM_POSITIONS);
+  pat_move_choice_benefit(NULL, PAT_LEXFLOAT_PAT_NAME, 801000000ULL,
+                          PAT_HYPERSCALE_FIT_NUM_POSITIONS,
+                          PAT_MOVE_CHOICE_DEFAULT_WORLDS);
   pat_move_choice_benefit(PAT_LEGACY_FROZEN_PAT_NAME, PAT_LEXFLOAT_PAT_NAME,
-                          810000000ULL, PAT_HYPERSCALE_FIT_NUM_POSITIONS);
+                          811000000ULL, PAT_HYPERSCALE_FIT_NUM_POSITIONS,
+                          PAT_MOVE_CHOICE_DEFAULT_WORLDS);
 }
 
 // A larger, separately seeded confirmation batch for the isolated
@@ -138,6 +149,10 @@ void test_pat_lexfloat_move_choice(void) {
 // the 12,000-position run above resolves it far more coarsely than the
 // champion comparison.
 void test_pat_lexfloat_isolated_confirm(void) {
+  // 200 worlds: the decomposition puts within-position noise near half of
+  // Var(mean) at 30, and worlds are cheap next to the exhaustive
+  // generation behind each disagreement.
   pat_move_choice_benefit(PAT_LEGACY_FROZEN_PAT_NAME, PAT_LEXFLOAT_PAT_NAME,
-                          820000000ULL, 4 * PAT_HYPERSCALE_FIT_NUM_POSITIONS);
+                          821000000ULL, 4 * PAT_HYPERSCALE_FIT_NUM_POSITIONS,
+                          200);
 }

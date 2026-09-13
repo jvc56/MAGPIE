@@ -39,7 +39,6 @@
 // decomposition, which says whether more worlds per position or more
 // positions is the better next spend.
 
-#define PAT_MOVE_CHOICE_NUM_WORLDS 30
 #define PAT_MOVE_CHOICE_MOVE_LIST_CAPACITY 3000
 #define PAT_MOVE_CHOICE_CHAMPION "pat_dls_champion_v2"
 
@@ -95,9 +94,9 @@ static double pat_move_choice_reference_value(const Game *game,
 static void pat_move_choice_reference_values(const Game *game, const Move *move,
                                              int mover_index,
                                              const PATWeights *reference_pat,
-                                             uint64_t base_seed,
+                                             uint64_t base_seed, int num_worlds,
                                              double *values_out) {
-  for (int world = 0; world < PAT_MOVE_CHOICE_NUM_WORLDS; world++) {
+  for (int world = 0; world < num_worlds; world++) {
     const uint64_t world_seed =
         base_seed + (uint64_t)world * 1000003ULL; // a prime stride
     values_out[world] = pat_move_choice_reference_value(
@@ -105,17 +104,27 @@ static void pat_move_choice_reference_values(const Game *game, const Move *move,
   }
 }
 
+// A move's equity as a double, with the pass sentinel mapped far below
+// anything a real move scores (MOVE_RECORD_ALL lists include the pass).
+static double pat_move_choice_move_equity(const Move *move) {
+  if (move_get_type(move) == GAME_EVENT_PASS) {
+    return -1.0e9;
+  }
+  return equity_to_double(move_get_equity(move));
+}
+
 // The chooser's move at the game's current position, copied into
 // move_out. Leaves the mover's PAT pointing at chooser->pat; callers
-// restore it.
+// restore it. Every chooser picks from the same exhaustively generated,
+// fully sorted list -- including a plain one, which takes its top entry
+// -- rather than from MOVE_RECORD_BEST: best-only generation can prune
+// an exactly tied move that exhaustive generation keeps, and the
+// comparator's tie-break may then prefer the kept one, so two choosers
+// that value every move identically could otherwise "disagree" on ties.
 static void pat_move_choice_choose(Game *game, int mover_index,
                                    const PATMoveChooser *chooser,
                                    MoveList *move_list, Move *move_out) {
   player_set_pat(game_get_player(game, mover_index), chooser->pat);
-  if (chooser->degrade_margin <= 0.0 && chooser->overlap_correction == 0.0) {
-    move_copy(move_out, get_top_equity_move(game, move_list));
-    return;
-  }
   const MoveGenArgs args = {
       .game = game,
       .move_list = move_list,
@@ -131,14 +140,19 @@ static void pat_move_choice_choose(Game *game, int mover_index,
   const int num_moves = move_list_get_count(move_list);
   assert(num_moves > 0);
   const double best_equity =
-      equity_to_double(move_get_equity(move_list_get_move(move_list, 0)));
+      pat_move_choice_move_equity(move_list_get_move(move_list, 0));
   int chosen = 0;
-  if (chooser->degrade_margin > 0.0) {
+  if (chooser->degrade_margin <= 0.0 && chooser->overlap_correction == 0.0) {
+    // Plain: the top of the sorted list.
+  } else if (chooser->degrade_margin > 0.0) {
     // The best move at least degrade_margin below the top; the top itself
     // when nothing is that far back.
     for (int i = 1; i < num_moves; i++) {
-      const double equity =
-          equity_to_double(move_get_equity(move_list_get_move(move_list, i)));
+      const Move *move = move_list_get_move(move_list, i);
+      if (move_get_type(move) == GAME_EVENT_PASS) {
+        continue;
+      }
+      const double equity = pat_move_choice_move_equity(move);
       if (best_equity - equity >= chooser->degrade_margin) {
         chosen = i;
         break;
@@ -159,7 +173,7 @@ static void pat_move_choice_choose(Game *game, int mover_index,
         narrow_after = pat_overlap_narrow_measure(game, mover_index);
         game_unplay_last_move(game);
       }
-      const double adjusted = equity_to_double(move_get_equity(move)) -
+      const double adjusted = pat_move_choice_move_equity(move) -
                               chooser->overlap_correction * narrow_after;
       // Strictly greater: ties keep the higher raw-equity move.
       if (i == 0 || adjusted > best_adjusted) {
@@ -175,7 +189,8 @@ static void pat_move_choice_choose(Game *game, int mover_index,
 void pat_move_choice_compare(Config *config, const PATMoveChooser *baseline,
                              const PATMoveChooser *candidate,
                              uint64_t seed_base, int num_positions,
-                             PATMoveChoiceResult *result_out) {
+                             int num_worlds, PATMoveChoiceResult *result_out) {
+  assert(num_worlds > 1 && num_worlds <= PAT_MOVE_CHOICE_MAX_WORLDS);
   Game *game = config_get_game(config);
   const PATWeights *reference_pat = player_get_pat(game_get_player(game, 0));
   assert(reference_pat);
@@ -188,8 +203,8 @@ void pat_move_choice_compare(Config *config, const PATMoveChooser *baseline,
   double sum_within = 0.0;
   int num_disagreements = 0;
   int num_positions_considered = 0;
-  double values_baseline[PAT_MOVE_CHOICE_NUM_WORLDS];
-  double values_candidate[PAT_MOVE_CHOICE_NUM_WORLDS];
+  double values_baseline[PAT_MOVE_CHOICE_MAX_WORLDS];
+  double values_candidate[PAT_MOVE_CHOICE_MAX_WORLDS];
 
   for (int attempt = 0; attempt < num_positions; attempt++) {
     const uint64_t seed = seed_base + (uint64_t)attempt;
@@ -238,23 +253,22 @@ void pat_move_choice_compare(Config *config, const PATMoveChooser *baseline,
 
     const uint64_t world_seed = seed + 500000000ULL;
     pat_move_choice_reference_values(game, &move_baseline, mover_index,
-                                     reference_pat, world_seed,
+                                     reference_pat, world_seed, num_worlds,
                                      values_baseline);
     pat_move_choice_reference_values(game, &move_candidate, mover_index,
-                                     reference_pat, world_seed,
+                                     reference_pat, world_seed, num_worlds,
                                      values_candidate);
     double sum_d = 0.0;
     double sum_d_sq = 0.0;
-    for (int world = 0; world < PAT_MOVE_CHOICE_NUM_WORLDS; world++) {
+    for (int world = 0; world < num_worlds; world++) {
       const double d = values_candidate[world] - values_baseline[world];
       sum_d += d;
       sum_d_sq += d * d;
     }
-    const double position_mean = sum_d / PAT_MOVE_CHOICE_NUM_WORLDS;
+    const double position_mean = sum_d / num_worlds;
     const double position_var =
-        (sum_d_sq / PAT_MOVE_CHOICE_NUM_WORLDS -
-         position_mean * position_mean) *
-        ((double)PAT_MOVE_CHOICE_NUM_WORLDS / (PAT_MOVE_CHOICE_NUM_WORLDS - 1));
+        (sum_d_sq / num_worlds - position_mean * position_mean) *
+        ((double)num_worlds / (num_worlds - 1));
     sum_means += position_mean;
     sum_means_sq += position_mean * position_mean;
     sum_within += position_var;
@@ -278,7 +292,7 @@ void pat_move_choice_compare(Config *config, const PATMoveChooser *baseline,
         (sum_means_sq / n - mean * mean) * ((double)n / (n - 1));
     const double se = sqrt(var_means / n);
     const double within = sum_within / n;
-    const double between = var_means - within / PAT_MOVE_CHOICE_NUM_WORLDS;
+    const double between = var_means - within / num_worlds;
     result_out->mean = mean;
     result_out->se = se;
     result_out->within_variance = within;
@@ -292,9 +306,8 @@ void pat_move_choice_compare(Config *config, const PATMoveChooser *baseline,
     printf("  variance decomposition: within-position %.2f, "
            "between-position %.2f (R = %d worlds); shares of Var(mean): "
            "between %.1f%%, within %.1f%%\n",
-           within, between, PAT_MOVE_CHOICE_NUM_WORLDS,
-           100.0 * (between / n) / var_means * n,
-           100.0 * (within / (n * PAT_MOVE_CHOICE_NUM_WORLDS)) / var_means * n);
+           within, between, num_worlds, 100.0 * between / var_means,
+           100.0 * (within / num_worlds) / var_means);
   }
 }
 
@@ -372,7 +385,8 @@ void test_pat_move_choice_controls(void) {
 
   // Identical choosers.
   pat_move_choice_compare(config, &champion_chooser, &champion_chooser,
-                          900000000ULL, 2000, &result);
+                          900000000ULL, 2000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
   assert(result.positions_considered > 1500);
   assert(result.disagreements == 0);
 
@@ -406,10 +420,10 @@ void test_pat_move_choice_controls(void) {
   pat_move_choice_whole_game(config, &degraded_2, &champion_chooser,
                              910000000ULL, 100);
   pat_move_choice_compare(config, &champion_chooser, &degraded_2, 920000000ULL,
-                          12000, &result);
+                          4000, PAT_MOVE_CHOICE_DEFAULT_WORLDS, &result);
   PATMoveChoiceResult swapped;
   pat_move_choice_compare(config, &degraded_2, &champion_chooser, 920000000ULL,
-                          12000, &swapped);
+                          4000, PAT_MOVE_CHOICE_DEFAULT_WORLDS, &swapped);
   assert(swapped.disagreements == result.disagreements);
   assert(fabs(swapped.mean + result.mean) < 1e-9);
   assert(fabs(swapped.se - result.se) < 1e-9);
@@ -423,14 +437,73 @@ void test_pat_move_choice_controls(void) {
                                         .overlap_correction = 0.0};
   printf("\nsmall degradation control:\n");
   pat_move_choice_compare(config, &champion_chooser, &degraded_half,
-                          930000000ULL, 12000, &result);
+                          930000000ULL, 4000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+
+  config_destroy(config);
+  test_pat_move_choice_targeted_controls();
+}
+
+// The reload and targeted-degradation controls, separately runnable.
+void test_pat_move_choice_targeted_controls(void) {
+  Config *config = pat_move_choice_config_create();
+  Game *game = config_get_game(config);
+  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  const PATMoveChooser champion_chooser = {.label = "champion",
+                                           .pat = champion,
+                                           .degrade_margin = 0.0,
+                                           .overlap_correction = 0.0};
+  PATMoveChoiceResult result;
+
+  // A file loaded straight through pat_create has no lexicon tables
+  // (hook_flex, through_score, through_count): only the config path runs
+  // pat_prepare_hook_flex. A reloaded champion with the tables prepared
+  // must be indistinguishable from the config's own; the same reload
+  // without them measures how much those tables move choices.
+  printf("\nreload controls:\n");
+  ErrorStack *error_stack = error_stack_create();
+  PATWeights *reloaded = pat_create(config_get_data_paths(config),
+                                    PAT_MOVE_CHOICE_CHAMPION, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const PATMoveChooser reloaded_unprepared = {.label = "champion reloaded, "
+                                                       "lexicon tables absent",
+                                              .pat = reloaded,
+                                              .degrade_margin = 0.0,
+                                              .overlap_correction = 0.0};
+  pat_move_choice_compare(config, &champion_chooser, &reloaded_unprepared,
+                          960000000ULL, 2000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  pat_prepare_hook_flex(reloaded, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
+  const PATMoveChooser reloaded_prepared = {.label = "champion reloaded, "
+                                                     "lexicon tables prepared",
+                                            .pat = reloaded,
+                                            .degrade_margin = 0.0,
+                                            .overlap_correction = 0.0};
+  pat_move_choice_compare(config, &champion_chooser, &reloaded_prepared,
+                          960000000ULL, 2000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  assert(result.disagreements == 0);
+  pat_destroy(reloaded);
+
+  // No PAT at all: the champion's whole term removed. Must disagree often.
+  PATWeights *zeroed = pat_create_zeroed("zeroed");
+  const PATMoveChooser zeroed_chooser = {.label = "all PAT weights zero",
+                                         .pat = zeroed,
+                                         .degrade_margin = 0.0,
+                                         .overlap_correction = 0.0};
+  pat_move_choice_compare(config, &champion_chooser, &zeroed_chooser,
+                          960000000ULL, 1000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  pat_destroy(zeroed);
 
   // Targeted degradation: hook_d1 zeroed, nothing else changed.
-  ErrorStack *error_stack = error_stack_create();
   PATWeights *no_hook_d1 = pat_create(config_get_data_paths(config),
                                       PAT_MOVE_CHOICE_CHAMPION, error_stack);
   assert(error_stack_is_empty(error_stack));
   error_stack_destroy(error_stack);
+  pat_prepare_hook_flex(no_hook_d1, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
   assert(pat_get_weight(no_hook_d1, PAT_FEATURE_HOOK_START) < 0);
   pat_set_weight(no_hook_d1, PAT_FEATURE_HOOK_START, 0);
   const PATMoveChooser no_hook_d1_chooser = {.label = "champion with hook_d1 "
@@ -440,9 +513,10 @@ void test_pat_move_choice_controls(void) {
                                              .overlap_correction = 0.0};
   printf("\ntargeted degradation control:\n");
   pat_move_choice_whole_game(config, &no_hook_d1_chooser, &champion_chooser,
-                             940000000ULL, 1500);
+                             940000000ULL, 300);
   pat_move_choice_compare(config, &champion_chooser, &no_hook_d1_chooser,
-                          950000000ULL, 12000, &result);
+                          950000000ULL, 3000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
   pat_destroy(no_hook_d1);
   config_destroy(config);
 }
@@ -472,16 +546,23 @@ void test_pat_overlap_step3_dev(void) {
                                   .overlap_correction = 2.0};
   PATMoveChoiceResult result;
   pat_move_choice_compare(config, &champion_chooser, &credit, 830000000ULL,
-                          12000, &result);
+                          12000, PAT_MOVE_CHOICE_DEFAULT_WORLDS, &result);
   pat_move_choice_compare(config, &champion_chooser, &penalty, 830000000ULL,
-                          12000, &result);
+                          12000, PAT_MOVE_CHOICE_DEFAULT_WORLDS, &result);
   config_destroy(config);
 }
 
-// Frozen after the development batch: set PAT_OVERLAP_STEP3_CONFIRM_C to
-// the chosen sign's correction (0 means neither was chosen and this test
-// does nothing).
+// Frozen after the development batch: set to the chosen sign's correction
+// (0 means neither was chosen and this test does nothing). An earlier
+// development batch was run while the WMP exhaustive-list path dropped
+// the PAT term entirely (fixed in move_gen.c alongside this harness), so
+// its choice of +2 was withdrawn and the batch rerun.
 #define PAT_OVERLAP_STEP3_CONFIRM_C 0.0
+// The development batch's decomposition put within-position noise at about
+// half of Var(mean) with 30 worlds, and a world costs far less than the
+// ~77 exhaustively reranked positions behind each disagreement, so the
+// confirmation batch spends more worlds per disagreement.
+#define PAT_OVERLAP_STEP3_CONFIRM_WORLDS 200
 
 void test_pat_overlap_step3_confirm(void) {
   if (PAT_OVERLAP_STEP3_CONFIRM_C == 0.0) {
@@ -503,6 +584,6 @@ void test_pat_overlap_step3_confirm(void) {
                                      PAT_OVERLAP_STEP3_CONFIRM_C};
   PATMoveChoiceResult result;
   pat_move_choice_compare(config, &champion_chooser, &frozen, 840000000ULL,
-                          48000, &result);
+                          48000, PAT_OVERLAP_STEP3_CONFIRM_WORLDS, &result);
   config_destroy(config);
 }
