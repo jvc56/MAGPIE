@@ -3409,7 +3409,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
       pat_eval_context_load(&gen->pat_eval_ctx, pat, gen->board_lanes, &gen->ld,
                             &gen->player_rack,
                             PAT_CLASS_MASK_ALL &
-                                ~args->pat_disabled_classes_mask);
+                                ~args->pat_disabled_classes_mask,
+                            rack_get_total_letters(&gen->opponent_rack));
     } else {
       pat_eval_context_disable(&gen->pat_eval_ctx);
     }
