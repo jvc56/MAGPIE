@@ -96,9 +96,15 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
   } else if (feature_index < PAT_FEATURE_FLOAT_THROUGH_COUNT_START) {
     snprintf(buf, buf_size, "float_through_score_d%d",
              feature_index - PAT_FEATURE_FLOAT_THROUGH_SCORE_START + 1);
-  } else if (feature_index < PAT_FEATURE_DWS_HOOK_START) {
+  } else if (feature_index < PAT_FEATURE_HOOK_SCALED_START) {
     snprintf(buf, buf_size, "float_through_count_d%d",
              feature_index - PAT_FEATURE_FLOAT_THROUGH_COUNT_START + 1);
+  } else if (feature_index < PAT_FEATURE_FLOAT_FLEX_SCALED_START) {
+    snprintf(buf, buf_size, "hook_scaled_d%d",
+             feature_index - PAT_FEATURE_HOOK_SCALED_START + 1);
+  } else if (feature_index < PAT_FEATURE_DWS_HOOK_START) {
+    snprintf(buf, buf_size, "float_flex_scaled_d%d",
+             feature_index - PAT_FEATURE_FLOAT_FLEX_SCALED_START + 1);
   } else if (feature_index < PAT_FEATURE_DWS_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "dws_hook_d%d",
              feature_index - PAT_FEATURE_DWS_HOOK_START + 1);
@@ -219,6 +225,12 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
     if (version < 2 && feature_index >= PAT_FEATURE_DLS_HOOK_START &&
         feature_index < PAT_FEATURE_QWS_HOOK_START) {
       feature_index = PAT_FEATURE_QWS_HOOK_START;
+    }
+    // A version below 3 has no hypergeometric-scaled rows: they were added
+    // in version 3. Same skip, same reasoning.
+    if (version < 3 && feature_index >= PAT_FEATURE_HOOK_SCALED_START &&
+        feature_index < PAT_FEATURE_DWS_HOOK_START) {
+      feature_index = PAT_FEATURE_DWS_HOOK_START;
     }
     if (has_prefix(PAT_GAMMA_ROW_PREFIX, line)) {
       const char *gamma_text = line + strlen(PAT_GAMMA_ROW_PREFIX);
@@ -508,6 +520,35 @@ static inline int pat_set_flex(const uint8_t *unseen_counts,
   return flex;
 }
 
+// The hypergeometric expectation of how many of the unseen pool's copies
+// of a given letter are already in the opponent's rack right now, as a
+// fraction: opponent_rack_size / total_unseen. Raw flex implicitly uses a
+// fraction of 1 (every unseen copy is treated as if it were already in
+// their hand), which is only right when the bag is empty; early on, most
+// of the unseen pool is still sitting in the bag, unreachable for many
+// turns, so raw flex overstates immediate risk. total_unseen of 0 means
+// nothing is left to fear either way, and dividing by it would be
+// meaningless, so that case scales to 0.
+static inline double pat_hyper_scale(const uint8_t *unseen_counts,
+                                     int opponent_rack_size) {
+  int total_unseen = 0;
+  for (int letter = 0; letter < MAX_ALPHABET_SIZE; letter++) {
+    total_unseen += unseen_counts[letter];
+  }
+  if (total_unseen <= 0) {
+    return 0.0;
+  }
+  return (double)opponent_rack_size / (double)total_unseen;
+}
+
+// pat_set_flex scaled by the hypergeometric fraction (see pat_hyper_scale),
+// rounded to the nearest integer so it stays comparable to the raw count
+// feature it sits beside.
+static inline int pat_set_flex_scaled(const uint8_t *unseen_counts,
+                                      uint64_t letter_set, double hyper_scale) {
+  return (int)lround(pat_set_flex(unseen_counts, letter_set) * hyper_scale);
+}
+
 // Fills unseen_counts (MAX_ALPHABET_SIZE entries) with the tiles that are
 // neither on the board nor on the evaluating player's rack, which is
 // exactly the pool the opponent draws from plus what they already hold.
@@ -605,6 +646,7 @@ typedef struct PATCrossInfo {
   bool dead;
   bool hooky;
   int flex;
+  int scaled_flex;
 } PATCrossInfo;
 
 // The perpendicular constraint at an empty square: dead (no letter can be
@@ -613,17 +655,22 @@ typedef struct PATCrossInfo {
 // adjacent to the square, the real post-move cross set would require a KWG
 // traversal, so it is approximated with the per-letter hook_flex table; a
 // pre-move dead square is left dead even though a fresh adjacent tile
-// technically changes its perpendicular pattern.
-static PATCrossInfo pat_effective_cross_info(const Square *lane, int idx,
-                                             int dir,
-                                             const PATMoveOverlay *overlay,
-                                             int row, int col,
-                                             const uint8_t *unseen_counts) {
+// technically changes its perpendicular pattern. hyper_scale is only used
+// for scaled_flex (see pat_hyper_scale); pass 1.0 when the caller has no
+// use for that channel (its result is then simply ignored).
+static PATCrossInfo
+pat_effective_cross_info(const Square *lane, int idx, int dir,
+                         const PATMoveOverlay *overlay, int row, int col,
+                         const uint8_t *unseen_counts, double hyper_scale) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   PATCrossInfo info;
   info.dead = (base_cross_set == 0);
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
   info.flex = info.hooky ? pat_set_flex(unseen_counts, base_cross_set) : 0;
+  info.scaled_flex =
+      info.hooky
+          ? pat_set_flex_scaled(unseen_counts, base_cross_set, hyper_scale)
+          : 0;
   if (!overlay || info.dead) {
     return info;
   }
@@ -650,6 +697,10 @@ static PATCrossInfo pat_effective_cross_info(const Square *lane, int idx,
     }
   }
   if (fresh_flex >= 0) {
+    const int scaled_fresh_flex = (int)lround(fresh_flex * hyper_scale);
+    info.scaled_flex = (info.hooky && info.scaled_flex < scaled_fresh_flex)
+                           ? info.scaled_flex
+                           : scaled_fresh_flex;
     info.flex = (info.hooky && info.flex < fresh_flex) ? info.flex : fresh_flex;
     info.hooky = true;
   }
@@ -674,6 +725,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           int opponent_rack_size) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
+  const double hyper_scale = pat_hyper_scale(unseen_counts, opponent_rack_size);
   // Each premium class writes its own hook and floater-value channels. The
   // richer channels (floater flexibility, the lexicon through-table, and
   // the triple-triple pair) stay exclusive to triple word squares, which
@@ -719,7 +771,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   }
   const PATCrossInfo tws_info = pat_effective_cross_info(
       lane, tws_idx, dir, overlay, pat_unit_row(dir, lane_index, tws_idx),
-      pat_unit_col(dir, lane_index, tws_idx), unseen_counts);
+      pat_unit_col(dir, lane_index, tws_idx), unseen_counts, hyper_scale);
   if (tws_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -728,6 +780,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     // A one-tile play on the TWS square itself completes a perpendicular
     // word at triple word score: hook access at d = 1.
     features[hook_base] += tws_info.flex;
+    if (full_channels) {
+      features[PAT_FEATURE_HOOK_SCALED_START] += tws_info.scaled_flex;
+    }
   }
 
   for (int side = -1; side <= 1; side += 2) {
@@ -794,12 +849,14 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           idx += side;
         }
         int run_flex;
+        int scaled_run_flex;
         if (run_has_fresh_tile) {
           // The run's real extension sets do not exist yet; approximate
           // with the two-letter-word flexibility of the tile facing the
           // TWS square.
           run_flex =
               overlay->hook_flex[get_unblanked_machine_letter(facing_letter)];
+          scaled_run_flex = (int)lround(run_flex * hyper_scale);
         } else {
           // The empty square between the run and the TWS square carries the
           // extension set of the adjacent word on the run's side.
@@ -807,16 +864,21 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
               (side > 0) ? square_get_right_extension_set(&lane[prev_empty_idx])
                          : square_get_left_extension_set(&lane[prev_empty_idx]);
           run_flex = pat_set_flex(unseen_counts, extension_set);
+          scaled_run_flex =
+              pat_set_flex_scaled(unseen_counts, extension_set, hyper_scale);
         }
         if (full_channels) {
           features[PAT_FEATURE_FLOAT_FLEX_START + distance_bin - 1] += run_flex;
+          features[PAT_FEATURE_FLOAT_FLEX_SCALED_START + distance_bin - 1] +=
+              scaled_run_flex;
         }
         span_has_floater = true;
         span_floater_flex += run_flex;
         continue;
       }
-      const PATCrossInfo info = pat_effective_cross_info(
-          lane, idx, dir, overlay, square_row, square_col, unseen_counts);
+      const PATCrossInfo info =
+          pat_effective_cross_info(lane, idx, dir, overlay, square_row,
+                                   square_col, unseen_counts, hyper_scale);
       if (info.dead) {
         break;
       }
@@ -837,6 +899,10 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       if (info.hooky) {
         features[hook_base + empties_used - 1] += info.flex;
+        if (full_channels) {
+          features[PAT_FEATURE_HOOK_SCALED_START + empties_used - 1] +=
+              info.scaled_flex;
+        }
         span_has_hook = true;
       }
       prev_empty_idx = idx;
@@ -892,8 +958,9 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
       has_floater = true;
       continue;
     }
+    // Never reads scaled_flex, so hyper_scale is a don't-care here.
     const PATCrossInfo info = pat_effective_cross_info(
-        lane, idx, dir, overlay, square_row, square_col, unseen_counts);
+        lane, idx, dir, overlay, square_row, square_col, unseen_counts, 1.0);
     if (info.dead) {
       return;
     }
