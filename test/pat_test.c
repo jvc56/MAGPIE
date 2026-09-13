@@ -572,6 +572,21 @@ static void test_pat_hook_scaled_channel(void) {
   config_destroy(config);
 }
 
+// The bound argument for pat_eval_move_penalty_bound depends on the
+// discount staying in [0, 1] for every value a PATWeights could ever
+// carry, not just the ones a file happens to pass through pat_parse_contents
+// (a search over candidate discounts would set this directly).
+static void test_pat_own_asset_discount_clamped(void) {
+  PATWeights *pat = pat_create_zeroed("clamp_test");
+  pat_set_own_asset_discount(pat, -0.5);
+  assert(pat_get_own_asset_discount(pat) == 0.0);
+  pat_set_own_asset_discount(pat, 1.5);
+  assert(pat_get_own_asset_discount(pat) == 1.0);
+  pat_set_own_asset_discount(pat, 0.5);
+  assert(pat_get_own_asset_discount(pat) == 0.5);
+  pat_destroy(pat);
+}
+
 // A move played far from every premium square still credits a unit its own
 // leave could exploit, entirely through unit_hook_letters -- the point of
 // the feature (Q above the open TWS at (7,0) makes CSW21's QI its only
@@ -667,6 +682,17 @@ static void test_pat_own_asset_discount(void) {
                         PAT_CLASS_MASK_ALL, RACK_SIZE);
   assert(pat_eval_move_penalty(&no_discount_ctx, &far_move, leave_with_i) ==
          no_discount_ctx.pre_penalty);
+
+  // A move that covers the hooky square itself destroys the only route
+  // this unit had. Eligibility must come from the fresh, post-move scan,
+  // not the stale baseline reverse index: an I in the leave (what the now-
+  // gone hook needed) must not resurrect a discount on a unit whose real,
+  // rescanned contribution is already gone.
+  Move cover_move;
+  set_single_tile_move(&cover_move, x_ml, 7, 0);
+  const Equity covered_penalty =
+      pat_eval_move_penalty(&ctx, &cover_move, leave_with_i);
+  assert(covered_penalty == pat_eval_move_penalty(&ctx, &cover_move, NULL));
 
   rack_destroy(leave_with_i);
   rack_destroy(leave_without_i);
@@ -894,6 +920,7 @@ void test_pat(void) {
   test_pat_move_penalty();
   test_pat_dls_features_land_in_dls_channels();
   test_pat_hook_scaled_channel();
+  test_pat_own_asset_discount_clamped();
   test_pat_own_asset_discount();
   test_pat_opening_penalty_gating();
   test_pat_unweighted_units_dropped();

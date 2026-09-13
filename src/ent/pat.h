@@ -254,6 +254,18 @@ typedef struct PATEvalContext {
   // reads, without rescanning a single unit the move's placement did not
   // already touch.
   uint64_t units_by_hook_letter[MAX_ALPHABET_SIZE][PAT_MASK_WORDS];
+  // Units reachable through some letter the player's STARTING rack holds
+  // right now (or every unit with any live route at all, if the rack has a
+  // blank) -- a conservative, position-level superset of what any single
+  // move's own leave could end up eligible for, since every leave is a
+  // subset of this same rack. Empty whenever the file carries no discount.
+  // Used both to widen lane_penalty_bound uniformly (a per-lane bound
+  // computed before any specific move's leave exists) and as the fallback
+  // pat_eval_move_penalty_bound takes when a caller has no specific leave
+  // to offer: omitting leave information must never make a claimed upper
+  // bound smaller than the true value could reach, so the fallback has to
+  // be a safe superset, not empty.
+  uint64_t worst_case_leave_units[PAT_MASK_WORDS];
 } PATEvalContext;
 
 void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
