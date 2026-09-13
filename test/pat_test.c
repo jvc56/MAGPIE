@@ -452,7 +452,7 @@ static void test_pat_move_penalty(void) {
   // position baseline.
   Move far_move;
   set_single_tile_move(&far_move, x_ml, 5, 10);
-  assert(pat_eval_move_penalty(&pat_eval_ctx, &far_move) ==
+  assert(pat_eval_move_penalty(&pat_eval_ctx, &far_move, NULL) ==
          pat_eval_ctx.pre_penalty);
 
   // An exchange also carries the baseline.
@@ -460,7 +460,7 @@ static void test_pat_move_penalty(void) {
   MachineLetter exchange_strip[1] = {x_ml};
   move_set_all_except_equity(&exchange_move, exchange_strip, 0, 0, 0, 0, 0, 1,
                              BOARD_HORIZONTAL_DIRECTION, GAME_EVENT_EXCHANGE);
-  assert(pat_eval_move_penalty(&pat_eval_ctx, &exchange_move) ==
+  assert(pat_eval_move_penalty(&pat_eval_ctx, &exchange_move, NULL) ==
          pat_eval_ctx.pre_penalty);
 
   // Covering the TWS at (14,7) kills both triple-triple counts and the
@@ -470,7 +470,7 @@ static void test_pat_move_penalty(void) {
   Move block_move;
   set_single_tile_move(&block_move, x_ml, 14, 7);
   const Equity block_penalty =
-      pat_eval_move_penalty(&pat_eval_ctx, &block_move);
+      pat_eval_move_penalty(&pat_eval_ctx, &block_move, NULL);
   assert(block_penalty == -100 * float_flex_d5);
   assert(block_penalty > pat_eval_ctx.pre_penalty);
   assert(block_penalty <= 0);
@@ -481,14 +481,14 @@ static void test_pat_move_penalty(void) {
   pat_eval_context_load(&zero_ctx, zero_pat, lanes, ld, NULL,
                         PAT_CLASS_MASK_ALL, RACK_SIZE);
   assert(zero_ctx.pre_penalty == 0);
-  assert(pat_eval_move_penalty(&zero_ctx, &block_move) == 0);
-  assert(pat_eval_move_penalty(&zero_ctx, &far_move) == 0);
+  assert(pat_eval_move_penalty(&zero_ctx, &block_move, NULL) == 0);
+  assert(pat_eval_move_penalty(&zero_ctx, &far_move, NULL) == 0);
 
   // A disabled or NULL context is exactly zero.
   PATEvalContext disabled_ctx;
   pat_eval_context_disable(&disabled_ctx);
-  assert(pat_eval_move_penalty(&disabled_ctx, &block_move) == 0);
-  assert(pat_eval_move_penalty(NULL, &block_move) == 0);
+  assert(pat_eval_move_penalty(&disabled_ctx, &block_move, NULL) == 0);
+  assert(pat_eval_move_penalty(NULL, &block_move, NULL) == 0);
 
   pat_destroy(zero_pat);
   pat_destroy(pat);
@@ -572,6 +572,110 @@ static void test_pat_hook_scaled_channel(void) {
   config_destroy(config);
 }
 
+// A move played far from every premium square still credits a unit its own
+// leave could exploit, entirely through unit_hook_letters -- the point of
+// the feature (Q above the open TWS at (7,0) makes CSW21's QI its only
+// hook letter, so a leave holding an I should get credit; one that
+// doesn't, or a discount of 0, should not).
+static void test_pat_own_asset_discount(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/Q14/15/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Square *lanes = board_get_readonly_lanes(board, 0);
+  const int ld_size = ld_get_size(ld);
+
+  const MachineLetter x_ml = ld_hl_to_ml(ld, "X");
+  const MachineLetter i_ml = ld_hl_to_ml(ld, "I");
+
+  Move far_move;
+  set_single_tile_move(&far_move, x_ml, 5, 10);
+
+  Rack *leave_with_i = rack_create(ld_size);
+  rack_add_letter(leave_with_i, i_ml);
+  Rack *leave_without_i = rack_create(ld_size);
+  rack_add_letter(leave_without_i, x_ml);
+  Rack *leave_with_blank = rack_create(ld_size);
+  rack_add_letter(leave_with_blank, BLANK_MACHINE_LETTER);
+
+  PATWeights *pat = pat_create_zeroed("own_asset_test");
+  pat_set_weight(pat, PAT_FEATURE_HOOK_START, -1000);
+  pat_set_own_asset_discount(pat, 0.5);
+
+  PATEvalContext ctx;
+  pat_eval_context_load(&ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
+  assert(ctx.pre_penalty < 0);
+  // Never touches (7,0) or its halo, so with no leave (or one that cannot
+  // exploit the hook) the term is exactly the baseline, same as before this
+  // feature existed.
+  assert(pat_eval_move_penalty(&ctx, &far_move, NULL) == ctx.pre_penalty);
+  assert(pat_eval_move_penalty(&ctx, &far_move, leave_without_i) ==
+         ctx.pre_penalty);
+  // Holding the I this exact hook needs earns credit even though the move
+  // never went near (7,0): half the baseline penalty, per the 0.5 discount.
+  const Equity credited_i =
+      pat_eval_move_penalty(&ctx, &far_move, leave_with_i);
+  assert(credited_i == (Equity)lround((double)ctx.pre_penalty * 0.5));
+  assert(credited_i > ctx.pre_penalty);
+  assert(credited_i <= 0);
+  // A blank stands in for whatever the hook needs, so it earns the same
+  // credit even without holding an I specifically.
+  assert(pat_eval_move_penalty(&ctx, &far_move, leave_with_blank) ==
+         credited_i);
+  // The bound must stay a real upper bound: at least as generous as the
+  // exact value once the leave is known.
+  assert(pat_eval_move_penalty_bound(&ctx, &far_move, leave_with_i) >=
+         credited_i);
+  assert(pat_eval_move_penalty_bound(&ctx, &far_move, NULL) >= ctx.pre_penalty);
+
+  // lane_penalty_bound is position-level, computed before any specific
+  // move's leave is known, so it must assume the worst case: any unit
+  // reachable through a letter the player's rack currently holds could end
+  // up in that move's leave and earn credit. A rack holding an I must
+  // widen even a lane nowhere near (7,0) all the way to 0 (the only
+  // nonzero unit, now assumed creditable everywhere); a rack that cannot
+  // supply the hook's letter at all must leave that lane's bound exactly
+  // where it already was.
+  Rack *rack_with_i = rack_create(ld_size);
+  rack_add_letter(rack_with_i, i_ml);
+  PATEvalContext ctx_with_i;
+  pat_eval_context_load(&ctx_with_i, pat, lanes, ld, rack_with_i,
+                        PAT_CLASS_MASK_ALL, RACK_SIZE);
+  assert(pat_eval_lane_penalty_bound(&ctx_with_i, BOARD_HORIZONTAL_DIRECTION,
+                                     5) == 0);
+
+  Rack *rack_without_i = rack_create(ld_size);
+  rack_add_letter(rack_without_i, x_ml);
+  PATEvalContext ctx_without_i;
+  pat_eval_context_load(&ctx_without_i, pat, lanes, ld, rack_without_i,
+                        PAT_CLASS_MASK_ALL, RACK_SIZE);
+  assert(pat_eval_lane_penalty_bound(&ctx_without_i, BOARD_HORIZONTAL_DIRECTION,
+                                     5) == ctx_without_i.pre_penalty);
+  rack_destroy(rack_with_i);
+  rack_destroy(rack_without_i);
+
+  // With no discount configured (the default every earlier file already
+  // has), the same leave earns nothing: byte-for-byte today's behavior.
+  PATWeights *no_discount_pat = pat_create_zeroed("no_discount_test");
+  pat_set_weight(no_discount_pat, PAT_FEATURE_HOOK_START, -1000);
+  PATEvalContext no_discount_ctx;
+  pat_eval_context_load(&no_discount_ctx, no_discount_pat, lanes, ld, NULL,
+                        PAT_CLASS_MASK_ALL, RACK_SIZE);
+  assert(pat_eval_move_penalty(&no_discount_ctx, &far_move, leave_with_i) ==
+         no_discount_ctx.pre_penalty);
+
+  rack_destroy(leave_with_i);
+  rack_destroy(leave_without_i);
+  rack_destroy(leave_with_blank);
+  pat_destroy(pat);
+  pat_destroy(no_discount_pat);
+  config_destroy(config);
+}
+
 static void test_pat_unweighted_units_dropped(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
@@ -619,10 +723,10 @@ static void test_pat_unweighted_units_dropped(void) {
       }
       Move move;
       set_single_tile_move(&move, z_ml, row, col);
-      assert(pat_eval_move_penalty(&pruned_ctx, &move) ==
-             pat_eval_move_penalty(&full_ctx, &move));
-      assert(pat_eval_move_penalty_bound(&pruned_ctx, &move) ==
-             pat_eval_move_penalty_bound(&full_ctx, &move));
+      assert(pat_eval_move_penalty(&pruned_ctx, &move, NULL) ==
+             pat_eval_move_penalty(&full_ctx, &move, NULL));
+      assert(pat_eval_move_penalty_bound(&pruned_ctx, &move, NULL) ==
+             pat_eval_move_penalty_bound(&full_ctx, &move, NULL));
     }
   }
 
@@ -691,7 +795,8 @@ static void test_pat_opening_and_hook_flex(void) {
   // from the TWS at (14,14): the opening play is penalized.
   Move open_move;
   set_single_tile_move(&open_move, z_ml, 14, 12);
-  const Equity open_penalty = pat_eval_move_penalty(&pat_eval_ctx, &open_move);
+  const Equity open_penalty =
+      pat_eval_move_penalty(&pat_eval_ctx, &open_move, NULL);
   assert(open_penalty == -500 * (1 + 10));
   assert(open_penalty < pat_eval_ctx.pre_penalty);
 
@@ -701,7 +806,8 @@ static void test_pat_opening_and_hook_flex(void) {
   pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START + 1, -10);
   pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
                         RACK_SIZE);
-  const Equity flex_penalty = pat_eval_move_penalty(&pat_eval_ctx, &open_move);
+  const Equity flex_penalty =
+      pat_eval_move_penalty(&pat_eval_ctx, &open_move, NULL);
   // Baseline has the board floater E at d = 2; the move adds the fresh Z
   // floater at d = 2 with hook_flex[Z] flexibility.
   assert(flex_penalty ==
@@ -788,6 +894,7 @@ void test_pat(void) {
   test_pat_move_penalty();
   test_pat_dls_features_land_in_dls_channels();
   test_pat_hook_scaled_channel();
+  test_pat_own_asset_discount();
   test_pat_opening_penalty_gating();
   test_pat_unweighted_units_dropped();
   test_pat_opening_and_hook_flex();

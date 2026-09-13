@@ -39,6 +39,9 @@ void pat_set_weight(PATWeights *pat, int feature_index, Equity weight);
 // See PATWeights.combine_gamma.
 double pat_get_combine_gamma(const PATWeights *pat);
 void pat_set_combine_gamma(PATWeights *pat, double combine_gamma);
+// See PATWeights.own_asset_discount.
+double pat_get_own_asset_discount(const PATWeights *pat);
+void pat_set_own_asset_discount(PATWeights *pat, double own_asset_discount);
 uint64_t pat_get_mutation_counter(const PATWeights *pat);
 void pat_bump_mutation_counter(PATWeights *pat);
 // Writes the weights to data/strategy/<pat_name>.pat.
@@ -233,6 +236,24 @@ typedef struct PATEvalContext {
   // tiles) needs through the same call chain; keeping the cap live now
   // means it activates for free the day PAT's own bag-empty gate loosens.
   int opponent_rack_size;
+  // Bit L of unit_hook_letters[u] is set when some live hook or floater
+  // route this unit's baseline scan found would accept machine letter L
+  // (blanks excluded, matching pat_set_flex's own convention). Lets a
+  // move's own leave be checked against exactly the letters that would
+  // let it exploit this unit itself, entirely independent of whether the
+  // move's placement geometrically touches the unit -- unlike
+  // unit_mask_by_row/col, which only ever answer the geometric question.
+  // Computed once per position load, from the same overlay-free baseline
+  // walk that fills unit_penalty; never updated for a per-move overlay
+  // rescan.
+  uint64_t unit_hook_letters[PAT_MAX_SCAN_UNITS];
+  // Reverse index of the above: bit u of units_by_hook_letter[L] is set
+  // exactly when unit_hook_letters[u] has bit L set. A move's leave has at
+  // most RACK_SIZE distinct letters, so ORing this in for each one finds
+  // every unit the move's own leave could exploit in a handful of array
+  // reads, without rescanning a single unit the move's placement did not
+  // already touch.
+  uint64_t units_by_hook_letter[MAX_ALPHABET_SIZE][PAT_MASK_WORDS];
 } PATEvalContext;
 
 void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
@@ -264,15 +285,21 @@ void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
 // Returns the defense term for the move: the penalty for the opponent's TWS
 // access after the move is played, which is always <= 0. Returns 0 when the
 // context is NULL or disabled. Non-placement moves return the position
-// baseline (their play leaves the board unchanged).
+// baseline (their play leaves the board unchanged). leave is the tiles the
+// move would keep, used only to credit units its own leave could exploit
+// itself (see PATWeights.own_asset_discount and unit_hook_letters in the
+// context above); pass NULL if unavailable, which simply forgoes the
+// credit.
 Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
-                             const Move *move);
+                             const Move *move, const Rack *leave);
 // Returns an upper bound on pat_eval_move_penalty for the move without any
 // lane rescans: the baseline penalty minus the baseline contributions of
-// the units the move can affect (each of which the move can at best zero
-// out). Used to skip the exact computation for moves that cannot contend.
+// the units the move can affect or its leave could exploit (each of which
+// the move can at best zero out). Used to skip the exact computation for
+// moves that cannot contend. leave has the same meaning as in
+// pat_eval_move_penalty above.
 Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
-                                   const Move *move);
+                                   const Move *move, const Rack *leave);
 // The defense term of every non-placement move (exchange or pass): the
 // position baseline, exactly, since they leave the board unchanged. Zero
 // when the context is NULL or disabled.
