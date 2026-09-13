@@ -229,6 +229,8 @@ static TestEntry on_demand_test_table[] = {
     {"passpegoracle", test_pass_peg_oracle_eval_move},
     {"patassetfit", test_pat_own_asset_discount_fit},
     {"pathyperscalefit", test_pat_hyperscale_fit},
+    {"patlexfloatchoice", test_pat_lexfloat_move_choice},
+    {"patlexfloatconfirm", test_pat_lexfloat_isolated_confirm},
     {"patoverlap", test_pat_overlap_pilot},
     {NULL, NULL} // Sentinel value to mark end of array
 };

@@ -315,6 +315,83 @@ static void test_pat_extract_features_floater_board(void) {
 // reach must cap at the opponent's real rack size, not always at RACK_SIZE.
 // Reuses the floater board from test_pat_extract_features_floater_board:
 // the E floater is 2 empties from the near TWS and 5 from the far one.
+// NARCEIN across row 8 from D8: nothing precedes NARCEIN in CSW21, so the
+// floater route from the A8 triple (three tiles away) is dead under the
+// real extension set; NARCEINE and NARCEINS exist, so the route from O8
+// (five tiles away) admits exactly E and S; the two vertical routes
+// through the E (seven tiles from H1 and H15) admit every letter. Under
+// the legacy semantics every one of those runs counts all 91 unseen
+// non-blank tiles (100 minus NARCEIN's 7 minus 2 blanks; no rack given).
+static void test_pat_lexicon_floaters(const char *data_dir) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/3NARCEIN5/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Square *lanes = board_get_readonly_lanes(board, 0);
+  const int unseen_nonblank = 100 - 7 - 2;
+  const int unseen_e_and_s = 11 + 4;
+
+  PATWeights *pat = pat_create_zeroed("lexicon_floaters");
+  assert(!pat_get_lexicon_floaters(pat));
+  int32_t legacy_features[PAT_NUM_FEATURES];
+  pat_extract_features(lanes, ld, NULL, pat, RACK_SIZE, legacy_features);
+  int32_t null_pat_features[PAT_NUM_FEATURES];
+  pat_extract_features(lanes, ld, NULL, NULL, RACK_SIZE, null_pat_features);
+  assert(legacy_features[PAT_FEATURE_FLOAT_FLEX_START + 2] == unseen_nonblank);
+  assert(legacy_features[PAT_FEATURE_FLOAT_FLEX_START + 4] == unseen_nonblank);
+  assert(legacy_features[PAT_FEATURE_FLOAT_FLEX_START + 6] ==
+         2 * unseen_nonblank);
+  for (int bin = 0; bin < PAT_HOOK_BIN_COUNT; bin++) {
+    assert(null_pat_features[PAT_FEATURE_FLOAT_FLEX_START + bin] ==
+           legacy_features[PAT_FEATURE_FLOAT_FLEX_START + bin]);
+  }
+
+  pat_set_lexicon_floaters(pat, true);
+  int32_t lexicon_features[PAT_NUM_FEATURES];
+  pat_extract_features(lanes, ld, NULL, pat, RACK_SIZE, lexicon_features);
+  assert(lexicon_features[PAT_FEATURE_FLOAT_FLEX_START + 2] == 0);
+  assert(lexicon_features[PAT_FEATURE_FLOAT_FLEX_START + 4] == unseen_e_and_s);
+  assert(lexicon_features[PAT_FEATURE_FLOAT_FLEX_START + 6] ==
+         2 * unseen_nonblank);
+  // Only the floater flexibility channels (and their scaled variants)
+  // read the extension set; everything else is identical.
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    const bool is_float_flex =
+        (feature_index >= PAT_FEATURE_FLOAT_FLEX_START &&
+         feature_index < PAT_FEATURE_FLOAT_FLEX_START + PAT_HOOK_BIN_COUNT) ||
+        (feature_index >= PAT_FEATURE_FLOAT_FLEX_SCALED_START &&
+         feature_index <
+             PAT_FEATURE_FLOAT_FLEX_SCALED_START + PAT_HOOK_BIN_COUNT);
+    if (!is_float_flex) {
+      assert(lexicon_features[feature_index] == legacy_features[feature_index]);
+    }
+  }
+
+  // The flag round-trips through the file, and a file without the row
+  // reads as legacy.
+  ErrorStack *error_stack = error_stack_create();
+  pat_write(pat, data_dir, "lexicon_floaters", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  PATWeights *loaded = pat_create(data_dir, "lexicon_floaters", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(pat_get_lexicon_floaters(loaded));
+  pat_destroy(loaded);
+  error_stack_destroy(error_stack);
+  char header[32];
+  current_pat_header(header, sizeof(header));
+  char *contents =
+      get_formatted_string("%s\nlexicon_floaters,2\nhook_d1,-1\n", header);
+  assert_pat_create_fails(data_dir, "lexicon_floaters_bad", contents);
+  free(contents);
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
 static void test_pat_scan_reach_capped_by_opponent_rack_size(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
@@ -916,6 +993,7 @@ void test_pat(void) {
   test_pat_version1_has_no_dls(data_dir);
   test_pat_version2_has_no_scaled_channels(data_dir);
   test_pat_extract_features_floater_board();
+  test_pat_lexicon_floaters(data_dir);
   test_pat_scan_reach_capped_by_opponent_rack_size();
   test_pat_move_penalty();
   test_pat_dls_features_land_in_dls_channels();
