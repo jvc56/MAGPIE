@@ -44,6 +44,8 @@ double pat_get_own_asset_discount(const PATWeights *pat);
 void pat_set_own_asset_discount(PATWeights *pat, double own_asset_discount);
 bool pat_get_lexicon_floaters(const PATWeights *pat);
 void pat_set_lexicon_floaters(PATWeights *pat, bool lexicon_floaters);
+bool pat_get_signed_through(const PATWeights *pat);
+void pat_set_signed_through(PATWeights *pat, bool signed_through);
 uint64_t pat_get_mutation_counter(const PATWeights *pat);
 void pat_bump_mutation_counter(PATWeights *pat);
 // Writes the weights to data/strategy/<pat_name>.pat.
@@ -64,6 +66,12 @@ void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
 int pat_get_hook_flex(const PATWeights *pat, MachineLetter ml);
 // Entries of the floater through-table; see PATWeights.through_score.
 int pat_get_through_score(const PATWeights *pat, MachineLetter ml, int span);
+// The end-specific through tables: word_end 0 when ml is the word's first
+// letter, 1 when its last (see pat_walk_words).
+int pat_get_through_score_end(const PATWeights *pat, int word_end,
+                              MachineLetter ml, int span);
+int pat_get_through_count_end(const PATWeights *pat, int word_end,
+                              MachineLetter ml, int span);
 int pat_get_through_count(const PATWeights *pat, MachineLetter ml, int span);
 
 // The premium squares a lane walk can be anchored on. Each is worth

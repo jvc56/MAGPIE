@@ -138,6 +138,13 @@ enum {
 #define PAT_LEXICON_FLOATERS_ROW_PREFIX "lexicon_floaters,"
 #define PAT_DEFAULT_LEXICON_FLOATERS false
 
+// Optional row (0 or 1) selecting whether the floater through-table
+// statistics distinguish which end of the opponent's word the floater
+// would be (see PATWeights.signed_through). Absent means 0: the unsigned
+// tables every earlier file was trained under.
+#define PAT_SIGNED_THROUGH_ROW_PREFIX "signed_through,"
+#define PAT_DEFAULT_SIGNED_THROUGH false
+
 // The header line is PAT_MAGIC_PREFIX followed by the format version as a
 // decimal integer, e.g. "magpie_pat_v2". PAT_VERSION is what this build
 // writes; a file naming a version below PAT_EARLIEST_SUPPORTED_VERSION is

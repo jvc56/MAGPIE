@@ -66,6 +66,8 @@
 #define PAT_HYPERSCALE_FIT_SCALED_PAT_NAME "pat_hyper_frozen_v1"
 #define PAT_LEXFLOAT_PAT_NAME "pat_lexfloat_frozen_v1"
 #define PAT_LEGACY_FROZEN_PAT_NAME "pat_legacy_frozen_v1"
+#define PAT_SIGNED_PAT_NAME "pat_signed_frozen_v1"
+#define PAT_LEXSIGNED_PAT_NAME "pat_lexsigned_frozen_v1"
 
 // Loads a PAT file the way the config path does: pat_create alone leaves
 // the lexicon tables (hook_flex, through_score, through_count) empty, and
@@ -155,4 +157,26 @@ void test_pat_lexfloat_isolated_confirm(void) {
   pat_move_choice_benefit(PAT_LEGACY_FROZEN_PAT_NAME, PAT_LEXFLOAT_PAT_NAME,
                           821000000ULL, 4 * PAT_HYPERSCALE_FIT_NUM_POSITIONS,
                           200);
+}
+
+// The signed through-table refit (pat_signed_frozen_v1: the same frozen-
+// policy generation from the champion with signed_through,1; see
+// PATWeights.signed_through), isolated against the legacy refit and
+// against the champion, plus the refit with both lexicon_floaters and
+// signed_through on (pat_lexsigned_frozen_v1) against the champion. Fresh
+// seed ranges; 100 worlds since within-position noise was near half of
+// Var(mean) at 30 and worlds are cheap next to generation.
+void test_pat_signed_move_choice_isolated(void) {
+  pat_move_choice_benefit(PAT_LEGACY_FROZEN_PAT_NAME, PAT_SIGNED_PAT_NAME,
+                          850000000ULL, PAT_HYPERSCALE_FIT_NUM_POSITIONS, 100);
+}
+
+void test_pat_signed_move_choice_vs_champion(void) {
+  pat_move_choice_benefit(NULL, PAT_SIGNED_PAT_NAME, 851000000ULL,
+                          PAT_HYPERSCALE_FIT_NUM_POSITIONS, 100);
+}
+
+void test_pat_lexsigned_move_choice_vs_champion(void) {
+  pat_move_choice_benefit(NULL, PAT_LEXSIGNED_PAT_NAME, 852000000ULL,
+                          PAT_HYPERSCALE_FIT_NUM_POSITIONS, 100);
 }

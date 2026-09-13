@@ -43,6 +43,15 @@ struct PATWeights {
   // word must cover to run from the floater to the triple.
   uint8_t through_score[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
   uint8_t through_count[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+  // The same statistics kept separately for the letter being the word's
+  // first letter ([0]) or its last ([1]). A floater beyond the premium is
+  // the LAST letter of the word that reaches the premium from it, a
+  // floater before the premium the FIRST, and for letters like J
+  // (thousands of words start with it, a handful end with it) or Y
+  // (the reverse) the two differ enormously; the unsigned tables above
+  // sum both ends into one figure. Used only when signed_through is set.
+  uint8_t through_score_end[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+  uint8_t through_count_end[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
   // How much a second route to danger counts once the worst one is already
   // counted. The opponent plays one move, so the threats a board offers do
   // not simply add: 0 charges only the worst scan unit, 1 charges every
@@ -76,6 +85,12 @@ struct PATWeights {
   // switched globally, until a refit under the real sets is validated
   // against the champion.
   bool lexicon_floaters;
+  // Whether pat_scan_unit reads the end-specific through tables
+  // (through_score_end / through_count_end) for a floater, by which side
+  // of the premium it lies on, instead of the unsigned tables. false is
+  // what every file before this row was trained under. Same reasoning as
+  // lexicon_floaters for keeping it per file.
+  bool signed_through;
   uint64_t mutation_counter;
   // The version named on the file's header line (see PAT_VERSION).
   int version;
@@ -108,6 +123,14 @@ void pat_set_own_asset_discount(PATWeights *pat, double own_asset_discount) {
 
 bool pat_get_lexicon_floaters(const PATWeights *pat) {
   return pat->lexicon_floaters;
+}
+
+bool pat_get_signed_through(const PATWeights *pat) {
+  return pat->signed_through;
+}
+
+void pat_set_signed_through(PATWeights *pat, bool signed_through) {
+  pat->signed_through = signed_through;
 }
 
 void pat_set_lexicon_floaters(PATWeights *pat, bool lexicon_floaters) {
@@ -211,6 +234,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->combine_gamma = PAT_DEFAULT_COMBINE_GAMMA;
   pat->own_asset_discount = PAT_DEFAULT_OWN_ASSET_DISCOUNT;
   pat->lexicon_floaters = PAT_DEFAULT_LEXICON_FLOATERS;
+  pat->signed_through = PAT_DEFAULT_SIGNED_THROUGH;
   pat->version = PAT_VERSION;
   return pat;
 }
@@ -345,6 +369,20 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->lexicon_floaters = (flag == 1);
       continue;
     }
+    if (has_prefix(PAT_SIGNED_THROUGH_ROW_PREFIX, line)) {
+      const int flag = string_to_int(
+          line + strlen(PAT_SIGNED_THROUGH_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a signed "
+                                 "through flag other than 0 or 1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->signed_through = (flag == 1);
+      continue;
+    }
     if (feature_index >= PAT_NUM_FEATURES) {
       error_stack_push(
           error_stack, ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
@@ -448,6 +486,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
   string_builder_add_formatted_string(sb, "%s%d\n",
                                       PAT_LEXICON_FLOATERS_ROW_PREFIX,
                                       pat->lexicon_floaters ? 1 : 0);
+  string_builder_add_formatted_string(
+      sb, "%s%d\n", PAT_SIGNED_THROUGH_ROW_PREFIX, pat->signed_through ? 1 : 0);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -467,8 +507,9 @@ void pat_write(const PATWeights *pat, const char *data_paths,
 // the number of words and the summed tile value of everything in them but
 // that end letter.
 typedef struct PATThroughStats {
-  double count[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
-  double score_sum[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+  // [0]: the letter is the word's first; [1]: its last.
+  double count[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+  double score_sum[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
 } PATThroughStats;
 
 // Walks every word in the lexicon, crediting each to the letters at its two
@@ -495,13 +536,13 @@ static void pat_walk_words(const KWG *kwg, const LetterDistribution *ld,
       }
       const MachineLetter first = word[0];
       const MachineLetter last = word[word_length - 1];
-      stats->count[first][word_length] += 1.0;
-      stats->score_sum[first][word_length] +=
+      stats->count[0][first][word_length] += 1.0;
+      stats->score_sum[0][first][word_length] +=
           total_score - equity_to_int(ld_get_score(ld, first));
       // The last letter is a distinct position even when it repeats the
       // first, since accepted words are at least two letters long.
-      stats->count[last][word_length] += 1.0;
-      stats->score_sum[last][word_length] +=
+      stats->count[1][last][word_length] += 1.0;
+      stats->score_sum[1][last][word_length] +=
           total_score - equity_to_int(ld_get_score(ld, last));
     }
     if (word_length < PAT_MAX_THROUGH_LEN - 1) {
@@ -519,6 +560,8 @@ void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
   memset(pat->hook_flex, 0, sizeof(pat->hook_flex));
   memset(pat->through_score, 0, sizeof(pat->through_score));
   memset(pat->through_count, 0, sizeof(pat->through_count));
+  memset(pat->through_score_end, 0, sizeof(pat->through_score_end));
+  memset(pat->through_count_end, 0, sizeof(pat->through_count_end));
   if (!kwg) {
     return;
   }
@@ -553,25 +596,57 @@ void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
   pat_walk_words(kwg, ld, dawg_root, word, 0, stats);
   for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
     for (int len = 0; len < PAT_MAX_THROUGH_LEN; len++) {
-      const double word_count = stats->count[ml][len];
-      if (word_count <= 0.0) {
-        continue;
+      // The unsigned tables are exactly what they always were: both ends
+      // pooled into one count and one mean.
+      for (int word_end = 0; word_end <= 2; word_end++) {
+        const double word_count =
+            (word_end < 2)
+                ? stats->count[word_end][ml][len]
+                : stats->count[0][ml][len] + stats->count[1][ml][len];
+        if (word_count <= 0.0) {
+          continue;
+        }
+        const double score_sum =
+            (word_end < 2)
+                ? stats->score_sum[word_end][ml][len]
+                : stats->score_sum[0][ml][len] + stats->score_sum[1][ml][len];
+        double mean_score = score_sum / word_count;
+        if (mean_score > UINT8_MAX) {
+          mean_score = UINT8_MAX;
+        }
+        // Log scale: the useful distinction is between a letter that
+        // reaches nothing, a few words, and thousands, not between 900
+        // and 1000.
+        double scaled = 8.0 * log2(1.0 + word_count);
+        if (scaled > UINT8_MAX) {
+          scaled = UINT8_MAX;
+        }
+        if (word_end < 2) {
+          pat->through_score_end[word_end][ml][len] =
+              (uint8_t)(mean_score + 0.5);
+          pat->through_count_end[word_end][ml][len] = (uint8_t)(scaled + 0.5);
+        } else {
+          pat->through_score[ml][len] = (uint8_t)(mean_score + 0.5);
+          pat->through_count[ml][len] = (uint8_t)(scaled + 0.5);
+        }
       }
-      double mean_score = stats->score_sum[ml][len] / word_count;
-      if (mean_score > UINT8_MAX) {
-        mean_score = UINT8_MAX;
-      }
-      pat->through_score[ml][len] = (uint8_t)(mean_score + 0.5);
-      // Log scale: the useful distinction is between a letter that reaches
-      // nothing, a few words, and thousands, not between 900 and 1000.
-      double scaled = 8.0 * log2(1.0 + word_count);
-      if (scaled > UINT8_MAX) {
-        scaled = UINT8_MAX;
-      }
-      pat->through_count[ml][len] = (uint8_t)(scaled + 0.5);
     }
   }
   free(stats);
+}
+
+int pat_get_through_score_end(const PATWeights *pat, int word_end,
+                              MachineLetter ml, int span) {
+  return (span < PAT_MAX_THROUGH_LEN)
+             ? pat->through_score_end[word_end][ml][span]
+             : 0;
+}
+
+int pat_get_through_count_end(const PATWeights *pat, int word_end,
+                              MachineLetter ml, int span) {
+  return (span < PAT_MAX_THROUGH_LEN)
+             ? pat->through_count_end[word_end][ml][span]
+             : 0;
 }
 
 int pat_get_through_score(const PATWeights *pat, MachineLetter ml, int span) {
@@ -946,10 +1021,23 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                 get_unblanked_machine_letter(run_letter);
             const int span = distance_bin + 1;
             if (span < PAT_MAX_THROUGH_LEN) {
-              features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
-                       1] += pat->through_score[unblanked][span];
-              features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
-                       1] += pat->through_count[unblanked][span];
+              // A run beyond the premium (side > 0) ends the word that
+              // reaches it from the premium; a run before it begins that
+              // word. See PATWeights.signed_through.
+              if (pat->signed_through) {
+                const int word_end = (side > 0) ? 1 : 0;
+                features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
+                         1] +=
+                    pat->through_score_end[word_end][unblanked][span];
+                features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
+                         1] +=
+                    pat->through_count_end[word_end][unblanked][span];
+              } else {
+                features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
+                         1] += pat->through_score[unblanked][span];
+                features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
+                         1] += pat->through_count[unblanked][span];
+              }
             }
           }
           idx += side;
