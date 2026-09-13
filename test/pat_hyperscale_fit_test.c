@@ -1,27 +1,12 @@
 #include "pat_hyperscale_fit_test.h"
 
-#include "../src/def/equity_defs.h"
-#include "../src/def/game_defs.h"
-#include "../src/def/move_defs.h"
-#include "../src/def/pat_defs.h"
-#include "../src/def/players_data_defs.h"
-#include "../src/ent/bag.h"
-#include "../src/ent/board.h"
-#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
-#include "../src/ent/klv.h"
-#include "../src/ent/letter_distribution.h"
-#include "../src/ent/move.h"
 #include "../src/ent/pat.h"
 #include "../src/ent/player.h"
-#include "../src/ent/rack.h"
 #include "../src/impl/config.h"
-#include "../src/impl/gameplay.h"
-#include "../src/impl/move_gen.h"
+#include "pat_move_choice_test.h"
 #include "test_util.h"
 #include <assert.h>
-#include <math.h>
-#include <stdio.h>
 
 // Tests whether the hypergeometric-scaled hook/float_flex channels
 // (pat_dls_champion_v2 has zero weight on them; pat_hyper_frozen_v1, a
@@ -76,242 +61,56 @@
 // permutation of the unseen pool.
 
 #define PAT_HYPERSCALE_FIT_NUM_POSITIONS 12000
-#define PAT_HYPERSCALE_FIT_MOVE_LIST_CAPACITY 500
 // The "scaled" candidate under test; swapped between retraining attempts
 // without touching the rest of the file.
 #define PAT_HYPERSCALE_FIT_SCALED_PAT_NAME "pat_hyper_frozen_v1"
 #define PAT_LEXFLOAT_PAT_NAME "pat_lexfloat_frozen_v1"
 #define PAT_LEGACY_FROZEN_PAT_NAME "pat_legacy_frozen_v1"
-// Rollout samples averaged per candidate move, each one paired against the
-// other candidate's same-index sample via a shared world_seed (see
-// pat_hyperscale_reference_value).
-#define PAT_HYPERSCALE_FIT_NUM_ROLLOUT_SAMPLES 30
 
-// Reference-equity value of playing move on a duplicate of game, then one
-// hypothetical continuation (a uniformly random opponent rack, the
-// opponent's own top-equity reply, and the mover's own top-equity reply
-// after that), all three plies played under reference_pat -- a single,
-// common policy for BOTH candidates in a pair, not each candidate's own
-// policy (see the file comment for why the earlier self-consistent-
-// policy design was withdrawn).
-//
-// game_seed(rollout_game, world_seed) runs BEFORE move is played, not
-// just before the opponent's later draw: candidates of different lengths
-// draw different numbers of tiles for the mover's own refill, so
-// reseeding only before the opponent's draw left that refill unpaired
-// across a comparison in an earlier version of this function. Reseeding
-// before the candidate is played at least starts both candidates' whole
-// remaining random stream from an identical shuffle, even though the
-// specific tiles each draws still differ once their refill lengths do.
-//
-// Returns the resulting spread plus the mover's own final leave value
-// (only added with tiles left in the bag, matching how a real move's
-// equity treats leave value -- see static_eval_get_nonopening_move_
-// equity), closer to E0's own score+leave convention than raw spread
-// alone.
-static double pat_hyperscale_reference_value(const Game *game, const Move *move,
-                                             int mover_index,
-                                             const PATWeights *reference_pat,
-                                             uint64_t world_seed) {
-  Game *rollout_game = game_duplicate(game);
-  game_seed(rollout_game, world_seed);
-  player_set_pat(game_get_player(rollout_game, 0), reference_pat);
-  player_set_pat(game_get_player(rollout_game, 1), reference_pat);
-  play_move(move, rollout_game, NULL);
-  const int opponent_index = 1 - mover_index;
-  if (game_get_game_end_reason(rollout_game) == GAME_END_REASON_NONE) {
-    set_random_rack(rollout_game, opponent_index, NULL);
-    MoveList *reply_list = move_list_create(1);
-    const Move *opponent_reply = get_top_equity_move(rollout_game, reply_list);
-    play_move(opponent_reply, rollout_game, NULL);
-    move_list_destroy(reply_list);
-  }
-  if (game_get_game_end_reason(rollout_game) == GAME_END_REASON_NONE) {
-    MoveList *reply_list = move_list_create(1);
-    const Move *mover_reply = get_top_equity_move(rollout_game, reply_list);
-    play_move(mover_reply, rollout_game, NULL);
-    move_list_destroy(reply_list);
-  }
-  const Player *mover = game_get_player(rollout_game, mover_index);
-  const Player *opponent = game_get_player(rollout_game, opponent_index);
-  double value =
-      equity_to_double(player_get_score(mover) - player_get_score(opponent));
-  if (game_get_game_end_reason(rollout_game) == GAME_END_REASON_NONE) {
-    value += equity_to_double(
-        klv_get_leave_value(player_get_klv(mover), player_get_rack(mover)));
-  }
-  game_destroy(rollout_game);
-  return value;
-}
-
-// Mean of PAT_HYPERSCALE_FIT_NUM_ROLLOUT_SAMPLES reference values, each
-// sample index using the same world_seed as the same-index call for
-// whichever other candidate this move is being compared against (the
-// caller passes the same base_seed for both), pairing every individual
-// sample, not just the aggregate.
-static double pat_hyperscale_average_reference_value(
-    const Game *game, const Move *move, int mover_index,
-    const PATWeights *reference_pat, uint64_t base_seed) {
-  double total = 0.0;
-  for (int sample_idx = 0; sample_idx < PAT_HYPERSCALE_FIT_NUM_ROLLOUT_SAMPLES;
-       sample_idx++) {
-    const uint64_t world_seed =
-        base_seed + (uint64_t)sample_idx * 1000003ULL; // a prime stride
-    total += pat_hyperscale_reference_value(game, move, mover_index,
-                                            reference_pat, world_seed);
-  }
-  return total / PAT_HYPERSCALE_FIT_NUM_ROLLOUT_SAMPLES;
+// A chooser that generates moves under a PAT file; NULL name means the
+// champion.
+static PATWeights *pat_hyperscale_load(Config *config, const char *name) {
+  ErrorStack *error_stack = error_stack_create();
+  PATWeights *pat =
+      pat_create(config_get_data_paths(config), name, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(pat);
+  error_stack_destroy(error_stack);
+  return pat;
 }
 
 // Runs the move-choice-benefit comparison of candidate_pat_name against
 // baseline_pat_name (NULL for the champion, pat_dls_champion_v2, which is
 // the common reference policy either way) over num_positions attempted
-// positions seeded from seed_base. Each
-// candidate file gets its own prespecified seed range so a confirmation
-// batch never reuses positions an earlier exploratory run already looked
-// at.
+// positions seeded from seed_base. Each candidate file gets its own
+// prespecified seed range so a confirmation batch never reuses positions
+// an earlier exploratory run already looked at.
 static void pat_move_choice_benefit(const char *baseline_pat_name,
                                     const char *candidate_pat_name,
                                     uint64_t seed_base, int num_positions) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
-      "-pat pat_dls_champion_v2");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Config *config = pat_move_choice_config_create();
   Game *game = config_get_game(config);
-  const PATWeights *raw_pat = player_get_pat(game_get_player(game, 0));
-  assert(raw_pat);
-
-  ErrorStack *error_stack = error_stack_create();
-  PATWeights *scaled_pat = pat_create(config_get_data_paths(config),
-                                      candidate_pat_name, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(scaled_pat);
-  PATWeights *baseline_pat = NULL;
-  if (baseline_pat_name != NULL) {
-    baseline_pat = pat_create(config_get_data_paths(config), baseline_pat_name,
-                              error_stack);
-    assert(error_stack_is_empty(error_stack));
-    assert(baseline_pat);
-  }
-  error_stack_destroy(error_stack);
-  // What the baseline side of every pair chooses with; the reference
-  // continuation below stays the champion regardless.
-  const PATWeights *baseline_chooser =
-      (baseline_pat != NULL) ? baseline_pat : raw_pat;
-
-  // The reference continuation policy shared by both candidates in every
-  // pair below. The unmodified champion is a legitimate, neutral choice
-  // for this: it carries no opinion about which of the two candidates
-  // being compared is better.
-  const PATWeights *reference_pat = raw_pat;
-
-  MoveList *setup_move_list = move_list_create(1);
-  MoveList *choice_move_list = move_list_create(1);
-
-  double sum_diff = 0.0;
-  double sum_diff_sq = 0.0;
-  int num_disagreements = 0;
-  int num_positions_considered = 0;
-
-  for (int attempt = 0; attempt < num_positions; attempt++) {
-    const uint64_t seed = seed_base + (uint64_t)attempt;
-    game_reset(game);
-    game_seed(game, seed);
-    draw_starting_racks(game);
-    const int target_bag = 10 + (int)(seed % 31); // spans [10, 40]
-    bool position_ok = true;
-    player_set_pat(game_get_player(game, 0), raw_pat);
-    player_set_pat(game_get_player(game, 1), raw_pat);
-    while (bag_get_letters(game_get_bag(game)) > target_bag) {
-      const Move *setup_move = get_top_equity_move(game, setup_move_list);
-      play_move(setup_move, game, NULL);
-      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
-        position_ok = false;
-        break;
-      }
-    }
-    if (!position_ok || bag_get_letters(game_get_bag(game)) == 0) {
-      continue;
-    }
-    const Board *board = game_get_board(game);
-    if (board_get_transposed(board) || !board_get_cross_sets_valid(board)) {
-      continue;
-    }
-    num_positions_considered++;
-
-    const int mover_index = game_get_player_on_turn_index(game);
-
-    // Each model's own top choice at this exact position -- not the
-    // champion's top-2, which can miss the scaled model's actual
-    // preference entirely.
-    player_set_pat(game_get_player(game, mover_index), baseline_chooser);
-    Move move_raw;
-    move_copy(&move_raw, get_top_equity_move(game, choice_move_list));
-    player_set_pat(game_get_player(game, mover_index), scaled_pat);
-    Move move_scaled;
-    move_copy(&move_scaled, get_top_equity_move(game, choice_move_list));
-    // Restored before this position is used for anything else (nothing
-    // else here does, but matches what a real player object should read
-    // outside this deliberate probe).
-    player_set_pat(game_get_player(game, mover_index), raw_pat);
-
-    if (move_get_type(&move_raw) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
-        move_get_type(&move_scaled) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      continue;
-    }
-    if (compare_moves_without_equity(&move_raw, &move_scaled, true) == -1) {
-      // The two models agree here: zero information for which model's
-      // preference is better, so this position is discarded rather than
-      // counted as a (trivially zero) data point.
-      continue;
-    }
-    num_disagreements++;
-
-    const uint64_t world_seed = seed + 500000000ULL;
-    const double value_raw_choice = pat_hyperscale_average_reference_value(
-        game, &move_raw, mover_index, reference_pat, world_seed);
-    const double value_scaled_choice = pat_hyperscale_average_reference_value(
-        game, &move_scaled, mover_index, reference_pat, world_seed);
-    const double diff = value_scaled_choice - value_raw_choice;
-    sum_diff += diff;
-    sum_diff_sq += diff * diff;
-  }
-
-  move_list_destroy(setup_move_list);
-  move_list_destroy(choice_move_list);
-  pat_destroy(scaled_pat);
-  if (baseline_pat != NULL) {
+  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  PATWeights *baseline_pat =
+      baseline_pat_name ? pat_hyperscale_load(config, baseline_pat_name) : NULL;
+  PATWeights *candidate_pat = pat_hyperscale_load(config, candidate_pat_name);
+  const PATMoveChooser baseline = {
+      .label = baseline_pat_name ? baseline_pat_name : "champion",
+      .pat = baseline_pat ? baseline_pat : champion,
+      .degrade_margin = 0.0,
+      .overlap_correction = 0.0};
+  const PATMoveChooser candidate = {.label = candidate_pat_name,
+                                    .pat = candidate_pat,
+                                    .degrade_margin = 0.0,
+                                    .overlap_correction = 0.0};
+  PATMoveChoiceResult result;
+  pat_move_choice_compare(config, &baseline, &candidate, seed_base,
+                          num_positions, &result);
+  assert(result.positions_considered > 0);
+  pat_destroy(candidate_pat);
+  if (baseline_pat) {
     pat_destroy(baseline_pat);
   }
-
-  printf("\n%s vs %s move-choice pilot: %d positions considered, %d "
-         "disagreements (%.1f%%)\n",
-         candidate_pat_name,
-         baseline_pat_name != NULL ? baseline_pat_name : "champion",
-         num_positions_considered, num_disagreements,
-         num_positions_considered > 0
-             ? 100.0 * num_disagreements / num_positions_considered
-             : 0.0);
-  if (num_disagreements > 1) {
-    const double mean_diff = sum_diff / num_disagreements;
-    const double variance_diff =
-        (sum_diff_sq / num_disagreements - mean_diff * mean_diff) *
-        ((double)num_disagreements / (num_disagreements - 1));
-    const double se_diff = sqrt(variance_diff / num_disagreements);
-    printf("reference value(candidate's choice) - reference value(baseline's "
-           "choice): mean %.4f, SE %.4f, 95%% CI [%.4f, %.4f]\n",
-           mean_diff, se_diff, mean_diff - 1.96 * se_diff,
-           mean_diff + 1.96 * se_diff);
-    printf("%s\n",
-           mean_diff > 0.0
-               ? "candidate's own move choices score higher under the "
-                 "common reference"
-               : "candidate's own move choices do not score higher under "
-                 "the common reference");
-  }
-
-  assert(num_positions_considered > 0);
   config_destroy(config);
 }
 
