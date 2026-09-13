@@ -1,6 +1,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "alias_method_test.h"
 #include "alphabet_test.h"
 #include "analyze_test.h"
@@ -263,6 +264,12 @@ void run_test(const char *subtest) {
       on_demand_test_table[i].func();
       return;
     }
+  }
+  // Parameterized move-choice comparisons: "patmovechoice:<spec>" (see
+  // pat_move_choice_run_spec).
+  if (has_prefix("patmovechoice:", subtest)) {
+    pat_move_choice_run_spec(subtest + strlen("patmovechoice:"));
+    return;
   }
   log_fatal("unrecognized test: %s\n", subtest);
 }

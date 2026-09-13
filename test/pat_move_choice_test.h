@@ -44,6 +44,14 @@ void pat_move_choice_compare(Config *config, const PATMoveChooser *baseline,
 // What every comparison used before the decomposition was measured.
 #define PAT_MOVE_CHOICE_DEFAULT_WORLDS 30
 
+void pat_move_choice_compare_shard(Config *config,
+                                   const PATMoveChooser *baseline,
+                                   const PATMoveChooser *candidate,
+                                   uint64_t seed_base, int num_positions,
+                                   int num_worlds, int shard, int num_shards,
+                                   PATMoveChoiceResult *result_out);
+void pat_move_choice_run_spec(const char *spec);
+
 void test_pat_move_choice_controls(void);
 void test_pat_move_choice_targeted_controls(void);
 void test_pat_overlap_step3_dev(void);
