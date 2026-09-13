@@ -31,8 +31,22 @@ enum {
       TWD_FEATURE_FLOAT_SCORE_START + TWD_FLOATER_BIN_COUNT,
   TWD_FEATURE_FLOAT_THROUGH_COUNT_START =
       TWD_FEATURE_FLOAT_THROUGH_SCORE_START + TWD_FLOATER_BIN_COUNT,
-  TWD_FEATURE_TT_FLOATER =
+  // The same hook and floater-value channels for the lesser premium
+  // squares. A lone double word square doubles a whole word and a triple
+  // letter square triples one tile, so both are worth reaching and both
+  // were invisible to a model that only ever walked triple-word lanes.
+  // They get their own channels rather than a shared one scaled by a
+  // guessed multiplier, so the fit says what each class is worth.
+  TWD_FEATURE_DWS_HOOK_START =
       TWD_FEATURE_FLOAT_THROUGH_COUNT_START + TWD_FLOATER_BIN_COUNT,
+  TWD_FEATURE_DWS_FLOAT_SCORE_START =
+      TWD_FEATURE_DWS_HOOK_START + TWD_HOOK_BIN_COUNT,
+  TWD_FEATURE_TLS_HOOK_START =
+      TWD_FEATURE_DWS_FLOAT_SCORE_START + TWD_FLOATER_BIN_COUNT,
+  TWD_FEATURE_TLS_FLOAT_SCORE_START =
+      TWD_FEATURE_TLS_HOOK_START + TWD_HOOK_BIN_COUNT,
+  TWD_FEATURE_TT_FLOATER =
+      TWD_FEATURE_TLS_FLOAT_SCORE_START + TWD_FLOATER_BIN_COUNT,
   TWD_FEATURE_TT_HOOK_ONLY = TWD_FEATURE_TT_FLOATER + 1,
   // Double-double windows: a pair of empty double word squares in one lane
   // close enough for a single word to cover both, which doubles the word
