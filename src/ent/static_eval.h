@@ -188,7 +188,8 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
   // bound (see the invariant comment there). Scoped to bag > 0, matching the
   // endgame adjustment's own scope in static_eval_get_nonopening_move_equity.
   if (number_of_tiles_in_bag > 0) {
-    other_adjustments += pat_eval_move_penalty(pat_eval_ctx, move);
+    other_adjustments +=
+        pat_eval_move_penalty(pat_eval_ctx, move, player_leave);
   }
 
   return static_eval_get_nonopening_move_equity(

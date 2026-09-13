@@ -124,6 +124,13 @@ enum {
 // reads as a second route to danger being worth half a first.
 #define PAT_TRAINING_COMBINE_GAMMA 0.5
 
+// Optional row giving the fraction of a unit's penalty credited back when
+// the move's own leave holds a letter that could exploit that unit itself
+// (see PATWeights.own_asset_discount); absent means 0.0, no credit, the
+// behavior every earlier file already has.
+#define PAT_OWN_ASSET_DISCOUNT_ROW_PREFIX "own_asset_discount,"
+#define PAT_DEFAULT_OWN_ASSET_DISCOUNT 0.0
+
 // The header line is PAT_MAGIC_PREFIX followed by the format version as a
 // decimal integer, e.g. "magpie_pat_v2". PAT_VERSION is what this build
 // writes; a file naming a version below PAT_EARLIEST_SUPPORTED_VERSION is

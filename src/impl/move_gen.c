@@ -392,8 +392,8 @@ static inline void update_best_move_or_insert_into_movelist(
           gen_get_static_equity_without_pat(gen, current_move);
       const Equity best_equity =
           move_get_equity(gen_get_readonly_best_move(gen));
-      const Equity penalty_bound =
-          pat_eval_move_penalty_bound(&gen->pat_eval_ctx, current_move);
+      const Equity penalty_bound = pat_eval_move_penalty_bound(
+          &gen->pat_eval_ctx, current_move, &gen->player_rack);
       if (best_equity != EQUITY_INITIAL_VALUE &&
           equity_without_pat + penalty_bound < best_equity) {
         // Cannot become the best move even with its best possible defense
@@ -401,8 +401,9 @@ static inline void update_best_move_or_insert_into_movelist(
         move_equity_or_score = equity_without_pat + penalty_bound;
       } else {
         move_equity_or_score =
-            equity_without_pat +
-            pat_eval_move_penalty(&gen->pat_eval_ctx, current_move);
+            equity_without_pat + pat_eval_move_penalty(&gen->pat_eval_ctx,
+                                                       current_move,
+                                                       &gen->player_rack);
       }
     } else {
       move_equity_or_score =
@@ -839,15 +840,15 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                     gen->number_of_tiles_in_bag, leave_value);
       const Equity best_equity =
           move_get_equity(gen_get_readonly_best_move(gen));
-      const Equity penalty_bound =
-          pat_eval_move_penalty_bound(&gen->pat_eval_ctx, current_move);
+      const Equity penalty_bound = pat_eval_move_penalty_bound(
+          &gen->pat_eval_ctx, current_move, &gen->leave);
       if (best_equity != EQUITY_INITIAL_VALUE &&
           equity_without_pat + penalty_bound < best_equity) {
         move_equity_or_score = equity_without_pat + penalty_bound;
       } else {
-        move_equity_or_score =
-            equity_without_pat +
-            pat_eval_move_penalty(&gen->pat_eval_ctx, current_move);
+        move_equity_or_score = equity_without_pat +
+                               pat_eval_move_penalty(&gen->pat_eval_ctx,
+                                                     current_move, &gen->leave);
       }
     } else {
       move_equity_or_score = has_precomputed_equity

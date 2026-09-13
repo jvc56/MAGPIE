@@ -49,6 +49,16 @@ struct PATWeights {
   // unit in full (the original behaviour), and values between allow for a
   // rack that cannot use the worst route. See pat_combine_unit_penalties.
   double combine_gamma;
+  // Fraction of a unit's penalty credited back when the move's own leave
+  // holds a letter that could exploit that exact unit itself, whether or
+  // not the move's placement touches it. 0 (the default for every file
+  // that predates this, and the default pat_create_zeroed writes) is
+  // exactly today's behavior: no credit, penalty unchanged. Clamped to
+  // [0, 1] on read (see pat_parse_contents) so the adjusted penalty
+  // p * (1 - discount) always stays in [p, 0]: it can only shrink a
+  // penalty toward zero, never flip its sign, so no new shadow-pruning
+  // bound is needed for it (see pat_eval_move_penalty).
+  double own_asset_discount;
   uint64_t mutation_counter;
   // The version named on the file's header line (see PAT_VERSION).
   int version;
@@ -60,6 +70,14 @@ double pat_get_combine_gamma(const PATWeights *pat) {
 
 void pat_set_combine_gamma(PATWeights *pat, double combine_gamma) {
   pat->combine_gamma = combine_gamma;
+}
+
+double pat_get_own_asset_discount(const PATWeights *pat) {
+  return pat->own_asset_discount;
+}
+
+void pat_set_own_asset_discount(PATWeights *pat, double own_asset_discount) {
+  pat->own_asset_discount = own_asset_discount;
 }
 
 const char *pat_get_name(const PATWeights *pat) { return pat->name; }
@@ -157,6 +175,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   PATWeights *pat = calloc_or_die(1, sizeof(PATWeights));
   pat->name = string_duplicate(pat_name);
   pat->combine_gamma = PAT_DEFAULT_COMBINE_GAMMA;
+  pat->own_asset_discount = PAT_DEFAULT_OWN_ASSET_DISCOUNT;
   pat->version = PAT_VERSION;
   return pat;
 }
@@ -251,6 +270,27 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         return;
       }
       pat->combine_gamma = parsed_gamma;
+      continue;
+    }
+    if (has_prefix(PAT_OWN_ASSET_DISCOUNT_ROW_PREFIX, line)) {
+      const char *discount_text =
+          line + strlen(PAT_OWN_ASSET_DISCOUNT_ROW_PREFIX);
+      char *discount_end = NULL;
+      const double parsed_discount = strtod(discount_text, &discount_end);
+      // Outside [0, 1] the adjusted penalty p * (1 - discount) could land
+      // above 0 (a positive weight would be reachable) or below p (would
+      // credit more than the unit's own penalty), either of which breaks
+      // the <= 0 invariant the shadow-pruning bound relies on.
+      if (discount_end == discount_text || !isfinite(parsed_discount) ||
+          parsed_discount < 0.0 || parsed_discount > 1.0) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has an own-asset "
+                                 "discount outside [0, 1]: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->own_asset_discount = parsed_discount;
       continue;
     }
     if (feature_index >= PAT_NUM_FEATURES) {
@@ -350,6 +390,9 @@ void pat_write(const PATWeights *pat, const char *data_paths,
                                       PAT_VERSION);
   string_builder_add_formatted_string(sb, "%s%.6f\n", PAT_GAMMA_ROW_PREFIX,
                                       pat->combine_gamma);
+  string_builder_add_formatted_string(sb, "%s%.6f\n",
+                                      PAT_OWN_ASSET_DISCOUNT_ROW_PREFIX,
+                                      pat->own_asset_discount);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -647,6 +690,10 @@ typedef struct PATCrossInfo {
   bool hooky;
   int flex;
   int scaled_flex;
+  // The real cross-set this hook or floater route needs, valid only when
+  // hooky; 0 otherwise. Blank stays at bit 0, same convention as every
+  // other cross/extension set (see pat_set_flex).
+  uint64_t letter_set;
 } PATCrossInfo;
 
 // The perpendicular constraint at an empty square: dead (no letter can be
@@ -671,6 +718,7 @@ pat_effective_cross_info(const Square *lane, int idx, int dir,
       info.hooky
           ? pat_set_flex_scaled(unseen_counts, base_cross_set, hyper_scale)
           : 0;
+  info.letter_set = info.hooky ? base_cross_set : 0;
   if (!overlay || info.dead) {
     return info;
   }
@@ -722,7 +770,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           int tws_row, int tws_col, int premium_class, int dir,
                           const PATMoveOverlay *overlay, int32_t *features,
                           int *extent_lo, int *extent_hi,
-                          int opponent_rack_size) {
+                          int opponent_rack_size, uint64_t *hook_letters_out) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const double hyper_scale = pat_hyper_scale(unseen_counts, opponent_rack_size);
@@ -782,6 +830,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     features[hook_base] += tws_info.flex;
     if (full_channels) {
       features[PAT_FEATURE_HOOK_SCALED_START] += tws_info.scaled_flex;
+    }
+    if (hook_letters_out) {
+      *hook_letters_out |= tws_info.letter_set;
     }
   }
 
@@ -866,6 +917,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           run_flex = pat_set_flex(unseen_counts, extension_set);
           scaled_run_flex =
               pat_set_flex_scaled(unseen_counts, extension_set, hyper_scale);
+          if (hook_letters_out) {
+            *hook_letters_out |= extension_set;
+          }
         }
         if (full_channels) {
           features[PAT_FEATURE_FLOAT_FLEX_START + distance_bin - 1] += run_flex;
@@ -903,6 +957,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           features[PAT_FEATURE_HOOK_SCALED_START + empties_used - 1] +=
               info.scaled_flex;
         }
+        if (hook_letters_out) {
+          *hook_letters_out |= info.letter_set;
+        }
         span_has_hook = true;
       }
       prev_empty_idx = idx;
@@ -928,7 +985,8 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
                              int dir, int lane_index, int lo, int hi, int tier,
                              const PATMoveOverlay *overlay, int32_t *features,
                              int *extent_lo, int *extent_hi,
-                             int opponent_rack_size) {
+                             int opponent_rack_size,
+                             uint64_t *hook_letters_out) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const int tier_base =
@@ -966,6 +1024,9 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     }
     if (info.hooky) {
       has_hook = true;
+      if (hook_letters_out) {
+        *hook_letters_out |= info.letter_set;
+      }
     }
     empties++;
   }
@@ -1113,11 +1174,11 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size);
+                  opponent_rack_size, NULL);
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size);
+                  opponent_rack_size, NULL);
   }
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
@@ -1129,7 +1190,7 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
   for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
     pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                      dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                     features, NULL, NULL, opponent_rack_size);
+                     features, NULL, NULL, opponent_rack_size, NULL);
   }
 }
 
@@ -1283,8 +1344,8 @@ void pat_eval_context_disable(PATEvalContext *pat_eval_ctx) {
 static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                                   int unit_index, const PATMoveOverlay *overlay,
                                   int32_t *features, int *dir_out,
-                                  int *lane_out, int *extent_lo,
-                                  int *extent_hi) {
+                                  int *lane_out, int *extent_lo, int *extent_hi,
+                                  uint64_t *hook_letters_out) {
   const int num_tws_units = pat_eval_ctx->num_tws * 2;
   if (unit_index < num_tws_units) {
     const int tws_idx = unit_index / 2;
@@ -1297,7 +1358,7 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                   pat_eval_ctx->unseen_counts, pat_eval_ctx->weights, tws_row,
                   tws_col, pat_eval_ctx->tws_classes[tws_idx], dir, overlay,
                   features, extent_lo, extent_hi,
-                  pat_eval_ctx->opponent_rack_size);
+                  pat_eval_ctx->opponent_rack_size, hook_letters_out);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
@@ -1308,7 +1369,7 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                    pat_eval_ctx->dd_lanes[dd_idx], pat_eval_ctx->dd_los[dd_idx],
                    pat_eval_ctx->dd_his[dd_idx], pat_eval_ctx->dd_tiers[dd_idx],
                    overlay, features, extent_lo, extent_hi,
-                   pat_eval_ctx->opponent_rack_size);
+                   pat_eval_ctx->opponent_rack_size, hook_letters_out);
 }
 
 // Whether any channel a walk from this premium class can write carries a
@@ -1481,8 +1542,10 @@ static void pat_eval_context_load_units(
     int lane = 0;
     int extent_lo = 0;
     int extent_hi = 0;
+    pat_eval_ctx->unit_hook_letters[unit_index] = 0;
     pat_scan_context_unit(pat_eval_ctx, unit_index, NULL, unit_features, &dir,
-                          &lane, &extent_lo, &extent_hi);
+                          &lane, &extent_lo, &extent_hi,
+                          &pat_eval_ctx->unit_hook_letters[unit_index]);
     pat_eval_ctx->unit_penalty[unit_index] =
         pat_dot_ctx(pat_eval_ctx, unit_features);
     // A move affects this unit only when it has a tile on or directly
@@ -1505,6 +1568,23 @@ static void pat_eval_context_load_units(
     }
     for (int idx = extent_lo; idx <= extent_hi; idx++) {
       pat_mask_set(extent_masks[idx], unit_index);
+    }
+  }
+  // Reverse index of unit_hook_letters: bit u of units_by_hook_letter[L] set
+  // exactly when unit u's baseline scan found a live hook or floater route
+  // admitting letter L. Built once per position so a move's own leave (at
+  // most RACK_SIZE distinct letters) can find every unit it could exploit
+  // in a handful of ORs, entirely independent of the move's placement.
+  memset(pat_eval_ctx->units_by_hook_letter, 0,
+         sizeof(pat_eval_ctx->units_by_hook_letter));
+  for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
+    uint64_t remaining_letters =
+        pat_eval_ctx->unit_hook_letters[unit_index] & ~(uint64_t)1;
+    while (remaining_letters) {
+      const int machine_letter = pat_ctz(remaining_letters);
+      remaining_letters &= remaining_letters - 1;
+      pat_mask_set(pat_eval_ctx->units_by_hook_letter[machine_letter],
+                   unit_index);
     }
   }
   // The total and the penalty order that let a move's combination be
@@ -1530,13 +1610,47 @@ static void pat_eval_context_load_units(
   pat_eval_ctx->pre_penalty = pat_combine_unit_penalties(
       pat_eval_ctx->unit_penalty, pat_eval_ctx->num_units,
       weights->combine_gamma);
+  // Every move's leave is some subset of the player's starting rack, so the
+  // units ANY move from this position could earn leave credit for (see
+  // pat_leave_affected_units) are a subset of the units reachable through
+  // some letter the player's rack holds right now. lane_penalty_bound is
+  // position-level, not move-level, so it cannot know which specific leave
+  // a later move will keep; folding this worst case in uniformly keeps it a
+  // sound upper bound for every move in the lane rather than only the ones
+  // whose leave happens to be empty. Empty whenever the file carries no
+  // discount, so that case's bound is identical to before this feature.
+  uint64_t worst_case_leave_units[PAT_MASK_WORDS];
+  pat_mask_clear(worst_case_leave_units);
+  if (weights->own_asset_discount > 0.0 && player_rack) {
+    bool rack_has_blank =
+        rack_get_letter(player_rack, BLANK_MACHINE_LETTER) > 0;
+    const int dist_size = rack_get_dist_size(player_rack);
+    for (int ml = 1; ml < dist_size; ml++) {
+      if (rack_get_letter(player_rack, ml) > 0) {
+        pat_mask_or_into(worst_case_leave_units,
+                         pat_eval_ctx->units_by_hook_letter[ml]);
+      }
+    }
+    if (rack_has_blank) {
+      for (int ml = 1; ml < MAX_ALPHABET_SIZE; ml++) {
+        pat_mask_or_into(worst_case_leave_units,
+                         pat_eval_ctx->units_by_hook_letter[ml]);
+      }
+    }
+  }
   for (int lane = 0; lane < BOARD_DIM; lane++) {
+    uint64_t row_bound_units[PAT_MASK_WORDS];
+    uint64_t col_bound_units[PAT_MASK_WORDS];
+    for (int word = 0; word < PAT_MASK_WORDS; word++) {
+      row_bound_units[word] = pat_eval_ctx->unit_mask_by_row[lane][word] |
+                              worst_case_leave_units[word];
+      col_bound_units[word] = pat_eval_ctx->unit_mask_by_col[lane][word] |
+                              worst_case_leave_units[word];
+    }
     pat_eval_ctx->lane_penalty_bound[BOARD_HORIZONTAL_DIRECTION][lane] =
-        pat_units_penalty_bound(pat_eval_ctx,
-                                pat_eval_ctx->unit_mask_by_row[lane]);
+        pat_units_penalty_bound(pat_eval_ctx, row_bound_units);
     pat_eval_ctx->lane_penalty_bound[BOARD_VERTICAL_DIRECTION][lane] =
-        pat_units_penalty_bound(pat_eval_ctx,
-                                pat_eval_ctx->unit_mask_by_col[lane]);
+        pat_units_penalty_bound(pat_eval_ctx, col_bound_units);
   }
 }
 
@@ -1581,8 +1695,74 @@ static inline void pat_move_affected_units(const PATEvalContext *pat_eval_ctx,
   }
 }
 
+// Bit L (L != BLANK_MACHINE_LETTER) is set when the leave holds at least
+// one unblanked tile of machine letter L; *has_blank_out reports whether
+// the leave holds a blank, which could stand in for whatever letter a
+// hook needs. A NULL leave (a caller with no leave to offer) reports an
+// empty mask and no blank, which is exactly "this move's own leave helps
+// nothing" -- safe by construction, not a special case below.
+static uint64_t pat_leave_letter_mask(const Rack *leave, bool *has_blank_out) {
+  *has_blank_out = false;
+  uint64_t mask = 0;
+  if (!leave) {
+    return 0;
+  }
+  const int dist_size = rack_get_dist_size(leave);
+  for (int ml = 0; ml < dist_size; ml++) {
+    if (rack_get_letter(leave, ml) == 0) {
+      continue;
+    }
+    if (ml == BLANK_MACHINE_LETTER) {
+      *has_blank_out = true;
+    } else {
+      mask |= (uint64_t)1 << ml;
+    }
+  }
+  return mask;
+}
+
+// Units the move's own leave could exploit itself (see unit_hook_letters),
+// independent of whether its placement geometrically touches them. Empty
+// whenever the file carries no discount, so that case matches every
+// earlier file's behavior exactly -- byte for byte, not just numerically.
+static void pat_leave_affected_units(const PATEvalContext *pat_eval_ctx,
+                                     const Rack *leave,
+                                     uint64_t *leave_units_out) {
+  pat_mask_clear(leave_units_out);
+  if (pat_eval_ctx->weights->own_asset_discount <= 0.0) {
+    return;
+  }
+  bool leave_has_blank = false;
+  const uint64_t leave_mask = pat_leave_letter_mask(leave, &leave_has_blank);
+  uint64_t remaining_letters = leave_mask;
+  while (remaining_letters) {
+    const int machine_letter = pat_ctz(remaining_letters);
+    remaining_letters &= remaining_letters - 1;
+    pat_mask_or_into(leave_units_out,
+                     pat_eval_ctx->units_by_hook_letter[machine_letter]);
+  }
+  if (leave_has_blank) {
+    // A blank stands in for whatever letter a hook needs, so it can
+    // exploit any unit with a live hook or floater route at all.
+    for (int machine_letter = 1; machine_letter < MAX_ALPHABET_SIZE;
+         machine_letter++) {
+      pat_mask_or_into(leave_units_out,
+                       pat_eval_ctx->units_by_hook_letter[machine_letter]);
+    }
+  }
+}
+
+// Bounds pat_eval_move_penalty(move, leave) without rescanning: besides the
+// units the move's placement can reach, the units its own leave could
+// exploit (see pat_leave_affected_units) can also move all the way to 0 in
+// the best case (own_asset_discount capping at 1), so both sets are zeroed
+// for the bound exactly as pat_units_penalty_bound already zeros a
+// geometrically reached unit. Skipping the leave side here whenever the
+// move's own is unknown or the file carries no discount would make this
+// call a looser bound than the real evaluation could ever need, never a
+// wrong one, but every current caller has the leave in hand regardless.
 Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
-                                   const Move *move) {
+                                   const Move *move, const Rack *leave) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
@@ -1598,11 +1778,17 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   uint64_t affected_units[PAT_MASK_WORDS];
   pat_move_affected_units(pat_eval_ctx, row_start, row_end, col_start, col_end,
                           affected_units);
-  return pat_units_penalty_bound(pat_eval_ctx, affected_units);
+  uint64_t leave_units[PAT_MASK_WORDS];
+  pat_leave_affected_units(pat_eval_ctx, leave, leave_units);
+  uint64_t combined_units[PAT_MASK_WORDS];
+  for (int word = 0; word < PAT_MASK_WORDS; word++) {
+    combined_units[word] = affected_units[word] | leave_units[word];
+  }
+  return pat_units_penalty_bound(pat_eval_ctx, combined_units);
 }
 
 Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
-                             const Move *move) {
+                             const Move *move, const Rack *leave) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
@@ -1621,7 +1807,18 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
   uint64_t affected_units[PAT_MASK_WORDS];
   pat_move_affected_units(pat_eval_ctx, row_start, row_end, col_start, col_end,
                           affected_units);
-  if (pat_mask_is_empty(affected_units)) {
+  // Units the move's own leave could exploit itself, whether or not its
+  // placement geometrically touches them (see unit_hook_letters). Empty
+  // whenever the file carries no discount, so that case runs the exact
+  // byte-for-byte loop every earlier file already ran.
+  const double discount = pat_eval_ctx->weights->own_asset_discount;
+  uint64_t leave_units[PAT_MASK_WORDS];
+  pat_leave_affected_units(pat_eval_ctx, leave, leave_units);
+  uint64_t combined_units[PAT_MASK_WORDS];
+  for (int word = 0; word < PAT_MASK_WORDS; word++) {
+    combined_units[word] = affected_units[word] | leave_units[word];
+  }
+  if (pat_mask_is_empty(combined_units)) {
     return pat_eval_ctx->pre_penalty;
   }
   const PATMoveOverlay overlay = {
@@ -1633,31 +1830,46 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
       .vertical = vertical,
       .hook_flex = pat_eval_ctx->weights->hook_flex,
   };
-  // Rescan only the units the move can reach and combine the whole set:
-  // the units it cannot reach keep exactly the penalty they were loaded
-  // with, so the sum is the total moved by each reached unit's change and
-  // the worst is the lesser of the reached units' new penalties and the
-  // first unreached unit in penalty order.
+  // Rescan only the units the move can reach (geometrically, or through
+  // its own leave) and combine the whole set: the units in neither set
+  // keep exactly the penalty they were loaded with, so the sum is the
+  // total moved by each reached unit's change and the worst is the lesser
+  // of the reached units' new penalties and the first unreached unit in
+  // penalty order.
   int64_t sum = pat_eval_ctx->total_unit_penalty;
   int64_t worst = 0;
   for (int word = 0; word < PAT_MASK_WORDS; word++) {
-    uint64_t bits = affected_units[word];
+    uint64_t bits = combined_units[word];
     while (bits != 0) {
       const int unit_index = word * 64 + pat_ctz(bits);
       bits &= bits - 1;
-      int32_t overlay_features[PAT_NUM_FEATURES] = {0};
-      int scan_dir = 0;
-      int scan_lane = 0;
-      // The same rack the training label was built against: whatever the
-      // player holds now, not the leave this move would keep. Training
-      // opens its observation after the mover has drawn back to full, so
-      // scoring a candidate against its leave would call every hook
-      // uncontested in proportion to how many tiles the move played, which
-      // is a penalty on bingos and nothing to do with hooks.
-      pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
-                            overlay_features, &scan_dir, &scan_lane, NULL,
-                            NULL);
-      const Equity penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
+      Equity penalty;
+      if (pat_mask_test(affected_units, unit_index)) {
+        int32_t overlay_features[PAT_NUM_FEATURES] = {0};
+        int scan_dir = 0;
+        int scan_lane = 0;
+        // The same rack the training label was built against: whatever the
+        // player holds now, not the leave this move would keep. Training
+        // opens its observation after the mover has drawn back to full, so
+        // scoring a candidate against its leave would call every hook
+        // uncontested in proportion to how many tiles the move played,
+        // which is a penalty on bingos and nothing to do with hooks.
+        pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
+                              overlay_features, &scan_dir, &scan_lane, NULL,
+                              NULL, NULL);
+        penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
+      } else {
+        // Reached only through the leave: the move's placement never
+        // touched this unit, so its geometry (and hence penalty, absent
+        // the discount below) is exactly what was loaded.
+        penalty = pat_eval_ctx->unit_penalty[unit_index];
+      }
+      if (pat_mask_test(leave_units, unit_index)) {
+        // p <= 0 and discount in [0, 1], so p * (1 - discount) always
+        // lands in [p, 0]: the credit can shrink a penalty toward zero
+        // but never past it, so no new shadow-pruning bound is needed.
+        penalty = (Equity)lround((double)penalty * (1.0 - discount));
+      }
       sum += penalty - pat_eval_ctx->unit_penalty[unit_index];
       if (penalty < worst) {
         worst = penalty;
@@ -1666,7 +1878,7 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
   }
   for (int order_idx = 0; order_idx < pat_eval_ctx->num_units; order_idx++) {
     const int unit_index = pat_eval_ctx->units_by_penalty[order_idx];
-    if (!pat_mask_test(affected_units, unit_index)) {
+    if (!pat_mask_test(combined_units, unit_index)) {
       if (pat_eval_ctx->unit_penalty[unit_index] < worst) {
         worst = pat_eval_ctx->unit_penalty[unit_index];
       }
@@ -1710,12 +1922,12 @@ void pat_extract_features_combined(const Square *lanes,
       const int tws_idx = unit_index / 2;
       pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                     tws_cols[tws_idx], tws_classes[tws_idx], unit_index % 2,
-                    NULL, row, NULL, NULL, opponent_rack_size);
+                    NULL, row, NULL, NULL, opponent_rack_size, NULL);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                        dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                       row, NULL, NULL, opponent_rack_size);
+                       row, NULL, NULL, opponent_rack_size, NULL);
     }
     const Equity penalty = pat_dot(pat, row);
     if (penalty < worst_penalty) {
