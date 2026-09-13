@@ -35,6 +35,9 @@ void twd_set_weight(TWDWeights *twd, int feature_index, Equity weight);
 // The mutation counter changes whenever the weights are rewritten in place
 // (as the training loop does between generations) so any future cache keyed
 // on this object can detect staleness.
+// See TWDWeights.combine_gamma.
+double twd_get_combine_gamma(const TWDWeights *twd);
+void twd_set_combine_gamma(TWDWeights *twd, double combine_gamma);
 uint64_t twd_get_mutation_counter(const TWDWeights *twd);
 void twd_bump_mutation_counter(TWDWeights *twd);
 // Writes the weights to data/strategy/<twd_name>.twd.
@@ -178,5 +181,18 @@ twd_eval_lane_penalty_bound(const TWDEvalContext *twd_eval_ctx, int dir,
 // post-move boards. features must have TWD_NUM_FEATURES elements.
 void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
                           const Rack *player_rack, int32_t *features);
+// The feature row to regress on when per-unit penalties are combined with a
+// gamma below one. Because the combination charges the worst unit in full
+// and the rest at gamma, the row whose dot product with the weights equals
+// the combined term is gamma times every unit plus the remaining (1 - gamma)
+// of whichever unit the CURRENT weights rank worst. Training on this row and
+// evaluating with the same combination is one round of the obvious
+// fixed-point iteration, which the generation loop already provides. Falls
+// back to the plain sum when the weights combine at gamma 1 or rank every
+// unit equally. features has TWD_NUM_FEATURES elements.
+void twd_extract_features_combined(const Square *lanes,
+                                   const LetterDistribution *ld,
+                                   const Rack *player_rack,
+                                   const TWDWeights *twd, double *features);
 
 #endif

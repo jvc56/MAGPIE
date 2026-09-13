@@ -19,6 +19,7 @@
 #include "move.h"
 #include "rack.h"
 #include <assert.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -33,8 +34,22 @@ struct TWDWeights {
   // flexibility approximation for hooks and floaters the evaluated move
   // itself creates (see twd_prepare_hook_flex).
   uint8_t hook_flex[MAX_ALPHABET_SIZE];
+  // How much a second route to danger counts once the worst one is already
+  // counted. The opponent plays one move, so the threats a board offers do
+  // not simply add: 0 charges only the worst scan unit, 1 charges every
+  // unit in full (the original behaviour), and values between allow for a
+  // rack that cannot use the worst route. See twd_combine_unit_penalties.
+  double combine_gamma;
   uint64_t mutation_counter;
 };
+
+double twd_get_combine_gamma(const TWDWeights *twd) {
+  return twd->combine_gamma;
+}
+
+void twd_set_combine_gamma(TWDWeights *twd, double combine_gamma) {
+  twd->combine_gamma = combine_gamma;
+}
 
 const char *twd_get_name(const TWDWeights *twd) { return twd->name; }
 
@@ -85,6 +100,7 @@ void twd_feature_name(int feature_index, char *buf, size_t buf_size) {
 TWDWeights *twd_create_zeroed(const char *twd_name) {
   TWDWeights *twd = calloc_or_die(1, sizeof(TWDWeights));
   twd->name = string_duplicate(twd_name);
+  twd->combine_gamma = TWD_DEFAULT_COMBINE_GAMMA;
   return twd;
 }
 
@@ -120,6 +136,10 @@ static void twd_parse_contents(TWDWeights *twd, const char *twd_name,
   for (int line_index = 1; line_index < num_lines; line_index++) {
     const char *line = string_splitter_get_item(split_contents, line_index);
     if (is_string_empty_or_whitespace(line) || line[0] == '#') {
+      continue;
+    }
+    if (has_prefix(TWD_GAMMA_ROW_PREFIX, line)) {
+      twd->combine_gamma = strtod(line + strlen(TWD_GAMMA_ROW_PREFIX), NULL);
       continue;
     }
     if (feature_index >= TWD_NUM_FEATURES) {
@@ -218,6 +238,8 @@ void twd_write(const TWDWeights *twd, const char *data_paths,
   }
   StringBuilder *sb = string_builder_create();
   string_builder_add_formatted_string(sb, "%s\n", TWD_MAGIC_HEADER);
+  string_builder_add_formatted_string(sb, "%s%.6f\n", TWD_GAMMA_ROW_PREFIX,
+                                      twd->combine_gamma);
   string_builder_add_string(
       sb, "# trained TWS defense weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -779,20 +801,61 @@ static Equity twd_dot(const TWDWeights *twd, const int32_t *features) {
 static_assert(TWD_MAX_SCAN_UNITS <= 64,
               "TWS defense unit masks require at most 64 scan units");
 
+// Combines the per-unit penalties into the position's defense term. The
+// opponent plays one move next turn, so two open lanes are not two separate
+// losses: the worst route is charged in full and every other route at
+// gamma, which is a convex combination of the minimum and the sum. Gamma 1
+// is the plain sum. Being a convex combination of non-positive values the
+// result is non-positive, and it is nondecreasing in every unit penalty,
+// which is what lets the shadow bound below zero out the units a move can
+// reach.
+static Equity twd_combine(int64_t worst, int64_t sum, double combine_gamma) {
+  double combined =
+      (1.0 - combine_gamma) * (double)worst + combine_gamma * (double)sum;
+  if (combined > 0.0) {
+    combined = 0.0;
+  }
+  if (combined < (double)EQUITY_MIN_VALUE) {
+    combined = (double)EQUITY_MIN_VALUE;
+  }
+  return (Equity)llround(combined);
+}
+
+static Equity twd_combine_unit_penalties(const Equity *unit_penalties,
+                                         int num_units, double combine_gamma) {
+  int64_t sum = 0;
+  int64_t worst = 0;
+  for (int unit_index = 0; unit_index < num_units; unit_index++) {
+    const int64_t penalty = unit_penalties[unit_index];
+    sum += penalty;
+    if (penalty < worst) {
+      worst = penalty;
+    }
+  }
+  return twd_combine(worst, sum, combine_gamma);
+}
+
 // The moves affecting the units can at best zero out each affected unit's (<=
 // 0) baseline contribution; every unaffected unit keeps its baseline exactly.
-static inline Equity twd_units_penalty_bound(const TWDEvalContext *twd_eval_ctx,
-                                             uint64_t affected_units) {
-  int64_t bound = twd_eval_ctx->pre_penalty;
-  while (affected_units) {
-    const int unit_index = twd_ctz(affected_units);
-    affected_units &= affected_units - 1;
-    bound -= twd_eval_ctx->unit_penalty[unit_index];
+static Equity twd_units_penalty_bound(const TWDEvalContext *twd_eval_ctx,
+                                      uint64_t affected_units) {
+  // A move can at best zero out every unit it reaches, and the combination
+  // is nondecreasing in each unit, so combining with those units at zero
+  // bounds the term from above. A zeroed unit adds nothing to the sum and
+  // can never be the worst, so it simply drops out of both.
+  int64_t sum = 0;
+  int64_t worst = 0;
+  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
+    if ((affected_units >> unit_index) & 1) {
+      continue;
+    }
+    const int64_t penalty = twd_eval_ctx->unit_penalty[unit_index];
+    sum += penalty;
+    if (penalty < worst) {
+      worst = penalty;
+    }
   }
-  if (bound > 0) {
-    bound = 0;
-  }
-  return (Equity)bound;
+  return twd_combine(worst, sum, twd_eval_ctx->weights->combine_gamma);
 }
 
 void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx) {
@@ -891,7 +954,9 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
       extent_masks[idx] |= unit_bit;
     }
   }
-  twd_eval_ctx->pre_penalty = twd_dot(weights, features);
+  twd_eval_ctx->pre_penalty = twd_combine_unit_penalties(
+      twd_eval_ctx->unit_penalty, twd_eval_ctx->num_units,
+      weights->combine_gamma);
   for (int lane = 0; lane < BOARD_DIM; lane++) {
     twd_eval_ctx->lane_penalty_bound[BOARD_HORIZONTAL_DIRECTION][lane] =
         twd_units_penalty_bound(twd_eval_ctx,
@@ -968,7 +1033,12 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
       .vertical = vertical,
       .hook_flex = twd_eval_ctx->weights->hook_flex,
   };
-  int32_t delta_features[TWD_NUM_FEATURES] = {0};
+  // Rescan only the units the move can reach and combine the whole set:
+  // the units it cannot reach keep exactly the penalty they were loaded
+  // with.
+  Equity post_move_penalties[TWD_MAX_SCAN_UNITS];
+  memcpy(post_move_penalties, twd_eval_ctx->unit_penalty,
+         sizeof(Equity) * (size_t)twd_eval_ctx->num_units);
   while (affected_units) {
     const int unit_index = twd_ctz(affected_units);
     affected_units &= affected_units - 1;
@@ -977,23 +1047,72 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
     int scan_lane = 0;
     twd_scan_context_unit(twd_eval_ctx, unit_index, &overlay, overlay_features,
                           &scan_dir, &scan_lane, NULL, NULL);
-    const int32_t *unit_features = twd_eval_ctx->unit_features[unit_index];
-    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
-         feature_index++) {
-      delta_features[feature_index] +=
-          overlay_features[feature_index] - unit_features[feature_index];
+    post_move_penalties[unit_index] =
+        twd_dot(twd_eval_ctx->weights, overlay_features);
+  }
+  return twd_combine_unit_penalties(post_move_penalties,
+                                    twd_eval_ctx->num_units,
+                                    twd_eval_ctx->weights->combine_gamma);
+}
+
+void twd_extract_features_combined(const Square *lanes,
+                                   const LetterDistribution *ld,
+                                   const Rack *player_rack,
+                                   const TWDWeights *twd, double *features) {
+  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+       feature_index++) {
+    features[feature_index] = 0.0;
+  }
+  uint8_t unseen_counts[MAX_ALPHABET_SIZE];
+  twd_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
+  uint8_t tws_rows[TWD_MAX_TWS];
+  uint8_t tws_cols[TWD_MAX_TWS];
+  const int num_tws = twd_find_tws(lanes, tws_rows, tws_cols);
+  uint8_t dd_dirs[TWD_MAX_DD];
+  uint8_t dd_lanes[TWD_MAX_DD];
+  uint8_t dd_los[TWD_MAX_DD];
+  uint8_t dd_his[TWD_MAX_DD];
+  const int num_dd = twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his);
+  const int num_units = num_tws * 2 + num_dd;
+
+  int32_t unit_features[TWD_MAX_SCAN_UNITS][TWD_NUM_FEATURES];
+  int worst_unit = -1;
+  Equity worst_penalty = 0;
+  for (int unit_index = 0; unit_index < num_units; unit_index++) {
+    int32_t *row = unit_features[unit_index];
+    memset(row, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
+    if (unit_index < num_tws * 2) {
+      const int tws_idx = unit_index / 2;
+      twd_scan_unit(lanes, ld, unseen_counts, tws_rows[tws_idx],
+                    tws_cols[tws_idx], unit_index % 2, NULL, row, NULL, NULL);
+    } else {
+      const int dd_idx = unit_index - num_tws * 2;
+      twd_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
+                       dd_los[dd_idx], dd_his[dd_idx], NULL, row, NULL, NULL);
+    }
+    const Equity penalty = twd_dot(twd, row);
+    if (penalty < worst_penalty) {
+      worst_penalty = penalty;
+      worst_unit = unit_index;
     }
   }
-  const int64_t delta = twd_dot_raw(twd_eval_ctx->weights, delta_features);
-  int64_t penalty = (int64_t)twd_eval_ctx->pre_penalty + delta;
-  if (penalty > 0) {
-    // Cannot happen (the term equals weights . post-move features, which is
-    // <= 0 by sign construction); clamp defensively for the shadow
-    // invariant.
-    penalty = 0;
+
+  // Untrained weights rank every unit alike, so there is no worst one to
+  // charge in full. Fall back to the sum, which makes the first generation
+  // an ordinary fit and gives later ones something to rank with.
+  const double gamma = (worst_unit >= 0) ? twd->combine_gamma : 1.0;
+  for (int unit_index = 0; unit_index < num_units; unit_index++) {
+    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+         feature_index++) {
+      features[feature_index] +=
+          gamma * (double)unit_features[unit_index][feature_index];
+    }
   }
-  if (penalty < EQUITY_MIN_VALUE) {
-    penalty = EQUITY_MIN_VALUE;
+  if (worst_unit >= 0) {
+    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+         feature_index++) {
+      features[feature_index] +=
+          (1.0 - gamma) * (double)unit_features[worst_unit][feature_index];
+    }
   }
-  return (Equity)penalty;
 }
