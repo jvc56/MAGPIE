@@ -98,8 +98,10 @@ static void test_pat_version1_has_no_dls(const char *data_dir) {
   char feature_name[64];
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
-    if (feature_index >= PAT_FEATURE_DLS_HOOK_START &&
-        feature_index < PAT_FEATURE_QWS_HOOK_START) {
+    if ((feature_index >= PAT_FEATURE_DLS_HOOK_START &&
+         feature_index < PAT_FEATURE_QWS_HOOK_START) ||
+        (feature_index >= PAT_FEATURE_HOOK_SCALED_START &&
+         feature_index < PAT_FEATURE_DWS_HOOK_START)) {
       continue;
     }
     pat_feature_name(feature_index, feature_name, sizeof(feature_name));
@@ -117,9 +119,51 @@ static void test_pat_version1_has_no_dls(const char *data_dir) {
        feature_index < PAT_FEATURE_QWS_HOOK_START; feature_index++) {
     assert(pat_get_weight(loaded, feature_index) == 0);
   }
+  for (int feature_index = PAT_FEATURE_HOOK_SCALED_START;
+       feature_index < PAT_FEATURE_DWS_HOOK_START; feature_index++) {
+    assert(pat_get_weight(loaded, feature_index) == 0);
+  }
   assert(pat_get_weight(loaded, PAT_FEATURE_HOOK_START) == -1);
   assert(pat_get_weight(loaded, PAT_FEATURE_QWS_HOOK_START) ==
          -(PAT_FEATURE_QWS_HOOK_START + 1));
+  error_stack_destroy(error_stack);
+  pat_destroy(loaded);
+}
+
+// A version 2 file predates the hypergeometric-scaled channels: it has DLS
+// rows (added in version 2) but no rows for the scaled channels added in
+// version 3. Confirms they read back as zero and every other feature still
+// round-trips through the gap.
+static void test_pat_version2_has_no_scaled_channels(const char *data_dir) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(sb, "magpie_pat_v2\n");
+  char feature_name[64];
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    if (feature_index >= PAT_FEATURE_HOOK_SCALED_START &&
+        feature_index < PAT_FEATURE_DWS_HOOK_START) {
+      continue;
+    }
+    pat_feature_name(feature_index, feature_name, sizeof(feature_name));
+    string_builder_add_formatted_string(sb, "%s,%d\n", feature_name,
+                                        -(feature_index + 1));
+  }
+  write_pat_file_contents(data_dir, "v2_no_scaled", string_builder_peek(sb));
+  string_builder_destroy(sb);
+
+  ErrorStack *error_stack = error_stack_create();
+  PATWeights *loaded = pat_create(data_dir, "v2_no_scaled", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(loaded);
+  for (int feature_index = PAT_FEATURE_HOOK_SCALED_START;
+       feature_index < PAT_FEATURE_DWS_HOOK_START; feature_index++) {
+    assert(pat_get_weight(loaded, feature_index) == 0);
+  }
+  assert(pat_get_weight(loaded, PAT_FEATURE_HOOK_START) == -1);
+  assert(pat_get_weight(loaded, PAT_FEATURE_DLS_HOOK_START) ==
+         -(PAT_FEATURE_DLS_HOOK_START + 1));
+  assert(pat_get_weight(loaded, PAT_FEATURE_DWS_HOOK_START) ==
+         -(PAT_FEATURE_DWS_HOOK_START + 1));
   error_stack_destroy(error_stack);
   pat_destroy(loaded);
 }
@@ -492,6 +536,42 @@ static void test_pat_dls_features_land_in_dls_channels(void) {
   config_destroy(config);
 }
 
+// A Q directly above an open TWS makes it hooky (CSW21's only completion is
+// QI), giving both the raw and hypergeometric-scaled hook channels a real,
+// nonzero value to compare on an otherwise near-empty board, where the
+// unseen pool is far larger than RACK_SIZE.
+static void test_pat_hook_scaled_channel(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/Q14/15/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Square *lanes = board_get_readonly_lanes(board, 0);
+
+  int32_t features[PAT_NUM_FEATURES];
+  pat_extract_features(lanes, ld, NULL, NULL, RACK_SIZE, features);
+
+  const int32_t raw_hook = features[PAT_FEATURE_HOOK_START];
+  const int32_t scaled_hook = features[PAT_FEATURE_HOOK_SCALED_START];
+  assert(raw_hook > 0);
+  // The unseen pool on a near-empty board is far larger than RACK_SIZE, so
+  // the hypergeometric fraction is well under 1: the scaled channel must be
+  // strictly smaller than the raw count, never equal to or exceeding it,
+  // and never negative.
+  assert(scaled_hook >= 0);
+  assert(scaled_hook < raw_hook);
+  // Every other hook bin (no hook there) and DWS/TLS/DLS/QWS/QLS's own
+  // hook channels (TWS-only feature) stay at zero in both forms.
+  for (int bin = 1; bin < PAT_HOOK_BIN_COUNT; bin++) {
+    assert(features[PAT_FEATURE_HOOK_START + bin] == 0);
+    assert(features[PAT_FEATURE_HOOK_SCALED_START + bin] == 0);
+  }
+
+  config_destroy(config);
+}
+
 static void test_pat_unweighted_units_dropped(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
@@ -702,10 +782,12 @@ void test_pat(void) {
   test_pat_invalid_files(data_dir);
   test_pat_comments_and_blank_lines(data_dir);
   test_pat_version1_has_no_dls(data_dir);
+  test_pat_version2_has_no_scaled_channels(data_dir);
   test_pat_extract_features_floater_board();
   test_pat_scan_reach_capped_by_opponent_rack_size();
   test_pat_move_penalty();
   test_pat_dls_features_land_in_dls_channels();
+  test_pat_hook_scaled_channel();
   test_pat_opening_penalty_gating();
   test_pat_unweighted_units_dropped();
   test_pat_opening_and_hook_flex();

@@ -31,6 +31,22 @@ enum {
       PAT_FEATURE_FLOAT_SCORE_START + PAT_FLOATER_BIN_COUNT,
   PAT_FEATURE_FLOAT_THROUGH_COUNT_START =
       PAT_FEATURE_FLOAT_THROUGH_SCORE_START + PAT_FLOATER_BIN_COUNT,
+  // Raw unseen counts (above) implicitly treat every unseen copy of a
+  // letter as equally likely to already be in the opponent's hand, which
+  // overstates risk whenever the bag is still large relative to their
+  // rack: most unseen copies are sitting in the bag, not their hand, yet.
+  // These channels are the same hook and floater-flex sums scaled by the
+  // hypergeometric expectation opponent_rack_size / total_unseen, so they
+  // shrink early (large bag) and rise toward the raw count late (bag
+  // nearly empty) instead of treating both alike. Present from format
+  // version 3 on; earlier files have no rows for these and they read as
+  // zero (see pat_parse_contents). TWS-only, like the through-table:
+  // spending the feature budget on a scaled variant of every class was
+  // not worth it before knowing whether scaling helps at all.
+  PAT_FEATURE_HOOK_SCALED_START =
+      PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT,
+  PAT_FEATURE_FLOAT_FLEX_SCALED_START =
+      PAT_FEATURE_HOOK_SCALED_START + PAT_HOOK_BIN_COUNT,
   // The same hook and floater-value channels for the lesser premium
   // squares. A lone double word square doubles a whole word and a triple
   // letter square triples one tile, so both are worth reaching and both
@@ -38,7 +54,7 @@ enum {
   // They get their own channels rather than a shared one scaled by a
   // guessed multiplier, so the fit says what each class is worth.
   PAT_FEATURE_DWS_HOOK_START =
-      PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT,
+      PAT_FEATURE_FLOAT_FLEX_SCALED_START + PAT_FLOATER_BIN_COUNT,
   PAT_FEATURE_DWS_FLOAT_SCORE_START =
       PAT_FEATURE_DWS_HOOK_START + PAT_HOOK_BIN_COUNT,
   PAT_FEATURE_TLS_HOOK_START =
@@ -112,13 +128,15 @@ enum {
 // decimal integer, e.g. "magpie_pat_v2". PAT_VERSION is what this build
 // writes; a file naming a version below PAT_EARLIEST_SUPPORTED_VERSION is
 // rejected (see the PAT_UNSUPPORTED_VERSION error). Version 1 predates the
-// double letter square channels (PAT_FEATURE_DLS_HOOK_START onward): a
-// version 1 file has no rows for them and they read as zero, so raising
+// double letter square channels (PAT_FEATURE_DLS_HOOK_START onward), and
+// version 2 predates the hypergeometric-scaled channels
+// (PAT_FEATURE_HOOK_SCALED_START onward): an older file has no rows for
+// the channels added after it and they read as zero, so raising
 // PAT_EARLIEST_SUPPORTED_VERSION is never required by adding a class.
 #define PAT_MAGIC_PREFIX "magpie_pat_v"
 enum {
   PAT_EARLIEST_SUPPORTED_VERSION = 1,
-  PAT_VERSION = 2,
+  PAT_VERSION = 3,
 };
 
 #endif
