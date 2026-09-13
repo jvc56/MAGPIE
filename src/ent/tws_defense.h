@@ -54,15 +54,23 @@ void twd_prepare_hook_flex(TWDWeights *twd, const KWG *kwg,
 int twd_get_hook_flex(const TWDWeights *twd, MachineLetter ml);
 
 enum {
-  TWD_MAX_TWS = BOARD_DIM * BOARD_DIM,
+  // Standard boards have 8 TWS squares; exotic layouts get headroom. A
+  // board with more uncovered TWS than this is deterministically truncated
+  // to the first TWD_MAX_TWS in row-major order, identically in training
+  // and evaluation.
+  TWD_MAX_TWS = 32,
+  TWD_MAX_SCAN_UNITS = TWD_MAX_TWS * 2,
 };
 
 // Per-position evaluation state, rebuilt by each movegen position load (and
 // on the stack for validated moves). Holds the position-constant part of the
 // defense term (pre_penalty, the penalty for the opponent's TWS access on
-// the board as it stands) plus what is needed to compute the per-move delta:
-// the lanes view, the empty TWS list, and touch masks that let moves far
-// from every TWS lane skip the delta scan entirely.
+// the board as it stands) plus what the per-move delta needs to stay off
+// the hot path: per scan unit (one TWS row or column walk), the baseline
+// feature vector and the extent of squares the walk actually visited, so a
+// candidate move rescans a unit only when it places a tile on or directly
+// beside a square that walk could see, and rescans it exactly once (the
+// baseline side is cached).
 //
 // The lanes pointer is only valid while the board is alive, untransposed,
 // and unmutated, which holds for the duration of a move generation call and
@@ -73,11 +81,22 @@ typedef struct TWDEvalContext {
   const LetterDistribution *ld;
   const Square *lanes;
   Equity pre_penalty;
-  uint64_t touched_rows_mask;
-  uint64_t touched_cols_mask;
   int num_tws;
   uint8_t tws_rows[TWD_MAX_TWS];
   uint8_t tws_cols[TWD_MAX_TWS];
+  // Units 2*i and 2*i+1 are TWS i's horizontal and vertical walks.
+  int32_t unit_features[TWD_MAX_SCAN_UNITS][TWD_NUM_FEATURES];
+  // Each unit's baseline contribution to pre_penalty (always <= 0), used
+  // to bound a move's penalty from above without rescanning.
+  Equity unit_penalty[TWD_MAX_SCAN_UNITS];
+  // Bit u of unit_mask_by_row[r] is set when a fresh tile in row r could
+  // affect unit u provided the move's column span also overlaps the unit
+  // (and symmetrically for columns), so a candidate move's affected-unit
+  // set is the AND of the OR of its rows' masks with the OR of its
+  // columns' masks: a few operations per candidate on the movegen record
+  // path, zero for the vast majority of moves.
+  uint64_t unit_mask_by_row[BOARD_DIM];
+  uint64_t unit_mask_by_col[BOARD_DIM];
 } TWDEvalContext;
 
 void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx);
@@ -90,6 +109,12 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
 // baseline (their play leaves the board unchanged).
 Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
                              const Move *move);
+// Returns an upper bound on twd_eval_move_penalty for the move without any
+// lane rescans: the baseline penalty minus the baseline contributions of
+// the units the move can affect (each of which the move can at best zero
+// out). Used to skip the exact computation for moves that cannot contend.
+Equity twd_eval_move_penalty_bound(const TWDEvalContext *twd_eval_ctx,
+                                   const Move *move);
 // Extracts the feature vector for the board as it stands (no move overlay).
 // Used for the context baseline and, exactly as-is, by the training loop on
 // post-move boards. features must have TWD_NUM_FEATURES elements.
