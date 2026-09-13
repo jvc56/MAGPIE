@@ -796,10 +796,21 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     }
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
-    move_equity_or_score =
-        has_precomputed_equity
-            ? precomputed_equity
-            : get_move_equity_for_sort_type_wmp(gen, move, leave_value);
+    if (has_precomputed_equity) {
+      // precomputed_equity is score plus leave only (see
+      // get_wmp_equity_without_move); the defense term still has to be
+      // added, exactly as get_move_equity_for_sort_type_wmp would. It is
+      // <= 0, so the list-full and cutoff skips above, which compared the
+      // precomputed value, remain sound upper-bound skips.
+      move_equity_or_score = precomputed_equity;
+      if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen)) {
+        move_equity_or_score +=
+            pat_eval_move_penalty(&gen->pat_eval_ctx, move, &gen->leave);
+      }
+    } else {
+      move_equity_or_score =
+          get_move_equity_for_sort_type_wmp(gen, move, leave_value);
+    }
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
       // This updates the cutoff move internally so no update will be pending
       // afterward.

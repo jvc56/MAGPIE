@@ -921,8 +921,12 @@ static void test_pat_opening_and_hook_flex(void) {
 }
 
 static void test_pat_movegen_integration(void) {
+  // WMP on: its recording path precomputes score-plus-leave equity for
+  // nonempty boards and once forgot to add the defense term for
+  // MOVE_RECORD_ALL / WITHIN_X lists (best-move recording always had it).
   Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 5");
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 5 "
+      "-wmp true");
   // Install weights for player 0 before the game is created so the player
   // picks them up. Ownership transfers to players_data.
   PATWeights *pat = pat_create_zeroed("movegen_test");
@@ -977,8 +981,21 @@ static void test_pat_movegen_integration(void) {
   player_update(config_get_players_data(config), game_get_player(game, 0));
   generate_moves_for_game(&move_gen_args);
   sorted_moves = sorted_move_list_create(move_list);
-  assert(move_get_equity(sorted_moves->moves[0]) <= zero_weight_equities[0]);
+  const Equity heavy_all_top = move_get_equity(sorted_moves->moves[0]);
+  Move heavy_all_top_move;
+  move_copy(&heavy_all_top_move, sorted_moves->moves[0]);
   sorted_move_list_destroy(sorted_moves);
+  // The floater board's features fire for these channels, so the penalty
+  // is real: strictly below, not merely not above.
+  assert(heavy_all_top < zero_weight_equities[0]);
+  // And the exhaustive list's top must be exactly what best-only recording
+  // finds: same move, same equity, defense term included in both.
+  generate_moves_for_game_override_record_type(&move_gen_args,
+                                               MOVE_RECORD_BEST);
+  const Move *heavy_best = move_list_get_move(move_list, 0);
+  assert(move_get_equity(heavy_best) == heavy_all_top);
+  assert(compare_moves_without_equity(heavy_best, &heavy_all_top_move, true) ==
+         -1);
 
   move_list_destroy(move_list);
   config_destroy(config);
