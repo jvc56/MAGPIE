@@ -17,6 +17,7 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "move.h"
+#include "rack.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -269,19 +270,6 @@ int twd_get_hook_flex(const TWDWeights *twd, MachineLetter ml) {
   return twd->hook_flex[ml];
 }
 
-static inline int twd_popcount(uint64_t bits) {
-#if defined(__has_builtin) && __has_builtin(__builtin_popcountll)
-  return __builtin_popcountll(bits);
-#else
-  int count = 0;
-  while (bits) {
-    bits &= bits - 1;
-    count++;
-  }
-  return count;
-#endif
-}
-
 static inline int twd_ctz(uint64_t bits) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   return __builtin_ctzll(bits);
@@ -297,8 +285,61 @@ static inline int twd_ctz(uint64_t bits) {
 
 // The blank marker occupies bit 0 of cross and extension sets; flexibility
 // counts real letters only.
-static inline int twd_set_flex(uint64_t letter_set) {
-  return twd_popcount(letter_set & ~(uint64_t)1);
+// The flexibility of a hook or extension point: how many tiles the opponent
+// could still hold that fit it. Counting unseen tiles rather than the
+// letters the set admits makes a hook needing a J the near-nothing it
+// usually is, and makes a hook only the evaluating player can fill (its
+// letters all sitting on their own rack) score as no threat at all.
+static inline int twd_set_flex(const uint8_t *unseen_counts,
+                               uint64_t letter_set) {
+  int flex = 0;
+  uint64_t remaining = letter_set & ~(uint64_t)1;
+  while (remaining) {
+    const int machine_letter = twd_ctz(remaining);
+    remaining &= remaining - 1;
+    flex += unseen_counts[machine_letter];
+  }
+  return flex;
+}
+
+// Fills unseen_counts (MAX_ALPHABET_SIZE entries) with the tiles that are
+// neither on the board nor on the evaluating player's rack, which is
+// exactly the pool the opponent draws from plus what they already hold.
+// Blanks on the board are counted against the blank.
+static void twd_compute_unseen_counts(const Square *lanes,
+                                      const LetterDistribution *ld,
+                                      const Rack *player_rack,
+                                      uint8_t *unseen_counts) {
+  memset(unseen_counts, 0, sizeof(uint8_t) * MAX_ALPHABET_SIZE);
+  const int ld_size = ld_get_size(ld);
+  for (int machine_letter = 0; machine_letter < ld_size; machine_letter++) {
+    unseen_counts[machine_letter] = (uint8_t)ld_get_dist(ld, machine_letter);
+  }
+  for (int row = 0; row < BOARD_DIM; row++) {
+    const Square *lane =
+        board_get_row_cache(lanes, row, BOARD_HORIZONTAL_DIRECTION);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const MachineLetter letter = square_get_letter(&lane[col]);
+      if (letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+        continue;
+      }
+      const MachineLetter counted =
+          get_is_blanked(letter) ? BLANK_MACHINE_LETTER : letter;
+      if (counted < MAX_ALPHABET_SIZE && unseen_counts[counted] > 0) {
+        unseen_counts[counted]--;
+      }
+    }
+  }
+  if (player_rack == NULL) {
+    return;
+  }
+  for (int machine_letter = 0; machine_letter < ld_size; machine_letter++) {
+    const int held = rack_get_letter(player_rack, machine_letter);
+    unseen_counts[machine_letter] =
+        (uint8_t)((unseen_counts[machine_letter] > held)
+                      ? unseen_counts[machine_letter] - held
+                      : 0);
+  }
 }
 
 // Overlay describing the candidate move's fresh tiles on top of the
@@ -370,12 +411,13 @@ typedef struct TWDCrossInfo {
 static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
                                              int dir,
                                              const TWDMoveOverlay *overlay,
-                                             int row, int col) {
+                                             int row, int col,
+                                             const uint8_t *unseen_counts) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   TWDCrossInfo info;
   info.dead = (base_cross_set == 0);
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
-  info.flex = info.hooky ? twd_set_flex(base_cross_set) : 0;
+  info.flex = info.hooky ? twd_set_flex(unseen_counts, base_cross_set) : 0;
   if (!overlay || info.dead) {
     return info;
   }
@@ -419,9 +461,9 @@ static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
 // change this unit's features by placing a tile on one of those squares or
 // directly beside them in the perpendicular direction.
 static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
-                          int tws_row, int tws_col, int dir,
-                          const TWDMoveOverlay *overlay, int32_t *features,
-                          int *extent_lo, int *extent_hi) {
+                          const uint8_t *unseen_counts, int tws_row,
+                          int tws_col, int dir, const TWDMoveOverlay *overlay,
+                          int32_t *features, int *extent_lo, int *extent_hi) {
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
   const int tws_idx = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_col : tws_row;
@@ -444,7 +486,7 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
   }
   const TWDCrossInfo tws_info = twd_effective_cross_info(
       lane, tws_idx, dir, overlay, twd_unit_row(dir, lane_index, tws_idx),
-      twd_unit_col(dir, lane_index, tws_idx));
+      twd_unit_col(dir, lane_index, tws_idx), unseen_counts);
   if (tws_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -517,7 +559,7 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
           const uint64_t extension_set =
               (side > 0) ? square_get_right_extension_set(&lane[prev_empty_idx])
                          : square_get_left_extension_set(&lane[prev_empty_idx]);
-          run_flex = twd_set_flex(extension_set);
+          run_flex = twd_set_flex(unseen_counts, extension_set);
         }
         features[TWD_FEATURE_FLOAT_FLEX_START + distance_bin - 1] += run_flex;
         span_has_floater = true;
@@ -525,7 +567,7 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
         continue;
       }
       const TWDCrossInfo info = twd_effective_cross_info(
-          lane, idx, dir, overlay, square_row, square_col);
+          lane, idx, dir, overlay, square_row, square_col, unseen_counts);
       if (info.dead) {
         break;
       }
@@ -567,10 +609,10 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
 // an empty cross set, or when it still needs more fresh tiles than a rack
 // holds. A live window also needs somewhere to attach: a playthrough tile
 // inside it, or a hookable empty square.
-static void twd_scan_dd_unit(const Square *lanes, int dir, int lane_index,
-                             int lo, int hi, const TWDMoveOverlay *overlay,
-                             int32_t *features, int *extent_lo,
-                             int *extent_hi) {
+static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
+                             int dir, int lane_index, int lo, int hi,
+                             const TWDMoveOverlay *overlay, int32_t *features,
+                             int *extent_lo, int *extent_hi) {
   const Square *lane = board_get_row_cache(lanes, lane_index, dir);
   if (extent_lo != NULL) {
     *extent_lo = lo;
@@ -596,8 +638,8 @@ static void twd_scan_dd_unit(const Square *lanes, int dir, int lane_index,
       has_floater = true;
       continue;
     }
-    const TWDCrossInfo info = twd_effective_cross_info(lane, idx, dir, overlay,
-                                                       square_row, square_col);
+    const TWDCrossInfo info = twd_effective_cross_info(
+        lane, idx, dir, overlay, square_row, square_col, unseen_counts);
     if (info.dead) {
       return;
     }
@@ -684,16 +726,20 @@ static int twd_find_tws(const Square *lanes, uint8_t *tws_rows,
 }
 
 void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
-                          int32_t *features) {
+                          const Rack *player_rack, int32_t *features) {
   memset(features, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
+  uint8_t unseen_counts[MAX_ALPHABET_SIZE];
+  twd_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
   uint8_t tws_rows[TWD_MAX_TWS];
   uint8_t tws_cols[TWD_MAX_TWS];
   const int num_tws = twd_find_tws(lanes, tws_rows, tws_cols);
   for (int tws_idx = 0; tws_idx < num_tws; tws_idx++) {
-    twd_scan_unit(lanes, ld, tws_rows[tws_idx], tws_cols[tws_idx],
-                  BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL);
-    twd_scan_unit(lanes, ld, tws_rows[tws_idx], tws_cols[tws_idx],
-                  BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL);
+    twd_scan_unit(lanes, ld, unseen_counts, tws_rows[tws_idx],
+                  tws_cols[tws_idx], BOARD_HORIZONTAL_DIRECTION, NULL, features,
+                  NULL, NULL);
+    twd_scan_unit(lanes, ld, unseen_counts, tws_rows[tws_idx],
+                  tws_cols[tws_idx], BOARD_VERTICAL_DIRECTION, NULL, features,
+                  NULL, NULL);
   }
   uint8_t dd_dirs[TWD_MAX_DD];
   uint8_t dd_lanes[TWD_MAX_DD];
@@ -701,8 +747,9 @@ void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
   uint8_t dd_his[TWD_MAX_DD];
   const int num_dd = twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his);
   for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
-    twd_scan_dd_unit(lanes, dd_dirs[dd_idx], dd_lanes[dd_idx], dd_los[dd_idx],
-                     dd_his[dd_idx], NULL, features, NULL, NULL);
+    twd_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
+                     dd_los[dd_idx], dd_his[dd_idx], NULL, features, NULL,
+                     NULL);
   }
 }
 
@@ -769,14 +816,16 @@ static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
     const int tws_col = twd_eval_ctx->tws_cols[tws_idx];
     *dir_out = dir;
     *lane_out = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
-    twd_scan_unit(twd_eval_ctx->lanes, twd_eval_ctx->ld, tws_row, tws_col, dir,
-                  overlay, features, extent_lo, extent_hi);
+    twd_scan_unit(twd_eval_ctx->lanes, twd_eval_ctx->ld,
+                  twd_eval_ctx->unseen_counts, tws_row, tws_col, dir, overlay,
+                  features, extent_lo, extent_hi);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
   *dir_out = twd_eval_ctx->dd_dirs[dd_idx];
   *lane_out = twd_eval_ctx->dd_lanes[dd_idx];
-  twd_scan_dd_unit(twd_eval_ctx->lanes, twd_eval_ctx->dd_dirs[dd_idx],
+  twd_scan_dd_unit(twd_eval_ctx->lanes, twd_eval_ctx->unseen_counts,
+                   twd_eval_ctx->dd_dirs[dd_idx],
                    twd_eval_ctx->dd_lanes[dd_idx], twd_eval_ctx->dd_los[dd_idx],
                    twd_eval_ctx->dd_his[dd_idx], overlay, features, extent_lo,
                    extent_hi);
@@ -784,13 +833,16 @@ static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
 
 void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
                            const TWDWeights *weights, const Square *lanes,
-                           const LetterDistribution *ld) {
+                           const LetterDistribution *ld,
+                           const Rack *player_rack) {
   twd_eval_ctx->weights = weights;
   if (!weights) {
     return;
   }
   twd_eval_ctx->ld = ld;
   twd_eval_ctx->lanes = lanes;
+  twd_compute_unseen_counts(lanes, ld, player_rack,
+                            twd_eval_ctx->unseen_counts);
   twd_eval_ctx->num_tws =
       twd_find_tws(lanes, twd_eval_ctx->tws_rows, twd_eval_ctx->tws_cols);
   twd_eval_ctx->num_dd =

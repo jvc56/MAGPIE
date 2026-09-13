@@ -229,6 +229,7 @@ typedef enum {
   ARG_TOKEN_P2_MAX_ITERATIONS,
   ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
+  ARG_TOKEN_TWD_LABEL_PLIES,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
   ARG_TOKEN_P1_TIME_LIMIT,
@@ -412,6 +413,8 @@ struct Config {
   // rack_list_write_rack_equity_csv). Independent of whether a
   // forceracksfile restriction is in use.
   bool write_rack_equity_csv;
+  // Plies of net result a TWS defense training label spans.
+  int twd_label_plies;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
   // Set when the most recent sim ran inference internally and it completed
@@ -2198,6 +2201,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the minimum number of iterations per play for player "
              "1 or 2 during autoplay simulation.";
       break;
+    case ARG_TOKEN_TWD_LABEL_PLIES:
+      usages[0] = "<plies>";
+      text = "Specifies how many plies of net result a TWS defense training "
+             "label spans: 1 is the opponent's reply score alone, and higher "
+             "values subtract what the observing player scores back and add "
+             "what the opponent scores after that.";
+      break;
     case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
     case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
       usages[0] = "<true_or_false>";
@@ -3846,6 +3856,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
       config->p2_utility_spread_scale, &p2_inference_args,
       &autoplay_args->p2_sim_args);
+
+  autoplay_args->twd_label_plies = config->twd_label_plies;
 
   const double utility_win_pct[2] = {config->p1_utility_w_winpct,
                                      config->p2_utility_w_winpct};
@@ -8042,6 +8054,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->p1_sim_with_inference = config->sim_with_inference;
     config->p2_sim_with_inference = config->sim_with_inference;
   }
+  config_load_int(config, ARG_TOKEN_TWD_LABEL_PLIES, 1, TWD_MAX_LABEL_PLIES,
+                  &config->twd_label_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   config_load_bool(config, ARG_TOKEN_P1_SIM_WITH_INFERENCE,
                    &config->p1_sim_with_inference, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -9640,6 +9657,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MAX_ITERATIONS, "i2", 1, 1);
   arg(ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, "mi1", 1, 1);
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
+  arg(ARG_TOKEN_TWD_LABEL_PLIES, "twdplies", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
@@ -9742,6 +9760,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->human_readable = true;
   config->show_mistakes = false;
   config->sim_with_inference = true;
+  config->twd_label_plies = 1;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
   config->p1_num_plays = config->num_plays;
@@ -10266,6 +10285,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->sim_with_inference);
+      break;
+    case ARG_TOKEN_TWD_LABEL_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->twd_label_plies);
       break;
     case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

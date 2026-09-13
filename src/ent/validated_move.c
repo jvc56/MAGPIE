@@ -487,7 +487,7 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
                 board, board_get_cross_set_index(
                            game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
                            player_index)),
-            ld);
+            ld, player_get_rack(player));
       }
       move_set_equity(
           vm->move,

@@ -8,6 +8,7 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "move.h"
+#include "rack.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -103,6 +104,14 @@ typedef struct TWDEvalContext {
   // Units 2*i and 2*i+1 are TWS i's horizontal and vertical walks; the
   // num_dd units after those are the double-double windows in order.
   int num_units;
+  // How many tiles of each letter the opponent could still be holding: the
+  // full distribution less the board and less the evaluating player's own
+  // rack. Hook flexibility is measured against this rather than by counting
+  // the letters a cross set admits, so a hook the opponent has no tile for
+  // is no threat, and one only the evaluating player can fill is none
+  // either. The player's whole rack is excluded, not the leave the move
+  // would keep, since the context is built once for the position.
+  uint8_t unseen_counts[MAX_ALPHABET_SIZE];
   int32_t unit_features[TWD_MAX_SCAN_UNITS][TWD_NUM_FEATURES];
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
@@ -129,7 +138,8 @@ typedef struct TWDEvalContext {
 void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx);
 void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
                            const TWDWeights *weights, const Square *lanes,
-                           const LetterDistribution *ld);
+                           const LetterDistribution *ld,
+                           const Rack *player_rack);
 // Returns the defense term for the move: the penalty for the opponent's TWS
 // access after the move is played, which is always <= 0. Returns 0 when the
 // context is NULL or disabled. Non-placement moves return the position
@@ -167,6 +177,6 @@ twd_eval_lane_penalty_bound(const TWDEvalContext *twd_eval_ctx, int dir,
 // Used for the context baseline and, exactly as-is, by the training loop on
 // post-move boards. features must have TWD_NUM_FEATURES elements.
 void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
-                          int32_t *features);
+                          const Rack *player_rack, int32_t *features);
 
 #endif
