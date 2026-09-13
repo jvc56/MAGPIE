@@ -42,6 +42,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pat_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -61,7 +62,6 @@
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "transposition_table_test.h"
-#include "tws_defense_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
 #include "wit_cache_test.h"
@@ -142,7 +142,7 @@ static TestEntry test_table[] = {
     {"wmpmaker", test_wmp_maker},
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
-    {"twd", test_tws_defense},
+    {"pat", test_pat},
     {"endgame", test_endgame},
     {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},

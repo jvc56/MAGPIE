@@ -10,8 +10,8 @@
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat.h"
 #include "../ent/rack.h"
-#include "../ent/tws_defense.h"
 
 static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
 
@@ -108,7 +108,7 @@ static inline Equity static_eval_get_nonopening_move_equity(
 // move, or shadow equities stop being valid upper bounds and moves are
 // wrongly pruned. Two terms rely on this: the opening placement_adjustment
 // (each entry is <= 0 by construction in board_apply_layout) and the TWS
-// defense term (twd_eval_move_penalty, <= 0 by the sign convention enforced
+// defense term (pat_eval_move_penalty, <= 0 by the sign convention enforced
 // when weights are loaded or set). If you add a term that can be positive,
 // you must account for it here.
 static inline Equity
@@ -142,12 +142,12 @@ static_eval_get_shadow_equity(const LetterDistribution *ld,
 }
 
 // Assumes all fields of the move are set except the equity.
-// twd_eval_ctx may be NULL (or disabled), in which case the TWS defense
+// pat_eval_ctx may be NULL (or disabled), in which case the PAT
 // term is zero.
 static inline Equity static_eval_get_move_equity_with_leave_value(
     const LetterDistribution *ld, const Move *move, const Rack *player_leave,
     const Rack *opp_rack, const Equity *opening_move_penalties,
-    const TWDEvalContext *twd_eval_ctx, int board_number_of_tiles_played,
+    const PATEvalContext *pat_eval_ctx, int board_number_of_tiles_played,
     int number_of_tiles_in_bag, Equity leave_value) {
   Equity other_adjustments = 0;
 
@@ -156,12 +156,12 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
     other_adjustments = placement_adjustment(ld, move, opening_move_penalties);
   }
 
-  // TWS defense term: always <= 0 (weights <= 0, features >= 0), and
+  // PAT term: always <= 0 (weights <= 0, features >= 0), and
   // therefore soundly omitted from static_eval_get_shadow_equity's upper
   // bound (see the invariant comment there). Scoped to bag > 0, matching the
   // endgame adjustment's own scope in static_eval_get_nonopening_move_equity.
   if (number_of_tiles_in_bag > 0) {
-    other_adjustments += twd_eval_move_penalty(twd_eval_ctx, move);
+    other_adjustments += pat_eval_move_penalty(pat_eval_ctx, move);
   }
 
   return static_eval_get_nonopening_move_equity(
@@ -174,14 +174,14 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
 static inline Equity static_eval_get_move_equity(
     const LetterDistribution *ld, const KLV *klv, const Move *move,
     const Rack *player_leave, const Rack *opp_rack,
-    const Equity *opening_move_penalties, const TWDEvalContext *twd_eval_ctx,
+    const Equity *opening_move_penalties, const PATEvalContext *pat_eval_ctx,
     int board_number_of_tiles_played, int number_of_tiles_in_bag) {
   Equity leave_equity = 0;
   if (player_leave && !rack_is_empty(player_leave)) {
     leave_equity = klv_get_leave_value(klv, player_leave);
   }
   return static_eval_get_move_equity_with_leave_value(
-      ld, move, player_leave, opp_rack, opening_move_penalties, twd_eval_ctx,
+      ld, move, player_leave, opp_rack, opening_move_penalties, pat_eval_ctx,
       board_number_of_tiles_played, number_of_tiles_in_bag, leave_equity);
 }
 

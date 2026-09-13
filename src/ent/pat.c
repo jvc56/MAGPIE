@@ -1,4 +1,4 @@
-#include "tws_defense.h"
+#include "pat.h"
 
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
@@ -6,8 +6,8 @@
 #include "../def/game_history_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/pat_defs.h"
 #include "../def/rack_defs.h"
-#include "../def/tws_defense_defs.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -28,12 +28,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct TWDWeights {
+struct PATWeights {
   char *name;
-  Equity weights[TWD_NUM_FEATURES];
+  Equity weights[PAT_NUM_FEATURES];
   // Per-letter count of two-letter words containing the letter; the
   // flexibility approximation for hooks and floaters the evaluated move
-  // itself creates (see twd_prepare_hook_flex).
+  // itself creates (see pat_prepare_hook_flex).
   uint8_t hook_flex[MAX_ALPHABET_SIZE];
   // What a floater is worth to whoever plays through it, from the lexicon
   // alone. through_score[ml][len] is the mean total tile value the rest of
@@ -41,138 +41,163 @@ struct TWDWeights {
   // through_count[ml][len] is how many such words there are, log-scaled so
   // a common letter does not swamp the fit. Both are indexed by the span a
   // word must cover to run from the floater to the triple.
-  uint8_t through_score[MAX_ALPHABET_SIZE][TWD_MAX_THROUGH_LEN];
-  uint8_t through_count[MAX_ALPHABET_SIZE][TWD_MAX_THROUGH_LEN];
+  uint8_t through_score[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+  uint8_t through_count[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
   // How much a second route to danger counts once the worst one is already
   // counted. The opponent plays one move, so the threats a board offers do
   // not simply add: 0 charges only the worst scan unit, 1 charges every
   // unit in full (the original behaviour), and values between allow for a
-  // rack that cannot use the worst route. See twd_combine_unit_penalties.
+  // rack that cannot use the worst route. See pat_combine_unit_penalties.
   double combine_gamma;
   uint64_t mutation_counter;
+  // The version named on the file's header line (see PAT_VERSION).
+  int version;
 };
 
-double twd_get_combine_gamma(const TWDWeights *twd) {
-  return twd->combine_gamma;
+double pat_get_combine_gamma(const PATWeights *pat) {
+  return pat->combine_gamma;
 }
 
-void twd_set_combine_gamma(TWDWeights *twd, double combine_gamma) {
-  twd->combine_gamma = combine_gamma;
+void pat_set_combine_gamma(PATWeights *pat, double combine_gamma) {
+  pat->combine_gamma = combine_gamma;
 }
 
-const char *twd_get_name(const TWDWeights *twd) { return twd->name; }
+const char *pat_get_name(const PATWeights *pat) { return pat->name; }
 
-Equity twd_get_weight(const TWDWeights *twd, int feature_index) {
-  return twd->weights[feature_index];
+Equity pat_get_weight(const PATWeights *pat, int feature_index) {
+  return pat->weights[feature_index];
 }
 
-void twd_set_weight(TWDWeights *twd, int feature_index, Equity weight) {
+void pat_set_weight(PATWeights *pat, int feature_index, Equity weight) {
   if (weight > 0) {
-    log_fatal("TWS defense weight for feature %d must be <= 0, got %d",
-              feature_index, weight);
+    log_fatal("PAT weight for feature %d must be <= 0, got %d", feature_index,
+              weight);
   }
-  twd->weights[feature_index] = weight;
+  pat->weights[feature_index] = weight;
 }
 
-uint64_t twd_get_mutation_counter(const TWDWeights *twd) {
-  return twd->mutation_counter;
+uint64_t pat_get_mutation_counter(const PATWeights *pat) {
+  return pat->mutation_counter;
 }
 
-void twd_bump_mutation_counter(TWDWeights *twd) { twd->mutation_counter++; }
+void pat_bump_mutation_counter(PATWeights *pat) { pat->mutation_counter++; }
 
-void twd_feature_name(int feature_index, char *buf, size_t buf_size) {
-  if (feature_index >= TWD_FEATURE_HOOK_START &&
-      feature_index < TWD_FEATURE_FLOAT_FLEX_START) {
+void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
+  if (feature_index >= PAT_FEATURE_HOOK_START &&
+      feature_index < PAT_FEATURE_FLOAT_FLEX_START) {
     snprintf(buf, buf_size, "hook_d%d",
-             feature_index - TWD_FEATURE_HOOK_START + 1);
-  } else if (feature_index < TWD_FEATURE_FLOAT_SCORE_START) {
+             feature_index - PAT_FEATURE_HOOK_START + 1);
+  } else if (feature_index < PAT_FEATURE_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "float_flex_d%d",
-             feature_index - TWD_FEATURE_FLOAT_FLEX_START + 1);
-  } else if (feature_index < TWD_FEATURE_FLOAT_THROUGH_SCORE_START) {
+             feature_index - PAT_FEATURE_FLOAT_FLEX_START + 1);
+  } else if (feature_index < PAT_FEATURE_FLOAT_THROUGH_SCORE_START) {
     snprintf(buf, buf_size, "float_score_d%d",
-             feature_index - TWD_FEATURE_FLOAT_SCORE_START + 1);
-  } else if (feature_index < TWD_FEATURE_FLOAT_THROUGH_COUNT_START) {
+             feature_index - PAT_FEATURE_FLOAT_SCORE_START + 1);
+  } else if (feature_index < PAT_FEATURE_FLOAT_THROUGH_COUNT_START) {
     snprintf(buf, buf_size, "float_through_score_d%d",
-             feature_index - TWD_FEATURE_FLOAT_THROUGH_SCORE_START + 1);
-  } else if (feature_index < TWD_FEATURE_DWS_HOOK_START) {
+             feature_index - PAT_FEATURE_FLOAT_THROUGH_SCORE_START + 1);
+  } else if (feature_index < PAT_FEATURE_DWS_HOOK_START) {
     snprintf(buf, buf_size, "float_through_count_d%d",
-             feature_index - TWD_FEATURE_FLOAT_THROUGH_COUNT_START + 1);
-  } else if (feature_index < TWD_FEATURE_DWS_FLOAT_SCORE_START) {
+             feature_index - PAT_FEATURE_FLOAT_THROUGH_COUNT_START + 1);
+  } else if (feature_index < PAT_FEATURE_DWS_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "dws_hook_d%d",
-             feature_index - TWD_FEATURE_DWS_HOOK_START + 1);
-  } else if (feature_index < TWD_FEATURE_TLS_HOOK_START) {
+             feature_index - PAT_FEATURE_DWS_HOOK_START + 1);
+  } else if (feature_index < PAT_FEATURE_TLS_HOOK_START) {
     snprintf(buf, buf_size, "dws_float_score_d%d",
-             feature_index - TWD_FEATURE_DWS_FLOAT_SCORE_START + 1);
-  } else if (feature_index < TWD_FEATURE_TLS_FLOAT_SCORE_START) {
+             feature_index - PAT_FEATURE_DWS_FLOAT_SCORE_START + 1);
+  } else if (feature_index < PAT_FEATURE_TLS_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "tls_hook_d%d",
-             feature_index - TWD_FEATURE_TLS_HOOK_START + 1);
-  } else if (feature_index < TWD_FEATURE_QWS_HOOK_START) {
+             feature_index - PAT_FEATURE_TLS_HOOK_START + 1);
+  } else if (feature_index < PAT_FEATURE_QWS_HOOK_START) {
     snprintf(buf, buf_size, "tls_float_score_d%d",
-             feature_index - TWD_FEATURE_TLS_FLOAT_SCORE_START + 1);
-  } else if (feature_index < TWD_FEATURE_QWS_FLOAT_SCORE_START) {
+             feature_index - PAT_FEATURE_TLS_FLOAT_SCORE_START + 1);
+  } else if (feature_index < PAT_FEATURE_QWS_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "qws_hook_d%d",
-             feature_index - TWD_FEATURE_QWS_HOOK_START + 1);
-  } else if (feature_index < TWD_FEATURE_QLS_HOOK_START) {
+             feature_index - PAT_FEATURE_QWS_HOOK_START + 1);
+  } else if (feature_index < PAT_FEATURE_QLS_HOOK_START) {
     snprintf(buf, buf_size, "qws_float_score_d%d",
-             feature_index - TWD_FEATURE_QWS_FLOAT_SCORE_START + 1);
-  } else if (feature_index < TWD_FEATURE_QLS_FLOAT_SCORE_START) {
+             feature_index - PAT_FEATURE_QWS_FLOAT_SCORE_START + 1);
+  } else if (feature_index < PAT_FEATURE_QLS_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "qls_hook_d%d",
-             feature_index - TWD_FEATURE_QLS_HOOK_START + 1);
-  } else if (feature_index < TWD_FEATURE_TT_FLOATER) {
+             feature_index - PAT_FEATURE_QLS_HOOK_START + 1);
+  } else if (feature_index < PAT_FEATURE_TT_FLOATER) {
     snprintf(buf, buf_size, "qls_float_score_d%d",
-             feature_index - TWD_FEATURE_QLS_FLOAT_SCORE_START + 1);
-  } else if (feature_index == TWD_FEATURE_TT_FLOATER) {
+             feature_index - PAT_FEATURE_QLS_FLOAT_SCORE_START + 1);
+  } else if (feature_index == PAT_FEATURE_TT_FLOATER) {
     snprintf(buf, buf_size, "tt_floater");
-  } else if (feature_index == TWD_FEATURE_TT_HOOK_ONLY) {
+  } else if (feature_index == PAT_FEATURE_TT_HOOK_ONLY) {
     snprintf(buf, buf_size, "tt_hook_only");
-  } else if (feature_index < TWD_NUM_FEATURES) {
-    static const char *const tier_names[TWD_WINDOW_TIER_COUNT] = {"dd", "w6",
+  } else if (feature_index < PAT_NUM_FEATURES) {
+    static const char *const tier_names[PAT_WINDOW_TIER_COUNT] = {"dd", "w6",
                                                                   "w9", "w12"};
-    static const char *const kind_names[TWD_WINDOW_FEATURES_PER_TIER] = {
+    static const char *const kind_names[PAT_WINDOW_FEATURES_PER_TIER] = {
         "floater", "hook_only", "tiles_saved"};
-    const int offset = feature_index - TWD_FEATURE_WINDOW_START;
+    const int offset = feature_index - PAT_FEATURE_WINDOW_START;
     snprintf(buf, buf_size, "%s_%s",
-             tier_names[offset / TWD_WINDOW_FEATURES_PER_TIER],
-             kind_names[offset % TWD_WINDOW_FEATURES_PER_TIER]);
+             tier_names[offset / PAT_WINDOW_FEATURES_PER_TIER],
+             kind_names[offset % PAT_WINDOW_FEATURES_PER_TIER]);
   } else {
-    log_fatal("invalid TWS defense feature index: %d", feature_index);
+    log_fatal("invalid PAT feature index: %d", feature_index);
   }
 }
 
-TWDWeights *twd_create_zeroed(const char *twd_name) {
-  TWDWeights *twd = calloc_or_die(1, sizeof(TWDWeights));
-  twd->name = string_duplicate(twd_name);
-  twd->combine_gamma = TWD_DEFAULT_COMBINE_GAMMA;
-  return twd;
+PATWeights *pat_create_zeroed(const char *pat_name) {
+  PATWeights *pat = calloc_or_die(1, sizeof(PATWeights));
+  pat->name = string_duplicate(pat_name);
+  pat->combine_gamma = PAT_DEFAULT_COMBINE_GAMMA;
+  pat->version = PAT_VERSION;
+  return pat;
 }
 
-void twd_destroy(TWDWeights *twd) {
-  if (!twd) {
+void pat_destroy(PATWeights *pat) {
+  if (!pat) {
     return;
   }
-  free(twd->name);
-  free(twd);
+  free(pat->name);
+  free(pat);
 }
 
-// Parses the weights file contents into twd. The format is:
-//   line 1: the magic header (TWD_MAGIC_HEADER)
+// Parses the weights file contents into pat. The format is:
+//   line 1: the magic header, PAT_MAGIC_PREFIX followed by the format
+//     version as a decimal integer (e.g. "magpie_pat_v1")
 //   then, ignoring empty lines and lines starting with '#', exactly
-//   TWD_NUM_FEATURES lines of "<feature_name>,<millipoints>", in canonical
+//   PAT_NUM_FEATURES lines of "<feature_name>,<millipoints>", in canonical
 //   feature order, every value <= 0.
-static void twd_parse_contents(TWDWeights *twd, const char *twd_name,
+static void pat_parse_contents(PATWeights *pat, const char *pat_name,
                                const StringSplitter *split_contents,
                                ErrorStack *error_stack) {
   const int num_lines = string_splitter_get_number_of_items(split_contents);
-  if (num_lines < 1 ||
-      !strings_equal(string_splitter_get_item(split_contents, 0),
-                     TWD_MAGIC_HEADER)) {
+  const char *header_line =
+      num_lines > 0 ? string_splitter_get_item(split_contents, 0) : NULL;
+  if (!header_line || !has_prefix(PAT_MAGIC_PREFIX, header_line)) {
     error_stack_push(
-        error_stack, ERROR_STATUS_TWD_INVALID_HEADER,
+        error_stack, ERROR_STATUS_PAT_INVALID_HEADER,
         get_formatted_string(
-            "TWS defense file '%s' does not start with the header '%s'",
-            twd_name, TWD_MAGIC_HEADER));
+            "PAT file '%s' does not start with the header '%sN' for some "
+            "version N",
+            pat_name, PAT_MAGIC_PREFIX));
     return;
   }
+  const int version =
+      string_to_int(header_line + strlen(PAT_MAGIC_PREFIX), error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_PAT_INVALID_HEADER,
+        get_formatted_string(
+            "PAT file '%s' header '%s' does not end in a version number",
+            pat_name, header_line));
+    return;
+  }
+  if (version < PAT_EARLIEST_SUPPORTED_VERSION) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_PAT_UNSUPPORTED_VERSION,
+        get_formatted_string(
+            "PAT file '%s' is version %d but only %d or greater is "
+            "supported",
+            pat_name, version, PAT_EARLIEST_SUPPORTED_VERSION));
+    return;
+  }
+  pat->version = version;
   int feature_index = 0;
   char expected_name[64];
   for (int line_index = 1; line_index < num_lines; line_index++) {
@@ -180,8 +205,8 @@ static void twd_parse_contents(TWDWeights *twd, const char *twd_name,
     if (is_string_empty_or_whitespace(line) || line[0] == '#') {
       continue;
     }
-    if (has_prefix(TWD_GAMMA_ROW_PREFIX, line)) {
-      const char *gamma_text = line + strlen(TWD_GAMMA_ROW_PREFIX);
+    if (has_prefix(PAT_GAMMA_ROW_PREFIX, line)) {
+      const char *gamma_text = line + strlen(PAT_GAMMA_ROW_PREFIX);
       char *gamma_end = NULL;
       const double parsed_gamma = strtod(gamma_text, &gamma_end);
       // Outside [0, 1] the combination stops being a convex one, so it is
@@ -192,144 +217,143 @@ static void twd_parse_contents(TWDWeights *twd, const char *twd_name,
       if (gamma_end == gamma_text || !isfinite(parsed_gamma) ||
           parsed_gamma < 0.0 || parsed_gamma > 1.0) {
         error_stack_push(
-            error_stack, ERROR_STATUS_TWD_INVALID_ROW,
-            get_formatted_string("TWS defense file '%s' line %d has a "
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a "
                                  "combination gamma outside [0, 1]: '%s'",
-                                 twd_name, line_index + 1, line));
+                                 pat_name, line_index + 1, line));
         return;
       }
-      twd->combine_gamma = parsed_gamma;
+      pat->combine_gamma = parsed_gamma;
       continue;
     }
-    if (feature_index >= TWD_NUM_FEATURES) {
-      error_stack_push(error_stack, ERROR_STATUS_TWD_WRONG_NUMBER_OF_ROWS,
-                       get_formatted_string(
-                           "TWS defense file '%s' has more than %d weight rows",
-                           twd_name, TWD_NUM_FEATURES));
+    if (feature_index >= PAT_NUM_FEATURES) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
+          get_formatted_string("PAT file '%s' has more than %d weight rows",
+                               pat_name, PAT_NUM_FEATURES));
       return;
     }
     const char *comma = strchr(line, ',');
     if (!comma) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_TWD_INVALID_ROW,
-          get_formatted_string(
-              "TWS defense file '%s' line %d is not '<name>,<value>': %s",
-              twd_name, line_index + 1, line));
+      error_stack_push(error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+                       get_formatted_string(
+                           "PAT file '%s' line %d is not '<name>,<value>': %s",
+                           pat_name, line_index + 1, line));
       return;
     }
-    twd_feature_name(feature_index, expected_name, sizeof(expected_name));
+    pat_feature_name(feature_index, expected_name, sizeof(expected_name));
     const size_t name_length = (size_t)(comma - line);
     if (strlen(expected_name) != name_length ||
         strncmp(line, expected_name, name_length) != 0) {
       error_stack_push(
-          error_stack, ERROR_STATUS_TWD_INVALID_ROW,
-          get_formatted_string("TWS defense file '%s' line %d names feature "
+          error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+          get_formatted_string("PAT file '%s' line %d names feature "
                                "'%.*s' but '%s' was expected",
-                               twd_name, line_index + 1, (int)name_length, line,
+                               pat_name, line_index + 1, (int)name_length, line,
                                expected_name));
       return;
     }
     const int weight = string_to_int(comma + 1, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_TWD_INVALID_ROW,
-          get_formatted_string(
-              "TWS defense file '%s' line %d has an invalid weight: %s",
-              twd_name, line_index + 1, comma + 1));
+      error_stack_push(error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+                       get_formatted_string(
+                           "PAT file '%s' line %d has an invalid weight: %s",
+                           pat_name, line_index + 1, comma + 1));
       return;
     }
     if (weight > 0) {
       error_stack_push(
-          error_stack, ERROR_STATUS_TWD_POSITIVE_WEIGHT,
+          error_stack, ERROR_STATUS_PAT_POSITIVE_WEIGHT,
           get_formatted_string(
-              "TWS defense file '%s' line %d has a positive weight (%d); "
+              "PAT file '%s' line %d has a positive weight (%d); "
               "applied weights must be <= 0 so the defense term can never "
               "increase a move's equity",
-              twd_name, line_index + 1, weight));
+              pat_name, line_index + 1, weight));
       return;
     }
-    twd->weights[feature_index] = weight;
+    pat->weights[feature_index] = weight;
     feature_index++;
   }
-  if (feature_index != TWD_NUM_FEATURES) {
+  if (feature_index != PAT_NUM_FEATURES) {
     error_stack_push(
-        error_stack, ERROR_STATUS_TWD_WRONG_NUMBER_OF_ROWS,
+        error_stack, ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
         get_formatted_string(
-            "TWS defense file '%s' has %d weight rows but %d were expected",
-            twd_name, feature_index, TWD_NUM_FEATURES));
+            "PAT file '%s' has %d weight rows but %d were expected", pat_name,
+            feature_index, PAT_NUM_FEATURES));
   }
 }
 
-TWDWeights *twd_create(const char *data_paths, const char *twd_name,
+PATWeights *pat_create(const char *data_paths, const char *pat_name,
                        ErrorStack *error_stack) {
-  char *twd_filename = data_filepaths_get_readable_filename(
-      data_paths, twd_name, DATA_FILEPATH_TYPE_TWS_DEFENSE, error_stack);
-  TWDWeights *twd = NULL;
+  char *pat_filename = data_filepaths_get_readable_filename(
+      data_paths, pat_name, DATA_FILEPATH_TYPE_PAT, error_stack);
+  PATWeights *pat = NULL;
   if (error_stack_is_empty(error_stack)) {
     char *file_contents =
-        fileproxy_get_string_from_filename(twd_filename, error_stack);
+        fileproxy_get_string_from_filename(pat_filename, error_stack);
     if (error_stack_is_empty(error_stack)) {
       StringSplitter *split_contents =
           split_string_by_newline(file_contents, error_stack);
       if (error_stack_is_empty(error_stack)) {
-        twd = twd_create_zeroed(twd_name);
-        twd_parse_contents(twd, twd_name, split_contents, error_stack);
+        pat = pat_create_zeroed(pat_name);
+        pat_parse_contents(pat, pat_name, split_contents, error_stack);
       }
       string_splitter_destroy(split_contents);
     }
     free(file_contents);
   }
-  free(twd_filename);
+  free(pat_filename);
   if (!error_stack_is_empty(error_stack)) {
-    twd_destroy(twd);
-    twd = NULL;
+    pat_destroy(pat);
+    pat = NULL;
   }
-  return twd;
+  return pat;
 }
 
-void twd_write(const TWDWeights *twd, const char *data_paths,
-               const char *twd_name, ErrorStack *error_stack) {
-  char *twd_filename = data_filepaths_get_writable_filename(
-      data_paths, twd_name, DATA_FILEPATH_TYPE_TWS_DEFENSE, error_stack);
+void pat_write(const PATWeights *pat, const char *data_paths,
+               const char *pat_name, ErrorStack *error_stack) {
+  char *pat_filename = data_filepaths_get_writable_filename(
+      data_paths, pat_name, DATA_FILEPATH_TYPE_PAT, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    free(twd_filename);
+    free(pat_filename);
     return;
   }
   StringBuilder *sb = string_builder_create();
-  string_builder_add_formatted_string(sb, "%s\n", TWD_MAGIC_HEADER);
-  string_builder_add_formatted_string(sb, "%s%.6f\n", TWD_GAMMA_ROW_PREFIX,
-                                      twd->combine_gamma);
+  string_builder_add_formatted_string(sb, "%s%d\n", PAT_MAGIC_PREFIX,
+                                      PAT_VERSION);
+  string_builder_add_formatted_string(sb, "%s%.6f\n", PAT_GAMMA_ROW_PREFIX,
+                                      pat->combine_gamma);
   string_builder_add_string(
-      sb, "# trained TWS defense weights; units: milli-equity per feature "
+      sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
   char feature_name[64];
-  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
-    twd_feature_name(feature_index, feature_name, sizeof(feature_name));
+    pat_feature_name(feature_index, feature_name, sizeof(feature_name));
     string_builder_add_formatted_string(sb, "%s,%d\n", feature_name,
-                                        twd->weights[feature_index]);
+                                        pat->weights[feature_index]);
   }
-  write_string_to_file(twd_filename, "w", string_builder_peek(sb), error_stack);
+  write_string_to_file(pat_filename, "w", string_builder_peek(sb), error_stack);
   string_builder_destroy(sb);
-  free(twd_filename);
+  free(pat_filename);
 }
 
 // Accumulators for the through table: for each (end letter, word length),
 // the number of words and the summed tile value of everything in them but
 // that end letter.
-typedef struct TWDThroughStats {
-  double count[MAX_ALPHABET_SIZE][TWD_MAX_THROUGH_LEN];
-  double score_sum[MAX_ALPHABET_SIZE][TWD_MAX_THROUGH_LEN];
-} TWDThroughStats;
+typedef struct PATThroughStats {
+  double count[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+  double score_sum[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+} PATThroughStats;
 
 // Walks every word in the lexicon, crediting each to the letters at its two
 // ends. A floater reaches the triple by being one end of the word that
 // covers the span between them, so those are the only positions that
 // matter; the value carried is what the REST of the word scores, which is
 // what the opponent lays down to get there.
-static void twd_walk_words(const KWG *kwg, const LetterDistribution *ld,
+static void pat_walk_words(const KWG *kwg, const LetterDistribution *ld,
                            uint32_t node_index, MachineLetter *word, int length,
-                           TWDThroughStats *stats) {
+                           PATThroughStats *stats) {
   if (node_index == 0) {
     return;
   }
@@ -339,7 +363,7 @@ static void twd_walk_words(const KWG *kwg, const LetterDistribution *ld,
     word[length] = machine_letter;
     const int word_length = length + 1;
     if (kwg_node_accepts(node) && word_length >= MINIMUM_WORD_LENGTH &&
-        word_length < TWD_MAX_THROUGH_LEN) {
+        word_length < PAT_MAX_THROUGH_LEN) {
       int total_score = 0;
       for (int letter_index = 0; letter_index < word_length; letter_index++) {
         total_score += equity_to_int(ld_get_score(ld, word[letter_index]));
@@ -355,8 +379,8 @@ static void twd_walk_words(const KWG *kwg, const LetterDistribution *ld,
       stats->score_sum[last][word_length] +=
           total_score - equity_to_int(ld_get_score(ld, last));
     }
-    if (word_length < TWD_MAX_THROUGH_LEN - 1) {
-      twd_walk_words(kwg, ld, kwg_node_arc_index(node), word, word_length,
+    if (word_length < PAT_MAX_THROUGH_LEN - 1) {
+      pat_walk_words(kwg, ld, kwg_node_arc_index(node), word, word_length,
                      stats);
     }
     if (kwg_node_is_end(node)) {
@@ -365,11 +389,11 @@ static void twd_walk_words(const KWG *kwg, const LetterDistribution *ld,
   }
 }
 
-void twd_prepare_hook_flex(TWDWeights *twd, const KWG *kwg,
+void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
                            const LetterDistribution *ld) {
-  memset(twd->hook_flex, 0, sizeof(twd->hook_flex));
-  memset(twd->through_score, 0, sizeof(twd->through_score));
-  memset(twd->through_count, 0, sizeof(twd->through_count));
+  memset(pat->hook_flex, 0, sizeof(pat->hook_flex));
+  memset(pat->through_score, 0, sizeof(pat->through_score));
+  memset(pat->through_count, 0, sizeof(pat->through_count));
   if (!kwg) {
     return;
   }
@@ -396,14 +420,14 @@ void twd_prepare_hook_flex(TWDWeights *twd, const KWG *kwg,
     if (counts[ml] > UINT8_MAX) {
       counts[ml] = UINT8_MAX;
     }
-    twd->hook_flex[ml] = (uint8_t)counts[ml];
+    pat->hook_flex[ml] = (uint8_t)counts[ml];
   }
 
-  TWDThroughStats *stats = calloc_or_die(1, sizeof(TWDThroughStats));
-  MachineLetter word[TWD_MAX_THROUGH_LEN];
-  twd_walk_words(kwg, ld, dawg_root, word, 0, stats);
+  PATThroughStats *stats = calloc_or_die(1, sizeof(PATThroughStats));
+  MachineLetter word[PAT_MAX_THROUGH_LEN];
+  pat_walk_words(kwg, ld, dawg_root, word, 0, stats);
   for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
-    for (int len = 0; len < TWD_MAX_THROUGH_LEN; len++) {
+    for (int len = 0; len < PAT_MAX_THROUGH_LEN; len++) {
       const double word_count = stats->count[ml][len];
       if (word_count <= 0.0) {
         continue;
@@ -412,32 +436,32 @@ void twd_prepare_hook_flex(TWDWeights *twd, const KWG *kwg,
       if (mean_score > UINT8_MAX) {
         mean_score = UINT8_MAX;
       }
-      twd->through_score[ml][len] = (uint8_t)(mean_score + 0.5);
+      pat->through_score[ml][len] = (uint8_t)(mean_score + 0.5);
       // Log scale: the useful distinction is between a letter that reaches
       // nothing, a few words, and thousands, not between 900 and 1000.
       double scaled = 8.0 * log2(1.0 + word_count);
       if (scaled > UINT8_MAX) {
         scaled = UINT8_MAX;
       }
-      twd->through_count[ml][len] = (uint8_t)(scaled + 0.5);
+      pat->through_count[ml][len] = (uint8_t)(scaled + 0.5);
     }
   }
   free(stats);
 }
 
-int twd_get_through_score(const TWDWeights *twd, MachineLetter ml, int span) {
-  return (span < TWD_MAX_THROUGH_LEN) ? twd->through_score[ml][span] : 0;
+int pat_get_through_score(const PATWeights *pat, MachineLetter ml, int span) {
+  return (span < PAT_MAX_THROUGH_LEN) ? pat->through_score[ml][span] : 0;
 }
 
-int twd_get_through_count(const TWDWeights *twd, MachineLetter ml, int span) {
-  return (span < TWD_MAX_THROUGH_LEN) ? twd->through_count[ml][span] : 0;
+int pat_get_through_count(const PATWeights *pat, MachineLetter ml, int span) {
+  return (span < PAT_MAX_THROUGH_LEN) ? pat->through_count[ml][span] : 0;
 }
 
-int twd_get_hook_flex(const TWDWeights *twd, MachineLetter ml) {
-  return twd->hook_flex[ml];
+int pat_get_hook_flex(const PATWeights *pat, MachineLetter ml) {
+  return pat->hook_flex[ml];
 }
 
-static inline int twd_ctz(uint64_t bits) {
+static inline int pat_ctz(uint64_t bits) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
   return __builtin_ctzll(bits);
 #else
@@ -457,12 +481,12 @@ static inline int twd_ctz(uint64_t bits) {
 // letters the set admits makes a hook needing a J the near-nothing it
 // usually is, and makes a hook only the evaluating player can fill (its
 // letters all sitting on their own rack) score as no threat at all.
-static inline int twd_set_flex(const uint8_t *unseen_counts,
+static inline int pat_set_flex(const uint8_t *unseen_counts,
                                uint64_t letter_set) {
   int flex = 0;
   uint64_t remaining = letter_set & ~(uint64_t)1;
   while (remaining) {
-    const int machine_letter = twd_ctz(remaining);
+    const int machine_letter = pat_ctz(remaining);
     remaining &= remaining - 1;
     flex += unseen_counts[machine_letter];
   }
@@ -473,7 +497,7 @@ static inline int twd_set_flex(const uint8_t *unseen_counts,
 // neither on the board nor on the evaluating player's rack, which is
 // exactly the pool the opponent draws from plus what they already hold.
 // Blanks on the board are counted against the blank.
-static void twd_compute_unseen_counts(const Square *lanes,
+static void pat_compute_unseen_counts(const Square *lanes,
                                       const LetterDistribution *ld,
                                       const Rack *player_rack,
                                       uint8_t *unseen_counts) {
@@ -513,7 +537,7 @@ static void twd_compute_unseen_counts(const Square *lanes,
 // pre-move board. hook_flex approximates the flexibility of hooks and
 // floaters the move itself creates, whose real cross and extension sets do
 // not exist yet.
-typedef struct TWDMoveOverlay {
+typedef struct PATMoveOverlay {
   const Move *move;
   int row_start;
   int col_start;
@@ -521,11 +545,11 @@ typedef struct TWDMoveOverlay {
   int col_end;
   bool vertical;
   const uint8_t *hook_flex;
-} TWDMoveOverlay;
+} PATMoveOverlay;
 
 // Returns true and sets *fresh_letter_out if the move places a fresh tile
 // on (row, col). Played-through positions fall through to the board.
-static inline bool twd_move_covers(const TWDMoveOverlay *overlay, int row,
+static inline bool pat_move_covers(const PATMoveOverlay *overlay, int row,
                                    int col, MachineLetter *fresh_letter_out) {
   if (!overlay) {
     return false;
@@ -544,29 +568,29 @@ static inline bool twd_move_covers(const TWDMoveOverlay *overlay, int row,
   return true;
 }
 
-static inline int twd_unit_row(int dir, int lane_index, int idx) {
+static inline int pat_unit_row(int dir, int lane_index, int idx) {
   return (dir == BOARD_HORIZONTAL_DIRECTION) ? lane_index : idx;
 }
 
-static inline int twd_unit_col(int dir, int lane_index, int idx) {
+static inline int pat_unit_col(int dir, int lane_index, int idx) {
   return (dir == BOARD_HORIZONTAL_DIRECTION) ? idx : lane_index;
 }
 
-static inline MachineLetter twd_effective_letter(const Square *lane, int idx,
-                                                 const TWDMoveOverlay *overlay,
+static inline MachineLetter pat_effective_letter(const Square *lane, int idx,
+                                                 const PATMoveOverlay *overlay,
                                                  int row, int col) {
   MachineLetter fresh_letter;
-  if (twd_move_covers(overlay, row, col, &fresh_letter)) {
+  if (pat_move_covers(overlay, row, col, &fresh_letter)) {
     return fresh_letter;
   }
   return square_get_letter(&lane[idx]);
 }
 
-typedef struct TWDCrossInfo {
+typedef struct PATCrossInfo {
   bool dead;
   bool hooky;
   int flex;
-} TWDCrossInfo;
+} PATCrossInfo;
 
 // The perpendicular constraint at an empty square: dead (no letter can be
 // placed), hooky (constrained by an adjacent perpendicular word, i.e. a
@@ -575,16 +599,16 @@ typedef struct TWDCrossInfo {
 // traversal, so it is approximated with the per-letter hook_flex table; a
 // pre-move dead square is left dead even though a fresh adjacent tile
 // technically changes its perpendicular pattern.
-static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
+static PATCrossInfo pat_effective_cross_info(const Square *lane, int idx,
                                              int dir,
-                                             const TWDMoveOverlay *overlay,
+                                             const PATMoveOverlay *overlay,
                                              int row, int col,
                                              const uint8_t *unseen_counts) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
-  TWDCrossInfo info;
+  PATCrossInfo info;
   info.dead = (base_cross_set == 0);
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
-  info.flex = info.hooky ? twd_set_flex(unseen_counts, base_cross_set) : 0;
+  info.flex = info.hooky ? pat_set_flex(unseen_counts, base_cross_set) : 0;
   if (!overlay || info.dead) {
     return info;
   }
@@ -602,7 +626,7 @@ static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
       continue;
     }
     MachineLetter fresh_letter;
-    if (twd_move_covers(overlay, perp_row, perp_col, &fresh_letter)) {
+    if (pat_move_covers(overlay, perp_row, perp_col, &fresh_letter)) {
       const int flex =
           overlay->hook_flex[get_unblanked_machine_letter(fresh_letter)];
       if (fresh_flex < 0 || flex < fresh_flex) {
@@ -627,31 +651,31 @@ static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
 // the walk visited, including the square it broke on: a move can only
 // change this unit's features by placing a tile on one of those squares or
 // directly beside them in the perpendicular direction.
-static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
-                          const uint8_t *unseen_counts, const TWDWeights *twd,
+static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
+                          const uint8_t *unseen_counts, const PATWeights *pat,
                           int tws_row, int tws_col, int premium_class, int dir,
-                          const TWDMoveOverlay *overlay, int32_t *features,
+                          const PATMoveOverlay *overlay, int32_t *features,
                           int *extent_lo, int *extent_hi) {
   // Each premium class writes its own hook and floater-value channels. The
   // richer channels (floater flexibility, the lexicon through-table, and
   // the triple-triple pair) stay exclusive to triple word squares, which
   // are the ones worth the feature budget.
-  int hook_base = TWD_FEATURE_HOOK_START;
-  int float_score_base = TWD_FEATURE_FLOAT_SCORE_START;
-  if (premium_class == TWD_PREMIUM_DWS) {
-    hook_base = TWD_FEATURE_DWS_HOOK_START;
-    float_score_base = TWD_FEATURE_DWS_FLOAT_SCORE_START;
-  } else if (premium_class == TWD_PREMIUM_TLS) {
-    hook_base = TWD_FEATURE_TLS_HOOK_START;
-    float_score_base = TWD_FEATURE_TLS_FLOAT_SCORE_START;
-  } else if (premium_class == TWD_PREMIUM_QWS) {
-    hook_base = TWD_FEATURE_QWS_HOOK_START;
-    float_score_base = TWD_FEATURE_QWS_FLOAT_SCORE_START;
-  } else if (premium_class == TWD_PREMIUM_QLS) {
-    hook_base = TWD_FEATURE_QLS_HOOK_START;
-    float_score_base = TWD_FEATURE_QLS_FLOAT_SCORE_START;
+  int hook_base = PAT_FEATURE_HOOK_START;
+  int float_score_base = PAT_FEATURE_FLOAT_SCORE_START;
+  if (premium_class == PAT_PREMIUM_DWS) {
+    hook_base = PAT_FEATURE_DWS_HOOK_START;
+    float_score_base = PAT_FEATURE_DWS_FLOAT_SCORE_START;
+  } else if (premium_class == PAT_PREMIUM_TLS) {
+    hook_base = PAT_FEATURE_TLS_HOOK_START;
+    float_score_base = PAT_FEATURE_TLS_FLOAT_SCORE_START;
+  } else if (premium_class == PAT_PREMIUM_QWS) {
+    hook_base = PAT_FEATURE_QWS_HOOK_START;
+    float_score_base = PAT_FEATURE_QWS_FLOAT_SCORE_START;
+  } else if (premium_class == PAT_PREMIUM_QLS) {
+    hook_base = PAT_FEATURE_QLS_HOOK_START;
+    float_score_base = PAT_FEATURE_QLS_FLOAT_SCORE_START;
   }
-  const bool full_channels = (premium_class == TWD_PREMIUM_TWS);
+  const bool full_channels = (premium_class == PAT_PREMIUM_TWS);
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
   const int tws_idx = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_col : tws_row;
@@ -663,18 +687,18 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
     *extent_hi = tws_idx;
   }
 
-  if (twd_effective_letter(lane, tws_idx, overlay,
-                           twd_unit_row(dir, lane_index, tws_idx),
-                           twd_unit_col(dir, lane_index, tws_idx)) !=
+  if (pat_effective_letter(lane, tws_idx, overlay,
+                           pat_unit_row(dir, lane_index, tws_idx),
+                           pat_unit_col(dir, lane_index, tws_idx)) !=
       ALPHABET_EMPTY_SQUARE_MARKER) {
     // The TWS square is covered (by the board or by the move itself):
     // nothing along this lane can reach it. Covering a TWS is exactly the
     // blocking reward.
     return;
   }
-  const TWDCrossInfo tws_info = twd_effective_cross_info(
-      lane, tws_idx, dir, overlay, twd_unit_row(dir, lane_index, tws_idx),
-      twd_unit_col(dir, lane_index, tws_idx), unseen_counts);
+  const PATCrossInfo tws_info = pat_effective_cross_info(
+      lane, tws_idx, dir, overlay, pat_unit_row(dir, lane_index, tws_idx),
+      pat_unit_col(dir, lane_index, tws_idx), unseen_counts);
   if (tws_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -701,10 +725,10 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
       if (square_get_is_brick(&lane[idx])) {
         break;
       }
-      const int square_row = twd_unit_row(dir, lane_index, idx);
-      const int square_col = twd_unit_col(dir, lane_index, idx);
+      const int square_row = pat_unit_row(dir, lane_index, idx);
+      const int square_col = pat_unit_col(dir, lane_index, idx);
       const MachineLetter letter =
-          twd_effective_letter(lane, idx, overlay, square_row, square_col);
+          pat_effective_letter(lane, idx, overlay, square_row, square_col);
       if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
         // A run of tiles: floater (playthrough) access. The run costs the
         // opponent no tiles, so the whole run shares the bin of the empty
@@ -714,16 +738,16 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
         bool run_has_fresh_tile = false;
         while (idx >= 0 && idx < BOARD_DIM &&
                !square_get_is_brick(&lane[idx])) {
-          const int run_row = twd_unit_row(dir, lane_index, idx);
-          const int run_col = twd_unit_col(dir, lane_index, idx);
+          const int run_row = pat_unit_row(dir, lane_index, idx);
+          const int run_col = pat_unit_col(dir, lane_index, idx);
           const MachineLetter run_letter =
-              twd_effective_letter(lane, idx, overlay, run_row, run_col);
+              pat_effective_letter(lane, idx, overlay, run_row, run_col);
           if (run_letter == ALPHABET_EMPTY_SQUARE_MARKER) {
             break;
           }
           last_visited_idx = idx;
           MachineLetter fresh_letter;
-          if (twd_move_covers(overlay, run_row, run_col, &fresh_letter)) {
+          if (pat_move_covers(overlay, run_row, run_col, &fresh_letter)) {
             run_has_fresh_tile = true;
           }
           int tile_score = 0;
@@ -735,15 +759,15 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
           // the way to the triple. The span it must cover is the empties
           // between the two plus both endpoints; a blank contributes
           // nothing to score above but reaches whatever its letter reaches.
-          if (twd != NULL && full_channels) {
+          if (pat != NULL && full_channels) {
             const MachineLetter unblanked =
                 get_unblanked_machine_letter(run_letter);
             const int span = distance_bin + 1;
-            if (span < TWD_MAX_THROUGH_LEN) {
-              features[TWD_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
-                       1] += twd->through_score[unblanked][span];
-              features[TWD_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
-                       1] += twd->through_count[unblanked][span];
+            if (span < PAT_MAX_THROUGH_LEN) {
+              features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
+                       1] += pat->through_score[unblanked][span];
+              features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
+                       1] += pat->through_count[unblanked][span];
             }
           }
           idx += side;
@@ -761,16 +785,16 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
           const uint64_t extension_set =
               (side > 0) ? square_get_right_extension_set(&lane[prev_empty_idx])
                          : square_get_left_extension_set(&lane[prev_empty_idx]);
-          run_flex = twd_set_flex(unseen_counts, extension_set);
+          run_flex = pat_set_flex(unseen_counts, extension_set);
         }
         if (full_channels) {
-          features[TWD_FEATURE_FLOAT_FLEX_START + distance_bin - 1] += run_flex;
+          features[PAT_FEATURE_FLOAT_FLEX_START + distance_bin - 1] += run_flex;
         }
         span_has_floater = true;
         span_floater_flex += run_flex;
         continue;
       }
-      const TWDCrossInfo info = twd_effective_cross_info(
+      const PATCrossInfo info = pat_effective_cross_info(
           lane, idx, dir, overlay, square_row, square_col, unseen_counts);
       if (info.dead) {
         break;
@@ -784,9 +808,9 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
         // A second empty TWS within reach: the triple-triple span from the
         // scanned TWS square through this one.
         if (span_has_floater) {
-          features[TWD_FEATURE_TT_FLOATER] += 1 + span_floater_flex;
+          features[PAT_FEATURE_TT_FLOATER] += 1 + span_floater_flex;
         } else if (span_has_hook) {
-          features[TWD_FEATURE_TT_HOOK_ONLY] += 1;
+          features[PAT_FEATURE_TT_HOOK_ONLY] += 1;
         }
         break;
       }
@@ -813,12 +837,12 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
 // an empty cross set, or when it still needs more fresh tiles than a rack
 // holds. A live window also needs somewhere to attach: a playthrough tile
 // inside it, or a hookable empty square.
-static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
+static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
                              int dir, int lane_index, int lo, int hi, int tier,
-                             const TWDMoveOverlay *overlay, int32_t *features,
+                             const PATMoveOverlay *overlay, int32_t *features,
                              int *extent_lo, int *extent_hi) {
   const int tier_base =
-      TWD_FEATURE_WINDOW_START + tier * TWD_WINDOW_FEATURES_PER_TIER;
+      PAT_FEATURE_WINDOW_START + tier * PAT_WINDOW_FEATURES_PER_TIER;
   const Square *lane = board_get_row_cache(lanes, lane_index, dir);
   if (extent_lo != NULL) {
     *extent_lo = lo;
@@ -833,10 +857,10 @@ static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     if (square_get_is_brick(&lane[idx])) {
       return;
     }
-    const int square_row = twd_unit_row(dir, lane_index, idx);
-    const int square_col = twd_unit_col(dir, lane_index, idx);
+    const int square_row = pat_unit_row(dir, lane_index, idx);
+    const int square_col = pat_unit_col(dir, lane_index, idx);
     const MachineLetter letter =
-        twd_effective_letter(lane, idx, overlay, square_row, square_col);
+        pat_effective_letter(lane, idx, overlay, square_row, square_col);
     if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
       if (idx == lo || idx == hi) {
         return;
@@ -844,7 +868,7 @@ static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
       has_floater = true;
       continue;
     }
-    const TWDCrossInfo info = twd_effective_cross_info(
+    const PATCrossInfo info = pat_effective_cross_info(
         lane, idx, dir, overlay, square_row, square_col, unseen_counts);
     if (info.dead) {
       return;
@@ -870,10 +894,10 @@ static void twd_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
 // Finds the double-double windows: consecutive pairs of double word squares
 // in one lane, near enough that a single word could cover both. Horizontal
 // lanes come first, then vertical, each scanned in increasing order, so the
-// truncation at TWD_MAX_DD is deterministic and training and evaluation
+// truncation at PAT_MAX_DD is deterministic and training and evaluation
 // always agree. Whether a window is currently live is left to the scan.
 // Which window tier the product of two word multipliers belongs to.
-static int twd_window_tier(int product) {
+static int pat_window_tier(int product) {
   if (product <= 4) {
     return 0; // double-double
   }
@@ -889,9 +913,9 @@ static int twd_window_tier(int product) {
 // Finds the windows: consecutive pairs of word-multiplier squares in one
 // lane, near enough that a single word could cover both. Horizontal lanes
 // come first, then vertical, each scanned in increasing order, so the
-// truncation at TWD_MAX_DD is deterministic and training and evaluation
+// truncation at PAT_MAX_DD is deterministic and training and evaluation
 // always agree. Whether a window is currently live is left to the scan.
-static int twd_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
+static int pat_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
                        uint8_t *dd_los, uint8_t *dd_his, uint8_t *dd_tiers) {
   int num_dd = 0;
   for (int dir = 0; dir < 2; dir++) {
@@ -905,8 +929,8 @@ static int twd_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
         if (word_multiplier < 2) {
           continue;
         }
-        if (previous_idx >= 0 && idx - previous_idx <= TWD_DD_MAX_SPAN) {
-          if (num_dd == TWD_MAX_DD) {
+        if (previous_idx >= 0 && idx - previous_idx <= PAT_DD_MAX_SPAN) {
+          if (num_dd == PAT_MAX_DD) {
             return num_dd;
           }
           dd_dirs[num_dd] = (uint8_t)dir;
@@ -914,7 +938,7 @@ static int twd_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
           dd_los[num_dd] = (uint8_t)previous_idx;
           dd_his[num_dd] = (uint8_t)idx;
           dd_tiers[num_dd] =
-              (uint8_t)twd_window_tier(previous_multiplier * word_multiplier);
+              (uint8_t)pat_window_tier(previous_multiplier * word_multiplier);
           num_dd++;
         }
         previous_idx = idx;
@@ -929,33 +953,33 @@ static int twd_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
 // walking a lane for. Double letter squares are deliberately excluded: they
 // are common enough to double the scan cost while raising a word by a
 // couple of points.
-static int twd_premium_class_of(const Square *square) {
+static int pat_premium_class_of(const Square *square) {
   const BonusSquare bonus = square_get_bonus_square(square);
   const int word_multiplier = bonus_square_get_word_multiplier(bonus);
   if (word_multiplier >= 4) {
-    return TWD_PREMIUM_QWS;
+    return PAT_PREMIUM_QWS;
   }
   if (word_multiplier == 3) {
-    return TWD_PREMIUM_TWS;
+    return PAT_PREMIUM_TWS;
   }
   if (word_multiplier == 2) {
-    return TWD_PREMIUM_DWS;
+    return PAT_PREMIUM_DWS;
   }
   const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
   if (letter_multiplier >= 4) {
-    return TWD_PREMIUM_QLS;
+    return PAT_PREMIUM_QLS;
   }
   if (letter_multiplier == 3) {
-    return TWD_PREMIUM_TLS;
+    return PAT_PREMIUM_TLS;
   }
   return -1;
 }
 
-// Finds up to TWD_MAX_PREMIUM uncovered premium squares in row-major order
+// Finds up to PAT_MAX_PREMIUM uncovered premium squares in row-major order
 // (the truncation is deterministic, so training and evaluation always
 // agree). Bricked and occupied squares are excluded: a covered premium
 // square can never be uncovered by a move.
-static int twd_find_tws(const Square *lanes, uint8_t *tws_rows,
+static int pat_find_tws(const Square *lanes, uint8_t *tws_rows,
                         uint8_t *tws_cols, uint8_t *tws_classes) {
   int num_tws = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
@@ -967,11 +991,11 @@ static int twd_find_tws(const Square *lanes, uint8_t *tws_rows,
           square_get_letter(square) != ALPHABET_EMPTY_SQUARE_MARKER) {
         continue;
       }
-      const int premium_class = twd_premium_class_of(square);
+      const int premium_class = pat_premium_class_of(square);
       if (premium_class < 0) {
         continue;
       }
-      if (num_tws == TWD_MAX_PREMIUM) {
+      if (num_tws == PAT_MAX_PREMIUM) {
         return num_tws;
       }
       tws_rows[num_tws] = (uint8_t)row;
@@ -983,48 +1007,48 @@ static int twd_find_tws(const Square *lanes, uint8_t *tws_rows,
   return num_tws;
 }
 
-void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
-                          const Rack *player_rack, const TWDWeights *twd,
+void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
+                          const Rack *player_rack, const PATWeights *pat,
                           int32_t *features) {
-  memset(features, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
+  memset(features, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
-  twd_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
-  uint8_t tws_rows[TWD_MAX_PREMIUM];
-  uint8_t tws_cols[TWD_MAX_PREMIUM];
-  uint8_t tws_classes[TWD_MAX_PREMIUM];
-  const int num_tws = twd_find_tws(lanes, tws_rows, tws_cols, tws_classes);
+  pat_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
+  uint8_t tws_rows[PAT_MAX_PREMIUM];
+  uint8_t tws_cols[PAT_MAX_PREMIUM];
+  uint8_t tws_classes[PAT_MAX_PREMIUM];
+  const int num_tws = pat_find_tws(lanes, tws_rows, tws_cols, tws_classes);
   for (int tws_idx = 0; tws_idx < num_tws; tws_idx++) {
-    twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
+    pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL);
-    twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
+    pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL);
   }
-  uint8_t dd_dirs[TWD_MAX_DD];
-  uint8_t dd_lanes[TWD_MAX_DD];
-  uint8_t dd_los[TWD_MAX_DD];
-  uint8_t dd_his[TWD_MAX_DD];
-  uint8_t dd_tiers[TWD_MAX_DD];
+  uint8_t dd_dirs[PAT_MAX_DD];
+  uint8_t dd_lanes[PAT_MAX_DD];
+  uint8_t dd_los[PAT_MAX_DD];
+  uint8_t dd_his[PAT_MAX_DD];
+  uint8_t dd_tiers[PAT_MAX_DD];
   const int num_dd =
-      twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his, dd_tiers);
+      pat_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his, dd_tiers);
   for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
-    twd_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
+    pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                      dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
                      features, NULL, NULL);
   }
 }
 
-static int64_t twd_dot_raw(const TWDWeights *twd, const int32_t *features) {
+static int64_t pat_dot_raw(const PATWeights *pat, const int32_t *features) {
   int64_t acc = 0;
-  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
-    acc += (int64_t)twd->weights[feature_index] * features[feature_index];
+    acc += (int64_t)pat->weights[feature_index] * features[feature_index];
   }
   return acc;
 }
 
-static Equity twd_clamp_dot(int64_t acc) {
+static Equity pat_clamp_dot(int64_t acc) {
   if (acc < EQUITY_MIN_VALUE) {
     acc = EQUITY_MIN_VALUE;
   }
@@ -1036,52 +1060,52 @@ static Equity twd_clamp_dot(int64_t acc) {
   return (Equity)acc;
 }
 
-static Equity twd_dot(const TWDWeights *twd, const int32_t *features) {
-  return twd_clamp_dot(twd_dot_raw(twd, features));
+static Equity pat_dot(const PATWeights *pat, const int32_t *features) {
+  return pat_clamp_dot(pat_dot_raw(pat, features));
 }
 
 // The same product over only the weighted features; the other terms are
 // zero. Every path that has a context uses this one.
-static Equity twd_dot_ctx(const TWDEvalContext *twd_eval_ctx,
+static Equity pat_dot_ctx(const PATEvalContext *pat_eval_ctx,
                           const int32_t *features) {
-  const Equity *weights = twd_eval_ctx->weights->weights;
+  const Equity *weights = pat_eval_ctx->weights->weights;
   int64_t acc = 0;
-  for (int nonzero_idx = 0; nonzero_idx < twd_eval_ctx->num_nonzero_features;
+  for (int nonzero_idx = 0; nonzero_idx < pat_eval_ctx->num_nonzero_features;
        nonzero_idx++) {
-    const int feature_index = twd_eval_ctx->nonzero_feature_index[nonzero_idx];
+    const int feature_index = pat_eval_ctx->nonzero_feature_index[nonzero_idx];
     acc += (int64_t)weights[feature_index] * features[feature_index];
   }
-  return twd_clamp_dot(acc);
+  return pat_clamp_dot(acc);
 }
 
 // The per-row and per-column unit masks are 64-bit.
-static_assert(TWD_MASK_WORDS >= 1, "unit masks need at least one word");
+static_assert(PAT_MASK_WORDS >= 1, "unit masks need at least one word");
 
 // The affected-unit set outgrew one word when the lesser premium squares
 // joined the scan, so it is a small fixed bitset. All of these are hot: the
 // per-move path builds one and walks its bits.
-static inline void twd_mask_clear(uint64_t *mask) {
-  for (int word = 0; word < TWD_MASK_WORDS; word++) {
+static inline void pat_mask_clear(uint64_t *mask) {
+  for (int word = 0; word < PAT_MASK_WORDS; word++) {
     mask[word] = 0;
   }
 }
 
-static inline void twd_mask_set(uint64_t *mask, int unit_index) {
+static inline void pat_mask_set(uint64_t *mask, int unit_index) {
   mask[unit_index / 64] |= (uint64_t)1 << (unit_index % 64);
 }
 
-static inline bool twd_mask_test(const uint64_t *mask, int unit_index) {
+static inline bool pat_mask_test(const uint64_t *mask, int unit_index) {
   return (mask[unit_index / 64] >> (unit_index % 64)) & 1;
 }
 
-static inline void twd_mask_or_into(uint64_t *dst, const uint64_t *src) {
-  for (int word = 0; word < TWD_MASK_WORDS; word++) {
+static inline void pat_mask_or_into(uint64_t *dst, const uint64_t *src) {
+  for (int word = 0; word < PAT_MASK_WORDS; word++) {
     dst[word] |= src[word];
   }
 }
 
-static inline bool twd_mask_is_empty(const uint64_t *mask) {
-  for (int word = 0; word < TWD_MASK_WORDS; word++) {
+static inline bool pat_mask_is_empty(const uint64_t *mask) {
+  for (int word = 0; word < PAT_MASK_WORDS; word++) {
     if (mask[word] != 0) {
       return false;
     }
@@ -1097,7 +1121,7 @@ static inline bool twd_mask_is_empty(const uint64_t *mask) {
 // result is non-positive, and it is nondecreasing in every unit penalty,
 // which is what lets the shadow bound below zero out the units a move can
 // reach.
-static Equity twd_combine(int64_t worst, int64_t sum, double combine_gamma) {
+static Equity pat_combine(int64_t worst, int64_t sum, double combine_gamma) {
   double combined =
       (1.0 - combine_gamma) * (double)worst + combine_gamma * (double)sum;
   if (combined > 0.0) {
@@ -1109,7 +1133,7 @@ static Equity twd_combine(int64_t worst, int64_t sum, double combine_gamma) {
   return (Equity)llround(combined);
 }
 
-static Equity twd_combine_unit_penalties(const Equity *unit_penalties,
+static Equity pat_combine_unit_penalties(const Equity *unit_penalties,
                                          int num_units, double combine_gamma) {
   int64_t sum = 0;
   int64_t worst = 0;
@@ -1120,12 +1144,12 @@ static Equity twd_combine_unit_penalties(const Equity *unit_penalties,
       worst = penalty;
     }
   }
-  return twd_combine(worst, sum, combine_gamma);
+  return pat_combine(worst, sum, combine_gamma);
 }
 
 // The moves affecting the units can at best zero out each affected unit's (<=
 // 0) baseline contribution; every unaffected unit keeps its baseline exactly.
-static Equity twd_units_penalty_bound(const TWDEvalContext *twd_eval_ctx,
+static Equity pat_units_penalty_bound(const PATEvalContext *pat_eval_ctx,
                                       const uint64_t *affected_units) {
   // A move can at best zero out every unit it reaches, and the combination
   // is nondecreasing in each unit, so combining with those units at zero
@@ -1134,60 +1158,60 @@ static Equity twd_units_penalty_bound(const TWDEvalContext *twd_eval_ctx,
   // total less the reached baselines, and the worst is the first unit in
   // penalty order the move does not reach. Only the reached units are
   // visited, and a move reaches few.
-  int64_t sum = twd_eval_ctx->total_unit_penalty;
-  for (int word = 0; word < TWD_MASK_WORDS; word++) {
+  int64_t sum = pat_eval_ctx->total_unit_penalty;
+  for (int word = 0; word < PAT_MASK_WORDS; word++) {
     uint64_t bits = affected_units[word];
     while (bits != 0) {
-      const int unit_index = word * 64 + twd_ctz(bits);
-      sum -= twd_eval_ctx->unit_penalty[unit_index];
+      const int unit_index = word * 64 + pat_ctz(bits);
+      sum -= pat_eval_ctx->unit_penalty[unit_index];
       bits &= bits - 1;
     }
   }
   int64_t worst = 0;
-  for (int order_idx = 0; order_idx < twd_eval_ctx->num_units; order_idx++) {
-    const int unit_index = twd_eval_ctx->units_by_penalty[order_idx];
-    if (!twd_mask_test(affected_units, unit_index)) {
-      worst = twd_eval_ctx->unit_penalty[unit_index];
+  for (int order_idx = 0; order_idx < pat_eval_ctx->num_units; order_idx++) {
+    const int unit_index = pat_eval_ctx->units_by_penalty[order_idx];
+    if (!pat_mask_test(affected_units, unit_index)) {
+      worst = pat_eval_ctx->unit_penalty[unit_index];
       break;
     }
   }
-  return twd_combine(worst, sum, twd_eval_ctx->weights->combine_gamma);
+  return pat_combine(worst, sum, pat_eval_ctx->weights->combine_gamma);
 }
 
-void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx) {
-  twd_eval_ctx->weights = NULL;
+void pat_eval_context_disable(PATEvalContext *pat_eval_ctx) {
+  pat_eval_ctx->weights = NULL;
 }
 
 // Scans one of the context's units into `features`, reporting the lane it
 // walks and the span of lane squares that walk could read. Units 2*i and
 // 2*i+1 are TWS i's horizontal and vertical walks; the units after those are
 // the double-double windows.
-static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
-                                  int unit_index, const TWDMoveOverlay *overlay,
+static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
+                                  int unit_index, const PATMoveOverlay *overlay,
                                   int32_t *features, int *dir_out,
                                   int *lane_out, int *extent_lo,
                                   int *extent_hi) {
-  const int num_tws_units = twd_eval_ctx->num_tws * 2;
+  const int num_tws_units = pat_eval_ctx->num_tws * 2;
   if (unit_index < num_tws_units) {
     const int tws_idx = unit_index / 2;
     const int dir = unit_index % 2;
-    const int tws_row = twd_eval_ctx->tws_rows[tws_idx];
-    const int tws_col = twd_eval_ctx->tws_cols[tws_idx];
+    const int tws_row = pat_eval_ctx->tws_rows[tws_idx];
+    const int tws_col = pat_eval_ctx->tws_cols[tws_idx];
     *dir_out = dir;
     *lane_out = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
-    twd_scan_unit(twd_eval_ctx->lanes, twd_eval_ctx->ld,
-                  twd_eval_ctx->unseen_counts, twd_eval_ctx->weights, tws_row,
-                  tws_col, twd_eval_ctx->tws_classes[tws_idx], dir, overlay,
+    pat_scan_unit(pat_eval_ctx->lanes, pat_eval_ctx->ld,
+                  pat_eval_ctx->unseen_counts, pat_eval_ctx->weights, tws_row,
+                  tws_col, pat_eval_ctx->tws_classes[tws_idx], dir, overlay,
                   features, extent_lo, extent_hi);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
-  *dir_out = twd_eval_ctx->dd_dirs[dd_idx];
-  *lane_out = twd_eval_ctx->dd_lanes[dd_idx];
-  twd_scan_dd_unit(twd_eval_ctx->lanes, twd_eval_ctx->unseen_counts,
-                   twd_eval_ctx->dd_dirs[dd_idx],
-                   twd_eval_ctx->dd_lanes[dd_idx], twd_eval_ctx->dd_los[dd_idx],
-                   twd_eval_ctx->dd_his[dd_idx], twd_eval_ctx->dd_tiers[dd_idx],
+  *dir_out = pat_eval_ctx->dd_dirs[dd_idx];
+  *lane_out = pat_eval_ctx->dd_lanes[dd_idx];
+  pat_scan_dd_unit(pat_eval_ctx->lanes, pat_eval_ctx->unseen_counts,
+                   pat_eval_ctx->dd_dirs[dd_idx],
+                   pat_eval_ctx->dd_lanes[dd_idx], pat_eval_ctx->dd_los[dd_idx],
+                   pat_eval_ctx->dd_his[dd_idx], pat_eval_ctx->dd_tiers[dd_idx],
                    overlay, features, extent_lo, extent_hi);
 }
 
@@ -1195,30 +1219,30 @@ static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
 // nonzero weight. Each class writes only its own hook and floater-value
 // channels; the triple word class alone also writes the flexibility,
 // through-table and triple-triple channels.
-static bool twd_class_is_weighted(const TWDWeights *weights,
+static bool pat_class_is_weighted(const PATWeights *weights,
                                   int premium_class) {
   int start = 0;
   int end = 0;
   switch (premium_class) {
-  case TWD_PREMIUM_TWS:
-    start = TWD_FEATURE_HOOK_START;
-    end = TWD_FEATURE_DWS_HOOK_START;
+  case PAT_PREMIUM_TWS:
+    start = PAT_FEATURE_HOOK_START;
+    end = PAT_FEATURE_DWS_HOOK_START;
     break;
-  case TWD_PREMIUM_DWS:
-    start = TWD_FEATURE_DWS_HOOK_START;
-    end = TWD_FEATURE_TLS_HOOK_START;
+  case PAT_PREMIUM_DWS:
+    start = PAT_FEATURE_DWS_HOOK_START;
+    end = PAT_FEATURE_TLS_HOOK_START;
     break;
-  case TWD_PREMIUM_TLS:
-    start = TWD_FEATURE_TLS_HOOK_START;
-    end = TWD_FEATURE_QWS_HOOK_START;
+  case PAT_PREMIUM_TLS:
+    start = PAT_FEATURE_TLS_HOOK_START;
+    end = PAT_FEATURE_QWS_HOOK_START;
     break;
-  case TWD_PREMIUM_QWS:
-    start = TWD_FEATURE_QWS_HOOK_START;
-    end = TWD_FEATURE_QLS_HOOK_START;
+  case PAT_PREMIUM_QWS:
+    start = PAT_FEATURE_QWS_HOOK_START;
+    end = PAT_FEATURE_QLS_HOOK_START;
     break;
-  case TWD_PREMIUM_QLS:
-    start = TWD_FEATURE_QLS_HOOK_START;
-    end = TWD_FEATURE_TT_FLOATER;
+  case PAT_PREMIUM_QLS:
+    start = PAT_FEATURE_QLS_HOOK_START;
+    end = PAT_FEATURE_TT_FLOATER;
     break;
   default:
     return true;
@@ -1228,17 +1252,17 @@ static bool twd_class_is_weighted(const TWDWeights *weights,
       return true;
     }
   }
-  return premium_class == TWD_PREMIUM_TWS &&
-         (weights->weights[TWD_FEATURE_TT_FLOATER] != 0 ||
-          weights->weights[TWD_FEATURE_TT_HOOK_ONLY] != 0);
+  return premium_class == PAT_PREMIUM_TWS &&
+         (weights->weights[PAT_FEATURE_TT_FLOATER] != 0 ||
+          weights->weights[PAT_FEATURE_TT_HOOK_ONLY] != 0);
 }
 
 // Whether any of a window tier's three channels carries a nonzero weight.
-static bool twd_tier_is_weighted(const TWDWeights *weights, int tier) {
+static bool pat_tier_is_weighted(const PATWeights *weights, int tier) {
   const int start =
-      TWD_FEATURE_WINDOW_START + tier * TWD_WINDOW_FEATURES_PER_TIER;
+      PAT_FEATURE_WINDOW_START + tier * PAT_WINDOW_FEATURES_PER_TIER;
   for (int feature_index = start;
-       feature_index < start + TWD_WINDOW_FEATURES_PER_TIER; feature_index++) {
+       feature_index < start + PAT_WINDOW_FEATURES_PER_TIER; feature_index++) {
     if (weights->weights[feature_index] != 0) {
       return true;
     }
@@ -1252,97 +1276,97 @@ static bool twd_tier_is_weighted(const TWDWeights *weights, int tier) {
 // changes no penalty, combination, or lane bound: it only saves the walk.
 // The enumeration and its caps have already run, so which squares exist
 // was decided exactly as training decides it.
-static void twd_drop_unweighted_units(TWDEvalContext *twd_eval_ctx,
-                                      const TWDWeights *weights) {
-  bool class_weighted[TWD_NUM_PREMIUM_CLASSES];
-  for (int premium_class = 0; premium_class < TWD_NUM_PREMIUM_CLASSES;
+static void pat_drop_unweighted_units(PATEvalContext *pat_eval_ctx,
+                                      const PATWeights *weights) {
+  bool class_weighted[PAT_NUM_PREMIUM_CLASSES];
+  for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
        premium_class++) {
     class_weighted[premium_class] =
-        twd_class_is_weighted(weights, premium_class);
+        pat_class_is_weighted(weights, premium_class);
   }
   int kept = 0;
-  for (int tws_idx = 0; tws_idx < twd_eval_ctx->num_tws; tws_idx++) {
-    if (!class_weighted[twd_eval_ctx->tws_classes[tws_idx]]) {
+  for (int tws_idx = 0; tws_idx < pat_eval_ctx->num_tws; tws_idx++) {
+    if (!class_weighted[pat_eval_ctx->tws_classes[tws_idx]]) {
       continue;
     }
-    twd_eval_ctx->tws_rows[kept] = twd_eval_ctx->tws_rows[tws_idx];
-    twd_eval_ctx->tws_cols[kept] = twd_eval_ctx->tws_cols[tws_idx];
-    twd_eval_ctx->tws_classes[kept] = twd_eval_ctx->tws_classes[tws_idx];
+    pat_eval_ctx->tws_rows[kept] = pat_eval_ctx->tws_rows[tws_idx];
+    pat_eval_ctx->tws_cols[kept] = pat_eval_ctx->tws_cols[tws_idx];
+    pat_eval_ctx->tws_classes[kept] = pat_eval_ctx->tws_classes[tws_idx];
     kept++;
   }
-  twd_eval_ctx->num_tws = kept;
+  pat_eval_ctx->num_tws = kept;
 
-  bool tier_weighted[TWD_WINDOW_TIER_COUNT];
-  for (int tier = 0; tier < TWD_WINDOW_TIER_COUNT; tier++) {
-    tier_weighted[tier] = twd_tier_is_weighted(weights, tier);
+  bool tier_weighted[PAT_WINDOW_TIER_COUNT];
+  for (int tier = 0; tier < PAT_WINDOW_TIER_COUNT; tier++) {
+    tier_weighted[tier] = pat_tier_is_weighted(weights, tier);
   }
   kept = 0;
-  for (int dd_idx = 0; dd_idx < twd_eval_ctx->num_dd; dd_idx++) {
-    if (!tier_weighted[twd_eval_ctx->dd_tiers[dd_idx]]) {
+  for (int dd_idx = 0; dd_idx < pat_eval_ctx->num_dd; dd_idx++) {
+    if (!tier_weighted[pat_eval_ctx->dd_tiers[dd_idx]]) {
       continue;
     }
-    twd_eval_ctx->dd_dirs[kept] = twd_eval_ctx->dd_dirs[dd_idx];
-    twd_eval_ctx->dd_lanes[kept] = twd_eval_ctx->dd_lanes[dd_idx];
-    twd_eval_ctx->dd_los[kept] = twd_eval_ctx->dd_los[dd_idx];
-    twd_eval_ctx->dd_his[kept] = twd_eval_ctx->dd_his[dd_idx];
-    twd_eval_ctx->dd_tiers[kept] = twd_eval_ctx->dd_tiers[dd_idx];
+    pat_eval_ctx->dd_dirs[kept] = pat_eval_ctx->dd_dirs[dd_idx];
+    pat_eval_ctx->dd_lanes[kept] = pat_eval_ctx->dd_lanes[dd_idx];
+    pat_eval_ctx->dd_los[kept] = pat_eval_ctx->dd_los[dd_idx];
+    pat_eval_ctx->dd_his[kept] = pat_eval_ctx->dd_his[dd_idx];
+    pat_eval_ctx->dd_tiers[kept] = pat_eval_ctx->dd_tiers[dd_idx];
     kept++;
   }
-  twd_eval_ctx->num_dd = kept;
+  pat_eval_ctx->num_dd = kept;
 }
 
-static void twd_eval_context_load_units(TWDEvalContext *twd_eval_ctx,
-                                        const TWDWeights *weights,
+static void pat_eval_context_load_units(PATEvalContext *pat_eval_ctx,
+                                        const PATWeights *weights,
                                         const Square *lanes,
                                         const LetterDistribution *ld,
                                         const Rack *player_rack,
                                         bool drop_unweighted_units) {
-  twd_eval_ctx->weights = weights;
+  pat_eval_ctx->weights = weights;
   if (!weights) {
     return;
   }
-  twd_eval_ctx->ld = ld;
-  twd_eval_ctx->lanes = lanes;
-  twd_compute_unseen_counts(lanes, ld, player_rack,
-                            twd_eval_ctx->unseen_counts);
-  twd_eval_ctx->num_tws =
-      twd_find_tws(lanes, twd_eval_ctx->tws_rows, twd_eval_ctx->tws_cols,
-                   twd_eval_ctx->tws_classes);
-  twd_eval_ctx->num_dd = twd_find_dd(
-      lanes, twd_eval_ctx->dd_dirs, twd_eval_ctx->dd_lanes,
-      twd_eval_ctx->dd_los, twd_eval_ctx->dd_his, twd_eval_ctx->dd_tiers);
+  pat_eval_ctx->ld = ld;
+  pat_eval_ctx->lanes = lanes;
+  pat_compute_unseen_counts(lanes, ld, player_rack,
+                            pat_eval_ctx->unseen_counts);
+  pat_eval_ctx->num_tws =
+      pat_find_tws(lanes, pat_eval_ctx->tws_rows, pat_eval_ctx->tws_cols,
+                   pat_eval_ctx->tws_classes);
+  pat_eval_ctx->num_dd = pat_find_dd(
+      lanes, pat_eval_ctx->dd_dirs, pat_eval_ctx->dd_lanes,
+      pat_eval_ctx->dd_los, pat_eval_ctx->dd_his, pat_eval_ctx->dd_tiers);
   if (drop_unweighted_units) {
-    twd_drop_unweighted_units(twd_eval_ctx, weights);
+    pat_drop_unweighted_units(pat_eval_ctx, weights);
   }
-  twd_eval_ctx->num_units = twd_eval_ctx->num_tws * 2 + twd_eval_ctx->num_dd;
-  memset(twd_eval_ctx->unit_mask_by_row, 0,
-         sizeof(twd_eval_ctx->unit_mask_by_row));
-  memset(twd_eval_ctx->unit_mask_by_col, 0,
-         sizeof(twd_eval_ctx->unit_mask_by_col));
-  static_assert(TWD_MAX_SCAN_UNITS <= TWD_MASK_WORDS * 64,
+  pat_eval_ctx->num_units = pat_eval_ctx->num_tws * 2 + pat_eval_ctx->num_dd;
+  memset(pat_eval_ctx->unit_mask_by_row, 0,
+         sizeof(pat_eval_ctx->unit_mask_by_row));
+  memset(pat_eval_ctx->unit_mask_by_col, 0,
+         sizeof(pat_eval_ctx->unit_mask_by_col));
+  static_assert(PAT_MAX_SCAN_UNITS <= PAT_MASK_WORDS * 64,
                 "unit masks must cover every scan unit");
-  static_assert(TWD_MAX_SCAN_UNITS <= UINT16_MAX,
+  static_assert(PAT_MAX_SCAN_UNITS <= UINT16_MAX,
                 "unit order entries must hold every unit index");
-  twd_eval_ctx->num_nonzero_features = 0;
-  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+  pat_eval_ctx->num_nonzero_features = 0;
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     if (weights->weights[feature_index] != 0) {
-      twd_eval_ctx
-          ->nonzero_feature_index[twd_eval_ctx->num_nonzero_features++] =
+      pat_eval_ctx
+          ->nonzero_feature_index[pat_eval_ctx->num_nonzero_features++] =
           feature_index;
     }
   }
-  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
-    int32_t *unit_features = twd_eval_ctx->unit_features[unit_index];
-    memset(unit_features, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
+  for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
+    int32_t *unit_features = pat_eval_ctx->unit_features[unit_index];
+    memset(unit_features, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
     int dir = 0;
     int lane = 0;
     int extent_lo = 0;
     int extent_hi = 0;
-    twd_scan_context_unit(twd_eval_ctx, unit_index, NULL, unit_features, &dir,
+    pat_scan_context_unit(pat_eval_ctx, unit_index, NULL, unit_features, &dir,
                           &lane, &extent_lo, &extent_hi);
-    twd_eval_ctx->unit_penalty[unit_index] =
-        twd_dot_ctx(twd_eval_ctx, unit_features);
+    pat_eval_ctx->unit_penalty[unit_index] =
+        pat_dot_ctx(pat_eval_ctx, unit_features);
     // A move affects this unit only when it has a tile on or directly
     // beside the lane (perpendicular halo of one) within the span of
     // squares the baseline walk visited: squares beyond the walk's break
@@ -1350,99 +1374,99 @@ static void twd_eval_context_load_units(TWDEvalContext *twd_eval_ctx,
     // Farther effects (a move extending a distant perpendicular word
     // into a lane square's cross set) are deliberately ignored in the
     // per-move delta.
-    uint64_t (*halo_masks)[TWD_MASK_WORDS] =
-        (dir == BOARD_HORIZONTAL_DIRECTION) ? twd_eval_ctx->unit_mask_by_row
-                                            : twd_eval_ctx->unit_mask_by_col;
-    uint64_t (*extent_masks)[TWD_MASK_WORDS] =
-        (dir == BOARD_HORIZONTAL_DIRECTION) ? twd_eval_ctx->unit_mask_by_col
-                                            : twd_eval_ctx->unit_mask_by_row;
+    uint64_t (*halo_masks)[PAT_MASK_WORDS] =
+        (dir == BOARD_HORIZONTAL_DIRECTION) ? pat_eval_ctx->unit_mask_by_row
+                                            : pat_eval_ctx->unit_mask_by_col;
+    uint64_t (*extent_masks)[PAT_MASK_WORDS] =
+        (dir == BOARD_HORIZONTAL_DIRECTION) ? pat_eval_ctx->unit_mask_by_col
+                                            : pat_eval_ctx->unit_mask_by_row;
     for (int halo = lane - 1; halo <= lane + 1; halo++) {
       if (halo >= 0 && halo < BOARD_DIM) {
-        twd_mask_set(halo_masks[halo], unit_index);
+        pat_mask_set(halo_masks[halo], unit_index);
       }
     }
     for (int idx = extent_lo; idx <= extent_hi; idx++) {
-      twd_mask_set(extent_masks[idx], unit_index);
+      pat_mask_set(extent_masks[idx], unit_index);
     }
   }
   // The total and the penalty order that let a move's combination be
-  // formed from the units it reaches alone (see twd_units_penalty_bound).
+  // formed from the units it reaches alone (see pat_units_penalty_bound).
   // Insertion sort: a few dozen units, once per position.
   int64_t total_unit_penalty = 0;
-  for (int unit_index = 0; unit_index < twd_eval_ctx->num_units; unit_index++) {
-    const Equity penalty = twd_eval_ctx->unit_penalty[unit_index];
+  for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
+    const Equity penalty = pat_eval_ctx->unit_penalty[unit_index];
     total_unit_penalty += penalty;
     int order_idx = unit_index;
     while (
         order_idx > 0 &&
-        twd_eval_ctx
-                ->unit_penalty[twd_eval_ctx->units_by_penalty[order_idx - 1]] >
+        pat_eval_ctx
+                ->unit_penalty[pat_eval_ctx->units_by_penalty[order_idx - 1]] >
             penalty) {
-      twd_eval_ctx->units_by_penalty[order_idx] =
-          twd_eval_ctx->units_by_penalty[order_idx - 1];
+      pat_eval_ctx->units_by_penalty[order_idx] =
+          pat_eval_ctx->units_by_penalty[order_idx - 1];
       order_idx--;
     }
-    twd_eval_ctx->units_by_penalty[order_idx] = (uint16_t)unit_index;
+    pat_eval_ctx->units_by_penalty[order_idx] = (uint16_t)unit_index;
   }
-  twd_eval_ctx->total_unit_penalty = total_unit_penalty;
-  twd_eval_ctx->pre_penalty = twd_combine_unit_penalties(
-      twd_eval_ctx->unit_penalty, twd_eval_ctx->num_units,
+  pat_eval_ctx->total_unit_penalty = total_unit_penalty;
+  pat_eval_ctx->pre_penalty = pat_combine_unit_penalties(
+      pat_eval_ctx->unit_penalty, pat_eval_ctx->num_units,
       weights->combine_gamma);
   for (int lane = 0; lane < BOARD_DIM; lane++) {
-    twd_eval_ctx->lane_penalty_bound[BOARD_HORIZONTAL_DIRECTION][lane] =
-        twd_units_penalty_bound(twd_eval_ctx,
-                                twd_eval_ctx->unit_mask_by_row[lane]);
-    twd_eval_ctx->lane_penalty_bound[BOARD_VERTICAL_DIRECTION][lane] =
-        twd_units_penalty_bound(twd_eval_ctx,
-                                twd_eval_ctx->unit_mask_by_col[lane]);
+    pat_eval_ctx->lane_penalty_bound[BOARD_HORIZONTAL_DIRECTION][lane] =
+        pat_units_penalty_bound(pat_eval_ctx,
+                                pat_eval_ctx->unit_mask_by_row[lane]);
+    pat_eval_ctx->lane_penalty_bound[BOARD_VERTICAL_DIRECTION][lane] =
+        pat_units_penalty_bound(pat_eval_ctx,
+                                pat_eval_ctx->unit_mask_by_col[lane]);
   }
 }
 
-void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
-                           const TWDWeights *weights, const Square *lanes,
+void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
+                           const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
                            const Rack *player_rack) {
-  twd_eval_context_load_units(twd_eval_ctx, weights, lanes, ld, player_rack,
+  pat_eval_context_load_units(pat_eval_ctx, weights, lanes, ld, player_rack,
                               true);
 }
 
-void twd_eval_context_load_all_units(TWDEvalContext *twd_eval_ctx,
-                                     const TWDWeights *weights,
+void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
+                                     const PATWeights *weights,
                                      const Square *lanes,
                                      const LetterDistribution *ld,
                                      const Rack *player_rack) {
-  twd_eval_context_load_units(twd_eval_ctx, weights, lanes, ld, player_rack,
+  pat_eval_context_load_units(pat_eval_ctx, weights, lanes, ld, player_rack,
                               false);
 }
 
 // Returns the bitset of scan units the move can affect (see the
 // unit_mask_by_row comment in the header).
-static inline void twd_move_affected_units(const TWDEvalContext *twd_eval_ctx,
+static inline void pat_move_affected_units(const PATEvalContext *pat_eval_ctx,
                                            int row_start, int row_end,
                                            int col_start, int col_end,
                                            uint64_t *affected_units) {
-  uint64_t row_units[TWD_MASK_WORDS];
-  uint64_t col_units[TWD_MASK_WORDS];
-  twd_mask_clear(row_units);
-  twd_mask_clear(col_units);
+  uint64_t row_units[PAT_MASK_WORDS];
+  uint64_t col_units[PAT_MASK_WORDS];
+  pat_mask_clear(row_units);
+  pat_mask_clear(col_units);
   for (int row = row_start; row <= row_end; row++) {
-    twd_mask_or_into(row_units, twd_eval_ctx->unit_mask_by_row[row]);
+    pat_mask_or_into(row_units, pat_eval_ctx->unit_mask_by_row[row]);
   }
   for (int col = col_start; col <= col_end; col++) {
-    twd_mask_or_into(col_units, twd_eval_ctx->unit_mask_by_col[col]);
+    pat_mask_or_into(col_units, pat_eval_ctx->unit_mask_by_col[col]);
   }
-  for (int word = 0; word < TWD_MASK_WORDS; word++) {
+  for (int word = 0; word < PAT_MASK_WORDS; word++) {
     affected_units[word] = row_units[word] & col_units[word];
   }
 }
 
-Equity twd_eval_move_penalty_bound(const TWDEvalContext *twd_eval_ctx,
+Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
                                    const Move *move) {
-  if (!twd_eval_ctx || !twd_eval_ctx->weights) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return twd_eval_ctx->pre_penalty;
+    return pat_eval_ctx->pre_penalty;
   }
   const bool vertical = board_is_dir_vertical(move_get_dir(move));
   const int row_start = move_get_row_start(move);
@@ -1450,22 +1474,22 @@ Equity twd_eval_move_penalty_bound(const TWDEvalContext *twd_eval_ctx,
   const int tiles_length = move_get_tiles_length(move);
   const int row_end = vertical ? row_start + tiles_length - 1 : row_start;
   const int col_end = vertical ? col_start : col_start + tiles_length - 1;
-  uint64_t affected_units[TWD_MASK_WORDS];
-  twd_move_affected_units(twd_eval_ctx, row_start, row_end, col_start, col_end,
+  uint64_t affected_units[PAT_MASK_WORDS];
+  pat_move_affected_units(pat_eval_ctx, row_start, row_end, col_start, col_end,
                           affected_units);
-  return twd_units_penalty_bound(twd_eval_ctx, affected_units);
+  return pat_units_penalty_bound(pat_eval_ctx, affected_units);
 }
 
-Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
+Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
                              const Move *move) {
-  if (!twd_eval_ctx || !twd_eval_ctx->weights) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Exchanges and passes leave the board unchanged, so their defense term
     // is exactly the position baseline. Including it keeps the comparison
     // against tile placements (whose term is baseline plus delta) fair.
-    return twd_eval_ctx->pre_penalty;
+    return pat_eval_ctx->pre_penalty;
   }
   const bool vertical = board_is_dir_vertical(move_get_dir(move));
   const int row_start = move_get_row_start(move);
@@ -1473,34 +1497,34 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
   const int tiles_length = move_get_tiles_length(move);
   const int row_end = vertical ? row_start + tiles_length - 1 : row_start;
   const int col_end = vertical ? col_start : col_start + tiles_length - 1;
-  uint64_t affected_units[TWD_MASK_WORDS];
-  twd_move_affected_units(twd_eval_ctx, row_start, row_end, col_start, col_end,
+  uint64_t affected_units[PAT_MASK_WORDS];
+  pat_move_affected_units(pat_eval_ctx, row_start, row_end, col_start, col_end,
                           affected_units);
-  if (twd_mask_is_empty(affected_units)) {
-    return twd_eval_ctx->pre_penalty;
+  if (pat_mask_is_empty(affected_units)) {
+    return pat_eval_ctx->pre_penalty;
   }
-  const TWDMoveOverlay overlay = {
+  const PATMoveOverlay overlay = {
       .move = move,
       .row_start = row_start,
       .col_start = col_start,
       .row_end = row_end,
       .col_end = col_end,
       .vertical = vertical,
-      .hook_flex = twd_eval_ctx->weights->hook_flex,
+      .hook_flex = pat_eval_ctx->weights->hook_flex,
   };
   // Rescan only the units the move can reach and combine the whole set:
   // the units it cannot reach keep exactly the penalty they were loaded
   // with, so the sum is the total moved by each reached unit's change and
   // the worst is the lesser of the reached units' new penalties and the
   // first unreached unit in penalty order.
-  int64_t sum = twd_eval_ctx->total_unit_penalty;
+  int64_t sum = pat_eval_ctx->total_unit_penalty;
   int64_t worst = 0;
-  for (int word = 0; word < TWD_MASK_WORDS; word++) {
+  for (int word = 0; word < PAT_MASK_WORDS; word++) {
     uint64_t bits = affected_units[word];
     while (bits != 0) {
-      const int unit_index = word * 64 + twd_ctz(bits);
+      const int unit_index = word * 64 + pat_ctz(bits);
       bits &= bits - 1;
-      int32_t overlay_features[TWD_NUM_FEATURES] = {0};
+      int32_t overlay_features[PAT_NUM_FEATURES] = {0};
       int scan_dir = 0;
       int scan_lane = 0;
       // The same rack the training label was built against: whatever the
@@ -1509,69 +1533,69 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
       // scoring a candidate against its leave would call every hook
       // uncontested in proportion to how many tiles the move played, which
       // is a penalty on bingos and nothing to do with hooks.
-      twd_scan_context_unit(twd_eval_ctx, unit_index, &overlay,
+      pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
                             overlay_features, &scan_dir, &scan_lane, NULL,
                             NULL);
-      const Equity penalty = twd_dot_ctx(twd_eval_ctx, overlay_features);
-      sum += penalty - twd_eval_ctx->unit_penalty[unit_index];
+      const Equity penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
+      sum += penalty - pat_eval_ctx->unit_penalty[unit_index];
       if (penalty < worst) {
         worst = penalty;
       }
     }
   }
-  for (int order_idx = 0; order_idx < twd_eval_ctx->num_units; order_idx++) {
-    const int unit_index = twd_eval_ctx->units_by_penalty[order_idx];
-    if (!twd_mask_test(affected_units, unit_index)) {
-      if (twd_eval_ctx->unit_penalty[unit_index] < worst) {
-        worst = twd_eval_ctx->unit_penalty[unit_index];
+  for (int order_idx = 0; order_idx < pat_eval_ctx->num_units; order_idx++) {
+    const int unit_index = pat_eval_ctx->units_by_penalty[order_idx];
+    if (!pat_mask_test(affected_units, unit_index)) {
+      if (pat_eval_ctx->unit_penalty[unit_index] < worst) {
+        worst = pat_eval_ctx->unit_penalty[unit_index];
       }
       break;
     }
   }
-  return twd_combine(worst, sum, twd_eval_ctx->weights->combine_gamma);
+  return pat_combine(worst, sum, pat_eval_ctx->weights->combine_gamma);
 }
 
-void twd_extract_features_combined(const Square *lanes,
+void pat_extract_features_combined(const Square *lanes,
                                    const LetterDistribution *ld,
                                    const Rack *player_rack,
-                                   const TWDWeights *twd, double *features) {
-  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+                                   const PATWeights *pat, double *features) {
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     features[feature_index] = 0.0;
   }
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
-  twd_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
-  uint8_t tws_rows[TWD_MAX_PREMIUM];
-  uint8_t tws_cols[TWD_MAX_PREMIUM];
-  uint8_t tws_classes[TWD_MAX_PREMIUM];
-  const int num_tws = twd_find_tws(lanes, tws_rows, tws_cols, tws_classes);
-  uint8_t dd_dirs[TWD_MAX_DD];
-  uint8_t dd_lanes[TWD_MAX_DD];
-  uint8_t dd_los[TWD_MAX_DD];
-  uint8_t dd_his[TWD_MAX_DD];
-  uint8_t dd_tiers[TWD_MAX_DD];
+  pat_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
+  uint8_t tws_rows[PAT_MAX_PREMIUM];
+  uint8_t tws_cols[PAT_MAX_PREMIUM];
+  uint8_t tws_classes[PAT_MAX_PREMIUM];
+  const int num_tws = pat_find_tws(lanes, tws_rows, tws_cols, tws_classes);
+  uint8_t dd_dirs[PAT_MAX_DD];
+  uint8_t dd_lanes[PAT_MAX_DD];
+  uint8_t dd_los[PAT_MAX_DD];
+  uint8_t dd_his[PAT_MAX_DD];
+  uint8_t dd_tiers[PAT_MAX_DD];
   const int num_dd =
-      twd_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his, dd_tiers);
+      pat_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his, dd_tiers);
   const int num_units = num_tws * 2 + num_dd;
 
-  int32_t unit_features[TWD_MAX_SCAN_UNITS][TWD_NUM_FEATURES];
+  int32_t unit_features[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
   int worst_unit = -1;
   Equity worst_penalty = 0;
   for (int unit_index = 0; unit_index < num_units; unit_index++) {
     int32_t *row = unit_features[unit_index];
-    memset(row, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
+    memset(row, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
     if (unit_index < num_tws * 2) {
       const int tws_idx = unit_index / 2;
-      twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
+      pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                     tws_cols[tws_idx], tws_classes[tws_idx], unit_index % 2,
                     NULL, row, NULL, NULL);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
-      twd_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
+      pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                        dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
                        row, NULL, NULL);
     }
-    const Equity penalty = twd_dot(twd, row);
+    const Equity penalty = pat_dot(pat, row);
     if (penalty < worst_penalty) {
       worst_penalty = penalty;
       worst_unit = unit_index;
@@ -1581,16 +1605,16 @@ void twd_extract_features_combined(const Square *lanes,
   // Untrained weights rank every unit alike, so there is no worst one to
   // charge in full. Fall back to the sum, which makes the first generation
   // an ordinary fit and gives later ones something to rank with.
-  const double gamma = (worst_unit >= 0) ? twd->combine_gamma : 1.0;
+  const double gamma = (worst_unit >= 0) ? pat->combine_gamma : 1.0;
   for (int unit_index = 0; unit_index < num_units; unit_index++) {
-    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
          feature_index++) {
       features[feature_index] +=
           gamma * (double)unit_features[unit_index][feature_index];
     }
   }
   if (worst_unit >= 0) {
-    for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
          feature_index++) {
       features[feature_index] +=
           (1.0 - gamma) * (double)unit_features[worst_unit][feature_index];

@@ -6,10 +6,10 @@
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "pat.h"
 #include "players_data.h"
 #include "rack.h"
 #include "rack_info_table.h"
-#include "tws_defense.h"
 #include "wmp.h"
 #include "word_info_table.h"
 #include <stdlib.h>
@@ -29,7 +29,7 @@ struct Player {
   const WMP *wmp;
   const RackInfoTable *rack_info_table;
   const WordInfoTable *word_info_table;
-  const TWDWeights *twd;
+  const PATWeights *pat;
 };
 
 void player_reset(Player *player) {
@@ -50,7 +50,7 @@ void player_update(const PlayersData *players_data, Player *player) {
       players_data_get_rack_info_table(players_data, player->index);
   player->word_info_table =
       players_data_get_word_info_table(players_data, player->index);
-  player->twd = players_data_get_twd(players_data, player->index);
+  player->pat = players_data_get_pat(players_data, player->index);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -80,7 +80,7 @@ Player *player_duplicate(const Player *player) {
   new_player->wmp = player->wmp;
   new_player->rack_info_table = player->rack_info_table;
   new_player->word_info_table = player->word_info_table;
-  new_player->twd = player->twd;
+  new_player->pat = player->pat;
   return new_player;
 }
 
@@ -96,7 +96,7 @@ void player_copy(Player *dst, const Player *src) {
   dst->wmp = src->wmp;
   dst->rack_info_table = src->rack_info_table;
   dst->word_info_table = src->word_info_table;
-  dst->twd = src->twd;
+  dst->pat = src->pat;
 }
 
 void player_destroy(Player *player) {
@@ -140,7 +140,7 @@ const WordInfoTable *player_get_word_info_table(const Player *player) {
   return player->word_info_table;
 }
 
-const TWDWeights *player_get_twd(const Player *player) { return player->twd; }
+const PATWeights *player_get_pat(const Player *player) { return player->pat; }
 
 void player_set_score(Player *player, Equity score) { player->score = score; }
 
