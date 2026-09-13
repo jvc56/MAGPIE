@@ -77,6 +77,9 @@
 // least this many fresh tiles: the near-full-rack shape of the NARCEIN
 // example, as opposed to a two-tile hook that any rack can hit.
 #define PAT_OVERLAP_LONG_TILES 5
+// The narrow measure's minimum fresh tiles per qualifying route: the
+// near-full-rack, opposing-reach shape of the NARCEIN example.
+#define PAT_OVERLAP_NARROW_MIN_TILES 5
 #define PAT_OVERLAP_MAX_ROUTES 2048
 #define PAT_OVERLAP_MASK_WORDS ((BOARD_DIM * BOARD_DIM + 63) / 64)
 #define PAT_OVERLAP_MAX_PREMIUMS 64
@@ -104,6 +107,12 @@ typedef struct OverlapRoute {
   int flex;
   uint64_t mask[PAT_OVERLAP_MASK_WORDS];
   int component;
+  // Floater routes only: the run's lane index span, and whether it is the
+  // first run the walk from the premium reached (a word using a later run
+  // must play through this one too, so only the first is "direct").
+  int run_lo;
+  int run_hi;
+  bool is_direct;
 } OverlapRoute;
 
 typedef struct OverlapScan {
@@ -118,6 +127,12 @@ typedef struct OverlapScan {
   int shared_anchor_long;
   // Premium squares with live routes from more than one (lane, direction).
   int shared_premium;
+  // The narrow, prespecified measure (see overlap_summarize): runs that
+  // are the direct contact of lexicon-feasible floater routes needing at
+  // least PAT_OVERLAP_NARROW_MIN_TILES fresh tiles from two distinct
+  // premiums along the run's own lane, counted as max(0, k - 1) distinct
+  // premiums per run.
+  int narrow;
   // Over shared-anchor components: the easiest route's tile count, and the
   // easiest route from a second, different premium.
   int anchor_min_tiles_hist[RACK_SIZE + 1];
@@ -245,6 +260,9 @@ static OverlapRoute *overlap_new_route(OverlapScan *scan, int premium_row,
   route->flex = flex;
   memset(route->mask, 0, sizeof(route->mask));
   route->component = -1;
+  route->run_lo = -1;
+  route->run_hi = -1;
+  route->is_direct = false;
   if (is_floater) {
     scan->num_floaters++;
   } else {
@@ -291,6 +309,7 @@ static void overlap_scan_premium_lane(const Square *lanes,
   for (int side = -1; side <= 1; side += 2) {
     int empties_used = 1;
     int prev_empty_idx = premium_idx;
+    int runs_passed = 0;
     uint64_t span_mask[PAT_OVERLAP_MASK_WORDS];
     memset(span_mask, 0, sizeof(span_mask));
     int idx = premium_idx + side;
@@ -302,11 +321,13 @@ static void overlap_scan_premium_lane(const Square *lanes,
       if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
         const int distance_bin = empties_used;
         const int facing_idx = idx;
+        int run_far_idx = idx;
         while (idx >= 0 && idx < BOARD_DIM &&
                !square_get_is_brick(&lane[idx]) &&
                square_get_letter(&lane[idx]) != ALPHABET_EMPTY_SQUARE_MARKER) {
           overlap_mask_set(span_mask, overlap_row(dir, lane_index, idx),
                            overlap_col(dir, lane_index, idx));
+          run_far_idx = idx;
           idx += side;
         }
         // The letters that could extend this run toward the premium. Per
@@ -344,8 +365,14 @@ static void overlap_scan_premium_lane(const Square *lanes,
                                 distance_bin, flex);
           if (route) {
             memcpy(route->mask, span_mask, sizeof(span_mask));
+            route->run_lo =
+                (facing_idx < run_far_idx) ? facing_idx : run_far_idx;
+            route->run_hi =
+                (facing_idx < run_far_idx) ? run_far_idx : facing_idx;
+            route->is_direct = (runs_passed == 0);
           }
         }
+        runs_passed++;
         continue;
       }
       const uint64_t cross_set = square_get_cross_set(&lane[idx]);
@@ -497,6 +524,61 @@ static void overlap_summarize(OverlapScan *scan) {
       scan->shared_premium++;
     }
   }
+  // Narrow measure: no transitive grouping. Two routes count together
+  // only when their direct contact run is the same run in the same lane
+  // (so they approach it from opposite ends of that lane), each needs
+  // PAT_OVERLAP_NARROW_MIN_TILES+ fresh tiles, and each is lexicon-
+  // feasible (every recorded route already has flex > 0). Distinct
+  // premiums per run, in excess of one.
+  scan->narrow = 0;
+  for (int i = 0; i < scan->num_routes; i++) {
+    const OverlapRoute *anchor = &scan->routes[i];
+    if (!anchor->is_floater || !anchor->is_direct ||
+        anchor->tiles_required < PAT_OVERLAP_NARROW_MIN_TILES) {
+      continue;
+    }
+    // Count each run once, from its lowest-index qualifying route.
+    bool first = true;
+    int distinct_premiums = 0;
+    int seen_premium_ids[PAT_OVERLAP_MAX_PREMIUMS];
+    for (int j = 0; j < scan->num_routes; j++) {
+      const OverlapRoute *route = &scan->routes[j];
+      if (!route->is_floater || !route->is_direct ||
+          route->tiles_required < PAT_OVERLAP_NARROW_MIN_TILES ||
+          route->dir != anchor->dir || route->run_lo != anchor->run_lo ||
+          route->run_hi != anchor->run_hi) {
+        continue;
+      }
+      const int route_lane = (route->dir == BOARD_HORIZONTAL_DIRECTION)
+                                 ? route->contact_row
+                                 : route->contact_col;
+      const int anchor_lane = (anchor->dir == BOARD_HORIZONTAL_DIRECTION)
+                                  ? anchor->contact_row
+                                  : anchor->contact_col;
+      if (route_lane != anchor_lane) {
+        continue;
+      }
+      if (j < i) {
+        first = false;
+        break;
+      }
+      const int premium_id =
+          route->premium_row * BOARD_DIM + route->premium_col;
+      bool seen = false;
+      for (int p = 0; p < distinct_premiums; p++) {
+        if (seen_premium_ids[p] == premium_id) {
+          seen = true;
+          break;
+        }
+      }
+      if (!seen && distinct_premiums < PAT_OVERLAP_MAX_PREMIUMS) {
+        seen_premium_ids[distinct_premiums++] = premium_id;
+      }
+    }
+    if (first && distinct_premiums > 1) {
+      scan->narrow += distinct_premiums - 1;
+    }
+  }
 }
 
 // Scans the game's current board from mover_index's point of view (their
@@ -589,6 +671,9 @@ static void test_pat_overlap_detector(void) {
   assert(scan->anchor_min_tiles_hist[7] == 1);
   assert(scan->anchor_second_tiles_hist[7] == 1);
   assert(scan->shared_premium == 0);
+  // Narrow: the vertical pair shares the run {H8} in column H, the
+  // horizontal pair shares it in row 8: two qualifying runs.
+  assert(scan->narrow == 2);
   for (int i = 0; i < scan->num_routes; i++) {
     assert(scan->routes[i].contact_row == 7);
     assert(scan->routes[i].contact_col == 7);
@@ -608,6 +693,7 @@ static void test_pat_overlap_detector(void) {
   assert(scan->routes[0].premium_row == 7 && scan->routes[0].premium_col == 0);
   assert(scan->shared_anchor_any == 0);
   assert(scan->shared_premium == 0);
+  assert(scan->narrow == 0);
 
   // The motivating example. Nothing precedes NARCEIN in CSW21, so the
   // route from A8 is dead; NARCEINE/NARCEINS exist, so the route from O8
@@ -639,6 +725,9 @@ static void test_pat_overlap_detector(void) {
   assert(scan->shared_anchor_long == 1);
   assert(scan->anchor_min_tiles_hist[5] == 1);
   assert(scan->anchor_second_tiles_hist[7] == 1);
+  // Narrow: only the vertical pair through the E qualifies (the A8 route
+  // is dead, so the NARCEIN run has one feasible direct route, not two).
+  assert(scan->narrow == 1);
 
   free(scan);
   config_destroy(config);
@@ -658,6 +747,9 @@ typedef struct OverlapStats {
   int pos_with_anchor_any;
   int pos_with_anchor_long;
   int pos_with_shared_premium;
+  int pos_with_narrow;
+  int pos_with_narrow_by_stage[PAT_OVERLAP_NUM_STAGES];
+  long narrow_sum;
   int pos_with_anchor_any_by_stage[PAT_OVERLAP_NUM_STAGES];
   int pos_with_anchor_long_by_stage[PAT_OVERLAP_NUM_STAGES];
   long anchor_min_tiles_hist[RACK_SIZE + 1];
@@ -665,6 +757,14 @@ typedef struct OverlapStats {
   long candidates_examined;
   long candidates_changing_any;
   long candidates_changing_long;
+  long candidates_changing_narrow;
+  long candidates_creating_narrow;
+  long candidates_removing_narrow;
+  int pos_with_candidate_changing_narrow;
+  int pos_best_changes_narrow;
+  int pos_close_candidate_changing_narrow[3];
+  int rerank_changes_narrow[PAT_OVERLAP_NUM_CORRECTIONS];
+  int narrow_examples_printed;
   long candidates_creating_any;
   long candidates_removing_any;
   long candidates_creating_long;
@@ -732,6 +832,11 @@ static void overlap_analyze_position(Game *game, MoveList *move_list,
   if (pre_scan->shared_premium > 0) {
     stats->pos_with_shared_premium++;
   }
+  if (pre_scan->narrow > 0) {
+    stats->pos_with_narrow++;
+    stats->pos_with_narrow_by_stage[stage]++;
+  }
+  stats->narrow_sum += pre_scan->narrow;
   for (int t = 0; t <= RACK_SIZE; t++) {
     stats->anchor_min_tiles_hist[t] += pre_scan->anchor_min_tiles_hist[t];
     stats->anchor_second_tiles_hist[t] += pre_scan->anchor_second_tiles_hist[t];
@@ -743,11 +848,14 @@ static void overlap_analyze_position(Game *game, MoveList *move_list,
   double equities[PAT_OVERLAP_MAX_CANDIDATES];
   int delta_any[PAT_OVERLAP_MAX_CANDIDATES];
   int delta_long[PAT_OVERLAP_MAX_CANDIDATES];
+  int delta_narrow[PAT_OVERLAP_MAX_CANDIDATES];
   int num_candidates = 0;
   bool any_changes = false;
   bool long_changes = false;
+  bool narrow_changes = false;
   bool close_any[3] = {false, false, false};
   bool close_long[3] = {false, false, false};
+  bool close_narrow[3] = {false, false, false};
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   for (int i = 0; i < num_moves && num_candidates < PAT_OVERLAP_MAX_CANDIDATES;
        i++) {
@@ -759,18 +867,92 @@ static void overlap_analyze_position(Game *game, MoveList *move_list,
     }
     int d_any = 0;
     int d_long = 0;
+    int d_narrow = 0;
     if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       play_move_without_drawing_tiles(move, game);
       overlap_scan_game(game, mover_index, post_scan);
       game_unplay_last_move(game);
       d_any = post_scan->shared_anchor_any - pre_scan->shared_anchor_any;
       d_long = post_scan->shared_anchor_long - pre_scan->shared_anchor_long;
+      d_narrow = post_scan->narrow - pre_scan->narrow;
     }
     equities[num_candidates] = equity;
     delta_any[num_candidates] = d_any;
     delta_long[num_candidates] = d_long;
+    delta_narrow[num_candidates] = d_narrow;
     num_candidates++;
     stats->candidates_examined++;
+    if (d_narrow != 0) {
+      stats->candidates_changing_narrow++;
+      narrow_changes = true;
+      if (d_narrow > 0) {
+        stats->candidates_creating_narrow++;
+      } else {
+        stats->candidates_removing_narrow++;
+      }
+      if (i == 0) {
+        stats->pos_best_changes_narrow++;
+      }
+      for (int g = 0; g < 3; g++) {
+        if (i > 0 && gap <= pat_overlap_close_gaps[g]) {
+          close_narrow[g] = true;
+        }
+      }
+      // Examples for manual inspection of the narrow definition: a
+      // candidate within 3 equity of best that creates one.
+      if (d_narrow > 0 && gap <= 3.0 &&
+          stats->narrow_examples_printed < PAT_OVERLAP_MAX_EXAMPLES) {
+        stats->narrow_examples_printed++;
+        char *cgp = game_get_cgp(game, true);
+        printf("\nnarrow example %d (bag %d): %s\n  best ",
+               stats->narrow_examples_printed,
+               bag_get_letters(game_get_bag(game)), cgp);
+        free(cgp);
+        overlap_print_move(game, move_list_get_move(move_list, 0));
+        printf(" eq %.2f\n  candidate ", best_equity);
+        overlap_print_move(game, move);
+        printf(" eq %.2f (gap %.2f) narrow %d -> %d; direct floater routes "
+               "needing >= %d tiles on the resulting board:\n",
+               equity, gap, pre_scan->narrow, post_scan->narrow,
+               PAT_OVERLAP_NARROW_MIN_TILES);
+        for (int r = 0; r < post_scan->num_routes; r++) {
+          const OverlapRoute *route = &post_scan->routes[r];
+          if (!route->is_floater || !route->is_direct ||
+              route->tiles_required < PAT_OVERLAP_NARROW_MIN_TILES) {
+            continue;
+          }
+          printf("    from TWS ");
+          overlap_print_square(route->premium_row, route->premium_col);
+          printf(" %s%s run ",
+                 route->dir == BOARD_HORIZONTAL_DIRECTION ? "row" : "col",
+                 route->side < 0 ? "-" : "+");
+          overlap_print_square(
+              overlap_row(route->dir,
+                          route->dir == BOARD_HORIZONTAL_DIRECTION
+                              ? route->contact_row
+                              : route->contact_col,
+                          route->run_lo),
+              overlap_col(route->dir,
+                          route->dir == BOARD_HORIZONTAL_DIRECTION
+                              ? route->contact_row
+                              : route->contact_col,
+                          route->run_lo));
+          printf("-");
+          overlap_print_square(
+              overlap_row(route->dir,
+                          route->dir == BOARD_HORIZONTAL_DIRECTION
+                              ? route->contact_row
+                              : route->contact_col,
+                          route->run_hi),
+              overlap_col(route->dir,
+                          route->dir == BOARD_HORIZONTAL_DIRECTION
+                              ? route->contact_row
+                              : route->contact_col,
+                          route->run_hi));
+          printf(" tiles %d flex %d\n", route->tiles_required, route->flex);
+        }
+      }
+    }
     if (d_any != 0) {
       stats->candidates_changing_any++;
       any_changes = true;
@@ -829,6 +1011,9 @@ static void overlap_analyze_position(Game *game, MoveList *move_list,
   if (long_changes) {
     stats->pos_with_candidate_changing_long++;
   }
+  if (narrow_changes) {
+    stats->pos_with_candidate_changing_narrow++;
+  }
   for (int g = 0; g < 3; g++) {
     if (close_any[g]) {
       stats->pos_close_candidate_changing_any[g]++;
@@ -836,13 +1021,18 @@ static void overlap_analyze_position(Game *game, MoveList *move_list,
     if (close_long[g]) {
       stats->pos_close_candidate_changing_long[g]++;
     }
+    if (close_narrow[g]) {
+      stats->pos_close_candidate_changing_narrow[g]++;
+    }
   }
   // Reranking sensitivity: does any prespecified correction change the
   // argmax over the examined candidates? Ties keep the original best.
   for (int c = 0; c < PAT_OVERLAP_NUM_CORRECTIONS; c++) {
     const double correction = pat_overlap_corrections[c];
-    for (int metric = 0; metric < 2; metric++) {
-      const int *deltas = (metric == 0) ? delta_any : delta_long;
+    for (int metric = 0; metric < 3; metric++) {
+      const int *deltas = (metric == 0)   ? delta_any
+                          : (metric == 1) ? delta_long
+                                          : delta_narrow;
       int best_index = 0;
       double best_adjusted = equities[0] - correction * deltas[0];
       for (int i = 1; i < num_candidates; i++) {
@@ -855,8 +1045,10 @@ static void overlap_analyze_position(Game *game, MoveList *move_list,
       if (best_index != 0) {
         if (metric == 0) {
           stats->rerank_changes_any[c]++;
-        } else {
+        } else if (metric == 1) {
           stats->rerank_changes_long[c]++;
+        } else {
+          stats->rerank_changes_narrow[c]++;
         }
       }
     }
@@ -867,6 +1059,18 @@ static void overlap_print_pct(const char *label, long numerator,
                               long denominator) {
   printf("  %s: %ld / %ld (%.2f%%)\n", label, numerator, denominator,
          denominator > 0 ? 100.0 * numerator / denominator : 0.0);
+}
+
+// The narrow overlap measure of the game's current board from the mover's
+// point of view, for the move-choice harness's diagnostic reranking. Uses
+// a private scratch scan (single-threaded tests only).
+int pat_overlap_narrow_measure(const Game *game, int mover_index) {
+  static OverlapScan *scratch = NULL;
+  if (scratch == NULL) {
+    scratch = malloc_or_die(sizeof(OverlapScan));
+  }
+  overlap_scan_game(game, mover_index, scratch);
+  return scratch->narrow;
 }
 
 void test_pat_overlap_pilot(void) {
@@ -935,10 +1139,16 @@ void test_pat_overlap_pilot(void) {
                     stats->pos_with_anchor_long, stats->positions);
   overlap_print_pct("positions with a shared-premium overlap",
                     stats->pos_with_shared_premium, stats->positions);
+  overlap_print_pct("positions with a NARROW overlap (same direct run, "
+                    "opposite ends, each route >= 5 tiles, lexicon-feasible)",
+                    stats->pos_with_narrow, stats->positions);
+  printf("  narrow measure mean per position: %.3f\n",
+         (double)stats->narrow_sum / stats->positions);
   static const char *const stage_names[PAT_OVERLAP_NUM_STAGES] = {
       "bag >= 60", "bag 40-59", "bag 20-39", "bag 1-19"};
   for (int s = 0; s < PAT_OVERLAP_NUM_STAGES; s++) {
-    printf("  %s: %d positions, shared-anchor any %.2f%%, long %.2f%%\n",
+    printf("  %s: %d positions, shared-anchor any %.2f%%, long %.2f%%, "
+           "narrow %.2f%%\n",
            stage_names[s], stats->positions_by_stage[s],
            stats->positions_by_stage[s] > 0
                ? 100.0 * stats->pos_with_anchor_any_by_stage[s] /
@@ -946,6 +1156,10 @@ void test_pat_overlap_pilot(void) {
                : 0.0,
            stats->positions_by_stage[s] > 0
                ? 100.0 * stats->pos_with_anchor_long_by_stage[s] /
+                     stats->positions_by_stage[s]
+               : 0.0,
+           stats->positions_by_stage[s] > 0
+               ? 100.0 * stats->pos_with_narrow_by_stage[s] /
                      stats->positions_by_stage[s]
                : 0.0);
   }
@@ -968,6 +1182,25 @@ void test_pat_overlap_pilot(void) {
                     stats->candidates_examined);
   printf("    creating %ld, removing %ld\n", stats->candidates_creating_long,
          stats->candidates_removing_long);
+  overlap_print_pct("candidates changing the narrow measure",
+                    stats->candidates_changing_narrow,
+                    stats->candidates_examined);
+  printf("    increasing %ld, decreasing %ld\n",
+         stats->candidates_creating_narrow, stats->candidates_removing_narrow);
+  overlap_print_pct("positions with any examined candidate changing (narrow)",
+                    stats->pos_with_candidate_changing_narrow,
+                    stats->positions);
+  overlap_print_pct("positions where the best move itself changes (narrow)",
+                    stats->pos_best_changes_narrow, stats->positions);
+  for (int g = 0; g < 3; g++) {
+    char label[128];
+    snprintf(label, sizeof(label),
+             "positions with a non-best candidate within %.0f eq changing "
+             "(narrow)",
+             pat_overlap_close_gaps[g]);
+    overlap_print_pct(label, stats->pos_close_candidate_changing_narrow[g],
+                      stats->positions);
+  }
   overlap_print_pct("positions with any examined candidate changing (any)",
                     stats->pos_with_candidate_changing_any, stats->positions);
   overlap_print_pct("positions with any examined candidate changing (long)",
@@ -994,11 +1227,14 @@ void test_pat_overlap_pilot(void) {
   printf("reranking sensitivity (positions whose argmax changes; "
          "correction is equity per created overlap, negative = credit):\n");
   for (int c = 0; c < PAT_OVERLAP_NUM_CORRECTIONS; c++) {
-    printf("  correction %+.0f: any %d (%.2f%%), long %d (%.2f%%)\n",
+    printf("  correction %+.0f: any %d (%.2f%%), long %d (%.2f%%), narrow "
+           "%d (%.2f%%)\n",
            pat_overlap_corrections[c], stats->rerank_changes_any[c],
            100.0 * stats->rerank_changes_any[c] / stats->positions,
            stats->rerank_changes_long[c],
-           100.0 * stats->rerank_changes_long[c] / stats->positions);
+           100.0 * stats->rerank_changes_long[c] / stats->positions,
+           stats->rerank_changes_narrow[c],
+           100.0 * stats->rerank_changes_narrow[c] / stats->positions);
   }
 
   assert(stats->positions > 0);
