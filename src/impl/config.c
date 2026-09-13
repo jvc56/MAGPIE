@@ -2491,7 +2491,6 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
         ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
-        ARG_TOKEN_TWD_ROOT_ONLY,           /* twdroot */
         ARG_TOKEN_TWD_LABEL_PLIES,         /* twdplies */
         ARG_TOKEN_TWD_COMBINE_GAMMA,       /* twdgamma */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
