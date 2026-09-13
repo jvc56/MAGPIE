@@ -36,6 +36,15 @@ void player_set_move_sort_type(Player *player, move_sort_t move_sort_type);
 void player_set_move_record_type(Player *player,
                                  move_record_t move_record_type);
 void player_add_to_score(Player *player, Equity score);
+// Swaps which PATWeights this player's own movegen calls read (see
+// player_duplicate: a duplicated player shares its source's pat pointer,
+// not a copy of it), without touching anything else on the player. The
+// caller owns pat's lifetime; this does not take ownership or free the
+// player's previous one. Meant for tooling that needs one duplicated
+// game's own move choices to follow a different policy than its source
+// (e.g. comparing two candidate weights files' own self-consistent
+// rollouts), not for real gameplay, which loads PAT once per position.
+void player_set_pat(Player *player, const PATWeights *pat);
 
 void player_update(const PlayersData *players_data, Player *player);
 Player *player_duplicate(const Player *player);
