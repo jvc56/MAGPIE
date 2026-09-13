@@ -340,6 +340,41 @@ static void test_pat_move_penalty(void) {
   config_destroy(config);
 }
 
+// Regression test for a bug where pat_scan_unit had no double letter square
+// case and fell through to the triple word square channel bases, so double
+// letter features silently landed on hook_d*/float_score_d* instead of
+// dls_hook_d*/dls_float_score_d*. A weight on dls_hook_d1 alone should
+// still produce a nonzero penalty on a board with open double letter
+// squares; under the bug the feature would never reach that channel and
+// the penalty would stay exactly zero.
+static void test_pat_dls_features_land_in_dls_channels(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Square *lanes = board_get_readonly_lanes(board, 0);
+
+  PATWeights *pat = pat_create_zeroed("dls_only");
+  pat_set_weight(pat, PAT_FEATURE_DLS_HOOK_START, -1000);
+
+  PATEvalContext ctx;
+  pat_eval_context_load(&ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  int num_dls = 0;
+  for (int tws_idx = 0; tws_idx < ctx.num_tws; tws_idx++) {
+    if (ctx.tws_classes[tws_idx] == PAT_PREMIUM_DLS) {
+      num_dls++;
+    }
+  }
+  assert(num_dls > 0);
+  assert(ctx.pre_penalty < 0);
+
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
 static void test_pat_unweighted_units_dropped(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
@@ -549,6 +584,7 @@ void test_pat(void) {
   test_pat_version1_has_no_dls(data_dir);
   test_pat_extract_features_floater_board();
   test_pat_move_penalty();
+  test_pat_dls_features_land_in_dls_channels();
   test_pat_unweighted_units_dropped();
   test_pat_opening_and_hook_flex();
   test_pat_movegen_integration();

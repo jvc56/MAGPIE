@@ -683,6 +683,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   } else if (premium_class == PAT_PREMIUM_TLS) {
     hook_base = PAT_FEATURE_TLS_HOOK_START;
     float_score_base = PAT_FEATURE_TLS_FLOAT_SCORE_START;
+  } else if (premium_class == PAT_PREMIUM_DLS) {
+    hook_base = PAT_FEATURE_DLS_HOOK_START;
+    float_score_base = PAT_FEATURE_DLS_FLOAT_SCORE_START;
   } else if (premium_class == PAT_PREMIUM_QWS) {
     hook_base = PAT_FEATURE_QWS_HOOK_START;
     float_score_base = PAT_FEATURE_QWS_FLOAT_SCORE_START;
