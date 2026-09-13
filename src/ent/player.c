@@ -153,6 +153,10 @@ uint32_t player_get_pat_disabled_classes_mask(const Player *player) {
 
 void player_set_score(Player *player, Equity score) { player->score = score; }
 
+void player_set_pat(Player *player, const PATWeights *pat) {
+  player->pat = pat;
+}
+
 void player_add_to_score(Player *player, Equity score) {
   player->score += score;
 }
