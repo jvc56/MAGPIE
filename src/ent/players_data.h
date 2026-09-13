@@ -6,6 +6,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "rack_info_table.h"
+#include "tws_defense.h"
 #include "wmp.h"
 #include "word_info_table.h"
 #include <stdbool.h>
@@ -29,6 +30,8 @@ RackInfoTable *players_data_get_rack_info_table(const PlayersData *players_data,
                                                 int player_index);
 WordInfoTable *players_data_get_word_info_table(const PlayersData *players_data,
                                                 int player_index);
+TWDWeights *players_data_get_twd(const PlayersData *players_data,
+                                 int player_index);
 
 void players_data_set_move_sort_type(PlayersData *players_data,
                                      int player_index,
