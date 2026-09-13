@@ -12,6 +12,25 @@ void twd_regression_reset(TWDRegression *regression) {
   memset(regression, 0, sizeof(TWDRegression));
 }
 
+void twd_regression_add_observation_double(TWDRegression *regression,
+                                           const double *features,
+                                           double label) {
+  double row[TWD_REGRESSION_DIM];
+  row[0] = 1.0;
+  for (int feature_index = 0; feature_index < TWD_NUM_FEATURES;
+       feature_index++) {
+    row[feature_index + 1] = features[feature_index];
+  }
+  for (int i = 0; i < TWD_REGRESSION_DIM; i++) {
+    for (int j = i; j < TWD_REGRESSION_DIM; j++) {
+      regression->xtx[i][j] += row[i] * row[j];
+    }
+    regression->xty[i] += row[i] * label;
+  }
+  regression->yty += label * label;
+  regression->num_observations++;
+}
+
 void twd_regression_add_observation(TWDRegression *regression,
                                     const int32_t *features,
                                     double reply_score) {
