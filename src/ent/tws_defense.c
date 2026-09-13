@@ -4,6 +4,7 @@
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/tws_defense_defs.h"
@@ -34,6 +35,14 @@ struct TWDWeights {
   // flexibility approximation for hooks and floaters the evaluated move
   // itself creates (see twd_prepare_hook_flex).
   uint8_t hook_flex[MAX_ALPHABET_SIZE];
+  // What a floater is worth to whoever plays through it, from the lexicon
+  // alone. through_score[ml][len] is the mean total tile value the rest of
+  // a len-letter word carries when ml sits at one end of it, and
+  // through_count[ml][len] is how many such words there are, log-scaled so
+  // a common letter does not swamp the fit. Both are indexed by the span a
+  // word must cover to run from the floater to the triple.
+  uint8_t through_score[MAX_ALPHABET_SIZE][TWD_MAX_THROUGH_LEN];
+  uint8_t through_count[MAX_ALPHABET_SIZE][TWD_MAX_THROUGH_LEN];
   // How much a second route to danger counts once the worst one is already
   // counted. The opponent plays one move, so the threats a board offers do
   // not simply add: 0 charges only the worst scan unit, 1 charges every
@@ -79,9 +88,15 @@ void twd_feature_name(int feature_index, char *buf, size_t buf_size) {
   } else if (feature_index < TWD_FEATURE_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "float_flex_d%d",
              feature_index - TWD_FEATURE_FLOAT_FLEX_START + 1);
-  } else if (feature_index < TWD_FEATURE_TT_FLOATER) {
+  } else if (feature_index < TWD_FEATURE_FLOAT_THROUGH_SCORE_START) {
     snprintf(buf, buf_size, "float_score_d%d",
              feature_index - TWD_FEATURE_FLOAT_SCORE_START + 1);
+  } else if (feature_index < TWD_FEATURE_FLOAT_THROUGH_COUNT_START) {
+    snprintf(buf, buf_size, "float_through_score_d%d",
+             feature_index - TWD_FEATURE_FLOAT_THROUGH_SCORE_START + 1);
+  } else if (feature_index < TWD_FEATURE_TT_FLOATER) {
+    snprintf(buf, buf_size, "float_through_count_d%d",
+             feature_index - TWD_FEATURE_FLOAT_THROUGH_COUNT_START + 1);
   } else if (feature_index == TWD_FEATURE_TT_FLOATER) {
     snprintf(buf, buf_size, "tt_floater");
   } else if (feature_index == TWD_FEATURE_TT_HOOK_ONLY) {
@@ -255,9 +270,62 @@ void twd_write(const TWDWeights *twd, const char *data_paths,
   free(twd_filename);
 }
 
+// Accumulators for the through table: for each (end letter, word length),
+// the number of words and the summed tile value of everything in them but
+// that end letter.
+typedef struct TWDThroughStats {
+  double count[MAX_ALPHABET_SIZE][TWD_MAX_THROUGH_LEN];
+  double score_sum[MAX_ALPHABET_SIZE][TWD_MAX_THROUGH_LEN];
+} TWDThroughStats;
+
+// Walks every word in the lexicon, crediting each to the letters at its two
+// ends. A floater reaches the triple by being one end of the word that
+// covers the span between them, so those are the only positions that
+// matter; the value carried is what the REST of the word scores, which is
+// what the opponent lays down to get there.
+static void twd_walk_words(const KWG *kwg, const LetterDistribution *ld,
+                           uint32_t node_index, MachineLetter *word, int length,
+                           TWDThroughStats *stats) {
+  if (node_index == 0) {
+    return;
+  }
+  for (uint32_t index = node_index;; index++) {
+    const uint32_t node = kwg_node(kwg, index);
+    const MachineLetter machine_letter = (MachineLetter)kwg_node_tile(node);
+    word[length] = machine_letter;
+    const int word_length = length + 1;
+    if (kwg_node_accepts(node) && word_length >= MINIMUM_WORD_LENGTH &&
+        word_length < TWD_MAX_THROUGH_LEN) {
+      int total_score = 0;
+      for (int letter_index = 0; letter_index < word_length; letter_index++) {
+        total_score += equity_to_int(ld_get_score(ld, word[letter_index]));
+      }
+      const MachineLetter first = word[0];
+      const MachineLetter last = word[word_length - 1];
+      stats->count[first][word_length] += 1.0;
+      stats->score_sum[first][word_length] +=
+          total_score - equity_to_int(ld_get_score(ld, first));
+      if (last != first || word_length > 1) {
+        stats->count[last][word_length] += 1.0;
+        stats->score_sum[last][word_length] +=
+            total_score - equity_to_int(ld_get_score(ld, last));
+      }
+    }
+    if (word_length < TWD_MAX_THROUGH_LEN - 1) {
+      twd_walk_words(kwg, ld, kwg_node_arc_index(node), word, word_length,
+                     stats);
+    }
+    if (kwg_node_is_end(node)) {
+      break;
+    }
+  }
+}
+
 void twd_prepare_hook_flex(TWDWeights *twd, const KWG *kwg,
                            const LetterDistribution *ld) {
   memset(twd->hook_flex, 0, sizeof(twd->hook_flex));
+  memset(twd->through_score, 0, sizeof(twd->through_score));
+  memset(twd->through_count, 0, sizeof(twd->through_count));
   if (!kwg) {
     return;
   }
@@ -286,6 +354,39 @@ void twd_prepare_hook_flex(TWDWeights *twd, const KWG *kwg,
     }
     twd->hook_flex[ml] = (uint8_t)counts[ml];
   }
+
+  TWDThroughStats *stats = calloc_or_die(1, sizeof(TWDThroughStats));
+  MachineLetter word[TWD_MAX_THROUGH_LEN];
+  twd_walk_words(kwg, ld, dawg_root, word, 0, stats);
+  for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+    for (int len = 0; len < TWD_MAX_THROUGH_LEN; len++) {
+      const double word_count = stats->count[ml][len];
+      if (word_count <= 0.0) {
+        continue;
+      }
+      double mean_score = stats->score_sum[ml][len] / word_count;
+      if (mean_score > UINT8_MAX) {
+        mean_score = UINT8_MAX;
+      }
+      twd->through_score[ml][len] = (uint8_t)(mean_score + 0.5);
+      // Log scale: the useful distinction is between a letter that reaches
+      // nothing, a few words, and thousands, not between 900 and 1000.
+      double scaled = 8.0 * log2(1.0 + word_count);
+      if (scaled > UINT8_MAX) {
+        scaled = UINT8_MAX;
+      }
+      twd->through_count[ml][len] = (uint8_t)(scaled + 0.5);
+    }
+  }
+  free(stats);
+}
+
+int twd_get_through_score(const TWDWeights *twd, MachineLetter ml, int span) {
+  return (span < TWD_MAX_THROUGH_LEN) ? twd->through_score[ml][span] : 0;
+}
+
+int twd_get_through_count(const TWDWeights *twd, MachineLetter ml, int span) {
+  return (span < TWD_MAX_THROUGH_LEN) ? twd->through_count[ml][span] : 0;
 }
 
 int twd_get_hook_flex(const TWDWeights *twd, MachineLetter ml) {
@@ -483,9 +584,10 @@ static TWDCrossInfo twd_effective_cross_info(const Square *lane, int idx,
 // change this unit's features by placing a tile on one of those squares or
 // directly beside them in the perpendicular direction.
 static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
-                          const uint8_t *unseen_counts, int tws_row,
-                          int tws_col, int dir, const TWDMoveOverlay *overlay,
-                          int32_t *features, int *extent_lo, int *extent_hi) {
+                          const uint8_t *unseen_counts, const TWDWeights *twd,
+                          int tws_row, int tws_col, int dir,
+                          const TWDMoveOverlay *overlay, int32_t *features,
+                          int *extent_lo, int *extent_hi) {
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
   const int tws_idx = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_col : tws_row;
@@ -566,6 +668,21 @@ static void twd_scan_unit(const Square *lanes, const LetterDistribution *ld,
           }
           features[TWD_FEATURE_FLOAT_SCORE_START + distance_bin - 1] +=
               tile_score;
+          // What a word through this floater would actually lay down on
+          // the way to the triple. The span it must cover is the empties
+          // between the two plus both endpoints; a blank contributes
+          // nothing to score above but reaches whatever its letter reaches.
+          if (twd != NULL) {
+            const MachineLetter unblanked =
+                get_unblanked_machine_letter(run_letter);
+            const int span = distance_bin + 1;
+            if (span < TWD_MAX_THROUGH_LEN) {
+              features[TWD_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
+                       1] += twd->through_score[unblanked][span];
+              features[TWD_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
+                       1] += twd->through_count[unblanked][span];
+            }
+          }
           idx += side;
         }
         int run_flex;
@@ -748,7 +865,8 @@ static int twd_find_tws(const Square *lanes, uint8_t *tws_rows,
 }
 
 void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
-                          const Rack *player_rack, int32_t *features) {
+                          const Rack *player_rack, const TWDWeights *twd,
+                          int32_t *features) {
   memset(features, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
   twd_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
@@ -756,10 +874,10 @@ void twd_extract_features(const Square *lanes, const LetterDistribution *ld,
   uint8_t tws_cols[TWD_MAX_TWS];
   const int num_tws = twd_find_tws(lanes, tws_rows, tws_cols);
   for (int tws_idx = 0; tws_idx < num_tws; tws_idx++) {
-    twd_scan_unit(lanes, ld, unseen_counts, tws_rows[tws_idx],
+    twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
                   tws_cols[tws_idx], BOARD_HORIZONTAL_DIRECTION, NULL, features,
                   NULL, NULL);
-    twd_scan_unit(lanes, ld, unseen_counts, tws_rows[tws_idx],
+    twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
                   tws_cols[tws_idx], BOARD_VERTICAL_DIRECTION, NULL, features,
                   NULL, NULL);
   }
@@ -880,8 +998,8 @@ static void twd_scan_context_unit(const TWDEvalContext *twd_eval_ctx,
     *dir_out = dir;
     *lane_out = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
     twd_scan_unit(twd_eval_ctx->lanes, twd_eval_ctx->ld,
-                  twd_eval_ctx->unseen_counts, tws_row, tws_col, dir, overlay,
-                  features, extent_lo, extent_hi);
+                  twd_eval_ctx->unseen_counts, twd_eval_ctx->weights, tws_row,
+                  tws_col, dir, overlay, features, extent_lo, extent_hi);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
@@ -1045,6 +1163,12 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
     int32_t overlay_features[TWD_NUM_FEATURES] = {0};
     int scan_dir = 0;
     int scan_lane = 0;
+    // The same rack the training label was built against: whatever the
+    // player holds now, not the leave this move would keep. Training opens
+    // its observation after the mover has drawn back to full, so scoring a
+    // candidate against its leave would call every hook uncontested in
+    // proportion to how many tiles the move played, which is a penalty on
+    // bingos and nothing to do with hooks.
     twd_scan_context_unit(twd_eval_ctx, unit_index, &overlay, overlay_features,
                           &scan_dir, &scan_lane, NULL, NULL);
     post_move_penalties[unit_index] =
@@ -1083,7 +1207,7 @@ void twd_extract_features_combined(const Square *lanes,
     memset(row, 0, sizeof(int32_t) * TWD_NUM_FEATURES);
     if (unit_index < num_tws * 2) {
       const int tws_idx = unit_index / 2;
-      twd_scan_unit(lanes, ld, unseen_counts, tws_rows[tws_idx],
+      twd_scan_unit(lanes, ld, unseen_counts, twd, tws_rows[tws_idx],
                     tws_cols[tws_idx], unit_index % 2, NULL, row, NULL, NULL);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
