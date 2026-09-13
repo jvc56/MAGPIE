@@ -3396,7 +3396,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
         gen->number_of_tiles_in_bag > 0 &&
         board_get_cross_sets_valid(gen->board)) {
       pat_eval_context_load(&gen->pat_eval_ctx, pat, gen->board_lanes, &gen->ld,
-                            &gen->player_rack);
+                            &gen->player_rack,
+                            PAT_CLASS_MASK_ALL &
+                                ~args->pat_disabled_classes_mask);
     } else {
       pat_eval_context_disable(&gen->pat_eval_ctx);
     }

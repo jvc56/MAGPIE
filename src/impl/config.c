@@ -132,6 +132,7 @@ typedef enum {
   ARG_TOKEN_P1_USE_WIT,
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_PAT,
+  ARG_TOKEN_P1_PAT_CLASSES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
@@ -140,6 +141,7 @@ typedef enum {
   ARG_TOKEN_P2_USE_WIT,
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_PAT,
+  ARG_TOKEN_P2_PAT_CLASSES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
@@ -1662,6 +1664,20 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the PAT weights for the given player. This "
              "can be used with the autoplay command to compare playing with "
              "and without defense weights. Use 'none' to unload.";
+      break;
+    case ARG_TOKEN_P1_PAT_CLASSES:
+    case ARG_TOKEN_P2_PAT_CLASSES:
+      usages[0] = "<class>[,<class>...]";
+      examples[0] = "tws";
+      examples[1] = "all";
+      text = "Specifies which loaded PAT classes the given player actually "
+             "applies, without reloading a different weights file: a "
+             "comma-separated list from tws, dws, tls, dls, qws, qls and "
+             "windows, or 'all' (the default). A class this excludes costs "
+             "nothing to walk and cannot change a result, same as if the "
+             "weights had scored it zero. Lets one loaded file serve, for "
+             "example, a fast tws-only mode for rollouts alongside a full "
+             "mode for candidate selection.";
       break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
@@ -8416,6 +8432,26 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  // Set which loaded PAT classes actually apply, per player (see
+  // PAT_CLASS_MASK_ALL). Unset means "keep whatever is currently set",
+  // the same convention the weights themselves use; a fresh config's
+  // default (every class) comes from players_data_create.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const arg_token_t classes_token =
+        player_index == 0 ? ARG_TOKEN_P1_PAT_CLASSES : ARG_TOKEN_P2_PAT_CLASSES;
+    if (config_get_parg_num_set_values(config, classes_token) == 0) {
+      continue;
+    }
+    const char *classes_value = config_get_parg_value(config, classes_token, 0);
+    const uint32_t enabled_mask =
+        pat_parse_classes_mask(classes_value, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    players_data_set_pat_disabled_classes_mask(
+        config->players_data, player_index, PAT_CLASS_MASK_ALL & ~enabled_mask);
+  }
+
   // The PAT hook-flex table depends on the lexicon, so rebuild it
   // whenever data may have changed (cheap: one DAWG walk per letter). When
   // both players share one weights object but use different lexicons, the
@@ -9600,6 +9636,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_USE_WIT, "wit1", 1, 1);
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
   arg(ARG_TOKEN_P1_PAT, "pat1", 1, 1);
+  arg(ARG_TOKEN_P1_PAT_CLASSES, "patclasses1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -9608,6 +9645,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_USE_WIT, "wit2", 1, 1);
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
   arg(ARG_TOKEN_P2_PAT, "pat2", 1, 1);
+  arg(ARG_TOKEN_P2_PAT_CLASSES, "patclasses2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -10060,6 +10098,19 @@ void config_add_settings_to_string_builder(const Config *config,
                                        PLAYERS_DATA_TYPE_PAT, 0));
       }
       break;
+    case ARG_TOKEN_P1_PAT_CLASSES: {
+      // Omitted when every class applies; that is the default.
+      const uint32_t mask =
+          players_data_get_pat_disabled_classes_mask(config->players_data, 0);
+      if (mask != 0) {
+        char *classes_str =
+            pat_classes_mask_to_string(PAT_CLASS_MASK_ALL & ~mask);
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    classes_str);
+        free(classes_str);
+      }
+      break;
+    }
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
@@ -10111,6 +10162,19 @@ void config_add_settings_to_string_builder(const Config *config,
                                        PLAYERS_DATA_TYPE_PAT, 1));
       }
       break;
+    case ARG_TOKEN_P2_PAT_CLASSES: {
+      // Omitted when every class applies; that is the default.
+      const uint32_t mask =
+          players_data_get_pat_disabled_classes_mask(config->players_data, 1);
+      if (mask != 0) {
+        char *classes_str =
+            pat_classes_mask_to_string(PAT_CLASS_MASK_ALL & ~mask);
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    classes_str);
+        free(classes_str);
+      }
+      break;
+    }
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);

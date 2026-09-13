@@ -45,11 +45,21 @@ enum {
       PAT_FEATURE_DWS_FLOAT_SCORE_START + PAT_FLOATER_BIN_COUNT,
   PAT_FEATURE_TLS_FLOAT_SCORE_START =
       PAT_FEATURE_TLS_HOOK_START + PAT_HOOK_BIN_COUNT,
+  // Double letter squares: the most numerous premium square on the
+  // standard board (24 of them, twice the triple letters), left out of
+  // every earlier model because walking them nearly doubled the scan cost
+  // for what a single extra letter's worth of multiplier seemed likely to
+  // be worth. Present from format version 2 on; a version 1 file has no
+  // rows for these and they read as zero (see pat_parse_contents).
+  PAT_FEATURE_DLS_HOOK_START =
+      PAT_FEATURE_TLS_FLOAT_SCORE_START + PAT_FLOATER_BIN_COUNT,
+  PAT_FEATURE_DLS_FLOAT_SCORE_START =
+      PAT_FEATURE_DLS_HOOK_START + PAT_HOOK_BIN_COUNT,
   // The super board's quadruple word and quadruple letter squares. The
   // four quad-word corners are its most valuable squares by a distance and
   // were invisible to a scan that knew multipliers only up to three.
   PAT_FEATURE_QWS_HOOK_START =
-      PAT_FEATURE_TLS_FLOAT_SCORE_START + PAT_FLOATER_BIN_COUNT,
+      PAT_FEATURE_DLS_FLOAT_SCORE_START + PAT_FLOATER_BIN_COUNT,
   PAT_FEATURE_QWS_FLOAT_SCORE_START =
       PAT_FEATURE_QWS_HOOK_START + PAT_HOOK_BIN_COUNT,
   PAT_FEATURE_QLS_HOOK_START =
@@ -99,13 +109,16 @@ enum {
 #define PAT_TRAINING_COMBINE_GAMMA 0.5
 
 // The header line is PAT_MAGIC_PREFIX followed by the format version as a
-// decimal integer, e.g. "magpie_pat_v1". PAT_VERSION is what this build
+// decimal integer, e.g. "magpie_pat_v2". PAT_VERSION is what this build
 // writes; a file naming a version below PAT_EARLIEST_SUPPORTED_VERSION is
-// rejected (see the PAT_UNSUPPORTED_VERSION error).
+// rejected (see the PAT_UNSUPPORTED_VERSION error). Version 1 predates the
+// double letter square channels (PAT_FEATURE_DLS_HOOK_START onward): a
+// version 1 file has no rows for them and they read as zero, so raising
+// PAT_EARLIEST_SUPPORTED_VERSION is never required by adding a class.
 #define PAT_MAGIC_PREFIX "magpie_pat_v"
 enum {
   PAT_EARLIEST_SUPPORTED_VERSION = 1,
-  PAT_VERSION = 1,
+  PAT_VERSION = 2,
 };
 
 #endif

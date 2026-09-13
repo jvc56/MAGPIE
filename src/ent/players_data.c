@@ -31,6 +31,9 @@ struct PlayersData {
   bool use_when_available[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
+  // Which loaded PAT classes to suppress at runtime (see
+  // PAT_CLASS_MASK_ALL); 0 means none, i.e. every class the weights have.
+  uint32_t pat_disabled_classes_masks[2];
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -61,6 +64,18 @@ void players_data_set_move_record_type(PlayersData *players_data,
 move_record_t players_data_get_move_record_type(const PlayersData *players_data,
                                                 int player_index) {
   return players_data->move_record_types[player_index];
+}
+
+void players_data_set_pat_disabled_classes_mask(PlayersData *players_data,
+                                                int player_index,
+                                                uint32_t mask) {
+  players_data->pat_disabled_classes_masks[player_index] = mask;
+}
+
+uint32_t
+players_data_get_pat_disabled_classes_mask(const PlayersData *players_data,
+                                           int player_index) {
+  return players_data->pat_disabled_classes_masks[player_index];
 }
 
 bool players_data_get_is_shared(const PlayersData *players_data,
@@ -285,6 +300,7 @@ PlayersData *players_data_create(bool use_wmp) {
                                     DEFAULT_MOVE_SORT_TYPE);
     players_data_set_move_record_type(players_data, player_index,
                                       DEFAULT_MOVE_RECORD_TYPE);
+    players_data_set_pat_disabled_classes_mask(players_data, player_index, 0);
   }
   return players_data;
 }

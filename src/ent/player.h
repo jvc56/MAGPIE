@@ -29,6 +29,7 @@ const WMP *player_get_wmp(const Player *player);
 const RackInfoTable *player_get_rack_info_table(const Player *player);
 const WordInfoTable *player_get_word_info_table(const Player *player);
 const PATWeights *player_get_pat(const Player *player);
+uint32_t player_get_pat_disabled_classes_mask(const Player *player);
 
 void player_set_score(Player *player, Equity score);
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type);
