@@ -80,6 +80,8 @@
 // The "scaled" candidate under test; swapped between retraining attempts
 // without touching the rest of the file.
 #define PAT_HYPERSCALE_FIT_SCALED_PAT_NAME "pat_hyper_frozen_v1"
+#define PAT_LEXFLOAT_PAT_NAME "pat_lexfloat_frozen_v1"
+#define PAT_LEGACY_FROZEN_PAT_NAME "pat_legacy_frozen_v1"
 // Rollout samples averaged per candidate move, each one paired against the
 // other candidate's same-index sample via a shared world_seed (see
 // pat_hyperscale_reference_value).
@@ -161,7 +163,16 @@ static double pat_hyperscale_average_reference_value(
   return total / PAT_HYPERSCALE_FIT_NUM_ROLLOUT_SAMPLES;
 }
 
-void test_pat_hyperscale_fit(void) {
+// Runs the move-choice-benefit comparison of candidate_pat_name against
+// baseline_pat_name (NULL for the champion, pat_dls_champion_v2, which is
+// the common reference policy either way) over num_positions attempted
+// positions seeded from seed_base. Each
+// candidate file gets its own prespecified seed range so a confirmation
+// batch never reuses positions an earlier exploratory run already looked
+// at.
+static void pat_move_choice_benefit(const char *baseline_pat_name,
+                                    const char *candidate_pat_name,
+                                    uint64_t seed_base, int num_positions) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
       "-pat pat_dls_champion_v2");
@@ -172,12 +183,22 @@ void test_pat_hyperscale_fit(void) {
   assert(raw_pat);
 
   ErrorStack *error_stack = error_stack_create();
-  PATWeights *scaled_pat =
-      pat_create(config_get_data_paths(config),
-                 PAT_HYPERSCALE_FIT_SCALED_PAT_NAME, error_stack);
+  PATWeights *scaled_pat = pat_create(config_get_data_paths(config),
+                                      candidate_pat_name, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(scaled_pat);
+  PATWeights *baseline_pat = NULL;
+  if (baseline_pat_name != NULL) {
+    baseline_pat = pat_create(config_get_data_paths(config), baseline_pat_name,
+                              error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(baseline_pat);
+  }
   error_stack_destroy(error_stack);
+  // What the baseline side of every pair chooses with; the reference
+  // continuation below stays the champion regardless.
+  const PATWeights *baseline_chooser =
+      (baseline_pat != NULL) ? baseline_pat : raw_pat;
 
   // The reference continuation policy shared by both candidates in every
   // pair below. The unmodified champion is a legitimate, neutral choice
@@ -193,8 +214,8 @@ void test_pat_hyperscale_fit(void) {
   int num_disagreements = 0;
   int num_positions_considered = 0;
 
-  for (int attempt = 0; attempt < PAT_HYPERSCALE_FIT_NUM_POSITIONS; attempt++) {
-    const uint64_t seed = 700000000ULL + (uint64_t)attempt;
+  for (int attempt = 0; attempt < num_positions; attempt++) {
+    const uint64_t seed = seed_base + (uint64_t)attempt;
     game_reset(game);
     game_seed(game, seed);
     draw_starting_racks(game);
@@ -224,7 +245,7 @@ void test_pat_hyperscale_fit(void) {
     // Each model's own top choice at this exact position -- not the
     // champion's top-2, which can miss the scaled model's actual
     // preference entirely.
-    player_set_pat(game_get_player(game, mover_index), raw_pat);
+    player_set_pat(game_get_player(game, mover_index), baseline_chooser);
     Move move_raw;
     move_copy(&move_raw, get_top_equity_move(game, choice_move_list));
     player_set_pat(game_get_player(game, mover_index), scaled_pat);
@@ -260,9 +281,14 @@ void test_pat_hyperscale_fit(void) {
   move_list_destroy(setup_move_list);
   move_list_destroy(choice_move_list);
   pat_destroy(scaled_pat);
+  if (baseline_pat != NULL) {
+    pat_destroy(baseline_pat);
+  }
 
-  printf("\nhyperscale move-choice pilot: %d positions considered, %d "
+  printf("\n%s vs %s move-choice pilot: %d positions considered, %d "
          "disagreements (%.1f%%)\n",
+         candidate_pat_name,
+         baseline_pat_name != NULL ? baseline_pat_name : "champion",
          num_positions_considered, num_disagreements,
          num_positions_considered > 0
              ? 100.0 * num_disagreements / num_positions_considered
@@ -273,18 +299,46 @@ void test_pat_hyperscale_fit(void) {
         (sum_diff_sq / num_disagreements - mean_diff * mean_diff) *
         ((double)num_disagreements / (num_disagreements - 1));
     const double se_diff = sqrt(variance_diff / num_disagreements);
-    printf("reference value(scaled's choice) - reference value(raw's "
+    printf("reference value(candidate's choice) - reference value(baseline's "
            "choice): mean %.4f, SE %.4f, 95%% CI [%.4f, %.4f]\n",
            mean_diff, se_diff, mean_diff - 1.96 * se_diff,
            mean_diff + 1.96 * se_diff);
     printf("%s\n",
            mean_diff > 0.0
-               ? "scaled model's own move choices score higher under the "
+               ? "candidate's own move choices score higher under the "
                  "common reference"
-               : "scaled model's own move choices do not score higher under "
+               : "candidate's own move choices do not score higher under "
                  "the common reference");
   }
 
   assert(num_positions_considered > 0);
   config_destroy(config);
+}
+
+void test_pat_hyperscale_fit(void) {
+  pat_move_choice_benefit(NULL, PAT_HYPERSCALE_FIT_SCALED_PAT_NAME,
+                          700000000ULL, PAT_HYPERSCALE_FIT_NUM_POSITIONS);
+}
+
+// The lexicon-aware floater refit (pat_lexfloat_frozen_v1: one frozen-
+// policy patgen generation over 150K games, seed 4242, from the champion
+// with lexicon_floaters,1; see PATWeights.lexicon_floaters) on seed ranges
+// no earlier run has used. Two comparisons: against the champion (is it
+// better than what ships), and against the identical refit with the flag
+// off (pat_legacy_frozen_v1, byte-for-byte pat_hyper_frozen_v1 plus the
+// flag row), which isolates the semantics change from the refit itself.
+void test_pat_lexfloat_move_choice(void) {
+  pat_move_choice_benefit(NULL, PAT_LEXFLOAT_PAT_NAME, 800000000ULL,
+                          PAT_HYPERSCALE_FIT_NUM_POSITIONS);
+  pat_move_choice_benefit(PAT_LEGACY_FROZEN_PAT_NAME, PAT_LEXFLOAT_PAT_NAME,
+                          810000000ULL, PAT_HYPERSCALE_FIT_NUM_POSITIONS);
+}
+
+// A larger, separately seeded confirmation batch for the isolated
+// semantics comparison only: it disagrees on just ~2.4% of positions, so
+// the 12,000-position run above resolves it far more coarsely than the
+// champion comparison.
+void test_pat_lexfloat_isolated_confirm(void) {
+  pat_move_choice_benefit(PAT_LEGACY_FROZEN_PAT_NAME, PAT_LEXFLOAT_PAT_NAME,
+                          820000000ULL, 4 * PAT_HYPERSCALE_FIT_NUM_POSITIONS);
 }

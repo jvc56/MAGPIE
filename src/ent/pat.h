@@ -42,6 +42,8 @@ void pat_set_combine_gamma(PATWeights *pat, double combine_gamma);
 // See PATWeights.own_asset_discount.
 double pat_get_own_asset_discount(const PATWeights *pat);
 void pat_set_own_asset_discount(PATWeights *pat, double own_asset_discount);
+bool pat_get_lexicon_floaters(const PATWeights *pat);
+void pat_set_lexicon_floaters(PATWeights *pat, bool lexicon_floaters);
 uint64_t pat_get_mutation_counter(const PATWeights *pat);
 void pat_bump_mutation_counter(PATWeights *pat);
 // Writes the weights to data/strategy/<pat_name>.pat.

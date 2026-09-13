@@ -131,6 +131,13 @@ enum {
 #define PAT_OWN_ASSET_DISCOUNT_ROW_PREFIX "own_asset_discount,"
 #define PAT_DEFAULT_OWN_ASSET_DISCOUNT 0.0
 
+// Optional row (0 or 1) selecting which letters a floater run's flexibility
+// counts (see PATWeights.lexicon_floaters). Absent means 0: the behavior
+// every earlier file was trained under, where a floater's flexibility is
+// every unseen tile regardless of what the lexicon lets extend the run.
+#define PAT_LEXICON_FLOATERS_ROW_PREFIX "lexicon_floaters,"
+#define PAT_DEFAULT_LEXICON_FLOATERS false
+
 // The header line is PAT_MAGIC_PREFIX followed by the format version as a
 // decimal integer, e.g. "magpie_pat_v2". PAT_VERSION is what this build
 // writes; a file naming a version below PAT_EARLIEST_SUPPORTED_VERSION is

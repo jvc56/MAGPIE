@@ -59,6 +59,23 @@ struct PATWeights {
   // penalty toward zero, never flip its sign, so no new shadow-pruning
   // bound is needed for it (see pat_eval_move_penalty).
   double own_asset_discount;
+  // Whether a floater run's flexibility counts only the unseen tiles the
+  // lexicon actually lets extend that run toward the premium (the run's
+  // real extension set), or every unseen tile. false is what every file
+  // before this row was trained under: pat_scan_unit read the extension
+  // set from fields game_gen_cross_set never writes on an empty square
+  // (an empty square's right_extension_set) or writes for the run on its
+  // other side (its left_extension_set), so it always saw the trivial
+  // all-letters set and float_flex_dN reduced to "floater runs at
+  // distance N, times tiles unseen". The measured gap is large -- a
+  // quarter of floater runs cannot be extended toward their premium at
+  // all, and real flexibility totals about half of the trivial figure
+  // (test/pat_overlap_pilot_test.c) -- but the shipped champion's
+  // float_flex weights were fitted to the trivial figure, so the two
+  // semantics are different models, selectable per file rather than
+  // switched globally, until a refit under the real sets is validated
+  // against the champion.
+  bool lexicon_floaters;
   uint64_t mutation_counter;
   // The version named on the file's header line (see PAT_VERSION).
   int version;
@@ -87,6 +104,14 @@ void pat_set_own_asset_discount(PATWeights *pat, double own_asset_discount) {
     own_asset_discount = 1.0;
   }
   pat->own_asset_discount = own_asset_discount;
+}
+
+bool pat_get_lexicon_floaters(const PATWeights *pat) {
+  return pat->lexicon_floaters;
+}
+
+void pat_set_lexicon_floaters(PATWeights *pat, bool lexicon_floaters) {
+  pat->lexicon_floaters = lexicon_floaters;
 }
 
 const char *pat_get_name(const PATWeights *pat) { return pat->name; }
@@ -185,6 +210,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->name = string_duplicate(pat_name);
   pat->combine_gamma = PAT_DEFAULT_COMBINE_GAMMA;
   pat->own_asset_discount = PAT_DEFAULT_OWN_ASSET_DISCOUNT;
+  pat->lexicon_floaters = PAT_DEFAULT_LEXICON_FLOATERS;
   pat->version = PAT_VERSION;
   return pat;
 }
@@ -302,6 +328,23 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->own_asset_discount = parsed_discount;
       continue;
     }
+    if (has_prefix(PAT_LEXICON_FLOATERS_ROW_PREFIX, line)) {
+      const int flag = string_to_int(
+          line + strlen(PAT_LEXICON_FLOATERS_ROW_PREFIX), error_stack);
+      // Anything but an explicit 0 or 1 is rejected: the two values are
+      // different models, and a typo silently reading as one of them
+      // would be accepted in silence.
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a lexicon "
+                                 "floaters flag other than 0 or 1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->lexicon_floaters = (flag == 1);
+      continue;
+    }
     if (feature_index >= PAT_NUM_FEATURES) {
       error_stack_push(
           error_stack, ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
@@ -402,6 +445,9 @@ void pat_write(const PATWeights *pat, const char *data_paths,
   string_builder_add_formatted_string(sb, "%s%.6f\n",
                                       PAT_OWN_ASSET_DISCOUNT_ROW_PREFIX,
                                       pat->own_asset_discount);
+  string_builder_add_formatted_string(sb, "%s%d\n",
+                                      PAT_LEXICON_FLOATERS_ROW_PREFIX,
+                                      pat->lexicon_floaters ? 1 : 0);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -918,11 +964,26 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
               overlay->hook_flex[get_unblanked_machine_letter(facing_letter)];
           scaled_run_flex = (int)lround(run_flex * hyper_scale);
         } else {
-          // The empty square between the run and the TWS square carries the
-          // extension set of the adjacent word on the run's side.
-          const uint64_t extension_set =
-              (side > 0) ? square_get_right_extension_set(&lane[prev_empty_idx])
-                         : square_get_left_extension_set(&lane[prev_empty_idx]);
+          // The letters that could extend this run toward the TWS square.
+          // game_gen_cross_set stores a run's own extension sets on its
+          // rightmost (highest lane index) tile, and the leftward one also
+          // on the empty square just before the run; an empty square's
+          // right_extension_set is never written and stays trivial. The
+          // legacy reads below therefore see the trivial set (or the wrong
+          // run's) and count every unseen tile; see
+          // PATWeights.lexicon_floaters for why both are kept.
+          uint64_t extension_set;
+          if (pat != NULL && pat->lexicon_floaters) {
+            extension_set =
+                (side > 0)
+                    ? square_get_left_extension_set(&lane[prev_empty_idx])
+                    : square_get_right_extension_set(&lane[prev_empty_idx - 1]);
+          } else {
+            extension_set =
+                (side > 0)
+                    ? square_get_right_extension_set(&lane[prev_empty_idx])
+                    : square_get_left_extension_set(&lane[prev_empty_idx]);
+          }
           run_flex = pat_set_flex(unseen_counts, extension_set);
           scaled_run_flex =
               pat_set_flex_scaled(unseen_counts, extension_set, hyper_scale);
