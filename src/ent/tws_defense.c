@@ -166,7 +166,24 @@ static void twd_parse_contents(TWDWeights *twd, const char *twd_name,
       continue;
     }
     if (has_prefix(TWD_GAMMA_ROW_PREFIX, line)) {
-      twd->combine_gamma = strtod(line + strlen(TWD_GAMMA_ROW_PREFIX), NULL);
+      const char *gamma_text = line + strlen(TWD_GAMMA_ROW_PREFIX);
+      char *gamma_end = NULL;
+      const double parsed_gamma = strtod(gamma_text, &gamma_end);
+      // Outside [0, 1] the combination stops being a convex one, so it is
+      // no longer nondecreasing in each unit penalty and the bound shadow
+      // pruning relies on stops being an upper bound: moves would be
+      // silently pruned. Unparseable text would otherwise read as 0.0,
+      // which is a different model accepted in silence.
+      if (gamma_end == gamma_text || !isfinite(parsed_gamma) ||
+          parsed_gamma < 0.0 || parsed_gamma > 1.0) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_TWD_INVALID_ROW,
+            get_formatted_string("TWS defense file '%s' line %d has a "
+                                 "combination gamma outside [0, 1]: '%s'",
+                                 twd_name, line_index + 1, line));
+        return;
+      }
+      twd->combine_gamma = parsed_gamma;
       continue;
     }
     if (feature_index >= TWD_NUM_FEATURES) {
