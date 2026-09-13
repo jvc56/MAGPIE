@@ -236,7 +236,7 @@ static void test_pat_extract_features_floater_board(void) {
   const Square *lanes = board_get_readonly_lanes(board, 0);
 
   int32_t features[PAT_NUM_FEATURES];
-  pat_extract_features(lanes, ld, NULL, NULL, features);
+  pat_extract_features(lanes, ld, NULL, NULL, RACK_SIZE, features);
 
   // The floater E at (14,5) is two empties from the TWS at (14,7) and five
   // empties from the TWS at (14,0); E scores one point.
@@ -263,6 +263,42 @@ static void test_pat_extract_features_floater_board(void) {
     assert(features[PAT_FEATURE_FLOAT_FLEX_START + bin] == 0);
     assert(features[PAT_FEATURE_FLOAT_SCORE_START + bin] == 0);
   }
+  config_destroy(config);
+}
+
+// A route needing more fresh tiles than the opponent currently holds cannot
+// be played regardless of which letters would complete it, so the scan's
+// reach must cap at the opponent's real rack size, not always at RACK_SIZE.
+// Reuses the floater board from test_pat_extract_features_floater_board:
+// the E floater is 2 empties from the near TWS and 5 from the far one.
+static void test_pat_scan_reach_capped_by_opponent_rack_size(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(config, PAT_FLOATER_CGP_CMD);
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Square *lanes = board_get_readonly_lanes(board, 0);
+
+  int32_t full_reach_features[PAT_NUM_FEATURES];
+  pat_extract_features(lanes, ld, NULL, NULL, RACK_SIZE, full_reach_features);
+  const int32_t float_flex_d2 =
+      full_reach_features[PAT_FEATURE_FLOAT_FLEX_START + 1];
+  assert(full_reach_features[PAT_FEATURE_FLOAT_SCORE_START + 4] == 1);
+
+  // With the opponent down to 3 tiles, the d=5 route to the far TWS is
+  // impossible: that floater bin must vanish, while the d=2 route (still
+  // <= 3) survives unchanged.
+  int32_t capped_features[PAT_NUM_FEATURES];
+  pat_extract_features(lanes, ld, NULL, NULL, 3, capped_features);
+  assert(capped_features[PAT_FEATURE_FLOAT_SCORE_START + 1] == 1);
+  assert(capped_features[PAT_FEATURE_FLOAT_FLEX_START + 1] == float_flex_d2);
+  assert(capped_features[PAT_FEATURE_FLOAT_SCORE_START + 4] == 0);
+  assert(capped_features[PAT_FEATURE_FLOAT_FLEX_START + 4] == 0);
+  // The triple-triple span needed both endpoints live; losing the far one
+  // drops it to a plain hook-only reach from the near TWS, not a floater.
+  assert(capped_features[PAT_FEATURE_TT_FLOATER] == 0);
+
   config_destroy(config);
 }
 
@@ -302,7 +338,8 @@ static void test_pat_opening_penalty_gating(void) {
   PATWeights *dls_only = pat_create_zeroed("dls_only_gate");
   pat_set_weight(dls_only, PAT_FEATURE_DLS_HOOK_START, -5);
   PATEvalContext ctx;
-  pat_eval_context_load(&ctx, dls_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&ctx, dls_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   const uint32_t dls_active = pat_eval_ctx_active_classes(&ctx);
   assert(dls_active & PAT_CLASS_MASK_LETTER_MULT);
   assert(!(dls_active & PAT_CLASS_MASK_WORD_MULT));
@@ -314,7 +351,8 @@ static void test_pat_opening_penalty_gating(void) {
   // suppressed, the letter axis is untouched.
   PATWeights *tws_only = pat_create_zeroed("tws_only_gate");
   pat_set_weight(tws_only, PAT_FEATURE_HOOK_START, -5);
-  pat_eval_context_load(&ctx, tws_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&ctx, tws_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   const uint32_t tws_active = pat_eval_ctx_active_classes(&ctx);
   assert(tws_active & PAT_CLASS_MASK_WORD_MULT);
   assert(!(tws_active & PAT_CLASS_MASK_LETTER_MULT));
@@ -328,7 +366,7 @@ static void test_pat_opening_penalty_gating(void) {
   PATWeights *dls_weighted = pat_create_zeroed("dls_masked_off_gate");
   pat_set_weight(dls_weighted, PAT_FEATURE_DLS_HOOK_START, -5);
   pat_eval_context_load(&ctx, dls_weighted, lanes, ld, NULL,
-                        PAT_CLASS_MASK_TWS_ONLY);
+                        PAT_CLASS_MASK_TWS_ONLY, RACK_SIZE);
   const uint32_t masked_active = pat_eval_ctx_active_classes(&ctx);
   assert(!(masked_active & PAT_CLASS_MASK_LETTER_MULT));
   assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
@@ -347,7 +385,7 @@ static void test_pat_move_penalty(void) {
   const LetterDistribution *ld = game_get_ld(game);
   const Square *lanes = board_get_readonly_lanes(board, 0);
   int32_t features[PAT_NUM_FEATURES];
-  pat_extract_features(lanes, ld, NULL, NULL, features);
+  pat_extract_features(lanes, ld, NULL, NULL, RACK_SIZE, features);
   const int32_t float_flex_d5 = features[PAT_FEATURE_FLOAT_FLEX_START + 4];
 
   PATWeights *pat = pat_create_zeroed("penalty_test");
@@ -356,8 +394,8 @@ static void test_pat_move_penalty(void) {
   pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START + 4, -100);
 
   PATEvalContext pat_eval_ctx;
-  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL,
-                        PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   const Equity expected_pre = -1000 * features[PAT_FEATURE_TT_FLOATER] -
                               100 * features[PAT_FEATURE_FLOAT_FLEX_START + 1] -
                               100 * float_flex_d5;
@@ -397,7 +435,7 @@ static void test_pat_move_penalty(void) {
   PATWeights *zero_pat = pat_create_zeroed("zero_test");
   PATEvalContext zero_ctx;
   pat_eval_context_load(&zero_ctx, zero_pat, lanes, ld, NULL,
-                        PAT_CLASS_MASK_ALL);
+                        PAT_CLASS_MASK_ALL, RACK_SIZE);
   assert(zero_ctx.pre_penalty == 0);
   assert(pat_eval_move_penalty(&zero_ctx, &block_move) == 0);
   assert(pat_eval_move_penalty(&zero_ctx, &far_move) == 0);
@@ -439,7 +477,8 @@ static void test_pat_dls_features_land_in_dls_channels(void) {
   pat_set_weight(pat, PAT_FEATURE_DLS_HOOK_START, -1000);
 
   PATEvalContext ctx;
-  pat_eval_context_load(&ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   int num_dls = 0;
   for (int tws_idx = 0; tws_idx < ctx.num_tws; tws_idx++) {
     if (ctx.tws_classes[tws_idx] == PAT_PREMIUM_DLS) {
@@ -470,9 +509,10 @@ static void test_pat_unweighted_units_dropped(void) {
   pat_set_weight(pat, PAT_FEATURE_HOOK_START, -20);
 
   PATEvalContext pruned_ctx;
-  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   PATEvalContext full_ctx;
-  pat_eval_context_load_all_units(&full_ctx, pat, lanes, ld, NULL);
+  pat_eval_context_load_all_units(&full_ctx, pat, lanes, ld, NULL, RACK_SIZE);
   assert(pruned_ctx.num_tws > 0);
   assert(full_ctx.num_tws > pruned_ctx.num_tws);
   assert(full_ctx.num_dd > 0);
@@ -509,7 +549,8 @@ static void test_pat_unweighted_units_dropped(void) {
   // A weight on a double-word channel brings those squares back, and one
   // on a double-double channel brings the windows back.
   pat_set_weight(pat, PAT_FEATURE_DWS_HOOK_START, -10);
-  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   int num_dws = 0;
   for (int tws_idx = 0; tws_idx < pruned_ctx.num_tws; tws_idx++) {
     if (pruned_ctx.tws_classes[tws_idx] == PAT_PREMIUM_DWS) {
@@ -522,7 +563,8 @@ static void test_pat_unweighted_units_dropped(void) {
   // the higher tiers, so a double-double weight brings back exactly the
   // tier-0 windows and no others.
   pat_set_weight(pat, PAT_FEATURE_DD_TILES_SAVED, -10);
-  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   int num_tier0 = 0;
   for (int dd_idx = 0; dd_idx < full_ctx.num_dd; dd_idx++) {
     if (full_ctx.dd_tiers[dd_idx] == 0) {
@@ -560,8 +602,8 @@ static void test_pat_opening_and_hook_flex(void) {
   assert(pat_get_hook_flex(pat, e_ml) > pat_get_hook_flex(pat, z_ml));
 
   PATEvalContext pat_eval_ctx;
-  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL,
-                        PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   // Baseline: the floater E is a 1-point tile two empties from (14,7).
   assert(pat_eval_ctx.pre_penalty == -500);
 
@@ -577,8 +619,8 @@ static void test_pat_opening_and_hook_flex(void) {
   // hook_flex table when the flex bin is weighted.
   pat_set_weight(pat, PAT_FEATURE_FLOAT_SCORE_START + 1, 0);
   pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START + 1, -10);
-  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL,
-                        PAT_CLASS_MASK_ALL);
+  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
+                        RACK_SIZE);
   const Equity flex_penalty = pat_eval_move_penalty(&pat_eval_ctx, &open_move);
   // Baseline has the board floater E at d = 2; the move adds the fresh Z
   // floater at d = 2 with hook_flex[Z] flexibility.
@@ -661,6 +703,7 @@ void test_pat(void) {
   test_pat_comments_and_blank_lines(data_dir);
   test_pat_version1_has_no_dls(data_dir);
   test_pat_extract_features_floater_board();
+  test_pat_scan_reach_capped_by_opponent_rack_size();
   test_pat_move_penalty();
   test_pat_dls_features_land_in_dls_channels();
   test_pat_opening_penalty_gating();

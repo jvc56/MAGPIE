@@ -211,6 +211,14 @@ typedef struct PATEvalContext {
   // pat_eval_ctx_active_classes, the safe way to read this from outside
   // pat.c since it is meaningless (and left unset) while weights is NULL.
   uint32_t active_classes_mask;
+  // The opponent's rack SIZE only -- never their rack contents, which real
+  // play never has visibility into. A route needing more fresh tiles than
+  // the opponent currently holds cannot be played regardless of which
+  // letters admit it, so scans cap distance at this rather than always at
+  // RACK_SIZE. Defaults to RACK_SIZE when a caller has no better estimate
+  // (e.g. training, which observes a specific player but not turn parity
+  // detail beyond that).
+  int opponent_rack_size;
 } PATEvalContext;
 
 void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
@@ -219,14 +227,17 @@ void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
 // windows whose tier has none or that the mask's PAT_CLASS_MASK_WINDOWS
 // bit excludes, are not walked: their penalty would be exactly zero, so
 // leaving them out changes no result and only saves the scans. Pass
-// PAT_CLASS_MASK_ALL for ordinary use. Training never comes through here
-// (it extracts every feature from the board directly), so a class the
-// weights have not learned yet still reaches the fit.
+// PAT_CLASS_MASK_ALL for ordinary use. opponent_rack_size is the tile
+// COUNT only (public information), never rack contents; pass RACK_SIZE if
+// unknown. Training never comes through here (it extracts every feature
+// from the board directly), so a class the weights have not learned yet
+// still reaches the fit.
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
                            const Rack *player_rack,
-                           uint32_t enabled_classes_mask);
+                           uint32_t enabled_classes_mask,
+                           int opponent_rack_size);
 // The same context with every unit walked whatever its weights, for callers
 // that read per-move feature rows (pat_extract_move_features) and need the
 // channels the current weights leave at zero.
@@ -234,7 +245,8 @@ void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
                                      const PATWeights *weights,
                                      const Square *lanes,
                                      const LetterDistribution *ld,
-                                     const Rack *player_rack);
+                                     const Rack *player_rack,
+                                     int opponent_rack_size);
 // Returns the defense term for the move: the penalty for the opponent's TWS
 // access after the move is played, which is always <= 0. Returns 0 when the
 // context is NULL or disabled. Non-placement moves return the position
@@ -284,10 +296,11 @@ pat_eval_lane_penalty_bound(const PATEvalContext *pat_eval_ctx, int dir,
 // Used for the context baseline and, exactly as-is, by the training loop on
 // post-move boards. features must have PAT_NUM_FEATURES elements.
 // pat supplies the per-letter tables the floater channels read and may be
-// NULL, which zeroes those channels.
+// NULL, which zeroes those channels. opponent_rack_size is the tile COUNT
+// only (public information); pass RACK_SIZE if unknown.
 void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
                           const Rack *player_rack, const PATWeights *pat,
-                          int32_t *features);
+                          int opponent_rack_size, int32_t *features);
 // The feature row to regress on when per-unit penalties are combined with a
 // gamma below one. Because the combination charges the worst unit in full
 // and the rest at gamma, the row whose dot product with the weights equals
@@ -300,7 +313,8 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
 void pat_extract_features_combined(const Square *lanes,
                                    const LetterDistribution *ld,
                                    const Rack *player_rack,
-                                   const PATWeights *pat, double *features);
+                                   const PATWeights *pat,
+                                   int opponent_rack_size, double *features);
 
 // Parses a comma-separated list of class names (tws, dws, tls, dls, qws,
 // qls, windows), or "all" or "none", into the PAT_CLASS_MASK_* bitmask of

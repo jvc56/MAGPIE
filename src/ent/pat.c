@@ -670,7 +670,10 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           const uint8_t *unseen_counts, const PATWeights *pat,
                           int tws_row, int tws_col, int premium_class, int dir,
                           const PATMoveOverlay *overlay, int32_t *features,
-                          int *extent_lo, int *extent_hi) {
+                          int *extent_lo, int *extent_hi,
+                          int opponent_rack_size) {
+  const int max_reach =
+      (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   // Each premium class writes its own hook and floater-value channels. The
   // richer channels (floater flexibility, the lexicon through-table, and
   // the triple-triple pair) stay exclusive to triple word squares, which
@@ -818,7 +821,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         break;
       }
       empties_used++;
-      if (empties_used > RACK_SIZE) {
+      if (empties_used > max_reach) {
         break;
       }
       if (full_channels && bonus_square_get_word_multiplier(
@@ -858,7 +861,10 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
 static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
                              int dir, int lane_index, int lo, int hi, int tier,
                              const PATMoveOverlay *overlay, int32_t *features,
-                             int *extent_lo, int *extent_hi) {
+                             int *extent_lo, int *extent_hi,
+                             int opponent_rack_size) {
+  const int max_reach =
+      (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const int tier_base =
       PAT_FEATURE_WINDOW_START + tier * PAT_WINDOW_FEATURES_PER_TIER;
   const Square *lane = board_get_row_cache(lanes, lane_index, dir);
@@ -896,7 +902,7 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     }
     empties++;
   }
-  if (empties > RACK_SIZE) {
+  if (empties > max_reach) {
     return;
   }
   if (has_floater) {
@@ -906,7 +912,7 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
   } else {
     return;
   }
-  features[tier_base + 2] += RACK_SIZE - empties;
+  features[tier_base + 2] += max_reach - empties;
 }
 
 // Finds the double-double windows: consecutive pairs of double word squares
@@ -1028,7 +1034,7 @@ static int pat_find_tws(const Square *lanes, uint8_t *tws_rows,
 
 void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
                           const Rack *player_rack, const PATWeights *pat,
-                          int32_t *features) {
+                          int opponent_rack_size, int32_t *features) {
   memset(features, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
   pat_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
@@ -1039,10 +1045,12 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
   for (int tws_idx = 0; tws_idx < num_tws; tws_idx++) {
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
-                  BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL);
+                  BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
+                  opponent_rack_size);
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
-                  BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL);
+                  BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
+                  opponent_rack_size);
   }
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
@@ -1054,7 +1062,7 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
   for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
     pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                      dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                     features, NULL, NULL);
+                     features, NULL, NULL, opponent_rack_size);
   }
 }
 
@@ -1221,7 +1229,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
     pat_scan_unit(pat_eval_ctx->lanes, pat_eval_ctx->ld,
                   pat_eval_ctx->unseen_counts, pat_eval_ctx->weights, tws_row,
                   tws_col, pat_eval_ctx->tws_classes[tws_idx], dir, overlay,
-                  features, extent_lo, extent_hi);
+                  features, extent_lo, extent_hi,
+                  pat_eval_ctx->opponent_rack_size);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
@@ -1231,7 +1240,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                    pat_eval_ctx->dd_dirs[dd_idx],
                    pat_eval_ctx->dd_lanes[dd_idx], pat_eval_ctx->dd_los[dd_idx],
                    pat_eval_ctx->dd_his[dd_idx], pat_eval_ctx->dd_tiers[dd_idx],
-                   overlay, features, extent_lo, extent_hi);
+                   overlay, features, extent_lo, extent_hi,
+                   pat_eval_ctx->opponent_rack_size);
 }
 
 // Whether any channel a walk from this premium class can write carries a
@@ -1352,11 +1362,13 @@ static void pat_drop_unweighted_units(PATEvalContext *pat_eval_ctx,
 static void pat_eval_context_load_units(
     PATEvalContext *pat_eval_ctx, const PATWeights *weights,
     const Square *lanes, const LetterDistribution *ld, const Rack *player_rack,
-    bool drop_unweighted_units, uint32_t enabled_classes_mask) {
+    bool drop_unweighted_units, uint32_t enabled_classes_mask,
+    int opponent_rack_size) {
   pat_eval_ctx->weights = weights;
   if (!weights) {
     return;
   }
+  pat_eval_ctx->opponent_rack_size = opponent_rack_size;
   pat_eval_ctx->active_classes_mask = 0;
   for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
        premium_class++) {
@@ -1465,18 +1477,20 @@ void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
                            const Rack *player_rack,
-                           uint32_t enabled_classes_mask) {
+                           uint32_t enabled_classes_mask,
+                           int opponent_rack_size) {
   pat_eval_context_load_units(pat_eval_ctx, weights, lanes, ld, player_rack,
-                              true, enabled_classes_mask);
+                              true, enabled_classes_mask, opponent_rack_size);
 }
 
 void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
                                      const PATWeights *weights,
                                      const Square *lanes,
                                      const LetterDistribution *ld,
-                                     const Rack *player_rack) {
+                                     const Rack *player_rack,
+                                     int opponent_rack_size) {
   pat_eval_context_load_units(pat_eval_ctx, weights, lanes, ld, player_rack,
-                              false, PAT_CLASS_MASK_ALL);
+                              false, PAT_CLASS_MASK_ALL, opponent_rack_size);
 }
 
 // Returns the bitset of scan units the move can affect (see the
@@ -1598,7 +1612,8 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
 void pat_extract_features_combined(const Square *lanes,
                                    const LetterDistribution *ld,
                                    const Rack *player_rack,
-                                   const PATWeights *pat, double *features) {
+                                   const PATWeights *pat,
+                                   int opponent_rack_size, double *features) {
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     features[feature_index] = 0.0;
@@ -1628,12 +1643,12 @@ void pat_extract_features_combined(const Square *lanes,
       const int tws_idx = unit_index / 2;
       pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                     tws_cols[tws_idx], tws_classes[tws_idx], unit_index % 2,
-                    NULL, row, NULL, NULL);
+                    NULL, row, NULL, NULL, opponent_rack_size);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                        dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                       row, NULL, NULL);
+                       row, NULL, NULL, opponent_rack_size);
     }
     const Equity penalty = pat_dot(pat, row);
     if (penalty < worst_penalty) {

@@ -1083,7 +1083,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       pat_extract_features_combined(
           board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
           player_get_rack(game_get_player(game, player_on_turn_index)),
-          pat_gen_shared_data->pat, observation->features);
+          pat_gen_shared_data->pat,
+          rack_get_total_letters(
+              player_get_rack(game_get_player(game, 1 - player_on_turn_index))),
+          observation->features);
       observation->plies_seen = 0;
       observation->label = 0.0;
       observation->valid = true;
