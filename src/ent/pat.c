@@ -77,6 +77,15 @@ double pat_get_own_asset_discount(const PATWeights *pat) {
 }
 
 void pat_set_own_asset_discount(PATWeights *pat, double own_asset_discount) {
+  // Clamped here, not just at the file-parsing boundary: a search over
+  // candidate discounts (e.g. a 1D fit) mutates a PATWeights directly, and
+  // the bound argument in pat_eval_move_penalty_bound depends on this
+  // invariant holding for every value this object could ever carry.
+  if (own_asset_discount < 0.0) {
+    own_asset_discount = 0.0;
+  } else if (own_asset_discount > 1.0) {
+    own_asset_discount = 1.0;
+  }
   pat->own_asset_discount = own_asset_discount;
 }
 
@@ -1619,21 +1628,20 @@ static void pat_eval_context_load_units(
   // sound upper bound for every move in the lane rather than only the ones
   // whose leave happens to be empty. Empty whenever the file carries no
   // discount, so that case's bound is identical to before this feature.
-  uint64_t worst_case_leave_units[PAT_MASK_WORDS];
-  pat_mask_clear(worst_case_leave_units);
+  pat_mask_clear(pat_eval_ctx->worst_case_leave_units);
   if (weights->own_asset_discount > 0.0 && player_rack) {
     bool rack_has_blank =
         rack_get_letter(player_rack, BLANK_MACHINE_LETTER) > 0;
     const int dist_size = rack_get_dist_size(player_rack);
     for (int ml = 1; ml < dist_size; ml++) {
       if (rack_get_letter(player_rack, ml) > 0) {
-        pat_mask_or_into(worst_case_leave_units,
+        pat_mask_or_into(pat_eval_ctx->worst_case_leave_units,
                          pat_eval_ctx->units_by_hook_letter[ml]);
       }
     }
     if (rack_has_blank) {
       for (int ml = 1; ml < MAX_ALPHABET_SIZE; ml++) {
-        pat_mask_or_into(worst_case_leave_units,
+        pat_mask_or_into(pat_eval_ctx->worst_case_leave_units,
                          pat_eval_ctx->units_by_hook_letter[ml]);
       }
     }
@@ -1643,9 +1651,9 @@ static void pat_eval_context_load_units(
     uint64_t col_bound_units[PAT_MASK_WORDS];
     for (int word = 0; word < PAT_MASK_WORDS; word++) {
       row_bound_units[word] = pat_eval_ctx->unit_mask_by_row[lane][word] |
-                              worst_case_leave_units[word];
+                              pat_eval_ctx->worst_case_leave_units[word];
       col_bound_units[word] = pat_eval_ctx->unit_mask_by_col[lane][word] |
-                              worst_case_leave_units[word];
+                              pat_eval_ctx->worst_case_leave_units[word];
     }
     pat_eval_ctx->lane_penalty_bound[BOARD_HORIZONTAL_DIRECTION][lane] =
         pat_units_penalty_bound(pat_eval_ctx, row_bound_units);
@@ -1721,6 +1729,29 @@ static uint64_t pat_leave_letter_mask(const Rack *leave, bool *has_blank_out) {
   return mask;
 }
 
+// Every unit reachable through some letter in letter_mask, via the reverse
+// index (see units_by_hook_letter); every unit with any live route at all
+// when has_blank, since a blank stands in for whatever letter a hook needs.
+static void pat_units_from_letter_mask(const PATEvalContext *pat_eval_ctx,
+                                       uint64_t letter_mask, bool has_blank,
+                                       uint64_t *units_out) {
+  pat_mask_clear(units_out);
+  uint64_t remaining_letters = letter_mask;
+  while (remaining_letters) {
+    const int machine_letter = pat_ctz(remaining_letters);
+    remaining_letters &= remaining_letters - 1;
+    pat_mask_or_into(units_out,
+                     pat_eval_ctx->units_by_hook_letter[machine_letter]);
+  }
+  if (has_blank) {
+    for (int machine_letter = 1; machine_letter < MAX_ALPHABET_SIZE;
+         machine_letter++) {
+      pat_mask_or_into(units_out,
+                       pat_eval_ctx->units_by_hook_letter[machine_letter]);
+    }
+  }
+}
+
 // Units the move's own leave could exploit itself (see unit_hook_letters),
 // independent of whether its placement geometrically touches them. Empty
 // whenever the file carries no discount, so that case matches every
@@ -1734,22 +1765,8 @@ static void pat_leave_affected_units(const PATEvalContext *pat_eval_ctx,
   }
   bool leave_has_blank = false;
   const uint64_t leave_mask = pat_leave_letter_mask(leave, &leave_has_blank);
-  uint64_t remaining_letters = leave_mask;
-  while (remaining_letters) {
-    const int machine_letter = pat_ctz(remaining_letters);
-    remaining_letters &= remaining_letters - 1;
-    pat_mask_or_into(leave_units_out,
-                     pat_eval_ctx->units_by_hook_letter[machine_letter]);
-  }
-  if (leave_has_blank) {
-    // A blank stands in for whatever letter a hook needs, so it can
-    // exploit any unit with a live hook or floater route at all.
-    for (int machine_letter = 1; machine_letter < MAX_ALPHABET_SIZE;
-         machine_letter++) {
-      pat_mask_or_into(leave_units_out,
-                       pat_eval_ctx->units_by_hook_letter[machine_letter]);
-    }
-  }
+  pat_units_from_letter_mask(pat_eval_ctx, leave_mask, leave_has_blank,
+                             leave_units_out);
 }
 
 // Bounds pat_eval_move_penalty(move, leave) without rescanning: besides the
@@ -1757,10 +1774,17 @@ static void pat_leave_affected_units(const PATEvalContext *pat_eval_ctx,
 // exploit (see pat_leave_affected_units) can also move all the way to 0 in
 // the best case (own_asset_discount capping at 1), so both sets are zeroed
 // for the bound exactly as pat_units_penalty_bound already zeros a
-// geometrically reached unit. Skipping the leave side here whenever the
-// move's own is unknown or the file carries no discount would make this
-// call a looser bound than the real evaluation could ever need, never a
-// wrong one, but every current caller has the leave in hand regardless.
+// geometrically reached unit.
+//
+// A NULL leave does NOT mean "assume no credit": that would make the bound
+// too small when the move's actual (unknown to this call) leave would have
+// qualified, which is the unsound direction for an upper bound -- the real
+// pat_eval_move_penalty could then exceed what this claimed to bound.
+// Every real move-generation caller has the actual leave in hand and passes
+// it, so this only matters for a caller with none to offer; that caller
+// gets pat_eval_ctx->worst_case_leave_units, the same conservative
+// rack-wide superset lane_penalty_bound already uses for exactly this
+// reason (every leave is a subset of the current starting rack).
 Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
                                    const Move *move, const Rack *leave) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
@@ -1779,7 +1803,13 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   pat_move_affected_units(pat_eval_ctx, row_start, row_end, col_start, col_end,
                           affected_units);
   uint64_t leave_units[PAT_MASK_WORDS];
-  pat_leave_affected_units(pat_eval_ctx, leave, leave_units);
+  if (leave) {
+    pat_leave_affected_units(pat_eval_ctx, leave, leave_units);
+  } else {
+    for (int word = 0; word < PAT_MASK_WORDS; word++) {
+      leave_units[word] = pat_eval_ctx->worst_case_leave_units[word];
+    }
+  }
   uint64_t combined_units[PAT_MASK_WORDS];
   for (int word = 0; word < PAT_MASK_WORDS; word++) {
     combined_units[word] = affected_units[word] | leave_units[word];
@@ -1810,8 +1840,16 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
   // Units the move's own leave could exploit itself, whether or not its
   // placement geometrically touches them (see unit_hook_letters). Empty
   // whenever the file carries no discount, so that case runs the exact
-  // byte-for-byte loop every earlier file already ran.
+  // byte-for-byte loop every earlier file already ran. This uses the
+  // baseline (pre-move) reverse index, which is exactly right for a unit
+  // the move's placement never touches -- but a unit the placement DOES
+  // touch may have gained or lost hook letters the move itself created or
+  // destroyed, so that case is re-checked below against a fresh, overlay-
+  // aware scan instead of trusting this baseline membership test.
   const double discount = pat_eval_ctx->weights->own_asset_discount;
+  bool leave_has_blank = false;
+  const uint64_t leave_mask =
+      (discount > 0.0) ? pat_leave_letter_mask(leave, &leave_has_blank) : 0;
   uint64_t leave_units[PAT_MASK_WORDS];
   pat_leave_affected_units(pat_eval_ctx, leave, leave_units);
   uint64_t combined_units[PAT_MASK_WORDS];
@@ -1844,10 +1882,12 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
       const int unit_index = word * 64 + pat_ctz(bits);
       bits &= bits - 1;
       Equity penalty;
+      bool qualifies_for_credit;
       if (pat_mask_test(affected_units, unit_index)) {
         int32_t overlay_features[PAT_NUM_FEATURES] = {0};
         int scan_dir = 0;
         int scan_lane = 0;
+        uint64_t fresh_hook_letters = 0;
         // The same rack the training label was built against: whatever the
         // player holds now, not the leave this move would keep. Training
         // opens its observation after the mover has drawn back to full, so
@@ -1856,15 +1896,27 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
         // which is a penalty on bingos and nothing to do with hooks.
         pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
                               overlay_features, &scan_dir, &scan_lane, NULL,
-                              NULL, NULL);
+                              NULL,
+                              discount > 0.0 ? &fresh_hook_letters : NULL);
         penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
+        // The move's own placement can create or destroy this unit's hook
+        // letters (a newly hooked square, or covering one that existed at
+        // baseline), so eligibility is re-checked against the fresh,
+        // overlay-aware scan rather than trusted from the baseline reverse
+        // index that built leave_units.
+        qualifies_for_credit =
+            discount > 0.0 &&
+            (leave_has_blank ? (fresh_hook_letters != 0)
+                             : (fresh_hook_letters & leave_mask) != 0);
       } else {
         // Reached only through the leave: the move's placement never
-        // touched this unit, so its geometry (and hence penalty, absent
-        // the discount below) is exactly what was loaded.
+        // touched this unit, so its geometry (and hence its hook letters)
+        // is exactly what was loaded, and the baseline membership test is
+        // still correct.
         penalty = pat_eval_ctx->unit_penalty[unit_index];
+        qualifies_for_credit = pat_mask_test(leave_units, unit_index);
       }
-      if (pat_mask_test(leave_units, unit_index)) {
+      if (qualifies_for_credit) {
         // p <= 0 and discount in [0, 1], so p * (1 - discount) always
         // lands in [p, 0]: the credit can shrink a penalty toward zero
         // but never past it, so no new shadow-pruning bound is needed.
