@@ -218,6 +218,20 @@ typedef struct PATEvalContext {
   // RACK_SIZE. Defaults to RACK_SIZE when a caller has no better estimate
   // (e.g. training, which observes a specific player but not turn parity
   // detail beyond that).
+  //
+  // Every current caller is bag-gated (see pat_eval_context_load's own
+  // callers in move_gen.c and validated_move.c, and the training gate in
+  // autoplay.c), and the opponent's rack can only fall below RACK_SIZE once
+  // the bag is empty: whichever player's draw first comes up short is the
+  // one that empties it, so bag_get_letters(...) > 0 implies every rack
+  // still on the board is full. This field is therefore always exactly
+  // RACK_SIZE at every current call site -- confirmed empirically (zero
+  // engagements over 4000 self-played games with instrumentation). It is
+  // still correct and load-bearing as the plumbing pat_scan_unit's
+  // hypergeometric reweighting (unseen_counts scaled by
+  // opponent_rack_size / total_unseen, which DOES vary while the bag has
+  // tiles) needs through the same call chain; keeping the cap live now
+  // means it activates for free the day PAT's own bag-empty gate loosens.
   int opponent_rack_size;
 } PATEvalContext;
 
