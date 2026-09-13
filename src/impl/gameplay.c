@@ -893,6 +893,8 @@ void generate_moves_for_game_override_record_type(
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .disable_pat = args->disable_pat,
+      .pat_disabled_classes_mask =
+          player_get_pat_disabled_classes_mask(player_on_turn),
   };
 
   generate_moves(&args_with_overwritten_record_and_sort);

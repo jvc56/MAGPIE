@@ -67,23 +67,41 @@ typedef enum {
   PAT_PREMIUM_TWS,
   PAT_PREMIUM_DWS,
   PAT_PREMIUM_TLS,
+  PAT_PREMIUM_DLS,
   PAT_PREMIUM_QWS,
   PAT_PREMIUM_QLS,
   PAT_NUM_PREMIUM_CLASSES,
 } pat_premium_class_t;
 
+// A runtime mask of which loaded classes pat_eval_context_load actually
+// applies, independent of what the weights file has: bit
+// (1u << a pat_premium_class_t value) gates that premium class, and
+// PAT_CLASS_MASK_WINDOWS separately gates the double-word and larger
+// window channels (double-double on the standard board). This lets one
+// loaded PATWeights serve a fast mode (e.g. TWS only, for rollouts) and a
+// full mode (e.g. every class, for candidate selection) without loading
+// different files: a class this mask excludes is treated exactly like one
+// the file weighted at zero, so it costs nothing to walk (see
+// pat_class_is_weighted) and cannot change a result.
 enum {
-  // The standard 15x15 board has 37 premium squares of the three classes
-  // walked (8 triple word, 17 double word, 12 triple letter) and the 21x21
-  // super board has 77. Truncation past the cap is deterministic
-  // (row-major) but it is also a defect: the trainer lists squares on the
-  // post-move board and the engine on the pre-move board, so a covered
-  // square near the cap shifts which squares each side sees. Keep the cap
-  // above every layout that is built.
-  PAT_MAX_TWS = 24,
-  // The super board walks 89 premium squares (4 quad word, 16 triple word,
-  // 41 double word, 8 quad letter, 20 triple letter) and has 72 windows.
-  PAT_MAX_PREMIUM = 96,
+  PAT_CLASS_MASK_WINDOWS = 1u << PAT_NUM_PREMIUM_CLASSES,
+  PAT_CLASS_MASK_ALL =
+      PAT_CLASS_MASK_WINDOWS | ((1u << PAT_NUM_PREMIUM_CLASSES) - 1),
+  PAT_CLASS_MASK_TWS_ONLY = 1u << PAT_PREMIUM_TWS,
+};
+
+enum {
+  // The standard 15x15 board has 61 premium squares of the four classes
+  // walked (8 triple word, 17 double word, 12 triple letter, 24 double
+  // letter) and the 21x21 super board has 125. Truncation past the cap is
+  // deterministic (row-major) but it is also a defect: the trainer lists
+  // squares on the post-move board and the engine on the pre-move board,
+  // so a covered square near the cap shifts which squares each side sees.
+  // Keep the cap above every layout that is built.
+  // The super board walks 125 premium squares (4 quad word, 16 triple
+  // word, 41 double word, 8 quad letter, 20 triple letter, 36 double
+  // letter) and has 72 windows.
+  PAT_MAX_PREMIUM = 132,
   // The standard board has 16 double-double windows (8 in rows and 8 in
   // columns) and the super board 40. Windows are found horizontally first,
   // so a cap below the count silently drops every vertical window.
@@ -180,15 +198,18 @@ typedef struct PATEvalContext {
 
 void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
 // Builds the context static evaluation uses. Premium squares whose class
-// has no nonzero weight, and windows whose tier has none, are not walked:
-// their penalty would be exactly zero, so leaving them out changes no
-// result and only saves the scans. Training never comes through here (it
-// extracts every feature from the board directly), so a class the weights
-// have not learned yet still reaches the fit.
+// has no nonzero weight, or that enabled_classes_mask excludes, and
+// windows whose tier has none or that the mask's PAT_CLASS_MASK_WINDOWS
+// bit excludes, are not walked: their penalty would be exactly zero, so
+// leaving them out changes no result and only saves the scans. Pass
+// PAT_CLASS_MASK_ALL for ordinary use. Training never comes through here
+// (it extracts every feature from the board directly), so a class the
+// weights have not learned yet still reaches the fit.
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
-                           const Rack *player_rack);
+                           const Rack *player_rack,
+                           uint32_t enabled_classes_mask);
 // The same context with every unit walked whatever its weights, for callers
 // that read per-move feature rows (pat_extract_move_features) and need the
 // channels the current weights leave at zero.
@@ -251,5 +272,15 @@ void pat_extract_features_combined(const Square *lanes,
                                    const LetterDistribution *ld,
                                    const Rack *player_rack,
                                    const PATWeights *pat, double *features);
+
+// Parses a comma-separated list of class names (tws, dws, tls, dls, qws,
+// qls, windows), or "all" or "none", into the PAT_CLASS_MASK_* bitmask of
+// the classes named. Pushes ERROR_STATUS_PAT_INVALID_CLASSES_ARG and
+// returns 0 on an unrecognized name.
+uint32_t pat_parse_classes_mask(const char *value, ErrorStack *error_stack);
+// The inverse of pat_parse_classes_mask: "all", "none", or a
+// comma-separated list of the classes enabled_classes_mask contains, in
+// canonical order. Caller owns the returned string.
+char *pat_classes_mask_to_string(uint32_t enabled_classes_mask);
 
 #endif

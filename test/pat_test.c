@@ -80,6 +80,47 @@ static void test_pat_feature_names(void) {
   assert(strings_equal(name_buffer, "tt_floater"));
   pat_feature_name(PAT_FEATURE_TT_HOOK_ONLY, name_buffer, sizeof(name_buffer));
   assert(strings_equal(name_buffer, "tt_hook_only"));
+  pat_feature_name(PAT_FEATURE_DLS_HOOK_START, name_buffer,
+                   sizeof(name_buffer));
+  assert(strings_equal(name_buffer, "dls_hook_d1"));
+  pat_feature_name(PAT_FEATURE_DLS_FLOAT_SCORE_START + 1, name_buffer,
+                   sizeof(name_buffer));
+  assert(strings_equal(name_buffer, "dls_float_score_d2"));
+}
+
+// A version 1 file predates the double letter square channels: it has no
+// rows for them at all, not zero-valued ones. Confirms they read back as
+// zero and every other feature still round-trips through the gap.
+static void test_pat_version1_has_no_dls(const char *data_dir) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(sb, "magpie_pat_v1\n");
+  char feature_name[64];
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    if (feature_index >= PAT_FEATURE_DLS_HOOK_START &&
+        feature_index < PAT_FEATURE_QWS_HOOK_START) {
+      continue;
+    }
+    pat_feature_name(feature_index, feature_name, sizeof(feature_name));
+    string_builder_add_formatted_string(sb, "%s,%d\n", feature_name,
+                                        -(feature_index + 1));
+  }
+  write_pat_file_contents(data_dir, "v1_no_dls", string_builder_peek(sb));
+  string_builder_destroy(sb);
+
+  ErrorStack *error_stack = error_stack_create();
+  PATWeights *loaded = pat_create(data_dir, "v1_no_dls", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(loaded);
+  for (int feature_index = PAT_FEATURE_DLS_HOOK_START;
+       feature_index < PAT_FEATURE_QWS_HOOK_START; feature_index++) {
+    assert(pat_get_weight(loaded, feature_index) == 0);
+  }
+  assert(pat_get_weight(loaded, PAT_FEATURE_HOOK_START) == -1);
+  assert(pat_get_weight(loaded, PAT_FEATURE_QWS_HOOK_START) ==
+         -(PAT_FEATURE_QWS_HOOK_START + 1));
+  error_stack_destroy(error_stack);
+  pat_destroy(loaded);
 }
 
 static void test_pat_round_trip(const char *data_dir) {
@@ -242,7 +283,8 @@ static void test_pat_move_penalty(void) {
   pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START + 4, -100);
 
   PATEvalContext pat_eval_ctx;
-  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL);
+  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL,
+                        PAT_CLASS_MASK_ALL);
   const Equity expected_pre = -1000 * features[PAT_FEATURE_TT_FLOATER] -
                               100 * features[PAT_FEATURE_FLOAT_FLEX_START + 1] -
                               100 * float_flex_d5;
@@ -281,7 +323,8 @@ static void test_pat_move_penalty(void) {
   // With zero weights everything is zero.
   PATWeights *zero_pat = pat_create_zeroed("zero_test");
   PATEvalContext zero_ctx;
-  pat_eval_context_load(&zero_ctx, zero_pat, lanes, ld, NULL);
+  pat_eval_context_load(&zero_ctx, zero_pat, lanes, ld, NULL,
+                        PAT_CLASS_MASK_ALL);
   assert(zero_ctx.pre_penalty == 0);
   assert(pat_eval_move_penalty(&zero_ctx, &block_move) == 0);
   assert(pat_eval_move_penalty(&zero_ctx, &far_move) == 0);
@@ -314,7 +357,7 @@ static void test_pat_unweighted_units_dropped(void) {
   pat_set_weight(pat, PAT_FEATURE_HOOK_START, -20);
 
   PATEvalContext pruned_ctx;
-  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL);
+  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
   PATEvalContext full_ctx;
   pat_eval_context_load_all_units(&full_ctx, pat, lanes, ld, NULL);
   assert(pruned_ctx.num_tws > 0);
@@ -353,7 +396,7 @@ static void test_pat_unweighted_units_dropped(void) {
   // A weight on a double-word channel brings those squares back, and one
   // on a double-double channel brings the windows back.
   pat_set_weight(pat, PAT_FEATURE_DWS_HOOK_START, -10);
-  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL);
+  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
   int num_dws = 0;
   for (int tws_idx = 0; tws_idx < pruned_ctx.num_tws; tws_idx++) {
     if (pruned_ctx.tws_classes[tws_idx] == PAT_PREMIUM_DWS) {
@@ -366,7 +409,7 @@ static void test_pat_unweighted_units_dropped(void) {
   // the higher tiers, so a double-double weight brings back exactly the
   // tier-0 windows and no others.
   pat_set_weight(pat, PAT_FEATURE_DD_TILES_SAVED, -10);
-  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL);
+  pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL);
   int num_tier0 = 0;
   for (int dd_idx = 0; dd_idx < full_ctx.num_dd; dd_idx++) {
     if (full_ctx.dd_tiers[dd_idx] == 0) {
@@ -404,7 +447,8 @@ static void test_pat_opening_and_hook_flex(void) {
   assert(pat_get_hook_flex(pat, e_ml) > pat_get_hook_flex(pat, z_ml));
 
   PATEvalContext pat_eval_ctx;
-  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL);
+  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL,
+                        PAT_CLASS_MASK_ALL);
   // Baseline: the floater E is a 1-point tile two empties from (14,7).
   assert(pat_eval_ctx.pre_penalty == -500);
 
@@ -420,7 +464,8 @@ static void test_pat_opening_and_hook_flex(void) {
   // hook_flex table when the flex bin is weighted.
   pat_set_weight(pat, PAT_FEATURE_FLOAT_SCORE_START + 1, 0);
   pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START + 1, -10);
-  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL);
+  pat_eval_context_load(&pat_eval_ctx, pat, lanes, ld, NULL,
+                        PAT_CLASS_MASK_ALL);
   const Equity flex_penalty = pat_eval_move_penalty(&pat_eval_ctx, &open_move);
   // Baseline has the board floater E at d = 2; the move adds the fresh Z
   // floater at d = 2 with hook_flex[Z] flexibility.
@@ -501,6 +546,7 @@ void test_pat(void) {
   test_pat_round_trip(data_dir);
   test_pat_invalid_files(data_dir);
   test_pat_comments_and_blank_lines(data_dir);
+  test_pat_version1_has_no_dls(data_dir);
   test_pat_extract_features_floater_board();
   test_pat_move_penalty();
   test_pat_unweighted_units_dropped();

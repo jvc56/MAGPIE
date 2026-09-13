@@ -108,9 +108,15 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
   } else if (feature_index < PAT_FEATURE_TLS_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "tls_hook_d%d",
              feature_index - PAT_FEATURE_TLS_HOOK_START + 1);
-  } else if (feature_index < PAT_FEATURE_QWS_HOOK_START) {
+  } else if (feature_index < PAT_FEATURE_DLS_HOOK_START) {
     snprintf(buf, buf_size, "tls_float_score_d%d",
              feature_index - PAT_FEATURE_TLS_FLOAT_SCORE_START + 1);
+  } else if (feature_index < PAT_FEATURE_DLS_FLOAT_SCORE_START) {
+    snprintf(buf, buf_size, "dls_hook_d%d",
+             feature_index - PAT_FEATURE_DLS_HOOK_START + 1);
+  } else if (feature_index < PAT_FEATURE_QWS_HOOK_START) {
+    snprintf(buf, buf_size, "dls_float_score_d%d",
+             feature_index - PAT_FEATURE_DLS_FLOAT_SCORE_START + 1);
   } else if (feature_index < PAT_FEATURE_QWS_FLOAT_SCORE_START) {
     snprintf(buf, buf_size, "qws_hook_d%d",
              feature_index - PAT_FEATURE_QWS_HOOK_START + 1);
@@ -159,10 +165,11 @@ void pat_destroy(PATWeights *pat) {
 
 // Parses the weights file contents into pat. The format is:
 //   line 1: the magic header, PAT_MAGIC_PREFIX followed by the format
-//     version as a decimal integer (e.g. "magpie_pat_v1")
-//   then, ignoring empty lines and lines starting with '#', exactly
-//   PAT_NUM_FEATURES lines of "<feature_name>,<millipoints>", in canonical
-//   feature order, every value <= 0.
+//     version as a decimal integer (e.g. "magpie_pat_v2")
+//   then, ignoring empty lines and lines starting with '#', one line of
+//   "<feature_name>,<millipoints>" per feature that version has, in
+//   canonical feature order, every value <= 0. A version 1 file omits the
+//   double letter square rows added in version 2; those weights stay zero.
 static void pat_parse_contents(PATWeights *pat, const char *pat_name,
                                const StringSplitter *split_contents,
                                ErrorStack *error_stack) {
@@ -204,6 +211,14 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
     const char *line = string_splitter_get_item(split_contents, line_index);
     if (is_string_empty_or_whitespace(line) || line[0] == '#') {
       continue;
+    }
+    // A version 1 file has no double letter square rows: they were added
+    // in version 2. Skip past that range so the next row is matched
+    // against the feature that actually follows it in an old file; the
+    // weights array already reads zero there from the zeroed allocation.
+    if (version < 2 && feature_index >= PAT_FEATURE_DLS_HOOK_START &&
+        feature_index < PAT_FEATURE_QWS_HOOK_START) {
+      feature_index = PAT_FEATURE_QWS_HOOK_START;
     }
     if (has_prefix(PAT_GAMMA_ROW_PREFIX, line)) {
       const char *gamma_text = line + strlen(PAT_GAMMA_ROW_PREFIX);
@@ -950,9 +965,7 @@ static int pat_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
 }
 
 // Which premium class a square belongs to, or -1 if it is not one worth
-// walking a lane for. Double letter squares are deliberately excluded: they
-// are common enough to double the scan cost while raising a word by a
-// couple of points.
+// walking a lane for.
 static int pat_premium_class_of(const Square *square) {
   const BonusSquare bonus = square_get_bonus_square(square);
   const int word_multiplier = bonus_square_get_word_multiplier(bonus);
@@ -971,6 +984,9 @@ static int pat_premium_class_of(const Square *square) {
   }
   if (letter_multiplier == 3) {
     return PAT_PREMIUM_TLS;
+  }
+  if (letter_multiplier == 2) {
+    return PAT_PREMIUM_DLS;
   }
   return -1;
 }
@@ -1216,11 +1232,15 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
 }
 
 // Whether any channel a walk from this premium class can write carries a
-// nonzero weight. Each class writes only its own hook and floater-value
-// channels; the triple word class alone also writes the flexibility,
-// through-table and triple-triple channels.
-static bool pat_class_is_weighted(const PATWeights *weights,
-                                  int premium_class) {
+// nonzero weight and the runtime mask has not excluded the class outright.
+// Each class writes only its own hook and floater-value channels; the
+// triple word class alone also writes the flexibility, through-table and
+// triple-triple channels.
+static bool pat_class_is_weighted(const PATWeights *weights, int premium_class,
+                                  uint32_t enabled_classes_mask) {
+  if (!(enabled_classes_mask & (1u << premium_class))) {
+    return false;
+  }
   int start = 0;
   int end = 0;
   switch (premium_class) {
@@ -1234,6 +1254,10 @@ static bool pat_class_is_weighted(const PATWeights *weights,
     break;
   case PAT_PREMIUM_TLS:
     start = PAT_FEATURE_TLS_HOOK_START;
+    end = PAT_FEATURE_DLS_HOOK_START;
+    break;
+  case PAT_PREMIUM_DLS:
+    start = PAT_FEATURE_DLS_HOOK_START;
     end = PAT_FEATURE_QWS_HOOK_START;
     break;
   case PAT_PREMIUM_QWS:
@@ -1257,8 +1281,13 @@ static bool pat_class_is_weighted(const PATWeights *weights,
           weights->weights[PAT_FEATURE_TT_HOOK_ONLY] != 0);
 }
 
-// Whether any of a window tier's three channels carries a nonzero weight.
-static bool pat_tier_is_weighted(const PATWeights *weights, int tier) {
+// Whether any of a window tier's three channels carries a nonzero weight
+// and the runtime mask has not excluded windows outright.
+static bool pat_tier_is_weighted(const PATWeights *weights, int tier,
+                                 uint32_t enabled_classes_mask) {
+  if (!(enabled_classes_mask & PAT_CLASS_MASK_WINDOWS)) {
+    return false;
+  }
   const int start =
       PAT_FEATURE_WINDOW_START + tier * PAT_WINDOW_FEATURES_PER_TIER;
   for (int feature_index = start;
@@ -1277,12 +1306,13 @@ static bool pat_tier_is_weighted(const PATWeights *weights, int tier) {
 // The enumeration and its caps have already run, so which squares exist
 // was decided exactly as training decides it.
 static void pat_drop_unweighted_units(PATEvalContext *pat_eval_ctx,
-                                      const PATWeights *weights) {
+                                      const PATWeights *weights,
+                                      uint32_t enabled_classes_mask) {
   bool class_weighted[PAT_NUM_PREMIUM_CLASSES];
   for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
        premium_class++) {
     class_weighted[premium_class] =
-        pat_class_is_weighted(weights, premium_class);
+        pat_class_is_weighted(weights, premium_class, enabled_classes_mask);
   }
   int kept = 0;
   for (int tws_idx = 0; tws_idx < pat_eval_ctx->num_tws; tws_idx++) {
@@ -1298,7 +1328,8 @@ static void pat_drop_unweighted_units(PATEvalContext *pat_eval_ctx,
 
   bool tier_weighted[PAT_WINDOW_TIER_COUNT];
   for (int tier = 0; tier < PAT_WINDOW_TIER_COUNT; tier++) {
-    tier_weighted[tier] = pat_tier_is_weighted(weights, tier);
+    tier_weighted[tier] =
+        pat_tier_is_weighted(weights, tier, enabled_classes_mask);
   }
   kept = 0;
   for (int dd_idx = 0; dd_idx < pat_eval_ctx->num_dd; dd_idx++) {
@@ -1315,12 +1346,10 @@ static void pat_drop_unweighted_units(PATEvalContext *pat_eval_ctx,
   pat_eval_ctx->num_dd = kept;
 }
 
-static void pat_eval_context_load_units(PATEvalContext *pat_eval_ctx,
-                                        const PATWeights *weights,
-                                        const Square *lanes,
-                                        const LetterDistribution *ld,
-                                        const Rack *player_rack,
-                                        bool drop_unweighted_units) {
+static void pat_eval_context_load_units(
+    PATEvalContext *pat_eval_ctx, const PATWeights *weights,
+    const Square *lanes, const LetterDistribution *ld, const Rack *player_rack,
+    bool drop_unweighted_units, uint32_t enabled_classes_mask) {
   pat_eval_ctx->weights = weights;
   if (!weights) {
     return;
@@ -1336,7 +1365,7 @@ static void pat_eval_context_load_units(PATEvalContext *pat_eval_ctx,
       lanes, pat_eval_ctx->dd_dirs, pat_eval_ctx->dd_lanes,
       pat_eval_ctx->dd_los, pat_eval_ctx->dd_his, pat_eval_ctx->dd_tiers);
   if (drop_unweighted_units) {
-    pat_drop_unweighted_units(pat_eval_ctx, weights);
+    pat_drop_unweighted_units(pat_eval_ctx, weights, enabled_classes_mask);
   }
   pat_eval_ctx->num_units = pat_eval_ctx->num_tws * 2 + pat_eval_ctx->num_dd;
   memset(pat_eval_ctx->unit_mask_by_row, 0,
@@ -1425,9 +1454,10 @@ static void pat_eval_context_load_units(PATEvalContext *pat_eval_ctx,
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
-                           const Rack *player_rack) {
+                           const Rack *player_rack,
+                           uint32_t enabled_classes_mask) {
   pat_eval_context_load_units(pat_eval_ctx, weights, lanes, ld, player_rack,
-                              true);
+                              true, enabled_classes_mask);
 }
 
 void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
@@ -1436,7 +1466,7 @@ void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
                                      const LetterDistribution *ld,
                                      const Rack *player_rack) {
   pat_eval_context_load_units(pat_eval_ctx, weights, lanes, ld, player_rack,
-                              false);
+                              false, PAT_CLASS_MASK_ALL);
 }
 
 // Returns the bitset of scan units the move can affect (see the
@@ -1620,4 +1650,76 @@ void pat_extract_features_combined(const Square *lanes,
           (1.0 - gamma) * (double)unit_features[worst_unit][feature_index];
     }
   }
+}
+
+// Indexed by pat_premium_class_t.
+static const char *const pat_class_names[PAT_NUM_PREMIUM_CLASSES] = {
+    "tws", "dws", "tls", "dls", "qws", "qls",
+};
+
+uint32_t pat_parse_classes_mask(const char *value, ErrorStack *error_stack) {
+  if (strings_equal(value, "all")) {
+    return PAT_CLASS_MASK_ALL;
+  }
+  if (strings_equal(value, "none")) {
+    return 0;
+  }
+  StringSplitter *split = split_string(value, ',', true);
+  const int num_items = string_splitter_get_number_of_items(split);
+  uint32_t mask = 0;
+  for (int item_index = 0; item_index < num_items; item_index++) {
+    const char *item = string_splitter_get_item(split, item_index);
+    if (strings_equal(item, "windows")) {
+      mask |= PAT_CLASS_MASK_WINDOWS;
+      continue;
+    }
+    bool matched = false;
+    for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
+         premium_class++) {
+      if (strings_equal(item, pat_class_names[premium_class])) {
+        mask |= 1u << premium_class;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PAT_INVALID_CLASSES_ARG,
+          get_formatted_string("unrecognized PAT class: '%s'", item));
+      string_splitter_destroy(split);
+      return 0;
+    }
+  }
+  string_splitter_destroy(split);
+  return mask;
+}
+
+char *pat_classes_mask_to_string(uint32_t enabled_classes_mask) {
+  if (enabled_classes_mask == PAT_CLASS_MASK_ALL) {
+    return string_duplicate("all");
+  }
+  if (enabled_classes_mask == 0) {
+    return string_duplicate("none");
+  }
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
+       premium_class++) {
+    if (enabled_classes_mask & (1u << premium_class)) {
+      if (!first) {
+        string_builder_add_string(sb, ",");
+      }
+      string_builder_add_string(sb, pat_class_names[premium_class]);
+      first = false;
+    }
+  }
+  if (enabled_classes_mask & PAT_CLASS_MASK_WINDOWS) {
+    if (!first) {
+      string_builder_add_string(sb, ",");
+    }
+    string_builder_add_string(sb, "windows");
+  }
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
 }
