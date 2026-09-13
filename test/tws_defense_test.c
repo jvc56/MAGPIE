@@ -286,6 +286,92 @@ static void test_twd_move_penalty(void) {
   config_destroy(config);
 }
 
+static void test_twd_unweighted_units_dropped(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(config, TWD_FLOATER_CGP_CMD);
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Square *lanes = board_get_readonly_lanes(board, 0);
+
+  // Weights on triple-word channels only: the double-word, triple-letter
+  // and window units can never charge anything, so the evaluation context
+  // leaves them out while the all-units context keeps them.
+  TWDWeights *twd = twd_create_zeroed("drop_test");
+  twd_set_weight(twd, TWD_FEATURE_FLOAT_SCORE_START + 1, -500);
+  twd_set_weight(twd, TWD_FEATURE_HOOK_START, -20);
+
+  TWDEvalContext pruned_ctx;
+  twd_eval_context_load(&pruned_ctx, twd, lanes, ld, NULL);
+  TWDEvalContext full_ctx;
+  twd_eval_context_load_all_units(&full_ctx, twd, lanes, ld, NULL);
+  assert(pruned_ctx.num_tws > 0);
+  assert(full_ctx.num_tws > pruned_ctx.num_tws);
+  assert(full_ctx.num_dd > 0);
+  assert(pruned_ctx.num_dd == 0);
+  for (int tws_idx = 0; tws_idx < pruned_ctx.num_tws; tws_idx++) {
+    assert(pruned_ctx.tws_classes[tws_idx] == TWD_PREMIUM_TWS);
+  }
+
+  // Dropping them changes nothing the engine reads: the baseline, every
+  // lane bound, and the penalty and bound of a tile on every empty square.
+  assert(pruned_ctx.pre_penalty == full_ctx.pre_penalty);
+  assert(pruned_ctx.pre_penalty < 0);
+  for (int dir = 0; dir < 2; dir++) {
+    for (int lane = 0; lane < BOARD_DIM; lane++) {
+      assert(pruned_ctx.lane_penalty_bound[dir][lane] ==
+             full_ctx.lane_penalty_bound[dir][lane]);
+    }
+  }
+  const MachineLetter z_ml = ld_hl_to_ml(ld, "Z");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_get_letter(board, row, col) != ALPHABET_EMPTY_SQUARE_MARKER) {
+        continue;
+      }
+      Move move;
+      set_single_tile_move(&move, z_ml, row, col);
+      assert(twd_eval_move_penalty(&pruned_ctx, &move) ==
+             twd_eval_move_penalty(&full_ctx, &move));
+      assert(twd_eval_move_penalty_bound(&pruned_ctx, &move) ==
+             twd_eval_move_penalty_bound(&full_ctx, &move));
+    }
+  }
+
+  // A weight on a double-word channel brings those squares back, and one
+  // on a double-double channel brings the windows back.
+  twd_set_weight(twd, TWD_FEATURE_DWS_HOOK_START, -10);
+  twd_eval_context_load(&pruned_ctx, twd, lanes, ld, NULL);
+  int num_dws = 0;
+  for (int tws_idx = 0; tws_idx < pruned_ctx.num_tws; tws_idx++) {
+    if (pruned_ctx.tws_classes[tws_idx] == TWD_PREMIUM_DWS) {
+      num_dws++;
+    }
+  }
+  assert(num_dws > 0);
+  assert(pruned_ctx.num_dd == 0);
+  // The standard board also has triple-double and triple-triple windows in
+  // the higher tiers, so a double-double weight brings back exactly the
+  // tier-0 windows and no others.
+  twd_set_weight(twd, TWD_FEATURE_DD_TILES_SAVED, -10);
+  twd_eval_context_load(&pruned_ctx, twd, lanes, ld, NULL);
+  int num_tier0 = 0;
+  for (int dd_idx = 0; dd_idx < full_ctx.num_dd; dd_idx++) {
+    if (full_ctx.dd_tiers[dd_idx] == 0) {
+      num_tier0++;
+    }
+  }
+  assert(num_tier0 > 0);
+  assert(pruned_ctx.num_dd == num_tier0);
+  for (int dd_idx = 0; dd_idx < pruned_ctx.num_dd; dd_idx++) {
+    assert(pruned_ctx.dd_tiers[dd_idx] == 0);
+  }
+
+  twd_destroy(twd);
+  config_destroy(config);
+}
+
 static void test_twd_opening_and_hook_flex(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
@@ -406,6 +492,7 @@ void test_tws_defense(void) {
   test_twd_comments_and_blank_lines(data_dir);
   test_twd_extract_features_floater_board();
   test_twd_move_penalty();
+  test_twd_unweighted_units_dropped();
   test_twd_opening_and_hook_flex();
   test_twd_movegen_integration();
   free(data_dir);
