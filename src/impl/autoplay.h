@@ -26,6 +26,10 @@ typedef struct AutoplayArgs {
   // inferred from force_racks_filename, since an unrestricted run could mean
   // dumping millions of rows.
   bool write_rack_equity_csv;
+  // Output name for the TWS defense weights trained by
+  // AUTOPLAY_TYPE_TWS_DEFENSE_GEN; per-generation snapshots are written as
+  // <name>_gen_<N>.twd. Only meaningful for that autoplay type.
+  const char *twd_gen_output_name;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;
