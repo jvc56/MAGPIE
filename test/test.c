@@ -42,6 +42,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pat_asset_fit_test.h"
 #include "pat_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
@@ -224,6 +225,7 @@ static TestEntry on_demand_test_table[] = {
     {"genpegmore", test_gen_peg_more},
     {"pegpoll", test_peg_poll},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
+    {"patassetfit", test_pat_own_asset_discount_fit},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
