@@ -392,6 +392,94 @@ static void test_pat_lexicon_floaters(const char *data_dir) {
   config_destroy(config);
 }
 
+// A lone J three empties below the H1 triple (H4): the only route to H1
+// is a four-tile play running H1 -> H4, so the J is that word's LAST
+// letter and almost nothing four letters long ends in J (HADJ, HAJJ).
+// A lone J three empties above the H15 triple (H12): the word runs H12 ->
+// H15 and starts with J, which hundreds of four-letter words do. The
+// unsigned tables pool both ends, so they call the two boards the same
+// threat; the signed tables do not. Every other channel is identical
+// between the two semantics.
+static void test_pat_signed_through(const char *data_dir) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/7J7/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const KWG *kwg = player_get_kwg(game_get_player(game, 0));
+  PATWeights *pat = pat_create_zeroed("signed_through");
+  pat_prepare_hook_flex(pat, kwg, ld);
+  const MachineLetter j = ld_hl_to_ml(ld, "J");
+  const MachineLetter y = ld_hl_to_ml(ld, "Y");
+  for (int span = 4; span <= 8; span += 4) {
+    printf("through_count (8*log2(1+words)) span %d: J first %d last %d "
+           "pooled %d; Y first %d last %d pooled %d\n",
+           span, pat_get_through_count_end(pat, 0, j, span),
+           pat_get_through_count_end(pat, 1, j, span),
+           pat_get_through_count(pat, j, span),
+           pat_get_through_count_end(pat, 0, y, span),
+           pat_get_through_count_end(pat, 1, y, span),
+           pat_get_through_count(pat, y, span));
+  }
+  // Table sanity: the unsigned entry pools both ends.
+  assert(pat_get_through_count_end(pat, 0, j, 4) >
+         pat_get_through_count_end(pat, 1, j, 4));
+  assert(pat_get_through_count(pat, j, 4) >=
+         pat_get_through_count_end(pat, 0, j, 4));
+
+  int32_t unsigned_below[PAT_NUM_FEATURES];
+  int32_t signed_below[PAT_NUM_FEATURES];
+  assert(!pat_get_signed_through(pat));
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, unsigned_below);
+  pat_set_signed_through(pat, true);
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, signed_below);
+  const int through_count_d3 = PAT_FEATURE_FLOAT_THROUGH_COUNT_START + 2;
+  const int through_score_d3 = PAT_FEATURE_FLOAT_THROUGH_SCORE_START + 2;
+  assert(unsigned_below[through_count_d3] > 0);
+  assert(signed_below[through_count_d3] ==
+         pat_get_through_count_end(pat, 1, j, 4));
+  assert(unsigned_below[through_count_d3] == pat_get_through_count(pat, j, 4));
+  assert(signed_below[through_count_d3] < unsigned_below[through_count_d3]);
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    if (feature_index != through_count_d3 &&
+        feature_index != through_score_d3) {
+      assert(signed_below[feature_index] == unsigned_below[feature_index]);
+    }
+  }
+
+  // J above the H15 triple: the word starts with it.
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/7J7/15/15/15 / 0/0 0");
+  int32_t signed_above[PAT_NUM_FEATURES];
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, signed_above);
+  assert(signed_above[through_count_d3] ==
+         pat_get_through_count_end(pat, 0, j, 4));
+  assert(signed_above[through_count_d3] > signed_below[through_count_d3]);
+
+  // Round trip, and a file without the row reads as unsigned.
+  ErrorStack *error_stack = error_stack_create();
+  pat_write(pat, data_dir, "signed_through", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  PATWeights *loaded = pat_create(data_dir, "signed_through", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(pat_get_signed_through(loaded));
+  pat_destroy(loaded);
+  error_stack_destroy(error_stack);
+  char header[32];
+  current_pat_header(header, sizeof(header));
+  char *contents =
+      get_formatted_string("%s\nsigned_through,7\nhook_d1,-1\n", header);
+  assert_pat_create_fails(data_dir, "signed_through_bad", contents);
+  free(contents);
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
 static void test_pat_scan_reach_capped_by_opponent_rack_size(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
@@ -1011,6 +1099,7 @@ void test_pat(void) {
   test_pat_version2_has_no_scaled_channels(data_dir);
   test_pat_extract_features_floater_board();
   test_pat_lexicon_floaters(data_dir);
+  test_pat_signed_through(data_dir);
   test_pat_scan_reach_capped_by_opponent_rack_size();
   test_pat_move_penalty();
   test_pat_dls_features_land_in_dls_channels();
