@@ -523,7 +523,13 @@ static inline void record_exchange(MoveGen *gen) {
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
   case MOVE_RECORD_BEST:
     if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-      const Equity leave_value = leave_map_get_current_value(&gen->leave_map);
+      // An exchange's equity is its leave value plus the (<= 0, exactly
+      // known) TWS defense baseline; the cutoff already includes the best
+      // move's defense term, so compare like with like or every exchange
+      // within the baseline of the cutoff gets needlessly recorded.
+      const Equity leave_value =
+          leave_map_get_current_value(&gen->leave_map) +
+          twd_eval_non_placement_penalty(&gen->twd_eval_ctx);
       if (better_play_has_been_found(gen, leave_value)) {
         return;
       }
@@ -562,7 +568,10 @@ static void record_best_exchange_from_table(MoveGen *gen) {
   }
   const int leave_size = RACK_SIZE - tiles_exchanged;
   const Equity leave_value = gen->best_leaves[leave_size];
-  if (better_play_has_been_found(gen, leave_value)) {
+  // See record_exchange for why the defense baseline is included.
+  if (better_play_has_been_found(
+          gen,
+          leave_value + twd_eval_non_placement_penalty(&gen->twd_eval_ctx))) {
     return;
   }
   // Temporarily set leave_map so gen_get_static_equity reads the correct
@@ -1075,7 +1084,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
 // out-of-line masked scan below, away from generate_moves.
 static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
-                           bool lazy) {
+                           bool lazy, Equity anchor_twd_bound) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
   // The anchor's score bound plus this subrack's leave bounds the equity of
   // every play the subrack can make, so under equity sort a subrack whose
@@ -1084,12 +1093,14 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
   // there would skip subracks that still hold plays above the cutoff. This is
   // an equity upper bound independent of the anchor's highest_possible_score,
   // so any positive equity term added to the real evaluation must be added
-  // here too. Terms that are always <= 0 (opening placement_adjustment, the
-  // TWS defense term) are soundly omitted; see static_eval_get_shadow_equity.
+  // here too: anchor_twd_bound (see twd_eval_lane_penalty_bound) folds in the
+  // TWS defense term's (<= 0) contribution; the opening placement_adjustment
+  // (also always <= 0) is soundly omitted; see static_eval_get_shadow_equity.
   if (gen->wmp_prune_subracks_by_leave) {
     const Equity leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
     if (better_play_has_been_found(gen, leave_value +
-                                            anchor->highest_possible_score)) {
+                                            anchor->highest_possible_score +
+                                            anchor_twd_bound)) {
       return false;
     }
   }
@@ -1137,6 +1148,8 @@ wordmap_gen_forbidden_subracks(MoveGen *gen, const Anchor *anchor,
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
+  const Equity anchor_twd_bound =
+      twd_eval_lane_penalty_bound(&gen->twd_eval_ctx, anchor->dir, anchor->row);
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     const BitRack *subrack =
@@ -1145,7 +1158,8 @@ wordmap_gen_forbidden_subracks(MoveGen *gen, const Anchor *anchor,
                                  forbidden_subrack_high)) {
       continue;
     }
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, true)) {
+    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, true,
+                                   anchor_twd_bound)) {
       return;
     }
   }
@@ -1266,9 +1280,15 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
                                    forbidden_subrack_high);
     return;
   }
+  // Upper bound on the (<= 0) TWS defense term of every move from this
+  // anchor (zero when the term is off); omitting it would be sound too,
+  // just looser. See the shadow_record comment.
+  const Equity anchor_twd_bound =
+      twd_eval_lane_penalty_bound(&gen->twd_eval_ctx, anchor->dir, anchor->row);
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, lazy)) {
+    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, lazy,
+                                   anchor_twd_bound)) {
       return;
     }
   }
@@ -1955,6 +1975,12 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
         &gen->ld, &gen->opponent_rack, best_leaves,
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
+    // The TWS defense term is <= 0, so the bound would stay valid without
+    // it, but then every anchor's bound is loose by roughly the position's
+    // baseline penalty and anchors survive the cutoff on a penalty all of
+    // their moves will pay. The per-lane bound (set when the lane is
+    // loaded; zero when the term is off) recovers most of that for free.
+    equity += gen->twd_lane_penalty_bound;
   }
   if (wmp_active) {
     const int word_length =
@@ -3137,6 +3163,8 @@ void shadow_by_orientation(MoveGen *gen) {
         gen->board, gen->current_row_index, gen->dir, gen->cross_index);
     gen->wit_len_lane = board_get_wit_len_lane(
         gen->board, gen->current_row_index, gen->dir, gen->cross_index);
+    gen->twd_lane_penalty_bound = twd_eval_lane_penalty_bound(
+        &gen->twd_eval_ctx, gen->dir, gen->current_row_index);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
