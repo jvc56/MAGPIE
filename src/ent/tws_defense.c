@@ -623,6 +623,22 @@ static Equity twd_dot(const TWDWeights *twd, const int32_t *features) {
 static_assert(TWD_MAX_SCAN_UNITS <= 64,
               "TWS defense unit masks require at most 64 scan units");
 
+// The moves affecting the units can at best zero out each affected unit's (<=
+// 0) baseline contribution; every unaffected unit keeps its baseline exactly.
+static inline Equity twd_units_penalty_bound(const TWDEvalContext *twd_eval_ctx,
+                                             uint64_t affected_units) {
+  int64_t bound = twd_eval_ctx->pre_penalty;
+  while (affected_units) {
+    const int unit_index = twd_ctz(affected_units);
+    affected_units &= affected_units - 1;
+    bound -= twd_eval_ctx->unit_penalty[unit_index];
+  }
+  if (bound > 0) {
+    bound = 0;
+  }
+  return (Equity)bound;
+}
+
 void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx) {
   twd_eval_ctx->weights = NULL;
 }
@@ -689,6 +705,14 @@ void twd_eval_context_load(TWDEvalContext *twd_eval_ctx,
     }
   }
   twd_eval_ctx->pre_penalty = twd_dot(weights, features);
+  for (int lane = 0; lane < BOARD_DIM; lane++) {
+    twd_eval_ctx->lane_penalty_bound[BOARD_HORIZONTAL_DIRECTION][lane] =
+        twd_units_penalty_bound(twd_eval_ctx,
+                                twd_eval_ctx->unit_mask_by_row[lane]);
+    twd_eval_ctx->lane_penalty_bound[BOARD_VERTICAL_DIRECTION][lane] =
+        twd_units_penalty_bound(twd_eval_ctx,
+                                twd_eval_ctx->unit_mask_by_col[lane]);
+  }
 }
 
 // Returns the bitset of scan units the move can affect (see the
@@ -721,20 +745,9 @@ Equity twd_eval_move_penalty_bound(const TWDEvalContext *twd_eval_ctx,
   const int tiles_length = move_get_tiles_length(move);
   const int row_end = vertical ? row_start + tiles_length - 1 : row_start;
   const int col_end = vertical ? col_start : col_start + tiles_length - 1;
-  uint64_t affected_units = twd_move_affected_units(
-      twd_eval_ctx, row_start, row_end, col_start, col_end);
-  // The move can at best zero out each affected unit's (<= 0) baseline
-  // contribution; every unaffected unit keeps its baseline exactly.
-  int64_t bound = twd_eval_ctx->pre_penalty;
-  while (affected_units) {
-    const int unit_index = twd_ctz(affected_units);
-    affected_units &= affected_units - 1;
-    bound -= twd_eval_ctx->unit_penalty[unit_index];
-  }
-  if (bound > 0) {
-    bound = 0;
-  }
-  return (Equity)bound;
+  return twd_units_penalty_bound(
+      twd_eval_ctx, twd_move_affected_units(twd_eval_ctx, row_start, row_end,
+                                            col_start, col_end));
 }
 
 Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,

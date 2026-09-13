@@ -97,6 +97,15 @@ typedef struct TWDEvalContext {
   // path, zero for the vast majority of moves.
   uint64_t unit_mask_by_row[BOARD_DIM];
   uint64_t unit_mask_by_col[BOARD_DIM];
+  // lane_penalty_bound[dir][lane] is an upper bound on the defense term of
+  // every tile placement along that lane (a row for horizontal moves, a
+  // column for vertical ones): the baseline penalty less the baseline
+  // contribution of every unit a move in the lane could affect, each of
+  // which it can at best zero out. Shadow pruning adds it to its per-anchor
+  // equity bounds, which otherwise omit the term entirely; it is always
+  // <= 0, so the bounds stay valid, and it is a plain array lookup so the
+  // shadow hot path pays nothing for it.
+  Equity lane_penalty_bound[2][BOARD_DIM];
 } TWDEvalContext;
 
 void twd_eval_context_disable(TWDEvalContext *twd_eval_ctx);
@@ -115,6 +124,27 @@ Equity twd_eval_move_penalty(const TWDEvalContext *twd_eval_ctx,
 // out). Used to skip the exact computation for moves that cannot contend.
 Equity twd_eval_move_penalty_bound(const TWDEvalContext *twd_eval_ctx,
                                    const Move *move);
+// The defense term of every non-placement move (exchange or pass): the
+// position baseline, exactly, since they leave the board unchanged. Zero
+// when the context is NULL or disabled.
+static inline Equity
+twd_eval_non_placement_penalty(const TWDEvalContext *twd_eval_ctx) {
+  if (!twd_eval_ctx || !twd_eval_ctx->weights) {
+    return 0;
+  }
+  return twd_eval_ctx->pre_penalty;
+}
+// The upper bound on the defense term of every tile placement in lane
+// `lane` of direction `dir` (see lane_penalty_bound). Zero when the context
+// is NULL or disabled.
+static inline Equity
+twd_eval_lane_penalty_bound(const TWDEvalContext *twd_eval_ctx, int dir,
+                            int lane) {
+  if (!twd_eval_ctx || !twd_eval_ctx->weights) {
+    return 0;
+  }
+  return twd_eval_ctx->lane_penalty_bound[dir][lane];
+}
 // Extracts the feature vector for the board as it stands (no move overlay).
 // Used for the context baseline and, exactly as-is, by the training loop on
 // post-move boards. features must have TWD_NUM_FEATURES elements.
