@@ -46,6 +46,7 @@
 #include "pat_asset_fit_test.h"
 #include "pat_hyperscale_fit_test.h"
 #include "pat_move_choice_test.h"
+#include "pat_opening_sim_test.h"
 #include "pat_overlap_pilot_test.h"
 #include "pat_test.h"
 #include "peg_oracle_test.h"
@@ -238,6 +239,7 @@ static TestEntry on_demand_test_table[] = {
     {"patlexsignedchampion", test_pat_lexsigned_move_choice_vs_champion},
     {"patoverlap", test_pat_overlap_pilot},
     {"patpremiumpilot", test_pat_premium_combo_pilot},
+    {"patopeningsim", test_pat_opening_sim},
     {"patmovechoicecontrols", test_pat_move_choice_controls},
     {"patmovechoicetargeted", test_pat_move_choice_targeted_controls},
     {"pattrainparity", test_pat_train_runtime_parity},
