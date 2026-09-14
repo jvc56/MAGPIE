@@ -51,6 +51,18 @@ bool pat_get_fit_scaled_channels(const PATWeights *pat);
 void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels);
 bool pat_get_train_overlay(const PATWeights *pat);
 void pat_set_train_overlay(PATWeights *pat, bool train_overlay);
+bool pat_get_run_through(const PATWeights *pat);
+void pat_set_run_through(PATWeights *pat, bool run_through);
+// The run-keyed through tables (see PATWeights.run_through): the
+// log-scaled count and mean rest-of-word score of words of the given
+// length whose first (word_end 0) or last (word_end 1) key_len letters,
+// in word order, are key. Zero when the tables were never prepared.
+int pat_get_run_through_count(const PATWeights *pat, int word_end,
+                              const MachineLetter *key, int key_len,
+                              int word_length);
+int pat_get_run_through_score(const PATWeights *pat, int word_end,
+                              const MachineLetter *key, int key_len,
+                              int word_length);
 bool pat_get_exact_created_hooks(const PATWeights *pat);
 void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
 bool pat_get_fit_residual(const PATWeights *pat);

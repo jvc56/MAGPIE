@@ -52,6 +52,13 @@ struct PATWeights {
   // sum both ends into one figure. Used only when signed_through is set.
   uint8_t through_score_end[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
   uint8_t through_count_end[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+  // Run-keyed through tables: for a key of 1..PAT_RUN_THROUGH_MAX_KEY
+  // letters, per word length and per end, the same two statistics over
+  // the words that begin (end 0) or end (end 1) with that key. Built by
+  // pat_prepare_hook_flex, sized by the alphabet; see pat_run_through_index.
+  uint8_t *run_through_count;
+  uint8_t *run_through_score;
+  int run_through_alphabet_size;
   // How much a second route to danger counts once the worst one is already
   // counted. The opponent plays one move, so the threats a board offers do
   // not simply add: 0 charges only the worst scan unit, 1 charges every
@@ -123,8 +130,17 @@ struct PATWeights {
   // approximation can still play better than one evaluated exactly, and
   // only whole-game play can say.
   bool exact_created_hooks;
+  // Whether floater through channels use the run-keyed tables (see
+  // pat_scan_unit). The per-tile sum they replace adds each tile's
+  // single-letter log-count, i.e. the log of a product of unrelated
+  // numbers: for AT four squares from a triple it claims ~169 units
+  // against an actual 48.7 (67 words), for QI 121 against 0 (no word of
+  // length six ends in QI), for NARCEIN 560 against 0. Opt-in, like the
+  // other semantic flags, until a file using it is validated.
+  bool run_through;
   // 1: only the hook-score channels are fitted; 2: the triple-word hook
-  // flexibility channels too (see pat_regression_solve_into_weights).
+  // flexibility channels too; 3: only the floater through channels (see
+  // pat_regression_solve_into_weights).
   int fit_residual_mode;
   // Set by pat_prepare_hook_flex. The lexicon tables (hook_flex,
   // through_score, through_count) are part of the model: a file loaded
@@ -190,6 +206,68 @@ bool pat_get_train_overlay(const PATWeights *pat) { return pat->train_overlay; }
 
 void pat_set_train_overlay(PATWeights *pat, bool train_overlay) {
   pat->train_overlay = train_overlay;
+}
+
+bool pat_get_run_through(const PATWeights *pat) { return pat->run_through; }
+
+void pat_set_run_through(PATWeights *pat, bool run_through) {
+  pat->run_through = run_through;
+}
+
+// Row index of a key in the run-keyed tables: keys of each length are
+// laid out consecutively (all 1-letter keys, then 2-letter, ...), each
+// block indexed base alphabet_size in word order; within a row, word
+// length then end.
+static int pat_run_through_index(const PATWeights *pat, int word_end,
+                                 const MachineLetter *key, int key_len,
+                                 int word_length) {
+  const int n = pat->run_through_alphabet_size;
+  int block_start = 0;
+  int block = 1;
+  for (int k = 1; k < key_len; k++) {
+    block *= n;
+    block_start += block;
+  }
+  // block_start now holds n + n^2 + ... + n^(key_len-1); add the key's
+  // base-n value.
+  int within = 0;
+  for (int k = 0; k < key_len; k++) {
+    within = within * n + key[k];
+  }
+  return ((block_start + within) * PAT_MAX_THROUGH_LEN + word_length) * 2 +
+         word_end;
+}
+
+static int pat_run_through_rows(int alphabet_size) {
+  int rows = 0;
+  int block = 1;
+  for (int k = 1; k <= PAT_RUN_THROUGH_MAX_KEY; k++) {
+    block *= alphabet_size;
+    rows += block;
+  }
+  return rows;
+}
+
+int pat_get_run_through_count(const PATWeights *pat, int word_end,
+                              const MachineLetter *key, int key_len,
+                              int word_length) {
+  if (pat->run_through_count == NULL || key_len < 1 ||
+      key_len > PAT_RUN_THROUGH_MAX_KEY || word_length >= PAT_MAX_THROUGH_LEN) {
+    return 0;
+  }
+  return pat->run_through_count[pat_run_through_index(pat, word_end, key,
+                                                      key_len, word_length)];
+}
+
+int pat_get_run_through_score(const PATWeights *pat, int word_end,
+                              const MachineLetter *key, int key_len,
+                              int word_length) {
+  if (pat->run_through_score == NULL || key_len < 1 ||
+      key_len > PAT_RUN_THROUGH_MAX_KEY || word_length >= PAT_MAX_THROUGH_LEN) {
+    return 0;
+  }
+  return pat->run_through_score[pat_run_through_index(pat, word_end, key,
+                                                      key_len, word_length)];
 }
 
 bool pat_get_exact_created_hooks(const PATWeights *pat) {
@@ -329,6 +407,10 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->fit_residual = PAT_DEFAULT_FIT_RESIDUAL;
   pat->fit_residual_mode = 0;
   pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
+  pat->run_through = PAT_DEFAULT_RUN_THROUGH;
+  pat->run_through_count = NULL;
+  pat->run_through_score = NULL;
+  pat->run_through_alphabet_size = 0;
   pat->version = PAT_VERSION;
   return pat;
 }
@@ -338,6 +420,8 @@ void pat_destroy(PATWeights *pat) {
     return;
   }
   free(pat->name);
+  free(pat->run_through_count);
+  free(pat->run_through_score);
   free(pat);
 }
 
@@ -513,11 +597,11 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
     if (has_prefix(PAT_FIT_RESIDUAL_ROW_PREFIX, line)) {
       const int flag = string_to_int(line + strlen(PAT_FIT_RESIDUAL_ROW_PREFIX),
                                      error_stack);
-      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 2) {
+      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 3) {
         error_stack_push(
             error_stack, ERROR_STATUS_PAT_INVALID_ROW,
             get_formatted_string("PAT file '%s' line %d has a fit_residual "
-                                 "value other than 0, 1 or 2: '%s'",
+                                 "value other than 0 to 3: '%s'",
                                  pat_name, line_index + 1, line));
         return;
       }
@@ -538,6 +622,20 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         return;
       }
       pat->exact_created_hooks = (flag == 1);
+      continue;
+    }
+    if (has_prefix(PAT_RUN_THROUGH_ROW_PREFIX, line)) {
+      const int flag =
+          string_to_int(line + strlen(PAT_RUN_THROUGH_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a run_through "
+                                 "flag other than 0 or 1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->run_through = (flag == 1);
       continue;
     }
     if (feature_index >= PAT_NUM_FEATURES) {
@@ -654,6 +752,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
   string_builder_add_formatted_string(sb, "%s%d\n",
                                       PAT_EXACT_CREATED_HOOKS_ROW_PREFIX,
                                       pat->exact_created_hooks ? 1 : 0);
+  string_builder_add_formatted_string(sb, "%s%d\n", PAT_RUN_THROUGH_ROW_PREFIX,
+                                      pat->run_through ? 1 : 0);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -676,6 +776,12 @@ typedef struct PATThroughStats {
   // [0]: the letter is the word's first; [1]: its last.
   double count[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
   double score_sum[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
+  // The run-keyed accumulators, indexed like the tables they become
+  // (pat_run_through_index): the count of words with the key at that end
+  // and the summed score of the rest of each such word.
+  double *run_count;
+  double *run_score_sum;
+  const PATWeights *pat;
 } PATThroughStats;
 
 // Walks every word in the lexicon, crediting each to the letters at its two
@@ -702,6 +808,27 @@ static void pat_walk_words(const KWG *kwg, const LetterDistribution *ld,
       }
       const MachineLetter first = word[0];
       const MachineLetter last = word[word_length - 1];
+      // Every prefix and suffix of the word up to the key depth, with what
+      // the rest of the word scores.
+      for (int key_len = 1;
+           key_len <= PAT_RUN_THROUGH_MAX_KEY && key_len <= word_length;
+           key_len++) {
+        int prefix_score = 0;
+        int suffix_score = 0;
+        for (int k = 0; k < key_len; k++) {
+          prefix_score += equity_to_int(ld_get_score(ld, word[k]));
+          suffix_score +=
+              equity_to_int(ld_get_score(ld, word[word_length - key_len + k]));
+        }
+        const int prefix_index =
+            pat_run_through_index(stats->pat, 0, word, key_len, word_length);
+        const int suffix_index = pat_run_through_index(
+            stats->pat, 1, word + word_length - key_len, key_len, word_length);
+        stats->run_count[prefix_index] += 1.0;
+        stats->run_score_sum[prefix_index] += total_score - prefix_score;
+        stats->run_count[suffix_index] += 1.0;
+        stats->run_score_sum[suffix_index] += total_score - suffix_score;
+      }
       stats->count[0][first][word_length] += 1.0;
       stats->score_sum[0][first][word_length] +=
           total_score - equity_to_int(ld_get_score(ld, first));
@@ -759,8 +886,36 @@ void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
   }
 
   PATThroughStats *stats = calloc_or_die(1, sizeof(PATThroughStats));
+  pat->run_through_alphabet_size = ld_size;
+  const size_t run_cells =
+      (size_t)pat_run_through_rows(ld_size) * PAT_MAX_THROUGH_LEN * 2;
+  stats->run_count = calloc_or_die(run_cells, sizeof(double));
+  stats->run_score_sum = calloc_or_die(run_cells, sizeof(double));
+  stats->pat = pat;
   MachineLetter word[PAT_MAX_THROUGH_LEN];
   pat_walk_words(kwg, ld, dawg_root, word, 0, stats);
+  free(pat->run_through_count);
+  free(pat->run_through_score);
+  pat->run_through_count = calloc_or_die(run_cells, sizeof(uint8_t));
+  pat->run_through_score = calloc_or_die(run_cells, sizeof(uint8_t));
+  for (size_t cell = 0; cell < run_cells; cell++) {
+    const double word_count = stats->run_count[cell];
+    if (word_count <= 0.0) {
+      continue;
+    }
+    double mean_score = stats->run_score_sum[cell] / word_count;
+    if (mean_score > UINT8_MAX) {
+      mean_score = UINT8_MAX;
+    }
+    double scaled = 8.0 * log2(1.0 + word_count);
+    if (scaled > UINT8_MAX) {
+      scaled = UINT8_MAX;
+    }
+    pat->run_through_score[cell] = (uint8_t)(mean_score + 0.5);
+    pat->run_through_count[cell] = (uint8_t)(scaled + 0.5);
+  }
+  free(stats->run_count);
+  free(stats->run_score_sum);
   for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
     for (int len = 0; len < PAT_MAX_THROUGH_LEN; len++) {
       // The unsigned tables are exactly what they always were: both ends
@@ -1393,6 +1548,12 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         const int distance_bin = empties_used;
         const MachineLetter facing_letter = letter;
         bool run_has_fresh_tile = false;
+        // The run's letters in encounter order (facing tile first), for
+        // the run-keyed through lookup.
+        MachineLetter run_letters[BOARD_DIM];
+        int run_length = 0;
+        const bool run_through =
+            pat != NULL && pat->run_through && full_channels;
         while (idx >= 0 && idx < BOARD_DIM &&
                !square_get_is_brick(&lane[idx])) {
           const int run_row = pat_unit_row(dir, lane_index, idx);
@@ -1416,7 +1577,11 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           // the way to the triple. The span it must cover is the empties
           // between the two plus both endpoints; a blank contributes
           // nothing to score above but reaches whatever its letter reaches.
-          if (pat != NULL && full_channels) {
+          if (run_through && run_length < BOARD_DIM) {
+            run_letters[run_length++] =
+                get_unblanked_machine_letter(run_letter);
+          }
+          if (pat != NULL && full_channels && !run_through) {
             const MachineLetter unblanked =
                 get_unblanked_machine_letter(run_letter);
             const int span = distance_bin + 1;
@@ -1441,6 +1606,33 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
             }
           }
           idx += side;
+        }
+        if (run_through && run_length > 0) {
+          // The whole run at the end of a word of exactly the covering
+          // length: a suffix when the run lies beyond the premium (the
+          // word runs premium to run, encounter order is word order), a
+          // prefix when before it (word order is the reverse). Keyed by
+          // the run's far-end letters, up to PAT_RUN_THROUGH_MAX_KEY.
+          const int word_length = distance_bin + run_length;
+          const int key_len = (run_length < PAT_RUN_THROUGH_MAX_KEY)
+                                  ? run_length
+                                  : PAT_RUN_THROUGH_MAX_KEY;
+          MachineLetter key[PAT_RUN_THROUGH_MAX_KEY];
+          for (int k = 0; k < key_len; k++) {
+            // Far-end letters in word order: beyond the premium the far end
+            // is the last encountered and word order is encounter order;
+            // before it, word order is reversed, so the word's first
+            // letters are the last encountered, read backwards.
+            key[k] = (side > 0) ? run_letters[run_length - key_len + k]
+                                : run_letters[run_length - 1 - k];
+          }
+          const int word_end = (side > 0) ? 1 : 0;
+          features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin - 1] +=
+              pat_get_run_through_score(pat, word_end, key, key_len,
+                                        word_length);
+          features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin - 1] +=
+              pat_get_run_through_count(pat, word_end, key, key_len,
+                                        word_length);
         }
         int run_flex;
         int scaled_run_flex;

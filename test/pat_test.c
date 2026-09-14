@@ -13,6 +13,7 @@
 #include "../src/ent/bonus_square.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/pat.h"
@@ -772,6 +773,196 @@ static void test_pat_blank_floater(void) {
            blank_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + bin]);
     assert(real_features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + bin] ==
            blank_features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + bin]);
+  }
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
+// Enumerates words of the given length whose first (word_end 0) or last
+// (word_end 1) letters are key: the slow reference for the run-keyed
+// through tables.
+static void pat_test_count_key_words(const KWG *kwg, uint32_t node_index,
+                                     int depth, int target_length,
+                                     const MachineLetter *key, int key_len,
+                                     int word_end, MachineLetter *word,
+                                     long *count, long *rest_score_sum,
+                                     const LetterDistribution *ld) {
+  if (node_index == 0) {
+    return;
+  }
+  for (uint32_t index = node_index;; index++) {
+    const uint32_t node = kwg_node(kwg, index);
+    word[depth] = (MachineLetter)kwg_node_tile(node);
+    const int length = depth + 1;
+    if (length == target_length && kwg_node_accepts(node)) {
+      bool match = true;
+      for (int k = 0; k < key_len; k++) {
+        const int pos = (word_end == 0) ? k : length - key_len + k;
+        if (word[pos] != key[k]) {
+          match = false;
+        }
+      }
+      if (match) {
+        (*count)++;
+        int rest = 0;
+        for (int k = 0; k < length; k++) {
+          const bool in_key =
+              (word_end == 0) ? (k < key_len) : (k >= length - key_len);
+          if (!in_key) {
+            rest += equity_to_int(ld_get_score(ld, word[k]));
+          }
+        }
+        *rest_score_sum += rest;
+      }
+    }
+    if (length < target_length) {
+      pat_test_count_key_words(kwg, kwg_node_arc_index(node), length,
+                               target_length, key, key_len, word_end, word,
+                               count, rest_score_sum, ld);
+    }
+    if (kwg_node_is_end(node)) {
+      break;
+    }
+  }
+}
+
+// The run-keyed through tables against a direct enumeration of the
+// lexicon, for the runs the audit used, and the single-letter keys against
+// the signed per-letter table they must reproduce.
+static void test_pat_run_through_table(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const KWG *kwg = player_get_kwg(game_get_player(game, 0));
+  PATWeights *pat = pat_test_create_prepared("run_through", game);
+  const char *runs[] = {"E", "AT", "QI", "ION", "TIO"};
+  int checked = 0;
+  for (int r = 0; r < 5; r++) {
+    const int key_len = (int)strlen(runs[r]);
+    MachineLetter key[3];
+    for (int k = 0; k < key_len; k++) {
+      char one[2] = {runs[r][k], 0};
+      key[k] = ld_hl_to_ml(ld, one);
+    }
+    for (int length = key_len + 2; length <= key_len + 6; length += 2) {
+      for (int word_end = 0; word_end < 2; word_end++) {
+        long count = 0;
+        long rest = 0;
+        MachineLetter word[16];
+        pat_test_count_key_words(kwg, kwg_get_dawg_root_node_index(kwg), 0,
+                                 length, key, key_len, word_end, word, &count,
+                                 &rest, ld);
+        const int expected_count = (int)(8.0 * log2(1.0 + count) + 0.5);
+        const int expected_score =
+            count > 0 ? (int)((double)rest / count + 0.5) : 0;
+        const int table_count =
+            pat_get_run_through_count(pat, word_end, key, key_len, length);
+        const int table_score =
+            pat_get_run_through_score(pat, word_end, key, key_len, length);
+        if (table_count != expected_count || table_score != expected_score) {
+          printf("run_through mismatch: %s len %d end %d: table %d/%d, "
+                 "enumeration %d/%d (%ld words)\n",
+                 runs[r], length, word_end, table_count, table_score,
+                 expected_count, expected_score, count);
+          assert(false);
+        }
+        if (key_len == 1) {
+          assert(table_count ==
+                 pat_get_through_count_end(pat, word_end, key[0], length));
+          assert(table_score ==
+                 pat_get_through_score_end(pat, word_end, key[0], length));
+        }
+        checked++;
+      }
+    }
+  }
+  printf("run_through table: %d (key, length, end) cells match the "
+         "enumeration\n",
+         checked);
+  // The audit's headline: QI cannot end a six-letter word, NARCEIN (keyed
+  // by its far three letters) is nothing at all.
+  MachineLetter qi[2] = {ld_hl_to_ml(ld, "Q"), ld_hl_to_ml(ld, "I")};
+  assert(pat_get_run_through_count(pat, 1, qi, 2, 6) == 0);
+  assert(pat_get_run_through_count(pat, 0, qi, 2, 6) > 0);
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
+// The scan under run_through on constructed boards. AT on B8-C8 with the
+// A8 triple one square to its left: the word runs A8 -> AT, AT is a
+// suffix, distance 1, word length 3 (?AT: BAT, CAT, ...). QI on N8-O8 is
+// keyed as a prefix from the O8 triple... no: O8 is the last square, so
+// the run before it, at distance 1 with the word running QI -> O8, QI is
+// a prefix of a three-letter word (QIS): nonzero. QI on B8-C8 from A8: a
+// suffix of a three-letter word ending in QI: none. A blank Q keys as Q.
+static void test_pat_run_through_scan(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/1AT12/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  PATWeights *pat = pat_test_create_prepared("run_scan", game);
+  pat_set_lexicon_floaters(pat, true);
+  pat_set_signed_through(pat, true);
+  int32_t features[PAT_NUM_FEATURES];
+  int32_t run_features[PAT_NUM_FEATURES];
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, features);
+  pat_set_run_through(pat, true);
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, run_features);
+  MachineLetter at[2] = {ld_hl_to_ml(ld, "A"), ld_hl_to_ml(ld, "T")};
+  // From A8 (side +1): distance 1, suffix AT, length 3. From O8 (side -1):
+  // O8 N8 ... D8 are 12 empties, more than a rack: no route.
+  assert(run_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START] ==
+         pat_get_run_through_count(pat, 1, at, 2, 3));
+  assert(run_features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START] ==
+         pat_get_run_through_score(pat, 1, at, 2, 3));
+  assert(run_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START] > 0);
+  // The per-tile sum claimed more (A's and T's single-letter statistics
+  // added), and every other channel is untouched by the flag.
+  assert(features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START] >
+         run_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START]);
+  for (int f = 0; f < PAT_NUM_FEATURES; f++) {
+    const bool is_through =
+        (f >= PAT_FEATURE_FLOAT_THROUGH_SCORE_START &&
+         f < PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT);
+    if (!is_through) {
+      assert(features[f] == run_features[f]);
+    }
+  }
+  // QI before the O8 triple at distance 1: a prefix of a three-letter
+  // word (QIS exists); QI after A8: a suffix of a three-letter word (none).
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/1QI10N1/15/15/15/15/15/15/15 / 0/0 0");
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, run_features);
+  MachineLetter qi[2] = {ld_hl_to_ml(ld, "Q"), ld_hl_to_ml(ld, "I")};
+  MachineLetter n[1] = {ld_hl_to_ml(ld, "N")};
+  // d1 bin: QI from A8 (suffix, length 3: 0) plus N from O8 (prefix,
+  // length 3... O8 is at index 14, N at 13: distance 1, word N + O8 =
+  // length 2? The empties between N and the triple: just O8, so d = 1 and
+  // the word is two letters starting with N).
+  assert(pat_get_run_through_count(pat, 1, qi, 2, 3) == 0);
+  assert(run_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START] ==
+         pat_get_run_through_count(pat, 0, n, 1, 2));
+  // A blank Q keys as Q.
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/1qI12/15/15/15/15/15/15/15 / 0/0 0");
+  int32_t blank_features[PAT_NUM_FEATURES];
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, blank_features);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/1QI12/15/15/15/15/15/15/15 / 0/0 0");
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, run_features);
+  for (int bin = 0; bin < PAT_FLOATER_BIN_COUNT; bin++) {
+    assert(blank_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + bin] ==
+           run_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + bin]);
   }
   pat_destroy(pat);
   config_destroy(config);
@@ -1595,6 +1786,8 @@ void test_pat(void) {
   test_pat_hook_score_channel();
   test_pat_transposition_invariance();
   test_pat_blank_floater();
+  test_pat_run_through_table();
+  test_pat_run_through_scan();
   test_pat_extract_features_floater_board();
   test_pat_lexicon_floaters(data_dir);
   test_pat_signed_through(data_dir);
