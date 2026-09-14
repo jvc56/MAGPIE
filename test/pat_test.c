@@ -25,6 +25,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/pat_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -2117,6 +2118,80 @@ static void test_pat_opening_adjustments(const char *data_dir) {
   test_pat_opening_adjustments_with_wmp(data_dir, false);
 }
 
+// Default fits never spend mass on the experimental channels: with
+// hook_d1 and hook_score_d1 as identical columns the whole coefficient
+// must land on hook_d1 under fit_residual 0 (hook_score fixed at its
+// loaded zero), on hook_score_d1 alone under fit_residual 1, and be
+// shared under 2; the premium-combination channel likewise stays zero
+// unless fit_residual is 4. A zeroed file is the bootstrap every recipe
+// starts from, so this is the case that matters.
+static void test_pat_gen_experimental_channels_fixed(void) {
+  PATRegression *regression = malloc_or_die(sizeof(PATRegression));
+  pat_regression_reset(regression);
+  int32_t features[PAT_NUM_FEATURES];
+  for (int i = 0; i < 400; i++) {
+    memset(features, 0, sizeof(features));
+    const int x = 1 + (i % 5);
+    features[PAT_FEATURE_HOOK_START] = x;
+    features[PAT_FEATURE_HOOK_SCORE_START] = x;
+    features[PAT_FEATURE_LM_SPAN_START] = x;
+    // Reply score 3 points per unit, plus a little noise so the system
+    // is not degenerate beyond the collinear columns.
+    pat_regression_add_observation(regression, features,
+                                   3.0 * x + ((i % 3) - 1) * 0.01);
+  }
+  const int modes[3] = {0, 1, 2};
+  for (int m = 0; m < 3; m++) {
+    PATWeights *pat = pat_create_zeroed("gen_fixed");
+    if (modes[m] != 0) {
+      // Set the residual mode through the file rows.
+      pat_set_fit_residual(pat, true);
+    }
+    // fit_residual 2 needs the mode itself; pat_set_fit_residual only
+    // knows 0/1, so write and reread through the parser for 2.
+    if (modes[m] == 2) {
+      char *data_dir = create_temp_pat_data_dir();
+      pat_destroy(pat);
+      char header[64];
+      current_pat_header(header, sizeof(header));
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_formatted_string(sb, "%s\nfit_residual,2\n", header);
+      char feature_name[64];
+      for (int f = 0; f < PAT_NUM_FEATURES; f++) {
+        pat_feature_name(f, feature_name, sizeof(feature_name));
+        string_builder_add_formatted_string(sb, "%s,0\n", feature_name);
+      }
+      write_pat_file_contents(data_dir, "gen_fixed_mode2",
+                              string_builder_peek(sb));
+      string_builder_destroy(sb);
+      ErrorStack *error_stack = error_stack_create();
+      pat = pat_create(data_dir, "gen_fixed_mode2", error_stack);
+      assert(error_stack_is_empty(error_stack));
+      error_stack_destroy(error_stack);
+      free(data_dir);
+    }
+    assert(pat_get_fit_residual_mode(pat) == modes[m]);
+    const PATSolveResult result =
+        pat_regression_solve_into_weights(regression, 1.0 / 400.0, pat);
+    assert(result.solved);
+    const Equity hook = pat_get_weight(pat, PAT_FEATURE_HOOK_START);
+    const Equity hook_score = pat_get_weight(pat, PAT_FEATURE_HOOK_SCORE_START);
+    assert(pat_get_weight(pat, PAT_FEATURE_LM_SPAN_START) == 0);
+    if (modes[m] == 0) {
+      assert(hook_score == 0);
+      assert(hook < -2900 && hook > -3100);
+    } else if (modes[m] == 1) {
+      assert(hook == 0);
+      assert(hook_score < -2900 && hook_score > -3100);
+    } else {
+      assert(hook < 0 && hook_score < 0);
+      assert(hook + hook_score < -2900 && hook + hook_score > -3100);
+    }
+    pat_destroy(pat);
+  }
+  free(regression);
+}
+
 static void test_pat_movegen_integration(void) {
   // WMP on: its recording path precomputes score-plus-leave equity for
   // nonempty boards and once forgot to add the defense term for
@@ -2212,6 +2287,7 @@ void test_pat(void) {
   test_pat_lm_channels();
   test_pat_stage_scale(data_dir);
   test_pat_opening_adjustments(data_dir);
+  test_pat_gen_experimental_channels_fixed();
   test_pat_transposition_invariance();
   test_pat_blank_floater();
   test_pat_run_through_table();
