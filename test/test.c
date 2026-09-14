@@ -273,6 +273,10 @@ void run_test(const char *subtest) {
   }
   // Parameterized move-choice comparisons: "patmovechoice:<spec>" (see
   // pat_move_choice_run_spec).
+  if (has_prefix("patopeningsim:", subtest)) {
+    pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
+    return;
+  }
   if (has_prefix("patmovechoice:", subtest)) {
     pat_move_choice_run_spec(subtest + strlen("patmovechoice:"));
     return;
