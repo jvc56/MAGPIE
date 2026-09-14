@@ -101,6 +101,15 @@ struct PATWeights {
   // this way carries exactly the champion's feature set; evaluation is
   // unaffected either way (zero weights are zero).
   bool fit_scaled_channels;
+  // Whether patgen builds training rows through the runtime overlay path
+  // (pat_extract_move_features_combined) rather than by scanning the
+  // post-move board. The two differ wherever the move creates a hook or
+  // floater: the overlay approximates those with the hook_flex table,
+  // the post-move scan measures them with real cross and extension sets
+  // (mean absolute difference 0.66 equity over the v3 champion's top
+  // candidates, see test_pat_train_runtime_parity). Training on the
+  // overlay rows makes fitting and evaluation see the same measurement.
+  bool train_overlay;
   // Set by pat_prepare_hook_flex. The lexicon tables (hook_flex,
   // through_score, through_count) are part of the model: a file loaded
   // without them evaluates differently (it disagreed with the same
@@ -159,6 +168,12 @@ static void pat_require_prepared(const PATWeights *pat) {
 
 bool pat_get_fit_scaled_channels(const PATWeights *pat) {
   return pat->fit_scaled_channels;
+}
+
+bool pat_get_train_overlay(const PATWeights *pat) { return pat->train_overlay; }
+
+void pat_set_train_overlay(PATWeights *pat, bool train_overlay) {
+  pat->train_overlay = train_overlay;
 }
 
 void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels) {
@@ -272,6 +287,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->lexicon_floaters = PAT_DEFAULT_LEXICON_FLOATERS;
   pat->signed_through = PAT_DEFAULT_SIGNED_THROUGH;
   pat->fit_scaled_channels = PAT_DEFAULT_FIT_SCALED;
+  pat->train_overlay = PAT_DEFAULT_TRAIN_OVERLAY;
   pat->version = PAT_VERSION;
   return pat;
 }
@@ -434,6 +450,20 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->fit_scaled_channels = (flag == 1);
       continue;
     }
+    if (has_prefix(PAT_TRAIN_OVERLAY_ROW_PREFIX, line)) {
+      const int flag = string_to_int(
+          line + strlen(PAT_TRAIN_OVERLAY_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a train_overlay "
+                                 "flag other than 0 or 1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->train_overlay = (flag == 1);
+      continue;
+    }
     if (feature_index >= PAT_NUM_FEATURES) {
       error_stack_push(
           error_stack, ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
@@ -541,6 +571,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
       sb, "%s%d\n", PAT_SIGNED_THROUGH_ROW_PREFIX, pat->signed_through ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SCALED_ROW_PREFIX,
                                       pat->fit_scaled_channels ? 1 : 0);
+  string_builder_add_formatted_string(
+      sb, "%s%d\n", PAT_TRAIN_OVERLAY_ROW_PREFIX, pat->train_overlay ? 1 : 0);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -2142,6 +2174,91 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
     }
   }
   return pat_combine(worst, sum, pat_eval_ctx->weights->combine_gamma);
+}
+
+// The training row for a candidate move built the way the runtime term is
+// built: the pre-move context's stored unit rows, with the units the move
+// geometrically touches rescanned through the move overlay, combined by
+// the same worst-unit / gamma rule pat_eval_move_penalty applies. A model
+// fitted on these rows is fitted on exactly what it is later evaluated
+// with (the overlay's approximations included), whereas
+// pat_extract_features_combined on the post-move board measures the
+// created hooks and floaters with their real cross and extension sets,
+// which the runtime never sees. Units the context dropped as unweighted
+// contribute nothing, so their classes cannot gain weight from rows built
+// this way; own-asset credit is not applied (training runs with no
+// discount). Non-placement moves get the baseline rows unchanged.
+void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
+                                        const Move *move, double *features) {
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    features[feature_index] = 0.0;
+  }
+  if (!pat_eval_ctx || !pat_eval_ctx->weights || pat_eval_ctx->num_units == 0) {
+    return;
+  }
+  const int num_units = pat_eval_ctx->num_units;
+  uint64_t affected_units[PAT_MASK_WORDS];
+  pat_mask_clear(affected_units);
+  PATMoveOverlay overlay;
+  const bool is_placement =
+      move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
+  if (is_placement) {
+    const bool vertical = board_is_dir_vertical(move_get_dir(move));
+    const int row_start = move_get_row_start(move);
+    const int col_start = move_get_col_start(move);
+    const int tiles_length = move_get_tiles_length(move);
+    const int row_end = vertical ? row_start + tiles_length - 1 : row_start;
+    const int col_end = vertical ? col_start : col_start + tiles_length - 1;
+    pat_move_affected_units(pat_eval_ctx, row_start, row_end, col_start,
+                            col_end, affected_units);
+    overlay.move = move;
+    overlay.row_start = row_start;
+    overlay.col_start = col_start;
+    overlay.row_end = row_end;
+    overlay.col_end = col_end;
+    overlay.vertical = vertical;
+    overlay.hook_flex = pat_eval_ctx->weights->hook_flex;
+  }
+  int32_t unit_rows[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
+  int worst_unit = -1;
+  Equity worst_penalty = 0;
+  for (int unit_index = 0; unit_index < num_units; unit_index++) {
+    int32_t *row = unit_rows[unit_index];
+    Equity penalty;
+    if (is_placement && pat_mask_test(affected_units, unit_index)) {
+      memset(row, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
+      int scan_dir = 0;
+      int scan_lane = 0;
+      pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay, row, &scan_dir,
+                            &scan_lane, NULL, NULL, NULL);
+      penalty = pat_dot_ctx(pat_eval_ctx, row);
+    } else {
+      memcpy(row, pat_eval_ctx->unit_features[unit_index],
+             sizeof(int32_t) * PAT_NUM_FEATURES);
+      penalty = pat_eval_ctx->unit_penalty[unit_index];
+    }
+    if (penalty < worst_penalty) {
+      worst_penalty = penalty;
+      worst_unit = unit_index;
+    }
+  }
+  const double gamma =
+      (worst_unit >= 0) ? pat_eval_ctx->weights->combine_gamma : 1.0;
+  for (int unit_index = 0; unit_index < num_units; unit_index++) {
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      features[feature_index] +=
+          gamma * (double)unit_rows[unit_index][feature_index];
+    }
+  }
+  if (worst_unit >= 0) {
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      features[feature_index] +=
+          (1.0 - gamma) * (double)unit_rows[worst_unit][feature_index];
+    }
+  }
 }
 
 void pat_extract_features_combined(const Square *lanes,

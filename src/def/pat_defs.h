@@ -152,6 +152,14 @@ enum {
 #define PAT_FIT_SCALED_ROW_PREFIX "fit_scaled,"
 #define PAT_DEFAULT_FIT_SCALED true
 
+// Optional row (0 or 1): whether patgen builds each training row through
+// the runtime overlay path from the pre-move context
+// (pat_extract_move_features_combined) instead of scanning the post-move
+// board (see PATWeights.train_overlay). Absent means 0, the post-move
+// scan every earlier file was trained on.
+#define PAT_TRAIN_OVERLAY_ROW_PREFIX "train_overlay,"
+#define PAT_DEFAULT_TRAIN_OVERLAY false
+
 // The header line is PAT_MAGIC_PREFIX followed by the format version as a
 // decimal integer, e.g. "magpie_pat_v2". PAT_VERSION is what this build
 // writes; a file naming a version below PAT_EARLIEST_SUPPORTED_VERSION is

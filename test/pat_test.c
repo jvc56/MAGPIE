@@ -26,6 +26,7 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1073,8 +1074,11 @@ static void test_pat_path_parity(void) {
   MoveList *all_list_wmp = move_list_create(3000);
   MoveList *all_list_no_wmp = move_list_create(3000);
   MoveList *within_list = move_list_create(3000);
+  PATEvalContext *parity_ctx = malloc_or_die(sizeof(PATEvalContext));
+  double *parity_row = malloc_or_die(sizeof(double) * PAT_NUM_FEATURES);
   int positions_checked = 0;
   int moves_checked = 0;
+  int rows_checked = 0;
   for (int attempt = 0; attempt < 40; attempt++) {
     // Positions from seeded self-play in the WMP config, mirrored into
     // the other config through their CGP.
@@ -1158,6 +1162,37 @@ static void test_pat_path_parity(void) {
         moves_checked++;
       }
     }
+    // The overlay training row dotted with the weights must reproduce
+    // the runtime term for the same move (the same units, overlay and
+    // combination), to milli-equity rounding.
+    {
+      const int mover_index = game_get_player_on_turn_index(game_wmp);
+      const Player *mover = game_get_player(game_wmp, mover_index);
+      const int csi = board_get_cross_set_index(
+          game_get_data_is_shared(game_wmp, PLAYERS_DATA_TYPE_KWG),
+          mover_index);
+      pat_eval_context_load(
+          parity_ctx, pats[0],
+          board_get_readonly_lanes(game_get_board(game_wmp), csi),
+          game_get_ld(game_wmp), player_get_rack(mover), PAT_CLASS_MASK_ALL,
+          rack_get_total_letters(
+              player_get_rack(game_get_player(game_wmp, 1 - mover_index))));
+      const int num_top = move_list_get_count(all_list_wmp);
+      for (int i = 0; i < num_top && i < 20; i++) {
+        const Move *move = move_list_get_move(all_list_wmp, i);
+        Rack leave;
+        get_leave_for_move(move, game_wmp, &leave);
+        const double runtime =
+            equity_to_double(pat_eval_move_penalty(parity_ctx, move, &leave));
+        pat_extract_move_features_combined(parity_ctx, move, parity_row);
+        double dot = 0.0;
+        for (int f = 0; f < PAT_NUM_FEATURES; f++) {
+          dot += equity_to_double(pat_get_weight(pats[0], f)) * parity_row[f];
+        }
+        assert(fabs(dot - runtime) < 0.002);
+        rows_checked++;
+      }
+    }
     // WMP on and off: identical exhaustive lists, move for move.
     const int num_all = move_list_get_count(all_list_wmp);
     assert(num_all == move_list_get_count(all_list_no_wmp));
@@ -1168,9 +1203,13 @@ static void test_pat_path_parity(void) {
       assert(move_get_equity(m1) == move_get_equity(m2));
     }
   }
-  printf("PAT path parity: %d positions, %d within-margin moves checked\n",
-         positions_checked, moves_checked);
+  printf("PAT path parity: %d positions, %d within-margin moves, %d overlay "
+         "training rows checked\n",
+         positions_checked, moves_checked, rows_checked);
   assert(positions_checked >= 30);
+  assert(rows_checked >= 300);
+  free(parity_ctx);
+  free(parity_row);
   move_list_destroy(best_list);
   move_list_destroy(all_list_wmp);
   move_list_destroy(all_list_no_wmp);
