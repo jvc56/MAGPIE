@@ -2852,20 +2852,23 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
 }
 
 // The opening adjustment for a move on an empty board (see
-// PAT_OPENING_TILES_ROW_PREFIX); zero elsewhere and for a pass.
+// PAT_OPENING_TILES_ROW_PREFIX): a placement's entry for its tile count,
+// and the exchange entry for BOTH an exchange and a pass, which leave
+// the board empty alike (a pass is an exchange that draws nothing, and
+// the two tie statically on a hopeless rack: the table must not break
+// that tie toward the pass). Applies to every decision while the board
+// is empty, either player's, including the ones that follow an opening
+// exchange or pass -- the same empty-board situation the table was
+// measured on. Zero once a tile is down.
 static inline Equity pat_opening_adjustment(const PATEvalContext *pat_eval_ctx,
                                             const Move *move) {
   if (!pat_eval_ctx->board_is_empty) {
     return 0;
   }
-  const game_event_t type = move_get_type(move);
-  if (type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
     return pat_eval_ctx->weights->opening_tiles[move_get_tiles_played(move)];
   }
-  if (type == GAME_EVENT_EXCHANGE) {
-    return pat_eval_ctx->weights->opening_exchange;
-  }
-  return 0;
+  return pat_eval_ctx->weights->opening_exchange;
 }
 
 static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
