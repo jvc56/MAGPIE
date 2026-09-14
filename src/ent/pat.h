@@ -46,6 +46,8 @@ bool pat_get_lexicon_floaters(const PATWeights *pat);
 void pat_set_lexicon_floaters(PATWeights *pat, bool lexicon_floaters);
 bool pat_get_signed_through(const PATWeights *pat);
 void pat_set_signed_through(PATWeights *pat, bool signed_through);
+bool pat_get_fit_scaled_channels(const PATWeights *pat);
+void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels);
 uint64_t pat_get_mutation_counter(const PATWeights *pat);
 void pat_bump_mutation_counter(PATWeights *pat);
 // Writes the weights to data/strategy/<pat_name>.pat.

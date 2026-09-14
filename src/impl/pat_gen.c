@@ -132,12 +132,29 @@ pat_regression_solve_into_weights(const PATRegression *regression,
   for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
     a[i][i] += ridge_lambda * num_observations;
   }
+  // Excluded features: drop the column from the solve by zeroing its row
+  // and column and its right-hand side, with a unit diagonal so the
+  // system stays positive definite and the solution there is exactly 0.
+  double xty[PAT_REGRESSION_DIM];
+  memcpy(xty, regression->xty, sizeof(xty));
+  if (!pat_get_fit_scaled_channels(pat)) {
+    for (int feature_index = PAT_FEATURE_HOOK_SCALED_START;
+         feature_index < PAT_FEATURE_DWS_HOOK_START; feature_index++) {
+      const int i = feature_index + 1;
+      for (int j = 0; j < PAT_REGRESSION_DIM; j++) {
+        a[i][j] = 0.0;
+        a[j][i] = 0.0;
+      }
+      a[i][i] = 1.0;
+      xty[i] = 0.0;
+    }
+  }
 
   if (!pat_cholesky_decompose(a)) {
     return result;
   }
   double solution[PAT_REGRESSION_DIM];
-  pat_cholesky_solve(a, regression->xty, solution);
+  pat_cholesky_solve(a, xty, solution);
 
   result.solved = true;
   result.intercept = solution[0];

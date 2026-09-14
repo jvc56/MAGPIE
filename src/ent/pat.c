@@ -91,6 +91,16 @@ struct PATWeights {
   // what every file before this row was trained under. Same reasoning as
   // lexicon_floaters for keeping it per file.
   bool signed_through;
+  // Whether patgen's regression fits the hypergeometric-scaled channels
+  // at all. They are deterministic rescalings of the raw hook/floater
+  // channels, so ridge splits the fitted mass between the two under
+  // near-collinearity, and under iterative training the split drifted
+  // (a five-generation retrain with them lost to the champion, and a
+  // reproduction of the champion's own recipe on this branch came out
+  // below it). false drops their columns from the solve so a file trained
+  // this way carries exactly the champion's feature set; evaluation is
+  // unaffected either way (zero weights are zero).
+  bool fit_scaled_channels;
   uint64_t mutation_counter;
   // The version named on the file's header line (see PAT_VERSION).
   int version;
@@ -127,6 +137,14 @@ bool pat_get_lexicon_floaters(const PATWeights *pat) {
 
 bool pat_get_signed_through(const PATWeights *pat) {
   return pat->signed_through;
+}
+
+bool pat_get_fit_scaled_channels(const PATWeights *pat) {
+  return pat->fit_scaled_channels;
+}
+
+void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels) {
+  pat->fit_scaled_channels = fit_scaled_channels;
 }
 
 void pat_set_signed_through(PATWeights *pat, bool signed_through) {
@@ -235,6 +253,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->own_asset_discount = PAT_DEFAULT_OWN_ASSET_DISCOUNT;
   pat->lexicon_floaters = PAT_DEFAULT_LEXICON_FLOATERS;
   pat->signed_through = PAT_DEFAULT_SIGNED_THROUGH;
+  pat->fit_scaled_channels = PAT_DEFAULT_FIT_SCALED;
   pat->version = PAT_VERSION;
   return pat;
 }
@@ -383,6 +402,20 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->signed_through = (flag == 1);
       continue;
     }
+    if (has_prefix(PAT_FIT_SCALED_ROW_PREFIX, line)) {
+      const int flag =
+          string_to_int(line + strlen(PAT_FIT_SCALED_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a fit_scaled "
+                                 "flag other than 0 or 1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->fit_scaled_channels = (flag == 1);
+      continue;
+    }
     if (feature_index >= PAT_NUM_FEATURES) {
       error_stack_push(
           error_stack, ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
@@ -488,6 +521,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
                                       pat->lexicon_floaters ? 1 : 0);
   string_builder_add_formatted_string(
       sb, "%s%d\n", PAT_SIGNED_THROUGH_ROW_PREFIX, pat->signed_through ? 1 : 0);
+  string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SCALED_ROW_PREFIX,
+                                      pat->fit_scaled_channels ? 1 : 0);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
