@@ -236,6 +236,17 @@ enum {
 // diagnostics were run over. Absent means 1.0: the term as trained. The
 // weights themselves are never scaled, so training and the features are
 // untouched; this is purely how strongly a trained term is applied.
+// Optional rows: an adjustment (milli-equity, <= 0) added to the defense
+// term of an opening move -- the first tile placement on an empty board,
+// by the number of tiles it plays, or an opening exchange (see
+// PATWeights.opening_tiles / opening_exchange). What static evaluation
+// systematically misses about opening length, measured by simulation
+// and by whole-game residuals; entries are relative, so the best length
+// carries 0 and the rest are penalties, which keeps the whole term <= 0
+// and its omission from the shadow bounds sound. Absent means 0.
+#define PAT_OPENING_TILES_ROW_PREFIX "opening_tiles_"
+#define PAT_OPENING_EXCHANGE_ROW_PREFIX "opening_exchange,"
+
 #define PAT_STAGE_SCALE_EARLY_ROW_PREFIX "stage_scale_early,"
 #define PAT_STAGE_SCALE_MID_ROW_PREFIX "stage_scale_mid,"
 #define PAT_STAGE_SCALE_LATE_ROW_PREFIX "stage_scale_late,"

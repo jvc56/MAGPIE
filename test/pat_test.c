@@ -1971,6 +1971,134 @@ static void test_pat_stage_scale(const char *data_dir) {
   config_destroy(config);
 }
 
+// Opening adjustments: rows by tiles played and for an exchange, applied
+// only on an empty board. Round trip, rejection of a positive value, and
+// end to end through move generation: on the empty board every
+// tile-placement candidate's equity moves by its tile count's entry and
+// an exchange by the exchange entry, relative to the same weights without
+// the rows; after one move nothing changes.
+static void test_pat_opening_adjustments(const char *data_dir) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-wmp true");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  PATWeights *plain = pat_create_zeroed("opening_plain");
+  PATWeights *opening = pat_create_zeroed("opening_table");
+  PATWeights *pats[2] = {plain, opening};
+  for (int i = 0; i < 2; i++) {
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      pat_set_weight(pats[i], feature_index, -40 - 3 * (feature_index % 7));
+    }
+    pat_set_combine_gamma(pats[i], 0.5);
+    pat_set_lexicon_floaters(pats[i], true);
+    pat_set_signed_through(pats[i], true);
+    pat_prepare_hook_flex(pats[i], player_get_kwg(game_get_player(game, 0)),
+                          game_get_ld(game));
+  }
+  static const Equity table[RACK_SIZE + 1] = {0,     0,     -1000, -2500,
+                                              -3170, -2630, -1860, 0};
+  for (int tiles = 2; tiles <= RACK_SIZE; tiles++) {
+    pat_set_opening_tiles_adjustment(opening, tiles, table[tiles]);
+  }
+  pat_set_opening_exchange_adjustment(opening, -530);
+
+  ErrorStack *error_stack = error_stack_create();
+  pat_write(opening, data_dir, "opening_table", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  PATWeights *loaded = pat_create(data_dir, "opening_table", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
+    assert(pat_get_opening_tiles_adjustment(loaded, tiles) == table[tiles]);
+  }
+  assert(pat_get_opening_exchange_adjustment(loaded) == -530);
+  pat_destroy(loaded);
+  error_stack_destroy(error_stack);
+  {
+    char header[64];
+    current_pat_header(header, sizeof(header));
+    char *contents = get_formatted_string("%s\nopening_tiles_3,5\n", header);
+    assert_pat_create_fails(data_dir, "opening_positive", contents);
+    free(contents);
+    contents = get_formatted_string("%s\nopening_tiles_9,-5\n", header);
+    assert_pat_create_fails(data_dir, "opening_bad_tiles", contents);
+    free(contents);
+  }
+
+  MoveList *setup_list = move_list_create(1);
+  MoveList *lists[2] = {move_list_create(3000), move_list_create(3000)};
+  int checked = 0;
+  int exchanges_checked = 0;
+  for (int attempt = 0; attempt < 8; attempt++) {
+    game_reset(game);
+    game_seed(game, 6000000ULL + (uint64_t)attempt);
+    draw_starting_racks(game);
+    // Empty board on even attempts; one move played on odd ones.
+    if (attempt % 2 == 1) {
+      player_set_pat(game_get_player(game, 0), NULL);
+      player_set_pat(game_get_player(game, 1), NULL);
+      play_move(get_top_equity_move(game, setup_list), game, NULL);
+    }
+    const bool empty = (attempt % 2 == 0);
+    for (int i = 0; i < 2; i++) {
+      player_set_pat(game_get_player(game, 0), pats[i]);
+      player_set_pat(game_get_player(game, 1), pats[i]);
+      const MoveGenArgs args = {
+          .game = game,
+          .move_list = lists[i],
+          .move_record_type = MOVE_RECORD_ALL,
+          .move_sort_type = MOVE_SORT_EQUITY,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&args);
+      move_list_sort_moves(lists[i]);
+      const Move *best = get_top_equity_move(game, setup_list);
+      assert(move_get_equity(best) ==
+             move_get_equity(move_list_get_move(lists[i], 0)));
+    }
+    const int num = move_list_get_count(lists[0]);
+    assert(num == move_list_get_count(lists[1]));
+    for (int a = 0; a < num; a++) {
+      const Move *without = move_list_get_move(lists[0], a);
+      const Move *with = NULL;
+      for (int b = 0; b < num; b++) {
+        if (compare_moves_without_equity(
+                without, move_list_get_move(lists[1], b), true) == -1) {
+          with = move_list_get_move(lists[1], b);
+          break;
+        }
+      }
+      if (!with) {
+        continue;
+      }
+      Equity expected = move_get_equity(without);
+      if (empty && move_get_type(without) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        expected += table[move_get_tiles_played(without)];
+      } else if (empty && move_get_type(without) == GAME_EVENT_EXCHANGE) {
+        expected += -530;
+        exchanges_checked++;
+      }
+      assert(move_get_equity(with) == expected);
+      checked++;
+    }
+  }
+  assert(checked > 500);
+  assert(exchanges_checked > 0);
+  move_list_destroy(lists[0]);
+  move_list_destroy(lists[1]);
+  move_list_destroy(setup_list);
+  player_set_pat(game_get_player(game, 0), NULL);
+  player_set_pat(game_get_player(game, 1), NULL);
+  pat_destroy(plain);
+  pat_destroy(opening);
+  config_destroy(config);
+}
+
 static void test_pat_movegen_integration(void) {
   // WMP on: its recording path precomputes score-plus-leave equity for
   // nonempty boards and once forgot to add the defense term for
@@ -2065,6 +2193,7 @@ void test_pat(void) {
   test_pat_hook_score_channel();
   test_pat_lm_channels();
   test_pat_stage_scale(data_dir);
+  test_pat_opening_adjustments(data_dir);
   test_pat_transposition_invariance();
   test_pat_blank_floater();
   test_pat_run_through_table();
