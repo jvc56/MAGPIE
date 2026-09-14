@@ -272,6 +272,10 @@ void run_test(const char *subtest) {
     pat_move_choice_run_spec(subtest + strlen("patmovechoice:"));
     return;
   }
+  if (has_prefix("pattrainparity:", subtest)) {
+    pat_train_runtime_parity_for(subtest + strlen("pattrainparity:"));
+    return;
+  }
   log_fatal("unrecognized test: %s\n", subtest);
 }
 

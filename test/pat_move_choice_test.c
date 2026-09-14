@@ -805,10 +805,20 @@ void pat_move_choice_run_spec(const char *spec) {
 // hook or floater the move itself creates (their real cross and extension
 // sets do not exist before the move is played), and this reports how often
 // and by how much.
-void test_pat_train_runtime_parity(void) {
+void test_pat_train_runtime_parity(void) { pat_train_runtime_parity_for(NULL); }
+
+// pat_name NULL means the config champion.
+void pat_train_runtime_parity_for(const char *pat_name) {
   Config *config = pat_move_choice_config_create();
   Game *game = config_get_game(config);
-  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  PATWeights *owned = NULL;
+  const PATWeights *champion =
+      pat_name ? pat_move_choice_chooser_from_spec(config, pat_name, &owned).pat
+               : player_get_pat(game_get_player(game, 0));
+  if (owned) {
+    player_set_pat(game_get_player(game, 0), owned);
+    player_set_pat(game_get_player(game, 1), owned);
+  }
   MoveList *setup_list = move_list_create(1);
   MoveList *all_list = move_list_create(PAT_MOVE_CHOICE_MOVE_LIST_CAPACITY);
   PATEvalContext *ctx = malloc_or_die(sizeof(PATEvalContext));
@@ -823,7 +833,6 @@ void test_pat_train_runtime_parity(void) {
   int num_over_two = 0;
   double sum_runtime = 0.0;
   double sum_post = 0.0;
-  game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   for (int attempt = 0; attempt < 300; attempt++) {
     const uint64_t seed = 1200000000ULL + (uint64_t)attempt;
     game_reset(game);
@@ -873,6 +882,10 @@ void test_pat_train_runtime_parity(void) {
       get_leave_for_move(move, game, &leave);
       const double runtime =
           equity_to_double(pat_eval_move_penalty(ctx, move, &leave));
+      // play_move itself pushes a backup under BACKUP_MODE_SIMULATION, so
+      // the mode is on only around this probe, never during the setup
+      // plies (the stack holds MAX_SEARCH_DEPTH entries).
+      game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
       play_move_without_drawing_tiles(move, game);
       const Square *post_lanes =
           board_get_readonly_lanes(game_get_board(game), csi);
@@ -887,6 +900,7 @@ void test_pat_train_runtime_parity(void) {
         dot += equity_to_double(pat_get_weight(champion, f)) * row[f];
       }
       game_unplay_last_move(game);
+      game_set_backup_mode(game, BACKUP_MODE_OFF);
       const double diff = fabs(runtime - post);
       num_moves++;
       sum_runtime += runtime;
@@ -909,14 +923,13 @@ void test_pat_train_runtime_parity(void) {
       }
     }
   }
-  game_set_backup_mode(game, BACKUP_MODE_OFF);
-  printf("\ntraining/runtime parity: %d moves; runtime == post-board exact on "
-         "%d (%.1f%%); mean |diff| %.4f, max %.4f; |diff| > 0.5 on %d "
-         "(%.1f%%), > 2.0 on %d (%.1f%%); mean runtime %.4f, mean post-board "
-         "%.4f\n",
-         num_moves, num_exact, 100.0 * num_exact / num_moves,
-         sum_abs_diff / num_moves, max_abs_diff, num_over_half,
-         100.0 * num_over_half / num_moves, num_over_two,
+  printf("\n[%s] training/runtime parity: %d moves; runtime == post-board "
+         "exact on %d (%.1f%%); mean |diff| %.4f, max %.4f; |diff| > 0.5 on "
+         "%d (%.1f%%), > 2.0 on %d (%.1f%%); mean runtime %.4f, mean "
+         "post-board %.4f\n",
+         pat_name ? pat_name : "champion", num_moves, num_exact,
+         100.0 * num_exact / num_moves, sum_abs_diff / num_moves, max_abs_diff,
+         num_over_half, 100.0 * num_over_half / num_moves, num_over_two,
          100.0 * num_over_two / num_moves, sum_runtime / num_moves,
          sum_post / num_moves);
   printf("  post-board exact vs training row dot: max |diff| %.6f\n",
@@ -927,5 +940,8 @@ void test_pat_train_runtime_parity(void) {
   free(post_ctx);
   move_list_destroy(setup_list);
   move_list_destroy(all_list);
+  if (owned) {
+    pat_destroy(owned);
+  }
   config_destroy(config);
 }
