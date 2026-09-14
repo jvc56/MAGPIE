@@ -7,6 +7,7 @@
 #include "../src/def/move_defs.h"
 #include "../src/def/pat_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -17,6 +18,7 @@
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/static_eval.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
@@ -40,6 +42,17 @@ static char *create_temp_pat_data_dir(void) {
   assert(mkdir(strategy_dir, 0755) == 0);
   free(strategy_dir);
   return string_duplicate(tmp_dir);
+}
+
+// A zeroed PATWeights with its lexicon tables prepared from the game's
+// data, ready for evaluation (an unprepared model is refused; see
+// PATWeights.prepared).
+static PATWeights *pat_test_create_prepared(const char *name,
+                                            const Game *game) {
+  PATWeights *pat = pat_create_zeroed(name);
+  pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
+  return pat;
 }
 
 static void write_pat_file_contents(const char *data_dir, const char *pat_name,
@@ -544,7 +557,7 @@ static void test_pat_opening_penalty_gating(void) {
 
   // Only a letter-multiplier class (DLS) weighted: the letter axis is
   // suppressed, the word axis is untouched.
-  PATWeights *dls_only = pat_create_zeroed("dls_only_gate");
+  PATWeights *dls_only = pat_test_create_prepared("dls_only_gate", game);
   pat_set_weight(dls_only, PAT_FEATURE_DLS_HOOK_START, -5);
   PATEvalContext ctx;
   pat_eval_context_load(&ctx, dls_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
@@ -558,7 +571,7 @@ static void test_pat_opening_penalty_gating(void) {
 
   // Only a word-multiplier class (TWS) weighted: the word axis is
   // suppressed, the letter axis is untouched.
-  PATWeights *tws_only = pat_create_zeroed("tws_only_gate");
+  PATWeights *tws_only = pat_test_create_prepared("tws_only_gate", game);
   pat_set_weight(tws_only, PAT_FEATURE_HOOK_START, -5);
   pat_eval_context_load(&ctx, tws_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
                         RACK_SIZE);
@@ -572,7 +585,8 @@ static void test_pat_opening_penalty_gating(void) {
   // A runtime mask excluding DLS even though the file has real DLS weights
   // must not suppress the legacy penalty: gating follows what actually
   // applies, not what the file merely contains.
-  PATWeights *dls_weighted = pat_create_zeroed("dls_masked_off_gate");
+  PATWeights *dls_weighted =
+      pat_test_create_prepared("dls_masked_off_gate", game);
   pat_set_weight(dls_weighted, PAT_FEATURE_DLS_HOOK_START, -5);
   pat_eval_context_load(&ctx, dls_weighted, lanes, ld, NULL,
                         PAT_CLASS_MASK_TWS_ONLY, RACK_SIZE);
@@ -597,7 +611,7 @@ static void test_pat_move_penalty(void) {
   pat_extract_features(lanes, ld, NULL, NULL, RACK_SIZE, features);
   const int32_t float_flex_d5 = features[PAT_FEATURE_FLOAT_FLEX_START + 4];
 
-  PATWeights *pat = pat_create_zeroed("penalty_test");
+  PATWeights *pat = pat_test_create_prepared("penalty_test", game);
   pat_set_weight(pat, PAT_FEATURE_TT_FLOATER, -1000);
   pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START + 1, -100);
   pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START + 4, -100);
@@ -641,7 +655,7 @@ static void test_pat_move_penalty(void) {
   assert(block_penalty <= 0);
 
   // With zero weights everything is zero.
-  PATWeights *zero_pat = pat_create_zeroed("zero_test");
+  PATWeights *zero_pat = pat_test_create_prepared("zero_test", game);
   PATEvalContext zero_ctx;
   pat_eval_context_load(&zero_ctx, zero_pat, lanes, ld, NULL,
                         PAT_CLASS_MASK_ALL, RACK_SIZE);
@@ -682,7 +696,7 @@ static void test_pat_dls_features_land_in_dls_channels(void) {
   const LetterDistribution *ld = game_get_ld(game);
   const Square *lanes = board_get_readonly_lanes(board, 0);
 
-  PATWeights *pat = pat_create_zeroed("dls_only");
+  PATWeights *pat = pat_test_create_prepared("dls_only", game);
   pat_set_weight(pat, PAT_FEATURE_DLS_HOOK_START, -1000);
 
   PATEvalContext ctx;
@@ -781,7 +795,7 @@ static void test_pat_own_asset_discount(void) {
   Rack *leave_with_blank = rack_create(ld_size);
   rack_add_letter(leave_with_blank, BLANK_MACHINE_LETTER);
 
-  PATWeights *pat = pat_create_zeroed("own_asset_test");
+  PATWeights *pat = pat_test_create_prepared("own_asset_test", game);
   pat_set_weight(pat, PAT_FEATURE_HOOK_START, -1000);
   pat_set_own_asset_discount(pat, 0.5);
 
@@ -840,7 +854,8 @@ static void test_pat_own_asset_discount(void) {
 
   // With no discount configured (the default every earlier file already
   // has), the same leave earns nothing: byte-for-byte today's behavior.
-  PATWeights *no_discount_pat = pat_create_zeroed("no_discount_test");
+  PATWeights *no_discount_pat =
+      pat_test_create_prepared("no_discount_test", game);
   pat_set_weight(no_discount_pat, PAT_FEATURE_HOOK_START, -1000);
   PATEvalContext no_discount_ctx;
   pat_eval_context_load(&no_discount_ctx, no_discount_pat, lanes, ld, NULL,
@@ -879,7 +894,7 @@ static void test_pat_unweighted_units_dropped(void) {
   // Weights on triple-word channels only: the double-word, triple-letter
   // and window units can never charge anything, so the evaluation context
   // leaves them out while the all-units context keeps them.
-  PATWeights *pat = pat_create_zeroed("drop_test");
+  PATWeights *pat = pat_test_create_prepared("drop_test", game);
   pat_set_weight(pat, PAT_FEATURE_FLOAT_SCORE_START + 1, -500);
   pat_set_weight(pat, PAT_FEATURE_HOOK_START, -20);
 
@@ -1008,6 +1023,162 @@ static void test_pat_opening_and_hook_flex(void) {
   config_destroy(config);
 }
 
+// A candidate must get the same PAT contribution through every
+// generation path: best-move recording, exhaustive recording (what the
+// simmer and the play chooser use), within-margin recording, and each of
+// those with WMP on and off. Heavy weights on every channel with both
+// floater semantics on, so any path that drops or misreads the term
+// shows up as a different equity for the same move.
+static void test_pat_path_parity(void) {
+  const char *set_cmd =
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 ";
+  Config *config_wmp = config_create_or_die(set_cmd);
+  load_and_exec_config_or_die(config_wmp, "set -wmp true");
+  Config *config_no_wmp = config_create_or_die(set_cmd);
+  load_and_exec_config_or_die(config_no_wmp, "set -wmp false");
+  Config *configs[2] = {config_wmp, config_no_wmp};
+  PATWeights *pats[2];
+  for (int c = 0; c < 2; c++) {
+    PATWeights *pat = pat_create_zeroed("path_parity");
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      pat_set_weight(pat, feature_index, -40 - 3 * (feature_index % 7));
+    }
+    pat_set_combine_gamma(pat, 0.5);
+    pat_set_lexicon_floaters(pat, true);
+    pat_set_signed_through(pat, true);
+    players_data_set_data(config_get_players_data(configs[c]),
+                          PLAYERS_DATA_TYPE_PAT, 0, pat);
+    players_data_set_data(config_get_players_data(configs[c]),
+                          PLAYERS_DATA_TYPE_PAT, 1, pat);
+    players_data_set_is_shared(config_get_players_data(configs[c]),
+                               PLAYERS_DATA_TYPE_PAT, true);
+    pats[c] = pat;
+  }
+  load_and_exec_config_or_die(
+      config_wmp, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  load_and_exec_config_or_die(
+      config_no_wmp,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game_wmp = config_get_game(config_wmp);
+  Game *game_no_wmp = config_get_game(config_no_wmp);
+  for (int c = 0; c < 2; c++) {
+    Game *game = config_get_game(configs[c]);
+    pat_prepare_hook_flex(pats[c], player_get_kwg(game_get_player(game, 0)),
+                          game_get_ld(game));
+    assert(player_get_pat(game_get_player(game, 0)) == pats[c]);
+  }
+
+  MoveList *best_list = move_list_create(1);
+  MoveList *all_list_wmp = move_list_create(3000);
+  MoveList *all_list_no_wmp = move_list_create(3000);
+  MoveList *within_list = move_list_create(3000);
+  int positions_checked = 0;
+  int moves_checked = 0;
+  for (int attempt = 0; attempt < 40; attempt++) {
+    // Positions from seeded self-play in the WMP config, mirrored into
+    // the other config through their CGP.
+    game_reset(game_wmp);
+    game_seed(game_wmp, 4000000ULL + (uint64_t)attempt);
+    draw_starting_racks(game_wmp);
+    // The setup plays run without the heavy weights (under which passing
+    // beats every opening play and the game ends scoreless); they are
+    // restored for the checks.
+    player_set_pat(game_get_player(game_wmp, 0), NULL);
+    player_set_pat(game_get_player(game_wmp, 1), NULL);
+    const int plies = attempt % 12;
+    for (int ply = 0; ply < plies; ply++) {
+      play_move(get_top_equity_move(game_wmp, best_list), game_wmp, NULL);
+      if (game_get_game_end_reason(game_wmp) != GAME_END_REASON_NONE) {
+        break;
+      }
+    }
+    player_set_pat(game_get_player(game_wmp, 0), pats[0]);
+    player_set_pat(game_get_player(game_wmp, 1), pats[0]);
+    if (game_get_game_end_reason(game_wmp) != GAME_END_REASON_NONE ||
+        bag_get_letters(game_get_bag(game_wmp)) == 0) {
+      continue;
+    }
+    char *cgp = game_get_cgp(game_wmp, true);
+    char *cgp_cmd = get_formatted_string("cgp %s", cgp);
+    load_and_exec_config_or_die(config_no_wmp, cgp_cmd);
+    free(cgp_cmd);
+    free(cgp);
+    positions_checked++;
+
+    Game *games[2] = {game_wmp, game_no_wmp};
+    MoveList *all_lists[2] = {all_list_wmp, all_list_no_wmp};
+    for (int c = 0; c < 2; c++) {
+      const MoveGenArgs all_args = {
+          .game = games[c],
+          .move_list = all_lists[c],
+          .move_record_type = MOVE_RECORD_ALL,
+          .move_sort_type = MOVE_SORT_EQUITY,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&all_args);
+      move_list_sort_moves(all_lists[c]);
+      // Best-move recording: same move, same equity as the exhaustive top.
+      const Move *best = get_top_equity_move(games[c], best_list);
+      const Move *all_top = move_list_get_move(all_lists[c], 0);
+      assert(move_get_equity(best) == move_get_equity(all_top));
+      assert(compare_moves_without_equity(best, all_top, true) == -1);
+      // Within-margin recording: every move it keeps has the exhaustive
+      // list's equity for that move.
+      const MoveGenArgs within_args = {
+          .game = games[c],
+          .move_list = within_list,
+          .move_record_type = MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST,
+          .move_sort_type = MOVE_SORT_EQUITY,
+          .override_kwg = NULL,
+          .eq_margin_movegen = int_to_equity(12),
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&within_args);
+      move_list_sort_moves(within_list);
+      const int num_within = move_list_get_count(within_list);
+      const int num_all = move_list_get_count(all_lists[c]);
+      assert(num_within > 0);
+      for (int w = 0; w < num_within; w++) {
+        const Move *within_move = move_list_get_move(within_list, w);
+        bool found = false;
+        for (int a = 0; a < num_all; a++) {
+          const Move *all_move = move_list_get_move(all_lists[c], a);
+          if (compare_moves_without_equity(within_move, all_move, true) == -1) {
+            assert(move_get_equity(within_move) == move_get_equity(all_move));
+            found = true;
+            break;
+          }
+        }
+        assert(found);
+        moves_checked++;
+      }
+    }
+    // WMP on and off: identical exhaustive lists, move for move.
+    const int num_all = move_list_get_count(all_list_wmp);
+    assert(num_all == move_list_get_count(all_list_no_wmp));
+    for (int a = 0; a < num_all; a++) {
+      const Move *m1 = move_list_get_move(all_list_wmp, a);
+      const Move *m2 = move_list_get_move(all_list_no_wmp, a);
+      assert(compare_moves_without_equity(m1, m2, true) == -1);
+      assert(move_get_equity(m1) == move_get_equity(m2));
+    }
+  }
+  printf("PAT path parity: %d positions, %d within-margin moves checked\n",
+         positions_checked, moves_checked);
+  assert(positions_checked >= 30);
+  move_list_destroy(best_list);
+  move_list_destroy(all_list_wmp);
+  move_list_destroy(all_list_no_wmp);
+  move_list_destroy(within_list);
+  config_destroy(config_wmp);
+  config_destroy(config_no_wmp);
+}
+
 static void test_pat_movegen_integration(void) {
   // WMP on: its recording path precomputes score-plus-leave equity for
   // nonempty boards and once forgot to add the defense term for
@@ -1060,7 +1231,7 @@ static void test_pat_movegen_integration(void) {
 
   // With a real penalty active, no move's equity can exceed the unweighted
   // best (every term is <= 0).
-  PATWeights *heavy_pat = pat_create_zeroed("movegen_heavy");
+  PATWeights *heavy_pat = pat_test_create_prepared("movegen_heavy", game);
   pat_set_weight(heavy_pat, PAT_FEATURE_TT_FLOATER, -2000);
   pat_set_weight(heavy_pat, PAT_FEATURE_FLOAT_SCORE_START, -500);
   pat_set_weight(heavy_pat, PAT_FEATURE_FLOAT_SCORE_START + 1, -500);
@@ -1110,5 +1281,6 @@ void test_pat(void) {
   test_pat_unweighted_units_dropped();
   test_pat_opening_and_hook_flex();
   test_pat_movegen_integration();
+  test_pat_path_parity();
   free(data_dir);
 }

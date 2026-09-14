@@ -483,25 +483,20 @@ void test_pat_move_choice_targeted_controls(void) {
   PATMoveChoiceResult result;
 
   // A file loaded straight through pat_create has no lexicon tables
-  // (hook_flex, through_score, through_count): only the config path runs
-  // pat_prepare_hook_flex. A reloaded champion with the tables prepared
-  // must be indistinguishable from the config's own; the same reload
-  // without them measures how much those tables move choices.
+  // (hook_flex, through_score, through_count): only pat_prepare_hook_flex
+  // installs them, and evaluation refuses a model without them (an
+  // earlier revision of this harness measured such a candidate at 12%
+  // disagreements with the same weights prepared). A reloaded, prepared
+  // champion must be indistinguishable from the config's own.
   printf("\nreload controls:\n");
   ErrorStack *error_stack = error_stack_create();
   PATWeights *reloaded = pat_create(config_get_data_paths(config),
                                     PAT_MOVE_CHOICE_CHAMPION, error_stack);
   assert(error_stack_is_empty(error_stack));
-  const PATMoveChooser reloaded_unprepared = {.label = "champion reloaded, "
-                                                       "lexicon tables absent",
-                                              .pat = reloaded,
-                                              .degrade_margin = 0.0,
-                                              .overlap_correction = 0.0};
-  pat_move_choice_compare(config, &champion_chooser, &reloaded_unprepared,
-                          960000000ULL, 2000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
-                          &result);
+  assert(!pat_get_prepared(reloaded));
   pat_prepare_hook_flex(reloaded, player_get_kwg(game_get_player(game, 0)),
                         game_get_ld(game));
+  assert(pat_get_prepared(reloaded));
   const PATMoveChooser reloaded_prepared = {.label = "champion reloaded, "
                                                      "lexicon tables prepared",
                                             .pat = reloaded,
@@ -515,6 +510,8 @@ void test_pat_move_choice_targeted_controls(void) {
 
   // No PAT at all: the champion's whole term removed. Must disagree often.
   PATWeights *zeroed = pat_create_zeroed("zeroed");
+  pat_prepare_hook_flex(zeroed, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
   const PATMoveChooser zeroed_chooser = {.label = "all PAT weights zero",
                                          .pat = zeroed,
                                          .degrade_margin = 0.0,

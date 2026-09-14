@@ -101,6 +101,13 @@ struct PATWeights {
   // this way carries exactly the champion's feature set; evaluation is
   // unaffected either way (zero weights are zero).
   bool fit_scaled_channels;
+  // Set by pat_prepare_hook_flex. The lexicon tables (hook_flex,
+  // through_score, through_count) are part of the model: a file loaded
+  // without them evaluates differently (it disagreed with the same
+  // weights prepared on 12% of positions in one measurement), so the
+  // evaluation and training entry points refuse an unprepared model
+  // instead of quietly scoring with empty tables.
+  bool prepared;
   uint64_t mutation_counter;
   // The version named on the file's header line (see PAT_VERSION).
   int version;
@@ -137,6 +144,17 @@ bool pat_get_lexicon_floaters(const PATWeights *pat) {
 
 bool pat_get_signed_through(const PATWeights *pat) {
   return pat->signed_through;
+}
+
+bool pat_get_prepared(const PATWeights *pat) { return pat->prepared; }
+
+// See PATWeights.prepared.
+static void pat_require_prepared(const PATWeights *pat) {
+  if (pat != NULL && !pat->prepared) {
+    log_fatal("PAT '%s' is used without its lexicon tables prepared "
+              "(pat_prepare_hook_flex)",
+              pat->name);
+  }
 }
 
 bool pat_get_fit_scaled_channels(const PATWeights *pat) {
@@ -592,6 +610,7 @@ static void pat_walk_words(const KWG *kwg, const LetterDistribution *ld,
 
 void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
                            const LetterDistribution *ld) {
+  pat->prepared = true;
   memset(pat->hook_flex, 0, sizeof(pat->hook_flex));
   memset(pat->through_score, 0, sizeof(pat->through_score));
   memset(pat->through_count, 0, sizeof(pat->through_count));
@@ -1852,6 +1871,7 @@ void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const Rack *player_rack,
                            uint32_t enabled_classes_mask,
                            int opponent_rack_size) {
+  pat_require_prepared(weights);
   pat_eval_context_load_units(pat_eval_ctx, weights, lanes, ld, player_rack,
                               true, enabled_classes_mask, opponent_rack_size);
 }
@@ -2129,6 +2149,7 @@ void pat_extract_features_combined(const Square *lanes,
                                    const Rack *player_rack,
                                    const PATWeights *pat,
                                    int opponent_rack_size, double *features) {
+  pat_require_prepared(pat);
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     features[feature_index] = 0.0;

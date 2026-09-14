@@ -23,6 +23,7 @@
 #include "players_data.h"
 #include "rack.h"
 #include "stats.h"
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +41,11 @@ typedef struct RecorderArgs {
   bool divergent;
   bool human_readable;
   const AutoplayGameTiming *timing;
+  // The first game of a mirrored pair when this is its second game, else
+  // NULL: the pair's combined spread is the paired unit for comparing two
+  // players, the tile luck the mirror cancels being most of a single
+  // game's variance.
+  const Game *pair_game;
 } RecorderArgs;
 
 // Read-only data shared across all recorder types
@@ -117,6 +123,9 @@ typedef struct GameData {
   Stat *p0_score;
   Stat *p1_score;
   Stat *turns;
+  // Player 0's spread summed over both games of a mirrored pair, one
+  // sample per completed pair (see RecorderArgs.pair_game).
+  Stat *pair_spread;
   double total_seconds_used[2];
   double total_overtime_seconds[2];
   uint64_t overtime_games[2];
@@ -135,6 +144,7 @@ void game_data_reset(GameData *gd) {
   stat_reset(gd->p0_score);
   stat_reset(gd->p1_score);
   stat_reset(gd->turns);
+  stat_reset(gd->pair_spread);
   for (int i = 0; i < 2; i++) {
     gd->total_seconds_used[i] = 0.0;
     gd->total_overtime_seconds[i] = 0.0;
@@ -151,6 +161,7 @@ GameData *game_data_create(void) {
   game_data->p0_score = stat_create(true);
   game_data->p1_score = stat_create(true);
   game_data->turns = stat_create(true);
+  game_data->pair_spread = stat_create(true);
   game_data_reset(game_data);
   cpthread_mutex_init(&game_data->mutex);
   return game_data;
@@ -163,6 +174,7 @@ void game_data_destroy(GameData *gd) {
   stat_destroy(gd->p0_score);
   stat_destroy(gd->p1_score);
   stat_destroy(gd->turns);
+  stat_destroy(gd->pair_spread);
   free(gd);
 }
 
@@ -188,6 +200,16 @@ void game_data_add_game(GameData *gd, const RecorderArgs *args) {
   stat_push(gd->p0_score, (double)p0_game_score, 1);
   stat_push(gd->p1_score, (double)p1_game_score, 1);
   stat_push(gd->turns, (double)turns, 1);
+  if (args->pair_game != NULL) {
+    const int pair_p0_score =
+        equity_to_int(player_get_score(game_get_player(args->pair_game, 0)));
+    const int pair_p1_score =
+        equity_to_int(player_get_score(game_get_player(args->pair_game, 1)));
+    stat_push(gd->pair_spread,
+              (double)((p0_game_score - p1_game_score) +
+                       (pair_p0_score - pair_p1_score)),
+              1);
+  }
   gd->total_turns += turns;
   if (args->timing != NULL) {
     for (int player_index = 0; player_index < 2; player_index++) {
@@ -471,6 +493,19 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent,
 
   string_builder_add_winning_player_confidence(sb, p0_total, p1_total,
                                                gd->total_games);
+  const uint64_t num_pairs = stat_get_num_samples(gd->pair_spread);
+  if (num_pairs > 1) {
+    // Mirrored pairs are the analysis unit: the mean of Player 1's
+    // per-pair spread, its standard error, and a normal 95% interval.
+    const double mean = stat_get_mean(gd->pair_spread);
+    const double se = stat_get_stdev(gd->pair_spread) / sqrt((double)num_pairs);
+    string_builder_add_formatted_string(
+        sb,
+        "Player 1 spread per mirrored pair: mean %.4f, SE %.4f, 95%% CI "
+        "[%.4f, %.4f] (%llu pairs)\n",
+        mean, se, mean - 1.96 * se, mean + 1.96 * se,
+        (unsigned long long)num_pairs);
+  }
   string_builder_add_string(sb, "\n");
 
   string_builder_add_play_chooser_timing(sb, gd, recorder_context, col_width);
@@ -531,6 +566,8 @@ void game_data_sets_consolidate_subset(Recorder **recorder_list,
   Stat **p1_score_stats =
       malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
   Stat **turns_stats = malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
+  Stat **pair_spread_stats =
+      malloc_or_die((sizeof(Stat *)) * (recorder_list_size));
 
   GameDataSets *sets = (GameDataSets *)primary_recorder->data;
   GameData *gd_primary = sets->all_games;
@@ -553,6 +590,7 @@ void game_data_sets_consolidate_subset(Recorder **recorder_list,
     p0_score_stats[i] = gd_i->p0_score;
     p1_score_stats[i] = gd_i->p1_score;
     turns_stats[i] = gd_i->turns;
+    pair_spread_stats[i] = gd_i->pair_spread;
     gd_primary->total_turns += gd_i->total_turns;
     for (int player_index = 0; player_index < 2; player_index++) {
       gd_primary->total_seconds_used[player_index] +=
@@ -573,6 +611,8 @@ void game_data_sets_consolidate_subset(Recorder **recorder_list,
   stats_combine(p0_score_stats, recorder_list_size, gd_primary->p0_score);
   stats_combine(p1_score_stats, recorder_list_size, gd_primary->p1_score);
   stats_combine(turns_stats, recorder_list_size, gd_primary->turns);
+  stats_combine(pair_spread_stats, recorder_list_size, gd_primary->pair_spread);
+  free(pair_spread_stats);
   free(p0_score_stats);
   free(p1_score_stats);
   free(turns_stats);
@@ -1492,12 +1532,22 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
                                            const Game *game, int turns,
                                            bool divergent, uint64_t seed,
                                            const AutoplayGameTiming *timing) {
+  autoplay_results_add_game_with_pair(autoplay_results, game, turns, divergent,
+                                      seed, timing, NULL);
+}
+
+void autoplay_results_add_game_with_pair(AutoplayResults *autoplay_results,
+                                         const Game *game, int turns,
+                                         bool divergent, uint64_t seed,
+                                         const AutoplayGameTiming *timing,
+                                         const Game *pair_game) {
   RecorderArgs args = {0};
   args.game = game;
   args.number_of_turns = turns;
   args.divergent = divergent;
   args.seed = seed;
   args.timing = timing;
+  args.pair_game = pair_game;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
       recorder_add_game(autoplay_results->recorders[i], &args);
