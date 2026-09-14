@@ -698,3 +698,138 @@ void pat_move_choice_run_spec(const char *spec) {
   }
   config_destroy(config);
 }
+
+// Training/runtime parity diagnostic (Astra's third audit item): for a
+// candidate move, compare (a) the runtime PAT term, computed from the
+// pre-move context plus the move overlay, against (b) the exact combined
+// penalty of the post-move board scored by the same runtime machinery, and
+// (c) the training row (pat_extract_features_combined on the post-move
+// board with the leave) dotted with the weights. (b) and (c) should agree
+// to rounding; (a) differs from (b) wherever the overlay approximates a
+// hook or floater the move itself creates (their real cross and extension
+// sets do not exist before the move is played), and this reports how often
+// and by how much.
+void test_pat_train_runtime_parity(void) {
+  Config *config = pat_move_choice_config_create();
+  Game *game = config_get_game(config);
+  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  MoveList *setup_list = move_list_create(1);
+  MoveList *all_list = move_list_create(PAT_MOVE_CHOICE_MOVE_LIST_CAPACITY);
+  PATEvalContext *ctx = malloc_or_die(sizeof(PATEvalContext));
+  PATEvalContext *post_ctx = malloc_or_die(sizeof(PATEvalContext));
+  double *row = malloc_or_die(sizeof(double) * PAT_NUM_FEATURES);
+  int num_moves = 0;
+  int num_exact = 0;
+  double sum_abs_diff = 0.0;
+  double max_abs_diff = 0.0;
+  double max_bc_diff = 0.0;
+  int num_over_half = 0;
+  int num_over_two = 0;
+  double sum_runtime = 0.0;
+  double sum_post = 0.0;
+  game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
+  for (int attempt = 0; attempt < 300; attempt++) {
+    const uint64_t seed = 1200000000ULL + (uint64_t)attempt;
+    game_reset(game);
+    game_seed(game, seed);
+    draw_starting_racks(game);
+    const int target_bag = 10 + (int)(seed % 31);
+    bool ok = true;
+    while (bag_get_letters(game_get_bag(game)) > target_bag) {
+      play_move(get_top_equity_move(game, setup_list), game, NULL);
+      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok || bag_get_letters(game_get_bag(game)) == 0) {
+      continue;
+    }
+    const int mover_index = game_get_player_on_turn_index(game);
+    const Player *mover = game_get_player(game, mover_index);
+    const int opponent_rack_size = rack_get_total_letters(
+        player_get_rack(game_get_player(game, 1 - mover_index)));
+    const int csi = board_get_cross_set_index(
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), mover_index);
+    pat_eval_context_load(ctx, champion,
+                          board_get_readonly_lanes(game_get_board(game), csi),
+                          game_get_ld(game), player_get_rack(mover),
+                          PAT_CLASS_MASK_ALL, opponent_rack_size);
+    const MoveGenArgs args = {
+        .game = game,
+        .move_list = all_list,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&args);
+    move_list_sort_moves(all_list);
+    const int count = move_list_get_count(all_list);
+    for (int i = 0; i < count && i < 20; i++) {
+      const Move *move = move_list_get_move(all_list, i);
+      if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        continue;
+      }
+      Rack leave;
+      get_leave_for_move(move, game, &leave);
+      const double runtime =
+          equity_to_double(pat_eval_move_penalty(ctx, move, &leave));
+      play_move_without_drawing_tiles(move, game);
+      const Square *post_lanes =
+          board_get_readonly_lanes(game_get_board(game), csi);
+      pat_eval_context_load(post_ctx, champion, post_lanes, game_get_ld(game),
+                            &leave, PAT_CLASS_MASK_ALL, opponent_rack_size);
+      const double post =
+          equity_to_double(pat_eval_non_placement_penalty(post_ctx));
+      pat_extract_features_combined(post_lanes, game_get_ld(game), &leave,
+                                    champion, opponent_rack_size, row);
+      double dot = 0.0;
+      for (int f = 0; f < PAT_NUM_FEATURES; f++) {
+        dot += equity_to_double(pat_get_weight(champion, f)) * row[f];
+      }
+      game_unplay_last_move(game);
+      const double diff = fabs(runtime - post);
+      num_moves++;
+      sum_runtime += runtime;
+      sum_post += post;
+      sum_abs_diff += diff;
+      if (diff < 1e-9) {
+        num_exact++;
+      }
+      if (diff > max_abs_diff) {
+        max_abs_diff = diff;
+      }
+      if (diff > 0.5) {
+        num_over_half++;
+      }
+      if (diff > 2.0) {
+        num_over_two++;
+      }
+      if (fabs(post - dot) > max_bc_diff) {
+        max_bc_diff = fabs(post - dot);
+      }
+    }
+  }
+  game_set_backup_mode(game, BACKUP_MODE_OFF);
+  printf("\ntraining/runtime parity: %d moves; runtime == post-board exact on "
+         "%d (%.1f%%); mean |diff| %.4f, max %.4f; |diff| > 0.5 on %d "
+         "(%.1f%%), > 2.0 on %d (%.1f%%); mean runtime %.4f, mean post-board "
+         "%.4f\n",
+         num_moves, num_exact, 100.0 * num_exact / num_moves,
+         sum_abs_diff / num_moves, max_abs_diff, num_over_half,
+         100.0 * num_over_half / num_moves, num_over_two,
+         100.0 * num_over_two / num_moves, sum_runtime / num_moves,
+         sum_post / num_moves);
+  printf("  post-board exact vs training row dot: max |diff| %.6f\n",
+         max_bc_diff);
+  assert(max_bc_diff < 0.01);
+  free(row);
+  free(ctx);
+  free(post_ctx);
+  move_list_destroy(setup_list);
+  move_list_destroy(all_list);
+  config_destroy(config);
+}
