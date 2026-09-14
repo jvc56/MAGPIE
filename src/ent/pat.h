@@ -49,6 +49,8 @@ void pat_set_signed_through(PATWeights *pat, bool signed_through);
 bool pat_get_prepared(const PATWeights *pat);
 bool pat_get_fit_scaled_channels(const PATWeights *pat);
 void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels);
+bool pat_get_train_overlay(const PATWeights *pat);
+void pat_set_train_overlay(PATWeights *pat, bool train_overlay);
 uint64_t pat_get_mutation_counter(const PATWeights *pat);
 void pat_bump_mutation_counter(PATWeights *pat);
 // Writes the weights to data/strategy/<pat_name>.pat.
@@ -376,6 +378,11 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
 // fixed-point iteration, which the generation loop already provides. Falls
 // back to the plain sum when the weights combine at gamma 1 or rank every
 // unit equally. features has PAT_NUM_FEATURES elements.
+// See pat.c: the training row for move built through the runtime overlay
+// path from the (pre-move) context, so that fitting and evaluation see the
+// same measurement.
+void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
+                                        const Move *move, double *features);
 void pat_extract_features_combined(const Square *lanes,
                                    const LetterDistribution *ld,
                                    const Rack *player_rack,

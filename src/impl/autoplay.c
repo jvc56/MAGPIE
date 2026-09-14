@@ -701,6 +701,11 @@ typedef struct GameRunner {
   // most that many are ever in flight. Observations still unlabeled when
   // the game ends are dropped: their plies do not exist.
   PATPendingObservation pat_obs[PAT_MAX_LABEL_PLIES];
+  // For PATWeights.train_overlay: the pre-move context the runtime would
+  // build for this decision, and the row extracted from it before the
+  // move is played. Allocated only under patgen.
+  PATEvalContext *pat_train_ctx;
+  double pat_overlay_row[PAT_NUM_FEATURES];
   PlayChooser *play_choosers[2];
   GameTimer game_timer;
   AutoplayGameTiming timing;
@@ -727,6 +732,10 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
       0; // Will be set in game_runner_start if using pairs
   game_runner->play_choosers[0] = NULL;
   game_runner->play_choosers[1] = NULL;
+  game_runner->pat_train_ctx = NULL;
+  if (autoplay_worker->shared_data->pat_gen_shared_data) {
+    game_runner->pat_train_ctx = malloc_or_die(sizeof(PATEvalContext));
+  }
   game_timer_reset(&game_runner->game_timer, 0.0);
   game_runner->timing = (AutoplayGameTiming){0};
   return game_runner;
@@ -739,6 +748,7 @@ void game_runner_destroy(GameRunner *game_runner) {
   game_runner_destroy_play_choosers(game_runner);
   game_destroy(game_runner->game);
   game_destroy(game_runner->game_one_move_behind);
+  free(game_runner->pat_train_ctx);
   free(game_runner);
 }
 
@@ -1018,6 +1028,29 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
   const int pat_pre_move_bag_count =
       pat_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
+  // train_overlay: the row is what the runtime term is built from, so it
+  // has to be taken here, from the pre-move board and rack, before
+  // play_move changes both.
+  const bool pat_train_overlay =
+      pat_gen_shared_data && pat_pre_move_bag_count > 0 &&
+      pat_get_train_overlay(pat_gen_shared_data->pat);
+  if (pat_train_overlay) {
+    const int cross_set_index = board_get_cross_set_index(
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+        player_on_turn_index);
+    // Every unit, weighted or not: the runtime context drops units of
+    // classes with no weight (their term is zero either way), but a row
+    // built only from kept units could never let an unweighted class --
+    // every class, on the zero bootstrap -- gain weight from the fit.
+    pat_eval_context_load_all_units(
+        game_runner->pat_train_ctx, pat_gen_shared_data->pat,
+        board_get_readonly_lanes(game_get_board(game), cross_set_index),
+        game_get_ld(game), player_rack,
+        rack_get_total_letters(
+            player_get_rack(game_get_player(game, 1 - player_on_turn_index))));
+    pat_extract_move_features_combined(game_runner->pat_train_ctx, move,
+                                       game_runner->pat_overlay_row);
+  }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, move, &rare_rack_or_move_leave);
@@ -1087,12 +1120,18 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       // time. The row is the one the live weights' combination rule makes
       // linear, so that fitting and evaluating agree; with gamma 1 it is
       // the plain sum.
-      pat_extract_features_combined(
-          board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
-          &rare_rack_or_move_leave, pat_gen_shared_data->pat,
-          rack_get_total_letters(
-              player_get_rack(game_get_player(game, 1 - player_on_turn_index))),
-          observation->features);
+      if (pat_train_overlay) {
+        memcpy(observation->features, game_runner->pat_overlay_row,
+               sizeof(observation->features));
+      } else {
+        pat_extract_features_combined(
+            board_get_readonly_lanes(game_get_board(game), 0),
+            game_get_ld(game), &rare_rack_or_move_leave,
+            pat_gen_shared_data->pat,
+            rack_get_total_letters(player_get_rack(
+                game_get_player(game, 1 - player_on_turn_index))),
+            observation->features);
+      }
       observation->plies_seen = 0;
       observation->label = 0.0;
       observation->valid = true;
