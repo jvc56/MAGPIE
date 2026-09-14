@@ -3423,6 +3423,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                             PAT_CLASS_MASK_ALL &
                                 ~args->pat_disabled_classes_mask,
                             rack_get_total_letters(&gen->opponent_rack));
+      pat_eval_context_set_kwg(&gen->pat_eval_ctx, gen->kwg);
     } else {
       pat_eval_context_disable(&gen->pat_eval_ctx);
     }

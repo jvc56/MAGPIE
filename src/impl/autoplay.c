@@ -1048,6 +1048,9 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         game_get_ld(game), player_rack,
         rack_get_total_letters(
             player_get_rack(game_get_player(game, 1 - player_on_turn_index))));
+    pat_eval_context_set_kwg(
+        game_runner->pat_train_ctx,
+        player_get_kwg(game_get_player(game, player_on_turn_index)));
     pat_extract_move_features_combined(game_runner->pat_train_ctx, move,
                                        game_runner->pat_overlay_row);
   }

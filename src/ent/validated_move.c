@@ -490,6 +490,7 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
             ld, player_get_rack(player), PAT_CLASS_MASK_ALL,
             rack_get_total_letters(
                 player_get_rack(game_get_player(game, 1 - player_index))));
+        pat_eval_context_set_kwg(&pat_eval_ctx, player_get_kwg(player));
       }
       move_set_equity(
           vm->move,
