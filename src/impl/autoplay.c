@@ -710,6 +710,11 @@ typedef struct GameRunner {
   GameTimer game_timer;
   AutoplayGameTiming timing;
   AutoplaySharedData *shared_data;
+  // The opening move as chosen, for the results' opening-length
+  // statistic: tiles played (-1 until a tile placement opens the game)
+  // and its static equity in points.
+  int opening_tiles;
+  double opening_equity;
 } GameRunner;
 
 static void game_runner_destroy_play_choosers(GameRunner *game_runner) {
@@ -797,6 +802,8 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   }
 
   game_runner->turn_number = 0;
+  game_runner->opening_tiles = -1;
+  game_runner->opening_equity = 0.0;
   game_runner->force_draw = false;
   for (int obs_index = 0; obs_index < PAT_MAX_LABEL_PLIES; obs_index++) {
     game_runner->pat_obs[obs_index].valid = false;
@@ -992,6 +999,12 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
 
   const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
+
+  if (game_runner->turn_number == 0 &&
+      move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    game_runner->opening_tiles = move_get_tiles_played(move);
+    game_runner->opening_equity = equity_to_double(move_get_equity(move));
+  }
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -1205,7 +1218,8 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker,
   autoplay_results_add_game_with_pair(
       autoplay_worker->autoplay_results, game_runner->game,
       game_runner->turn_number, divergent, game_runner->seed,
-      &game_runner->timing, pair_runner ? pair_runner->game : NULL);
+      &game_runner->timing, pair_runner ? pair_runner->game : NULL,
+      game_runner->opening_tiles, game_runner->opening_equity);
   AutoplayIterCompletedOutput iter_completed_output;
   autoplay_complete_iter(autoplay_worker->shared_data, &iter_completed_output);
   if (iter_completed_output.print_info) {
