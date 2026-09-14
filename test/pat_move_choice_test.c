@@ -56,6 +56,16 @@ Config *pat_move_choice_config_create(void) {
 // See the file comment. game_seed runs before the candidate is played so
 // both candidates' whole remaining random stream starts from an
 // identical shuffle.
+// How many plies the reference continuation plays after the candidate:
+// an even number, so the mover always makes the last of them and the
+// horizon valuation (spread plus the mover's leave) keeps one convention.
+// 2 is what every comparison before 2026-09-14 used; it cannot credit
+// defense that pays off after the opponent's first reply, and preferred
+// models that whole-game play rejects (the 2-ply-label retrain: harness
+// +0.44 +/- 0.08, whole game -0.53 +/- 0.12). Set per run through the
+// spec's optional trailing field.
+static int pat_move_choice_reference_plies = 2;
+
 static double pat_move_choice_reference_value(const Game *game,
                                               const Move *move, int mover_index,
                                               const PATWeights *reference_pat,
@@ -67,18 +77,19 @@ static double pat_move_choice_reference_value(const Game *game,
   play_move(move, rollout_game, NULL);
   const int opponent_index = 1 - mover_index;
   if (game_get_game_end_reason(rollout_game) == GAME_END_REASON_NONE) {
+    // The opponent's rack is unknown to the mover: a fresh draw from the
+    // seeded bag, once, before their first reply.
     set_random_rack(rollout_game, opponent_index, NULL);
-    MoveList *reply_list = move_list_create(1);
-    const Move *opponent_reply = get_top_equity_move(rollout_game, reply_list);
-    play_move(opponent_reply, rollout_game, NULL);
-    move_list_destroy(reply_list);
   }
-  if (game_get_game_end_reason(rollout_game) == GAME_END_REASON_NONE) {
-    MoveList *reply_list = move_list_create(1);
-    const Move *mover_reply = get_top_equity_move(rollout_game, reply_list);
-    play_move(mover_reply, rollout_game, NULL);
-    move_list_destroy(reply_list);
+  MoveList *reply_list = move_list_create(1);
+  for (int ply = 0; ply < pat_move_choice_reference_plies; ply++) {
+    if (game_get_game_end_reason(rollout_game) != GAME_END_REASON_NONE) {
+      break;
+    }
+    const Move *reply = get_top_equity_move(rollout_game, reply_list);
+    play_move(reply, rollout_game, NULL);
   }
+  move_list_destroy(reply_list);
   const Player *mover = game_get_player(rollout_game, mover_index);
   const Player *opponent = game_get_player(rollout_game, opponent_index);
   double value =
@@ -358,11 +369,11 @@ void pat_move_choice_compare_range(Config *config,
   // Raw accumulators, for exact pooling across shards (see
   // test/pat_move_choice_pool.py).
   printf("POOL candidate=\"%s\" baseline=\"%s\" shard=%d/%d positions=%d "
-         "disagreements=%d worlds=%d bag=%d-%d sum_means=%.17g "
+         "disagreements=%d worlds=%d bag=%d-%d plies=%d sum_means=%.17g "
          "sum_means_sq=%.17g sum_within=%.17g\n",
          candidate->label, baseline->label, shard, num_shards,
-         num_positions_considered, n, num_worlds, bag_lo, bag_hi, sum_means,
-         sum_means_sq, sum_within);
+         num_positions_considered, n, num_worlds, bag_lo, bag_hi,
+         pat_move_choice_reference_plies, sum_means, sum_means_sq, sum_within);
   printf("\n[%s] vs [%s]: %d positions considered, %d disagreements "
          "(%.2f%%)\n",
          candidate->label, baseline->label, num_positions_considered, n,
@@ -728,7 +739,7 @@ pat_move_choice_chooser_from_spec(Config *config, const char *spec,
 
 // Runs one (possibly sharded) comparison from a colon-separated spec:
 //   <baseline>:<candidate>:<seed_base>:<num_positions>:<num_worlds>
-//       [:<shard>:<num_shards>[:<bag_lo>:<bag_hi>]]
+//       [:<shard>:<num_shards>[:<bag_lo>:<bag_hi>[:<reference_plies>]]]
 // so that N shards can run as N processes and be pooled exactly (see
 // test/pat_move_choice_shard.sh). Invoked as the test name
 // "patmovechoice:<spec>". Choosers: "champion", a PAT file name,
@@ -736,16 +747,24 @@ pat_move_choice_chooser_from_spec(Config *config, const char *spec,
 void pat_move_choice_run_spec(const char *spec) {
   char buffer[512];
   snprintf(buffer, sizeof(buffer), "%s", spec);
-  char *fields[9] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+  char *fields[10] = {NULL, NULL, NULL, NULL, NULL,
+                      NULL, NULL, NULL, NULL, NULL};
   int num_fields = 0;
   char *save = NULL;
-  for (char *tok = strtok_r(buffer, ":", &save); tok && num_fields < 9;
+  for (char *tok = strtok_r(buffer, ":", &save); tok && num_fields < 10;
        tok = strtok_r(NULL, ":", &save)) {
     fields[num_fields++] = tok;
   }
-  if (num_fields != 5 && num_fields != 7 && num_fields != 9) {
-    log_fatal("patmovechoice spec needs 5, 7 or 9 colon-separated fields: %s",
+  if (num_fields != 5 && num_fields != 7 && num_fields != 9 &&
+      num_fields != 10) {
+    log_fatal("patmovechoice spec needs 5, 7, 9 or 10 colon-separated "
+              "fields: %s",
               spec);
+  }
+  pat_move_choice_reference_plies = (num_fields == 10) ? atoi(fields[9]) : 2;
+  if (pat_move_choice_reference_plies < 2 ||
+      pat_move_choice_reference_plies % 2 != 0) {
+    log_fatal("reference plies must be a positive even number: %s", spec);
   }
   const uint64_t seed_base = strtoull(fields[2], NULL, 10);
   const int num_positions = atoi(fields[3]);
@@ -753,9 +772,9 @@ void pat_move_choice_run_spec(const char *spec) {
   const int shard = (num_fields >= 7) ? atoi(fields[5]) : 0;
   const int num_shards = (num_fields >= 7) ? atoi(fields[6]) : 1;
   const int bag_lo =
-      (num_fields == 9) ? atoi(fields[7]) : PAT_MOVE_CHOICE_DEFAULT_BAG_LO;
+      (num_fields >= 9) ? atoi(fields[7]) : PAT_MOVE_CHOICE_DEFAULT_BAG_LO;
   const int bag_hi =
-      (num_fields == 9) ? atoi(fields[8]) : PAT_MOVE_CHOICE_DEFAULT_BAG_HI;
+      (num_fields >= 9) ? atoi(fields[8]) : PAT_MOVE_CHOICE_DEFAULT_BAG_HI;
   Config *config = pat_move_choice_config_create();
   PATWeights *owned_baseline = NULL;
   PATWeights *owned_candidate = NULL;
