@@ -9,6 +9,7 @@
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -53,6 +54,16 @@ bool pat_get_train_overlay(const PATWeights *pat);
 void pat_set_train_overlay(PATWeights *pat, bool train_overlay);
 bool pat_get_run_through(const PATWeights *pat);
 void pat_set_run_through(PATWeights *pat, bool run_through);
+// stage is a PAT_STAGE_* value; see PAT_STAGE_SCALE_EARLY_ROW_PREFIX.
+double pat_get_stage_scale(const PATWeights *pat, int stage);
+void pat_set_stage_scale(PATWeights *pat, int stage, double scale);
+// The stage a pre-move bag count falls in.
+static inline int pat_stage_for_bag(int bag_count) {
+  if (bag_count >= PAT_STAGE_EARLY_MIN_BAG) {
+    return PAT_STAGE_EARLY;
+  }
+  return (bag_count >= PAT_STAGE_MID_MIN_BAG) ? PAT_STAGE_MID : PAT_STAGE_LATE;
+}
 // The run-keyed through tables (see PATWeights.run_through): the
 // log-scaled count and mean rest-of-word score of words of the given
 // length whose first (word_end 0) or last (word_end 1) key_len letters,
@@ -228,6 +239,18 @@ typedef struct PATEvalContext {
   // only those; every other term is exactly zero.
   int nonzero_feature_index[PAT_NUM_FEATURES];
   int num_nonzero_features;
+  // Whether unit scans do the premium-combination bookkeeping
+  // (PAT_FEATURE_LM_SPAN_START onward): only when some weight there is
+  // nonzero, or when every unit is walked for feature rows
+  // (pat_eval_context_load_all_units). Otherwise those channels
+  // contribute exactly zero and the scan skips the work.
+  bool lm_channels;
+  // The stage factor for this position (see PATWeights.stage_scale),
+  // applied to every penalty and bound the context hands out; 1.0 unless
+  // the file carries a stage row. The stage is read off the unseen
+  // counts: unseen is the bag plus the opponent's rack, so the pre-move
+  // bag is unseen less opponent_rack_size.
+  double term_scale;
   // Bit u of unit_mask_by_row[r] is set when a fresh tile in row r could
   // affect unit u provided the move's column span also overlaps the unit
   // (and symmetrically for columns), so a candidate move's affected-unit
@@ -371,6 +394,17 @@ pat_eval_ctx_active_classes(const PATEvalContext *pat_eval_ctx) {
   }
   return pat_eval_ctx->active_classes_mask;
 }
+// A penalty or bound as the context reports it: scaled by the position's
+// stage factor. The factor is nonnegative, so a bound stays a bound and a
+// penalty stays <= 0; rounding is monotone, so their order is kept too.
+static inline Equity pat_eval_scaled(const PATEvalContext *pat_eval_ctx,
+                                     Equity term) {
+  if (pat_eval_ctx->term_scale == 1.0) {
+    return term;
+  }
+  return (Equity)lround((double)term * pat_eval_ctx->term_scale);
+}
+
 // The upper bound on the defense term of every tile placement in lane
 // `lane` of direction `dir` (see lane_penalty_bound). Zero when the context
 // is NULL or disabled.
