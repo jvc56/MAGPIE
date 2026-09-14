@@ -608,6 +608,175 @@ static void test_pat_hook_score_channel(void) {
   config_destroy(config);
 }
 
+// Transposes the board part of a CGP (rows become columns), leaving the
+// racks and scores alone: the standard board is symmetric about its main
+// diagonal, so every PAT feature must be identical on the transposed
+// position (each channel already sums both lane directions).
+static char *pat_test_transpose_cgp(const char *cgp) {
+  char grid[BOARD_DIM][BOARD_DIM];
+  const char *p = cgp;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    int col = 0;
+    while (*p != '/' && *p != ' ') {
+      if (*p >= '0' && *p <= '9') {
+        int n = 0;
+        while (*p >= '0' && *p <= '9') {
+          n = n * 10 + (*p - '0');
+          p++;
+        }
+        for (int k = 0; k < n; k++) {
+          grid[row][col++] = 0;
+        }
+      } else {
+        grid[row][col++] = *p;
+        p++;
+      }
+    }
+    assert(col == BOARD_DIM);
+    if (*p == '/') {
+      p++;
+    }
+  }
+  const char *rest = p; // " RACK1/RACK2 S1/S2 N"
+  StringBuilder *sb = string_builder_create();
+  for (int col = 0; col < BOARD_DIM; col++) {
+    int empties = 0;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      const char c = grid[row][col];
+      if (c == 0) {
+        empties++;
+      } else {
+        if (empties > 0) {
+          string_builder_add_formatted_string(sb, "%d", empties);
+          empties = 0;
+        }
+        string_builder_add_char(sb, c);
+      }
+    }
+    if (empties > 0) {
+      string_builder_add_formatted_string(sb, "%d", empties);
+    }
+    if (col < BOARD_DIM - 1) {
+      string_builder_add_char(sb, '/');
+    }
+  }
+  string_builder_add_string(sb, rest);
+  char *out = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return out;
+}
+
+static void test_pat_transposition_invariance(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  PATWeights *pat = pat_test_create_prepared("transpose", game);
+  pat_set_lexicon_floaters(pat, true);
+  pat_set_signed_through(pat, true);
+  MoveList *move_list = move_list_create(1);
+  int32_t features[PAT_NUM_FEATURES];
+  int32_t transposed_features[PAT_NUM_FEATURES];
+  int positions = 0;
+  for (int attempt = 0; attempt < 30; attempt++) {
+    game_reset(game);
+    game_seed(game, 5000000ULL + (uint64_t)attempt);
+    draw_starting_racks(game);
+    const int plies = 1 + attempt % 14;
+    for (int ply = 0; ply < plies; ply++) {
+      play_move(get_top_equity_move(game, move_list), game, NULL);
+      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+        break;
+      }
+    }
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+      continue;
+    }
+    char *cgp = game_get_cgp(game, true);
+    const Rack *rack = player_get_rack(game_get_player(game, 0));
+    Rack rack_copy_0;
+    rack_copy(&rack_copy_0, rack);
+    pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0),
+                         game_get_ld(game), &rack_copy_0, pat, RACK_SIZE,
+                         features);
+    char *transposed = pat_test_transpose_cgp(cgp);
+    char *cmd = get_formatted_string("cgp %s", transposed);
+    load_and_exec_config_or_die(config, cmd);
+    pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0),
+                         game_get_ld(game), &rack_copy_0, pat, RACK_SIZE,
+                         transposed_features);
+    for (int f = 0; f < PAT_NUM_FEATURES; f++) {
+      if (features[f] != transposed_features[f]) {
+        char name[64];
+        pat_feature_name(f, name, sizeof(name));
+        printf("transposition mismatch at %s: %d vs %d\n  %s\n", name,
+               features[f], transposed_features[f], cgp);
+        assert(false);
+      }
+    }
+    free(cmd);
+    free(transposed);
+    free(cgp);
+    positions++;
+  }
+  printf("PAT transposition invariance: %d positions\n", positions);
+  assert(positions >= 25);
+  move_list_destroy(move_list);
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
+// A blank in a floater run reaches whatever its letter reaches (through
+// tables, extension sets) but scores nothing: NARCEIN with a blank E must
+// match NARCEIN with a real E on every channel except the floater score
+// channels, which lose exactly the E's one point per route through it.
+static void test_pat_blank_floater(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/3NARCEIN5/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  PATWeights *pat = pat_test_create_prepared("blank_floater", game);
+  pat_set_lexicon_floaters(pat, true);
+  pat_set_signed_through(pat, true);
+  int32_t real_features[PAT_NUM_FEATURES];
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0),
+                       game_get_ld(game), NULL, pat, RACK_SIZE, real_features);
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/3NARCeIN5/15/15/15/15/15/15/15 / 0/0 0");
+  int32_t blank_features[PAT_NUM_FEATURES];
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0),
+                       game_get_ld(game), NULL, pat, RACK_SIZE, blank_features);
+  int score_diffs = 0;
+  for (int f = 0; f < PAT_NUM_FEATURES; f++) {
+    const bool is_float_score =
+        f >= PAT_FEATURE_FLOAT_SCORE_START &&
+        f < PAT_FEATURE_FLOAT_SCORE_START + PAT_FLOATER_BIN_COUNT;
+    if (is_float_score) {
+      // The E is worth one point; the blank is worth none. Unseen counts
+      // also shift one E back into the pool and one blank out, which the
+      // flexibility channels see, so only the score channels are pinned.
+      if (real_features[f] != blank_features[f]) {
+        assert(real_features[f] - blank_features[f] >= 1);
+        score_diffs++;
+      }
+    }
+  }
+  assert(score_diffs > 0);
+  // Same routes: the through channels key on the unblanked letter.
+  for (int bin = 0; bin < PAT_FLOATER_BIN_COUNT; bin++) {
+    assert(real_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + bin] ==
+           blank_features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + bin]);
+    assert(real_features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + bin] ==
+           blank_features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + bin]);
+  }
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
 static void test_pat_scan_reach_capped_by_opponent_rack_size(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
@@ -1423,6 +1592,8 @@ void test_pat(void) {
   test_pat_version2_has_no_scaled_channels(data_dir);
   test_pat_version3_has_no_hook_score_channels(data_dir);
   test_pat_hook_score_channel();
+  test_pat_transposition_invariance();
+  test_pat_blank_floater();
   test_pat_extract_features_floater_board();
   test_pat_lexicon_floaters(data_dir);
   test_pat_signed_through(data_dir);

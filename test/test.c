@@ -240,6 +240,8 @@ static TestEntry on_demand_test_table[] = {
     {"patmovechoicecontrols", test_pat_move_choice_controls},
     {"patmovechoicetargeted", test_pat_move_choice_targeted_controls},
     {"pattrainparity", test_pat_train_runtime_parity},
+    {"patleafcheck", test_pat_leaf_check},
+    {"patthroughaudit", test_pat_through_table_audit},
     {"patoverlapstep3dev", test_pat_overlap_step3_dev},
     {"patoverlapstep3confirm", test_pat_overlap_step3_confirm},
     {NULL, NULL} // Sentinel value to mark end of array

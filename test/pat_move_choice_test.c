@@ -8,6 +8,8 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/kwg.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
@@ -58,7 +60,8 @@ Config *pat_move_choice_config_create(void) {
 // identical shuffle.
 // How many plies the reference continuation plays after the candidate:
 // an even number, so the mover always makes the last of them and the
-// horizon valuation (spread plus the mover's leave) keeps one convention.
+// horizon valuation (spread plus each side's last leave) keeps one
+// convention.
 // 2 is what every comparison before 2026-09-14 used; it cannot credit
 // defense that pays off after the opponent's first reply, and preferred
 // models that whole-game play rejects (the 2-ply-label retrain: harness
@@ -74,8 +77,19 @@ static double pat_move_choice_reference_value(const Game *game,
   game_seed(rollout_game, world_seed);
   player_set_pat(game_get_player(rollout_game, 0), reference_pat);
   player_set_pat(game_get_player(rollout_game, 1), reference_pat);
-  play_move(move, rollout_game, NULL);
   const int opponent_index = 1 - mover_index;
+  // Each player's leave from their last move inside the rollout: the
+  // rack they kept before drawing, which the KLV values (a full seven-tile
+  // rack after the draw is not in the KLV and would read as zero, which
+  // an earlier version of this leaf silently did).
+  Rack last_leave[2];
+  bool has_leave[2] = {false, false};
+  for (int p = 0; p < 2; p++) {
+    rack_set_dist_size(&last_leave[p], ld_get_size(game_get_ld(game)));
+    rack_reset(&last_leave[p]);
+  }
+  play_move(move, rollout_game, &last_leave[mover_index]);
+  has_leave[mover_index] = true;
   if (game_get_game_end_reason(rollout_game) == GAME_END_REASON_NONE) {
     // The opponent's rack is unknown to the mover: a fresh draw from the
     // seeded bag, once, before their first reply.
@@ -86,8 +100,10 @@ static double pat_move_choice_reference_value(const Game *game,
     if (game_get_game_end_reason(rollout_game) != GAME_END_REASON_NONE) {
       break;
     }
+    const int on_turn = game_get_player_on_turn_index(rollout_game);
     const Move *reply = get_top_equity_move(rollout_game, reply_list);
-    play_move(reply, rollout_game, NULL);
+    play_move(reply, rollout_game, &last_leave[on_turn]);
+    has_leave[on_turn] = true;
   }
   move_list_destroy(reply_list);
   const Player *mover = game_get_player(rollout_game, mover_index);
@@ -95,8 +111,17 @@ static double pat_move_choice_reference_value(const Game *game,
   double value =
       equity_to_double(player_get_score(mover) - player_get_score(opponent));
   if (game_get_game_end_reason(rollout_game) == GAME_END_REASON_NONE) {
-    value += equity_to_double(
-        klv_get_leave_value(player_get_klv(mover), player_get_rack(mover)));
+    // Symmetric leaf: what each side kept, from the mover's perspective.
+    // Skipped when the rollout ended the game, whose settlements are
+    // already in the spread.
+    if (has_leave[mover_index]) {
+      value += equity_to_double(
+          klv_get_leave_value(player_get_klv(mover), &last_leave[mover_index]));
+    }
+    if (has_leave[opponent_index]) {
+      value -= equity_to_double(klv_get_leave_value(
+          player_get_klv(opponent), &last_leave[opponent_index]));
+    }
   }
   game_destroy(rollout_game);
   return value;
@@ -942,6 +967,120 @@ void pat_train_runtime_parity_for(const char *pat_name) {
   move_list_destroy(all_list);
   if (owned) {
     pat_destroy(owned);
+  }
+  config_destroy(config);
+}
+
+// Prints what the KLV says a full seven-tile rack is worth (the harness
+// leaf adds the mover's leave value for the rack held at the horizon,
+// which after drawing is full).
+void test_pat_leaf_check(void) {
+  Config *config = pat_move_choice_config_create();
+  Game *game = config_get_game(config);
+  const KLV *klv = player_get_klv(game_get_player(game, 0));
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(game_get_ld(game)));
+  const char *racks[] = {"AEINRST", "AEINRS", "QVWXZ??", "EEEIIOU", "S", "?"};
+  for (int i = 0; i < 6; i++) {
+    rack_reset(&rack);
+    rack_set_to_string(game_get_ld(game), &rack, racks[i]);
+    printf("leave value %-8s (%d tiles): %.3f\n", racks[i],
+           rack_get_total_letters(&rack),
+           equity_to_double(klv_get_leave_value(klv, &rack)));
+  }
+  config_destroy(config);
+}
+
+// Through-table audit (Astra): for a multi-tile run the scan adds the
+// endpoint statistic of EACH tile at the same span, i.e. it claims
+// sum_over_tiles through_count[tile][span]. The actual quantity for a
+// floater run is the number of words of the required length that contain
+// the whole run at the required end. This enumerates those words for a
+// few runs and prints both, so the proxy's error is visible.
+static void pat_audit_count_words(const KWG *kwg, uint32_t node_index,
+                                  int depth, int target_length,
+                                  const MachineLetter *suffix, int suffix_len,
+                                  MachineLetter *word, long *count_end,
+                                  long *count_start) {
+  if (node_index == 0) {
+    return;
+  }
+  for (uint32_t index = node_index;; index++) {
+    const uint32_t node = kwg_node(kwg, index);
+    word[depth] = (MachineLetter)kwg_node_tile(node);
+    const int length = depth + 1;
+    if (length == target_length && kwg_node_accepts(node)) {
+      bool ends = true;
+      bool starts = true;
+      for (int k = 0; k < suffix_len; k++) {
+        if (word[length - suffix_len + k] != suffix[k]) {
+          ends = false;
+        }
+        if (word[k] != suffix[k]) {
+          starts = false;
+        }
+      }
+      if (ends) {
+        (*count_end)++;
+      }
+      if (starts) {
+        (*count_start)++;
+      }
+    }
+    if (length < target_length) {
+      pat_audit_count_words(kwg, kwg_node_arc_index(node), length,
+                            target_length, suffix, suffix_len, word, count_end,
+                            count_start);
+    }
+    if (kwg_node_is_end(node)) {
+      break;
+    }
+  }
+}
+
+void test_pat_through_table_audit(void) {
+  Config *config = pat_move_choice_config_create();
+  Game *game = config_get_game(config);
+  const KWG *kwg = player_get_kwg(game_get_player(game, 0));
+  const LetterDistribution *ld = game_get_ld(game);
+  const PATWeights *pat = player_get_pat(game_get_player(game, 0));
+  const char *runs[] = {"E", "S", "AT", "QI", "ING", "TION", "NARCEIN"};
+  printf("\nthrough-table audit: table = sum over run tiles of "
+         "8*log2(1+words) at span d+1; actual = 8*log2(1+words of length "
+         "d+len(run) with the run at that end)\n");
+  for (int r = 0; r < 7; r++) {
+    MachineLetter run[8];
+    const int run_len = (int)strlen(runs[r]);
+    for (int k = 0; k < run_len; k++) {
+      char one[2] = {runs[r][k], 0};
+      run[k] = ld_hl_to_ml(ld, one);
+    }
+    for (int d = 2; d <= 6; d += 2) {
+      const int span = d + 1;
+      int table_pooled = 0;
+      int table_first = 0;
+      int table_last = 0;
+      for (int k = 0; k < run_len; k++) {
+        table_pooled += pat_get_through_count(pat, run[k], span);
+        table_first += pat_get_through_count_end(pat, 0, run[k], span);
+        table_last += pat_get_through_count_end(pat, 1, run[k], span);
+      }
+      long words_end = 0;
+      long words_start = 0;
+      MachineLetter word[16];
+      const int target_length = d + run_len;
+      if (target_length < 16) {
+        pat_audit_count_words(kwg, kwg_get_dawg_root_node_index(kwg), 0,
+                              target_length, run, run_len, word, &words_end,
+                              &words_start);
+      }
+      printf("  run %-7s d=%d: table pooled %3d (first %3d, last %3d) | actual "
+             "8*log2(1+words): run at end %5.1f (%ld words), run at start "
+             "%5.1f (%ld words), word length %d\n",
+             runs[r], d, table_pooled, table_first, table_last,
+             8.0 * log2(1.0 + words_end), words_end,
+             8.0 * log2(1.0 + words_start), words_start, target_length);
+    }
   }
   config_destroy(config);
 }
