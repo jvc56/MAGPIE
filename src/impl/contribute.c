@@ -309,7 +309,8 @@ static bool already_logged(ContributeState *state, const char *key) {
 //
 // The check runs before the heartbeat starts: hashing is milliseconds, and a
 // decline should not look like a worker that started and died.
-static bool expected_data_matches(ContributeState *state, const char *data_paths,
+static bool expected_data_matches(ContributeState *state,
+                                  const char *data_paths,
                                   ThreadControl *thread_control,
                                   StringBuilder *missing) {
   const JsonValue *expected =
@@ -349,7 +350,8 @@ static bool expected_data_matches(ContributeState *state, const char *data_paths
     const char *tarball_date = json_get_string_or_null(file, "tarball_date");
     const char *display_path = json_get_string_or_null(file, "path");
     data_filepath_t type;
-    if (!role || !name || !expected_digest || !role_to_filepath_type(role, &type)) {
+    if (!role || !name || !expected_digest ||
+        !role_to_filepath_type(role, &type)) {
       continue;
     }
 
@@ -393,8 +395,8 @@ static bool expected_data_matches(ContributeState *state, const char *data_paths
                        : get_formatted_string(
                              "  %-24s not found in any data path (%s)",
                              display_path ? display_path : name, data_paths);
-    char *log_key = get_formatted_string("%s|%s", path ? path : name,
-                                         expected_digest);
+    char *log_key =
+        get_formatted_string("%s|%s", path ? path : name, expected_digest);
     if (!already_logged(state, log_key)) {
       thread_control_print_formatted(thread_control, "%s\n", gap);
       if (tarball_date) {

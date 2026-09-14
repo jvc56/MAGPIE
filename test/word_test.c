@@ -1,3 +1,5 @@
+#include "word_test.h"
+
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/validated_move.h"

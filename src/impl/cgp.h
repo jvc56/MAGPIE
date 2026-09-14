@@ -15,9 +15,9 @@ void game_get_cgp_string(const Game *game, bool write_player_on_turn_first,
                          char *dest, size_t dest_size);
 char *game_get_cgp_with_options(const Game *game,
                                 bool write_player_on_turn_first,
-                                PlayersData *players_data, int bingo_bonus,
-                                const char *board_layout_name,
+                                const PlayersData *players_data,
+                                int bingo_bonus, const char *board_layout_name,
                                 const char *ld_name,
-                                game_variant_t game_variant);
+                                const game_variant_t game_variant);
 
 #endif

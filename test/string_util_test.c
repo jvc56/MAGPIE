@@ -1,3 +1,5 @@
+#include "string_util_test.h"
+
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"

@@ -7,6 +7,7 @@
 #include "kwg.h"
 #include "rack_info_table.h"
 #include "wmp.h"
+#include "word_info_table.h"
 #include <stdbool.h>
 
 typedef struct PlayersData PlayersData;
@@ -25,6 +26,8 @@ KWG *players_data_get_kwg(const PlayersData *players_data, int player_index);
 KLV *players_data_get_klv(const PlayersData *players_data, int player_index);
 WMP *players_data_get_wmp(const PlayersData *players_data, int player_index);
 RackInfoTable *players_data_get_rack_info_table(const PlayersData *players_data,
+                                                int player_index);
+WordInfoTable *players_data_get_word_info_table(const PlayersData *players_data,
                                                 int player_index);
 
 void players_data_set_move_sort_type(PlayersData *players_data,
@@ -59,6 +62,8 @@ void players_data_set(PlayersData *players_data,
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data);
+void players_data_validate_word_info_tables(const PlayersData *players_data,
+                                            ErrorStack *error_stack);
 void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *data_paths, ErrorStack *error_stack);

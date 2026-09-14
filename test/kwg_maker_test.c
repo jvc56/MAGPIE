@@ -1,3 +1,5 @@
+#include "kwg_maker_test.h"
+
 #include "../src/compat/ctime.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"

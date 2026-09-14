@@ -2,7 +2,6 @@
 
 #include "../compat/sha256/sha256.h"
 #include "io_util.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -53,9 +52,9 @@ char *sha256_hash_file(const char *path, ErrorStack *error_stack) {
   fclose(file);
 
   if (read_failed) {
-    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-                     get_formatted_string("could not read %s while hashing it",
-                                          path));
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        get_formatted_string("could not read %s while hashing it", path));
     return NULL;
   }
 

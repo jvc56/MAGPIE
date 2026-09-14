@@ -9,7 +9,7 @@ COMMAND_PAIRS=(
     "git pull" "Pulling latest changes from remote..."
     "./download_data.sh" "Downloading lexical data..."
     "./convert_lexica.sh"        "Building lexical data..."
-    "make clean && make magpie BUILD=release" "Building the magpie executable..."
+    "make clean && make release" "Building the magpie executable..."
 )
 
 NUM_PAIRS=${#COMMAND_PAIRS[@]}

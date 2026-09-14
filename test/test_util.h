@@ -31,6 +31,7 @@ uint64_t string_to_cross_set(const LetterDistribution *ld, const char *letters);
 char *cross_set_to_string(const LetterDistribution *ld, uint64_t input);
 void play_top_n_equity_move(Game *game, int n);
 SortedMoveList *sorted_move_list_create(MoveList *ml);
+void assert_moves_are_equal(const Move *m1, const Move *m2);
 void sorted_move_list_destroy(SortedMoveList *sorted_move_list);
 void print_move_list(const Board *board, const LetterDistribution *ld,
                      const SortedMoveList *sml, int move_list_length);
@@ -53,6 +54,7 @@ void assert_move(const Game *game, const MoveList *move_list,
 void assert_bags_are_equal(const Bag *b1, const Bag *b2);
 void assert_boards_are_equal(Board *b1, Board *b2);
 void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores);
+void assert_moves_are_equal(const Move *m1, const Move *m2);
 void print_game(const Game *game, const MoveList *move_list);
 void print_cgp(const Game *game);
 void print_english_rack(const Rack *rack);

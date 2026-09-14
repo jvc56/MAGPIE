@@ -1,3 +1,5 @@
+#include "infer_test.h"
+
 #include "../src/def/inference_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/thread_control_defs.h"

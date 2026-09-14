@@ -1,9 +1,13 @@
+#include "autoplay_test.h"
+
 #include "../src/def/autoplay_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/players_data.h"
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
@@ -12,6 +16,7 @@
 #include "../src/util/string_util.h"
 #include "test_constants.h"
 #include "test_util.h"
+#include "wmp_move_gen_test.h"
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -124,11 +129,53 @@ void test_autoplay_leavegen(void) {
       config_create_or_die("set -lex CSW21_ab -ld english_ab -wmp false -s1 "
                            "equity -s2 equity -r1 best -r2 "
                            "best -numplays 1 -threads 1");
+  PlayersData *players_data = config_get_players_data(ab_config);
 
   // The minimum leave count should be achieved quickly, so if this takes too
   // long, we know it failed.
+  // CSW21_ab has no RIT. Pretend one was enabled by an earlier command and
+  // verify that leavegen disables it before attempting to load lexical data.
+  players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT, 0,
+                                      true);
+  players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT, 1,
+                                      true);
   load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3", 60);
-  load_and_exec_config_or_die_timed(ab_config, "leavegen 1,2,1 0 -seed 3", 60);
+  assert(!players_data_get_use_when_available(players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 0));
+  assert(!players_data_get_use_when_available(players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 1));
+
+  // Explicit shared and per-player RIT options are also ignored by leavegen.
+  load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3 -rit true",
+                                    60);
+
+  // Load known-good later-generation outputs. This exercises the full
+  // generation boundary: generation 1 primes MoveGen's leave caches,
+  // rack_list_write_to_klv changes the live KLV, and generations 2 and 3 must
+  // use the new values rather than cached ones.
+  const char *gen_2_csv_filename = "./testdata/lexica/CSW21_ab_gen_2.csv";
+  const char *gen_3_csv_filename = "./testdata/lexica/CSW21_ab_gen_3.csv";
+  char *expected_gen_2_csv = get_string_from_file_or_die(
+      "./test/fixtures/leavegen_CSW21_ab_gen_2.csv");
+  char *expected_gen_3_csv = get_string_from_file_or_die(
+      "./test/fixtures/leavegen_CSW21_ab_gen_3.csv");
+
+  load_and_exec_config_or_die_timed(
+      ab_config, "leavegen 1,2,1 0 -seed 3 -rit1 true -rit2 true", 60);
+
+  char *actual_gen_2_csv = get_string_from_file_or_die(gen_2_csv_filename);
+  char *actual_gen_3_csv = get_string_from_file_or_die(gen_3_csv_filename);
+  assert_strings_equal(expected_gen_2_csv, actual_gen_2_csv);
+  assert_strings_equal(expected_gen_3_csv, actual_gen_3_csv);
+  free(actual_gen_2_csv);
+  free(actual_gen_3_csv);
+  free(expected_gen_2_csv);
+  free(expected_gen_3_csv);
+
+  assert(!players_data_get_use_when_available(players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 0));
+  assert(!players_data_get_use_when_available(players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 1));
 
   config_destroy(ab_config);
 }
@@ -411,6 +458,12 @@ void test_autoplay_wmp_correctness(void) {
 }
 
 void test_autoplay_rit_correctness(void) {
+  // Fast, exact check first: the RIT-backed and plain move generators must
+  // produce identical move lists. Runs here because this shard is where the
+  // TWL98 RIT exists, and it must run before the cleanup below removes it.
+  test_rit_movegen_equality();
+  test_rit_toggle_subrack_cache();
+
   // Build a RIT for TWL98 using the release binary (fast), then run
   // game pairs under ASAN where player 1 uses RIT and player 2 does not.
   // Any divergence means the RIT changed move selection.
@@ -566,8 +619,9 @@ void test_autoplay_play_chooser(void) {
 // checks them against the game-level totals in the same JSON. The two are
 // different views of the same games, so they must agree exactly:
 //
-//   sum(counts)              == pairs             (every pair lands in one bucket)
-//   sum(i * counts[i])       == 2*wins + ties     (both count player 1's
+//   sum(counts)              == pairs             (every pair lands in one
+//   bucket) sum(i * counts[i])       == 2*wins + ties     (both count player
+//   1's
 //                                                  half-points over the pair)
 //
 // The second is the load-bearing one: it fails if a pair is ever dropped,
@@ -621,8 +675,8 @@ void test_autoplay_pentanomial(void) {
   // reports all 50 pairs.
   load_and_exec_config_or_die(
       csw_config, "autoplay games 50 -seed 50 -s1 equity -s2 equity -gp true");
-  assert_pentanomial_agrees_with_games(
-      config_get_autoplay_results(csw_config), 50, 50);
+  assert_pentanomial_agrees_with_games(config_get_autoplay_results(csw_config),
+                                       50, 50);
 
   // One player sorts by score and the other by equity, so essentially every
   // pair diverges and the counts spread across the buckets.
@@ -639,8 +693,8 @@ void test_autoplay_pentanomial(void) {
   error_stack_destroy(error_stack);
   assert(split_pairs >= 0);
   assert(split_pairs < 50);
-  assert_pentanomial_agrees_with_games(
-      config_get_autoplay_results(csw_config), 50, (uint64_t)split_pairs);
+  assert_pentanomial_agrees_with_games(config_get_autoplay_results(csw_config),
+                                       50, (uint64_t)split_pairs);
 
   config_destroy(csw_config);
 }

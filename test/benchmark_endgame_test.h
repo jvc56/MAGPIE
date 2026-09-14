@@ -11,4 +11,6 @@ void test_endgame_speed_bench(void);
 void test_endgame_playout_bench(void);
 void test_endgame_move1(void);
 
+void test_endgame_root_bench(void);
+
 #endif

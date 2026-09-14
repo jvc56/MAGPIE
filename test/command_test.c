@@ -1,3 +1,5 @@
+#include "command_test.h"
+
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/linenoise.h"

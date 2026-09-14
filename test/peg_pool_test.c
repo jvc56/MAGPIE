@@ -1,3 +1,5 @@
+#include "peg_pool_test.h"
+
 #include "../src/impl/peg_pool.h"
 #include "../src/util/io_util.h"
 #include <assert.h>

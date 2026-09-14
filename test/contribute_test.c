@@ -178,7 +178,8 @@ static void test_client_state(void) {
 static void test_sha256(void) {
   char *empty = sha256_hash_bytes("", 0);
   assert_strings_equal(
-      empty, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+      empty,
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
   free(empty);
 
   char *abc = sha256_hash_bytes("abc", 3);
@@ -206,7 +207,8 @@ static void test_sha256(void) {
   char *from_file = sha256_hash_file(path, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert_strings_equal(
-      from_file, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+      from_file,
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   free(from_file);
 
   // A file that is not there is an error, not a digest of nothing.
@@ -240,7 +242,8 @@ static void test_digest_cache_key_notices_a_same_size_replacement(void) {
   assert(file);
   fwrite("bbbb", 1, 4, file);
   fclose(file);
-  struct utimbuf times = {.actime = before.st_atime, .modtime = before.st_mtime};
+  struct utimbuf times = {.actime = before.st_atime,
+                          .modtime = before.st_mtime};
   assert(utime(path, &times) == 0);
 
   struct stat after;
@@ -337,16 +340,14 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   JsonValue *opening_rack =
       load_task_request_fixture(BIRDTEST_OPENING_RACK_FIXTURE, &request);
   const char *const opening_rack_keys[] = {
-      CONTRIBUTE_KEY_VARIANT,
-      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
-      CONTRIBUTE_KEY_BOARD_LAYOUT,
-      CONTRIBUTE_KEY_RACKS,
+      CONTRIBUTE_KEY_VARIANT,      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
+      CONTRIBUTE_KEY_BOARD_LAYOUT, CONTRIBUTE_KEY_RACKS,
       CONTRIBUTE_KEY_PLAYER,
   };
-  assert_fixture_has_keys(
-      request, opening_rack_keys,
-      sizeof(opening_rack_keys) / sizeof(opening_rack_keys[0]),
-      "opening_rack task_request");
+  assert_fixture_has_keys(request, opening_rack_keys,
+                          sizeof(opening_rack_keys) /
+                              sizeof(opening_rack_keys[0]),
+                          "opening_rack task_request");
   // The batch is the racks themselves, not a range: an empty one is a task
   // with nothing to do, which the executor refuses.
   assert(json_array_length(json_object_get(request, CONTRIBUTE_KEY_RACKS)) > 0);
@@ -435,8 +436,8 @@ static void test_shared_settings_do_not_leak_between_tasks(void) {
 // case this pins: a contributor running -plies 5 analysed every rack of a
 // 4-ply job at 5 plies.
 static void test_opening_rack_analysis_uses_the_players_settings(void) {
-  Config *config =
-      config_create_or_die("set -lex CSW21 -plies 5 -numplays 7 -iterations 99");
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -plies 5 -numplays 7 -iterations 99");
   const JsonValue *request = NULL;
   JsonValue *opening_rack =
       load_task_request_fixture(BIRDTEST_OPENING_RACK_FIXTURE, &request);

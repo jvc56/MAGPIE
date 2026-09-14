@@ -3,7 +3,7 @@
 # 2) Convert all *_super.kwg files (BOARD_DIM=21)
 #    note: 21x21 doesn't work with wmp
 make clean
-make magpie BUILD=release BOARD_DIM=21
+make magpie BUILD=no_pgo_release BOARD_DIM=21
 
 for path in data/lexica/*_super.kwg; do
     [[ -e "$path" ]] || continue  # Skip if none found
@@ -15,7 +15,7 @@ done
 # 3) Build again for nstandard (BOARD_DIM=15)
 #    leaves us with a BOARD_DIM=15 binary afterward
 make clean
-make magpie BUILD=release BOARD_DIM=15
+make magpie BUILD=no_pgo_release BOARD_DIM=15
 
 # 4) Convert all non-super .kwg files
 for path in data/lexica/*.kwg; do
