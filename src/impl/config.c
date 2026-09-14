@@ -146,6 +146,7 @@ typedef enum {
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
+  ARG_TOKEN_PEG_QUOTA,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_NESTED,
@@ -348,6 +349,9 @@ struct Config {
   // default.
   int peg_num_stages;
   int peg_scenario_stride;
+  // Minimum share of the stage 0 and stage 1 fields guaranteed to each
+  // bag-emptying class (-pegquota). 0 = disabled (plain top-K cuts).
+  double peg_class_quota;
   // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
   // the cell always fits the label + a worst-case token) and max wrapped lines
   // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
@@ -1718,6 +1722,19 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "preserve the expected aggregate (faster, approximate). Default "
              "(<= 1) is full enumeration. Ignored for bag <= 2.";
       break;
+    case ARG_TOKEN_PEG_QUOTA:
+      usages[0] = "<fraction>";
+      examples[0] = "0.25";
+      examples[1] = "0";
+      text =
+          "Minimum share of the stage 0 and stage 1 fields guaranteed to each "
+          "bag-emptying class -- plays that empty the bag, and plays that "
+          "leave tiles in it -- as a fraction in [0, 0.5], rounded up. Those "
+          "stages rank the classes unfairly (too few plies for the opponent to "
+          "punish an emptier), so a narrow cut can drop a whole class before "
+          "the fidelity that vindicates it runs. From stage 2 on the ranking "
+          "is trusted and no quota applies. Default 0 (plain top-K cuts).";
+      break;
     case ARG_TOKEN_PEG_NOPRUNE:
       usages[0] = "<moves>";
       examples[0] = "11J.MEH";
@@ -2416,6 +2433,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
         ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
+        ARG_TOKEN_PEG_QUOTA,               /* pegquota */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
         ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
         ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
@@ -3431,7 +3449,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*max_stage=*/0, /*greedy_seed_only=*/false,
       /*stage_top_k=*/
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL,
-      config->peg_num_stages, /*inner_top_k=*/0,
+      config->peg_num_stages, config->peg_class_quota, /*inner_top_k=*/0,
       config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
       config->peg_scenario_stride, /*nested_enabled=*/config->peg_nested,
       /*nested_cand_cap=*/0, PEG_NESTED_DEFAULT_CAND_CAPS,
@@ -7268,6 +7286,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Capped at 0.5: both classes get the same floor, so a larger share could
+  // not be honored for either.
+  config_load_double(config, ARG_TOKEN_PEG_QUOTA, 0, 0.5,
+                     &config->peg_class_quota, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_PEG_OUT_WIDTH, 0, INT_MAX,
                   &config->peg_out_width, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -9397,6 +9423,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ENDGAME_TIME_LIMIT, "etlim", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
+  arg(ARG_TOKEN_PEG_QUOTA, "pegquota", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
@@ -9920,6 +9947,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_STRIDE:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->peg_scenario_stride);
+      break;
+    case ARG_TOKEN_PEG_QUOTA:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->peg_class_quota);
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
