@@ -141,6 +141,10 @@ struct PATWeights {
   // Per-stage factor on the applied term (see the row prefixes in
   // pat_defs.h); indexed by PAT_STAGE_*.
   double stage_scale[PAT_STAGE_COUNT];
+  // Opening adjustments by tiles played (index 1..RACK_SIZE) and for an
+  // opening exchange, milli-equity <= 0 (see PAT_OPENING_TILES_ROW_PREFIX).
+  Equity opening_tiles[RACK_SIZE + 1];
+  Equity opening_exchange;
   // 1: only the hook-score channels are fitted; 2: the triple-word hook
   // flexibility channels too; 3: only the floater through channels (see
   // pat_regression_solve_into_weights).
@@ -212,6 +216,32 @@ void pat_set_train_overlay(PATWeights *pat, bool train_overlay) {
 }
 
 bool pat_get_run_through(const PATWeights *pat) { return pat->run_through; }
+
+Equity pat_get_opening_tiles_adjustment(const PATWeights *pat, int tiles) {
+  return pat->opening_tiles[tiles];
+}
+
+void pat_set_opening_tiles_adjustment(PATWeights *pat, int tiles,
+                                      Equity adjustment) {
+  if (tiles < 1 || tiles > RACK_SIZE || adjustment > 0) {
+    log_fatal("PAT opening adjustment must be for 1..%d tiles and <= 0, got "
+              "%d tiles, %d",
+              RACK_SIZE, tiles, adjustment);
+  }
+  pat->opening_tiles[tiles] = adjustment;
+}
+
+Equity pat_get_opening_exchange_adjustment(const PATWeights *pat) {
+  return pat->opening_exchange;
+}
+
+void pat_set_opening_exchange_adjustment(PATWeights *pat, Equity adjustment) {
+  if (adjustment > 0) {
+    log_fatal("PAT opening exchange adjustment must be <= 0, got %d",
+              adjustment);
+  }
+  pat->opening_exchange = adjustment;
+}
 
 double pat_get_stage_scale(const PATWeights *pat, int stage) {
   return pat->stage_scale[stage];
@@ -437,6 +467,10 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
     pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
   }
+  for (int tiles = 0; tiles <= RACK_SIZE; tiles++) {
+    pat->opening_tiles[tiles] = 0;
+  }
+  pat->opening_exchange = 0;
   pat->run_through_count = NULL;
   pat->run_through_score = NULL;
   pat->run_through_alphabet_size = 0;
@@ -653,6 +687,45 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->exact_created_hooks = (flag == 1);
       continue;
     }
+    if (has_prefix(PAT_OPENING_TILES_ROW_PREFIX, line) ||
+        has_prefix(PAT_OPENING_EXCHANGE_ROW_PREFIX, line)) {
+      const bool is_exchange =
+          has_prefix(PAT_OPENING_EXCHANGE_ROW_PREFIX, line);
+      int tiles = 0;
+      const char *value_text;
+      if (is_exchange) {
+        value_text = line + strlen(PAT_OPENING_EXCHANGE_ROW_PREFIX);
+      } else {
+        const char *tiles_text = line + strlen(PAT_OPENING_TILES_ROW_PREFIX);
+        char *tiles_end = NULL;
+        tiles = (int)strtol(tiles_text, &tiles_end, 10);
+        if (tiles_end == tiles_text || *tiles_end != ',' || tiles < 1 ||
+            tiles > RACK_SIZE) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+              get_formatted_string("PAT file '%s' line %d is not "
+                                   "'opening_tiles_<1..%d>,<value>': '%s'",
+                                   pat_name, line_index + 1, RACK_SIZE, line));
+          return;
+        }
+        value_text = tiles_end + 1;
+      }
+      const int adjustment = string_to_int(value_text, error_stack);
+      if (!error_stack_is_empty(error_stack) || adjustment > 0) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has an opening "
+                                 "adjustment that is not an integer <= 0: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      if (is_exchange) {
+        pat->opening_exchange = adjustment;
+      } else {
+        pat->opening_tiles[tiles] = adjustment;
+      }
+      continue;
+    }
     {
       static const char *const stage_prefixes[PAT_STAGE_COUNT] = {
           PAT_STAGE_SCALE_EARLY_ROW_PREFIX, PAT_STAGE_SCALE_MID_ROW_PREFIX,
@@ -826,6 +899,13 @@ void pat_write(const PATWeights *pat, const char *data_paths,
   string_builder_add_formatted_string(sb, "%s%.6f\n",
                                       PAT_STAGE_SCALE_LATE_ROW_PREFIX,
                                       pat->stage_scale[PAT_STAGE_LATE]);
+  for (int tiles = 1; tiles <= RACK_SIZE; tiles++) {
+    string_builder_add_formatted_string(sb, "%s%d,%d\n",
+                                        PAT_OPENING_TILES_ROW_PREFIX, tiles,
+                                        pat->opening_tiles[tiles]);
+  }
+  string_builder_add_formatted_string(
+      sb, "%s%d\n", PAT_OPENING_EXCHANGE_ROW_PREFIX, pat->opening_exchange);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -2454,6 +2534,17 @@ static void pat_eval_context_load_units(
                 "unit masks must cover every scan unit");
   static_assert(PAT_MAX_SCAN_UNITS <= UINT16_MAX,
                 "unit order entries must hold every unit index");
+  pat_eval_ctx->board_is_empty = true;
+  for (int row = 0; row < BOARD_DIM && pat_eval_ctx->board_is_empty; row++) {
+    const Square *lane =
+        board_get_row_cache(lanes, row, BOARD_HORIZONTAL_DIRECTION);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (square_get_letter(&lane[col]) != ALPHABET_EMPTY_SQUARE_MARKER) {
+        pat_eval_ctx->board_is_empty = false;
+        break;
+      }
+    }
+  }
   {
     int total_unseen = 0;
     for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
@@ -2760,11 +2851,40 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
                          pat_units_penalty_bound(pat_eval_ctx, combined_units));
 }
 
+// The opening adjustment for a move on an empty board (see
+// PAT_OPENING_TILES_ROW_PREFIX); zero elsewhere and for a pass.
+static inline Equity pat_opening_adjustment(const PATEvalContext *pat_eval_ctx,
+                                            const Move *move) {
+  if (!pat_eval_ctx->board_is_empty) {
+    return 0;
+  }
+  const game_event_t type = move_get_type(move);
+  if (type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return pat_eval_ctx->weights->opening_tiles[move_get_tiles_played(move)];
+  }
+  if (type == GAME_EVENT_EXCHANGE) {
+    return pat_eval_ctx->weights->opening_exchange;
+  }
+  return 0;
+}
+
+static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
+                                           const Move *move, const Rack *leave);
+
 Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
                              const Move *move, const Rack *leave) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
+  // The opening adjustment is <= 0 like everything else here, so every
+  // bound on the term stays a bound without knowing about it.
+  return pat_eval_move_penalty_scaled(pat_eval_ctx, move, leave) +
+         pat_opening_adjustment(pat_eval_ctx, move);
+}
+
+static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
+                                           const Move *move,
+                                           const Rack *leave) {
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Exchanges and passes leave the board unchanged, so their defense term
     // is exactly the position baseline. Including it keeps the comparison

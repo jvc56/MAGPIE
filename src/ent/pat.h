@@ -54,6 +54,13 @@ bool pat_get_train_overlay(const PATWeights *pat);
 void pat_set_train_overlay(PATWeights *pat, bool train_overlay);
 bool pat_get_run_through(const PATWeights *pat);
 void pat_set_run_through(PATWeights *pat, bool run_through);
+// tiles is 1..RACK_SIZE; values are milli-equity <= 0 (see
+// PAT_OPENING_TILES_ROW_PREFIX).
+Equity pat_get_opening_tiles_adjustment(const PATWeights *pat, int tiles);
+void pat_set_opening_tiles_adjustment(PATWeights *pat, int tiles,
+                                      Equity adjustment);
+Equity pat_get_opening_exchange_adjustment(const PATWeights *pat);
+void pat_set_opening_exchange_adjustment(PATWeights *pat, Equity adjustment);
 // stage is a PAT_STAGE_* value; see PAT_STAGE_SCALE_EARLY_ROW_PREFIX.
 double pat_get_stage_scale(const PATWeights *pat, int stage);
 void pat_set_stage_scale(PATWeights *pat, int stage, double scale);
@@ -251,6 +258,9 @@ typedef struct PATEvalContext {
   // counts: unseen is the bag plus the opponent's rack, so the pre-move
   // bag is unseen less opponent_rack_size.
   double term_scale;
+  // Whether the position's board is empty, so the opening adjustments
+  // (PATWeights.opening_tiles / opening_exchange) apply to its moves.
+  bool board_is_empty;
   // Bit u of unit_mask_by_row[r] is set when a fresh tile in row r could
   // affect unit u provided the move's column span also overlaps the unit
   // (and symmetrically for columns), so a candidate move's affected-unit
