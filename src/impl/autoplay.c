@@ -1158,11 +1158,12 @@ void print_current_status(AutoplayWorker *autoplay_worker,
 }
 
 void autoplay_add_game(AutoplayWorker *autoplay_worker,
-                       const GameRunner *game_runner, bool divergent) {
-  autoplay_results_add_game_with_timing(
+                       const GameRunner *game_runner,
+                       const GameRunner *pair_runner, bool divergent) {
+  autoplay_results_add_game_with_pair(
       autoplay_worker->autoplay_results, game_runner->game,
       game_runner->turn_number, divergent, game_runner->seed,
-      &game_runner->timing);
+      &game_runner->timing, pair_runner ? pair_runner->game : NULL);
   AutoplayIterCompletedOutput iter_completed_output;
   autoplay_complete_iter(autoplay_worker->shared_data, &iter_completed_output);
   if (iter_completed_output.print_info) {
@@ -1242,12 +1243,13 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
                          string_builder_peek(output));
     string_builder_destroy(output);
   }
-  autoplay_add_game(autoplay_worker, game_runner1, games_are_divergent);
+  autoplay_add_game(autoplay_worker, game_runner1, NULL, games_are_divergent);
   if (game_runner2) {
     // We do not check for min leave counts here because leave gen
     // does not use game pairs and therefore does not have a second
-    // game runner.
-    autoplay_add_game(autoplay_worker, game_runner2, games_are_divergent);
+    // game runner. The second game carries the pair's combined spread.
+    autoplay_add_game(autoplay_worker, game_runner2, game_runner1,
+                      games_are_divergent);
   }
 }
 

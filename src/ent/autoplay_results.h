@@ -39,6 +39,13 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);
+// pair_game is the first game of a mirrored pair when game is its second,
+// else NULL (see the pair spread statistic in the results).
+void autoplay_results_add_game_with_pair(AutoplayResults *autoplay_results,
+                                         const Game *game, int turns,
+                                         bool divergent, uint64_t seed,
+                                         const AutoplayGameTiming *timing,
+                                         const Game *pair_game);
 void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
                                            const Game *game, int turns,
                                            bool divergent, uint64_t seed,
