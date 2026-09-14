@@ -460,7 +460,45 @@ static void test_opening_rack_analysis_uses_the_players_settings(void) {
   config_destroy(config);
 }
 
+// Wordmap and rack info table use are decided as a task's lexical data loads,
+// so a task's flags have to be in place before it. The cases this pins: a task
+// that asked for no wordmap, run after one that asked for one, loaded a wordmap
+// nothing had checked against its .kwg; and a rack info table switched on by a
+// contributor's settings stayed on, putting its own leave values in place of
+// the leaves the task pins.
+static void test_lexical_flags_are_set_before_the_load(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  PlayersData *players_data = config_get_players_data(config);
+  assert(players_data_get_wmp(players_data, 0));
+  for (int player_index = 0; player_index < 2; player_index++) {
+    players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT,
+                                        player_index, true);
+  }
+  ErrorStack *error_stack = error_stack_create();
+
+  config_contribute_load_lexicon_and_variant(
+      config, "CSW21", "classic", NULL, NULL, "CSW21", "CSW21", "CSW21",
+      "CSW21", false, false, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  for (int player_index = 0; player_index < 2; player_index++) {
+    assert(!players_data_get_wmp(players_data, player_index));
+    assert(!players_data_get_rack_info_table(players_data, player_index));
+  }
+
+  // A task that asks for a wordmap gets it for itself, not for the next task.
+  config_contribute_load_lexicon_and_variant(config, "CSW21", "classic", NULL,
+                                             NULL, "CSW21", "CSW21", "CSW21",
+                                             "CSW21", true, false, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(players_data_get_wmp(players_data, 0));
+  assert(!players_data_get_wmp(players_data, 1));
+
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_contribute(void) {
+  test_lexical_flags_are_set_before_the_load();
   test_shared_settings_do_not_leak_between_tasks();
   test_opening_rack_analysis_uses_the_players_settings();
   test_version_comparison();

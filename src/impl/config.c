@@ -957,7 +957,7 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.2.0"
+#define MAGPIE_VERSION "0.3.0"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -7169,11 +7169,39 @@ static void config_contribute_ensure_wordmap(Config *config,
 // earlier task or the contributor's settings.txt last loaded: a worker whose
 // settings left standard21 loaded would otherwise verify standard15.txt and
 // play every game on the other board.
-static void config_contribute_load_lexicon_and_variant(
+//
+// p1_use_wordmap and p2_use_wordmap are stated here, and the rack info table
+// is switched off for both players, *before* the lexical data loads:
+// config_load_lexicon_dependent_data decides whether to load either file from
+// these flags as it loads, and players pick up whatever it leaves behind.
+// Setting them after the load, as the executors used to, applied each task's
+// settings to the next task's load. A task that asked for no wordmap then got
+// one if the task before it had asked -- for its own lexicon, whose wordmap
+// config_contribute_ensure_wordmap had never checked against the .kwg on disk
+// -- and a rack info table switched on by the contributor's settings or an
+// earlier task stayed on.
+//
+// The rack info table is always off. It is not exact the way a wordmap is:
+// each entry stores precomputed leave values, which move generation uses in
+// place of the loaded leaves, and the file is named after the lexicon, records
+// nothing about the KLV it was built from, and is covered by no digest. A
+// leave-generation task plays with a KLV fetched for its generation, which a
+// table built from the lexicon's shipped leaves would silently replace, and a
+// player whose leaves are not that KLV would rank moves on the wrong values.
+// birdtest refuses use_rit for the same reason.
+void config_contribute_load_lexicon_and_variant(
     Config *config, const char *lexicon, const char *variant,
     const char *letter_distribution, const char *board_layout,
     const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
-    const char *p2_leaves, ErrorStack *error_stack) {
+    const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
+    ErrorStack *error_stack) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    players_data_set_use_when_available(
+        config->players_data, PLAYERS_DATA_TYPE_WMP, player_index,
+        player_index == 0 ? p1_use_wordmap : p2_use_wordmap);
+    players_data_set_use_when_available(
+        config->players_data, PLAYERS_DATA_TYPE_RIT, player_index, false);
+  }
   config_load_game_variant(config, variant, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -7203,32 +7231,6 @@ static void config_contribute_load_lexicon_and_variant(
       /*use_mmap_for_rit_has_value=*/false, /*is_loading_game_history=*/false,
       error_stack);
   free(default_ld);
-}
-
-// Overrides one player's wordmap/rack-info-table use from the task request,
-// bypassing config_load_lexicon_dependent_data's own -w1/-w2/-rit1/-rit2
-// handling (which reads parsed CLI args the contribute path never
-// populates). Called after config_contribute_load_lexicon_and_variant, which
-// with has_value=false above leaves the existing players_data settings
-// alone, so this is the only writer for these two flags on the contribute
-// path.
-//
-// The wordmap flag is written unconditionally, unlike every other setting
-// here: a wordmap found on disk (left by an earlier job that asked for one)
-// is otherwise switched on by players_data_set_data the moment it loads, so
-// "the server didn't ask for a wordmap" has to be stated, not just omitted.
-static void config_contribute_apply_wmp_rit(Config *config,
-                                            const JsonValue *player,
-                                            int player_index) {
-  players_data_set_use_when_available(config->players_data,
-                                      PLAYERS_DATA_TYPE_WMP, player_index,
-                                      contribute_wants_wordmap(player));
-  const JsonValue *use_rit = json_object_get(player, CONTRIBUTE_KEY_USE_RIT);
-  if (use_rit && !json_is_null(use_rit)) {
-    players_data_set_use_when_available(
-        config->players_data, PLAYERS_DATA_TYPE_RIT, player_index,
-        json_get_bool_or(player, CONTRIBUTE_KEY_USE_RIT, false));
-  }
 }
 
 // Parses a threshold/sampling-rule name the same way the CLI's th1/th2/
@@ -7521,8 +7523,6 @@ void config_contribute_apply_player_settings(Config *config,
     *utility_spread_scale =
         json_get_double_or(player, CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE, 1.0);
   }
-
-  config_contribute_apply_wmp_rit(config, player, player_index);
 }
 
 // Resets the run-wide settings a task request never states to MAGPIE's own
@@ -7705,7 +7705,9 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       config, shared_lexicon, variant, letter_distribution, board_layout,
       p1_lexicon, p2_lexicon,
       json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
-      json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES), error_stack);
+      json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES),
+      contribute_wants_wordmap(player1), contribute_wants_wordmap(player2),
+      error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -7933,6 +7935,7 @@ static char *config_contribute_opening_rack(Config *config,
   config_contribute_load_lexicon_and_variant(
       config, contribute_shared_lexicon(lexicon, p1_lexicon), variant,
       letter_distribution, board_layout, p1_lexicon, NULL, leaves, leaves,
+      contribute_wants_wordmap(player), contribute_wants_wordmap(player),
       error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
@@ -8135,7 +8138,7 @@ static char *config_contribute_leave_gen(Config *config,
 
   config_contribute_load_lexicon_and_variant(
       config, lexicon, variant, letter_distribution, board_layout, NULL, NULL,
-      leaves_name, leaves_name, error_stack);
+      leaves_name, leaves_name, use_wordmap, use_wordmap, error_stack);
   free(leaves_name);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
@@ -8149,13 +8152,6 @@ static char *config_contribute_leave_gen(Config *config,
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }
-  }
-  // Stated for both players for the same reason config_contribute_apply_wmp_rit
-  // states it: a wordmap left on disk by an earlier job would otherwise be
-  // switched on as soon as it loads.
-  for (int player_index = 0; player_index < 2; player_index++) {
-    players_data_set_use_when_available(
-        config->players_data, PLAYERS_DATA_TYPE_WMP, player_index, use_wordmap);
   }
   if (!config_has_game_data(config)) {
     error_stack_push(

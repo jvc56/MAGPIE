@@ -63,6 +63,17 @@ void config_contribute_reset_shared_settings(Config *config);
 void config_contribute_use_player_settings_for_analysis(Config *config,
                                                         int player_index);
 
+// Loads the variant, board layout, lexicon, letter distribution and leaves a
+// task states, with each player's wordmap use set -- and the rack info table
+// switched off -- before the load reads those flags. Exposed so that ordering
+// can be tested: set afterwards, each task's flags applied to the next task.
+void config_contribute_load_lexicon_and_variant(
+    Config *config, const char *lexicon, const char *variant,
+    const char *letter_distribution, const char *board_layout,
+    const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
+    const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
+    ErrorStack *error_stack);
+
 Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 
