@@ -51,6 +51,9 @@ bool pat_get_fit_scaled_channels(const PATWeights *pat);
 void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels);
 bool pat_get_train_overlay(const PATWeights *pat);
 void pat_set_train_overlay(PATWeights *pat, bool train_overlay);
+bool pat_get_fit_residual(const PATWeights *pat);
+int pat_get_fit_residual_mode(const PATWeights *pat);
+void pat_set_fit_residual(PATWeights *pat, bool fit_residual);
 uint64_t pat_get_mutation_counter(const PATWeights *pat);
 void pat_bump_mutation_counter(PATWeights *pat);
 // Writes the weights to data/strategy/<pat_name>.pat.

@@ -47,6 +47,19 @@ enum {
       PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT,
   PAT_FEATURE_FLOAT_FLEX_SCALED_START =
       PAT_FEATURE_HOOK_SCALED_START + PAT_HOOK_BIN_COUNT,
+  // Hook flexibility counts every unseen tile that fits a hook alike; a
+  // hook that takes a J is a bigger immediate threat than one that takes
+  // an S, and hooking a long high-scoring word is worse than hooking AT.
+  // This channel is the flexibility sum weighted by each admissible
+  // letter's incremental immediate score with the real geometry: the
+  // hooked word's existing score under the hook square's word
+  // multiplier, plus the letter's own value under the square's letter
+  // multiplier, counted in the hook word and again in the lane word the
+  // triple multiplies (see pat_effective_cross_info), divided by
+  // PAT_HOOK_SCORE_SCALE to keep it on the other channels' scale. Present
+  // from format version 4 on. TWS-only, like the through table.
+  PAT_FEATURE_HOOK_SCORE_START =
+      PAT_FEATURE_FLOAT_FLEX_SCALED_START + PAT_FLOATER_BIN_COUNT,
   // The same hook and floater-value channels for the lesser premium
   // squares. A lone double word square doubles a whole word and a triple
   // letter square triples one tile, so both are worth reaching and both
@@ -54,7 +67,7 @@ enum {
   // They get their own channels rather than a shared one scaled by a
   // guessed multiplier, so the fit says what each class is worth.
   PAT_FEATURE_DWS_HOOK_START =
-      PAT_FEATURE_FLOAT_FLEX_SCALED_START + PAT_FLOATER_BIN_COUNT,
+      PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT,
   PAT_FEATURE_DWS_FLOAT_SCORE_START =
       PAT_FEATURE_DWS_HOOK_START + PAT_HOOK_BIN_COUNT,
   PAT_FEATURE_TLS_HOOK_START =
@@ -160,19 +173,32 @@ enum {
 #define PAT_TRAIN_OVERLAY_ROW_PREFIX "train_overlay,"
 #define PAT_DEFAULT_TRAIN_OVERLAY false
 
+// Optional row (0 or 1): whether patgen fits only the hook-score channels
+// (PAT_FEATURE_HOOK_SCORE_START onward, PAT_HOOK_BIN_COUNT of them) as a
+// residual on top of the file's other weights, which stay exactly as
+// loaded (see PATWeights.fit_residual). Absent means 0: every channel
+// fitted.
+#define PAT_FIT_RESIDUAL_ROW_PREFIX "fit_residual,"
+#define PAT_DEFAULT_FIT_RESIDUAL false
+
+// Divisor applied to the hook-score channel's availability-weighted point
+// sum so a typical hook lands near the flexibility channels' magnitude.
+#define PAT_HOOK_SCORE_SCALE 8
+
 // The header line is PAT_MAGIC_PREFIX followed by the format version as a
 // decimal integer, e.g. "magpie_pat_v2". PAT_VERSION is what this build
 // writes; a file naming a version below PAT_EARLIEST_SUPPORTED_VERSION is
 // rejected (see the PAT_UNSUPPORTED_VERSION error). Version 1 predates the
 // double letter square channels (PAT_FEATURE_DLS_HOOK_START onward), and
 // version 2 predates the hypergeometric-scaled channels
-// (PAT_FEATURE_HOOK_SCALED_START onward): an older file has no rows for
-// the channels added after it and they read as zero, so raising
+// (PAT_FEATURE_HOOK_SCALED_START onward), and version 3 the hook-score
+// channels (PAT_FEATURE_HOOK_SCORE_START onward): an older file has no
+// rows for the channels added after it and they read as zero, so raising
 // PAT_EARLIEST_SUPPORTED_VERSION is never required by adding a class.
 #define PAT_MAGIC_PREFIX "magpie_pat_v"
 enum {
   PAT_EARLIEST_SUPPORTED_VERSION = 1,
-  PAT_VERSION = 3,
+  PAT_VERSION = 4,
 };
 
 #endif
