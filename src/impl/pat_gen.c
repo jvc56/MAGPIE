@@ -132,22 +132,67 @@ pat_regression_solve_into_weights(const PATRegression *regression,
   for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
     a[i][i] += ridge_lambda * num_observations;
   }
-  // Excluded features: drop the column from the solve by zeroing its row
-  // and column and its right-hand side, with a unit diagonal so the
-  // system stays positive definite and the solution there is exactly 0.
-  double xty[PAT_REGRESSION_DIM];
-  memcpy(xty, regression->xty, sizeof(xty));
+  // Features held fixed at a value: their contribution moves to the
+  // right-hand side (xty_i -= sum_j XtX_ij c_j over fixed j, for every
+  // free i), then their column is dropped from the solve by zeroing its
+  // row and column with a unit diagonal, so the system stays positive
+  // definite; the solution there is overwritten with the fixed value
+  // afterwards. Excluded features are the fixed-at-zero case.
+  bool fixed[PAT_REGRESSION_DIM] = {false};
+  double fixed_value[PAT_REGRESSION_DIM] = {0.0};
   if (!pat_get_fit_scaled_channels(pat)) {
     for (int feature_index = PAT_FEATURE_HOOK_SCALED_START;
-         feature_index < PAT_FEATURE_DWS_HOOK_START; feature_index++) {
-      const int i = feature_index + 1;
-      for (int j = 0; j < PAT_REGRESSION_DIM; j++) {
-        a[i][j] = 0.0;
-        a[j][i] = 0.0;
-      }
-      a[i][i] = 1.0;
-      xty[i] = 0.0;
+         feature_index < PAT_FEATURE_HOOK_SCORE_START; feature_index++) {
+      fixed[feature_index + 1] = true;
     }
+  }
+  if (pat_get_fit_residual(pat)) {
+    // Only the hook-score channels move -- and, with fit_residual 2, the
+    // triple-word hook flexibility channels they are collinear with, so
+    // the fit can shift mass between count-weighted and score-weighted
+    // hooks; everything else keeps the loaded weight, as the coefficient
+    // it corresponds to (weights are the negated coefficients, see the
+    // clamp below).
+    const bool hooks_free = pat_get_fit_residual_mode(pat) >= 2;
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      const bool is_hook_score =
+          feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
+          feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT;
+      const bool is_tws_hook =
+          feature_index >= PAT_FEATURE_HOOK_START &&
+          feature_index < PAT_FEATURE_HOOK_START + PAT_HOOK_BIN_COUNT;
+      if (!is_hook_score && !(hooks_free && is_tws_hook)) {
+        fixed[feature_index + 1] = true;
+        fixed_value[feature_index + 1] =
+            -equity_to_double(pat_get_weight(pat, feature_index));
+      }
+    }
+  }
+  double xty[PAT_REGRESSION_DIM];
+  memcpy(xty, regression->xty, sizeof(xty));
+  for (int i = 0; i < PAT_REGRESSION_DIM; i++) {
+    if (fixed[i]) {
+      continue;
+    }
+    for (int j = 1; j < PAT_REGRESSION_DIM; j++) {
+      if (fixed[j] && fixed_value[j] != 0.0) {
+        const double xtx_ij =
+            (i <= j) ? regression->xtx[i][j] : regression->xtx[j][i];
+        xty[i] -= xtx_ij * fixed_value[j];
+      }
+    }
+  }
+  for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
+    if (!fixed[i]) {
+      continue;
+    }
+    for (int j = 0; j < PAT_REGRESSION_DIM; j++) {
+      a[i][j] = 0.0;
+      a[j][i] = 0.0;
+    }
+    a[i][i] = 1.0;
+    xty[i] = 0.0;
   }
 
   if (!pat_cholesky_decompose(a)) {
@@ -155,6 +200,11 @@ pat_regression_solve_into_weights(const PATRegression *regression,
   }
   double solution[PAT_REGRESSION_DIM];
   pat_cholesky_solve(a, xty, solution);
+  for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
+    if (fixed[i]) {
+      solution[i] = fixed_value[i];
+    }
+  }
 
   result.solved = true;
   result.intercept = solution[0];

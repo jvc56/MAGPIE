@@ -1,6 +1,7 @@
 #include "pat_test.h"
 
 #include "../src/def/board_defs.h"
+#include "../src/def/cross_set_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -9,6 +10,7 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
+#include "../src/ent/bonus_square.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
@@ -490,6 +492,118 @@ static void test_pat_signed_through(const char *data_dir) {
       get_formatted_string("%s\nsigned_through,7\nhook_d1,-1\n", header);
   assert_pat_create_fails(data_dir, "signed_through_bad", contents);
   free(contents);
+  pat_destroy(pat);
+  config_destroy(config);
+}
+
+// A version 3 file has no hook-score rows: they read as zero and the rows
+// after them land on the right features.
+static void test_pat_version3_has_no_hook_score_channels(const char *data_dir) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(sb, "magpie_pat_v3\n");
+  char feature_name[64];
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    if (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
+        feature_index < PAT_FEATURE_DWS_HOOK_START) {
+      continue;
+    }
+    pat_feature_name(feature_index, feature_name, sizeof(feature_name));
+    string_builder_add_formatted_string(sb, "%s,%d\n", feature_name,
+                                        -(feature_index + 1));
+  }
+  write_pat_file_contents(data_dir, "v3_no_hook_score",
+                          string_builder_peek(sb));
+  string_builder_destroy(sb);
+  ErrorStack *error_stack = error_stack_create();
+  PATWeights *loaded = pat_create(data_dir, "v3_no_hook_score", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(loaded);
+  for (int feature_index = PAT_FEATURE_HOOK_SCORE_START;
+       feature_index < PAT_FEATURE_DWS_HOOK_START; feature_index++) {
+    assert(pat_get_weight(loaded, feature_index) == 0);
+  }
+  assert(pat_get_weight(loaded, PAT_FEATURE_FLOAT_FLEX_SCALED_START) ==
+         -(PAT_FEATURE_FLOAT_FLEX_SCALED_START + 1));
+  assert(pat_get_weight(loaded, PAT_FEATURE_DWS_HOOK_START) ==
+         -(PAT_FEATURE_DWS_HOOK_START + 1));
+  assert(pat_get_weight(loaded, PAT_NUM_FEATURES - 1) == -PAT_NUM_FEATURES);
+  error_stack_destroy(error_stack);
+  pat_destroy(loaded);
+}
+
+// AT on D2-E2: the only hook squares on any triple lane are D1 (a DLS,
+// four tiles from A1, five from H1) and E1 (plain, five from A1, four from
+// H1), each hooking a one-letter word. The hook-score channel at each
+// distance must be the two squares' exposures, computed here from the
+// board's own cross sets: unseen count times (word multiplier x hooked
+// word's score + letter multiplier x tile score x (word multiplier + 3)),
+// summed and divided by PAT_HOOK_SCORE_SCALE.
+static void test_pat_hook_score_channel(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/3AT10/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Square *lanes = board_get_readonly_lanes(board, 0);
+  PATWeights *pat = pat_test_create_prepared("hook_score", game);
+  int32_t features[PAT_NUM_FEATURES];
+  pat_extract_features(lanes, ld, NULL, pat, RACK_SIZE, features);
+
+  const Square *row1 =
+      board_get_row_cache(lanes, 0, BOARD_HORIZONTAL_DIRECTION);
+  int expected[2] = {0, 0};
+  int expected_flex[2] = {0, 0};
+  const int cols[2] = {3, 4};
+  for (int k = 0; k < 2; k++) {
+    const Square *square = &row1[cols[k]];
+    const uint64_t cross_set = square_get_cross_set(square);
+    assert(cross_set != 0 && cross_set != TRIVIAL_CROSS_SET);
+    const int cross_score = equity_to_int(square_get_cross_score(square));
+    assert(cross_score == 1);
+    const BonusSquare bonus = square_get_bonus_square(square);
+    const int lm = bonus_square_get_letter_multiplier(bonus);
+    const int wm = bonus_square_get_word_multiplier(bonus);
+    assert(lm == (k == 0 ? 2 : 1) && wm == 1);
+    long exposure = 0;
+    for (int ml = 1; ml < ld_get_size(ld); ml++) {
+      if (!(cross_set & ((uint64_t)1 << ml))) {
+        continue;
+      }
+      int unseen = ld_get_dist(ld, ml);
+      if (ml == ld_hl_to_ml(ld, "A") || ml == ld_hl_to_ml(ld, "T")) {
+        unseen--;
+      }
+      expected_flex[k] += unseen;
+      exposure +=
+          (long)unseen * (wm * cross_score +
+                          lm * equity_to_int(ld_get_score(ld, ml)) * (wm + 3));
+    }
+    expected[k] = (int)(exposure / PAT_HOOK_SCORE_SCALE);
+    assert(expected[k] > 0);
+  }
+  // D1 is d4 from A1 and d5 from H1; E1 is d5 from A1 and d4 from H1.
+  assert(features[PAT_FEATURE_HOOK_START + 3] ==
+         expected_flex[0] + expected_flex[1]);
+  assert(features[PAT_FEATURE_HOOK_START + 4] ==
+         expected_flex[0] + expected_flex[1]);
+  assert(features[PAT_FEATURE_HOOK_SCORE_START + 3] ==
+         expected[0] + expected[1]);
+  assert(features[PAT_FEATURE_HOOK_SCORE_START + 4] ==
+         expected[0] + expected[1]);
+  for (int bin = 0; bin < PAT_HOOK_BIN_COUNT; bin++) {
+    if (bin != 3 && bin != 4) {
+      assert(features[PAT_FEATURE_HOOK_SCORE_START + bin] == 0);
+    }
+  }
+  // The DLS doubles E1's per-letter exposure relative to a plain square
+  // only through the letter term, so D1 (fewer admissible letters, T
+  // hooks A/I/U-style plurals aside) is not simply twice E1; just check
+  // both are positive and the channel is nonzero exactly where hooks are.
+  printf("hook_score: D1 exposure %d (flex %d), E1 exposure %d (flex %d)\n",
+         expected[0], expected_flex[0], expected[1], expected_flex[1]);
   pat_destroy(pat);
   config_destroy(config);
 }
@@ -1307,6 +1421,8 @@ void test_pat(void) {
   test_pat_comments_and_blank_lines(data_dir);
   test_pat_version1_has_no_dls(data_dir);
   test_pat_version2_has_no_scaled_channels(data_dir);
+  test_pat_version3_has_no_hook_score_channels(data_dir);
+  test_pat_hook_score_channel();
   test_pat_extract_features_floater_board();
   test_pat_lexicon_floaters(data_dir);
   test_pat_signed_through(data_dir);
