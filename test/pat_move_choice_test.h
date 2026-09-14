@@ -73,6 +73,8 @@ void test_pat_move_choice_controls(void);
 void test_pat_move_choice_targeted_controls(void);
 void test_pat_train_runtime_parity(void);
 void pat_train_runtime_parity_for(const char *pat_name);
+void test_pat_leaf_check(void);
+void test_pat_through_table_audit(void);
 void test_pat_overlap_step3_dev(void);
 void test_pat_overlap_step3_confirm(void);
 
