@@ -7740,20 +7740,31 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
     return false;
   }
 
-  // Every ranked move is reported; how many are worth keeping is the server's
-  // decision. A simming player's moves come in the simulation's ranking with
-  // win percentage, blended utility and per-ply statistics (up to the
-  // player's num_plies_recorded), written by the same code that writes a
-  // position captured during a game -- an opening rack is just a position on
-  // an empty board.
+  // The leading num_plays_recorded moves are reported, and num_moves says how
+  // many were actually ranked -- the same pair a position captured during a
+  // game reports, and the same two numbers the server stores.
+  //
+  // The cap is not cosmetic. The server keeps num_plays_recorded moves per
+  // rack and discards the rest, so everything past it is bytes nobody stores;
+  // and a task is a *batch* of up to 10,000 racks, with a simming player's
+  // num_plays (or a recorder type of 'equity'/'all') deciding how many moves
+  // each one ranks. Uncapped, an ordinary job could put a submission past the
+  // server's 64 MiB ceiling, which comes back 413 and counts as a failed task.
+  // A request that omits num_plays_recorded keeps the old behaviour of
+  // reporting everything, since the writer treats a cap of 0 as no cap.
   const int max_plies =
       json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED, INT_MAX);
+  const int play_cap =
+      json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, 0);
   bool rack_first = true;
   json_write_object_start(sb);
   json_write_string_field(sb, CONTRIBUTE_KEY_RACK, rack_str, &rack_first);
-  autoplay_results_write_ranked_plays_json(
+  const int num_moves = autoplay_results_write_ranked_plays_json(
       sb, &rack_first, config->game, config->move_list,
-      simming ? config->sim_results : NULL, /*play_cap=*/0, max_plies);
+      simming ? config->sim_results : NULL, play_cap, max_plies);
+  // How many were ranked before the cap above. The stored moves are truncated,
+  // so this is the one thing about the analysis they cannot recover.
+  json_write_int_field(sb, CONTRIBUTE_KEY_NUM_MOVES, num_moves, &rack_first);
   json_write_object_end(sb);
   return true;
 }
