@@ -140,13 +140,31 @@ pat_regression_solve_into_weights(const PATRegression *regression,
   // afterwards. Excluded features are the fixed-at-zero case.
   bool fixed[PAT_REGRESSION_DIM] = {false};
   double fixed_value[PAT_REGRESSION_DIM] = {0.0};
-  // The premium-combination channels are experimental (a residual on v4
-  // was null, 2026-09-14): they are fitted only by fit_residual 4 and
-  // otherwise keep whatever the file carries, zero for every file so
-  // far, so a default fit never spends mass on them.
-  if (pat_get_fit_residual_mode(pat) != 4) {
+  // Experimental channels keep whatever the file carries (zero for every
+  // file so far) unless the residual mode that studies them is on, so a
+  // default fit never spends mass on them:
+  //   - the premium-combination channels (fit_residual 4): a residual on
+  //     v4 was null;
+  //   - the hook-score channels (fit_residual 1 or 2): left free, a fit
+  //     moves every bit of hook mass onto them (hook_d* all zero,
+  //     hook_score_d1 about -130) and that model loses about 2.6 points
+  //     a pair to count-weighted hooks in whole-game play. CSW21's v3
+  //     predates these channels; a lexicon trained after them was first
+  //     built that way by mistake (2026-09-14) and came out at a third
+  //     of the strength.
+  const int residual_mode = pat_get_fit_residual_mode(pat);
+  if (residual_mode != 4) {
     for (int feature_index = PAT_FEATURE_LM_SPAN_START;
          feature_index < PAT_NUM_FEATURES; feature_index++) {
+      fixed[feature_index + 1] = true;
+      fixed_value[feature_index + 1] =
+          -equity_to_double(pat_get_weight(pat, feature_index));
+    }
+  }
+  if (residual_mode != 1 && residual_mode != 2) {
+    for (int feature_index = PAT_FEATURE_HOOK_SCORE_START;
+         feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT;
+         feature_index++) {
       fixed[feature_index + 1] = true;
       fixed_value[feature_index + 1] =
           -equity_to_double(pat_get_weight(pat, feature_index));
