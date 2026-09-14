@@ -106,6 +106,15 @@ static void pat_move_choice_reference_values(const Game *game, const Move *move,
   }
 }
 
+// Scratch context for the pat_scale chooser (single-threaded tests).
+static PATEvalContext *pat_move_choice_scale_ctx(void) {
+  static PATEvalContext *ctx = NULL;
+  if (ctx == NULL) {
+    ctx = malloc_or_die(sizeof(PATEvalContext));
+  }
+  return ctx;
+}
+
 // A move's equity as a double, with the pass sentinel mapped far below
 // anything a real move scores (MOVE_RECORD_ALL lists include the pass).
 static double pat_move_choice_move_equity(const Move *move) {
@@ -144,8 +153,39 @@ static void pat_move_choice_choose(Game *game, int mover_index,
   const double best_equity =
       pat_move_choice_move_equity(move_list_get_move(move_list, 0));
   int chosen = 0;
-  if (chooser->degrade_margin <= 0.0 && chooser->overlap_correction == 0.0) {
+  const bool scaled = chooser->pat_scale != 0.0 && chooser->pat_scale != 1.0;
+  if (chooser->degrade_margin <= 0.0 && chooser->overlap_correction == 0.0 &&
+      !scaled) {
     // Plain: the top of the sorted list.
+  } else if (scaled) {
+    // The PAT term of each candidate, recomputed from the position
+    // context, rescaled: equity - pat + pat_scale * pat. Ties keep the
+    // higher raw-equity move.
+    const Player *mover = game_get_player(game, mover_index);
+    const int csi = board_get_cross_set_index(
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), mover_index);
+    PATEvalContext *ctx = pat_move_choice_scale_ctx();
+    pat_eval_context_load(
+        ctx, chooser->pat, board_get_readonly_lanes(game_get_board(game), csi),
+        game_get_ld(game), player_get_rack(mover), PAT_CLASS_MASK_ALL,
+        rack_get_total_letters(
+            player_get_rack(game_get_player(game, 1 - mover_index))));
+    double best_adjusted = 0.0;
+    for (int i = 0; i < num_moves; i++) {
+      const Move *move = move_list_get_move(move_list, i);
+      double adjusted = pat_move_choice_move_equity(move);
+      if (move_get_type(move) != GAME_EVENT_PASS) {
+        Rack leave;
+        get_leave_for_move(move, game, &leave);
+        const double pat =
+            equity_to_double(pat_eval_move_penalty(ctx, move, &leave));
+        adjusted += (chooser->pat_scale - 1.0) * pat;
+      }
+      if (i == 0 || adjusted > best_adjusted) {
+        best_adjusted = adjusted;
+        chosen = i;
+      }
+    }
   } else if (chooser->degrade_margin > 0.0) {
     // The best move at least degrade_margin below the top; the top itself
     // when nothing is that far back.
@@ -202,8 +242,22 @@ void pat_move_choice_compare_shard(Config *config,
                                    uint64_t seed_base, int num_positions,
                                    int num_worlds, int shard, int num_shards,
                                    PATMoveChoiceResult *result_out) {
+  pat_move_choice_compare_range(config, baseline, candidate, seed_base,
+                                num_positions, num_worlds, shard, num_shards,
+                                PAT_MOVE_CHOICE_DEFAULT_BAG_LO,
+                                PAT_MOVE_CHOICE_DEFAULT_BAG_HI, result_out);
+}
+
+void pat_move_choice_compare_range(Config *config,
+                                   const PATMoveChooser *baseline,
+                                   const PATMoveChooser *candidate,
+                                   uint64_t seed_base, int num_positions,
+                                   int num_worlds, int shard, int num_shards,
+                                   int bag_lo, int bag_hi,
+                                   PATMoveChoiceResult *result_out) {
   assert(num_worlds > 1 && num_worlds <= PAT_MOVE_CHOICE_MAX_WORLDS);
   assert(num_shards >= 1 && shard >= 0 && shard < num_shards);
+  assert(bag_lo >= 1 && bag_hi >= bag_lo);
   Game *game = config_get_game(config);
   const PATWeights *reference_pat = player_get_pat(game_get_player(game, 0));
   assert(reference_pat);
@@ -232,7 +286,8 @@ void pat_move_choice_compare_shard(Config *config,
     draw_starting_racks(game);
     player_set_pat(game_get_player(game, 0), reference_pat);
     player_set_pat(game_get_player(game, 1), reference_pat);
-    const int target_bag = 10 + (int)(seed % 31); // spans [10, 40]
+    const int target_bag =
+        bag_lo + (int)(seed % (uint64_t)(bag_hi - bag_lo + 1));
     bool position_ok = true;
     while (bag_get_letters(game_get_bag(game)) > target_bag) {
       const Move *setup_move = get_top_equity_move(game, setup_move_list);
@@ -303,11 +358,11 @@ void pat_move_choice_compare_shard(Config *config,
   // Raw accumulators, for exact pooling across shards (see
   // test/pat_move_choice_pool.py).
   printf("POOL candidate=\"%s\" baseline=\"%s\" shard=%d/%d positions=%d "
-         "disagreements=%d worlds=%d sum_means=%.17g sum_means_sq=%.17g "
-         "sum_within=%.17g\n",
+         "disagreements=%d worlds=%d bag=%d-%d sum_means=%.17g "
+         "sum_means_sq=%.17g sum_within=%.17g\n",
          candidate->label, baseline->label, shard, num_shards,
-         num_positions_considered, n, num_worlds, sum_means, sum_means_sq,
-         sum_within);
+         num_positions_considered, n, num_worlds, bag_lo, bag_hi, sum_means,
+         sum_means_sq, sum_within);
   printf("\n[%s] vs [%s]: %d positions considered, %d disagreements "
          "(%.2f%%)\n",
          candidate->label, baseline->label, num_positions_considered, n,
@@ -625,7 +680,8 @@ pat_move_choice_chooser_from_spec(Config *config, const char *spec,
   PATMoveChooser chooser = {.label = spec,
                             .pat = champion,
                             .degrade_margin = 0.0,
-                            .overlap_correction = 0.0};
+                            .overlap_correction = 0.0,
+                            .pat_scale = 0.0};
   *owned_out = NULL;
   if (strcmp(spec, "champion") == 0) {
     return chooser;
@@ -638,6 +694,21 @@ pat_move_choice_chooser_from_spec(Config *config, const char *spec,
   if (strncmp(spec, "degrade", 7) == 0) {
     chooser.degrade_margin = strtod(spec + 7, NULL);
     assert(chooser.degrade_margin > 0.0);
+    return chooser;
+  }
+  if (strncmp(spec, "patscale", 8) == 0) {
+    // "patscale<s>" rescales the config champion's PAT term by s;
+    // "patscale<s>@<file>" rescales that file's term instead.
+    char *end = NULL;
+    chooser.pat_scale = strtod(spec + 8, &end);
+    assert(chooser.pat_scale > 0.0);
+    if (end != NULL && *end == '@') {
+      PATWeights *owned = NULL;
+      const PATMoveChooser file_chooser =
+          pat_move_choice_chooser_from_spec(config, end + 1, &owned);
+      chooser.pat = file_chooser.pat;
+      *owned_out = owned;
+    }
     return chooser;
   }
   ErrorStack *error_stack = error_stack_create();
@@ -656,29 +727,35 @@ pat_move_choice_chooser_from_spec(Config *config, const char *spec,
 }
 
 // Runs one (possibly sharded) comparison from a colon-separated spec:
-//   <baseline>:<candidate>:<seed_base>:<num_positions>:<num_worlds>[:<shard>:<num_shards>]
+//   <baseline>:<candidate>:<seed_base>:<num_positions>:<num_worlds>
+//       [:<shard>:<num_shards>[:<bag_lo>:<bag_hi>]]
 // so that N shards can run as N processes and be pooled exactly (see
 // test/pat_move_choice_shard.sh). Invoked as the test name
-// "patmovechoice:<spec>".
+// "patmovechoice:<spec>". Choosers: "champion", a PAT file name,
+// "overlap<c>", "degrade<m>", "patscale<s>".
 void pat_move_choice_run_spec(const char *spec) {
   char buffer[512];
   snprintf(buffer, sizeof(buffer), "%s", spec);
-  char *fields[7] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+  char *fields[9] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
   int num_fields = 0;
   char *save = NULL;
-  for (char *tok = strtok_r(buffer, ":", &save); tok && num_fields < 7;
+  for (char *tok = strtok_r(buffer, ":", &save); tok && num_fields < 9;
        tok = strtok_r(NULL, ":", &save)) {
     fields[num_fields++] = tok;
   }
-  if (num_fields != 5 && num_fields != 7) {
-    log_fatal("patmovechoice spec needs 5 or 7 colon-separated fields: %s",
+  if (num_fields != 5 && num_fields != 7 && num_fields != 9) {
+    log_fatal("patmovechoice spec needs 5, 7 or 9 colon-separated fields: %s",
               spec);
   }
   const uint64_t seed_base = strtoull(fields[2], NULL, 10);
   const int num_positions = atoi(fields[3]);
   const int num_worlds = atoi(fields[4]);
-  const int shard = (num_fields == 7) ? atoi(fields[5]) : 0;
-  const int num_shards = (num_fields == 7) ? atoi(fields[6]) : 1;
+  const int shard = (num_fields >= 7) ? atoi(fields[5]) : 0;
+  const int num_shards = (num_fields >= 7) ? atoi(fields[6]) : 1;
+  const int bag_lo =
+      (num_fields == 9) ? atoi(fields[7]) : PAT_MOVE_CHOICE_DEFAULT_BAG_LO;
+  const int bag_hi =
+      (num_fields == 9) ? atoi(fields[8]) : PAT_MOVE_CHOICE_DEFAULT_BAG_HI;
   Config *config = pat_move_choice_config_create();
   PATWeights *owned_baseline = NULL;
   PATWeights *owned_candidate = NULL;
@@ -687,9 +764,9 @@ void pat_move_choice_run_spec(const char *spec) {
   const PATMoveChooser candidate =
       pat_move_choice_chooser_from_spec(config, fields[1], &owned_candidate);
   PATMoveChoiceResult result;
-  pat_move_choice_compare_shard(config, &baseline, &candidate, seed_base,
+  pat_move_choice_compare_range(config, &baseline, &candidate, seed_base,
                                 num_positions, num_worlds, shard, num_shards,
-                                &result);
+                                bag_lo, bag_hi, &result);
   if (owned_baseline) {
     pat_destroy(owned_baseline);
   }
