@@ -364,6 +364,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
       CONTRIBUTE_KEY_VARIANT,
       CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
       CONTRIBUTE_KEY_BOARD_LAYOUT,
+      CONTRIBUTE_KEY_SEED,
       CONTRIBUTE_KEY_FORCED_RACKS,
       CONTRIBUTE_KEY_NUM_GAMES,
       CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY,
@@ -414,7 +415,54 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
   config_destroy(config);
 }
 
+// Run-wide settings no request states are reset rather than inherited. The
+// case this pins: a contributor whose settings.txt changes the bingo bonus
+// would otherwise score every game of every job differently from the fleet.
+static void test_shared_settings_do_not_leak_between_tasks(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -bb 35 -sp true");
+  assert(config_get_bingo_bonus(config) == 35);
+  assert(config_get_use_small_plays(config));
+
+  config_contribute_reset_shared_settings(config);
+  assert(config_get_bingo_bonus(config) == DEFAULT_BINGO_BONUS);
+  assert(!config_get_use_small_plays(config));
+
+  config_destroy(config);
+}
+
+// The opening-rack executor analyses through impl_move_gen and impl_sim,
+// which read the run-wide simulation settings rather than a player's. The
+// case this pins: a contributor running -plies 5 analysed every rack of a
+// 4-ply job at 5 plies.
+static void test_opening_rack_analysis_uses_the_players_settings(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW21 -plies 5 -numplays 7 -iterations 99");
+  const JsonValue *request = NULL;
+  JsonValue *opening_rack =
+      load_task_request_fixture(BIRDTEST_OPENING_RACK_FIXTURE, &request);
+  const JsonValue *player = json_object_get(request, CONTRIBUTE_KEY_PLAYER);
+  ErrorStack *error_stack = error_stack_create();
+
+  config_contribute_apply_player_settings(config, player, 0, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  // Applying the player alone leaves the run-wide settings untouched...
+  assert(config_get_plies(config) == 5);
+
+  // ...until they are copied across for the analysis.
+  config_contribute_use_player_settings_for_analysis(config, 0);
+  assert(config_get_plies(config) == 4);
+  assert(config_get_num_plays(config) == 10);
+  assert(config_get_max_iterations(config) == 1000);
+  assert(config_get_stop_cond_pct(config) == 99.0);
+
+  error_stack_destroy(error_stack);
+  json_destroy(opening_rack);
+  config_destroy(config);
+}
+
 void test_contribute(void) {
+  test_shared_settings_do_not_leak_between_tasks();
+  test_opening_rack_analysis_uses_the_players_settings();
   test_version_comparison();
   test_json_wrapper();
   test_json_serialization();

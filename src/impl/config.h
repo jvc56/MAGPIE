@@ -51,6 +51,18 @@ void config_contribute_apply_player_settings(Config *config,
                                              int player_index,
                                              ErrorStack *error_stack);
 
+// Resets the run-wide settings no task request states -- bingo bonus, movegen
+// margin, sim cutoff, multi-threading mode, small plays -- to MAGPIE's
+// defaults, so a contributor's settings.txt or an earlier task cannot change
+// what a task computes. Exposed so the reset can be tested.
+void config_contribute_reset_shared_settings(Config *config);
+
+// Copies one player's simulation settings into the run-wide ones that
+// impl_move_gen and impl_sim read. The opening-rack executor analyses through
+// those entry points, which ignore the per-player settings a request applies.
+void config_contribute_use_player_settings_for_analysis(Config *config,
+                                                        int player_index);
+
 Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 

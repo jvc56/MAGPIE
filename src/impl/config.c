@@ -957,7 +957,7 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.1.0"
+#define MAGPIE_VERSION "0.2.0"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -6927,6 +6927,7 @@ enum {
 #define CONFIG_DEFAULT_UTILITY_W_WINPCT 1.0
 #define CONFIG_DEFAULT_UTILITY_W_SPREAD 0.5
 #define CONFIG_DEFAULT_UTILITY_SPREAD_SCALE 100.0
+#define CONFIG_DEFAULT_USER_CUTOFF 0.005
 
 // Contribute
 //
@@ -7524,6 +7525,125 @@ void config_contribute_apply_player_settings(Config *config,
   config_contribute_apply_wmp_rit(config, player, player_index);
 }
 
+// Resets the run-wide settings a task request never states to MAGPIE's own
+// defaults, for the same reason config_contribute_reset_player_settings resets
+// the per-player ones: a null has to mean the same thing on every contributor's
+// machine. None of these has a field in birdtest's request, and every one of
+// them changes what a task computes when left at whatever the contributor's
+// settings.txt, a command run before contribute, or an earlier task set:
+//
+// - the bingo bonus is part of every play's score, so it moves every game's
+//   result and every move's equity;
+// - the movegen margin decides which plays an 'equity' recorder keeps;
+// - the cutoff decides when a simulation treats two plays as equivalent and
+//   stops distinguishing them;
+// - intra-game parallelism hands a simming player's simulations every thread
+//   rather than one, which changes what a sampled simulation plays;
+// - small plays are the endgame's move list shape, not a ranked list.
+//
+// print_interval is cosmetic, but a leftover one prints simulation progress
+// into a contributor's terminal on every rack.
+void config_contribute_reset_shared_settings(Config *config) {
+  config->bingo_bonus = DEFAULT_BINGO_BONUS;
+  config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  config->cutoff = convert_user_cutoff_to_cutoff(CONFIG_DEFAULT_USER_CUTOFF);
+  config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
+  config->use_small_plays = false;
+  config->use_heat_map = false;
+  config->leavegen_max_games = 0;
+  config->print_interval = 0;
+}
+
+// impl_move_gen and impl_sim are the entry points the CLI's generate and
+// simulate commands use, and they read the run-wide settings (-plies,
+// -numplays, -iterations, ...) rather than a player's. Autoplay is the only
+// caller that reads per-player ones. So the opening-rack executor, which
+// applies its player to the per-player settings like every executor does, was
+// analysing every rack with the contributor's run-wide settings instead: a job
+// asking for a 4-ply simmer ran whatever plies the worker's own MAGPIE had.
+// This copies the player's settings across before the analysis.
+void config_contribute_use_player_settings_for_analysis(Config *config,
+                                                        int player_index) {
+  const bool p1 = player_index == 0;
+  config->plies = p1 ? config->p1_sim_plies : config->p2_sim_plies;
+  config->num_plays = p1 ? config->p1_num_plays : config->p2_num_plays;
+  config->max_iterations =
+      p1 ? config->p1_max_iterations : config->p2_max_iterations;
+  config->min_play_iterations =
+      p1 ? config->p1_min_play_iterations : config->p2_min_play_iterations;
+  config->stop_cond_pct =
+      p1 ? config->p1_stop_cond_pct : config->p2_stop_cond_pct;
+  config->time_limit_seconds =
+      p1 ? config->p1_time_limit_seconds : config->p2_time_limit_seconds;
+  config->threshold = p1 ? config->p1_threshold : config->p2_threshold;
+  config->sampling_rule =
+      p1 ? config->p1_sampling_rule : config->p2_sampling_rule;
+  config->eq_margin_inference =
+      p1 ? config->p1_eq_margin_inference : config->p2_eq_margin_inference;
+  config->utility_w_winpct =
+      p1 ? config->p1_utility_w_winpct : config->p2_utility_w_winpct;
+  config->utility_w_spread =
+      p1 ? config->p1_utility_w_spread : config->p2_utility_w_spread;
+  config->utility_spread_scale =
+      p1 ? config->p1_utility_spread_scale : config->p2_utility_spread_scale;
+  // An opening rack has no previous play, so there is nothing to infer from.
+  // Left on, impl_sim infers from config->game_history -- which is not reset
+  // by the executor, and holds whatever game the contributor last loaded.
+  config->sim_with_inference = false;
+}
+
+// The object of whichever player states `key`, preferring player 1: used for
+// the settings MAGPIE has one value of for the whole run. birdtest only
+// accepts a job whose two players agree on them where both state one, and a
+// static player states no win% model at all -- so reading player 1's alone
+// loaded no model for a static player 1 facing a simming player 2, and the run
+// used whatever model an earlier task had left loaded.
+static const JsonValue *contribute_stated_by_either(const JsonValue *player1,
+                                                    const JsonValue *player2,
+                                                    const char *key) {
+  const JsonValue *value = json_object_get(player1, key);
+  if (value && !json_is_null(value)) {
+    return player1;
+  }
+  value = json_object_get(player2, key);
+  return value && !json_is_null(value) ? player2 : player1;
+}
+
+// Applies a player's movegen_margin, on top of the default the shared reset
+// put back.
+static void config_contribute_apply_movegen_margin(Config *config,
+                                                   const JsonValue *player,
+                                                   ErrorStack *error_stack) {
+  const JsonValue *movegen_margin =
+      json_object_get(player, CONTRIBUTE_KEY_MOVEGEN_MARGIN);
+  if (!movegen_margin || json_is_null(movegen_margin)) {
+    return;
+  }
+  const double value =
+      json_get_double_or(player, CONTRIBUTE_KEY_MOVEGEN_MARGIN, 0.0);
+  if (!isfinite(value) || value < 0 || value > EQUITY_MAX_DOUBLE) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "server sent an invalid movegen_margin: %f", value));
+    return;
+  }
+  config->eq_margin_movegen = double_to_equity(value);
+}
+
+// A simulation seed for one opening rack, derived from the rack itself (64-bit
+// FNV-1a). The executor used config->seed, which nothing in the request sets:
+// it was the process start time, a -seed in settings.txt, or the seed of the
+// last games task this worker ran. A function of the rack is the same on every
+// machine, so a single-threaded analysis of a rack reproduces.
+static uint64_t contribute_rack_seed(const char *rack_str) {
+  uint64_t hash = 14695981039346656037ULL;
+  for (const char *c = rack_str; *c; c++) {
+    hash ^= (uint8_t)*c;
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
 static char *config_contribute_games(Config *config, const JsonValue *request,
                                      bool game_pairs, int threads,
                                      ErrorStack *error_stack) {
@@ -7604,27 +7724,22 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
     return NULL;
   }
 
-  // Shared (not per-player) MAGPIE options that still affect play: read once,
-  // from player1's object, matching how num_plays_recorded is read below.
-  // birdtest validates both player configs agree on these before a job is
-  // even created, since MAGPIE has one value for the whole run, not one per
-  // player.
-  const char *win_pct_model =
-      json_get_string_or_null(player1, CONTRIBUTE_KEY_WIN_PCT_MODEL);
-  const JsonValue *movegen_margin =
-      json_object_get(player1, CONTRIBUTE_KEY_MOVEGEN_MARGIN);
-  // Reset first, like the per-player settings: a null means MAGPIE's default.
-  config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
-  if (movegen_margin && !json_is_null(movegen_margin)) {
-    const double value =
-        json_get_double_or(player1, CONTRIBUTE_KEY_MOVEGEN_MARGIN, 0.0);
-    if (!isfinite(value) || value < 0 || value > EQUITY_MAX_DOUBLE) {
-      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-                       get_formatted_string(
-                           "server sent an invalid movegen_margin: %f", value));
-      return NULL;
-    }
-    config->eq_margin_movegen = double_to_equity(value);
+  // Shared (not per-player) MAGPIE options that still affect play. birdtest
+  // validates that two players stating one agree before a job is even
+  // created, since MAGPIE has one value for the whole run; each is read from
+  // whichever player states it, because a static player states no win% model.
+  config_contribute_reset_shared_settings(config);
+  const char *win_pct_model = json_get_string_or_null(
+      contribute_stated_by_either(player1, player2,
+                                  CONTRIBUTE_KEY_WIN_PCT_MODEL),
+      CONTRIBUTE_KEY_WIN_PCT_MODEL);
+  config_contribute_apply_movegen_margin(
+      config,
+      contribute_stated_by_either(player1, player2,
+                                  CONTRIBUTE_KEY_MOVEGEN_MARGIN),
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
   }
 
   if (!config_has_game_data(config)) {
@@ -7712,6 +7827,7 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
                                            ErrorStack *error_stack) {
   game_reset(config->game);
   config_reset_move_list_and_invalidate_sim_results(config);
+  config->seed = contribute_rack_seed(rack_str);
   if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -7808,10 +7924,15 @@ static char *config_contribute_opening_rack(Config *config,
     }
   }
 
+  // Player 2 gets player 1's leaves as well as its lexicon. A simulation plays
+  // the opponent's replies with player 2's leaves, and a NULL here kept
+  // whichever leaves player 2 last had -- another job's, or the KLV an earlier
+  // leave-generation task fetched -- none of which this task's expected_data
+  // verified.
+  const char *leaves = json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES);
   config_contribute_load_lexicon_and_variant(
       config, contribute_shared_lexicon(lexicon, p1_lexicon), variant,
-      letter_distribution, board_layout, p1_lexicon, NULL,
-      json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES), NULL,
+      letter_distribution, board_layout, p1_lexicon, NULL, leaves, leaves,
       error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
@@ -7819,10 +7940,22 @@ static char *config_contribute_opening_rack(Config *config,
 
   config->num_threads = threads;
   config->human_readable = false;
-  config_contribute_apply_player_settings(config, player, 0, error_stack);
+  config_contribute_reset_shared_settings(config);
+  // Both seats get the job's one player: the analysed player on turn, and the
+  // opponent a simulation plays out, whose settings were otherwise whatever an
+  // earlier task left for player 2.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    config_contribute_apply_player_settings(config, player, player_index,
+                                            error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  config_contribute_apply_movegen_margin(config, player, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
+  config_contribute_use_player_settings_for_analysis(config, 0);
 
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -7930,6 +8063,17 @@ static char *config_contribute_leave_gen(Config *config,
                              (long long)num_games));
     return NULL;
   }
+  // Required, as it is for games. Every game of the task is seeded from it,
+  // and before the server sent one this read config->seed, which no request
+  // sets: the process start time, a -seed in settings.txt, or the seed of
+  // whichever games task this worker ran last.
+  const uint64_t seed =
+      json_get_uint64_string(request, CONTRIBUTE_KEY_SEED, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config_contribute_reset_shared_settings(config);
+  config->seed = seed;
   const char *previous_artifact_key =
       json_get_string_or_null(request, CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY);
 
@@ -10743,7 +10887,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
   config->max_iterations = CONFIG_DEFAULT_MAX_ITERATIONS;
   config->stop_cond_pct = CONFIG_DEFAULT_STOP_COND_PCT;
-  config->cutoff = convert_user_cutoff_to_cutoff(0.005);
+  config->cutoff = convert_user_cutoff_to_cutoff(CONFIG_DEFAULT_USER_CUTOFF);
   config->utility_w_winpct = CONFIG_DEFAULT_UTILITY_W_WINPCT;
   config->utility_w_spread = CONFIG_DEFAULT_UTILITY_W_SPREAD;
   config->utility_spread_scale = CONFIG_DEFAULT_UTILITY_SPREAD_SCALE;
