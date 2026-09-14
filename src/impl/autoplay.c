@@ -1018,15 +1018,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
   const int pat_pre_move_bag_count =
       pat_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
-  // Snapshot before play_move mutates player_rack in place (removes played
-  // tiles, draws replacements): pat_extract_features_combined's unseen-pool
-  // exclusion must match what real move evaluation excludes -- the rack the
-  // mover actually held when choosing this move, not what they hold after
-  // drawing tiles they could not have known about at decision time.
-  Rack pre_move_player_rack;
-  if (pat_gen_shared_data && pat_pre_move_bag_count > 0) {
-    rack_copy(&pre_move_player_rack, player_rack);
-  }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, move, &rare_rack_or_move_leave);
@@ -1085,16 +1076,20 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       if (observation->valid) {
         continue;
       }
-      // The rack excluded from the unseen pool is the mover's own -- the
-      // one they actually held when choosing this move (see the snapshot
-      // above), matching exactly what real move evaluation excludes at
-      // movegen time, not the post-draw rack the mover could not have
-      // known when deciding. The row is the one the live weights'
-      // combination rule makes linear, so that fitting and evaluating
-      // agree; with gamma 1 it is the plain sum.
+      // The features come from the post-move board, so the rack excluded
+      // from the unseen pool is the move's LEAVE: the played tiles are
+      // already off the pool as board tiles, and dist - board_post - leave
+      // is exactly what move evaluation computes at decision time as
+      // dist - board_pre - rack_pre. Excluding the post-draw rack instead
+      // (as the champion's training did) hides tiles the mover could not
+      // have known about; excluding the pre-move rack (an earlier revision
+      // here) subtracts the played letters' remaining copies a second
+      // time. The row is the one the live weights' combination rule makes
+      // linear, so that fitting and evaluating agree; with gamma 1 it is
+      // the plain sum.
       pat_extract_features_combined(
           board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
-          &pre_move_player_rack, pat_gen_shared_data->pat,
+          &rare_rack_or_move_leave, pat_gen_shared_data->pat,
           rack_get_total_letters(
               player_get_rack(game_get_player(game, 1 - player_on_turn_index))),
           observation->features);
