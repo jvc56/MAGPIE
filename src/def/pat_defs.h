@@ -109,7 +109,7 @@ enum {
 // The label a training observation carries is the opponent's net gain over
 // the next this-many plies, so the buffer holds at most this many
 // observations waiting to be labeled at once.
-#define PAT_MAX_LABEL_PLIES 4
+#define PAT_MAX_LABEL_PLIES 6
 
 // Optional row naming how per-unit penalties combine; absent means 1.0,
 // the plain sum every earlier file used.
