@@ -1973,14 +1973,18 @@ static void test_pat_stage_scale(const char *data_dir) {
 
 // Opening adjustments: rows by tiles played and for an exchange, applied
 // only on an empty board. Round trip, rejection of a positive value, and
-// end to end through move generation: on the empty board every
-// tile-placement candidate's equity moves by its tile count's entry and
-// an exchange by the exchange entry, relative to the same weights without
-// the rows; after one move nothing changes.
-static void test_pat_opening_adjustments(const char *data_dir) {
-  Config *config = config_create_or_die(
+// end to end through move generation with and without WMP: on the empty
+// board every tile-placement candidate's equity moves by its tile
+// count's entry and an exchange or pass by the exchange entry, relative
+// to the same weights without the rows; after one move nothing changes.
+static void test_pat_opening_adjustments_with_wmp(const char *data_dir,
+                                                  bool wmp) {
+  char *set_cmd = get_formatted_string(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
-      "-wmp true");
+      "-wmp %s",
+      wmp ? "true" : "false");
+  Config *config = config_create_or_die(set_cmd);
+  free(set_cmd);
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   Game *game = config_get_game(config);
@@ -2031,6 +2035,7 @@ static void test_pat_opening_adjustments(const char *data_dir) {
   MoveList *lists[2] = {move_list_create(3000), move_list_create(3000)};
   int checked = 0;
   int exchanges_checked = 0;
+  int passes_checked = 0;
   for (int attempt = 0; attempt < 8; attempt++) {
     game_reset(game);
     game_seed(game, 6000000ULL + (uint64_t)attempt);
@@ -2077,9 +2082,16 @@ static void test_pat_opening_adjustments(const char *data_dir) {
         continue;
       }
       Equity expected = move_get_equity(without);
-      if (empty && move_get_type(without) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      if (move_get_type(without) == GAME_EVENT_PASS) {
+        // Move generation never evaluates the pass: it keeps the sentinel
+        // equity that ranks below every real move, with or without the
+        // table.
+        assert(move_get_equity(without) == EQUITY_PASS_VALUE);
+        passes_checked++;
+      } else if (empty &&
+                 move_get_type(without) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
         expected += table[move_get_tiles_played(without)];
-      } else if (empty && move_get_type(without) == GAME_EVENT_EXCHANGE) {
+      } else if (empty) {
         expected += -530;
         exchanges_checked++;
       }
@@ -2089,6 +2101,7 @@ static void test_pat_opening_adjustments(const char *data_dir) {
   }
   assert(checked > 500);
   assert(exchanges_checked > 0);
+  assert(passes_checked > 0);
   move_list_destroy(lists[0]);
   move_list_destroy(lists[1]);
   move_list_destroy(setup_list);
@@ -2097,6 +2110,11 @@ static void test_pat_opening_adjustments(const char *data_dir) {
   pat_destroy(plain);
   pat_destroy(opening);
   config_destroy(config);
+}
+
+static void test_pat_opening_adjustments(const char *data_dir) {
+  test_pat_opening_adjustments_with_wmp(data_dir, true);
+  test_pat_opening_adjustments_with_wmp(data_dir, false);
 }
 
 static void test_pat_movegen_integration(void) {
