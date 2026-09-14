@@ -237,6 +237,7 @@ static TestEntry on_demand_test_table[] = {
     {"patsignedchampion", test_pat_signed_move_choice_vs_champion},
     {"patlexsignedchampion", test_pat_lexsigned_move_choice_vs_champion},
     {"patoverlap", test_pat_overlap_pilot},
+    {"patpremiumpilot", test_pat_premium_combo_pilot},
     {"patmovechoicecontrols", test_pat_move_choice_controls},
     {"patmovechoicetargeted", test_pat_move_choice_targeted_controls},
     {"pattrainparity", test_pat_train_runtime_parity},

@@ -375,8 +375,10 @@ static void test_pat_lexicon_floaters(const char *data_dir) {
   assert(lexicon_features[PAT_FEATURE_FLOAT_FLEX_START + 6] ==
          2 * unseen_nonblank);
   // Only the floater flexibility channels (and their scaled variants)
-  // read the extension set; everything else is identical.
-  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+  // read the extension set, and the premium-combination channels count a
+  // floater route only when that flexibility is nonzero; everything else
+  // is identical.
+  for (int feature_index = 0; feature_index < PAT_FEATURE_LM_SPAN_START;
        feature_index++) {
     const bool is_float_flex =
         (feature_index >= PAT_FEATURE_FLOAT_FLEX_START &&
@@ -531,6 +533,113 @@ static void test_pat_version3_has_no_hook_score_channels(const char *data_dir) {
   assert(pat_get_weight(loaded, PAT_NUM_FEATURES - 1) == -PAT_NUM_FEATURES);
   error_stack_destroy(error_stack);
   pat_destroy(loaded);
+}
+
+static void test_pat_version4_has_no_lm_channels(const char *data_dir) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(sb, "magpie_pat_v4\n");
+  char feature_name[64];
+  for (int feature_index = 0; feature_index < PAT_FEATURE_LM_SPAN_START;
+       feature_index++) {
+    pat_feature_name(feature_index, feature_name, sizeof(feature_name));
+    string_builder_add_formatted_string(sb, "%s,%d\n", feature_name,
+                                        -(feature_index + 1));
+  }
+  write_pat_file_contents(data_dir, "v4_no_lm", string_builder_peek(sb));
+  string_builder_destroy(sb);
+  ErrorStack *error_stack = error_stack_create();
+  PATWeights *loaded = pat_create(data_dir, "v4_no_lm", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(loaded);
+  for (int feature_index = PAT_FEATURE_LM_SPAN_START;
+       feature_index < PAT_NUM_FEATURES; feature_index++) {
+    assert(pat_get_weight(loaded, feature_index) == 0);
+  }
+  assert(pat_get_weight(loaded, PAT_FEATURE_LM_SPAN_START - 1) ==
+         -PAT_FEATURE_LM_SPAN_START);
+  // Rewritten, it carries the rows and reads back the same.
+  pat_write(loaded, data_dir, "v4_no_lm_rewritten", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  PATWeights *rewritten =
+      pat_create(data_dir, "v4_no_lm_rewritten", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    assert(pat_get_weight(rewritten, feature_index) ==
+           pat_get_weight(loaded, feature_index));
+  }
+  pat_destroy(rewritten);
+  error_stack_destroy(error_stack);
+  pat_destroy(loaded);
+}
+
+// A vertical AT on D2-D3, worked by hand against the standard board's
+// premium layout (D1 and L1 double letters on row 1; F2/J2 triple letters
+// on row 2; G3/I3, A4/H4, C7 and D8 double letters):
+//   - D1 hooks ?AT from both row-1 triples: four tiles from A1, five from
+//     H1, and the D1 double letter is in the span both ways: lm_span_d4
+//     and lm_span_d5 each get 3 x (2 - 1).
+//   - No triple lane has a letter multiplier only in an extension.
+//   - Double-word lanes never cover a letter multiplier on the way to a
+//     contact here, but six routes could extend onto one: B2's row
+//     floater at D2 (two tiles, past the run to the F2 triple letter:
+//     2 x 2), C3's row floater at D3 (one tile, on to G3: 2 x 1), C3
+//     itself as a column hook (?T; one tile, down to C7: 2 x 1), C3's
+//     column hook at C2 (?A; two tiles, past C3 down to C7: 2 x 1), the
+//     D4 hook itself on row 4 (AT?; one tile, out to A4: 2 x 1), and
+//     D4's column floater through TA (one tile, on to D1 or down to D8:
+//     2 x 1). So dws_lm_ext_d1 = 8 and dws_lm_ext_d2 = 6.
+//   Covering D1 with a C (CAT) spends the double letter: both triple
+//   spans go to zero while the double-word extensions are unchanged.
+static void test_pat_lm_channels(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/3A11/3T11/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  PATWeights *pat = pat_test_create_prepared("lm", game);
+  int32_t features[PAT_NUM_FEATURES];
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, features);
+  for (int bin = 0; bin < PAT_HOOK_BIN_COUNT; bin++) {
+    assert(features[PAT_FEATURE_LM_SPAN_START + bin] ==
+           ((bin == 3 || bin == 4) ? 3 : 0));
+    assert(features[PAT_FEATURE_LM_EXT_START + bin] == 0);
+    assert(features[PAT_FEATURE_DWS_LM_SPAN_START + bin] == 0);
+    assert(features[PAT_FEATURE_DWS_LM_EXT_START + bin] == (bin == 0   ? 8
+                                                            : bin == 1 ? 6
+                                                                       : 0));
+  }
+  // The same through the lexicon floater semantics: every route here
+  // has real extensions, so nothing changes.
+  pat_set_lexicon_floaters(pat, true);
+  int32_t lexicon_features[PAT_NUM_FEATURES];
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, lexicon_features);
+  for (int feature_index = PAT_FEATURE_LM_SPAN_START;
+       feature_index < PAT_NUM_FEATURES; feature_index++) {
+    assert(lexicon_features[feature_index] == features[feature_index]);
+  }
+
+  load_and_exec_config_or_die(
+      config, "cgp 3C11/3A11/3T11/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  game = config_get_game(config);
+  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
+                       NULL, pat, RACK_SIZE, features);
+  for (int bin = 0; bin < PAT_HOOK_BIN_COUNT; bin++) {
+    assert(features[PAT_FEATURE_LM_SPAN_START + bin] == 0);
+    assert(features[PAT_FEATURE_LM_EXT_START + bin] == 0);
+    assert(features[PAT_FEATURE_DWS_LM_SPAN_START + bin] == 0);
+    assert(features[PAT_FEATURE_DWS_LM_EXT_START + bin] == (bin == 0   ? 8
+                                                            : bin == 1 ? 6
+                                                                       : 0));
+  }
+
+  // The runtime overlay sees the same thing: evaluating CAT's C from the
+  // AT position as a move must match the post-move board.
+  pat_destroy(pat);
+  config_destroy(config);
 }
 
 // AT on D2-E2: the only hook squares on any triple lane are D1 (a DLS,
@@ -1783,7 +1892,9 @@ void test_pat(void) {
   test_pat_version1_has_no_dls(data_dir);
   test_pat_version2_has_no_scaled_channels(data_dir);
   test_pat_version3_has_no_hook_score_channels(data_dir);
+  test_pat_version4_has_no_lm_channels(data_dir);
   test_pat_hook_score_channel();
+  test_pat_lm_channels();
   test_pat_transposition_invariance();
   test_pat_blank_floater();
   test_pat_run_through_table();
