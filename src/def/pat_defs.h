@@ -228,6 +228,27 @@ enum {
 // count is a superset of the run's.
 #define PAT_RUN_THROUGH_MAX_KEY 3
 
+// Optional rows: a nonnegative factor applied to the whole defense term,
+// and to every pruning bound on it, by game stage (see
+// PATWeights.stage_scale). The stage comes from the pre-move bag count:
+// early is a bag of PAT_STAGE_EARLY_MIN_BAG or more, late one below
+// PAT_STAGE_MID_MIN_BAG, mid in between -- the ranges the stage
+// diagnostics were run over. Absent means 1.0: the term as trained. The
+// weights themselves are never scaled, so training and the features are
+// untouched; this is purely how strongly a trained term is applied.
+#define PAT_STAGE_SCALE_EARLY_ROW_PREFIX "stage_scale_early,"
+#define PAT_STAGE_SCALE_MID_ROW_PREFIX "stage_scale_mid,"
+#define PAT_STAGE_SCALE_LATE_ROW_PREFIX "stage_scale_late,"
+#define PAT_DEFAULT_STAGE_SCALE 1.0
+#define PAT_STAGE_EARLY_MIN_BAG 55
+#define PAT_STAGE_MID_MIN_BAG 30
+enum {
+  PAT_STAGE_EARLY = 0,
+  PAT_STAGE_MID = 1,
+  PAT_STAGE_LATE = 2,
+  PAT_STAGE_COUNT = 3,
+};
+
 // Divisor applied to the hook-score channel's availability-weighted point
 // sum so a typical hook lands near the flexibility channels' magnitude.
 #define PAT_HOOK_SCORE_SCALE 8

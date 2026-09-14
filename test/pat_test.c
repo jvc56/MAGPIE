@@ -1802,6 +1802,175 @@ static void test_pat_path_parity(void) {
   config_destroy(config_no_wmp);
 }
 
+// Stage scaling: a file's stage rows multiply the applied term (and every
+// bound on it) by a nonnegative factor chosen from the pre-move bag
+// count. Checked end to end through move generation against the same
+// weights unscaled and against no PAT at all: at an early position with
+// early scale 0.5 every move's equity is the no-PAT equity plus half the
+// unscaled term (rounded); at a mid position with mid scale 1 the lists
+// are the unscaled ones; at a late position with late scale 0 they are
+// the no-PAT ones, best move included, which also exercises the scaled
+// pruning bounds.
+static void test_pat_stage_scale(const char *data_dir) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-wmp true");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  PATWeights *unscaled = pat_create_zeroed("stage_unscaled");
+  PATWeights *scaled = pat_create_zeroed("stage_scaled");
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    pat_set_weight(unscaled, feature_index, -40 - 3 * (feature_index % 7));
+    pat_set_weight(scaled, feature_index, -40 - 3 * (feature_index % 7));
+  }
+  PATWeights *pats[2] = {unscaled, scaled};
+  for (int i = 0; i < 2; i++) {
+    pat_set_combine_gamma(pats[i], 0.5);
+    pat_set_lexicon_floaters(pats[i], true);
+    pat_set_signed_through(pats[i], true);
+    pat_prepare_hook_flex(pats[i], player_get_kwg(game_get_player(game, 0)),
+                          game_get_ld(game));
+  }
+  pat_set_stage_scale(scaled, PAT_STAGE_EARLY, 0.5);
+  pat_set_stage_scale(scaled, PAT_STAGE_MID, 1.0);
+  pat_set_stage_scale(scaled, PAT_STAGE_LATE, 0.0);
+
+  // The rows round-trip, and a negative one is rejected.
+  ErrorStack *error_stack = error_stack_create();
+  pat_write(scaled, data_dir, "stage_scaled", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  PATWeights *loaded = pat_create(data_dir, "stage_scaled", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(pat_get_stage_scale(loaded, PAT_STAGE_EARLY) == 0.5);
+  assert(pat_get_stage_scale(loaded, PAT_STAGE_MID) == 1.0);
+  assert(pat_get_stage_scale(loaded, PAT_STAGE_LATE) == 0.0);
+  pat_destroy(loaded);
+  error_stack_destroy(error_stack);
+  {
+    char header[64];
+    current_pat_header(header, sizeof(header));
+    char *contents = get_formatted_string("%s\nstage_scale_mid,-0.5\n", header);
+    assert_pat_create_fails(data_dir, "stage_negative", contents);
+    free(contents);
+  }
+  assert(pat_stage_for_bag(86) == PAT_STAGE_EARLY);
+  assert(pat_stage_for_bag(PAT_STAGE_EARLY_MIN_BAG) == PAT_STAGE_EARLY);
+  assert(pat_stage_for_bag(PAT_STAGE_EARLY_MIN_BAG - 1) == PAT_STAGE_MID);
+  assert(pat_stage_for_bag(PAT_STAGE_MID_MIN_BAG) == PAT_STAGE_MID);
+  assert(pat_stage_for_bag(PAT_STAGE_MID_MIN_BAG - 1) == PAT_STAGE_LATE);
+  assert(pat_stage_for_bag(1) == PAT_STAGE_LATE);
+
+  MoveList *setup_list = move_list_create(1);
+  MoveList *lists[3];
+  for (int i = 0; i < 3; i++) {
+    lists[i] = move_list_create(3000);
+  }
+  static const int bag_targets[3] = {70, 45, 20};
+  int positions = 0;
+  int moves_checked = 0;
+  for (int attempt = 0; attempt < 12; attempt++) {
+    const int stage = attempt % 3;
+    game_reset(game);
+    game_seed(game, 5000000ULL + (uint64_t)attempt);
+    draw_starting_racks(game);
+    player_set_pat(game_get_player(game, 0), NULL);
+    player_set_pat(game_get_player(game, 1), NULL);
+    while (bag_get_letters(game_get_bag(game)) > bag_targets[stage] &&
+           game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+      play_move(get_top_equity_move(game, setup_list), game, NULL);
+    }
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE ||
+        bag_get_letters(game_get_bag(game)) == 0) {
+      continue;
+    }
+    assert(pat_stage_for_bag(bag_get_letters(game_get_bag(game))) == stage);
+    positions++;
+    // 0: no PAT, 1: unscaled, 2: scaled.
+    const PATWeights *choices[3] = {NULL, unscaled, scaled};
+    for (int i = 0; i < 3; i++) {
+      player_set_pat(game_get_player(game, 0), choices[i]);
+      player_set_pat(game_get_player(game, 1), choices[i]);
+      const MoveGenArgs args = {
+          .game = game,
+          .move_list = lists[i],
+          .move_record_type = MOVE_RECORD_ALL,
+          .move_sort_type = MOVE_SORT_EQUITY,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&args);
+      move_list_sort_moves(lists[i]);
+      // Best-move recording (the pruned path) agrees with the exhaustive
+      // top under the same weights.
+      const Move *best = get_top_equity_move(game, setup_list);
+      assert(move_get_equity(best) ==
+             move_get_equity(move_list_get_move(lists[i], 0)));
+    }
+    const int num = move_list_get_count(lists[0]);
+    assert(num == move_list_get_count(lists[1]));
+    assert(num == move_list_get_count(lists[2]));
+    if (stage != PAT_STAGE_EARLY) {
+      // Mid: the scaled list is the unscaled one; late: the no-PAT one.
+      // Move for move in sorted order, equities included.
+      MoveList *expected_list = (stage == PAT_STAGE_MID) ? lists[1] : lists[0];
+      for (int a = 0; a < num; a++) {
+        const Move *expected = move_list_get_move(expected_list, a);
+        const Move *with_scale = move_list_get_move(lists[2], a);
+        assert(compare_moves_without_equity(expected, with_scale, true) == -1);
+        assert(move_get_equity(expected) == move_get_equity(with_scale));
+        moves_checked++;
+      }
+      continue;
+    }
+    // Early: half the term. The generator keeps one blank designation per
+    // word and square and which one wins can depend on the term, so only
+    // moves present in all three lists are compared, and nearly all are.
+    int matched = 0;
+    for (int a = 0; a < num; a++) {
+      const Move *with_scale = move_list_get_move(lists[2], a);
+      const Move *none = NULL;
+      const Move *plain = NULL;
+      for (int b = 0; b < num && (!none || !plain); b++) {
+        if (!none &&
+            compare_moves_without_equity(
+                with_scale, move_list_get_move(lists[0], b), true) == -1) {
+          none = move_list_get_move(lists[0], b);
+        }
+        if (!plain &&
+            compare_moves_without_equity(
+                with_scale, move_list_get_move(lists[1], b), true) == -1) {
+          plain = move_list_get_move(lists[1], b);
+        }
+      }
+      if (!none || !plain) {
+        continue;
+      }
+      const Equity term = move_get_equity(plain) - move_get_equity(none);
+      assert(term <= 0);
+      assert(move_get_equity(with_scale) ==
+             move_get_equity(none) + (Equity)lround(0.5 * term));
+      matched++;
+      moves_checked++;
+    }
+    assert(matched * 10 >= num * 9);
+  }
+  assert(positions >= 9);
+  assert(moves_checked > 1000);
+  for (int i = 0; i < 3; i++) {
+    move_list_destroy(lists[i]);
+  }
+  move_list_destroy(setup_list);
+  player_set_pat(game_get_player(game, 0), NULL);
+  player_set_pat(game_get_player(game, 1), NULL);
+  pat_destroy(unscaled);
+  pat_destroy(scaled);
+  config_destroy(config);
+}
+
 static void test_pat_movegen_integration(void) {
   // WMP on: its recording path precomputes score-plus-leave equity for
   // nonempty boards and once forgot to add the defense term for
@@ -1895,6 +2064,7 @@ void test_pat(void) {
   test_pat_version4_has_no_lm_channels(data_dir);
   test_pat_hook_score_channel();
   test_pat_lm_channels();
+  test_pat_stage_scale(data_dir);
   test_pat_transposition_invariance();
   test_pat_blank_floater();
   test_pat_run_through_table();

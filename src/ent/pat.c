@@ -138,6 +138,9 @@ struct PATWeights {
   // length six ends in QI), for NARCEIN 560 against 0. Opt-in, like the
   // other semantic flags, until a file using it is validated.
   bool run_through;
+  // Per-stage factor on the applied term (see the row prefixes in
+  // pat_defs.h); indexed by PAT_STAGE_*.
+  double stage_scale[PAT_STAGE_COUNT];
   // 1: only the hook-score channels are fitted; 2: the triple-word hook
   // flexibility channels too; 3: only the floater through channels (see
   // pat_regression_solve_into_weights).
@@ -209,6 +212,17 @@ void pat_set_train_overlay(PATWeights *pat, bool train_overlay) {
 }
 
 bool pat_get_run_through(const PATWeights *pat) { return pat->run_through; }
+
+double pat_get_stage_scale(const PATWeights *pat, int stage) {
+  return pat->stage_scale[stage];
+}
+
+void pat_set_stage_scale(PATWeights *pat, int stage, double scale) {
+  if (!isfinite(scale) || scale < 0.0) {
+    log_fatal("PAT stage scale must be finite and >= 0, got %f", scale);
+  }
+  pat->stage_scale[stage] = scale;
+}
 
 void pat_set_run_through(PATWeights *pat, bool run_through) {
   pat->run_through = run_through;
@@ -420,6 +434,9 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->fit_residual_mode = 0;
   pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
+  for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
+    pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
+  }
   pat->run_through_count = NULL;
   pat->run_through_score = NULL;
   pat->run_through_alphabet_size = 0;
@@ -636,6 +653,35 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->exact_created_hooks = (flag == 1);
       continue;
     }
+    {
+      static const char *const stage_prefixes[PAT_STAGE_COUNT] = {
+          PAT_STAGE_SCALE_EARLY_ROW_PREFIX, PAT_STAGE_SCALE_MID_ROW_PREFIX,
+          PAT_STAGE_SCALE_LATE_ROW_PREFIX};
+      int stage = 0;
+      while (stage < PAT_STAGE_COUNT &&
+             !has_prefix(stage_prefixes[stage], line)) {
+        stage++;
+      }
+      if (stage < PAT_STAGE_COUNT) {
+        const char *scale_text = line + strlen(stage_prefixes[stage]);
+        char *scale_end = NULL;
+        const double parsed_scale = strtod(scale_text, &scale_end);
+        // Negative would flip the term's sign and break every bound;
+        // unparseable text would read as 0.0, a different model accepted
+        // in silence.
+        if (scale_end == scale_text || !isfinite(parsed_scale) ||
+            parsed_scale < 0.0) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+              get_formatted_string("PAT file '%s' line %d has a stage scale "
+                                   "that is not a finite number >= 0: '%s'",
+                                   pat_name, line_index + 1, line));
+          return;
+        }
+        pat->stage_scale[stage] = parsed_scale;
+        continue;
+      }
+    }
     if (has_prefix(PAT_RUN_THROUGH_ROW_PREFIX, line)) {
       const int flag =
           string_to_int(line + strlen(PAT_RUN_THROUGH_ROW_PREFIX), error_stack);
@@ -771,6 +817,15 @@ void pat_write(const PATWeights *pat, const char *data_paths,
                                       pat->exact_created_hooks ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_RUN_THROUGH_ROW_PREFIX,
                                       pat->run_through ? 1 : 0);
+  string_builder_add_formatted_string(sb, "%s%.6f\n",
+                                      PAT_STAGE_SCALE_EARLY_ROW_PREFIX,
+                                      pat->stage_scale[PAT_STAGE_EARLY]);
+  string_builder_add_formatted_string(sb, "%s%.6f\n",
+                                      PAT_STAGE_SCALE_MID_ROW_PREFIX,
+                                      pat->stage_scale[PAT_STAGE_MID]);
+  string_builder_add_formatted_string(sb, "%s%.6f\n",
+                                      PAT_STAGE_SCALE_LATE_ROW_PREFIX,
+                                      pat->stage_scale[PAT_STAGE_LATE]);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -1463,12 +1518,17 @@ static PATCrossInfo pat_effective_cross_info(
 // the walk visited, including the square it broke on: a move can only
 // change this unit's features by placing a tile on one of those squares or
 // directly beside them in the perpendicular direction.
+// lm_channels: whether to do the premium-combination bookkeeping at all.
+// Training rows always want it; evaluation skips it when every weight
+// on those channels is zero, since their dot product is then exactly
+// zero whatever the features (see PATEvalContext.lm_channels).
 static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           const uint8_t *unseen_counts, const PATWeights *pat,
                           int tws_row, int tws_col, int premium_class, int dir,
                           const PATMoveOverlay *overlay, int32_t *features,
                           int *extent_lo, int *extent_hi,
-                          int opponent_rack_size, uint64_t *hook_letters_out) {
+                          int opponent_rack_size, uint64_t *hook_letters_out,
+                          bool lm_channels) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const double hyper_scale = pat_hyper_scale(unseen_counts, opponent_rack_size);
@@ -1502,13 +1562,14 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   // walked because a word may extend past the premium onto the far side.
   int lm_span_base = -1;
   int lm_ext_base = -1;
-  if (premium_class == PAT_PREMIUM_TWS) {
+  if (lm_channels && premium_class == PAT_PREMIUM_TWS) {
     lm_span_base = PAT_FEATURE_LM_SPAN_START;
     lm_ext_base = PAT_FEATURE_LM_EXT_START;
-  } else if (premium_class == PAT_PREMIUM_DWS) {
+  } else if (lm_channels && premium_class == PAT_PREMIUM_DWS) {
     lm_span_base = PAT_FEATURE_DWS_LM_SPAN_START;
     lm_ext_base = PAT_FEATURE_DWS_LM_EXT_START;
   }
+  const bool lm_track = lm_span_base >= 0;
   int8_t lm_entries[2][RACK_SIZE + 1];
   int lm_num_entries[2] = {1, 1};
   int8_t lm_route_bin[2][2 * RACK_SIZE + 2];
@@ -1544,9 +1605,11 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     // No word along this lane can cover the TWS square at all.
     return;
   }
-  lm_entries[0][0] = (int8_t)bonus_square_get_letter_multiplier(
-      square_get_bonus_square(&lane[tws_idx]));
-  lm_entries[1][0] = lm_entries[0][0];
+  if (lm_track) {
+    lm_entries[0][0] = (int8_t)bonus_square_get_letter_multiplier(
+        square_get_bonus_square(&lane[tws_idx]));
+    lm_entries[1][0] = lm_entries[0][0];
+  }
   if (tws_info.hooky) {
     // A one-tile play on the TWS square itself completes a perpendicular
     // word at triple word score: hook access at d = 1.
@@ -1558,7 +1621,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     if (hook_letters_out) {
       *hook_letters_out |= tws_info.letter_set;
     }
-    if (tws_info.flex > 0) {
+    if (lm_track && tws_info.flex > 0) {
       // Contact at the premium itself; either side is its far side.
       lm_route_bin[0][0] = 1;
       lm_route_position[0][0] = 0;
@@ -1722,7 +1785,8 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           features[PAT_FEATURE_FLOAT_FLEX_SCALED_START + distance_bin - 1] +=
               scaled_run_flex;
         }
-        if (run_flex > 0 && lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
+        if (lm_track && run_flex > 0 &&
+            lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
           // Contact at the last empty before the run.
           lm_route_bin[lm_side][lm_num_routes[lm_side]] = (int8_t)distance_bin;
           lm_route_position[lm_side][lm_num_routes[lm_side]] =
@@ -1743,7 +1807,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       if (empties_used > max_reach) {
         break;
       }
-      if (lm_num_entries[lm_side] < RACK_SIZE + 1) {
+      if (lm_track && lm_num_entries[lm_side] < RACK_SIZE + 1) {
         lm_entries[lm_side][lm_num_entries[lm_side]++] =
             (int8_t)bonus_square_get_letter_multiplier(
                 square_get_bonus_square(&lane[idx]));
@@ -1770,7 +1834,8 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         if (hook_letters_out) {
           *hook_letters_out |= info.letter_set;
         }
-        if (info.flex > 0 && lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
+        if (lm_track && info.flex > 0 &&
+            lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
           // Contact at the hook square, the entry just recorded.
           lm_route_bin[lm_side][lm_num_routes[lm_side]] = (int8_t)empties_used;
           lm_route_position[lm_side][lm_num_routes[lm_side]] =
@@ -1788,7 +1853,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       *extent_hi = last_visited_idx;
     }
   }
-  if (lm_span_base < 0) {
+  if (!lm_track) {
     return;
   }
   for (int lm_side = 0; lm_side < 2; lm_side++) {
@@ -2036,11 +2101,11 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL);
+                  opponent_rack_size, NULL, true);
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL);
+                  opponent_rack_size, NULL, true);
   }
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
@@ -2220,7 +2285,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                   pat_eval_ctx->unseen_counts, pat_eval_ctx->weights, tws_row,
                   tws_col, pat_eval_ctx->tws_classes[tws_idx], dir, overlay,
                   features, extent_lo, extent_hi,
-                  pat_eval_ctx->opponent_rack_size, hook_letters_out);
+                  pat_eval_ctx->opponent_rack_size, hook_letters_out,
+                  pat_eval_ctx->lm_channels);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
@@ -2388,13 +2454,29 @@ static void pat_eval_context_load_units(
                 "unit masks must cover every scan unit");
   static_assert(PAT_MAX_SCAN_UNITS <= UINT16_MAX,
                 "unit order entries must hold every unit index");
+  {
+    int total_unseen = 0;
+    for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+      total_unseen += pat_eval_ctx->unseen_counts[ml];
+    }
+    int bag_count = total_unseen - opponent_rack_size;
+    if (bag_count < 0) {
+      bag_count = 0;
+    }
+    pat_eval_ctx->term_scale =
+        weights->stage_scale[pat_stage_for_bag(bag_count)];
+  }
   pat_eval_ctx->num_nonzero_features = 0;
+  pat_eval_ctx->lm_channels = !drop_unweighted_units;
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     if (weights->weights[feature_index] != 0) {
       pat_eval_ctx
           ->nonzero_feature_index[pat_eval_ctx->num_nonzero_features++] =
           feature_index;
+      if (feature_index >= PAT_FEATURE_LM_SPAN_START) {
+        pat_eval_ctx->lm_channels = true;
+      }
     }
   }
   for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
@@ -2509,9 +2591,11 @@ static void pat_eval_context_load_units(
                               pat_eval_ctx->worst_case_leave_units[word];
     }
     pat_eval_ctx->lane_penalty_bound[BOARD_HORIZONTAL_DIRECTION][lane] =
-        pat_units_penalty_bound(pat_eval_ctx, row_bound_units);
+        pat_eval_scaled(pat_eval_ctx,
+                        pat_units_penalty_bound(pat_eval_ctx, row_bound_units));
     pat_eval_ctx->lane_penalty_bound[BOARD_VERTICAL_DIRECTION][lane] =
-        pat_units_penalty_bound(pat_eval_ctx, col_bound_units);
+        pat_eval_scaled(pat_eval_ctx,
+                        pat_units_penalty_bound(pat_eval_ctx, col_bound_units));
   }
 }
 
@@ -2649,7 +2733,7 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
     return 0;
   }
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return pat_eval_ctx->pre_penalty;
+    return pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty);
   }
   const bool vertical = board_is_dir_vertical(move_get_dir(move));
   const int row_start = move_get_row_start(move);
@@ -2672,7 +2756,8 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   for (int word = 0; word < PAT_MASK_WORDS; word++) {
     combined_units[word] = affected_units[word] | leave_units[word];
   }
-  return pat_units_penalty_bound(pat_eval_ctx, combined_units);
+  return pat_eval_scaled(pat_eval_ctx,
+                         pat_units_penalty_bound(pat_eval_ctx, combined_units));
 }
 
 Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
@@ -2684,7 +2769,7 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
     // Exchanges and passes leave the board unchanged, so their defense term
     // is exactly the position baseline. Including it keeps the comparison
     // against tile placements (whose term is baseline plus delta) fair.
-    return pat_eval_ctx->pre_penalty;
+    return pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty);
   }
   const bool vertical = board_is_dir_vertical(move_get_dir(move));
   const int row_start = move_get_row_start(move);
@@ -2715,7 +2800,7 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
     combined_units[word] = affected_units[word] | leave_units[word];
   }
   if (pat_mask_is_empty(combined_units)) {
-    return pat_eval_ctx->pre_penalty;
+    return pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty);
   }
   const PATMoveOverlay overlay = {
       .move = move,
@@ -2798,7 +2883,9 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
       break;
     }
   }
-  return pat_combine(worst, sum, pat_eval_ctx->weights->combine_gamma);
+  return pat_eval_scaled(
+      pat_eval_ctx,
+      pat_combine(worst, sum, pat_eval_ctx->weights->combine_gamma));
 }
 
 // The training row for a candidate move built the way the runtime term is
@@ -2924,7 +3011,7 @@ void pat_extract_features_combined(const Square *lanes,
       const int tws_idx = unit_index / 2;
       pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                     tws_cols[tws_idx], tws_classes[tws_idx], unit_index % 2,
-                    NULL, row, NULL, NULL, opponent_rack_size, NULL);
+                    NULL, row, NULL, NULL, opponent_rack_size, NULL, true);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
