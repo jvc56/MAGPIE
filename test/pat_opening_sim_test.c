@@ -30,12 +30,20 @@
 // unbiased because neither choice looks at the sim noise -- unlike a
 // regret against the sim-best play, which the max over noisy means
 // inflates.
+//
+// The table for a lexicon is measured under that lexicon's base file --
+// one WITHOUT an opening table, or the gap would be measured against a
+// static equity that already carries it -- with
+// "patopeningsim:<lexicon>:<pat>[:<racks>]"; the ready-to-paste rows are
+// printed at the end. The plain "patopeningsim" runs the defaults below
+// (the measurement pat_dls_champion_v5's table came from).
 #define PAT_OPENING_SIM_NUM_RACKS 1000
 #define PAT_OPENING_SIM_NUM_PLAYS 12
 #define PAT_OPENING_SIM_PLIES 4
 #define PAT_OPENING_SIM_ITERATIONS_PER_PLAY 400
 #define PAT_OPENING_SIM_THREADS 10
 #define PAT_OPENING_SIM_SEED_BASE 7300000000ULL
+#define PAT_OPENING_SIM_LEXICON "CSW21"
 #define PAT_OPENING_SIM_PAT "pat_dls_champion_v4"
 
 typedef struct OpeningCandidate {
@@ -63,23 +71,32 @@ static int opening_best_index(const OpeningRack *rack, const double *table) {
   return best;
 }
 
-void test_pat_opening_sim(void) {
+void pat_opening_sim_run(const char *lexicon, const char *pat_name,
+                         int max_racks) {
   char *set_cmd = get_formatted_string(
-      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays %d -plies %d -threads %d -iter %d -sr rr -scond none "
       "-threshold none -pat %s",
-      PAT_OPENING_SIM_NUM_PLAYS, PAT_OPENING_SIM_PLIES, PAT_OPENING_SIM_THREADS,
+      lexicon, PAT_OPENING_SIM_NUM_PLAYS, PAT_OPENING_SIM_PLIES,
+      PAT_OPENING_SIM_THREADS,
       PAT_OPENING_SIM_NUM_PLAYS * PAT_OPENING_SIM_ITERATIONS_PER_PLAY,
-      PAT_OPENING_SIM_PAT);
+      pat_name);
   Config *config = config_create_or_die(set_cmd);
   free(set_cmd);
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  // The empty board for this build's dimension.
+  StringBuilder *cgp_sb = string_builder_create();
+  string_builder_add_string(cgp_sb, "cgp ");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    string_builder_add_formatted_string(cgp_sb, "%s%d", row > 0 ? "/" : "",
+                                        BOARD_DIM);
+  }
+  string_builder_add_string(cgp_sb, " / 0/0 0");
+  load_and_exec_config_or_die(config, string_builder_peek(cgp_sb));
+  string_builder_destroy(cgp_sb);
   Game *game = config_get_game(config);
-  OpeningRack *racks =
-      malloc_or_die(sizeof(OpeningRack) * PAT_OPENING_SIM_NUM_RACKS);
+  OpeningRack *racks = malloc_or_die(sizeof(OpeningRack) * max_racks);
   int num_racks = 0;
-  for (int attempt = 0; attempt < PAT_OPENING_SIM_NUM_RACKS; attempt++) {
+  for (int attempt = 0; attempt < max_racks; attempt++) {
     game_reset(game);
     game_seed(game, PAT_OPENING_SIM_SEED_BASE + (uint64_t)attempt);
     draw_starting_racks(game);
@@ -168,9 +185,9 @@ void test_pat_opening_sim(void) {
     }
   }
   printf("\nopening sim diagnostic: %d racks, top %d static candidates, %d "
-         "plies, %d iterations per candidate, %s\n",
+         "plies, %d iterations per candidate, %s, %s\n",
          num_racks, PAT_OPENING_SIM_NUM_PLAYS, PAT_OPENING_SIM_PLIES,
-         PAT_OPENING_SIM_ITERATIONS_PER_PLAY, PAT_OPENING_SIM_PAT);
+         PAT_OPENING_SIM_ITERATIONS_PER_PLAY, lexicon, pat_name);
   printf("sim - static by tiles played (all candidates; candidate-level SE, "
          "within-rack correlation ignored):\n");
   double table[RACK_SIZE + 1] = {0};
@@ -230,6 +247,30 @@ void test_pat_opening_sim(void) {
          changed > 1
              ? stat_get_stdev(improvement_changed) / sqrt((double)changed)
              : 0.0);
+  // The rows a file would carry: every bin's mean over all racks,
+  // relative to the best bin so the best is 0 and the rest are
+  // penalties (<= 0, as the format requires), in milli-equity. Bin 0 is
+  // the exchange; a bin without samples gets no row (reads as 0).
+  double best_mean = 0.0;
+  bool have_best = false;
+  for (int t = 0; t <= RACK_SIZE; t++) {
+    if (stat_get_num_samples(gap_all[t]) > 0 &&
+        (!have_best || stat_get_mean(gap_all[t]) > best_mean)) {
+      best_mean = stat_get_mean(gap_all[t]);
+      have_best = true;
+    }
+  }
+  printf("rows for the file (all racks, relative to the best bin):\n");
+  for (int t = 2; t <= RACK_SIZE; t++) {
+    if (stat_get_num_samples(gap_all[t]) > 0) {
+      printf("opening_tiles_%d,%ld\n", t,
+             lround((stat_get_mean(gap_all[t]) - best_mean) * 1000.0));
+    }
+  }
+  if (stat_get_num_samples(gap_all[0]) > 0) {
+    printf("opening_exchange,%ld\n",
+           lround((stat_get_mean(gap_all[0]) - best_mean) * 1000.0));
+  }
   stat_destroy(improvement);
   stat_destroy(improvement_changed);
   for (int t = 0; t <= RACK_SIZE; t++) {
@@ -239,4 +280,28 @@ void test_pat_opening_sim(void) {
   }
   free(racks);
   config_destroy(config);
+}
+
+void test_pat_opening_sim(void) {
+  pat_opening_sim_run(PAT_OPENING_SIM_LEXICON, PAT_OPENING_SIM_PAT,
+                      PAT_OPENING_SIM_NUM_RACKS);
+}
+
+// "<lexicon>:<pat>[:<racks>]"
+void pat_opening_sim_run_spec(const char *spec) {
+  StringSplitter *fields = split_string(spec, ':', true);
+  const int num_fields = string_splitter_get_number_of_items(fields);
+  if (num_fields < 2 || num_fields > 3) {
+    log_fatal("patopeningsim spec must be <lexicon>:<pat>[:<racks>], got '%s'",
+              spec);
+  }
+  const int racks = (num_fields == 3)
+                        ? atoi(string_splitter_get_item(fields, 2))
+                        : PAT_OPENING_SIM_NUM_RACKS;
+  if (racks < 2) {
+    log_fatal("patopeningsim needs at least 2 racks, got %d", racks);
+  }
+  pat_opening_sim_run(string_splitter_get_item(fields, 0),
+                      string_splitter_get_item(fields, 1), racks);
+  string_splitter_destroy(fields);
 }
