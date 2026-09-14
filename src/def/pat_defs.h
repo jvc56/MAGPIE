@@ -173,11 +173,12 @@ enum {
 #define PAT_TRAIN_OVERLAY_ROW_PREFIX "train_overlay,"
 #define PAT_DEFAULT_TRAIN_OVERLAY false
 
-// Optional row (0 or 1): whether patgen fits only the hook-score channels
+// Optional row (0 to 3): whether patgen fits only the hook-score channels
 // (PAT_FEATURE_HOOK_SCORE_START onward, PAT_HOOK_BIN_COUNT of them) as a
 // residual on top of the file's other weights, which stay exactly as
-// loaded (see PATWeights.fit_residual). Absent means 0: every channel
-// fitted.
+// loaded (1), those plus the triple-word hook flexibility channels (2),
+// or only the floater through channels (3); see PATWeights.fit_residual.
+// Absent means 0: every channel fitted.
 #define PAT_FIT_RESIDUAL_ROW_PREFIX "fit_residual,"
 #define PAT_DEFAULT_FIT_RESIDUAL false
 
@@ -190,6 +191,18 @@ enum {
 // (pat_eval_context_set_kwg); without it the approximation is used.
 #define PAT_EXACT_CREATED_HOOKS_ROW_PREFIX "exact_created_hooks,"
 #define PAT_DEFAULT_EXACT_CREATED_HOOKS false
+
+// Optional row (0 or 1): whether the floater through channels score a
+// run of tiles by the words that actually contain the whole run at the
+// required end (a run-keyed table, up to PAT_RUN_THROUGH_MAX_KEY letters
+// deep) instead of summing each tile's single-letter statistic (see
+// PATWeights.run_through). Absent means 0, the per-tile sum every file so
+// far was trained on.
+#define PAT_RUN_THROUGH_ROW_PREFIX "run_through,"
+#define PAT_DEFAULT_RUN_THROUGH false
+// Runs longer than this are keyed by their far-end letters, whose word
+// count is a superset of the run's.
+#define PAT_RUN_THROUGH_MAX_KEY 3
 
 // Divisor applied to the hook-score channel's availability-weighted point
 // sum so a typical hook lands near the flexibility channels' magnitude.

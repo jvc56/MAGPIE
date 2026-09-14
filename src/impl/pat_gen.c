@@ -153,7 +153,11 @@ pat_regression_solve_into_weights(const PATRegression *regression,
     // hooks; everything else keeps the loaded weight, as the coefficient
     // it corresponds to (weights are the negated coefficients, see the
     // clamp below).
-    const bool hooks_free = pat_get_fit_residual_mode(pat) >= 2;
+    // Mode 3 frees the floater through channels instead (for a semantic
+    // change to what they measure), keeping every hook channel fixed.
+    const int mode = pat_get_fit_residual_mode(pat);
+    const bool hooks_free = mode == 2;
+    const bool through_free = mode == 3;
     for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
          feature_index++) {
       const bool is_hook_score =
@@ -162,7 +166,14 @@ pat_regression_solve_into_weights(const PATRegression *regression,
       const bool is_tws_hook =
           feature_index >= PAT_FEATURE_HOOK_START &&
           feature_index < PAT_FEATURE_HOOK_START + PAT_HOOK_BIN_COUNT;
-      if (!is_hook_score && !(hooks_free && is_tws_hook)) {
+      const bool is_through =
+          feature_index >= PAT_FEATURE_FLOAT_THROUGH_SCORE_START &&
+          feature_index <
+              PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT;
+      const bool free_here =
+          through_free ? is_through
+                       : (is_hook_score || (hooks_free && is_tws_hook));
+      if (!free_here) {
         fixed[feature_index + 1] = true;
         fixed_value[feature_index + 1] =
             -equity_to_double(pat_get_weight(pat, feature_index));
