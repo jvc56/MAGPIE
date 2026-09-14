@@ -181,6 +181,16 @@ enum {
 #define PAT_FIT_RESIDUAL_ROW_PREFIX "fit_residual,"
 #define PAT_DEFAULT_FIT_RESIDUAL false
 
+// Optional row (0 or 1): whether a hook the evaluated move itself creates
+// is scored from its real cross set and cross score, resolved on the
+// GADDAG from the perpendicular pattern the move forms, instead of the
+// per-letter two-letter-word count approximation (see
+// PATWeights.exact_created_hooks). Absent means 0, the approximation
+// every file so far was evaluated with. Needs the context's KWG
+// (pat_eval_context_set_kwg); without it the approximation is used.
+#define PAT_EXACT_CREATED_HOOKS_ROW_PREFIX "exact_created_hooks,"
+#define PAT_DEFAULT_EXACT_CREATED_HOOKS false
+
 // Divisor applied to the hook-score channel's availability-weighted point
 // sum so a typical hook lands near the flexibility channels' magnitude.
 #define PAT_HOOK_SCORE_SCALE 8

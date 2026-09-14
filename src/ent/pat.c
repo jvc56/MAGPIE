@@ -116,6 +116,13 @@ struct PATWeights {
   // equity per disagreement on the move-choice harness), which would
   // swamp a small new channel's effect; the residual fit isolates it.
   bool fit_residual;
+  // Whether hooks the evaluated move creates are scored exactly (see
+  // pat_fresh_cross_set) rather than from the hook_flex approximation.
+  // A runtime semantic, per file like the floater flags, and opt-in: a
+  // file fitted on exact post-move rows but evaluated with the
+  // approximation can still play better than one evaluated exactly, and
+  // only whole-game play can say.
+  bool exact_created_hooks;
   // 1: only the hook-score channels are fitted; 2: the triple-word hook
   // flexibility channels too (see pat_regression_solve_into_weights).
   int fit_residual_mode;
@@ -183,6 +190,14 @@ bool pat_get_train_overlay(const PATWeights *pat) { return pat->train_overlay; }
 
 void pat_set_train_overlay(PATWeights *pat, bool train_overlay) {
   pat->train_overlay = train_overlay;
+}
+
+bool pat_get_exact_created_hooks(const PATWeights *pat) {
+  return pat->exact_created_hooks;
+}
+
+void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks) {
+  pat->exact_created_hooks = exact_created_hooks;
 }
 
 bool pat_get_fit_residual(const PATWeights *pat) { return pat->fit_residual; }
@@ -313,6 +328,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->train_overlay = PAT_DEFAULT_TRAIN_OVERLAY;
   pat->fit_residual = PAT_DEFAULT_FIT_RESIDUAL;
   pat->fit_residual_mode = 0;
+  pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
   pat->version = PAT_VERSION;
   return pat;
 }
@@ -509,6 +525,21 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->fit_residual_mode = flag;
       continue;
     }
+    if (has_prefix(PAT_EXACT_CREATED_HOOKS_ROW_PREFIX, line)) {
+      const int flag = string_to_int(
+          line + strlen(PAT_EXACT_CREATED_HOOKS_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has an "
+                                 "exact_created_hooks flag other than 0 or "
+                                 "1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->exact_created_hooks = (flag == 1);
+      continue;
+    }
     if (feature_index >= PAT_NUM_FEATURES) {
       error_stack_push(
           error_stack, ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
@@ -620,6 +651,9 @@ void pat_write(const PATWeights *pat, const char *data_paths,
       sb, "%s%d\n", PAT_TRAIN_OVERLAY_ROW_PREFIX, pat->train_overlay ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_RESIDUAL_ROW_PREFIX,
                                       pat->fit_residual_mode);
+  string_builder_add_formatted_string(sb, "%s%d\n",
+                                      PAT_EXACT_CREATED_HOOKS_ROW_PREFIX,
+                                      pat->exact_created_hooks ? 1 : 0);
   string_builder_add_string(
       sb, "# trained PAT weights; units: milli-equity per feature "
           "unit; all values <= 0\n");
@@ -907,10 +941,12 @@ typedef struct PATMoveOverlay {
   int col_end;
   bool vertical;
   const uint8_t *hook_flex;
+  // Non-NULL when hooks the move creates are to be resolved exactly (see
+  // pat_fresh_cross_set); the lane cache goes with it.
+  const KWG *kwg;
+  const Square *lanes;
 } PATMoveOverlay;
 
-// Returns true and sets *fresh_letter_out if the move places a fresh tile
-// on (row, col). Played-through positions fall through to the board.
 static inline bool pat_move_covers(const PATMoveOverlay *overlay, int row,
                                    int col, MachineLetter *fresh_letter_out) {
   if (!overlay) {
@@ -930,6 +966,116 @@ static inline bool pat_move_covers(const PATMoveOverlay *overlay, int row,
   return true;
 }
 
+// The cross set of the empty square (row, col) on a dir lane after the
+// move, and the cross score to go with it: the perpendicular pattern
+// through the square, existing and fresh tiles alike, resolved on the
+// GADDAG the way game_gen_cross_set does for a played board. Tiles before
+// the square are collected outward, which is the reversed prefix the
+// GADDAG wants; a prefix-only pattern takes the separator and reads the
+// accepted set (back hooks); a suffix-only pattern walks the reversed
+// suffix and reads the accepted set (front hooks); with both, each letter
+// arc after the separator is checked through the suffix. 0 means no
+// letter fits (a dead square).
+static uint64_t pat_fresh_cross_set(const KWG *kwg,
+                                    const LetterDistribution *ld,
+                                    const Square *lanes, int dir, int row,
+                                    int col, const PATMoveOverlay *overlay,
+                                    int *cross_score_out) {
+  const int perp_dir = (dir == BOARD_HORIZONTAL_DIRECTION)
+                           ? BOARD_VERTICAL_DIRECTION
+                           : BOARD_HORIZONTAL_DIRECTION;
+  const int perp_lane_index =
+      (perp_dir == BOARD_HORIZONTAL_DIRECTION) ? row : col;
+  const int perp_idx = (perp_dir == BOARD_HORIZONTAL_DIRECTION) ? col : row;
+  const Square *perp_lane =
+      board_get_row_cache(lanes, perp_lane_index, perp_dir);
+  MachineLetter before[BOARD_DIM];
+  MachineLetter after[BOARD_DIM];
+  int num_before = 0;
+  int num_after = 0;
+  int cross_score = 0;
+  for (int side = -1; side <= 1; side += 2) {
+    int idx = perp_idx + side;
+    while (idx >= 0 && idx < BOARD_DIM &&
+           !square_get_is_brick(&perp_lane[idx])) {
+      const int r =
+          (perp_dir == BOARD_HORIZONTAL_DIRECTION) ? perp_lane_index : idx;
+      const int c =
+          (perp_dir == BOARD_HORIZONTAL_DIRECTION) ? idx : perp_lane_index;
+      MachineLetter letter;
+      if (!pat_move_covers(overlay, r, c, &letter)) {
+        letter = square_get_letter(&perp_lane[idx]);
+        if (letter == ALPHABET_EMPTY_SQUARE_MARKER) {
+          break;
+        }
+      }
+      if (!get_is_blanked(letter)) {
+        cross_score += equity_to_int(ld_get_score(ld, letter));
+      }
+      const MachineLetter unblanked = get_unblanked_machine_letter(letter);
+      if (side < 0) {
+        before[num_before++] = unblanked;
+      } else {
+        after[num_after++] = unblanked;
+      }
+      idx += side;
+    }
+  }
+  *cross_score_out = cross_score;
+  if (num_before == 0 && num_after == 0) {
+    return TRIVIAL_CROSS_SET;
+  }
+  const uint32_t root = kwg_get_root_node_index(kwg);
+  uint64_t extension_set = 0;
+  if (num_before == 0) {
+    uint32_t node = root;
+    for (int k = num_after - 1; k >= 0; k--) {
+      node = kwg_get_next_node_index(kwg, node, after[k]);
+      if (node == 0) {
+        return 0;
+      }
+    }
+    return kwg_get_letter_sets(kwg, node, &extension_set) & ~(uint64_t)1;
+  }
+  uint32_t node = root;
+  for (int k = 0; k < num_before; k++) {
+    node = kwg_get_next_node_index(kwg, node, before[k]);
+    if (node == 0) {
+      return 0;
+    }
+  }
+  const uint32_t separated =
+      kwg_get_next_node_index(kwg, node, SEPARATION_MACHINE_LETTER);
+  if (separated == 0) {
+    return 0;
+  }
+  if (num_after == 0) {
+    return kwg_get_letter_sets(kwg, separated, &extension_set) & ~(uint64_t)1;
+  }
+  uint64_t cross_set = 0;
+  for (uint32_t i = separated;; i++) {
+    const uint32_t arc = kwg_node(kwg, i);
+    const MachineLetter ml = (MachineLetter)kwg_node_tile(arc);
+    if (ml != SEPARATION_MACHINE_LETTER) {
+      uint32_t cur = kwg_node_arc_index_prefetch(arc, kwg);
+      bool ok = cur != 0;
+      for (int k = 0; ok && k < num_after - 1; k++) {
+        cur = kwg_get_next_node_index(kwg, cur, after[k]);
+        ok = cur != 0;
+      }
+      if (ok && kwg_in_letter_set(kwg, after[num_after - 1], cur)) {
+        cross_set |= (uint64_t)1 << ml;
+      }
+    }
+    if (kwg_node_is_end(arc)) {
+      break;
+    }
+  }
+  return cross_set;
+}
+
+// Returns true and sets *fresh_letter_out if the move places a fresh tile
+// on (row, col). Played-through positions fall through to the board.
 static inline int pat_unit_row(int dir, int lane_index, int idx) {
   return (dir == BOARD_HORIZONTAL_DIRECTION) ? lane_index : idx;
 }
@@ -996,7 +1142,62 @@ static PATCrossInfo pat_effective_cross_info(
     const LetterDistribution *ld, int premium_word_multiplier) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   PATCrossInfo info;
+  // Exact created hooks: if a fresh tile sits perpendicular-adjacent,
+  // resolve the whole perpendicular pattern on the GADDAG and score it
+  // like a real hook; an empty set makes the square dead.
+  if (overlay != NULL && overlay->kwg != NULL && ld != NULL) {
+    bool fresh_adjacent = false;
+    for (int side = -1; side <= 1; side += 2) {
+      const int perp_row =
+          (dir == BOARD_HORIZONTAL_DIRECTION) ? row + side : row;
+      const int perp_col =
+          (dir == BOARD_HORIZONTAL_DIRECTION) ? col : col + side;
+      MachineLetter fresh_letter;
+      if (perp_row >= 0 && perp_row < BOARD_DIM && perp_col >= 0 &&
+          perp_col < BOARD_DIM &&
+          pat_move_covers(overlay, perp_row, perp_col, &fresh_letter)) {
+        fresh_adjacent = true;
+      }
+    }
+    if (fresh_adjacent) {
+      int cross_score = 0;
+      const uint64_t cross_set =
+          pat_fresh_cross_set(overlay->kwg, ld, overlay->lanes, dir, row, col,
+                              overlay, &cross_score);
+      info.dead = (cross_set == 0);
+      info.hooky = !info.dead && (cross_set != TRIVIAL_CROSS_SET);
+      info.flex = info.hooky ? pat_set_flex(unseen_counts, cross_set) : 0;
+      info.scaled_flex =
+          info.hooky
+              ? pat_set_flex_scaled(unseen_counts, cross_set, hyper_scale)
+              : 0;
+      info.letter_set = info.hooky ? cross_set : 0;
+      info.score_exposure = 0;
+      if (info.hooky) {
+        const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
+        const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
+        const int word_multiplier = bonus_square_get_word_multiplier(bonus);
+        int64_t exposure = 0;
+        uint64_t remaining = cross_set & ~(uint64_t)1;
+        while (remaining) {
+          const int machine_letter = pat_ctz(remaining);
+          remaining &= remaining - 1;
+          if (unseen_counts[machine_letter] == 0) {
+            continue;
+          }
+          exposure +=
+              (int64_t)unseen_counts[machine_letter] *
+              pat_letter_score_exposure(
+                  cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
+                  letter_multiplier, word_multiplier, premium_word_multiplier);
+        }
+        info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
+      }
+      return info;
+    }
+  }
   info.dead = (base_cross_set == 0);
+
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
   info.flex = info.hooky ? pat_set_flex(unseen_counts, base_cross_set) : 0;
   info.scaled_flex =
@@ -2014,6 +2215,10 @@ static void pat_eval_context_load_units(
   }
 }
 
+void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg) {
+  pat_eval_ctx->kwg = kwg;
+}
+
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
@@ -2220,6 +2425,9 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
       .col_end = col_end,
       .vertical = vertical,
       .hook_flex = pat_eval_ctx->weights->hook_flex,
+      .kwg =
+          pat_eval_ctx->weights->exact_created_hooks ? pat_eval_ctx->kwg : NULL,
+      .lanes = pat_eval_ctx->lanes,
   };
   // Rescan only the units the move can reach (geometrically, or through
   // its own leave) and combine the whole set: the units in neither set
@@ -2336,6 +2544,9 @@ void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
     overlay.col_end = col_end;
     overlay.vertical = vertical;
     overlay.hook_flex = pat_eval_ctx->weights->hook_flex;
+    overlay.kwg =
+        pat_eval_ctx->weights->exact_created_hooks ? pat_eval_ctx->kwg : NULL;
+    overlay.lanes = pat_eval_ctx->lanes;
   }
   int32_t unit_rows[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
   int worst_unit = -1;

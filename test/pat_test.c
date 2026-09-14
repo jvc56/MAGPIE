@@ -1460,6 +1460,7 @@ static void test_pat_path_parity(void) {
           game_get_ld(game_wmp), player_get_rack(mover), PAT_CLASS_MASK_ALL,
           rack_get_total_letters(
               player_get_rack(game_get_player(game_wmp, 1 - mover_index))));
+      pat_eval_context_set_kwg(parity_ctx, player_get_kwg(mover));
       const int num_top = move_list_get_count(all_list_wmp);
       for (int i = 0; i < num_top && i < 20; i++) {
         const Move *move = move_list_get_move(all_list_wmp, i);

@@ -51,6 +51,8 @@ bool pat_get_fit_scaled_channels(const PATWeights *pat);
 void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels);
 bool pat_get_train_overlay(const PATWeights *pat);
 void pat_set_train_overlay(PATWeights *pat, bool train_overlay);
+bool pat_get_exact_created_hooks(const PATWeights *pat);
+void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
 bool pat_get_fit_residual(const PATWeights *pat);
 int pat_get_fit_residual_mode(const PATWeights *pat);
 void pat_set_fit_residual(PATWeights *pat, bool fit_residual);
@@ -167,6 +169,10 @@ typedef struct PATEvalContext {
   const PATWeights *weights;
   const LetterDistribution *ld;
   const Square *lanes;
+  // The lexicon for resolving hooks a move creates exactly (see
+  // PATWeights.exact_created_hooks); NULL, the default after a load, means
+  // the approximation is used. Set with pat_eval_context_set_kwg.
+  const KWG *kwg;
   Equity pre_penalty;
   // The premium squares walked, in row-major order within each class, and
   // which class each belongs to.
@@ -297,6 +303,7 @@ void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
 // unknown. Training never comes through here (it extracts every feature
 // from the board directly), so a class the weights have not learned yet
 // still reaches the fit.
+void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg);
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,

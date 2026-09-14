@@ -206,6 +206,7 @@ static void pat_move_choice_choose(Game *game, int mover_index,
         game_get_ld(game), player_get_rack(mover), PAT_CLASS_MASK_ALL,
         rack_get_total_letters(
             player_get_rack(game_get_player(game, 1 - mover_index))));
+    pat_eval_context_set_kwg(ctx, player_get_kwg(mover));
     double best_adjusted = 0.0;
     for (int i = 0; i < num_moves; i++) {
       const Move *move = move_list_get_move(move_list, i);
@@ -885,6 +886,7 @@ void pat_train_runtime_parity_for(const char *pat_name) {
                           board_get_readonly_lanes(game_get_board(game), csi),
                           game_get_ld(game), player_get_rack(mover),
                           PAT_CLASS_MASK_ALL, opponent_rack_size);
+    pat_eval_context_set_kwg(ctx, player_get_kwg(mover));
     const MoveGenArgs args = {
         .game = game,
         .move_list = all_list,
