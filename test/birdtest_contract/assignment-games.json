@@ -70,7 +70,7 @@
       "num_plays_recorded": 10,
       "stopping_pct": 99.0,
       "use_inference": false,
-      "time_limit_secs": null,
+      "time_limit_secs": 0,
       "use_wordmap": true,
       "use_rit": false,
       "min_play_iterations": null,

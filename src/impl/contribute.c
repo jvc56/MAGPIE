@@ -811,12 +811,28 @@ submit_result_over_http(HttpClient *client, const char *claim_token,
   return outcome;
 }
 
+// Hands back a claim this worker could not produce an accepted result for,
+// rather than leaving it to lapse. Stopping the heartbeat alone held the
+// task's slot for the server's whole heartbeat timeout -- five minutes by
+// default -- before anyone else could have it. The job is deliberately not
+// remembered as unsupported: a failure is a property of this attempt, and the
+// consecutive-failure guard is what stops a worker that fails every time. A
+// decline that cannot be delivered only costs the timeout it was meant to
+// save, so its errors are dropped rather than ending the run.
+static void decline_failed_task(ContributeState *state) {
+  ErrorStack *decline_errors = error_stack_create();
+  decline_over_http(state, "task_failed", NULL, decline_errors);
+  error_stack_destroy(decline_errors);
+}
+
 void contribute_submit_result(ContributeState *state,
                               ThreadControl *thread_control,
                               const char *result_json,
                               const char *error_message, bool fatal,
                               ErrorStack *error_stack) {
   heartbeat_stop(&state->heartbeat);
+  // An executor that failed produced no result to submit.
+  bool hand_back = error_message && !result_json;
 
   if (error_message) {
     thread_control_print_formatted(thread_control, "task failed: %s\n",
@@ -855,10 +871,17 @@ void contribute_submit_result(ContributeState *state,
         free(state->last_failure);
         state->last_failure = rejection;
         rejection = NULL;
+        // A refused result leaves the claim open on the server, holding the
+        // slot exactly as a failed executor would.
+        hand_back = true;
         break;
       }
     }
     free(rejection);
+  }
+
+  if (hand_back) {
+    decline_failed_task(state);
   }
 
   free(state->claim_token);

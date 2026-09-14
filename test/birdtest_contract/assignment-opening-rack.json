@@ -52,7 +52,11 @@
     "variant": "classic",
     "letter_distribution": "english",
     "board_layout": "standard15",
-    "racks": ["AEINRST", "?AEILNT", "AABBCDE"],
+    "racks": [
+      "AEINRST",
+      "?AEILNT",
+      "AABBCDE"
+    ],
     "previous_play": null,
     "player": {
       "name": "simmer-NWL23-4ply@20251004",
@@ -68,7 +72,7 @@
       "num_plays_recorded": 10,
       "stopping_pct": 99.0,
       "use_inference": false,
-      "time_limit_secs": null,
+      "time_limit_secs": 0,
       "use_wordmap": true,
       "use_rit": false,
       "min_play_iterations": null,
