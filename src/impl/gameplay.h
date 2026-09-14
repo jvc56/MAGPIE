@@ -10,6 +10,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "move_gen.h"
+#include <stdbool.h>
 
 void draw_starting_racks(const Game *game);
 Equity calculate_end_rack_points(const Rack *rack,
@@ -22,7 +23,8 @@ void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(const Game *game, int player_index,
                      const Rack *known_rack);
 const Move *get_top_equity_move(Game *game, MoveList *move_list);
-const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list);
+const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
+                                            bool record_all);
 Move *get_top_equity_move_for_inferences(
     Game *game, MoveList *move_list, Equity target_equity,
     int target_leave_size_for_exchange_cutoff, Equity equity_margin);

@@ -19,6 +19,7 @@
 #include "cmd_api_test.h"
 #include "command_test.h"
 #include "config_test.h"
+#include "contribute_test.h"
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
@@ -127,6 +128,7 @@ static TestEntry test_table[] = {
     {"gcg", test_gcg},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},
+    {"contribute", test_contribute},
     {"words", test_words},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
@@ -171,6 +173,7 @@ static TestEntry on_demand_test_table[] = {
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},
+    {"ap_pent", test_autoplay_pentanomial},
     {"endgame_wasm", test_endgame_wasm},
     {"endgameinject", test_endgame_dynamic_worker_injection},
     {"egttpvbound", test_endgame_tt_pv_bound_repeat},

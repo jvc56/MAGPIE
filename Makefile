@@ -82,7 +82,9 @@ LLVM_PROFDATA := xcrun llvm-profdata
 endif
 endif
 
-SRC  := $(wildcard $(SRC_DIR)/**/*.c)
+# find, not a wildcard: `**` is not recursive in make, and vendored code sits
+# two levels down (src/compat/sha256/sha256.c).
+SRC  := $(shell find $(SRC_DIR) -name '*.c')
 TEST := $(wildcard $(TEST_DIR)/*.c)
 CMD := $(wildcard $(CMD_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
@@ -162,6 +164,14 @@ endif
 LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
+
+# The HTTP compat layer resolves libcurl with dlopen at runtime rather than
+# linking it, so a machine without libcurl still runs every offline command.
+# glibc before 2.34 keeps dlopen in a separate libdl; macOS and newer glibc
+# have it in libc.
+ifeq ($(shell uname -s),Linux)
+  LDLIBS += -ldl
+endif
 
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
 	pgo_toolchain_check \

@@ -20,6 +20,7 @@
 #include "../ent/win_pct.h"
 #include "../impl/simmer.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "peg.h"
 #include <stdbool.h>
 
@@ -32,6 +33,55 @@ typedef struct ConfigArgs {
 } ConfigArgs;
 
 // Constructors and Destructors
+// This build's version, for the contribution client's version negotiation.
+const char *config_get_magpie_version(void);
+
+// One player's simulation settings, for tests of the contribute path.
+int config_get_player_sim_plies(const Config *config, int player_index);
+int config_get_player_num_plays(const Config *config, int player_index);
+uint64_t config_get_player_max_iterations(const Config *config,
+                                          int player_index);
+
+// Applies one player object from a birdtest task request to player
+// `player_index`, first resetting every per-player setting the request can
+// leave null to MAGPIE's defaults. Exposed so the reset can be tested: it is
+// what stops one task's settings leaking into the next.
+void config_contribute_apply_player_settings(Config *config,
+                                             const JsonValue *player,
+                                             int player_index,
+                                             ErrorStack *error_stack);
+
+// Resets the run-wide settings no task request states -- bingo bonus, movegen
+// margin, sim cutoff, multi-threading mode, small plays -- to MAGPIE's
+// defaults, so a contributor's settings.txt or an earlier task cannot change
+// what a task computes. Exposed so the reset can be tested.
+void config_contribute_reset_shared_settings(Config *config);
+
+// Applies the run-wide settings a task request states: the bingo bonus, and
+// the simulation cutoff when states_cutoff. Both are required. Exposed for
+// testing.
+void config_contribute_apply_run_settings(Config *config,
+                                          const JsonValue *request,
+                                          bool states_cutoff,
+                                          ErrorStack *error_stack);
+
+// Copies one player's simulation settings into the run-wide ones that
+// impl_move_gen and impl_sim read. The opening-rack executor analyses through
+// those entry points, which ignore the per-player settings a request applies.
+void config_contribute_use_player_settings_for_analysis(Config *config,
+                                                        int player_index);
+
+// Loads the variant, board layout, lexicon, letter distribution and leaves a
+// task states, with each player's wordmap use set -- and the rack info table
+// switched off -- before the load reads those flags. Exposed so that ordering
+// can be tested: set afterwards, each task's flags applied to the next task.
+void config_contribute_load_lexicon_and_variant(
+    Config *config, const char *lexicon, const char *variant,
+    const char *letter_distribution, const char *board_layout,
+    const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
+    const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
+    ErrorStack *error_stack);
+
 Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 
@@ -117,7 +167,8 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
-                     const char *force_racks_filename, ErrorStack *error_stack);
+                     const char *const *forced_racks, int num_forced_racks,
+                     ErrorStack *error_stack);
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
                      SimResults *sim_results, int *arm_avoid_prune,
                      int num_arm_avoid_prune, ErrorStack *error_stack);
