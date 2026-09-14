@@ -35,14 +35,18 @@ those flags set produces one too.
 Five generations of 30K games each, each generation's self-play under
 the previous generation's weights; the 1-ply label (the opponent's
 reply score); ridge with lambda = 1/observations; the unseen pool for
-each training row excludes the mover's LEAVE. About 5 minutes on 10
-threads for CSW21.
+each training row excludes the mover's LEAVE. About 46 seconds on 10
+threads for CSW21 with WMP.
 
 Seed variance is real: identical recipes at different seeds differ by
 0.2-0.4 equity per disagreement, and CSW21's v3 is an above-median draw
 of its own recipe. One draw is fine for a new lexicon (any of them is
 about +3 points a game over no PAT); to pick the best of several, train
-at a few seeds and run the whole-game match in step 4 between them.
+at a few seeds (steps 1 and 2 each, ~1.6 minutes a seed), match each
+against the first with the step 4 command (~5 minutes per 500K-pair
+match, which resolves the 0.2-0.4 seed differences), and carry the
+winner into step 3. Budget: ~28 minutes a lexicon single-seed, ~47 with
+four seeds, the opening sim being the long pole either way.
 
 ## 2. Run-keyed through table and residual refit (v4 stage)
 
