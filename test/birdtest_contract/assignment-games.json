@@ -1,7 +1,7 @@
 {
   "claim_token": "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c",
   "job_id": "1d4a7f60-3c1e-4a55-9f2e-2f0f5d9e6a31",
-  "min_magpie_version": "0.2.0",
+  "min_magpie_version": "0.4.0",
   "expected_data": {
     "algorithm": "sha256",
     "files": [
@@ -56,10 +56,12 @@
     "num_games": 10,
     "game_pairs": false,
     "capture_positions": false,
+    "bingo_bonus": 50,
+    "sim_cutoff": 0.005,
     "player1": {
       "name": "simmer-NWL23-4ply@20251004",
       "recorder_type": "best",
-      "sort_strategy": null,
+      "sort_strategy": "equity",
       "lexicon": "NWL23",
       "leaves": "NWL23",
       "win_pct_model": "winpct",
@@ -73,14 +75,14 @@
       "time_limit_secs": 0,
       "use_wordmap": true,
       "use_rit": false,
-      "min_play_iterations": null,
-      "threshold": null,
-      "sampling_rule": null,
-      "inference_margin": null,
-      "utility_w_winpct": null,
-      "utility_w_spread": null,
-      "utility_spread_scale": null,
-      "movegen_margin": null
+      "min_play_iterations": 500,
+      "threshold": "gk16",
+      "sampling_rule": "top_two_ids",
+      "inference_margin": 5.0,
+      "utility_w_winpct": 1.0,
+      "utility_w_spread": 0.5,
+      "utility_spread_scale": 100.0,
+      "movegen_margin": 5.0
     },
     "player2": {
       "name": "static-NWL23@20251004",
@@ -90,9 +92,9 @@
       "leaves": "NWL23",
       "win_pct_model": null,
       "max_iterations": null,
-      "num_plies": null,
-      "num_plies_recorded": null,
-      "num_plays": null,
+      "num_plies": 0,
+      "num_plies_recorded": 2,
+      "num_plays": 100,
       "num_plays_recorded": 10,
       "stopping_pct": null,
       "use_inference": null,
@@ -106,7 +108,7 @@
       "utility_w_winpct": null,
       "utility_w_spread": null,
       "utility_spread_scale": null,
-      "movegen_margin": null
+      "movegen_margin": 5.0
     }
   }
 }

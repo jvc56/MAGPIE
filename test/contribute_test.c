@@ -308,6 +308,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
       CONTRIBUTE_KEY_BOARD_LAYOUT, CONTRIBUTE_KEY_SEED,
       CONTRIBUTE_KEY_NUM_GAMES,    CONTRIBUTE_KEY_CAPTURE_POSITIONS,
       CONTRIBUTE_KEY_PLAYER1,      CONTRIBUTE_KEY_PLAYER2,
+      CONTRIBUTE_KEY_BINGO_BONUS,  CONTRIBUTE_KEY_SIM_CUTOFF,
   };
   assert_fixture_has_keys(request, request_keys,
                           sizeof(request_keys) / sizeof(request_keys[0]),
@@ -342,7 +343,8 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   const char *const opening_rack_keys[] = {
       CONTRIBUTE_KEY_VARIANT,      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
       CONTRIBUTE_KEY_BOARD_LAYOUT, CONTRIBUTE_KEY_RACKS,
-      CONTRIBUTE_KEY_PLAYER,
+      CONTRIBUTE_KEY_PLAYER,       CONTRIBUTE_KEY_BINGO_BONUS,
+      CONTRIBUTE_KEY_SIM_CUTOFF,
   };
   assert_fixture_has_keys(request, opening_rack_keys,
                           sizeof(opening_rack_keys) /
@@ -370,6 +372,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
       CONTRIBUTE_KEY_NUM_GAMES,
       CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY,
       CONTRIBUTE_KEY_USE_WORDMAP,
+      CONTRIBUTE_KEY_BINGO_BONUS,
   };
   assert_fixture_has_keys(request, leave_keys,
                           sizeof(leave_keys) / sizeof(leave_keys[0]),
@@ -428,6 +431,79 @@ static void test_shared_settings_do_not_leak_between_tasks(void) {
   assert(config_get_bingo_bonus(config) == DEFAULT_BINGO_BONUS);
   assert(!config_get_use_small_plays(config));
 
+  // The bingo bonus is then the request's, not this build's default.
+  ErrorStack *error_stack = error_stack_create();
+  JsonValue *run =
+      json_parse("{\"bingo_bonus\": 40, \"sim_cutoff\": 0.01}", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_apply_run_settings(config, run, /*states_cutoff=*/true,
+                                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(config_get_bingo_bonus(config) == 40);
+
+  // A request that leaves the cutoff to this build is refused...
+  JsonValue *no_cutoff = json_parse("{\"bingo_bonus\": 40}", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_apply_run_settings(config, no_cutoff,
+                                       /*states_cutoff=*/true, error_stack);
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_reset(error_stack);
+  // ...unless the task cannot simulate, as leave generation cannot.
+  config_contribute_apply_run_settings(config, no_cutoff,
+                                       /*states_cutoff=*/false, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  json_destroy(no_cutoff);
+  json_destroy(run);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Nothing a player object leaves out is taken from this build's defaults. The
+// case this pins: a server that did not state a setting got whatever default
+// this release compiled in, so two releases played the same task differently
+// and a version floor, being a minimum, could not keep either out.
+static void test_a_player_must_state_every_setting(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  ErrorStack *error_stack = error_stack_create();
+
+  // A static player states no simulation settings, and needs none.
+  JsonValue *static_player = json_parse(
+      "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_apply_player_settings(config, static_player, 0,
+                                          error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  // One that leaves its play count to this build is refused.
+  JsonValue *no_plays = json_parse(
+      "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "\"num_plies\": 0, \"num_plays\": null, \"num_plies_recorded\": 2, "
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_apply_player_settings(config, no_plays, 0, error_stack);
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_reset(error_stack);
+
+  // So is a simulating player that states only what a static one must.
+  JsonValue *bare_simmer = json_parse(
+      "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "\"num_plies\": 2, \"num_plays\": 100, \"num_plies_recorded\": 2, "
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_apply_player_settings(config, bare_simmer, 0, error_stack);
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_reset(error_stack);
+
+  json_destroy(bare_simmer);
+  json_destroy(no_plays);
+  json_destroy(static_player);
+  error_stack_destroy(error_stack);
   config_destroy(config);
 }
 
@@ -501,6 +577,7 @@ static void test_lexical_flags_are_set_before_the_load(void) {
 void test_contribute(void) {
   test_lexical_flags_are_set_before_the_load();
   test_shared_settings_do_not_leak_between_tasks();
+  test_a_player_must_state_every_setting();
   test_opening_rack_analysis_uses_the_players_settings();
   test_version_comparison();
   test_json_wrapper();

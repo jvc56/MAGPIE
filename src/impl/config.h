@@ -57,6 +57,14 @@ void config_contribute_apply_player_settings(Config *config,
 // what a task computes. Exposed so the reset can be tested.
 void config_contribute_reset_shared_settings(Config *config);
 
+// Applies the run-wide settings a task request states: the bingo bonus, and
+// the simulation cutoff when states_cutoff. Both are required. Exposed for
+// testing.
+void config_contribute_apply_run_settings(Config *config,
+                                          const JsonValue *request,
+                                          bool states_cutoff,
+                                          ErrorStack *error_stack);
+
 // Copies one player's simulation settings into the run-wide ones that
 // impl_move_gen and impl_sim read. The opening-rack executor analyses through
 // those entry points, which ignore the per-player settings a request applies.

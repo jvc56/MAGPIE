@@ -38,6 +38,13 @@
 #define CONTRIBUTE_KEY_TIME_LIMIT_SECS "time_limit_secs"
 #define CONTRIBUTE_KEY_CAPTURE_POSITIONS "capture_positions"
 #define CONTRIBUTE_KEY_NUM_PLAYS_RECORDED "num_plays_recorded"
+// Run-wide settings a request states once for the whole task rather than per
+// player: the bingo bonus (-bb) every job type scores with, and the
+// simulation cutoff (-cutoff) of the job types that can simulate. Stated
+// rather than left to this build's compile-time defaults, so a task means the
+// same thing on every MAGPIE release.
+#define CONTRIBUTE_KEY_BINGO_BONUS "bingo_bonus"
+#define CONTRIBUTE_KEY_SIM_CUTOFF "sim_cutoff"
 
 // Remaining per-player options (-l1/-l2, -w1/-w2, -rit1/-rit2, -mi1/-mi2,
 // -pc1/-pc2, -th1/-th2, -sa1/-sa2, -im1/-im2, -uwin1/-uwin2,

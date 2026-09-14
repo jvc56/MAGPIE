@@ -960,7 +960,7 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.3.0"
+#define MAGPIE_VERSION "0.4.0"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -7355,10 +7355,20 @@ static void config_contribute_parse_threshold(const char *value,
   }
 }
 
+//
+// birdtest names the rules "round_robin" and "top_two_ids" -- its validation
+// and schema accept nothing else -- which the CLI's "rr"/"tt" matching below
+// refuses. That went unnoticed while a request could leave the rule null, and
+// would have failed every simulating task once requests state every setting,
+// so birdtest's names are matched exactly first.
 static void config_contribute_parse_sampling_rule(const char *value,
                                                   bai_sampling_rule_t *out,
                                                   ErrorStack *error_stack) {
-  if (has_iprefix(value, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
+  if (strings_equal(value, "round_robin")) {
+    *out = BAI_SAMPLING_RULE_ROUND_ROBIN;
+  } else if (strings_equal(value, "top_two_ids")) {
+    *out = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  } else if (has_iprefix(value, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
     *out = BAI_SAMPLING_RULE_ROUND_ROBIN;
   } else if (has_iprefix(value, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
     *out = BAI_SAMPLING_RULE_TOP_TWO_IDS;
@@ -7426,10 +7436,60 @@ static void config_contribute_reset_player_settings(Config *config,
                         error_stack);
 }
 
+// The keys every player object must state, whether or not the player
+// simulates. A request used to leave most settings null, meaning "this
+// worker's compile-time default", which made a result a function of the task
+// *and* of the MAGPIE release that ran it: two workers on releases with
+// different defaults played the same task differently, and a version floor --
+// a minimum, not a pin -- could not exclude either. The server now writes
+// every one of these into the player config when the config is created, so a
+// request without one comes from a server this build does not understand, and
+// is refused rather than filled in.
+//
+// num_plays is here, not with the simulation keys: an opening-rack analysis
+// sizes its move list from it, simulating or not.
+static const char *const contribute_required_player_keys[] = {
+    CONTRIBUTE_KEY_RECORDER_TYPE,      CONTRIBUTE_KEY_SORT_STRATEGY,
+    CONTRIBUTE_KEY_NUM_PLIES,          CONTRIBUTE_KEY_NUM_PLAYS,
+    CONTRIBUTE_KEY_NUM_PLIES_RECORDED, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,
+    CONTRIBUTE_KEY_MOVEGEN_MARGIN,
+};
+
+// The keys a simulating player must state as well. A static player never
+// reads them, and the server sends them null for one.
+static const char *const contribute_required_simmer_keys[] = {
+    CONTRIBUTE_KEY_MAX_ITERATIONS,       CONTRIBUTE_KEY_STOPPING_PCT,
+    CONTRIBUTE_KEY_USE_INFERENCE,        CONTRIBUTE_KEY_TIME_LIMIT_SECS,
+    CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS,  CONTRIBUTE_KEY_THRESHOLD,
+    CONTRIBUTE_KEY_SAMPLING_RULE,        CONTRIBUTE_KEY_INFERENCE_MARGIN,
+    CONTRIBUTE_KEY_UTILITY_W_WINPCT,     CONTRIBUTE_KEY_UTILITY_W_SPREAD,
+    CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE, CONTRIBUTE_KEY_WIN_PCT_MODEL,
+};
+
+// Pushes an error naming the first of `keys` that `object` leaves absent or
+// null, and returns false. `what` names the object in the message.
+static bool contribute_require_keys(const JsonValue *object,
+                                    const char *const *keys, int num_keys,
+                                    const char *what, ErrorStack *error_stack) {
+  for (int i = 0; i < num_keys; i++) {
+    const JsonValue *value = json_object_get(object, keys[i]);
+    if (!value || json_is_null(value)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent a %s with no %s, and contribute "
+                               "takes no setting from this build's defaults",
+                               what, keys[i]));
+      return false;
+    }
+  }
+  return true;
+}
+
 // Applies one player's settings from a task request's "player1"/"player2"/
-// "player" object, on top of config_contribute_reset_player_settings: a field
-// absent or null in the JSON takes MAGPIE's default, not the value a previous
-// command or task left behind.
+// "player" object, on top of config_contribute_reset_player_settings. Every
+// setting that can change a result must be stated (see
+// contribute_required_player_keys); the reset still runs first, so a setting
+// no request carries at all -- the PlayChooser -- is never inherited.
 void config_contribute_apply_player_settings(Config *config,
                                              const JsonValue *player,
                                              int player_index,
@@ -7467,6 +7527,19 @@ void config_contribute_apply_player_settings(Config *config,
 
   config_contribute_reset_player_settings(config, player_index, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (!contribute_require_keys(player, contribute_required_player_keys,
+                               sizeof(contribute_required_player_keys) /
+                                   sizeof(contribute_required_player_keys[0]),
+                               "player", error_stack)) {
+    return;
+  }
+  if (json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES, 0) > 0 &&
+      !contribute_require_keys(player, contribute_required_simmer_keys,
+                               sizeof(contribute_required_simmer_keys) /
+                                   sizeof(contribute_required_simmer_keys[0]),
+                               "simulating player", error_stack)) {
     return;
   }
 
@@ -7630,12 +7703,13 @@ void config_contribute_apply_player_settings(Config *config,
   }
 }
 
-// Resets the run-wide settings a task request never states to MAGPIE's own
-// defaults, for the same reason config_contribute_reset_player_settings resets
-// the per-player ones: a null has to mean the same thing on every contributor's
-// machine. None of these has a field in birdtest's request, and every one of
-// them changes what a task computes when left at whatever the contributor's
-// settings.txt, a command run before contribute, or an earlier task set:
+// Resets the run-wide settings to MAGPIE's own defaults, for the same reason
+// config_contribute_reset_player_settings resets the per-player ones: nothing
+// a task computes may depend on the contributor's settings.txt, a command run
+// before contribute, or an earlier task. The bingo bonus and the cutoff are
+// then overwritten by what the request states
+// (config_contribute_apply_run_settings); the rest have no field in birdtest's
+// request, and each still changes what a task computes when left over:
 //
 // - the bingo bonus is part of every play's score, so it moves every game's
 //   result and every move's equity;
@@ -7657,6 +7731,46 @@ void config_contribute_reset_shared_settings(Config *config) {
   config->use_heat_map = false;
   config->leavegen_max_games = 0;
   config->print_interval = 0;
+}
+
+// Applies the run-wide settings a task request states, on top of
+// config_contribute_reset_shared_settings. Every job type states the bingo
+// bonus, since it is part of every play's score; the job types that can
+// simulate state the cutoff as well. Both are required, for the reason
+// contribute_required_player_keys gives.
+void config_contribute_apply_run_settings(Config *config,
+                                          const JsonValue *request,
+                                          bool states_cutoff,
+                                          ErrorStack *error_stack) {
+  const int64_t bingo_bonus =
+      json_get_int(request, CONTRIBUTE_KEY_BINGO_BONUS, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (bingo_bonus < INT_MIN || bingo_bonus > INT_MAX) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an invalid bingo_bonus: %lld",
+                             (long long)bingo_bonus));
+    return;
+  }
+  config->bingo_bonus = (int)bingo_bonus;
+  if (!states_cutoff) {
+    return;
+  }
+  const double user_cutoff =
+      json_get_double(request, CONTRIBUTE_KEY_SIM_CUTOFF, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  // The same range the -cutoff argument accepts.
+  if (!isfinite(user_cutoff) || user_cutoff < 0 || user_cutoff > 100) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "server sent an invalid sim_cutoff: %f", user_cutoff));
+    return;
+  }
+  config->cutoff = convert_user_cutoff_to_cutoff(user_cutoff);
 }
 
 // impl_move_gen and impl_sim are the entry points the CLI's generate and
@@ -7836,6 +7950,11 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   // created, since MAGPIE has one value for the whole run; each is read from
   // whichever player states it, because a static player states no win% model.
   config_contribute_reset_shared_settings(config);
+  config_contribute_apply_run_settings(config, request, /*states_cutoff=*/true,
+                                       error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
   const char *win_pct_model = json_get_string_or_null(
       contribute_stated_by_either(player1, player2,
                                   CONTRIBUTE_KEY_WIN_PCT_MODEL),
@@ -7973,8 +8092,8 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
   // num_plays (or a recorder type of 'equity'/'all') deciding how many moves
   // each one ranks. Uncapped, an ordinary job could put a submission past the
   // server's 64 MiB ceiling, which comes back 413 and counts as a failed task.
-  // A request that omits num_plays_recorded keeps the old behaviour of
-  // reporting everything, since the writer treats a cap of 0 as no cap.
+  // Both are required of every player (config_contribute_apply_player_settings
+  // refuses a request without them), so the fallbacks here are never taken.
   const int max_plies =
       json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED, INT_MAX);
   const int play_cap =
@@ -8049,6 +8168,11 @@ static char *config_contribute_opening_rack(Config *config,
   config->num_threads = threads;
   config->human_readable = false;
   config_contribute_reset_shared_settings(config);
+  config_contribute_apply_run_settings(config, request, /*states_cutoff=*/true,
+                                       error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
   // Both seats get the job's one player: the analysed player on turn, and the
   // opponent a simulation plays out, whose settings were otherwise whatever an
   // earlier task left for player 2.
@@ -8181,6 +8305,12 @@ static char *config_contribute_leave_gen(Config *config,
     return NULL;
   }
   config_contribute_reset_shared_settings(config);
+  // The bot plays statically, so there is no cutoff to state.
+  config_contribute_apply_run_settings(config, request,
+                                       /*states_cutoff=*/false, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
   config->seed = seed;
   const char *previous_artifact_key =
       json_get_string_or_null(request, CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY);
