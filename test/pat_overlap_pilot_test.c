@@ -9,6 +9,7 @@
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
+#include "../src/ent/bonus_square.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
@@ -1241,6 +1242,590 @@ void test_pat_overlap_pilot(void) {
   free(stats);
   free(pre_scan);
   free(post_scan);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+// Premium-combination pilot (Astra): for every route to an open word-
+// multiplier square (TWS, DWS), the largest letter multiplier among the
+// EMPTY squares the reaching word must cover (the required span: the
+// premium, the empties between it and the route's contact, and a hook
+// contact itself), separately from letter multipliers beyond the contact
+// that only some replies would reach (the extension, within the remaining
+// rack budget). An occupied letter multiplier is spent and is not
+// counted. The per-position aggregate is sum over routes of
+// word_multiplier x (max letter multiplier in the required span - 1), and
+// candidates are scored by how they change it, with the same +/-
+// reranking sweep the overlap pilot used.
+
+typedef struct LMRoute {
+  int premium_row;
+  int premium_col;
+  int word_multiplier;
+  int dir;
+  int side;
+  int tiles_required;
+  bool is_floater;
+  int span_lm;        // max letter multiplier in the required span (1 = none)
+  int span_lm_offset; // squares from the premium to that letter multiplier
+  int ext_lm;         // max letter multiplier in the optional extension
+} LMRoute;
+
+#define PAT_LM_MAX_ROUTES 1024
+
+typedef struct LMScan {
+  LMRoute routes[PAT_LM_MAX_ROUTES];
+  int num_routes;
+  int aggregate;
+  int aggregate_by_pair[2]
+                       [2]; // [word class: 0 DWS, 1 TWS][letter: 0 DLS, 1 TLS]
+  int num_span_by_pair[2][2];
+  int num_ext_only;
+} LMScan;
+
+// Empty squares beyond a point on the lane, within the rack budget.
+static int lm_extension_max(const Square *lane, int start, int side,
+                            int budget) {
+  int ext_lm = 1;
+  for (int e = start;
+       budget > 0 && e >= 0 && e < BOARD_DIM &&
+       !square_get_is_brick(&lane[e]) &&
+       square_get_letter(&lane[e]) == ALPHABET_EMPTY_SQUARE_MARKER;
+       e += side, budget--) {
+    const int lm =
+        bonus_square_get_letter_multiplier(square_get_bonus_square(&lane[e]));
+    if (lm > ext_lm) {
+      ext_lm = lm;
+    }
+  }
+  return ext_lm;
+}
+
+static bool lm_route_same_key(const LMRoute *a, const LMRoute *b) {
+  return a->premium_row == b->premium_row && a->premium_col == b->premium_col &&
+         a->dir == b->dir && a->side == b->side &&
+         a->tiles_required == b->tiles_required &&
+         a->is_floater == b->is_floater;
+}
+
+static const LMRoute *lm_find_route(const LMScan *scan, const LMRoute *key) {
+  for (int i = 0; i < scan->num_routes; i++) {
+    if (lm_route_same_key(&scan->routes[i], key)) {
+      return &scan->routes[i];
+    }
+  }
+  return NULL;
+}
+
+// Whether a tile-placement move puts one of its own tiles on a square.
+static bool overlap_move_covers(const Move *move, int row, int col) {
+  const int row_start = move_get_row_start(move);
+  const int col_start = move_get_col_start(move);
+  const int dir = move_get_dir(move);
+  const int length = move_get_tiles_length(move);
+  for (int i = 0; i < length; i++) {
+    const int r = dir == BOARD_HORIZONTAL_DIRECTION ? row_start : row_start + i;
+    const int c = dir == BOARD_HORIZONTAL_DIRECTION ? col_start + i : col_start;
+    if (r == row && c == col) {
+      return move_get_tile(move, i) != PLAYED_THROUGH_MARKER;
+    }
+  }
+  return false;
+}
+
+static void lm_scan_premium_lane(const Square *lanes,
+                                 const uint8_t *unseen_counts, int premium_row,
+                                 int premium_col, int word_multiplier, int dir,
+                                 LMScan *scan) {
+  const int lane_index =
+      (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_row : premium_col;
+  const int premium_idx =
+      (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_col : premium_row;
+  const Square *lane = board_get_row_cache(lanes, lane_index, dir);
+  if (square_get_letter(&lane[premium_idx]) != ALPHABET_EMPTY_SQUARE_MARKER) {
+    return;
+  }
+  const uint64_t premium_cross_set = square_get_cross_set(&lane[premium_idx]);
+  if (premium_cross_set == 0) {
+    return;
+  }
+  for (int side = -1; side <= 1; side += 2) {
+    int empties_used = 1;
+    int prev_empty_idx = premium_idx;
+    int span_lm = 1;
+    int span_lm_offset = 0;
+    int idx = premium_idx + side;
+    while (idx >= 0 && idx < BOARD_DIM) {
+      if (square_get_is_brick(&lane[idx])) {
+        break;
+      }
+      const MachineLetter letter = square_get_letter(&lane[idx]);
+      if (letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+        const int distance_bin = empties_used;
+        const int facing_idx = idx;
+        while (idx >= 0 && idx < BOARD_DIM &&
+               !square_get_is_brick(&lane[idx]) &&
+               square_get_letter(&lane[idx]) != ALPHABET_EMPTY_SQUARE_MARKER) {
+          idx += side;
+        }
+        const uint64_t extension_set =
+            (side > 0)
+                ? square_get_left_extension_set(&lane[prev_empty_idx])
+                : square_get_right_extension_set(&lane[prev_empty_idx - 1]);
+        if (overlap_set_flex(unseen_counts, extension_set) > 0 &&
+            scan->num_routes < PAT_LM_MAX_ROUTES) {
+          // Extension: empty squares beyond the run or beyond the
+          // premium, within the rack.
+          int ext_lm =
+              lm_extension_max(lane, idx, side, RACK_SIZE - distance_bin);
+          const int far_lm = lm_extension_max(lane, premium_idx - side, -side,
+                                              RACK_SIZE - distance_bin);
+          if (far_lm > ext_lm) {
+            ext_lm = far_lm;
+          }
+          LMRoute *route = &scan->routes[scan->num_routes++];
+          route->premium_row = premium_row;
+          route->premium_col = premium_col;
+          route->word_multiplier = word_multiplier;
+          route->dir = dir;
+          route->side = side;
+          route->tiles_required = distance_bin;
+          route->is_floater = true;
+          route->span_lm = span_lm;
+          route->span_lm_offset = span_lm_offset;
+          route->ext_lm = ext_lm;
+          (void)facing_idx;
+        }
+        // A word must play through the run; squares beyond it belong to
+        // later routes on this lane, which pat_scan_unit also continues
+        // to, but for this pilot the first run ends the route search.
+        break;
+      }
+      const uint64_t cross_set = square_get_cross_set(&lane[idx]);
+      if (cross_set == 0) {
+        break;
+      }
+      empties_used++;
+      if (empties_used > RACK_SIZE) {
+        break;
+      }
+      const int lm = bonus_square_get_letter_multiplier(
+          square_get_bonus_square(&lane[idx]));
+      if (lm > span_lm) {
+        span_lm = lm;
+        span_lm_offset = empties_used - 1;
+      }
+      if (bonus_square_get_word_multiplier(
+              square_get_bonus_square(&lane[idx])) >= 2) {
+        // A second word multiplier within reach: the word x word cases
+        // (triple-triple, double-double) are their own features.
+        break;
+      }
+      if (cross_set != TRIVIAL_CROSS_SET &&
+          overlap_set_flex(unseen_counts, cross_set) > 0 &&
+          scan->num_routes < PAT_LM_MAX_ROUTES) {
+        int ext_lm =
+            lm_extension_max(lane, idx + side, side, RACK_SIZE - empties_used);
+        const int far_lm = lm_extension_max(lane, premium_idx - side, -side,
+                                            RACK_SIZE - empties_used);
+        if (far_lm > ext_lm) {
+          ext_lm = far_lm;
+        }
+        LMRoute *route = &scan->routes[scan->num_routes++];
+        route->premium_row = premium_row;
+        route->premium_col = premium_col;
+        route->word_multiplier = word_multiplier;
+        route->dir = dir;
+        route->side = side;
+        route->tiles_required = empties_used;
+        route->is_floater = false;
+        route->span_lm = span_lm;
+        route->span_lm_offset = span_lm_offset;
+        route->ext_lm = ext_lm;
+      }
+      prev_empty_idx = idx;
+      idx += side;
+    }
+  }
+}
+
+static void lm_scan_game(const Game *game, int mover_index, LMScan *scan) {
+  scan->num_routes = 0;
+  scan->aggregate = 0;
+  memset(scan->aggregate_by_pair, 0, sizeof(scan->aggregate_by_pair));
+  memset(scan->num_span_by_pair, 0, sizeof(scan->num_span_by_pair));
+  scan->num_ext_only = 0;
+  const Board *board = game_get_board(game);
+  const int cross_set_index = board_get_cross_set_index(
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), mover_index);
+  const Square *lanes = board_get_readonly_lanes(board, cross_set_index);
+  uint8_t unseen_counts[MAX_ALPHABET_SIZE];
+  overlap_compute_unseen(lanes, game_get_ld(game),
+                         player_get_rack(game_get_player(game, mover_index)),
+                         unseen_counts);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    const Square *lane =
+        board_get_row_cache(lanes, row, BOARD_HORIZONTAL_DIRECTION);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const Square *square = &lane[col];
+      const int wm =
+          bonus_square_get_word_multiplier(square_get_bonus_square(square));
+      if (square_get_is_brick(square) ||
+          square_get_letter(square) != ALPHABET_EMPTY_SQUARE_MARKER || wm < 2) {
+        continue;
+      }
+      lm_scan_premium_lane(lanes, unseen_counts, row, col, wm,
+                           BOARD_HORIZONTAL_DIRECTION, scan);
+      lm_scan_premium_lane(lanes, unseen_counts, row, col, wm,
+                           BOARD_VERTICAL_DIRECTION, scan);
+    }
+  }
+  for (int i = 0; i < scan->num_routes; i++) {
+    const LMRoute *route = &scan->routes[i];
+    scan->aggregate += route->word_multiplier * (route->span_lm - 1);
+    if (route->span_lm > 1) {
+      const int w = route->word_multiplier == 3 ? 1 : 0;
+      const int l = route->span_lm == 3 ? 1 : 0;
+      scan->num_span_by_pair[w][l]++;
+      scan->aggregate_by_pair[w][l] +=
+          route->word_multiplier * (route->span_lm - 1);
+    } else if (route->ext_lm > 1) {
+      scan->num_ext_only++;
+    }
+  }
+}
+
+// The aggregate for the harness's diagnostic reranking.
+int pat_lm_aggregate(const Game *game, int mover_index) {
+  static LMScan *scratch = NULL;
+  if (scratch == NULL) {
+    scratch = malloc_or_die(sizeof(LMScan));
+  }
+  lm_scan_game(game, mover_index, scratch);
+  return scratch->aggregate;
+}
+
+void test_pat_premium_combo_pilot(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-pat pat_dls_champion_v4");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  MoveList *move_list = move_list_create(PAT_OVERLAP_MOVE_LIST_CAPACITY);
+  LMScan *pre = malloc_or_die(sizeof(LMScan));
+  LMScan *post = malloc_or_die(sizeof(LMScan));
+  int positions = 0;
+  int pos_with_span = 0;
+  int pos_by_pair[2][2] = {{0, 0}, {0, 0}};
+  long routes_total = 0;
+  long routes_with_span = 0;
+  long routes_ext_only = 0;
+  long offset_hist[RACK_SIZE + 1] = {0};
+  long candidates = 0;
+  long candidates_changing = 0;
+  long candidates_up = 0;
+  long candidates_down = 0;
+  int pos_candidate_changing = 0;
+  int pos_close_changing[3] = {0, 0, 0};
+  int pos_best_changes = 0;
+  static const double lm_corrections[PAT_OVERLAP_NUM_CORRECTIONS] = {
+      -2.0, -1.0, -0.5, -0.25, 0.25, 0.5, 1.0, 2.0};
+  int rerank[PAT_OVERLAP_NUM_CORRECTIONS] = {0};
+  long delta_hist[5] = {0}; // |delta| 1-2, 3-5, 6-10, 11-20, >20 (within 2 eq)
+  // What a near-best (within 2 eq) candidate does to routes with a letter
+  // multiplier in their span: creates one, consumes the letter multiplier
+  // or the premium with its own tiles, removes one otherwise (a block or
+  // a changed contact), or leaves them alone.
+  int pos_near_create = 0;
+  int pos_near_consume = 0;
+  int pos_near_remove = 0;
+  long near_candidates = 0;
+  long near_create = 0;
+  long near_consume = 0;
+  long near_remove = 0;
+  int examples = 0;
+  for (int game_index = 0; game_index < PAT_OVERLAP_NUM_GAMES; game_index++) {
+    game_reset(game);
+    game_seed(game, 910000000ULL + (uint64_t)game_index);
+    draw_starting_racks(game);
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+           bag_get_letters(game_get_bag(game)) > 0) {
+      const MoveGenArgs args = {
+          .game = game,
+          .move_list = move_list,
+          .move_record_type = MOVE_RECORD_ALL,
+          .move_sort_type = MOVE_SORT_EQUITY,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&args);
+      move_list_sort_moves(move_list);
+      if (move_list_get_count(move_list) == 0) {
+        break;
+      }
+      const int mover_index = game_get_player_on_turn_index(game);
+      lm_scan_game(game, mover_index, pre);
+      positions++;
+      routes_total += pre->num_routes;
+      bool any_span = false;
+      for (int i = 0; i < pre->num_routes; i++) {
+        if (pre->routes[i].span_lm > 1) {
+          routes_with_span++;
+          any_span = true;
+          offset_hist[pre->routes[i].span_lm_offset]++;
+        } else if (pre->routes[i].ext_lm > 1) {
+          routes_ext_only++;
+        }
+      }
+      if (any_span) {
+        pos_with_span++;
+      }
+      for (int w = 0; w < 2; w++) {
+        for (int l = 0; l < 2; l++) {
+          if (pre->num_span_by_pair[w][l] > 0) {
+            pos_by_pair[w][l]++;
+          }
+        }
+      }
+      const int num_moves = move_list_get_count(move_list);
+      const double best_equity =
+          equity_to_double(move_get_equity(move_list_get_move(move_list, 0)));
+      double equities[PAT_OVERLAP_MAX_CANDIDATES];
+      int deltas[PAT_OVERLAP_MAX_CANDIDATES];
+      int num_candidates = 0;
+      bool changing = false;
+      bool close[3] = {false, false, false};
+      bool near_create_here = false;
+      bool near_consume_here = false;
+      bool near_remove_here = false;
+      game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
+      for (int i = 0;
+           i < num_moves && num_candidates < PAT_OVERLAP_MAX_CANDIDATES; i++) {
+        const Move *move = move_list_get_move(move_list, i);
+        if (move_get_type(move) == GAME_EVENT_PASS) {
+          continue;
+        }
+        const double equity = equity_to_double(move_get_equity(move));
+        const double gap = best_equity - equity;
+        if (gap > PAT_OVERLAP_EQUITY_MARGIN) {
+          break;
+        }
+        int delta = 0;
+        int created = 0;
+        int consumed = 0;
+        int removed = 0;
+        if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          play_move_without_drawing_tiles(move, game);
+          lm_scan_game(game, mover_index, post);
+          game_unplay_last_move(game);
+          delta = post->aggregate - pre->aggregate;
+          if (gap <= 2.0) {
+            for (int r = 0; r < post->num_routes; r++) {
+              const LMRoute *route = &post->routes[r];
+              if (route->span_lm > 1 && lm_find_route(pre, route) == NULL) {
+                created++;
+              }
+            }
+            for (int r = 0; r < pre->num_routes; r++) {
+              const LMRoute *route = &pre->routes[r];
+              if (route->span_lm <= 1) {
+                continue;
+              }
+              const LMRoute *after = lm_find_route(post, route);
+              if (after != NULL && after->span_lm >= route->span_lm) {
+                continue;
+              }
+              // Does the move's own word cover the letter multiplier
+              // square or the premium?
+              int lm_row = route->premium_row;
+              int lm_col = route->premium_col;
+              if (route->dir == BOARD_HORIZONTAL_DIRECTION) {
+                lm_col += route->side * route->span_lm_offset;
+              } else {
+                lm_row += route->side * route->span_lm_offset;
+              }
+              const bool covers = overlap_move_covers(move, lm_row, lm_col) ||
+                                  overlap_move_covers(move, route->premium_row,
+                                                      route->premium_col);
+              if (covers) {
+                consumed++;
+              } else {
+                removed++;
+              }
+            }
+          }
+        }
+        if (gap <= 2.0 && i > 0) {
+          near_candidates++;
+          if (created > 0) {
+            near_create++;
+            near_create_here = true;
+          }
+          if (consumed > 0) {
+            near_consume++;
+            near_consume_here = true;
+          }
+          if (removed > 0) {
+            near_remove++;
+            near_remove_here = true;
+          }
+          if (delta != 0) {
+            const int a = delta < 0 ? -delta : delta;
+            delta_hist[a <= 2    ? 0
+                       : a <= 5  ? 1
+                       : a <= 10 ? 2
+                       : a <= 20 ? 3
+                                 : 4]++;
+          }
+        }
+        equities[num_candidates] = equity;
+        deltas[num_candidates] = delta;
+        num_candidates++;
+        candidates++;
+        if (delta != 0) {
+          candidates_changing++;
+          changing = true;
+          if (delta > 0) {
+            candidates_up++;
+          } else {
+            candidates_down++;
+          }
+          if (i == 0) {
+            pos_best_changes++;
+          }
+          for (int g = 0; g < 3; g++) {
+            if (i > 0 && gap <= pat_overlap_close_gaps[g]) {
+              close[g] = true;
+            }
+          }
+          if (i > 0 && delta > 0 && gap <= 3.0 &&
+              examples < PAT_OVERLAP_MAX_EXAMPLES) {
+            examples++;
+            char *cgp = game_get_cgp(game, true);
+            printf("\npremium-combo example %d (bag %d): %s\n  best ", examples,
+                   bag_get_letters(game_get_bag(game)), cgp);
+            free(cgp);
+            overlap_print_move(game, move_list_get_move(move_list, 0));
+            printf(" eq %.2f\n  candidate ", best_equity);
+            overlap_print_move(game, move);
+            printf(" eq %.2f (gap %.2f) aggregate %d -> %d\n", equity, gap,
+                   pre->aggregate, post->aggregate);
+            for (int r = 0; r < post->num_routes; r++) {
+              const LMRoute *route = &post->routes[r];
+              if (route->span_lm <= 1) {
+                continue;
+              }
+              printf("    %s from %s ",
+                     route->is_floater ? "floater" : "hook   ",
+                     route->word_multiplier == 3 ? "TWS" : "DWS");
+              overlap_print_square(route->premium_row, route->premium_col);
+              printf(" %s%s tiles %d: letter x%d at offset %d%s\n",
+                     route->dir == BOARD_HORIZONTAL_DIRECTION ? "row" : "col",
+                     route->side < 0 ? "-" : "+", route->tiles_required,
+                     route->span_lm, route->span_lm_offset,
+                     route->ext_lm > 1 ? " (+ext)" : "");
+            }
+          }
+        }
+      }
+      game_set_backup_mode(game, BACKUP_MODE_OFF);
+      if (changing) {
+        pos_candidate_changing++;
+      }
+      pos_near_create += near_create_here;
+      pos_near_consume += near_consume_here;
+      pos_near_remove += near_remove_here;
+      for (int g = 0; g < 3; g++) {
+        if (close[g]) {
+          pos_close_changing[g]++;
+        }
+      }
+      for (int c = 0; c < PAT_OVERLAP_NUM_CORRECTIONS; c++) {
+        const double correction = lm_corrections[c];
+        int best_index = 0;
+        double best_adjusted = equities[0] - correction * deltas[0];
+        for (int i = 1; i < num_candidates; i++) {
+          const double adjusted = equities[i] - correction * deltas[i];
+          if (adjusted > best_adjusted) {
+            best_adjusted = adjusted;
+            best_index = i;
+          }
+        }
+        if (best_index != 0) {
+          rerank[c]++;
+        }
+      }
+      Move best;
+      move_copy(&best, move_list_get_move(move_list, 0));
+      play_move(&best, game, NULL);
+    }
+  }
+  printf(
+      "\npremium-combination pilot (v4 self-play, %d games, %d positions):\n",
+      PAT_OVERLAP_NUM_GAMES, positions);
+  printf("  routes per position %.2f; with an empty letter multiplier in the "
+         "required span %.1f%%; letter multiplier only in the extension "
+         "%.1f%%\n",
+         (double)routes_total / positions,
+         100.0 * routes_with_span / routes_total,
+         100.0 * routes_ext_only / routes_total);
+  overlap_print_pct("positions with any such route", pos_with_span, positions);
+  printf("  by pair: TWS+DLS %.1f%%, TWS+TLS %.1f%%, DWS+DLS %.1f%%, DWS+TLS "
+         "%.1f%% of positions\n",
+         100.0 * pos_by_pair[1][0] / positions,
+         100.0 * pos_by_pair[1][1] / positions,
+         100.0 * pos_by_pair[0][0] / positions,
+         100.0 * pos_by_pair[0][1] / positions);
+  printf("  letter multiplier's offset from the premium (routes):");
+  for (int o = 0; o <= RACK_SIZE; o++) {
+    printf(" %d:%ld", o, offset_hist[o]);
+  }
+  printf("\ncandidates within %.0f equity of best:\n",
+         PAT_OVERLAP_EQUITY_MARGIN);
+  overlap_print_pct("candidates changing the aggregate", candidates_changing,
+                    candidates);
+  printf("    increasing %ld, decreasing %ld\n", candidates_up,
+         candidates_down);
+  overlap_print_pct("positions with any examined candidate changing",
+                    pos_candidate_changing, positions);
+  overlap_print_pct("positions where the best move itself changes",
+                    pos_best_changes, positions);
+  for (int g = 0; g < 3; g++) {
+    char label[96];
+    snprintf(label, sizeof(label),
+             "positions with a non-best candidate within %.0f eq changing",
+             pat_overlap_close_gaps[g]);
+    overlap_print_pct(label, pos_close_changing[g], positions);
+  }
+  printf("near-best (within 2 eq, non-best) candidates: %ld\n",
+         near_candidates);
+  printf("  |delta| 1-2: %ld, 3-5: %ld, 6-10: %ld, 11-20: %ld, >20: %ld\n",
+         delta_hist[0], delta_hist[1], delta_hist[2], delta_hist[3],
+         delta_hist[4]);
+  printf("  creating a route with a letter multiplier in its span: %ld "
+         "(%.1f%%); positions %d (%.1f%%)\n",
+         near_create, 100.0 * near_create / near_candidates, pos_near_create,
+         100.0 * pos_near_create / positions);
+  printf("  consuming the letter multiplier or the premium: %ld (%.1f%%); "
+         "positions %d (%.1f%%)\n",
+         near_consume, 100.0 * near_consume / near_candidates, pos_near_consume,
+         100.0 * pos_near_consume / positions);
+  printf("  removing such a route otherwise (block, changed contact): %ld "
+         "(%.1f%%); positions %d (%.1f%%)\n",
+         near_remove, 100.0 * near_remove / near_candidates, pos_near_remove,
+         100.0 * pos_near_remove / positions);
+  printf("reranking sensitivity (equity per unit of aggregate = per point of "
+         "word multiplier x (letter multiplier - 1); positive = penalize "
+         "creating):\n");
+  for (int c = 0; c < PAT_OVERLAP_NUM_CORRECTIONS; c++) {
+    printf("  correction %+.2f: %d (%.2f%%)\n", lm_corrections[c], rerank[c],
+           100.0 * rerank[c] / positions);
+  }
+  free(pre);
+  free(post);
   move_list_destroy(move_list);
   config_destroy(config);
 }

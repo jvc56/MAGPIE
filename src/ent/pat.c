@@ -381,7 +381,7 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
     snprintf(buf, buf_size, "tt_floater");
   } else if (feature_index == PAT_FEATURE_TT_HOOK_ONLY) {
     snprintf(buf, buf_size, "tt_hook_only");
-  } else if (feature_index < PAT_NUM_FEATURES) {
+  } else if (feature_index < PAT_FEATURE_LM_SPAN_START) {
     static const char *const tier_names[PAT_WINDOW_TIER_COUNT] = {"dd", "w6",
                                                                   "w9", "w12"};
     static const char *const kind_names[PAT_WINDOW_FEATURES_PER_TIER] = {
@@ -390,6 +390,18 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
     snprintf(buf, buf_size, "%s_%s",
              tier_names[offset / PAT_WINDOW_FEATURES_PER_TIER],
              kind_names[offset % PAT_WINDOW_FEATURES_PER_TIER]);
+  } else if (feature_index < PAT_FEATURE_LM_EXT_START) {
+    snprintf(buf, buf_size, "lm_span_d%d",
+             feature_index - PAT_FEATURE_LM_SPAN_START + 1);
+  } else if (feature_index < PAT_FEATURE_DWS_LM_SPAN_START) {
+    snprintf(buf, buf_size, "lm_ext_d%d",
+             feature_index - PAT_FEATURE_LM_EXT_START + 1);
+  } else if (feature_index < PAT_FEATURE_DWS_LM_EXT_START) {
+    snprintf(buf, buf_size, "dws_lm_span_d%d",
+             feature_index - PAT_FEATURE_DWS_LM_SPAN_START + 1);
+  } else if (feature_index < PAT_NUM_FEATURES) {
+    snprintf(buf, buf_size, "dws_lm_ext_d%d",
+             feature_index - PAT_FEATURE_DWS_LM_EXT_START + 1);
   } else {
     log_fatal("invalid PAT feature index: %d", feature_index);
   }
@@ -597,11 +609,11 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
     if (has_prefix(PAT_FIT_RESIDUAL_ROW_PREFIX, line)) {
       const int flag = string_to_int(line + strlen(PAT_FIT_RESIDUAL_ROW_PREFIX),
                                      error_stack);
-      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 3) {
+      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 4) {
         error_stack_push(
             error_stack, ERROR_STATUS_PAT_INVALID_ROW,
             get_formatted_string("PAT file '%s' line %d has a fit_residual "
-                                 "value other than 0 to 3: '%s'",
+                                 "value other than 0 to 4: '%s'",
                                  pat_name, line_index + 1, line));
         return;
       }
@@ -685,6 +697,11 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
     }
     pat->weights[feature_index] = weight;
     feature_index++;
+  }
+  // A version below 5 has no premium-combination rows: added in version
+  // 5 at the end, so such a file simply stops before them.
+  if (version < 5 && feature_index == PAT_FEATURE_LM_SPAN_START) {
+    feature_index = PAT_NUM_FEATURES;
   }
   if (feature_index != PAT_NUM_FEATURES) {
     error_stack_push(
@@ -1478,6 +1495,25 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     float_score_base = PAT_FEATURE_QLS_FLOAT_SCORE_START;
   }
   const bool full_channels = (premium_class == PAT_PREMIUM_TWS);
+  // Premium combinations (see PAT_FEATURE_LM_SPAN_START): the letter
+  // multiplier of every empty square the walk needs, in walk order per
+  // side (entry 0 is the premium itself), and each feasible route's bin
+  // and the entry it makes contact at, resolved after both sides are
+  // walked because a word may extend past the premium onto the far side.
+  int lm_span_base = -1;
+  int lm_ext_base = -1;
+  if (premium_class == PAT_PREMIUM_TWS) {
+    lm_span_base = PAT_FEATURE_LM_SPAN_START;
+    lm_ext_base = PAT_FEATURE_LM_EXT_START;
+  } else if (premium_class == PAT_PREMIUM_DWS) {
+    lm_span_base = PAT_FEATURE_DWS_LM_SPAN_START;
+    lm_ext_base = PAT_FEATURE_DWS_LM_EXT_START;
+  }
+  int8_t lm_entries[2][RACK_SIZE + 1];
+  int lm_num_entries[2] = {1, 1};
+  int8_t lm_route_bin[2][2 * RACK_SIZE + 2];
+  int8_t lm_route_position[2][2 * RACK_SIZE + 2];
+  int lm_num_routes[2] = {0, 0};
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
   const int tws_idx = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_col : tws_row;
@@ -1508,6 +1544,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     // No word along this lane can cover the TWS square at all.
     return;
   }
+  lm_entries[0][0] = (int8_t)bonus_square_get_letter_multiplier(
+      square_get_bonus_square(&lane[tws_idx]));
+  lm_entries[1][0] = lm_entries[0][0];
   if (tws_info.hooky) {
     // A one-tile play on the TWS square itself completes a perpendicular
     // word at triple word score: hook access at d = 1.
@@ -1519,9 +1558,16 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     if (hook_letters_out) {
       *hook_letters_out |= tws_info.letter_set;
     }
+    if (tws_info.flex > 0) {
+      // Contact at the premium itself; either side is its far side.
+      lm_route_bin[0][0] = 1;
+      lm_route_position[0][0] = 0;
+      lm_num_routes[0] = 1;
+    }
   }
 
   for (int side = -1; side <= 1; side += 2) {
+    const int lm_side = (side < 0) ? 0 : 1;
     // Number of empty squares a word covering the span from the current
     // scan position through the TWS square must fill, i.e. the number of
     // tiles the opponent must play. The TWS square itself is the first.
@@ -1676,6 +1722,13 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           features[PAT_FEATURE_FLOAT_FLEX_SCALED_START + distance_bin - 1] +=
               scaled_run_flex;
         }
+        if (run_flex > 0 && lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
+          // Contact at the last empty before the run.
+          lm_route_bin[lm_side][lm_num_routes[lm_side]] = (int8_t)distance_bin;
+          lm_route_position[lm_side][lm_num_routes[lm_side]] =
+              (int8_t)(lm_num_entries[lm_side] - 1);
+          lm_num_routes[lm_side]++;
+        }
         span_has_floater = true;
         span_floater_flex += run_flex;
         continue;
@@ -1689,6 +1742,11 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       empties_used++;
       if (empties_used > max_reach) {
         break;
+      }
+      if (lm_num_entries[lm_side] < RACK_SIZE + 1) {
+        lm_entries[lm_side][lm_num_entries[lm_side]++] =
+            (int8_t)bonus_square_get_letter_multiplier(
+                square_get_bonus_square(&lane[idx]));
       }
       if (full_channels && bonus_square_get_word_multiplier(
                                square_get_bonus_square(&lane[idx])) == 3) {
@@ -1712,6 +1770,13 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         if (hook_letters_out) {
           *hook_letters_out |= info.letter_set;
         }
+        if (info.flex > 0 && lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
+          // Contact at the hook square, the entry just recorded.
+          lm_route_bin[lm_side][lm_num_routes[lm_side]] = (int8_t)empties_used;
+          lm_route_position[lm_side][lm_num_routes[lm_side]] =
+              (int8_t)(lm_num_entries[lm_side] - 1);
+          lm_num_routes[lm_side]++;
+        }
         span_has_hook = true;
       }
       prev_empty_idx = idx;
@@ -1721,6 +1786,49 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       *extent_lo = last_visited_idx;
     } else if (side > 0 && extent_hi) {
       *extent_hi = last_visited_idx;
+    }
+  }
+  if (lm_span_base < 0) {
+    return;
+  }
+  for (int lm_side = 0; lm_side < 2; lm_side++) {
+    const int other = 1 - lm_side;
+    const int num_entries = lm_num_entries[lm_side];
+    // Largest letter multiplier up to each entry (the span of a route
+    // contacting there) and from each entry on (its extension beyond).
+    int prefix_max[RACK_SIZE + 1];
+    int suffix_max[RACK_SIZE + 2];
+    prefix_max[0] = lm_entries[lm_side][0];
+    for (int k = 1; k < num_entries; k++) {
+      prefix_max[k] = (lm_entries[lm_side][k] > prefix_max[k - 1])
+                          ? lm_entries[lm_side][k]
+                          : prefix_max[k - 1];
+    }
+    suffix_max[num_entries] = 1;
+    for (int k = num_entries - 1; k >= 0; k--) {
+      suffix_max[k] = (lm_entries[lm_side][k] > suffix_max[k + 1])
+                          ? lm_entries[lm_side][k]
+                          : suffix_max[k + 1];
+    }
+    for (int r = 0; r < lm_num_routes[lm_side]; r++) {
+      const int bin = lm_route_bin[lm_side][r];
+      const int position = lm_route_position[lm_side][r];
+      const int span_lm = prefix_max[position];
+      int ext_lm = suffix_max[position + 1];
+      // Past the premium onto the far side, with the tiles the route
+      // leaves in the rack (entry 0 there is the premium again).
+      const int budget = max_reach - bin;
+      for (int k = 1; k <= budget && k < lm_num_entries[other]; k++) {
+        if (lm_entries[other][k] > ext_lm) {
+          ext_lm = lm_entries[other][k];
+        }
+      }
+      features[lm_span_base + bin - 1] +=
+          premium_word_multiplier * (span_lm - 1);
+      if (ext_lm > span_lm) {
+        features[lm_ext_base + bin - 1] +=
+            premium_word_multiplier * (ext_lm - 1);
+      }
     }
   }
 }
