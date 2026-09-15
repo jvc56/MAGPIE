@@ -77,11 +77,11 @@ for c in $candidates; do
 done
 note "Selected: $best."
 log "opening table for $best ($OPENING_RACKS racks)"
-mgt "patopeningsim:$lex:$best:$OPENING_RACKS" > "$log_dir/opening_sim.txt" 2>&1
+mgt "patopeningsim:$lex:$best:$OPENING_RACKS:$leaves" > "$log_dir/opening_sim.txt" 2>&1
 rows="$(grep -E '^opening_(tiles_[0-9]+|exchange),-?[0-9]+$' "$log_dir/opening_sim.txt")"
 final="${release}_final"
 { head -1 "$strategy/$best.pat"; tail -n +2 "$strategy/$best.pat" | grep -v '^#' | grep -v '^opening_'; echo "$rows"; } > "$strategy/$final.pat"
-note "Opening table (patopeningsim:$lex:$best:$OPENING_RACKS): $(echo "$rows" | tr '\n' ' ')"
+note "Opening table (patopeningsim:$lex:$best:$OPENING_RACKS:$leaves): $(echo "$rows" | tr '\n' ' ')"
 log "validate $final vs none"
 mg autoplay games $VALIDATE_PAIRS $common -seed $validate_seed -pat1 "$final" -pat2 none > "$log_dir/validate.txt" 2>&1
 vl="$(line_of "$log_dir/validate.txt")"; log "  validation: $vl"
