@@ -71,6 +71,10 @@ pat_regression_solve_into_weights_shrunk(const PATRegression *regression,
 // candidate without storing rows.
 double pat_regression_installed_mse(const PATRegression *regression,
                                     const PATWeights *pat);
+// The same with a given intercept (e.g. the one the training fit chose)
+// instead of the refit one: untouched out-of-sample error.
+double pat_regression_installed_mse_with_intercept(
+    const PATRegression *regression, const PATWeights *pat, double intercept);
 double pat_regression_baseline_mse(const PATRegression *regression);
 
 #endif

@@ -364,6 +364,18 @@ void postgen_prebroadcast_func(void *data) {
   }
 }
 
+// Whether a game pair's observations go to the validation accumulator:
+// a deterministic hash of the pair's number rather than its position in
+// the sequence, so no periodic structure in the schedule lines up with
+// the split.
+static bool pat_gen_pair_is_validation(uint64_t game_number) {
+  uint64_t z = game_number + 0x9E3779B97F4A7C15ULL;
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  z ^= z >> 31;
+  return (z % PAT_GEN_HELDOUT_EVERY) == 0;
+}
+
 // Per-observation ridge strength for the PAT regression, in
 // (points per feature unit)^2. Tuned conservatively; revisit once real
 // training runs exist.
@@ -399,17 +411,21 @@ void pat_postgen_prebroadcast_func(void *data) {
 #define total_regression (*total_regression_ptr)
 #define heldout_regression (*heldout_regression_ptr)
   PATWeights *pat = pat_gen_shared_data->pat;
-  const double heldout_loaded_mse =
+  const double validation_loaded_mse =
       pat_regression_installed_mse(&heldout_regression, pat);
-  const double heldout_baseline_mse =
+  const double validation_baseline_mse =
       pat_regression_baseline_mse(&heldout_regression);
   StringBuilder *shrink_sb = string_builder_create();
-  double chosen_shrink = 0.0;
+  PATSolveResult solve_result;
+  memset(&solve_result, 0, sizeof(solve_result));
   if (pat_get_fit_shrink(pat)) {
-    // Adapt the loaded weights: for each shrinkage strength, fit, score
-    // the installed candidate on the held-out games, keep the file, then
-    // restore the loaded weights; the strength with the lowest held-out
-    // error is fitted last and becomes the live weights.
+    // Adapt the loaded weights: for each shrinkage strength (infinity
+    // being the incumbent itself), fit, score the installed candidate on
+    // the validation games, write the candidate, restore the loaded
+    // weights. The OUTPUT stays the incumbent: validation reply error
+    // does not select a file (a better reply predictor played worse on
+    // NWL23, monotonically); the candidates are for whole-game selection
+    // (test/pat_select_champion.sh) and the report is a diagnostic.
     static const double strengths[] = {0.0,    1.0,     10.0,    100.0,
                                        1000.0, 10000.0, 100000.0};
     const int num_strengths = (int)(sizeof(strengths) / sizeof(strengths[0]));
@@ -417,24 +433,45 @@ void pat_postgen_prebroadcast_func(void *data) {
     for (int f = 0; f < PAT_NUM_FEATURES; f++) {
       loaded[f] = pat_get_weight(pat, f);
     }
-    double best_mse = 0.0;
     string_builder_add_formatted_string(
         shrink_sb,
-        "Held-out observations: %llu\nHeld-out baseline MSE: %f\n"
-        "Held-out MSE of the loaded weights: %f\n"
-        "shrink_lambda,fit_mse,heldout_mse,file\n",
+        "Validation observations: %llu\nValidation baseline MSE: %f\n"
+        "Validation MSE of the loaded weights (intercept refit): %f\n"
+        "shrink_lambda,fit_mse,validation_mse_refit_intercept,"
+        "validation_mse_fit_intercept,file\n",
         (unsigned long long)heldout_regression.num_observations,
-        heldout_baseline_mse, heldout_loaded_mse);
-    for (int k = 0; k < num_strengths; k++) {
-      const PATSolveResult candidate = pat_regression_solve_into_weights_shrunk(
-          &total_regression, PAT_GEN_RIDGE_LAMBDA, strengths[k], pat);
-      if (!candidate.solved) {
-        continue;
+        validation_baseline_mse, validation_loaded_mse);
+    for (int k = 0; k <= num_strengths; k++) {
+      const bool incumbent = (k == num_strengths);
+      PATSolveResult candidate;
+      if (incumbent) {
+        memset(&candidate, 0, sizeof(candidate));
+        candidate.solved = true;
+        candidate.mean_squared_error = 0.0;
+      } else {
+        candidate = pat_regression_solve_into_weights_shrunk(
+            &total_regression, PAT_GEN_RIDGE_LAMBDA, strengths[k], pat);
+        if (!candidate.solved) {
+          continue;
+        }
+        if (k == 0) {
+          solve_result = candidate;
+        }
       }
-      const double mse = pat_regression_installed_mse(&heldout_regression, pat);
-      char *candidate_name = get_formatted_string(
-          "%s_gen_%d_shrink%g", pat_gen_shared_data->output_name,
-          pat_gen_shared_data->gens_completed + 1, strengths[k]);
+      const double mse_refit =
+          pat_regression_installed_mse(&heldout_regression, pat);
+      const double mse_fit_intercept =
+          incumbent ? 0.0
+                    : pat_regression_installed_mse_with_intercept(
+                          &heldout_regression, pat, candidate.intercept);
+      char *candidate_name =
+          incumbent
+              ? get_formatted_string("%s_gen_%d_shrinkinf",
+                                     pat_gen_shared_data->output_name,
+                                     pat_gen_shared_data->gens_completed + 1)
+              : get_formatted_string(
+                    "%s_gen_%d_shrink%g", pat_gen_shared_data->output_name,
+                    pat_gen_shared_data->gens_completed + 1, strengths[k]);
       ErrorStack *candidate_errors = error_stack_create();
       pat_write(pat, pat_gen_shared_data->data_paths, candidate_name,
                 candidate_errors);
@@ -443,26 +480,31 @@ void pat_postgen_prebroadcast_func(void *data) {
         log_fatal("patgen failed to write a shrink candidate");
       }
       error_stack_destroy(candidate_errors);
-      string_builder_add_formatted_string(
-          shrink_sb, "%g,%f,%f,%s\n", strengths[k],
-          candidate.mean_squared_error, mse, candidate_name);
-      free(candidate_name);
-      if (k == 0 || mse < best_mse) {
-        best_mse = mse;
-        chosen_shrink = strengths[k];
+      if (incumbent) {
+        string_builder_add_formatted_string(shrink_sb, "inf,-,%f,-,%s\n",
+                                            mse_refit, candidate_name);
+      } else {
+        string_builder_add_formatted_string(
+            shrink_sb, "%g,%f,%f,%f,%s\n", strengths[k],
+            candidate.mean_squared_error, mse_refit, mse_fit_intercept,
+            candidate_name);
       }
+      free(candidate_name);
       for (int f = 0; f < PAT_NUM_FEATURES; f++) {
         pat_set_weight(pat, f, loaded[f]);
       }
     }
-    string_builder_add_formatted_string(
-        shrink_sb, "Chosen shrink_lambda (lowest held-out MSE): %g\n",
-        chosen_shrink);
+    string_builder_add_string(
+        shrink_sb, "Installed: the loaded weights (inf); select among the "
+                   "candidates by whole-game play.\n");
+    // The coefficient table below is the full refit's (shrink 0), as the
+    // diagnostic; the installed weights are unchanged.
+    solve_result.num_observations = total_regression.num_observations;
+  } else {
+    solve_result = pat_regression_solve_into_weights_shrunk(
+        &total_regression, PAT_GEN_RIDGE_LAMBDA, 0.0, pat);
   }
-
-  const PATSolveResult solve_result = pat_regression_solve_into_weights_shrunk(
-      &total_regression, PAT_GEN_RIDGE_LAMBDA, chosen_shrink, pat);
-  const double heldout_fit_mse =
+  const double validation_fit_mse =
       pat_regression_installed_mse(&heldout_regression, pat);
 
   pat_gen_shared_data->gens_completed++;
@@ -489,13 +531,13 @@ void pat_postgen_prebroadcast_func(void *data) {
     string_builder_add_formatted_string(
         report_sb,
         "Intercept (mean reply baseline): %f\nFit MSE: %f\nBaseline MSE: "
-        "%f\nHeld-out observations: %llu\nHeld-out baseline MSE: %f\n"
-        "Held-out MSE, loaded weights: %f\nHeld-out MSE, installed fit: "
-        "%f\n",
+        "%f\nValidation observations: %llu\nValidation baseline MSE: "
+        "%f\nValidation MSE, loaded weights (intercept refit): %f\n"
+        "Validation MSE, installed weights (intercept refit): %f\n",
         solve_result.intercept, solve_result.mean_squared_error,
         solve_result.baseline_mean_squared_error,
         (unsigned long long)heldout_regression.num_observations,
-        heldout_baseline_mse, heldout_loaded_mse, heldout_fit_mse);
+        validation_baseline_mse, validation_loaded_mse, validation_fit_mse);
     if (string_builder_length(shrink_sb) > 0) {
       string_builder_add_string(report_sb, string_builder_peek(shrink_sb));
     }
@@ -1133,7 +1175,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         // game number), so the held-out rows are never from a game the
         // fit saw.
         PATRegression *target =
-            (game_runner->game_number % PAT_GEN_HELDOUT_EVERY == 0)
+            (pat_gen_pair_is_validation(game_runner->game_number))
                 ? &pat_gen_shared_data
                        ->heldout_regressions[autoplay_worker->worker_index]
                 : &pat_gen_shared_data

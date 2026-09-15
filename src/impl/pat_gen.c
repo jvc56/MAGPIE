@@ -115,14 +115,14 @@ pat_regression_solve_into_weights(const PATRegression *regression,
                                                   pat);
 }
 
-double pat_regression_installed_mse(const PATRegression *regression,
-                                    const PATWeights *pat) {
-  if (regression->num_observations == 0) {
-    return 0.0;
-  }
+// E[r^2] and E[r] for r = y - c.x with c the installed coefficients,
+// from the accumulated moments (row 0 of XtX holds the feature sums,
+// xty[0] the label sum).
+static void pat_regression_residual_moments(const PATRegression *regression,
+                                            const PATWeights *pat,
+                                            double *mean_r2_out,
+                                            double *mean_r_out) {
   const double n = (double)regression->num_observations;
-  // The installed coefficients: weights are the negated coefficients in
-  // milli-equity (see the clamp at the end of the solve).
   double c[PAT_REGRESSION_DIM];
   c[0] = 0.0;
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
@@ -130,10 +130,6 @@ double pat_regression_installed_mse(const PATRegression *regression,
     c[feature_index + 1] =
         -equity_to_double(pat_get_weight(pat, feature_index));
   }
-  // E[r^2] and E[r] for r = y - c.x, from the accumulated moments (row 0
-  // of XtX holds the feature sums, xty[0] the label sum); the intercept
-  // is refit implicitly by subtracting E[r]^2, since it never changes a
-  // move choice.
   double sum_r2 = regression->yty;
   double sum_r = regression->xty[0];
   for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
@@ -151,8 +147,31 @@ double pat_regression_installed_mse(const PATRegression *regression,
       sum_r2 += c[i] * xtx_ij * c[j];
     }
   }
-  const double mean_r = sum_r / n;
-  return sum_r2 / n - mean_r * mean_r;
+  *mean_r2_out = sum_r2 / n;
+  *mean_r_out = sum_r / n;
+}
+
+double pat_regression_installed_mse_with_intercept(
+    const PATRegression *regression, const PATWeights *pat, double intercept) {
+  if (regression->num_observations == 0) {
+    return 0.0;
+  }
+  double mean_r2;
+  double mean_r;
+  pat_regression_residual_moments(regression, pat, &mean_r2, &mean_r);
+  // E[(r - b)^2] = E[r^2] - 2 b E[r] + b^2.
+  return mean_r2 - 2.0 * intercept * mean_r + intercept * intercept;
+}
+
+double pat_regression_installed_mse(const PATRegression *regression,
+                                    const PATWeights *pat) {
+  if (regression->num_observations == 0) {
+    return 0.0;
+  }
+  double mean_r2;
+  double mean_r;
+  pat_regression_residual_moments(regression, pat, &mean_r2, &mean_r);
+  return mean_r2 - mean_r * mean_r;
 }
 
 double pat_regression_baseline_mse(const PATRegression *regression) {

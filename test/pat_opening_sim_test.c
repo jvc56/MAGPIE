@@ -76,19 +76,22 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
                          int max_racks) {
   // The speed-only tables when the lexicon has them (they change no
   // move choice); asking for a missing one is an error, so check first.
+  char *wmp_path = get_formatted_string("./data/lexica/%s.wmp", lexicon);
   char *rit_path = get_formatted_string("./data/lexica/%s.rit", lexicon);
   char *wit_path = get_formatted_string("./data/lexica/%s.wit", lexicon);
+  const bool have_wmp = access(wmp_path, R_OK) == 0;
   const bool have_rit = access(rit_path, R_OK) == 0;
   const bool have_wit = access(wit_path, R_OK) == 0;
+  free(wmp_path);
   free(rit_path);
   free(wit_path);
   char *set_cmd = get_formatted_string(
-      "set -lex %s -wmp true %s %s -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex %s -wmp %s %s %s -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays %d -plies %d -threads %d -iter %d -sr rr -scond none "
       "-threshold none -pat %s",
-      lexicon, have_rit ? "-rit true -ritmmap true" : "",
-      have_wit ? "-wit true" : "", PAT_OPENING_SIM_NUM_PLAYS,
-      PAT_OPENING_SIM_PLIES, PAT_OPENING_SIM_THREADS,
+      lexicon, have_wmp ? "true" : "false",
+      have_rit ? "-rit true -ritmmap true" : "", have_wit ? "-wit true" : "",
+      PAT_OPENING_SIM_NUM_PLAYS, PAT_OPENING_SIM_PLIES, PAT_OPENING_SIM_THREADS,
       PAT_OPENING_SIM_NUM_PLAYS * PAT_OPENING_SIM_ITERATIONS_PER_PLAY,
       pat_name);
   printf("rack info table %s, word info table %s\n", have_rit ? "on" : "absent",
