@@ -111,6 +111,62 @@ pat_cholesky_solve(const double a[PAT_REGRESSION_DIM][PAT_REGRESSION_DIM],
 PATSolveResult
 pat_regression_solve_into_weights(const PATRegression *regression,
                                   double ridge_lambda, PATWeights *pat) {
+  return pat_regression_solve_into_weights_shrunk(regression, ridge_lambda, 0.0,
+                                                  pat);
+}
+
+double pat_regression_installed_mse(const PATRegression *regression,
+                                    const PATWeights *pat) {
+  if (regression->num_observations == 0) {
+    return 0.0;
+  }
+  const double n = (double)regression->num_observations;
+  // The installed coefficients: weights are the negated coefficients in
+  // milli-equity (see the clamp at the end of the solve).
+  double c[PAT_REGRESSION_DIM];
+  c[0] = 0.0;
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    c[feature_index + 1] =
+        -equity_to_double(pat_get_weight(pat, feature_index));
+  }
+  // E[r^2] and E[r] for r = y - c.x, from the accumulated moments (row 0
+  // of XtX holds the feature sums, xty[0] the label sum); the intercept
+  // is refit implicitly by subtracting E[r]^2, since it never changes a
+  // move choice.
+  double sum_r2 = regression->yty;
+  double sum_r = regression->xty[0];
+  for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
+    if (c[i] == 0.0) {
+      continue;
+    }
+    sum_r2 -= 2.0 * c[i] * regression->xty[i];
+    sum_r -= c[i] * regression->xtx[0][i];
+    for (int j = 1; j < PAT_REGRESSION_DIM; j++) {
+      if (c[j] == 0.0) {
+        continue;
+      }
+      const double xtx_ij =
+          (i <= j) ? regression->xtx[i][j] : regression->xtx[j][i];
+      sum_r2 += c[i] * xtx_ij * c[j];
+    }
+  }
+  const double mean_r = sum_r / n;
+  return sum_r2 / n - mean_r * mean_r;
+}
+
+double pat_regression_baseline_mse(const PATRegression *regression) {
+  if (regression->num_observations == 0) {
+    return 0.0;
+  }
+  const double n = (double)regression->num_observations;
+  const double mean_y = regression->xty[0] / n;
+  return regression->yty / n - mean_y * mean_y;
+}
+
+PATSolveResult pat_regression_solve_into_weights_shrunk(
+    const PATRegression *regression, double ridge_lambda, double shrink_lambda,
+    PATWeights *pat) {
   PATSolveResult result;
   memset(&result, 0, sizeof(result));
   result.num_observations = regression->num_observations;
@@ -118,6 +174,15 @@ pat_regression_solve_into_weights(const PATRegression *regression,
     return result;
   }
   const double num_observations = (double)regression->num_observations;
+  // The loaded coefficients, the target the shrinkage pulls toward (the
+  // plain ridge pulls toward zero, shrink_lambda 0 leaves it at that).
+  double loaded[PAT_REGRESSION_DIM];
+  loaded[0] = 0.0;
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    loaded[feature_index + 1] =
+        -equity_to_double(pat_get_weight(pat, feature_index));
+  }
 
   // Build the full symmetric ridge system from the accumulated upper
   // triangle. The ridge term scales with the number of observations so
@@ -130,7 +195,7 @@ pat_regression_solve_into_weights(const PATRegression *regression,
     }
   }
   for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
-    a[i][i] += ridge_lambda * num_observations;
+    a[i][i] += (ridge_lambda + shrink_lambda) * num_observations;
   }
   // Features held fixed at a value: their contribution moves to the
   // right-hand side (xty_i -= sum_j XtX_ij c_j over fixed j, for every
@@ -216,6 +281,15 @@ pat_regression_solve_into_weights(const PATRegression *regression,
   }
   double xty[PAT_REGRESSION_DIM];
   memcpy(xty, regression->xty, sizeof(xty));
+  // Shrinkage toward the loaded coefficients: the penalty
+  // shrink_lambda * N * (c - loaded)^2 adds shrink_lambda * N to the
+  // diagonal (above) and shrink_lambda * N * loaded to the right-hand
+  // side.
+  if (shrink_lambda > 0.0) {
+    for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
+      xty[i] += shrink_lambda * num_observations * loaded[i];
+    }
+  }
   for (int i = 0; i < PAT_REGRESSION_DIM; i++) {
     if (fixed[i]) {
       continue;
