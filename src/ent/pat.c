@@ -138,6 +138,8 @@ struct PATWeights {
   // length six ends in QI), for NARCEIN 560 against 0. Opt-in, like the
   // other semantic flags, until a file using it is validated.
   bool run_through;
+  // See PAT_FIT_SHRINK_ROW_PREFIX.
+  bool fit_shrink;
   // Per-stage factor on the applied term (see the row prefixes in
   // pat_defs.h); indexed by PAT_STAGE_*.
   double stage_scale[PAT_STAGE_COUNT];
@@ -216,6 +218,12 @@ void pat_set_train_overlay(PATWeights *pat, bool train_overlay) {
 }
 
 bool pat_get_run_through(const PATWeights *pat) { return pat->run_through; }
+
+bool pat_get_fit_shrink(const PATWeights *pat) { return pat->fit_shrink; }
+
+void pat_set_fit_shrink(PATWeights *pat, bool fit_shrink) {
+  pat->fit_shrink = fit_shrink;
+}
 
 Equity pat_get_opening_tiles_adjustment(const PATWeights *pat, int tiles) {
   return pat->opening_tiles[tiles];
@@ -464,6 +472,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->fit_residual_mode = 0;
   pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
+  pat->fit_shrink = PAT_DEFAULT_FIT_SHRINK;
   for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
     pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
   }
@@ -755,6 +764,20 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         continue;
       }
     }
+    if (has_prefix(PAT_FIT_SHRINK_ROW_PREFIX, line)) {
+      const int flag =
+          string_to_int(line + strlen(PAT_FIT_SHRINK_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a fit_shrink "
+                                 "flag other than 0 or 1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->fit_shrink = (flag == 1);
+      continue;
+    }
     if (has_prefix(PAT_RUN_THROUGH_ROW_PREFIX, line)) {
       const int flag =
           string_to_int(line + strlen(PAT_RUN_THROUGH_ROW_PREFIX), error_stack);
@@ -890,6 +913,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
                                       pat->exact_created_hooks ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_RUN_THROUGH_ROW_PREFIX,
                                       pat->run_through ? 1 : 0);
+  string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SHRINK_ROW_PREFIX,
+                                      pat->fit_shrink ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%.6f\n",
                                       PAT_STAGE_SCALE_EARLY_ROW_PREFIX,
                                       pat->stage_scale[PAT_STAGE_EARLY]);

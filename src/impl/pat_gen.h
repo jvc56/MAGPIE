@@ -56,5 +56,21 @@ typedef struct PATSolveResult {
 PATSolveResult
 pat_regression_solve_into_weights(const PATRegression *regression,
                                   double ridge_lambda, PATWeights *pat);
+// The same solve with an extra penalty shrink_lambda * N * (c - c0)^2
+// pulling every free coefficient toward the weights the file was loaded
+// with (c0), so a fit on new data adapts an incumbent instead of
+// replacing it; shrink_lambda 0 is the plain solve.
+PATSolveResult
+pat_regression_solve_into_weights_shrunk(const PATRegression *regression,
+                                         double ridge_lambda,
+                                         double shrink_lambda, PATWeights *pat);
+// Mean squared error of the weights as installed in pat (clamped,
+// rounded) on the observations the regression accumulated, with the
+// intercept refit; and the intercept-only baseline. Both come straight
+// from the accumulated moments, so a held-out accumulator scores any
+// candidate without storing rows.
+double pat_regression_installed_mse(const PATRegression *regression,
+                                    const PATWeights *pat);
+double pat_regression_baseline_mse(const PATRegression *regression);
 
 #endif

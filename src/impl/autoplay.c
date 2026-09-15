@@ -146,6 +146,10 @@ typedef struct PATGenSharedData {
   const char *data_paths;
   const char *output_name;
   PATRegression *regressions;
+  // Observations from every PAT_GEN_HELDOUT_EVERY-th game pair, kept out
+  // of the fit and used to score installed candidates (see
+  // pat_regression_installed_mse).
+  PATRegression *heldout_regressions;
   int num_threads;
   Checkpoint *postgen_checkpoint;
 } PATGenSharedData;
@@ -375,17 +379,91 @@ void pat_postgen_prebroadcast_func(void *data) {
   AutoplaySharedData *shared_data = (AutoplaySharedData *)data;
   PATGenSharedData *pat_gen_shared_data = shared_data->pat_gen_shared_data;
 
-  PATRegression total_regression;
-  pat_regression_reset(&total_regression);
+  // Heap-allocated: each accumulator is a few hundred KB and this runs on
+  // a worker thread's stack, next to the solver's own matrix.
+  PATRegression *total_regression_ptr = malloc_or_die(sizeof(PATRegression));
+  PATRegression *heldout_regression_ptr = malloc_or_die(sizeof(PATRegression));
+  pat_regression_reset(total_regression_ptr);
+  pat_regression_reset(heldout_regression_ptr);
   for (int thread_index = 0; thread_index < pat_gen_shared_data->num_threads;
        thread_index++) {
-    pat_regression_merge(&total_regression,
+    pat_regression_merge(total_regression_ptr,
                          &pat_gen_shared_data->regressions[thread_index]);
     pat_regression_reset(&pat_gen_shared_data->regressions[thread_index]);
+    pat_regression_merge(
+        heldout_regression_ptr,
+        &pat_gen_shared_data->heldout_regressions[thread_index]);
+    pat_regression_reset(
+        &pat_gen_shared_data->heldout_regressions[thread_index]);
+  }
+#define total_regression (*total_regression_ptr)
+#define heldout_regression (*heldout_regression_ptr)
+  PATWeights *pat = pat_gen_shared_data->pat;
+  const double heldout_loaded_mse =
+      pat_regression_installed_mse(&heldout_regression, pat);
+  const double heldout_baseline_mse =
+      pat_regression_baseline_mse(&heldout_regression);
+  StringBuilder *shrink_sb = string_builder_create();
+  double chosen_shrink = 0.0;
+  if (pat_get_fit_shrink(pat)) {
+    // Adapt the loaded weights: for each shrinkage strength, fit, score
+    // the installed candidate on the held-out games, keep the file, then
+    // restore the loaded weights; the strength with the lowest held-out
+    // error is fitted last and becomes the live weights.
+    static const double strengths[] = {0.0,    1.0,     10.0,    100.0,
+                                       1000.0, 10000.0, 100000.0};
+    const int num_strengths = (int)(sizeof(strengths) / sizeof(strengths[0]));
+    Equity loaded[PAT_NUM_FEATURES];
+    for (int f = 0; f < PAT_NUM_FEATURES; f++) {
+      loaded[f] = pat_get_weight(pat, f);
+    }
+    double best_mse = 0.0;
+    string_builder_add_formatted_string(
+        shrink_sb,
+        "Held-out observations: %llu\nHeld-out baseline MSE: %f\n"
+        "Held-out MSE of the loaded weights: %f\n"
+        "shrink_lambda,fit_mse,heldout_mse,file\n",
+        (unsigned long long)heldout_regression.num_observations,
+        heldout_baseline_mse, heldout_loaded_mse);
+    for (int k = 0; k < num_strengths; k++) {
+      const PATSolveResult candidate = pat_regression_solve_into_weights_shrunk(
+          &total_regression, PAT_GEN_RIDGE_LAMBDA, strengths[k], pat);
+      if (!candidate.solved) {
+        continue;
+      }
+      const double mse = pat_regression_installed_mse(&heldout_regression, pat);
+      char *candidate_name = get_formatted_string(
+          "%s_gen_%d_shrink%g", pat_gen_shared_data->output_name,
+          pat_gen_shared_data->gens_completed + 1, strengths[k]);
+      ErrorStack *candidate_errors = error_stack_create();
+      pat_write(pat, pat_gen_shared_data->data_paths, candidate_name,
+                candidate_errors);
+      if (!error_stack_is_empty(candidate_errors)) {
+        error_stack_print_and_reset(candidate_errors);
+        log_fatal("patgen failed to write a shrink candidate");
+      }
+      error_stack_destroy(candidate_errors);
+      string_builder_add_formatted_string(
+          shrink_sb, "%g,%f,%f,%s\n", strengths[k],
+          candidate.mean_squared_error, mse, candidate_name);
+      free(candidate_name);
+      if (k == 0 || mse < best_mse) {
+        best_mse = mse;
+        chosen_shrink = strengths[k];
+      }
+      for (int f = 0; f < PAT_NUM_FEATURES; f++) {
+        pat_set_weight(pat, f, loaded[f]);
+      }
+    }
+    string_builder_add_formatted_string(
+        shrink_sb, "Chosen shrink_lambda (lowest held-out MSE): %g\n",
+        chosen_shrink);
   }
 
-  const PATSolveResult solve_result = pat_regression_solve_into_weights(
-      &total_regression, PAT_GEN_RIDGE_LAMBDA, pat_gen_shared_data->pat);
+  const PATSolveResult solve_result = pat_regression_solve_into_weights_shrunk(
+      &total_regression, PAT_GEN_RIDGE_LAMBDA, chosen_shrink, pat);
+  const double heldout_fit_mse =
+      pat_regression_installed_mse(&heldout_regression, pat);
 
   pat_gen_shared_data->gens_completed++;
 
@@ -411,9 +489,18 @@ void pat_postgen_prebroadcast_func(void *data) {
     string_builder_add_formatted_string(
         report_sb,
         "Intercept (mean reply baseline): %f\nFit MSE: %f\nBaseline MSE: "
-        "%f\n\nfeature,raw_coefficient,applied_weight\n",
+        "%f\nHeld-out observations: %llu\nHeld-out baseline MSE: %f\n"
+        "Held-out MSE, loaded weights: %f\nHeld-out MSE, installed fit: "
+        "%f\n",
         solve_result.intercept, solve_result.mean_squared_error,
-        solve_result.baseline_mean_squared_error);
+        solve_result.baseline_mean_squared_error,
+        (unsigned long long)heldout_regression.num_observations,
+        heldout_baseline_mse, heldout_loaded_mse, heldout_fit_mse);
+    if (string_builder_length(shrink_sb) > 0) {
+      string_builder_add_string(report_sb, string_builder_peek(shrink_sb));
+    }
+    string_builder_add_string(report_sb,
+                              "\nfeature,raw_coefficient,applied_weight\n");
     char feature_name[64];
     for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
          feature_index++) {
@@ -447,7 +534,12 @@ void pat_postgen_prebroadcast_func(void *data) {
   }
 
   string_builder_destroy(report_sb);
+  string_builder_destroy(shrink_sb);
   error_stack_destroy(error_stack);
+#undef total_regression
+#undef heldout_regression
+  free(total_regression_ptr);
+  free(heldout_regression_ptr);
   free(report_name);
   free(report_name_prefix);
   free(gen_labeled_pat_filename);
@@ -656,8 +748,12 @@ PATGenSharedData *pat_gen_shared_data_create(
   pat_gen_shared_data->num_threads = num_threads;
   pat_gen_shared_data->regressions =
       malloc_or_die(sizeof(PATRegression) * (size_t)num_threads);
+  pat_gen_shared_data->heldout_regressions =
+      malloc_or_die(sizeof(PATRegression) * (size_t)num_threads);
   for (int thread_index = 0; thread_index < num_threads; thread_index++) {
     pat_regression_reset(&pat_gen_shared_data->regressions[thread_index]);
+    pat_regression_reset(
+        &pat_gen_shared_data->heldout_regressions[thread_index]);
   }
   pat_gen_shared_data->postgen_checkpoint =
       checkpoint_create(num_threads, pat_postgen_prebroadcast_func);
@@ -670,6 +766,7 @@ void pat_gen_shared_data_destroy(PATGenSharedData *pat_gen_shared_data) {
   }
   checkpoint_destroy(pat_gen_shared_data->postgen_checkpoint);
   free(pat_gen_shared_data->regressions);
+  free(pat_gen_shared_data->heldout_regressions);
   free(pat_gen_shared_data);
 }
 
@@ -1032,9 +1129,17 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
           (observation->plies_seen % 2 == 0) ? move_score : -move_score;
       observation->plies_seen++;
       if (observation->plies_seen >= pat_gen_shared_data->label_plies) {
-        pat_regression_add_observation_double(
-            &pat_gen_shared_data->regressions[autoplay_worker->worker_index],
-            observation->features, observation->label);
+        // Whole game pairs are held out (both games of a pair share a
+        // game number), so the held-out rows are never from a game the
+        // fit saw.
+        PATRegression *target =
+            (game_runner->game_number % PAT_GEN_HELDOUT_EVERY == 0)
+                ? &pat_gen_shared_data
+                       ->heldout_regressions[autoplay_worker->worker_index]
+                : &pat_gen_shared_data
+                       ->regressions[autoplay_worker->worker_index];
+        pat_regression_add_observation_double(target, observation->features,
+                                              observation->label);
         observation->valid = false;
       }
     }

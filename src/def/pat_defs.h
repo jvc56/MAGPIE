@@ -228,6 +228,18 @@ enum {
 // count is a superset of the run's.
 #define PAT_RUN_THROUGH_MAX_KEY 3
 
+// Optional row (0 or 1): whether patgen adapts the loaded weights
+// instead of refitting from scratch -- every free coefficient is shrunk
+// toward the value the file was loaded with, and the shrinkage
+// strength is chosen automatically by the held-out reply-prediction
+// error of the installed model (see pat_postgen_prebroadcast_func;
+// every PAT_GEN_HELDOUT_EVERY-th game pair is held out of the fit). One
+// candidate file per strength is written alongside the chosen one.
+// Absent means 0: the plain fit every file so far was trained with.
+#define PAT_FIT_SHRINK_ROW_PREFIX "fit_shrink,"
+#define PAT_DEFAULT_FIT_SHRINK false
+#define PAT_GEN_HELDOUT_EVERY 10
+
 // Optional rows: a nonnegative factor applied to the whole defense term,
 // and to every pruning bound on it, by game stage (see
 // PATWeights.stage_scale). The stage comes from the pre-move bag count:
