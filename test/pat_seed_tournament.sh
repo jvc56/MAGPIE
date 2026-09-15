@@ -28,6 +28,17 @@ train_seed_base=61000002
 refit_seed=4242
 match_seed_base=777300000
 pairs=500000
+
+# Production files never carry mass on the experimental channels: a
+# default fit holds them at their loaded value, which must be zero here.
+assert_experimental_channels_zero() {
+  bad="$(grep -E '^(hook_score_d[0-9]+|lm_span_d[0-9]+|lm_ext_d[0-9]+|dws_lm_span_d[0-9]+|dws_lm_ext_d[0-9]+),' "$1" | grep -v ',0$' || true)"
+  if [ -n "$bad" ]; then
+    echo "ERROR: $1 carries weight on experimental channels:" >&2
+    echo "$bad" >&2
+    exit 3
+  fi
+}
 tables=""
 if [ ! -f "data/lexica/$lex.rit" ]; then
   echo "[$(date +%H:%M:%S)] building data/lexica/$lex.rit"
@@ -57,6 +68,8 @@ while [ "$i" -le "$last" ]; do
     ./bin/magpie patgen 150000 "$v4" -lex "$lex" -gp true -threads $threads \
       -seed $refit_seed -wmp true $tables -pat "${v3}_runres" > "$log_dir/refit_s$i.txt" 2>&1
     sed -i '' 's/^fit_residual,3$/fit_residual,0/' "$strategy/$v4.pat"
+  assert_experimental_channels_zero "$strategy/$v3.pat"
+  assert_experimental_channels_zero "$strategy/$v4.pat"
   fi
   echo "[$(date +%H:%M:%S)] match seed $i vs $reference on $lex"
   ./bin/magpie autoplay games $pairs -lex "$lex" -gp true -threads $threads \
