@@ -8452,12 +8452,28 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         config->players_data, player_index, PAT_CLASS_MASK_ALL & ~enabled_mask);
   }
 
-  // The PAT hook-flex table depends on the lexicon, so rebuild it
-  // whenever data may have changed (cheap: one DAWG walk per letter). When
-  // both players share one weights object but use different lexicons, the
-  // second player's table wins; the approximation it feeds is coarse enough
-  // that this does not matter.
+  // The PAT's lexicon tables (hook flexibility, floater extension sets,
+  // through tables) belong to the lexicon, so rebuild them from each
+  // player's own KWG whenever data may have changed (cheap: one walk).
+  // One weights object cannot serve two lexica: its tables would be
+  // whichever player's was prepared last, silently wrong for the other,
+  // so that combination is refused rather than approximated.
   if (config->ld) {
+    PATWeights *p1_pat = players_data_get_pat(config->players_data, 0);
+    PATWeights *p2_pat = players_data_get_pat(config->players_data, 1);
+    const KWG *p1_kwg = players_data_get_kwg(config->players_data, 0);
+    const KWG *p2_kwg = players_data_get_kwg(config->players_data, 1);
+    if (p1_pat && p1_pat == p2_pat && p1_kwg != p2_kwg) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+          get_formatted_string(
+              "PAT '%s' is shared by both players but the players use "
+              "different lexicons; a PAT's lexicon tables belong to one "
+              "lexicon, so give each player their own copy (e.g. the same "
+              "file under two names) or use one lexicon",
+              pat_get_name(p1_pat)));
+      return;
+    }
     for (int player_index = 0; player_index < 2; player_index++) {
       PATWeights *player_pat =
           players_data_get_pat(config->players_data, player_index);

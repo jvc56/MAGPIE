@@ -228,14 +228,16 @@ enum {
 // count is a superset of the run's.
 #define PAT_RUN_THROUGH_MAX_KEY 3
 
-// Optional row (0 or 1): whether patgen adapts the loaded weights
-// instead of refitting from scratch -- every free coefficient is shrunk
-// toward the value the file was loaded with, and the shrinkage
-// strength is chosen automatically by the held-out reply-prediction
-// error of the installed model (see pat_postgen_prebroadcast_func;
-// every PAT_GEN_HELDOUT_EVERY-th game pair is held out of the fit). One
-// candidate file per strength is written alongside the chosen one.
-// Absent means 0: the plain fit every file so far was trained with.
+// Optional row (0 or 1): whether patgen produces adaptation candidates
+// instead of refitting -- for each of a small set of shrinkage strengths
+// every free coefficient is pulled toward the value the file was loaded
+// with, and one candidate file per strength is written (infinity being
+// the incumbent itself) with its validation reply-prediction error; the
+// OUTPUT is the loaded weights unchanged, because validation error does
+// not select a playing strength (see test/pat_select_champion.sh for the
+// whole-game selection). About one in PAT_GEN_HELDOUT_EVERY game pairs,
+// by a hash of the pair number, is the validation set. Absent means 0:
+// the plain fit every file so far was trained with.
 #define PAT_FIT_SHRINK_ROW_PREFIX "fit_shrink,"
 #define PAT_DEFAULT_FIT_SHRINK false
 #define PAT_GEN_HELDOUT_EVERY 10
