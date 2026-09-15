@@ -312,12 +312,25 @@ int main(int argc, char *argv[]) {
       }
     }
   } else if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
-    if (argc > 1) {
-      log_warn("Ignoring test arguments when testing default super board "
-               "dimensions of %d.",
-               DEFAULT_SUPER_BOARD_DIM);
+    // The super suite is the default; a parameterized on-demand test
+    // (a "<name>:<spec>" argument, e.g. patopeningsim:CSW24:<pat>:300)
+    // runs on this board instead, so the board-dependent tooling is
+    // available under the 21x21 build.
+    bool ran_on_demand = false;
+    for (int i = 1; i < argc; i++) {
+      if (strchr(argv[i], ':') != NULL) {
+        run_test(argv[i]);
+        ran_on_demand = true;
+      }
     }
-    run_all_super();
+    if (!ran_on_demand) {
+      if (argc > 1) {
+        log_warn("Ignoring test arguments when testing default super board "
+                 "dimensions of %d.",
+                 DEFAULT_SUPER_BOARD_DIM);
+      }
+      run_all_super();
+    }
   } else {
     log_fatal(
         "Testing with unsupported board dimension of %d. Only %d and %d are "
