@@ -1,5 +1,6 @@
 #include "pat_opening_sim_test.h"
 
+#include "../src/def/board_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
@@ -73,23 +74,28 @@ static int opening_best_index(const OpeningRack *rack, const double *table) {
 }
 
 void pat_opening_sim_run(const char *lexicon, const char *pat_name,
-                         int max_racks) {
+                         int max_racks, const char *leaves) {
   // The speed-only tables when the lexicon has them (they change no
   // move choice); asking for a missing one is an error, so check first.
   char *wmp_path = get_formatted_string("./data/lexica/%s.wmp", lexicon);
   char *rit_path = get_formatted_string("./data/lexica/%s.rit", lexicon);
   char *wit_path = get_formatted_string("./data/lexica/%s.wit", lexicon);
-  const bool have_wmp = access(wmp_path, R_OK) == 0;
-  const bool have_rit = access(rit_path, R_OK) == 0;
-  const bool have_wit = access(wit_path, R_OK) == 0;
+  // The tables in the data directory are the standard board's; another
+  // board dimension plays without them.
+  const bool tables_ok = BOARD_DIM == DEFAULT_BOARD_DIM;
+  const bool have_wmp = tables_ok && access(wmp_path, R_OK) == 0;
+  const bool have_rit = tables_ok && access(rit_path, R_OK) == 0;
+  const bool have_wit = tables_ok && access(wit_path, R_OK) == 0;
   free(wmp_path);
   free(rit_path);
   free(wit_path);
+  char *leaves_arg = leaves ? get_formatted_string("-leaves %s", leaves)
+                            : string_duplicate("");
   char *set_cmd = get_formatted_string(
-      "set -lex %s -wmp %s %s %s -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex %s %s -wmp %s %s %s -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays %d -plies %d -threads %d -iter %d -sr rr -scond none "
       "-threshold none -pat %s",
-      lexicon, have_wmp ? "true" : "false",
+      lexicon, leaves_arg, have_wmp ? "true" : "false",
       have_rit ? "-rit true -ritmmap true" : "", have_wit ? "-wit true" : "",
       PAT_OPENING_SIM_NUM_PLAYS, PAT_OPENING_SIM_PLIES, PAT_OPENING_SIM_THREADS,
       PAT_OPENING_SIM_NUM_PLAYS * PAT_OPENING_SIM_ITERATIONS_PER_PLAY,
@@ -98,6 +104,7 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
          have_wit ? "on" : "absent");
   Config *config = config_create_or_die(set_cmd);
   free(set_cmd);
+  free(leaves_arg);
   // The empty board for this build's dimension.
   StringBuilder *cgp_sb = string_builder_create();
   string_builder_add_string(cgp_sb, "cgp ");
@@ -299,24 +306,27 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
 
 void test_pat_opening_sim(void) {
   pat_opening_sim_run(PAT_OPENING_SIM_LEXICON, PAT_OPENING_SIM_PAT,
-                      PAT_OPENING_SIM_NUM_RACKS);
+                      PAT_OPENING_SIM_NUM_RACKS, NULL);
 }
 
-// "<lexicon>:<pat>[:<racks>]"
+// "<lexicon>:<pat>[:<racks>[:<leaves>]]"
 void pat_opening_sim_run_spec(const char *spec) {
   StringSplitter *fields = split_string(spec, ':', true);
   const int num_fields = string_splitter_get_number_of_items(fields);
-  if (num_fields < 2 || num_fields > 3) {
-    log_fatal("patopeningsim spec must be <lexicon>:<pat>[:<racks>], got '%s'",
-              spec);
+  if (num_fields < 2 || num_fields > 4) {
+    log_fatal(
+        "patopeningsim spec must be <lexicon>:<pat>[:<racks>[:<leaves>]], "
+        "got '%s'",
+        spec);
   }
-  const int racks = (num_fields == 3)
+  const int racks = (num_fields >= 3)
                         ? atoi(string_splitter_get_item(fields, 2))
                         : PAT_OPENING_SIM_NUM_RACKS;
   if (racks < 2) {
     log_fatal("patopeningsim needs at least 2 racks, got %d", racks);
   }
-  pat_opening_sim_run(string_splitter_get_item(fields, 0),
-                      string_splitter_get_item(fields, 1), racks);
+  pat_opening_sim_run(
+      string_splitter_get_item(fields, 0), string_splitter_get_item(fields, 1),
+      racks, (num_fields == 4) ? string_splitter_get_item(fields, 3) : NULL);
   string_splitter_destroy(fields);
 }
