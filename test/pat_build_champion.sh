@@ -32,6 +32,32 @@ opening_racks=1000
 train_games=30000,30000,30000,30000,30000
 refit_games=150000
 
+# Speed-only tables: the rack info table (leave values per full rack)
+# and the word info table (subrack pruning). Neither changes a move
+# choice; they only shorten the run. Built here when the lexicon lacks
+# them, and deleted at the end -- the RIT is about 1.8 GB -- only when
+# this run built them AND the validation match below clears
+# DELETE_TABLES_MIN_LOWER_CI per pair (a shippable file), never a table
+# that was already there.
+tables="-rit true -ritmmap true -wit true"
+delete_tables_min_lower_ci=2.0
+built_rit=0
+built_wit=0
+if [ ! -f "data/lexica/$lex.rit" ]; then
+  echo "[$(date +%H:%M:%S)] building data/lexica/$lex.rit"
+  echo "convert klvwmp2rit $lex" | ./bin/magpie "set -lex $lex -wmp true -rit false" \
+    > "$log_dir/build_rit.txt" 2>&1
+  [ -f "data/lexica/$lex.rit" ]
+  built_rit=1
+fi
+if [ ! -f "data/lexica/$lex.wit" ]; then
+  echo "[$(date +%H:%M:%S)] building data/lexica/$lex.wit"
+  echo "convert kwg2wit $lex" | ./bin/magpie "set -lex $lex -wit false" \
+    > "$log_dir/build_wit.txt" 2>&1
+  [ -f "data/lexica/$lex.wit" ]
+  built_wit=1
+fi
+
 pair_mean() {
   # The per-pair mean of a finished autoplay match.
   grep -m1 "mirrored pair" "$1" | sed 's/.*mean \([-0-9.]*\),.*/\1/'
@@ -44,7 +70,7 @@ while [ "$i" -le "$num_seeds" ]; do
   v4="${name}_s${i}_v4"
   echo "[$(date +%H:%M:%S)] seed $i ($seed): training $v3"
   ./bin/magpie patgen "$train_games" "$v3" -lex "$lex" \
-    -gp true -threads $threads -seed "$seed" -wmp true \
+    -gp true -threads $threads -seed "$seed" -wmp true $tables \
     -pat pat_zero_lexsigned_nofit > "$log_dir/train_s$i.txt" 2>&1
   sed -e 's/^run_through,0$/run_through,1/' -e 's/^fit_residual,0$/fit_residual,3/' \
     "$strategy/$v3.pat" > "$strategy/${v3}_runres.pat"
@@ -52,7 +78,7 @@ while [ "$i" -le "$num_seeds" ]; do
   grep -q '^fit_residual,3$' "$strategy/${v3}_runres.pat"
   echo "[$(date +%H:%M:%S)] seed $i: through refit $v4"
   ./bin/magpie patgen "$refit_games" "$v4" -lex "$lex" -gp true -threads $threads \
-    -seed $refit_seed -wmp true -pat "${v3}_runres" > "$log_dir/refit_s$i.txt" 2>&1
+    -seed $refit_seed -wmp true $tables -pat "${v3}_runres" > "$log_dir/refit_s$i.txt" 2>&1
   sed -i '' 's/^fit_residual,3$/fit_residual,0/' "$strategy/$v4.pat"
   i=$((i + 1))
 done
@@ -65,7 +91,7 @@ i=2
 while [ "$i" -le "$num_seeds" ]; do
   echo "[$(date +%H:%M:%S)] match seed $i vs seed 1"
   ./bin/magpie autoplay games $pairs -lex "$lex" -gp true -threads $threads \
-    -seed $((match_seed_base + i)) -wmp true \
+    -seed $((match_seed_base + i)) -wmp true $tables \
     -pat1 "${name}_s${i}_v4" -pat2 "${name}_s1_v4" > "$log_dir/match_s${i}_vs_s1.txt" 2>&1
   line="$(grep -m1 "mirrored pair" "$log_dir/match_s${i}_vs_s1.txt")"
   mean="$(pair_mean "$log_dir/match_s${i}_vs_s1.txt")"
@@ -112,9 +138,24 @@ echo "$rows"
 # Validation against no PAT.
 echo "[$(date +%H:%M:%S)] validation $name vs none"
 ./bin/magpie autoplay games $pairs -lex "$lex" -gp true -threads $threads \
-  -seed $((match_seed_base + 99)) -wmp true -pat1 "$name" -pat2 none \
+  -seed $((match_seed_base + 99)) -wmp true $tables -pat1 "$name" -pat2 none \
   > "$log_dir/validation_vs_none.txt" 2>&1
 line="$(grep -m1 "mirrored pair" "$log_dir/validation_vs_none.txt")"
 echo "  $name vs none: $line"
 sed -i '' "s|^# Validation vs no PAT: see the row below once appended.|# Validation vs no PAT (seed $((match_seed_base + 99)), $pairs pairs): ${line#Player 1 spread per mirrored pair: }|" "$strategy/$name.pat"
 echo "[$(date +%H:%M:%S)] done: $strategy/$name.pat"
+
+# Tables this run built go once the file is shippable: the validation's
+# 95% interval must sit above delete_tables_min_lower_ci per pair (CSW21
+# is about +3 over no PAT; the broken hook-score build was +0.3 to +1.2).
+lower_ci="$(printf '%s' "$line" | sed 's/.*95% CI \[\([-0-9.]*\),.*/\1/')"
+if [ "$(echo "$lower_ci > $delete_tables_min_lower_ci" | bc)" -eq 1 ]; then
+  if [ "$built_rit" -eq 1 ]; then
+    rm -f "data/lexica/$lex.rit" && echo "deleted data/lexica/$lex.rit (built by this run; validation lower CI $lower_ci)"
+  fi
+  if [ "$built_wit" -eq 1 ]; then
+    rm -f "data/lexica/$lex.wit" && echo "deleted data/lexica/$lex.wit (built by this run; validation lower CI $lower_ci)"
+  fi
+else
+  echo "validation lower CI $lower_ci does not clear $delete_tables_min_lower_ci: NOT shippable as is; tables kept"
+fi
