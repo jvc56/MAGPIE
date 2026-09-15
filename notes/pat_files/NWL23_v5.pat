@@ -12,7 +12,7 @@ magpie_pat_v5
 #   winner: seed 1
 # Opening table: sim - static by tiles on 1000 seeded opening racks
 # (patopeningsim:NWL23:NWL23_v5_s1_v4:1000), relative to the best bin.
-# Validation vs no PAT: see the row below once appended.
+# Validation vs no PAT (seed 777100099, 500000 pairs): mean 2.9234, SE 0.1340, 95% CI [2.6607, 3.1860] (500000 pairs)
 gamma,0.500000
 own_asset_discount,0.000000
 lexicon_floaters,1
