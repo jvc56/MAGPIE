@@ -939,9 +939,18 @@ static void pat_test_count_key_words(const KWG *kwg, uint32_t node_index,
 // The run-keyed through tables against a direct enumeration of the
 // lexicon, for the runs the audit used, and the single-letter keys against
 // the signed per-letter table they must reproduce.
-static void test_pat_run_through_table(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+// The run-keyed through table against a direct enumeration of the
+// lexicon, for any lexicon: multi-tile keys, both word ends, zero-
+// completion cells (QI cannot end a six-letter word) included. The
+// tables are built from whichever KWG is loaded, so this is the check
+// that a weights file trained elsewhere is evaluated with THIS lexicon's
+// word availability.
+void pat_run_through_table_check(const char *lexicon) {
+  char *set_cmd = get_formatted_string(
+      "set -lex %s -s1 equity -s2 equity -r1 all -r2 all -numplays 15",
+      lexicon);
+  Config *config = config_create_or_die(set_cmd);
+  free(set_cmd);
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   const Game *game = config_get_game(config);
@@ -989,16 +998,38 @@ static void test_pat_run_through_table(void) {
       }
     }
   }
-  printf("run_through table: %d (key, length, end) cells match the "
+  printf("run_through table (%s): %d (key, length, end) cells match the "
          "enumeration\n",
-         checked);
+         lexicon, checked);
   // The audit's headline: QI cannot end a six-letter word, NARCEIN (keyed
   // by its far three letters) is nothing at all.
   MachineLetter qi[2] = {ld_hl_to_ml(ld, "Q"), ld_hl_to_ml(ld, "I")};
   assert(pat_get_run_through_count(pat, 1, qi, 2, 6) == 0);
   assert(pat_get_run_through_count(pat, 0, qi, 2, 6) > 0);
+  // Single-letter through tables, both ends, against the same enumeration
+  // for a few letters and lengths.
+  const char *letters[] = {"E", "S", "J", "Q", "X"};
+  for (int i = 0; i < 5; i++) {
+    MachineLetter key[1] = {ld_hl_to_ml(ld, letters[i])};
+    for (int length = 3; length <= 8; length++) {
+      for (int word_end = 0; word_end < 2; word_end++) {
+        long count = 0;
+        long rest = 0;
+        MachineLetter word[16];
+        pat_test_count_key_words(kwg, kwg_get_dawg_root_node_index(kwg), 0,
+                                 length, key, 1, word_end, word, &count, &rest,
+                                 ld);
+        assert(pat_get_through_count_end(pat, word_end, key[0], length) ==
+               (int)(8.0 * log2(1.0 + count) + 0.5));
+      }
+    }
+  }
   pat_destroy(pat);
   config_destroy(config);
+}
+
+static void test_pat_run_through_table(void) {
+  pat_run_through_table_check("CSW21");
 }
 
 // The scan under run_through on constructed boards. AT on B8-C8 with the

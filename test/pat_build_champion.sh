@@ -28,6 +28,17 @@ train_seed_base=61000002
 refit_seed=4242
 match_seed_base=777100000
 pairs=500000
+
+# Production files never carry mass on the experimental channels: a
+# default fit holds them at their loaded value, which must be zero here.
+assert_experimental_channels_zero() {
+  bad="$(grep -E '^(hook_score_d[0-9]+|lm_span_d[0-9]+|lm_ext_d[0-9]+|dws_lm_span_d[0-9]+|dws_lm_ext_d[0-9]+),' "$1" | grep -v ',0$' || true)"
+  if [ -n "$bad" ]; then
+    echo "ERROR: $1 carries weight on experimental channels:" >&2
+    echo "$bad" >&2
+    exit 3
+  fi
+}
 opening_racks=1000
 train_games=30000,30000,30000,30000,30000
 refit_games=150000
@@ -80,6 +91,8 @@ while [ "$i" -le "$num_seeds" ]; do
   ./bin/magpie patgen "$refit_games" "$v4" -lex "$lex" -gp true -threads $threads \
     -seed $refit_seed -wmp true $tables -pat "${v3}_runres" > "$log_dir/refit_s$i.txt" 2>&1
   sed -i '' 's/^fit_residual,3$/fit_residual,0/' "$strategy/$v4.pat"
+  assert_experimental_channels_zero "$strategy/$v3.pat"
+  assert_experimental_channels_zero "$strategy/$v4.pat"
   i=$((i + 1))
 done
 
