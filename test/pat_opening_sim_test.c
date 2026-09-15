@@ -16,6 +16,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 // Opening-length diagnostic by simulation (Astra's C, the user's
 // suggestion of sim regret over final-score residuals): for seeded opening
@@ -73,14 +74,25 @@ static int opening_best_index(const OpeningRack *rack, const double *table) {
 
 void pat_opening_sim_run(const char *lexicon, const char *pat_name,
                          int max_racks) {
+  // The speed-only tables when the lexicon has them (they change no
+  // move choice); asking for a missing one is an error, so check first.
+  char *rit_path = get_formatted_string("./data/lexica/%s.rit", lexicon);
+  char *wit_path = get_formatted_string("./data/lexica/%s.wit", lexicon);
+  const bool have_rit = access(rit_path, R_OK) == 0;
+  const bool have_wit = access(wit_path, R_OK) == 0;
+  free(rit_path);
+  free(wit_path);
   char *set_cmd = get_formatted_string(
-      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex %s -wmp true %s %s -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays %d -plies %d -threads %d -iter %d -sr rr -scond none "
       "-threshold none -pat %s",
-      lexicon, PAT_OPENING_SIM_NUM_PLAYS, PAT_OPENING_SIM_PLIES,
-      PAT_OPENING_SIM_THREADS,
+      lexicon, have_rit ? "-rit true -ritmmap true" : "",
+      have_wit ? "-wit true" : "", PAT_OPENING_SIM_NUM_PLAYS,
+      PAT_OPENING_SIM_PLIES, PAT_OPENING_SIM_THREADS,
       PAT_OPENING_SIM_NUM_PLAYS * PAT_OPENING_SIM_ITERATIONS_PER_PLAY,
       pat_name);
+  printf("rack info table %s, word info table %s\n", have_rit ? "on" : "absent",
+         have_wit ? "on" : "absent");
   Config *config = config_create_or_die(set_cmd);
   free(set_cmd);
   // The empty board for this build's dimension.
