@@ -26,6 +26,37 @@ RackList *rack_list_create(const LetterDistribution *ld, int target_rack_count,
 void rack_list_destroy(RackList *rack_list);
 void rack_list_reset(RackList *rack_list, int target_rack_count);
 void rack_list_add_rack(RackList *rack_list, const Rack *rack, double equity);
+// Sets a rack's observation count and mean equity outright, in place of
+// replaying the observations that produced them.
+//
+// rack_list_add_rack takes one game's equity at a time and folds it into a
+// running mean, which is what a leavegen run has. birdtest's server has the
+// other thing: millions of rows of (rack, occurrence_count, equity_sum)
+// aggregated from a whole generation's contributions, with the individual
+// games long since discarded. Replaying them is not possible and would not be
+// wanted -- rack_list_write_to_klv reads only the count and the mean.
+//
+// This deliberately does not touch the rare-rack partition. A rack list built
+// to convert aggregates into a KLV never draws a rack, and moving the
+// partition here would cost a lock per row for a structure nothing goes on to
+// read.
+//
+// Pushes an error if `rack` is not a full RACK_SIZE rack, or if that rack has
+// already been set since the last rack_list_mark_all_racks_unset.
+void rack_list_set_rack_count_and_mean(RackList *rack_list, const Rack *rack,
+                                       uint64_t count, double mean,
+                                       ErrorStack *error_stack);
+// Marks every rack as not yet set, so that
+// rack_list_set_rack_count_and_mean can tell a rack observed zero times from
+// one the caller never mentioned. The two are not the same: a rack with a
+// count of zero contributes a mean of zero at full draw weight to every leave
+// it contains, while a rack nobody supplied is a hole in the input. Without
+// this they would be indistinguishable, and a KLV derived from a file missing
+// a million racks would look exactly like one derived from a complete file.
+void rack_list_mark_all_racks_unset(RackList *rack_list);
+// How many racks rack_list_mark_all_racks_unset marked and nothing has set
+// since. Zero is the only acceptable answer before writing a KLV.
+int rack_list_get_number_of_unset_racks(const RackList *rack_list);
 void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
                             KLV *klv);
 // {"racks":[{"rack","count","mean"}, ...]}, one entry per rack actually

@@ -98,6 +98,77 @@ void contribute_decline_task(ContributeState *state,
                              ThreadControl *thread_control, const char *reason,
                              ErrorStack *error_stack);
 
+// ---------------------------------------------------------------------------
+// Derived files
+// ---------------------------------------------------------------------------
+
+// A wordmap or rack info table is derived on the contributor's own machine
+// from files the job pins, and is far too large to ship -- 179 MB and 1.9 GB
+// for CSW24 -- so birdtest cannot send one. What it sends instead is the
+// SHA-256 its own pinned MAGPIE got when it built the same file from the same
+// inputs, under `expected_data.derived`. The worker builds its own and uses it
+// only if the bytes agree.
+//
+// That is a stronger check than recording what a file was built *from*, which
+// is what the .wmp.src sidecar does: a CSW24 wordmap built in December 2025
+// and one built nine months later differ in 72 million bytes with the same
+// inputs and the same format version, because the builder changed underneath
+// them. Comparing the output catches that; comparing the inputs does not.
+typedef struct ContributeDerived {
+  // "wmp" or "rit".
+  const char *role;
+  // The name the file is loaded under. A wordmap's is its lexicon's, but a
+  // rack info table belongs to a (.kwg, .klv2) pair, so the server names it
+  // explicitly -- "CSW24.CSW_quackle_leaves" -- and two jobs on CSW24 with
+  // different leaves get different tables instead of silently sharing one.
+  const char *name;
+  const char *sha256;
+  // The builder that produced that hash, e.g. "wmp-1". A build of MAGPIE with
+  // a different builder version cannot match it and says so; see
+  // src/def/builder_defs.h.
+  const char *builder;
+  // The instruction-set target the server's MAGPIE was built for. Recorded and
+  // reported, never used to refuse work: measurement says these builders'
+  // output does not depend on it, and a contributor who builds from source
+  // should not be locked out on the strength of a field.
+  const char *build_target;
+} ContributeDerived;
+
+// The derived file the current claim pins for (role, name), if any.
+//
+// False means the server pinned nothing for it, which is the case for every
+// server older than this protocol and for every job that asks for no derived
+// file. The caller then keeps its previous behaviour rather than refusing to
+// run.
+bool contribute_find_derived(const ContributeState *state, const char *role,
+                             const char *name, ContributeDerived *out);
+
+// The SHA-256 of `path`, from the run's digest cache when the file has not
+// changed. Hashing a 1.9 GB rack info table takes about nine seconds, so the
+// cache is what keeps that a once-per-file cost rather than a once-per-task
+// one. Returns NULL and pushes an error if the file cannot be read; the caller
+// frees.
+char *contribute_hash_file(ContributeState *state, const char *path,
+                           ErrorStack *error_stack);
+
+// Records a derived file whose bytes do not match what the claim pins, to be
+// sent with the decline. Both digests go to the server so that a fleet-wide
+// disagreement shows up in the admin view instead of being worked around
+// silently by every worker independently.
+void contribute_record_derived_mismatch(ContributeState *state,
+                                        const char *role, const char *name,
+                                        const char *expected,
+                                        const char *actual);
+
+// Hands the claim back with reason "derived_mismatch", carrying everything
+// contribute_record_derived_mismatch collected for it, and forgets those
+// records. Like every other decline this remembers the job as unsupported, so
+// the worker does not spend another three minutes rebuilding a table it has
+// just found it cannot match.
+void contribute_decline_derived_mismatch(ContributeState *state,
+                                         ThreadControl *thread_control,
+                                         ErrorStack *error_stack);
+
 // Submits the result for the task claimed by the last contribute_claim_task
 // call and stops its heartbeat. Exactly one of result_json/error_message
 // should be non-NULL: result_json on success, error_message (printed for the

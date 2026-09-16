@@ -5,6 +5,7 @@
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
 #include "../def/board_defs.h"
+#include "../def/builder_defs.h"
 #include "../def/config_defs.h"
 #include "../def/contribute_defs.h"
 #include "../def/equity_defs.h"
@@ -254,6 +255,7 @@ typedef enum {
   ARG_TOKEN_MULTI_THREADING_MODE,
   ARG_TOKEN_ANALYZE,
   ARG_TOKEN_VERSION,
+  ARG_TOKEN_BUILDERS,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -414,6 +416,18 @@ struct Config {
   bool show_prompt;
   bool save_settings;
   bool use_mmap_for_rit;
+  // The names to load each player's rack info table under, in place of that
+  // player's lexicon name. Set only on the contribute path; NULL everywhere
+  // else, which keeps the CLI's "a table is named after its lexicon" rule.
+  //
+  // A table belongs to a (.kwg, .klv2) pair, not to a lexicon: it stores
+  // precomputed leave values, so CSW24 with CSW_quackle_leaves and CSW24 with
+  // its own leaves need different tables. Found by lexicon name alone they
+  // would silently share one, and every full-rack position in one of the two
+  // jobs would be ranked on the other's leaves. birdtest names the file it
+  // pinned a hash for, and these carry that name to the load.
+  char *p1_rit_name_override;
+  char *p2_rit_name_override;
   bool autosave_gcg;
   bool fg_required;
   bool loaded_settings;
@@ -960,7 +974,7 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.4.0"
+#define MAGPIE_VERSION "0.5.0"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -986,6 +1000,36 @@ void execute_version(Config *config,
 char *str_api_version(Config __attribute__((unused)) * config,
                       ErrorStack __attribute__((unused)) * error_stack) {
   return string_duplicate(MAGPIE_VERSION "\n");
+}
+
+// The identity of every builder in this binary, as one JSON object.
+//
+// birdtest's server runs a pinned MAGPIE to build a reference wordmap, rack
+// info table or leave-generation KLV, and records the builder that produced
+// each hash alongside it. It reads that identity from here rather than being
+// told it in configuration, so the recorded builder is always the one that did
+// the work. See src/def/builder_defs.h.
+static char *builders_json(void) {
+  return get_formatted_string("{\"magpie_version\":\"%s\","
+                              "\"build_target\":\"%s\","
+                              "\"wmp_builder_version\":%d,"
+                              "\"rit_builder_version\":%d,"
+                              "\"klv_builder_version\":%d}\n",
+                              MAGPIE_VERSION, MAGPIE_BUILD_TARGET,
+                              WMP_BUILDER_VERSION, RIT_BUILDER_VERSION,
+                              KLV_BUILDER_VERSION);
+}
+
+void execute_builders(Config *config,
+                      ErrorStack __attribute__((unused)) * error_stack) {
+  char *json = builders_json();
+  thread_control_print(config->thread_control, json);
+  free(json);
+}
+
+char *str_api_builders(Config __attribute__((unused)) * config,
+                       ErrorStack __attribute__((unused)) * error_stack) {
+  return builders_json();
 }
 
 // Used for commands that only update the config state
@@ -1255,18 +1299,29 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "ends up in shell history and ps output.";
       break;
     case ARG_TOKEN_CONVERT:
-      usages[0] = "<type> <name_without_extension> [<letter_distribution>]";
+      usages[0] = "<type> <name_without_extension> [<letter_distribution>] "
+                  "[<klv_name>] [<wmp_name>]";
       examples[0] = "klv2csv CSW21";
       examples[1] = "kwg2wit CSW24";
-      examples[2] = "text2wordmap NWL20";
-      examples[3] = "kwg2witifneeded CSW24";
+      examples[2] = "dawg2wordmap NWL20 english";
+      examples[3] = "klvwmp2rit CSW24.CSW_quackle_leaves english "
+                    "CSW_quackle_leaves CSW24";
+      examples[4] = "rackequity2klv gen1 english";
       text =
           "Runs the convert command for the specified type with the given "
           "input and output name, using different file extensions. The letter "
-          "distribution defaults to the lexicon's distribution. kwg2wit reads "
-          "the KWG and creates ordinary and positional word-info tables. "
-          "kwg2witifneeded preserves a current matching table and otherwise "
-          "rebuilds it before use.";
+          "distribution defaults to the lexicon's distribution. Types include "
+          "text2kwg, text2wordmap, dawg2wordmap, dawg2text, csv2klv, klv2csv, "
+          "klvwmp2rit, rackequity2klv, kwg2wit and kwg2witifneeded. kwg2wit "
+          "reads the KWG and creates ordinary and positional word-info "
+          "tables; kwg2witifneeded preserves a current matching table and "
+          "otherwise rebuilds it before use. klvwmp2rit optionally takes the "
+          "KLV's and the wordmap's names separately, since a rack info table "
+          "stores precomputed leave values and so belongs to a (lexicon, "
+          "leaves) pair rather than to either input. rackequity2klv reads "
+          "lexica/<name>.csv, one 'rack,count,equity_sum' row per full rack, "
+          "and writes the KLV those results imply; every full rack the "
+          "distribution draws must appear exactly once.";
       break;
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
@@ -2259,6 +2314,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "";
       text = "Prints the version of the magpie executable.";
       break;
+    case ARG_TOKEN_BUILDERS:
+      usages[0] = "";
+      text = "Prints, as JSON, the versions of the builders that derive one "
+             "data file from another (wordmap, rack info table, KLV) and the "
+             "instruction-set target this binary was compiled for. A "
+             "derived file's bytes are only comparable between two builds "
+             "that agree on these.";
+      break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
       break;
@@ -2368,6 +2431,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Other Commands (alphabetical by name)
     static const arg_token_t other_cmds[] = {
         ARG_TOKEN_AUTOPLAY,    /* autoplay */
+        ARG_TOKEN_BUILDERS,    /* builders */
         ARG_TOKEN_CGP,         /* cgp */
         ARG_TOKEN_CONVERT,     /* convert */
         ARG_TOKEN_CONTRIBUTE,  /* contribute */
@@ -3911,6 +3975,11 @@ void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
   args->input_and_output_name =
       config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
   args->ld_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
+  // klvwmp2rit's optional third and fourth names: the KLV and the wordmap to
+  // build the table from, when the table is not named after either of them.
+  // NULL for every other conversion and for `convert klvwmp2rit CSW24`.
+  args->klv_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 3);
+  args->wmp_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 4);
   args->num_threads = config_get_num_threads(config);
 }
 
@@ -6535,11 +6604,13 @@ void config_load_lexicon_dependent_data(
   // the lexicon name and non-NULL -> NULL transitions are allowed.
   const char *p1_rit_name = NULL;
   if (p1_rit_use_when_available) {
-    p1_rit_name = updated_p1_lexicon_name;
+    p1_rit_name = config->p1_rit_name_override ? config->p1_rit_name_override
+                                               : updated_p1_lexicon_name;
   }
   const char *p2_rit_name = NULL;
   if (p2_rit_use_when_available) {
-    p2_rit_name = updated_p2_lexicon_name;
+    p2_rit_name = config->p2_rit_name_override ? config->p2_rit_name_override
+                                               : updated_p2_lexicon_name;
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,
@@ -7125,21 +7196,39 @@ static bool contribute_wants_wordmap(const JsonValue *settings) {
   return json_get_bool_or(settings, CONTRIBUTE_KEY_USE_WORDMAP, false);
 }
 
-// Makes a wordmap for `lexicon` available, building it if it is not already
-// on disk. Only called for a lexicon some player's settings actually asked
-// to use a wordmap for. Wordmaps are never transmitted -- roughly ten times
-// the size of everything else MAGPIE ships -- so the client derives them
-// from the .kwg it already has. The whole chain costs about a second per
-// lexicon, once.
+// True if the settings ask for a rack info table. Read the same way as
+// use_wordmap, and absent means no -- a contributor's settings.txt must never
+// be able to switch one on for a job that did not ask.
+static bool contribute_wants_rit(const JsonValue *settings) {
+  return json_get_bool_or(settings, CONTRIBUTE_KEY_USE_RIT, false);
+}
+
+// The name the server pinned this task's rack info table under, or NULL.
+//
+// A table belongs to a (.kwg, .klv2) pair rather than to a lexicon, so its
+// name is the server's to choose and not something to infer here: inferring it
+// is how two jobs on one lexicon with different leaves end up sharing a table
+// built from only one of them.
+static const char *contribute_rit_name(const JsonValue *settings) {
+  return json_get_string_or_null(settings, CONTRIBUTE_KEY_RIT_NAME);
+}
+
 // The sidecar beside a wordmap, naming the .kwg digest it was built from.
 //
-// A wordmap is derived from a lexicon, and nothing else notices when the
-// lexicon changes underneath it: download_data.sh overwrites the .kwg in place
-// and leaves the old .wmp sitting next to it, which passes every check --  the
-// .kwg genuinely is the right lexicon, and the .wmp is not covered by any
-// digest because the server never pinned a file the contributor generated
-// locally. The worker then plays with a wordmap describing a lexicon that no
-// longer exists on its disk.
+// This is the weaker of the two checks and is now the fallback. A wordmap is
+// derived from a lexicon, and nothing else notices when the lexicon changes
+// underneath it: download_data.sh overwrites the .kwg in place and leaves the
+// old .wmp sitting next to it, which passes every check -- the .kwg genuinely
+// is the right lexicon, and the .wmp was covered by no digest because the
+// server never pinned a file the contributor generated locally. The worker
+// then plays with a wordmap describing a lexicon that no longer exists on its
+// disk.
+//
+// A server that pins the wordmap's own hash (expected_data.derived) supersedes
+// this entirely: the recorded input digest says a file was built from the
+// right things and still trusts the builder, where the output hash checks the
+// bytes that will actually load. The sidecar stays for servers that do not
+// send one, and for the CLI, which has no server at all.
 static char *wordmap_source_path(const char *wmp_path) {
   return get_formatted_string("%s.src", wmp_path);
 }
@@ -7163,101 +7252,284 @@ static bool wordmap_is_current(const char *wmp_path, const char *kwg_digest) {
   return current;
 }
 
+// The SHA-256 of the derived file `name` of type `type`, or NULL if it is not
+// on disk. Never an error: absent is the ordinary first-run case.
+static char *contribute_derived_digest(Config *config, ContributeState *state,
+                                       const char *name, data_filepath_t type) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(config->data_paths, name,
+                                                    type, errors);
+  char *digest = NULL;
+  if (error_stack_is_empty(errors)) {
+    digest = contribute_hash_file(state, path, errors);
+  }
+  error_stack_reset(errors);
+  error_stack_destroy(errors);
+  free(path);
+  return digest;
+}
+
+// Runs one `convert` conversion with this task's settings.
+static void contribute_convert(Config *config, const char *conversion_type,
+                               const char *name, const char *ld_name,
+                               const char *klv_name, const char *wmp_name,
+                               ErrorStack *error_stack) {
+  const ConversionArgs args = {
+      .conversion_type_string = conversion_type,
+      .data_paths = config_get_data_paths(config),
+      .input_and_output_name = name,
+      .ld_name = ld_name,
+      .klv_name = klv_name,
+      .wmp_name = wmp_name,
+      .num_threads = config_get_num_threads(config),
+  };
+  convert(&args, config->conversion_results, error_stack);
+}
+
+// Makes a wordmap for `lexicon` available, building it if what is on disk is
+// absent or does not match.
+//
+// Wordmaps are never transmitted -- roughly ten times the size of everything
+// else MAGPIE ships -- so the client derives them from the .kwg it already
+// has, which costs about a second per lexicon, once. Only a lexicon some
+// player's settings actually asked to use a wordmap for reaches this.
+//
+// When the claim pins the wordmap's SHA-256, that is the check: build if the
+// file on disk does not have that hash, and if the rebuilt file still does
+// not, record the mismatch and give up rather than playing with bytes the
+// server did not mean. When it does not -- an older server, or a CLI-style
+// run -- fall back to the .kwg sidecar, which is what this did before.
+//
+// `ld_name` is the letter distribution the job pins. It is passed rather than
+// inferred from the lexicon's name because a wordmap is built against a letter
+// distribution, and inferring one is how a worker builds a different file from
+// the server's for the same lexicon.
 static void config_contribute_ensure_wordmap(Config *config,
+                                             ContributeState *state,
                                              const char *lexicon,
+                                             const char *ld_name,
                                              ErrorStack *error_stack) {
   const char *data_paths = config_get_data_paths(config);
 
-  // The digest of the lexicon the wordmap must match. Missing is not an error
-  // here: without a .kwg there is nothing to build from either, and the
-  // conversion below reports that far better than this could.
-  char *kwg_path = data_filepaths_get_readable_filename(
-      data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, error_stack);
-  char *kwg_digest = NULL;
-  if (error_stack_is_empty(error_stack)) {
-    kwg_digest = sha256_hash_file(kwg_path, error_stack);
-  }
-  error_stack_reset(error_stack);
-  free(kwg_path);
+  ContributeDerived pinned;
+  const bool have_pin = contribute_find_derived(state, "wmp", lexicon, &pinned);
 
-  char *wmp_path = data_filepaths_get_readable_filename(
-      data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
-  if (error_stack_is_empty(error_stack)) {
-    if (wordmap_is_current(wmp_path, kwg_digest)) {
-      free(wmp_path);
+  if (have_pin) {
+    char *actual = contribute_derived_digest(config, state, lexicon,
+                                             DATA_FILEPATH_TYPE_WORDMAP);
+    const bool matches = actual && strings_equal(actual, pinned.sha256);
+    free(actual);
+    if (matches) {
+      return;
+    }
+  } else {
+    // The digest of the lexicon the wordmap must match. Missing is not an
+    // error here: without a .kwg there is nothing to build from either, and
+    // the conversion below reports that far better than this could.
+    char *kwg_path = data_filepaths_get_readable_filename(
+        data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, error_stack);
+    char *kwg_digest = NULL;
+    if (error_stack_is_empty(error_stack)) {
+      kwg_digest = sha256_hash_file(kwg_path, error_stack);
+    }
+    error_stack_reset(error_stack);
+    free(kwg_path);
+
+    char *wmp_path = data_filepaths_get_readable_filename(
+        data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+    const bool current = error_stack_is_empty(error_stack) &&
+                         wordmap_is_current(wmp_path, kwg_digest);
+    error_stack_reset(error_stack);
+    free(wmp_path);
+    if (current) {
       free(kwg_digest);
       return;
     }
-    // Built from a lexicon that is no longer here. Rebuilding costs about a
-    // second; playing with it costs a corrupt contribution nobody would catch.
-    free(wmp_path);
-  } else {
-    // Absent, which is the normal first-run case rather than a failure.
-    error_stack_reset(error_stack);
-  }
-
-  char *txt_path = data_filepaths_get_readable_filename(
-      data_paths, lexicon, DATA_FILEPATH_TYPE_LEXICON, error_stack);
-  if (error_stack_is_empty(error_stack)) {
-    free(txt_path);
-  } else {
-    error_stack_reset(error_stack);
-    const ConversionArgs dawg2text_args = {
-        .conversion_type_string = "dawg2text",
-        .data_paths = data_paths,
-        .input_and_output_name = lexicon,
-        .ld_name = NULL,
-        .num_threads = config_get_num_threads(config),
-    };
-    convert(&dawg2text_args, config->conversion_results, error_stack);
+    // Built from a lexicon that is no longer here, or never built. Rebuilding
+    // costs about a second; playing with it costs a corrupt contribution
+    // nobody would catch.
+    contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
+                       /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      free(kwg_digest);
       return;
     }
-  }
-
-  const ConversionArgs text2wordmap_args = {
-      .conversion_type_string = "text2wordmap",
-      .data_paths = data_paths,
-      .input_and_output_name = lexicon,
-      .ld_name = NULL,
-      .num_threads = config_get_num_threads(config),
-  };
-  convert(&text2wordmap_args, config->conversion_results, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  // `convert` reports failures on the error stack but can still leave no file
-  // behind, so the output's existence is the real check.
-  wmp_path = data_filepaths_get_readable_filename(
-      data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
+    // Written only now, *after* the wordmap itself is in place: a sidecar
+    // written first and then interrupted claims a wordmap that does not
+    // exist, and the next run would trust it.
+    char *built_path = data_filepaths_get_readable_filename(
+        data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_reset(error_stack);
+      free(kwg_digest);
+      free(built_path);
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
+          get_formatted_string(
+              "could not build a wordmap for %s. The data directory must be "
+              "writable; this job's settings ask for a wordmap.",
+              lexicon));
+      return;
+    }
+    if (kwg_digest) {
+      char *src_path = wordmap_source_path(built_path);
+      ErrorStack *sidecar_errors = error_stack_create();
+      write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
+      // A missing sidecar only costs one rebuild next time, which is not
+      // worth failing a task over.
+      error_stack_reset(sidecar_errors);
+      error_stack_destroy(sidecar_errors);
+      free(src_path);
+    }
     free(kwg_digest);
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
-        get_formatted_string(
-            "could not build a wordmap for %s. The data directory must be "
-            "writable; this job's settings ask for a wordmap.",
-            lexicon));
+    free(built_path);
     return;
   }
 
-  // Written only now, *after* the wordmap itself is in place: a sidecar
-  // written first and then interrupted claims a wordmap that does not exist,
-  // and the next run would trust it.
-  if (kwg_digest) {
-    char *src_path = wordmap_source_path(wmp_path);
+  // Pinned, and what is on disk is not it. Build from the .kwg this task's
+  // expected_data has already verified, and check the result.
+  //
+  // `dawg2wordmap` rather than the `dawg2text` + `text2wordmap` pair this used
+  // to run: the two produce identical bytes, this is the one the server builds
+  // its reference copy with, and it writes no intermediate .txt.
+  contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
+                     /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  char *built = contribute_derived_digest(config, state, lexicon,
+                                          DATA_FILEPATH_TYPE_WORDMAP);
+  if (built && strings_equal(built, pinned.sha256)) {
+    // The sidecar is redundant next to a pinned hash, but a later task on a
+    // server that pins nothing reads it, so keep it accurate.
     ErrorStack *sidecar_errors = error_stack_create();
-    write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
-    // A missing sidecar only costs one rebuild next time, which is not worth
-    // failing a task over.
+    char *kwg_path = data_filepaths_get_readable_filename(
+        data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, sidecar_errors);
+    char *kwg_digest = error_stack_is_empty(sidecar_errors)
+                           ? sha256_hash_file(kwg_path, sidecar_errors)
+                           : NULL;
+    char *wmp_path = error_stack_is_empty(sidecar_errors)
+                         ? data_filepaths_get_readable_filename(
+                               data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP,
+                               sidecar_errors)
+                         : NULL;
+    if (error_stack_is_empty(sidecar_errors) && kwg_digest && wmp_path) {
+      char *src_path = wordmap_source_path(wmp_path);
+      write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
+      free(src_path);
+    }
     error_stack_reset(sidecar_errors);
     error_stack_destroy(sidecar_errors);
-    free(src_path);
+    free(kwg_path);
+    free(kwg_digest);
+    free(wmp_path);
+    free(built);
+    return;
   }
-  free(kwg_digest);
-  free(wmp_path);
+
+  contribute_record_derived_mismatch(state, "wmp", lexicon, pinned.sha256,
+                                     built);
+  free(built);
+  error_stack_push(
+      error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+      get_formatted_string(
+          "the wordmap built here for %s is not the one this job pins "
+          "(builder %s, target %s)",
+          lexicon, pinned.builder ? pinned.builder : "unstated",
+          pinned.build_target ? pinned.build_target : "unstated"));
+}
+
+// Makes the rack info table `table_name` available, building it if what is on
+// disk is absent or does not match.
+//
+// Unlike a wordmap this is only ever done against a pinned hash. A table is
+// 1.9 GB and stores precomputed leave values that move generation uses in
+// place of the loaded KLV, so a wrong one silently reranks every full-rack
+// position; with nothing to check it against, the only safe answer is not to
+// load one, which is what this build did until now and what it still does
+// when the claim pins nothing.
+//
+// The table is built from the player's .klv2 and the wordmap for its lexicon,
+// so `config_contribute_ensure_wordmap` must have run first -- which also
+// means a player that asks for a table and no wordmap still builds one, since
+// the table cannot be made without it.
+static void config_contribute_ensure_rack_info_table(
+    Config *config, ContributeState *state, const char *table_name,
+    const char *lexicon, const char *leaves, const char *ld_name,
+    ErrorStack *error_stack) {
+  if (!leaves) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("a player asking for the rack info table %s "
+                             "states no leaves to build it from",
+                             table_name));
+    return;
+  }
+  ContributeDerived pinned;
+  if (!contribute_find_derived(state, "rit", table_name, &pinned)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+        get_formatted_string(
+            "this job asks for the rack info table %s but pins no hash for "
+            "it; a table that cannot be checked would rank every full rack on "
+            "leave values nothing verified",
+            table_name));
+    return;
+  }
+
+  char *actual = contribute_derived_digest(config, state, table_name,
+                                           DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
+  const bool matches = actual && strings_equal(actual, pinned.sha256);
+  free(actual);
+  if (matches) {
+    return;
+  }
+
+  // The wordmap the table is built from has to be the right one, and a player
+  // that asked for a table but no wordmap has not had one checked yet.
+  config_contribute_ensure_wordmap(config, state, lexicon, ld_name,
+                                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // One to three minutes and about 2.4 GB of memory, once per (.kwg, .klv2)
+  // pair. The heartbeat is already running by the time a task executes, which
+  // is why this can take that long without the claim lapsing.
+  contribute_convert(config, "klvwmp2rit", table_name, ld_name, leaves, lexicon,
+                     error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  char *built = contribute_derived_digest(config, state, table_name,
+                                          DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
+  if (built && strings_equal(built, pinned.sha256)) {
+    free(built);
+    return;
+  }
+  contribute_record_derived_mismatch(state, "rit", table_name, pinned.sha256,
+                                     built);
+  free(built);
+  error_stack_push(
+      error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+      get_formatted_string(
+          "the rack info table built here for %s is not the one this job pins "
+          "(builder %s, target %s)",
+          table_name, pinned.builder ? pinned.builder : "unstated",
+          pinned.build_target ? pinned.build_target : "unstated"));
+}
+
+// Sets the rack info table names the next lexicon load should use, or clears
+// them with two NULLs. Duplicated rather than borrowed: the JSON they come
+// from is the claim's, and the load happens while it is still alive, but a
+// table name that outlived its assignment would be the kind of bug that only
+// shows up on the task after the one that caused it.
+static void config_contribute_set_rit_names(Config *config, const char *p1,
+                                            const char *p2) {
+  free(config->p1_rit_name_override);
+  free(config->p2_rit_name_override);
+  config->p1_rit_name_override = p1 ? string_duplicate(p1) : NULL;
+  config->p2_rit_name_override = p2 ? string_duplicate(p2) : NULL;
 }
 
 // Sets the variant, board layout, lexicon, letter distribution and (for each
@@ -7274,37 +7546,44 @@ static void config_contribute_ensure_wordmap(Config *config,
 // settings left standard21 loaded would otherwise verify standard15.txt and
 // play every game on the other board.
 //
-// p1_use_wordmap and p2_use_wordmap are stated here, and the rack info table
-// is switched off for both players, *before* the lexical data loads:
-// config_load_lexicon_dependent_data decides whether to load either file from
-// these flags as it loads, and players pick up whatever it leaves behind.
-// Setting them after the load, as the executors used to, applied each task's
-// settings to the next task's load. A task that asked for no wordmap then got
-// one if the task before it had asked -- for its own lexicon, whose wordmap
-// config_contribute_ensure_wordmap had never checked against the .kwg on disk
-// -- and a rack info table switched on by the contributor's settings or an
-// earlier task stayed on.
+// Every one of these flags is stated here, *before* the lexical data loads:
+// config_load_lexicon_dependent_data decides whether to load a wordmap or a
+// rack info table from them as it loads, and players pick up whatever it
+// leaves behind. Setting them after the load, as the executors used to,
+// applied each task's settings to the next task's load. A task that asked for
+// no wordmap then got one if the task before it had asked -- for its own
+// lexicon, whose wordmap nothing had checked against the .kwg on disk -- and a
+// rack info table switched on by the contributor's settings or an earlier task
+// stayed on.
 //
-// The rack info table is always off. It is not exact the way a wordmap is:
-// each entry stores precomputed leave values, which move generation uses in
-// place of the loaded leaves, and the file is named after the lexicon, records
-// nothing about the KLV it was built from, and is covered by no digest. A
-// leave-generation task plays with a KLV fetched for its generation, which a
-// table built from the lexicon's shipped leaves would silently replace, and a
-// player whose leaves are not that KLV would rank moves on the wrong values.
-// birdtest refuses use_rit for the same reason.
+// p1_rit_name/p2_rit_name are the names the server pinned a hash for, or NULL
+// for a player that asked for no table. They are names rather than booleans
+// because a table belongs to a (.kwg, .klv2) pair: a player on CSW24 with
+// CSW_quackle_leaves and one on CSW24 with its own leaves need different
+// tables, and both would be called CSW24.rit if the table were found by
+// lexicon name the way the CLI finds it.
+//
+// Until birdtest could pin a table's hash, the table was switched off here
+// unconditionally. It is not an exact accelerator the way a wordmap is -- each
+// entry stores precomputed leave values that move generation uses in place of
+// the loaded leaves -- so a table nothing had checked would silently rerank
+// every full-rack position. What changed is that there is now something to
+// check it against; the caller has verified the file's bytes against the hash
+// the job pins before reaching here.
 void config_contribute_load_lexicon_and_variant(
     Config *config, const char *lexicon, const char *variant,
     const char *letter_distribution, const char *board_layout,
     const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
     const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
-    ErrorStack *error_stack) {
+    const char *p1_rit_name, const char *p2_rit_name, ErrorStack *error_stack) {
+  config_contribute_set_rit_names(config, p1_rit_name, p2_rit_name);
   for (int player_index = 0; player_index < 2; player_index++) {
     players_data_set_use_when_available(
         config->players_data, PLAYERS_DATA_TYPE_WMP, player_index,
         player_index == 0 ? p1_use_wordmap : p2_use_wordmap);
     players_data_set_use_when_available(
-        config->players_data, PLAYERS_DATA_TYPE_RIT, player_index, false);
+        config->players_data, PLAYERS_DATA_TYPE_RIT, player_index,
+        (player_index == 0 ? p1_rit_name : p2_rit_name) != NULL);
   }
   config_load_game_variant(config, variant, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7865,6 +8144,7 @@ static uint64_t contribute_rack_seed(const char *rack_str) {
 
 static char *config_contribute_games(Config *config, const JsonValue *request,
                                      bool game_pairs, int threads,
+                                     ContributeState *state,
                                      ErrorStack *error_stack) {
   const char *lexicon = NULL;
   const char *variant = NULL;
@@ -7906,15 +8186,45 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   const char *shared_lexicon = contribute_shared_lexicon(lexicon, p1_lexicon);
 
   if (contribute_wants_wordmap(player1)) {
-    config_contribute_ensure_wordmap(
-        config, p1_lexicon ? p1_lexicon : shared_lexicon, error_stack);
+    config_contribute_ensure_wordmap(config, state,
+                                     p1_lexicon ? p1_lexicon : shared_lexicon,
+                                     letter_distribution, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }
   }
   if (contribute_wants_wordmap(player2)) {
-    config_contribute_ensure_wordmap(
-        config, p2_lexicon ? p2_lexicon : shared_lexicon, error_stack);
+    config_contribute_ensure_wordmap(config, state,
+                                     p2_lexicon ? p2_lexicon : shared_lexicon,
+                                     letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+
+  // After the wordmaps: a rack info table is built from a .klv2 and the
+  // wordmap for its lexicon, so the wordmap has to be in place and correct
+  // first. Two players that share a table build it once, since the second
+  // finds the first's on disk with the right hash.
+  const char *p1_rit_name =
+      contribute_wants_rit(player1) ? contribute_rit_name(player1) : NULL;
+  const char *p2_rit_name =
+      contribute_wants_rit(player2) ? contribute_rit_name(player2) : NULL;
+  if (p1_rit_name) {
+    config_contribute_ensure_rack_info_table(
+        config, state, p1_rit_name, p1_lexicon ? p1_lexicon : shared_lexicon,
+        json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
+        letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  if (p2_rit_name &&
+      !(p1_rit_name && strings_equal(p1_rit_name, p2_rit_name))) {
+    config_contribute_ensure_rack_info_table(
+        config, state, p2_rit_name, p2_lexicon ? p2_lexicon : shared_lexicon,
+        json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES),
+        letter_distribution, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }
@@ -7926,7 +8236,7 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
       json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES),
       contribute_wants_wordmap(player1), contribute_wants_wordmap(player2),
-      error_stack);
+      p1_rit_name, p2_rit_name, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -8117,7 +8427,7 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
 // The lexicon and player settings are loaded once and reused across the batch.
 static char *config_contribute_opening_rack(Config *config,
                                             const JsonValue *request,
-                                            int threads,
+                                            int threads, ContributeState *state,
                                             ErrorStack *error_stack) {
   const char *lexicon = NULL;
   const char *variant = NULL;
@@ -8144,7 +8454,19 @@ static char *config_contribute_opening_rack(Config *config,
 
   if (contribute_wants_wordmap(player)) {
     config_contribute_ensure_wordmap(
-        config, contribute_shared_lexicon(lexicon, p1_lexicon), error_stack);
+        config, state, contribute_shared_lexicon(lexicon, p1_lexicon),
+        letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  const char *rit_name =
+      contribute_wants_rit(player) ? contribute_rit_name(player) : NULL;
+  if (rit_name) {
+    config_contribute_ensure_rack_info_table(
+        config, state, rit_name, contribute_shared_lexicon(lexicon, p1_lexicon),
+        json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES),
+        letter_distribution, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }
@@ -8160,7 +8482,7 @@ static char *config_contribute_opening_rack(Config *config,
       config, contribute_shared_lexicon(lexicon, p1_lexicon), variant,
       letter_distribution, board_layout, p1_lexicon, NULL, leaves, leaves,
       contribute_wants_wordmap(player), contribute_wants_wordmap(player),
-      error_stack);
+      rit_name, rit_name, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -8319,7 +8641,8 @@ static char *config_contribute_leave_gen(Config *config,
   // use_wordmap sits on the request itself rather than on a player object.
   const bool use_wordmap = contribute_wants_wordmap(request);
   if (use_wordmap) {
-    config_contribute_ensure_wordmap(config, lexicon, error_stack);
+    config_contribute_ensure_wordmap(config, state, lexicon,
+                                     letter_distribution, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }
@@ -8371,9 +8694,15 @@ static char *config_contribute_leave_gen(Config *config,
     }
   }
 
+  // No rack info table, ever, for leave generation. Every generation plays
+  // with a different KLV -- the one fetched above -- and a table caches leave
+  // values, so a table would have to be rebuilt per generation at 1.9 GB and
+  // several minutes per worker, to replace exactly the values being generated.
+  // The server pins none for this job type for the same reason.
   config_contribute_load_lexicon_and_variant(
       config, lexicon, variant, letter_distribution, board_layout, NULL, NULL,
-      leaves_name, leaves_name, use_wordmap, use_wordmap, error_stack);
+      leaves_name, leaves_name, use_wordmap, use_wordmap, /*p1_rit_name=*/NULL,
+      /*p2_rit_name=*/NULL, error_stack);
   free(leaves_name);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
@@ -8546,14 +8875,14 @@ void impl_contribute(Config *config, const char *settings_path,
     char *result_json = NULL;
     bool fatal = false;
     if (strings_equal(job_type, "games")) {
-      result_json =
-          config_contribute_games(config, request, false, threads, error_stack);
+      result_json = config_contribute_games(config, request, false, threads,
+                                            state, error_stack);
     } else if (strings_equal(job_type, "game_pairs")) {
-      result_json =
-          config_contribute_games(config, request, true, threads, error_stack);
+      result_json = config_contribute_games(config, request, true, threads,
+                                            state, error_stack);
     } else if (strings_equal(job_type, "opening_rack")) {
-      result_json =
-          config_contribute_opening_rack(config, request, threads, error_stack);
+      result_json = config_contribute_opening_rack(config, request, threads,
+                                                   state, error_stack);
     } else if (strings_equal(job_type, "leave_generation")) {
       result_json = config_contribute_leave_gen(config, request, threads, state,
                                                 error_stack);
@@ -8571,6 +8900,27 @@ void impl_contribute(Config *config, const char *settings_path,
       }
       continue;
     }
+    // A derived file this worker cannot reproduce is a property of this
+    // worker's build, not of the task, and it is not a result: hand the claim
+    // straight back with both hashes so the disagreement is visible in the
+    // admin view, and let the next claim land on another job. Submitting a
+    // failed result instead would hold the slot until the heartbeat lapsed and
+    // would tell the server nothing about which file differed.
+    if (error_stack_top(error_stack) ==
+        ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH) {
+      char *why = error_stack_get_string_and_reset(error_stack);
+      thread_control_print_formatted(config_get_thread_control(config), "%s\n",
+                                     why);
+      free(why);
+      free(result_json);
+      contribute_decline_derived_mismatch(
+          state, config_get_thread_control(config), error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        break;
+      }
+      continue;
+    }
+
     // execute_leave_gen pushes ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE when
     // this build cannot run the requested generation; that is a property of
     // the build rather than of one task, so it stops the run.
@@ -10910,6 +11260,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   cmd(ARG_TOKEN_HELP, "help", 0, 1, help, generic, false);
   cmd(ARG_TOKEN_VERSION, "version", 0, 0, version, generic, false);
+  cmd(ARG_TOKEN_BUILDERS, "builders", 0, 0, builders, generic, false);
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
@@ -10947,7 +11298,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
   cmd(ARG_TOKEN_PEG, "peg", 0, 1, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
-  cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
+  cmd(ARG_TOKEN_CONVERT, "convert", 2, 5, convert, generic, false);
   cmd(ARG_TOKEN_CONTRIBUTE, "contribute", 0, 1, contribute, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
@@ -11234,6 +11585,8 @@ void config_destroy(Config *config) {
   peg_result_destroy(&config->peg_result);
   peg_poll_destroy(config->peg_poll);
   free(config->peg_noprune_str);
+  free(config->p1_rit_name_override);
+  free(config->p2_rit_name_override);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
@@ -11294,6 +11647,7 @@ void config_add_settings_to_string_builder(const Config *config,
     switch (arg_token) {
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
+    case ARG_TOKEN_BUILDERS:
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:

@@ -80,7 +80,7 @@ void config_contribute_load_lexicon_and_variant(
     const char *letter_distribution, const char *board_layout,
     const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
     const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
-    ErrorStack *error_stack);
+    const char *p1_rit_name, const char *p2_rit_name, ErrorStack *error_stack);
 
 Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);

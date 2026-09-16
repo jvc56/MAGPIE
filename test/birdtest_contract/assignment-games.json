@@ -1,7 +1,7 @@
 {
   "claim_token": "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c",
   "job_id": "1d4a7f60-3c1e-4a55-9f2e-2f0f5d9e6a31",
-  "min_magpie_version": "0.4.0",
+  "min_magpie_version": "0.5.0",
   "expected_data": {
     "algorithm": "sha256",
     "files": [
@@ -45,6 +45,24 @@
         "bytes": 244,
         "tarball_date": "20251004"
       }
+    ],
+    "derived": [
+      {
+        "role": "wmp",
+        "name": "NWL23",
+        "sha256": "214a46d74fb6540fec309c4181b14ebd8f1c019cec76d7373d3c412cb08fc187",
+        "bytes": 104857600,
+        "builder": "wmp-1",
+        "build_target": "nehalem"
+      },
+      {
+        "role": "rit",
+        "name": "NWL23.NWL23",
+        "sha256": "157b72d3920d74b7b7e808d68251cf82033b516ad8f4c0746d8b4405cb306f8a",
+        "bytes": 1885416048,
+        "builder": "rit-1",
+        "build_target": "nehalem"
+      }
     ]
   },
   "task_request": {
@@ -74,7 +92,8 @@
       "use_inference": false,
       "time_limit_secs": 0,
       "use_wordmap": true,
-      "use_rit": false,
+      "use_rit": true,
+      "rit_name": "NWL23.NWL23",
       "min_play_iterations": 500,
       "threshold": "gk16",
       "sampling_rule": "top_two_ids",
@@ -101,6 +120,7 @@
       "time_limit_secs": null,
       "use_wordmap": true,
       "use_rit": false,
+      "rit_name": null,
       "min_play_iterations": null,
       "threshold": null,
       "sampling_rule": null,

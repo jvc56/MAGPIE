@@ -53,6 +53,11 @@
 #define CONTRIBUTE_KEY_PLAYER_LEXICON "lexicon"
 #define CONTRIBUTE_KEY_USE_WORDMAP "use_wordmap"
 #define CONTRIBUTE_KEY_USE_RIT "use_rit"
+// The name to load this player's rack info table under. A table belongs to a
+// (.kwg, .klv2) pair, so the server names it rather than letting the worker
+// infer it from the lexicon -- see src/impl/config.c's
+// config_contribute_ensure_rack_info_table.
+#define CONTRIBUTE_KEY_RIT_NAME "rit_name"
 #define CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS "min_play_iterations"
 #define CONTRIBUTE_KEY_PLAY_CHOOSER_TIME_SECS "play_chooser_time_secs"
 #define CONTRIBUTE_KEY_THRESHOLD "threshold"

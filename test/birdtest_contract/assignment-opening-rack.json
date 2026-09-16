@@ -1,7 +1,7 @@
 {
   "claim_token": "2b1c4e7a-9d30-4f61-b2cf-70d5a1e8c934",
   "job_id": "9a2f61c4-5e07-4b13-8d6a-c31f70b2ae58",
-  "min_magpie_version": "0.4.0",
+  "min_magpie_version": "0.5.0",
   "expected_data": {
     "algorithm": "sha256",
     "files": [
@@ -45,6 +45,16 @@
         "bytes": 244,
         "tarball_date": "20251004"
       }
+    ],
+    "derived": [
+      {
+        "role": "wmp",
+        "name": "NWL23",
+        "sha256": "214a46d74fb6540fec309c4181b14ebd8f1c019cec76d7373d3c412cb08fc187",
+        "bytes": 104857600,
+        "builder": "wmp-1",
+        "build_target": "nehalem"
+      }
     ]
   },
   "task_request": {
@@ -77,6 +87,7 @@
       "time_limit_secs": 0,
       "use_wordmap": true,
       "use_rit": false,
+      "rit_name": null,
       "min_play_iterations": 500,
       "threshold": "gk16",
       "sampling_rule": "top_two_ids",

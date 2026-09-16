@@ -299,6 +299,37 @@ static void assert_fixture_has_keys(const JsonValue *object,
 // is the check that would have caught "plies" and "top_plays" being read while
 // birdtest sent "num_plies" and "num_plays": every simming player ran on the
 // worker's own ambient settings and nothing failed.
+// Every derived file the claim pins has to carry what
+// config_contribute_ensure_wordmap and
+// config_contribute_ensure_rack_info_table read off it. A wordmap or a rack
+// info table is built on this machine and never shipped, so this hash is the
+// only thing that says the bytes are the ones the job means -- a fixture
+// missing a field here is a worker running unverified, which is the state this
+// whole mechanism replaces.
+static void assert_fixture_pins_derived_files(const JsonValue *fixture) {
+  const JsonValue *expected = json_object_get(fixture, "expected_data");
+  assert(expected);
+  const JsonValue *derived = json_object_get(expected, "derived");
+  if (!derived) {
+    log_fatal("birdtest's assignment has no expected_data.derived");
+  }
+  const int count = json_array_length(derived);
+  assert(count > 0);
+  for (int i = 0; i < count; i++) {
+    const JsonValue *entry = json_array_get(derived, i);
+    const char *role = json_get_string_or_null(entry, "role");
+    assert(role);
+    assert(strings_equal(role, "wmp") || strings_equal(role, "rit"));
+    assert(json_get_string_or_null(entry, "name"));
+    assert(json_get_string_or_null(entry, "sha256"));
+    // Diagnostic rather than load-bearing -- a worker does not refuse work
+    // over them -- but the server states both, and a decline that could not
+    // name the builder would be unactionable.
+    assert(json_get_string_or_null(entry, "builder"));
+    assert(json_get_string_or_null(entry, "build_target"));
+  }
+}
+
 static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   const JsonValue *request = NULL;
   JsonValue *games =
@@ -314,24 +345,25 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
                           sizeof(request_keys) / sizeof(request_keys[0]),
                           "games task_request");
   const char *const player_keys[] = {
-      CONTRIBUTE_KEY_PLAYER_LEXICON,       CONTRIBUTE_KEY_LEAVES,
-      CONTRIBUTE_KEY_RECORDER_TYPE,        CONTRIBUTE_KEY_SORT_STRATEGY,
-      CONTRIBUTE_KEY_MAX_ITERATIONS,       CONTRIBUTE_KEY_NUM_PLIES,
-      CONTRIBUTE_KEY_NUM_PLIES_RECORDED,   CONTRIBUTE_KEY_NUM_PLAYS,
-      CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,   CONTRIBUTE_KEY_STOPPING_PCT,
-      CONTRIBUTE_KEY_USE_INFERENCE,        CONTRIBUTE_KEY_TIME_LIMIT_SECS,
-      CONTRIBUTE_KEY_USE_WORDMAP,          CONTRIBUTE_KEY_USE_RIT,
-      CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS,  CONTRIBUTE_KEY_THRESHOLD,
-      CONTRIBUTE_KEY_SAMPLING_RULE,        CONTRIBUTE_KEY_INFERENCE_MARGIN,
-      CONTRIBUTE_KEY_UTILITY_W_WINPCT,     CONTRIBUTE_KEY_UTILITY_W_SPREAD,
-      CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE, CONTRIBUTE_KEY_WIN_PCT_MODEL,
-      CONTRIBUTE_KEY_MOVEGEN_MARGIN,
+      CONTRIBUTE_KEY_PLAYER_LEXICON,     CONTRIBUTE_KEY_LEAVES,
+      CONTRIBUTE_KEY_RECORDER_TYPE,      CONTRIBUTE_KEY_SORT_STRATEGY,
+      CONTRIBUTE_KEY_MAX_ITERATIONS,     CONTRIBUTE_KEY_NUM_PLIES,
+      CONTRIBUTE_KEY_NUM_PLIES_RECORDED, CONTRIBUTE_KEY_NUM_PLAYS,
+      CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, CONTRIBUTE_KEY_STOPPING_PCT,
+      CONTRIBUTE_KEY_USE_INFERENCE,      CONTRIBUTE_KEY_TIME_LIMIT_SECS,
+      CONTRIBUTE_KEY_USE_WORDMAP,        CONTRIBUTE_KEY_USE_RIT,
+      CONTRIBUTE_KEY_RIT_NAME,           CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS,
+      CONTRIBUTE_KEY_THRESHOLD,          CONTRIBUTE_KEY_SAMPLING_RULE,
+      CONTRIBUTE_KEY_INFERENCE_MARGIN,   CONTRIBUTE_KEY_UTILITY_W_WINPCT,
+      CONTRIBUTE_KEY_UTILITY_W_SPREAD,   CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE,
+      CONTRIBUTE_KEY_WIN_PCT_MODEL,      CONTRIBUTE_KEY_MOVEGEN_MARGIN,
   };
   const int num_player_keys = sizeof(player_keys) / sizeof(player_keys[0]);
   assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER1),
                           player_keys, num_player_keys, "games player1");
   assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER2),
                           player_keys, num_player_keys, "games player2");
+  assert_fixture_pins_derived_files(games);
   json_destroy(games);
 
   // Opening racks are the one job type whose request carries "racks" and a
@@ -358,6 +390,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   // loads itself when the player simulates.
   assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER),
                           player_keys, num_player_keys, "opening_rack player");
+  assert_fixture_pins_derived_files(opening_rack);
   json_destroy(opening_rack);
 
   JsonValue *leave =
@@ -555,7 +588,7 @@ static void test_lexical_flags_are_set_before_the_load(void) {
 
   config_contribute_load_lexicon_and_variant(
       config, "CSW21", "classic", NULL, NULL, "CSW21", "CSW21", "CSW21",
-      "CSW21", false, false, error_stack);
+      "CSW21", false, false, NULL, NULL, error_stack);
   assert(error_stack_is_empty(error_stack));
   for (int player_index = 0; player_index < 2; player_index++) {
     assert(!players_data_get_wmp(players_data, player_index));
@@ -563,9 +596,9 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   }
 
   // A task that asks for a wordmap gets it for itself, not for the next task.
-  config_contribute_load_lexicon_and_variant(config, "CSW21", "classic", NULL,
-                                             NULL, "CSW21", "CSW21", "CSW21",
-                                             "CSW21", true, false, error_stack);
+  config_contribute_load_lexicon_and_variant(
+      config, "CSW21", "classic", NULL, NULL, "CSW21", "CSW21", "CSW21",
+      "CSW21", true, false, NULL, NULL, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(players_data_get_wmp(players_data, 0));
   assert(!players_data_get_wmp(players_data, 1));

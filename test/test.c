@@ -14,6 +14,7 @@
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
 #include "board_test.h"
+#include "builder_hash_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
 #include "cmd_api_test.h"
@@ -138,6 +139,7 @@ static TestEntry test_table[] = {
     {"ch", test_checkpoint},
     {"klv", test_klv},
     {"cv", test_convert},
+    {"builderhash", test_builder_hash},
     {"cd", test_create_data},
     {"wmp", test_wmp},
     {"wmpmaker", test_wmp_maker},

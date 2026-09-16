@@ -182,6 +182,10 @@ struct ContributeState {
   // mtime, because a file replaced with same-size bytes inside one mtime tick
   // is exactly the case a cache must not miss.
   StringList *digest_cache;
+  // Derived files (wordmaps, rack info tables) whose bytes did not match what
+  // the claim pins, as JSON objects ready to go into a decline's "missing"
+  // array. Cleared by every decline that sends them.
+  StringList *derived_mismatches;
   // Set once the server has told this worker to stop.
   bool shutdown_requested;
 
@@ -418,6 +422,74 @@ static bool expected_data_matches(ContributeState *state,
   return all_matched;
 }
 
+// ---------------------------------------------------------------------------
+// Derived files
+// ---------------------------------------------------------------------------
+
+char *contribute_hash_file(ContributeState *state, const char *path,
+                           ErrorStack *error_stack) {
+  return hash_with_cache(state, path, error_stack);
+}
+
+bool contribute_find_derived(const ContributeState *state, const char *role,
+                             const char *name, ContributeDerived *out) {
+  if (!state || !state->assignment) {
+    return false;
+  }
+  const JsonValue *expected =
+      json_object_get(state->assignment, "expected_data");
+  if (!expected) {
+    return false;
+  }
+  const JsonValue *derived = json_object_get(expected, "derived");
+  const int count = json_array_length(derived);
+  for (int i = 0; i < count; i++) {
+    const JsonValue *entry = json_array_get(derived, i);
+    const char *entry_role = json_get_string_or_null(entry, "role");
+    const char *entry_name = json_get_string_or_null(entry, "name");
+    const char *sha256 = json_get_string_or_null(entry, "sha256");
+    if (!entry_role || !entry_name || !sha256 ||
+        !strings_equal(entry_role, role) || !strings_equal(entry_name, name)) {
+      continue;
+    }
+    out->role = entry_role;
+    out->name = entry_name;
+    out->sha256 = sha256;
+    out->builder = json_get_string_or_null(entry, "builder");
+    out->build_target = json_get_string_or_null(entry, "build_target");
+    return true;
+  }
+  return false;
+}
+
+void contribute_record_derived_mismatch(ContributeState *state,
+                                        const char *role, const char *name,
+                                        const char *expected,
+                                        const char *actual) {
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_string_field(sb, "role", role, &first);
+  json_write_string_field(sb, "name", name, &first);
+  json_write_string_field(sb, "expected", expected, &first);
+  if (actual) {
+    json_write_string_field(sb, "actual", actual, &first);
+  }
+  json_write_object_end(sb);
+  char *entry = string_builder_dump_and_destroy(sb, NULL);
+  string_list_add_string(state->derived_mismatches, entry);
+  free(entry);
+
+  // Kept for the shutdown summary alongside the input-data gaps, in the same
+  // shape, because from a contributor's point of view they are the same
+  // problem: a file on this disk is not the file the job means.
+  char *gap =
+      get_formatted_string("  %-24s built as sha256 %.8s, jobs require %.8s",
+                           name, actual ? actual : "(unbuilt)", expected);
+  string_list_add_string(state->data_gaps, gap);
+  free(gap);
+}
+
 // A worker with neither an API key nor a UUID sends no identity at all -- the
 // server mints one and hands it back the first time it actually assigns a
 // task. This persists that assignment for the rest of the run and to the
@@ -466,6 +538,7 @@ static ContributeState *contribute_state_create(const char *settings_path,
   state->data_gaps = string_list_create();
   state->logged_gaps = string_list_create();
   state->digest_cache = string_list_create();
+  state->derived_mismatches = string_list_create();
   state->shutdown_requested = false;
   memset(&state->heartbeat, 0, sizeof(state->heartbeat));
   state->claim_token = NULL;
@@ -750,6 +823,35 @@ void contribute_decline_task(ContributeState *state,
   release_claim(state);
 }
 
+void contribute_decline_derived_mismatch(ContributeState *state,
+                                         ThreadControl *thread_control,
+                                         ErrorStack *error_stack) {
+  if (!state || !state->claim_token) {
+    return;
+  }
+  StringBuilder *sb = string_builder_create();
+  const int count = string_list_get_count(state->derived_mismatches);
+  for (int i = 0; i < count; i++) {
+    if (i > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    string_builder_add_string(
+        sb, string_list_get_string(state->derived_mismatches, i));
+  }
+  char *missing_json = string_builder_dump_and_destroy(sb, NULL);
+
+  thread_control_print_formatted(
+      thread_control,
+      "declining this task: a file built here does not match what the job "
+      "pins\n");
+  decline_over_http(state, "derived_mismatch", missing_json, error_stack);
+  free(missing_json);
+  string_list_destroy(state->derived_mismatches);
+  state->derived_mismatches = string_list_create();
+  remember_unsupported(state, state->claimed_job_id);
+  release_claim(state);
+}
+
 typedef enum {
   CONTRIBUTE_SUBMIT_ACCEPTED,
   // 200 with {"accepted": false}: the claim had lapsed and been reassigned,
@@ -973,6 +1075,7 @@ void contribute_state_destroy(ContributeState *state) {
   string_list_destroy(state->data_gaps);
   string_list_destroy(state->logged_gaps);
   string_list_destroy(state->digest_cache);
+  string_list_destroy(state->derived_mismatches);
   json_destroy(state->assignment);
   http_client_destroy(state->http_client);
   client_state_destroy(state->client_state);

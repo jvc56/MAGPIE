@@ -21,11 +21,18 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+// A count no observation can produce, so "never drawn" and "never supplied"
+// stay distinguishable through rack_list_mark_all_racks_unset. Only
+// rackequity2klv uses it; every other path leaves counts at zero or above
+// from creation onwards.
+enum { RACK_LIST_COUNT_UNSET = -1 };
 
 typedef struct RackListItem {
   // Index of this item in the rack list items ordered by count.
@@ -430,6 +437,54 @@ void rack_list_add_rack(RackList *rack_list, const Rack *rack, double equity) {
       convert_word_index_to_rack_list_index(
           klv_get_word_index(rack_list->klv, rack)),
       equity);
+}
+
+void rack_list_set_rack_count_and_mean(RackList *rack_list, const Rack *rack,
+                                       uint64_t count, double mean,
+                                       ErrorStack *error_stack) {
+  const uint32_t word_index = rack_get_total_letters(rack) == (RACK_SIZE)
+                                  ? klv_get_word_index(rack_list->klv, rack)
+                                  : KLV_UNFOUND_INDEX;
+  if (word_index == KLV_UNFOUND_INDEX) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+        get_formatted_string("rack equity rows must name full racks of %d "
+                             "tiles drawable from this letter distribution",
+                             (RACK_SIZE)));
+    return;
+  }
+  const uint32_t rack_list_index =
+      convert_word_index_to_rack_list_index(word_index);
+  RackListItem *item = rack_list->racks_ordered_by_index[rack_list_index];
+  if (item->count != RACK_LIST_COUNT_UNSET) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+        string_duplicate("this rack has already been given a count"));
+    return;
+  }
+  // `count` is a uint64_t on the way in because that is what an aggregate of a
+  // whole generation is counted in, and an int on the item because that is
+  // what a single leavegen run needs. Only rack_list_write_to_klv reads it
+  // back, and only to decide whether the rack was observed at all, so the
+  // saturation below loses nothing that is used.
+  item->count = count > (uint64_t)INT_MAX ? INT_MAX : (int)count;
+  item->mean = mean;
+}
+
+void rack_list_mark_all_racks_unset(RackList *rack_list) {
+  for (int i = 0; i < rack_list->number_of_racks; i++) {
+    rack_list->racks_ordered_by_index[i]->count = RACK_LIST_COUNT_UNSET;
+  }
+}
+
+int rack_list_get_number_of_unset_racks(const RackList *rack_list) {
+  int unset = 0;
+  for (int i = 0; i < rack_list->number_of_racks; i++) {
+    if (rack_list->racks_ordered_by_index[i]->count == RACK_LIST_COUNT_UNSET) {
+      unset++;
+    }
+  }
+  return unset;
 }
 
 int rack_list_get_racks_below_target_count(const RackList *rack_list) {

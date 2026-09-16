@@ -27,13 +27,47 @@ ifndef RACK_SIZE
 RACK_SIZE = 7
 endif
 
+# The portable optimized build. Identical to no_pgo_release except that the
+# instruction set is fixed instead of being whatever the building machine
+# happens to have.
+#
+# This exists because a wordmap's and a rack info table's bytes have to be a
+# function of their inputs alone. birdtest's server builds a reference copy of
+# each derived file and sends its SHA-256 to workers, which build their own and
+# refuse to use one whose hash differs (see birdtest's MAGPIE_DEPENDENCY.md).
+# -march=native makes the binary's instruction set a property of the machine
+# that compiled it, so two builds of the same commit can vectorize the same
+# floating-point reduction differently and produce different bytes for the same
+# inputs.
+#
+# The target is spelled `nehalem` rather than `x86-64-v2`: they name the same
+# instruction set (SSE4.2, POPCNT), which every machine this runs on already
+# meets, Fargate included, but `x86-64-v2` only reached GCC in 11 and Clang in
+# 12 -- Ubuntu 20.04's clang 10 rejects it outright -- and a target some
+# compilers cannot parse is no use for a build meant to be reproducible
+# everywhere. `nehalem` additionally tunes for that microarchitecture, which
+# changes instruction scheduling and not results.
+#
+# PORTABLE_MARCH overrides the target for a non-x86 host; a build for one
+# architecture is only comparable with another build for that same
+# architecture, which is why the target travels with the binary and the server
+# records it alongside every hash (see `magpie builders`).
+PORTABLE_MARCH ?= nehalem
+
 # Key every object (and its .d fragment) by the flags that change its contents:
 # build flavor, board dim, rack size. Switching any of them selects a different
 # obj subtree instead of relinking objects compiled with mismatched flags -- so
 # no `make clean` is needed between flavors, and switching back reuses the cached
 # objects. `clean` wipes the whole OBJ_ROOT.
 OBJ_ROOT := obj
+# portable_release additionally keys on its target: the whole point of that
+# flavor is that the target is fixed, so changing it has to recompile rather
+# than relink objects built for the old one.
+ifeq ($(BUILD),portable_release)
+OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-$(PORTABLE_MARCH)-b$(BOARD_DIM)-r$(RACK_SIZE)
+else
 OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
+endif
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
 # ignored by git and removed by `make clean` with the other build artifacts.
@@ -114,6 +148,8 @@ cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototype
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
+cflags.portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -DNDEBUG -Wall -Wno-trigraphs
+cflags.test_portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -Wall -Wno-trigraphs
 # Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs
 # Training runs multithreaded, so counter updates must be atomic. clang 17
@@ -140,12 +176,26 @@ ldflags.lib := -pthread
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
 ldflags.no_pgo_release := -pthread -flto
+ldflags.portable_release := -pthread -flto
 ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
 ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.profile := -pthread
 ldflags.cov := -pthread
 
 CFLAGS := ${cflags.${BUILD}}
+
+# The instruction-set target compiled into this binary, reported by
+# `magpie builders` and recorded by birdtest beside every derived-file hash.
+# See src/def/builder_defs.h for why a hash is only meaningful together with
+# the build that produced it.
+ifeq ($(BUILD),portable_release)
+BUILD_TARGET := $(PORTABLE_MARCH)
+else ifneq ($(findstring -march=native,${cflags.${BUILD}}),)
+BUILD_TARGET := native
+else
+BUILD_TARGET := default
+endif
+CFLAGS += -DMAGPIE_BUILD_TARGET=\"$(BUILD_TARGET)\"
 
 # Emit a .d makefile fragment next to each .o listing the headers it includes
 # (-MMD) plus phony targets for those headers (-MP, so deleting a header does
@@ -252,7 +302,7 @@ endif
 
 # Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(if $(filter no_pgo_release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+	$(CC) $(if $(filter no_pgo_release portable_release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@

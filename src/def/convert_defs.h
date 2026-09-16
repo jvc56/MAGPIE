@@ -24,6 +24,9 @@ typedef enum {
   CONVERT_TEXT2WORDMAP,
   CONVERT_DAWG2WORDMAP,
   CONVERT_KLVWMP2RIT,
+  // A generation's aggregated full-rack results (rack,count,equity_sum) into
+  // the KLV those results imply. See convert.c.
+  CONVERT_RACKEQUITY2KLV,
   CONVERT_KWG2WIT,
   CONVERT_KWG2WIT_IF_NEEDED,
   CONVERT_UNKNOWN,

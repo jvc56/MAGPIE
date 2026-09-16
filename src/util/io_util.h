@@ -96,6 +96,11 @@ typedef enum {
   ERROR_STATUS_CONVERT_MALFORMED_KWG,
   ERROR_STATUS_CONVERT_UNRECOGNIZED_CONVERSION_TYPE,
   ERROR_STATUS_CONVERT_UNIMPLEMENTED_CONVERSION_TYPE,
+  // A row of a rackequity2klv CSV that is not `rack,count,equity_sum` with a
+  // full RACK_SIZE rack, or a file that does not cover every full rack exactly
+  // once.
+  ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+  ERROR_STATUS_CONVERT_INCOMPLETE_RACK_EQUITY_CSV,
   // Create data errors
   ERROR_STATUS_CREATE_DATA_MISSING_LETTER_DISTRIBUTION,
   // GCG Parse errors
@@ -278,6 +283,12 @@ typedef enum {
   ERROR_STATUS_CONTRIBUTE_MAGPIE_TOO_OLD,
   ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE,
   ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
+  // A wordmap or rack info table built here does not have the SHA-256 the
+  // claimed job pins for it. Handled by handing the claim back with reason
+  // "derived_mismatch" rather than by submitting a failed result: the task is
+  // fine, this build cannot reproduce the file, and the server needs to see
+  // both hashes.
+  ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
 } error_code_t;
 
 typedef enum {
