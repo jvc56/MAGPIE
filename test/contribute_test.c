@@ -580,8 +580,15 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   PlayersData *players_data = config_get_players_data(config);
   assert(players_data_get_wmp(players_data, 0));
+  // The table and the word info table flags are forced on the way a
+  // contributor's settings.txt or an earlier command would leave them (-wit
+  // itself refuses to set the flag without a file to load): birdtest offers
+  // neither setting, so contribute must switch both off before the load
+  // decides what to open.
   for (int player_index = 0; player_index < 2; player_index++) {
     players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT,
+                                        player_index, true);
+    players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_WIT,
                                         player_index, true);
   }
   ErrorStack *error_stack = error_stack_create();
@@ -593,6 +600,8 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   for (int player_index = 0; player_index < 2; player_index++) {
     assert(!players_data_get_wmp(players_data, player_index));
     assert(!players_data_get_rack_info_table(players_data, player_index));
+    assert(!players_data_get_use_when_available(
+        players_data, PLAYERS_DATA_TYPE_WIT, player_index));
   }
 
   // A task that asks for a wordmap gets it for itself, not for the next task.

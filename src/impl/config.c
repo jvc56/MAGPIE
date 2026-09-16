@@ -974,7 +974,7 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.5.0"
+#define MAGPIE_VERSION "0.5.1"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -7570,6 +7570,15 @@ static void config_contribute_set_rit_names(Config *config, const char *p1,
 // every full-rack position. What changed is that there is now something to
 // check it against; the caller has verified the file's bytes against the hash
 // the job pins before reaching here.
+//
+// The word info table is switched off here for both players, always. It is
+// the third file the load can open by lexicon name -- a per-substring letter
+// mask move generation prunes with -- and birdtest neither offers nor pins
+// one, so nothing a task carries has checked it: built from the lexicon on
+// disk it prunes nothing legal, built from an older one it prunes plays that
+// exist. It is opt-in (-wit, -wit1, -wit2), and nothing else on this path
+// reset the flag, so a contributor whose settings.txt or an earlier command
+// in this process had switched one on played every task with it.
 void config_contribute_load_lexicon_and_variant(
     Config *config, const char *lexicon, const char *variant,
     const char *letter_distribution, const char *board_layout,
@@ -7584,6 +7593,8 @@ void config_contribute_load_lexicon_and_variant(
     players_data_set_use_when_available(
         config->players_data, PLAYERS_DATA_TYPE_RIT, player_index,
         (player_index == 0 ? p1_rit_name : p2_rit_name) != NULL);
+    players_data_set_use_when_available(
+        config->players_data, PLAYERS_DATA_TYPE_WIT, player_index, false);
   }
   config_load_game_variant(config, variant, error_stack);
   if (!error_stack_is_empty(error_stack)) {
