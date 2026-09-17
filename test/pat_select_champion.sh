@@ -223,10 +223,10 @@ log "wrote $strategy/$release.pat"
 shippable=0
 if [ -n "$vl" ] && gt "$(lower_of "$log_dir/validate.txt")" "$SHIPPABLE_MIN_LOWER_CI"; then shippable=1; fi
 if [ "$shippable" -eq 1 ]; then
-  log "shippable (validation lower bound above $SHIPPABLE_MIN_LOWER_CI); removing tables"
-  [ -f "$lexica/$lex.rit" ] && rm -f "$lexica/$lex.rit" && log "  deleted $lex.rit"
-  [ -f "$lexica/$lex.wit" ] && rm -f "$lexica/$lex.wit" && log "  deleted $lex.wit"
-  [ -f "$lexica/$lex.wmp" ] && rm -f "$lexica/$lex.wmp" && log "  deleted $lex.wmp"
+  log "shippable (validation lower bound above $SHIPPABLE_MIN_LOWER_CI); removing tables this run built"
+  [ "$built_rit" -eq 1 ] && [ -f "$lexica/$lex.rit" ] && rm -f "$lexica/$lex.rit" && log "  deleted $lex.rit"
+  [ "$built_wit" -eq 1 ] && [ -f "$lexica/$lex.wit" ] && rm -f "$lexica/$lex.wit" && log "  deleted $lex.wit"
+  [ "$built_wmp" -eq 1 ] && [ -f "$lexica/$lex.wmp" ] && rm -f "$lexica/$lex.wmp" && log "  deleted $lex.wmp"
   rm -f settings.txt
 else
   log "NOT shippable by the validation bar; tables kept, file flagged"
