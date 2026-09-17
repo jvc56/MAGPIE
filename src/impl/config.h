@@ -65,6 +65,20 @@ void config_contribute_apply_run_settings(Config *config,
                                           bool states_cutoff,
                                           ErrorStack *error_stack);
 
+// Reads the job-wide names every task request carries -- the variant, the
+// letter distribution and the board layout, plus leave generation's top-level
+// lexicon -- and refuses a request that leaves out the variant, the
+// distribution or the layout, or names any of them with something that is not
+// a plain data name. The distribution and the layout are required rather than
+// defaulted: both change what a task computes, and a default is this build's
+// to choose. Exposed for testing.
+bool config_contribute_validate_common(const JsonValue *request,
+                                       const char **lexicon,
+                                       const char **variant,
+                                       const char **letter_distribution,
+                                       const char **board_layout,
+                                       ErrorStack *error_stack);
+
 // Copies one player's simulation settings into the run-wide ones that
 // impl_move_gen and impl_sim read. The opening-rack executor analyses through
 // those entry points, which ignore the per-player settings a request applies.

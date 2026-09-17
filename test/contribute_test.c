@@ -616,7 +616,63 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   config_destroy(config);
 }
 
+// The letter distribution and the board layout change what a task computes as
+// surely as a player's plies do, and they were the last two settings a request
+// could leave to the build that ran it: absent, the distribution was inferred
+// from the lexicon's name and the layout was the one named for this build's
+// BOARD_DIM. birdtest states both on every request, so one that does not is
+// refused, the way a player object missing a setting is.
+static void test_a_request_must_state_its_distribution_and_layout(void) {
+  ErrorStack *error_stack = error_stack_create();
+  const char *lexicon = NULL;
+  const char *variant = NULL;
+  const char *letter_distribution = NULL;
+  const char *board_layout = NULL;
+
+  JsonValue *stated = json_parse("{\"variant\":\"classic\","
+                                 "\"letter_distribution\":\"english\","
+                                 "\"board_layout\":\"standard15\"}",
+                                 error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(config_contribute_validate_common(stated, &lexicon, &variant,
+                                           &letter_distribution, &board_layout,
+                                           error_stack));
+  assert(error_stack_is_empty(error_stack));
+  // Only leave generation states a top-level lexicon.
+  assert(!lexicon);
+  assert_strings_equal(variant, "classic");
+  assert_strings_equal(letter_distribution, "english");
+  assert_strings_equal(board_layout, "standard15");
+  json_destroy(stated);
+
+  const char *const incomplete[] = {
+      // No distribution.
+      "{\"variant\":\"classic\",\"board_layout\":\"standard15\"}",
+      // No layout.
+      "{\"variant\":\"classic\",\"letter_distribution\":\"english\"}",
+      // A null is not a statement either.
+      "{\"variant\":\"classic\",\"letter_distribution\":null,"
+      "\"board_layout\":\"standard15\"}",
+      // A name that would leave the data directory.
+      "{\"variant\":\"classic\",\"letter_distribution\":\"../english\","
+      "\"board_layout\":\"standard15\"}",
+  };
+  for (size_t i = 0; i < sizeof(incomplete) / sizeof(incomplete[0]); i++) {
+    JsonValue *request = json_parse(incomplete[i], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(!config_contribute_validate_common(request, &lexicon, &variant,
+                                              &letter_distribution,
+                                              &board_layout, error_stack));
+    assert(!error_stack_is_empty(error_stack));
+    error_stack_reset(error_stack);
+    json_destroy(request);
+  }
+
+  error_stack_destroy(error_stack);
+}
+
 void test_contribute(void) {
+  test_a_request_must_state_its_distribution_and_layout();
   test_lexical_flags_are_set_before_the_load();
   test_shared_settings_do_not_leak_between_tasks();
   test_a_player_must_state_every_setting();

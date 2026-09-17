@@ -7142,10 +7142,18 @@ static bool contribute_is_safe_data_name(const char *name) {
 //
 // The letter distribution and board layout are job-wide as well, and both are
 // pinned by digest in expected_data. They are read here so every executor
-// applies them: optional on the wire, so that absent means MAGPIE's defaults
-// (see config_contribute_load_lexicon_and_variant), never whatever an earlier
-// task or the contributor's settings.txt last loaded.
-static bool contribute_validate_common(const JsonValue *request,
+// applies them, and both are required, like every other setting that changes
+// what a task computes (see contribute_required_player_keys).
+//
+// They used to be optional, with absent meaning this build's defaults: the
+// distribution inferred from the lexicon's name and the layout named for the
+// compile-time BOARD_DIM. That was the last setting on this path a request
+// could leave to the build that ran it. birdtest states both on every request
+// of every job type -- the job pins the two files by digest and the worker has
+// just verified them -- so a request without one comes from a server this
+// build does not understand, and is refused rather than filled in. (The load
+// below still accepts NULLs; nothing on this path passes one any more.)
+bool config_contribute_validate_common(const JsonValue *request,
                                        const char **lexicon,
                                        const char **variant,
                                        const char **letter_distribution,
@@ -7157,8 +7165,15 @@ static bool contribute_validate_common(const JsonValue *request,
     return false;
   }
   *letter_distribution =
-      json_get_string_or_null(request, CONTRIBUTE_KEY_LETTER_DISTRIBUTION);
-  *board_layout = json_get_string_or_null(request, CONTRIBUTE_KEY_BOARD_LAYOUT);
+      json_get_string(request, CONTRIBUTE_KEY_LETTER_DISTRIBUTION, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  *board_layout =
+      json_get_string(request, CONTRIBUTE_KEY_BOARD_LAYOUT, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
   if ((*lexicon && !contribute_is_safe_data_name(*lexicon)) ||
       !contribute_is_safe_data_name(*variant) ||
       (*letter_distribution &&
@@ -7540,11 +7555,13 @@ static void config_contribute_set_rit_names(Config *config, const char *p1,
 // to compare bots on different lexicons; NULL means "use the shared lexicon".
 //
 // letter_distribution and board_layout are the files the job pins and the
-// worker has just verified by digest. NULL for either means MAGPIE's default
-// -- the lexicon's own distribution, standard15 -- and never the one an
-// earlier task or the contributor's settings.txt last loaded: a worker whose
-// settings left standard21 loaded would otherwise verify standard15.txt and
-// play every game on the other board.
+// worker has just verified by digest. Every executor passes both: a task
+// request must state them (config_contribute_validate_common). NULL for either
+// is still accepted here and means MAGPIE's default -- the lexicon's own
+// distribution, standard15 -- and never the one an earlier task or the
+// contributor's settings.txt last loaded: a worker whose settings left
+// standard21 loaded would otherwise verify standard15.txt and play every game
+// on the other board.
 //
 // Every one of these flags is stated here, *before* the lexical data loads:
 // config_load_lexicon_dependent_data decides whether to load a wordmap or a
@@ -8147,9 +8164,9 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   const char *variant = NULL;
   const char *letter_distribution = NULL;
   const char *board_layout = NULL;
-  if (!contribute_validate_common(request, &lexicon, &variant,
-                                  &letter_distribution, &board_layout,
-                                  error_stack)) {
+  if (!config_contribute_validate_common(request, &lexicon, &variant,
+                                         &letter_distribution, &board_layout,
+                                         error_stack)) {
     return NULL;
   }
 
@@ -8437,9 +8454,9 @@ static char *config_contribute_opening_rack(Config *config,
   const char *variant = NULL;
   const char *letter_distribution = NULL;
   const char *board_layout = NULL;
-  if (!contribute_validate_common(request, &lexicon, &variant,
-                                  &letter_distribution, &board_layout,
-                                  error_stack)) {
+  if (!config_contribute_validate_common(request, &lexicon, &variant,
+                                         &letter_distribution, &board_layout,
+                                         error_stack)) {
     return NULL;
   }
 
@@ -8600,9 +8617,9 @@ static char *config_contribute_leave_gen(Config *config,
   const char *variant = NULL;
   const char *letter_distribution = NULL;
   const char *board_layout = NULL;
-  if (!contribute_validate_common(request, &lexicon, &variant,
-                                  &letter_distribution, &board_layout,
-                                  error_stack)) {
+  if (!config_contribute_validate_common(request, &lexicon, &variant,
+                                         &letter_distribution, &board_layout,
+                                         error_stack)) {
     return NULL;
   }
 
