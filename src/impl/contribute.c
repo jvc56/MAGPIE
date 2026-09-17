@@ -192,6 +192,10 @@ struct ContributeState {
   StringList *derived_mismatches;
   // Set once the server has told this worker to stop.
   bool shutdown_requested;
+  // Set once any claim has been answered by the server, whatever it said.
+  // From then on a claim that cannot reach the server keeps trying instead of
+  // ending the run: see claim_task_over_http.
+  bool reached_server;
 
   // Set between a successful claim and its matching submit.
   Heartbeat heartbeat;
@@ -512,6 +516,24 @@ static void adopt_server_assigned_uuid(ContributeState *state,
   http_client_set_worker_uuid(state->http_client, worker_uuid);
 }
 
+// Says that the server is not answering, so a contributor watching a run that
+// has gone quiet can tell waiting from hanging. Once when the trouble starts,
+// then once per wait at the back-off's ceiling -- a line a minute, which is
+// also the rate at which the server is being asked.
+static void report_server_retry(void *context, int retry_idx,
+                                int wait_seconds) {
+  ThreadControl *thread_control = (ThreadControl *)context;
+  if (retry_idx == 0) {
+    thread_control_print_formatted(thread_control,
+                                   "the server is not answering; retrying\n");
+  } else if (wait_seconds >= HTTP_CLIENT_MAX_BACKOFF_SECONDS) {
+    thread_control_print_formatted(
+        thread_control,
+        "the server is still not answering; trying again in %d seconds\n",
+        wait_seconds);
+  }
+}
+
 static ContributeState *contribute_state_create(const char *settings_path,
                                                 ThreadControl *thread_control,
                                                 ErrorStack *error_stack) {
@@ -544,6 +566,9 @@ static ContributeState *contribute_state_create(const char *settings_path,
   state->digest_cache = string_list_create();
   state->derived_mismatches = string_list_create();
   state->shutdown_requested = false;
+  state->reached_server = false;
+  http_client_set_retry_listener(state->http_client, report_server_retry,
+                                 thread_control);
   memset(&state->heartbeat, 0, sizeof(state->heartbeat));
   state->claim_token = NULL;
   state->claimed_job_id = NULL;
@@ -688,13 +713,31 @@ claim_task_over_http(ContributeState *state, const char *this_magpie_version,
   json_write_object_end(sb);
   char *claim_body = string_builder_dump_and_destroy(sb, NULL);
 
+  // A claim that cannot reach the server keeps asking, once this run has been
+  // answered by that server at all. An outage has no length a client can know
+  // -- a deployment is a minute, a restore from backup is most of an hour --
+  // and the two ways of being wrong are not alike: a claim a minute against a
+  // server that is away costs nothing, while a run that gave up is a
+  // contributor's machine lost until its owner happens to look. Nothing is
+  // held while it waits: no claim, no heartbeat, no result.
+  //
+  // A run that has *never* been answered keeps the finite budget, so a
+  // mistyped `server` line still ends with an error rather than a client
+  // polling nothing for ever. So does every other request: a submission's
+  // claim lapses on the server whatever the client does.
   // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-  http_client_post_json(state->http_client, "/api/worker/task", claim_body,
-                        &response, error_stack);
+  if (state->reached_server) {
+    http_client_post_json_persistent(state->http_client, "/api/worker/task",
+                                     claim_body, &response, error_stack);
+  } else {
+    http_client_post_json(state->http_client, "/api/worker/task", claim_body,
+                          &response, error_stack);
+  }
   free(claim_body);
   if (!error_stack_is_empty(error_stack)) {
     return CONTRIBUTE_CLAIM_FAILED;
   }
+  state->reached_server = true;
 
   // 204 is the normal state of a quiet server, not a failure.
   if (response.status_code == 204) {

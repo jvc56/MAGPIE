@@ -11,6 +11,9 @@ enum {
   MAX_RATE_LIMIT_RETRIES = 5,
   REQUEST_TIMEOUT_SECONDS = 120,
   MAX_HEADERS = 4,
+  // max_transient_retries for a request that never gives up on a server that
+  // is not answering: see http_client_post_json_persistent.
+  RETRY_WITHOUT_LIMIT = -1,
 };
 
 // How long a request rides out a server that is not answering: a transport
@@ -47,6 +50,11 @@ struct HttpClient {
   // NULL when neither an API key nor a worker UUID is known yet, in which
   // case a request carries no identity header at all.
   char *auth_header;
+  // See http_client_set_retry_listener. Only requests that retry reach it, and
+  // the heartbeat thread's never do, so it is only ever called from the thread
+  // that runs the contribute loop.
+  http_client_retry_listener_t retry_listener;
+  void *retry_listener_context;
 };
 
 static void rebuild_auth_header(HttpClient *client) {
@@ -80,6 +88,8 @@ HttpClient *http_client_create(const char *base_url, const char *api_key,
   client->api_key = api_key ? string_duplicate(api_key) : NULL;
   client->worker_uuid = worker_uuid ? string_duplicate(worker_uuid) : NULL;
   client->auth_header = NULL;
+  client->retry_listener = NULL;
+  client->retry_listener_context = NULL;
   rebuild_auth_header(client);
   return client;
 }
@@ -88,6 +98,28 @@ void http_client_set_worker_uuid(HttpClient *client, const char *worker_uuid) {
   free(client->worker_uuid);
   client->worker_uuid = string_duplicate(worker_uuid);
   rebuild_auth_header(client);
+}
+
+void http_client_set_retry_listener(HttpClient *client,
+                                    http_client_retry_listener_t listener,
+                                    void *context) {
+  client->retry_listener = listener;
+  client->retry_listener_context = context;
+}
+
+// Waits out one transient retry, telling the listener first.
+static void nap_before_retry(const HttpClient *client, int retry_idx) {
+  const int wait_seconds = http_client_backoff_seconds(retry_idx);
+  if (client->retry_listener) {
+    client->retry_listener(client->retry_listener_context, retry_idx,
+                           wait_seconds);
+  }
+  ctime_nap(wait_seconds);
+}
+
+static bool may_retry(int transient_retries, int max_transient_retries) {
+  return max_transient_retries == RETRY_WITHOUT_LIMIT ||
+         transient_retries < max_transient_retries;
 }
 
 void http_client_destroy(HttpClient *client) {
@@ -135,10 +167,14 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
       // A transport failure -- DNS, connection refused, timeout. A
       // contributor's link is not necessarily stable, and neither is the
       // server's: see http_client_backoff_seconds.
-      if (transient_retries < max_transient_retries) {
+      if (may_retry(transient_retries, max_transient_retries)) {
         error_stack_destroy(attempt_errors);
-        ctime_nap(http_client_backoff_seconds(transient_retries));
-        transient_retries++;
+        nap_before_retry(client, transient_retries);
+        // Saturating: a request that retries without limit must not wrap its
+        // own count, which only ever indexes the back-off.
+        if (transient_retries < HTTP_CLIENT_MAX_TRANSIENT_RETRIES) {
+          transient_retries++;
+        }
         continue;
       }
       char *message = error_stack_get_string_and_reset(attempt_errors);
@@ -163,10 +199,12 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
     }
 
     if (response->status_code >= 500 &&
-        transient_retries < max_transient_retries) {
+        may_retry(transient_retries, max_transient_retries)) {
       chttp_response_destroy(response);
-      ctime_nap(http_client_backoff_seconds(transient_retries));
-      transient_retries++;
+      nap_before_retry(client, transient_retries);
+      if (transient_retries < HTTP_CLIENT_MAX_TRANSIENT_RETRIES) {
+        transient_retries++;
+      }
       continue;
     }
 
@@ -186,6 +224,13 @@ void http_client_post_json(HttpClient *client, const char *path,
                            ErrorStack *error_stack) {
   perform(client, CHTTP_POST, path, body ? body : "{}",
           HTTP_CLIENT_MAX_TRANSIENT_RETRIES, response, error_stack);
+}
+
+void http_client_post_json_persistent(HttpClient *client, const char *path,
+                                      const char *body, ChttpResponse *response,
+                                      ErrorStack *error_stack) {
+  perform(client, CHTTP_POST, path, body ? body : "{}", RETRY_WITHOUT_LIMIT,
+          response, error_stack);
 }
 
 void http_client_post_json_once(HttpClient *client, const char *path,

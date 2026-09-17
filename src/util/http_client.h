@@ -38,6 +38,24 @@ void http_client_post_json(HttpClient *client, const char *path,
                            const char *body, ChttpResponse *response,
                            ErrorStack *error_stack);
 
+// As http_client_post_json, but a transport failure or a 5xx is retried for as
+// long as it lasts, at the back-off's ceiling once it gets there. For the one
+// request that loses nothing by waiting: a task claim. A submission keeps the
+// finite budget, because the claim it answers lapses on the server anyway.
+void http_client_post_json_persistent(HttpClient *client, const char *path,
+                                      const char *body, ChttpResponse *response,
+                                      ErrorStack *error_stack);
+
+// Called before each wait of a transient retry, with the number of the retry
+// (from 0), the seconds about to be waited, and `context`. Optional; NULL
+// clears it. The client itself prints nothing: it has no terminal to print to,
+// and a caller that retries for minutes owes its user a line saying so.
+typedef void (*http_client_retry_listener_t)(void *context, int retry_idx,
+                                             int wait_seconds);
+void http_client_set_retry_listener(HttpClient *client,
+                                    http_client_retry_listener_t listener,
+                                    void *context);
+
 // One attempt, with no retry of a transport failure or a 5xx. For a request
 // whose own schedule is the retry: the heartbeat goes out every thirty seconds
 // whatever happened to the last one, and a heartbeat that spent minutes backing
