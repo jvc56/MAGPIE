@@ -106,10 +106,14 @@ static void *heartbeat_worker(void *arg) {
     string_builder_clear(sb);
 
     // A failed heartbeat is not actionable here: the server treats a missed
-    // one as a lapsed claim and reassigns the task, which is the design.
+    // one as a lapsed claim and reassigns the task, which is the design. One
+    // attempt, not the client's retry schedule: the next heartbeat is thirty
+    // seconds away whatever happened to this one, and a heartbeat backing off
+    // through a server restart would keep heartbeat_stop -- and so the task's
+    // submission -- waiting for as long as it retried.
     ChttpResponse response;
-    http_client_post_json(heartbeat->client, "/api/worker/heartbeat", body,
-                          &response, errors);
+    http_client_post_json_once(heartbeat->client, "/api/worker/heartbeat", body,
+                               &response, errors);
     if (error_stack_is_empty(errors)) {
       chttp_response_destroy(&response);
     }
@@ -934,7 +938,19 @@ void contribute_submit_result(ContributeState *state,
                               const char *result_json,
                               const char *error_message, bool fatal,
                               ErrorStack *error_stack) {
-  heartbeat_stop(&state->heartbeat);
+  // The heartbeat is kept going through the submission below, not stopped
+  // here as it used to be. A claim is only as alive as its last heartbeat, and
+  // a submission is not instant: a batch with captured positions is tens of
+  // megabytes on a contributor's uplink, and a server that is restarting is
+  // retried for a quarter of an hour (http_client_backoff_seconds). With the
+  // heartbeat already stopped, the claim could lapse while its own result was
+  // on the way, be handed to another worker, and the finished task be answered
+  // "not accepted". A heartbeat for a claim that has just completed is a no-op
+  // on the server. An executor that produced no result has nothing to keep
+  // alive, so that case stops at once.
+  if (!result_json) {
+    heartbeat_stop(&state->heartbeat);
+  }
   // An executor that failed produced no result to submit.
   bool hand_back = error_message && !result_json;
 
@@ -956,6 +972,7 @@ void contribute_submit_result(ContributeState *state,
     const contribute_submit_outcome_t outcome =
         submit_result_over_http(state->http_client, state->claim_token,
                                 result_json, &rejection, error_stack);
+    heartbeat_stop(&state->heartbeat);
     if (error_stack_is_empty(error_stack)) {
       switch (outcome) {
       case CONTRIBUTE_SUBMIT_ACCEPTED:

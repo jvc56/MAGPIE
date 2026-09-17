@@ -5,6 +5,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/contribute.h"
 #include "../src/util/hash.h"
+#include "../src/util/http_client.h"
 #include "../src/util/io_util.h"
 #include "../src/util/json.h"
 #include "../src/util/string_util.h"
@@ -671,7 +672,35 @@ static void test_a_request_must_state_its_distribution_and_layout(void) {
   error_stack_destroy(error_stack);
 }
 
+// The retry budget exists to outlast a birdtest deployment, which stops the
+// one server instance before it starts the next: a minute or more of refused
+// connections and load-balancer 503s. It used to be 31 seconds, after which the
+// run ended -- so every deploy stopped whichever contributors asked for work
+// during it. Held here to at least ten minutes, with no single wait long enough
+// to leave a returned server idle for more than a minute.
+static void test_http_retries_outlast_a_server_deployment(void) {
+  assert(http_client_backoff_seconds(0) == 1);
+  assert(http_client_backoff_seconds(1) == 2);
+  assert(http_client_backoff_seconds(5) == 32);
+  int total_seconds = 0;
+  for (int retry_idx = 0; retry_idx < HTTP_CLIENT_MAX_TRANSIENT_RETRIES;
+       retry_idx++) {
+    const int wait = http_client_backoff_seconds(retry_idx);
+    assert(wait >= 1);
+    assert(wait <= HTTP_CLIENT_MAX_BACKOFF_SECONDS);
+    if (retry_idx > 0) {
+      assert(wait >= http_client_backoff_seconds(retry_idx - 1));
+    }
+    total_seconds += wait;
+  }
+  assert(HTTP_CLIENT_MAX_BACKOFF_SECONDS <= 60);
+  assert(total_seconds >= 600);
+  // Far past the last retry, still capped rather than overflowing.
+  assert(http_client_backoff_seconds(1000) == HTTP_CLIENT_MAX_BACKOFF_SECONDS);
+}
+
 void test_contribute(void) {
+  test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();
   test_lexical_flags_are_set_before_the_load();
   test_shared_settings_do_not_leak_between_tasks();

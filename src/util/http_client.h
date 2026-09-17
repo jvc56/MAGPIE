@@ -5,6 +5,7 @@
 // Nothing here is platform-aware; see src/compat/chttp.h for that.
 
 #include "../compat/chttp.h"
+#include "../def/contribute_defs.h"
 #include "io_util.h"
 #include <stdbool.h>
 
@@ -28,13 +29,28 @@ void http_client_set_worker_uuid(HttpClient *client, const char *worker_uuid);
 // caller with chttp_response_destroy on success.
 //
 // Retries are applied uniformly: 429 honours Retry-After up to 5 times, 5xx and
-// transport failures back off exponentially, and other 4xx are returned to the
-// caller untouched. A 2xx or an unretryable status is not an error -- callers
-// decide what a given status means for them.
+// transport failures back off exponentially (see http_client_backoff_seconds),
+// and other 4xx are returned to the caller untouched. A 2xx or an unretryable
+// status is not an error -- callers decide what a given status means for them.
 void http_client_get(HttpClient *client, const char *path,
                      ChttpResponse *response, ErrorStack *error_stack);
 void http_client_post_json(HttpClient *client, const char *path,
                            const char *body, ChttpResponse *response,
                            ErrorStack *error_stack);
+
+// One attempt, with no retry of a transport failure or a 5xx. For a request
+// whose own schedule is the retry: the heartbeat goes out every thirty seconds
+// whatever happened to the last one, and a heartbeat that spent minutes backing
+// off would hold up the task's submission, which waits for the heartbeat
+// thread to stop.
+void http_client_post_json_once(HttpClient *client, const char *path,
+                                const char *body, ChttpResponse *response,
+                                ErrorStack *error_stack);
+
+// Seconds to wait before retry number `retry_idx` (from 0) of a transport
+// failure or a 5xx: 1, 2, 4, ... and never more than
+// HTTP_CLIENT_MAX_BACKOFF_SECONDS. The budget itself is in
+// src/def/contribute_defs.h.
+int http_client_backoff_seconds(int retry_idx);
 
 #endif

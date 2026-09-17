@@ -8,6 +8,17 @@
 // instead of a raw string literal -- this is the one place to look, or
 // change, the name of a key.
 
+// The HTTP client's retry budget for a transport failure or a 5xx: this many
+// retries, waiting 1, 2, 4, ... seconds and never more than the ceiling between
+// attempts -- about fifteen minutes in all. Sized to outlast a birdtest
+// deployment, which stops the one server instance before it starts the next;
+// see http_client_backoff_seconds. Here rather than in http_client.c so the
+// test that holds the budget to that purpose can read it.
+enum {
+  HTTP_CLIENT_MAX_TRANSIENT_RETRIES = 20,
+  HTTP_CLIENT_MAX_BACKOFF_SECONDS = 60,
+};
+
 // Task request fields, read in config.c's config_contribute_* functions.
 #define CONTRIBUTE_KEY_LEXICON "lexicon"
 #define CONTRIBUTE_KEY_VARIANT "variant"

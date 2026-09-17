@@ -9,10 +9,35 @@
 
 enum {
   MAX_RATE_LIMIT_RETRIES = 5,
-  MAX_TRANSIENT_RETRIES = 5,
   REQUEST_TIMEOUT_SECONDS = 120,
   MAX_HEADERS = 4,
 };
+
+// How long a request rides out a server that is not answering: a transport
+// failure or a 5xx is retried HTTP_CLIENT_MAX_TRANSIENT_RETRIES times, waiting
+// 1, 2, 4, ... seconds and never more than HTTP_CLIENT_MAX_BACKOFF_SECONDS
+// between attempts -- about fifteen minutes in all.
+//
+// It was five retries, 31 seconds, and giving up ends the contribute run. A
+// routine birdtest deployment is longer than that: the service is a single
+// instance whose old task stops before the new one starts, so every deploy is
+// a minute or more of connection failures and 503s from the load balancer.
+// Every contributor that asked for a task in that window stopped contributing
+// until a person noticed and started it again, and one that was *submitting*
+// lost the finished task as well. The budget is sized to outlast a deployment,
+// a database failover or a short maintenance window with room to spare; a
+// server that is really gone still ends the run, a quarter of an hour later.
+int http_client_backoff_seconds(int retry_idx) {
+  int seconds = 1;
+  for (int doubling_idx = 0;
+       doubling_idx < retry_idx && seconds < HTTP_CLIENT_MAX_BACKOFF_SECONDS;
+       doubling_idx++) {
+    seconds *= 2;
+  }
+  return seconds < HTTP_CLIENT_MAX_BACKOFF_SECONDS
+             ? seconds
+             : HTTP_CLIENT_MAX_BACKOFF_SECONDS;
+}
 
 struct HttpClient {
   char *base_url;
@@ -77,8 +102,8 @@ void http_client_destroy(HttpClient *client) {
 }
 
 static void perform(HttpClient *client, chttp_method_t method, const char *path,
-                    const char *body, ChttpResponse *response,
-                    ErrorStack *error_stack) {
+                    const char *body, int max_transient_retries,
+                    ChttpResponse *response, ErrorStack *error_stack) {
   char *url = get_formatted_string("%s%s", client->base_url, path);
 
   const char *headers[MAX_HEADERS];
@@ -101,21 +126,19 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
 
   int rate_limit_retries = 0;
   int transient_retries = 0;
-  int backoff_seconds = 1;
 
   while (true) {
     ErrorStack *attempt_errors = error_stack_create();
     chttp_request(&request, response, attempt_errors);
 
     if (!error_stack_is_empty(attempt_errors)) {
-      // A transport failure -- DNS, connection refused, timeout. Worth
-      // retrying a few times before giving up, since a contributor's link is
-      // not necessarily stable.
-      if (transient_retries < MAX_TRANSIENT_RETRIES) {
-        transient_retries++;
+      // A transport failure -- DNS, connection refused, timeout. A
+      // contributor's link is not necessarily stable, and neither is the
+      // server's: see http_client_backoff_seconds.
+      if (transient_retries < max_transient_retries) {
         error_stack_destroy(attempt_errors);
-        ctime_nap(backoff_seconds);
-        backoff_seconds *= 2;
+        ctime_nap(http_client_backoff_seconds(transient_retries));
+        transient_retries++;
         continue;
       }
       char *message = error_stack_get_string_and_reset(attempt_errors);
@@ -140,11 +163,10 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
     }
 
     if (response->status_code >= 500 &&
-        transient_retries < MAX_TRANSIENT_RETRIES) {
-      transient_retries++;
+        transient_retries < max_transient_retries) {
       chttp_response_destroy(response);
-      ctime_nap(backoff_seconds);
-      backoff_seconds *= 2;
+      ctime_nap(http_client_backoff_seconds(transient_retries));
+      transient_retries++;
       continue;
     }
 
@@ -155,11 +177,20 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
 
 void http_client_get(HttpClient *client, const char *path,
                      ChttpResponse *response, ErrorStack *error_stack) {
-  perform(client, CHTTP_GET, path, NULL, response, error_stack);
+  perform(client, CHTTP_GET, path, NULL, HTTP_CLIENT_MAX_TRANSIENT_RETRIES,
+          response, error_stack);
 }
 
 void http_client_post_json(HttpClient *client, const char *path,
                            const char *body, ChttpResponse *response,
                            ErrorStack *error_stack) {
-  perform(client, CHTTP_POST, path, body ? body : "{}", response, error_stack);
+  perform(client, CHTTP_POST, path, body ? body : "{}",
+          HTTP_CLIENT_MAX_TRANSIENT_RETRIES, response, error_stack);
+}
+
+void http_client_post_json_once(HttpClient *client, const char *path,
+                                const char *body, ChttpResponse *response,
+                                ErrorStack *error_stack) {
+  perform(client, CHTTP_POST, path, body ? body : "{}",
+          /*max_transient_retries=*/0, response, error_stack);
 }
