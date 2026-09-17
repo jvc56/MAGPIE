@@ -1,7 +1,11 @@
 #!/bin/sh
 # Incumbent-preserving PAT selection for one lexicon (Astra, 2026-09-14):
 #
-#   test/pat_select_champion.sh <lexicon> <incumbent_pat> <release_name> [<log_dir>]
+#   test/pat_select_champion.sh <lexicon> <incumbent_pat> <release_name> [<log_dir>] [<leaves>]
+#
+# <leaves> defaults to <lexicon> (the usual klv2 named after the lexicon
+# itself); pass it explicitly for a lexicon whose leaves live under a
+# different name (e.g. OSW1_zeroed_gen_6).
 #
 # 1. Build the speed tables the lexicon lacks (WMP, RIT, WIT; none for
 #    lexica in NO_TABLES) and run everything with what exists.
@@ -24,11 +28,12 @@
 # No per-lexicon knobs: the same budgets and rules for every lexicon.
 set -u
 if [ "$#" -lt 3 ]; then
-  echo "usage: $0 <lexicon> <incumbent_pat> <release_name> [<log_dir>]" >&2
+  echo "usage: $0 <lexicon> <incumbent_pat> <release_name> [<log_dir>] [<leaves>]" >&2
   exit 2
 fi
 lex="$1"; incumbent="$2"; release="$3"
 log_dir="${4:-/tmp/pat_select_$release}"
+leaves="${5:-$lex}"
 mkdir -p "$log_dir"
 strategy=data/strategy
 lexica=data/lexica
@@ -98,7 +103,7 @@ if [ -f "$lexica/$lex.wmp" ]; then tables="-wmp true"; else tables="-wmp false";
 [ -f "$lexica/$lex.rit" ] && tables="$tables -rit true -ritmmap true"
 [ -f "$lexica/$lex.wit" ] && tables="$tables -wit true"
 log "tables: $tables (built wmp=$built_wmp rit=$built_rit wit=$built_wit)"
-note "$release: PAT for $lex by the incumbent-preserving selection"
+note "$release: PAT for $lex (leaves $leaves) by the incumbent-preserving selection"
 note "(test/pat_select_champion.sh, codex/pat-setup-value, $(date +%Y-%m-%d))."
 note "Incumbent: $incumbent (sha256 $(shasum -a 256 $strategy/$incumbent.pat | cut -c1-16)). Runtime tables: $tables."
 
@@ -113,13 +118,13 @@ while [ "$i" -le "$NUM_NATIVE_SEEDS" ]; do
   v3="${release}_s${i}_v3"; v4="${release}_s${i}_v4"
   if [ ! -f "$strategy/$v4.pat" ]; then
     log "native seed $i ($seed): training $v3"
-    mg patgen 30000,30000,30000,30000,30000 "$v3" -lex "$lex" -gp true -threads $threads \
+    mg patgen 30000,30000,30000,30000,30000 "$v3" -lex "$lex" -leaves "$leaves" -gp true -threads $threads \
       -seed "$seed" $tables -pat pat_zero_lexsigned_nofit > "$log_dir/train_s$i.txt" 2>&1
     if [ -f "$strategy/$v3.pat" ]; then
       sed -e 's/^run_through,0$/run_through,1/' -e 's/^fit_residual,0$/fit_residual,3/' \
         "$strategy/$v3.pat" > "$strategy/${v3}_runres.pat"
       log "native seed $i: through refit $v4"
-      mg patgen 150000 "$v4" -lex "$lex" -gp true -threads $threads -seed $adapt_seed \
+      mg patgen 150000 "$v4" -lex "$lex" -leaves "$leaves" -gp true -threads $threads -seed $adapt_seed \
         $tables -pat "${v3}_runres" > "$log_dir/refit_s$i.txt" 2>&1
       [ -f "$strategy/$v4.pat" ] && sed -i '' 's/^fit_residual,3$/fit_residual,0/' "$strategy/$v4.pat"
     fi
@@ -136,7 +141,7 @@ sed -e 's/^fit_shrink,0$/fit_shrink,1/' "$strategy/$incumbent.pat" > "$strategy/
 grep -q '^fit_shrink,1$' "$strategy/$boot.pat" || sed -i '' 's/^run_through,1$/run_through,1\
 fit_shrink,1/' "$strategy/$boot.pat"
 log "adaptation candidates from $incumbent on $lex self-play"
-mg patgen 150000 "${release}_adapt" -lex "$lex" -gp true -threads $threads -seed $adapt_seed \
+mg patgen 150000 "${release}_adapt" -lex "$lex" -leaves "$leaves" -gp true -threads $threads -seed $adapt_seed \
   $tables -pat "$boot" > "$log_dir/adapt.txt" 2>&1 || log "adaptation patgen failed; skipped"
 for lam in 10 100 1000; do
   c="${release}_adapt_gen_1_shrink$lam"
@@ -152,7 +157,7 @@ note "Screening vs the incumbent on $lex, dev seed $dev_seed, $SCREEN_PAIRS mirr
 best=""; best_mean=0
 for c in $candidates; do
   log "screen $c vs $incumbent"
-  mg autoplay games $SCREEN_PAIRS -lex "$lex" -gp true -threads $threads -seed $dev_seed \
+  mg autoplay games $SCREEN_PAIRS -lex "$lex" -leaves "$leaves" -gp true -threads $threads -seed $dev_seed \
     $tables -pat1 "$c" -pat2 "$incumbent" > "$log_dir/screen_$c.txt" 2>&1
   l="$(line_of "$log_dir/screen_$c.txt")"
   if [ -z "$l" ]; then log "  $c: no result"; note "  $c: failed"; continue; fi
@@ -172,10 +177,10 @@ if [ -n "$best" ]; then
       racks=$OPENING_RACKS
       [ -f "$lexica/$lex.wmp" ] || racks=$OPENING_RACKS_NO_WMP
       log "opening table for native challenger $best ($racks racks)"
-      mgt "patopeningsim:$lex:$best:$racks" > "$log_dir/opening_sim.txt" 2>&1
+      mgt "patopeningsim:$lex:$best:$racks:$leaves" > "$log_dir/opening_sim.txt" 2>&1
       rows="$(grep -E '^opening_(tiles_[0-9]+|exchange),-?[0-9]+$' "$log_dir/opening_sim.txt")"
       { head -1 "$strategy/$best.pat"; tail -n +2 "$strategy/$best.pat" | grep -v '^#' | grep -v '^opening_'; echo "$rows"; } > "$strategy/$challenger.pat"
-      note "Challenger: $best plus its opening table ($racks racks): $(echo "$rows" | tr '\n' ' ')"
+      note "Challenger: $best (leaves $leaves) plus its opening table ($racks racks): $(echo "$rows" | tr '\n' ' ')"
       ;;
     *)
       { head -1 "$strategy/$best.pat"; tail -n +2 "$strategy/$best.pat" | grep -v '^#'; } > "$strategy/$challenger.pat"
@@ -183,7 +188,7 @@ if [ -n "$best" ]; then
       ;;
   esac
   log "confirm $challenger vs $incumbent (seed $confirm_seed, $CONFIRM_PAIRS pairs)"
-  mg autoplay games $CONFIRM_PAIRS -lex "$lex" -gp true -threads $threads -seed $confirm_seed \
+  mg autoplay games $CONFIRM_PAIRS -lex "$lex" -leaves "$leaves" -gp true -threads $threads -seed $confirm_seed \
     $tables -pat1 "$challenger" -pat2 "$incumbent" > "$log_dir/confirm.txt" 2>&1
   l="$(line_of "$log_dir/confirm.txt")"
   log "  confirmation: $l"
@@ -200,7 +205,7 @@ note "Decision: $decision."
 
 # ---- 5. validation, release file, tables ----------------------------------
 log "validate $final vs none (seed $validate_seed)"
-mg autoplay games $VALIDATE_PAIRS -lex "$lex" -gp true -threads $threads -seed $validate_seed \
+mg autoplay games $VALIDATE_PAIRS -lex "$lex" -leaves "$leaves" -gp true -threads $threads -seed $validate_seed \
   $tables -pat1 "$final" -pat2 none > "$log_dir/validate.txt" 2>&1
 vl="$(line_of "$log_dir/validate.txt")"
 log "  validation: $vl"
