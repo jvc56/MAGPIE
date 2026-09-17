@@ -375,8 +375,8 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   const char *const opening_rack_keys[] = {
       CONTRIBUTE_KEY_VARIANT,      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
       CONTRIBUTE_KEY_BOARD_LAYOUT, CONTRIBUTE_KEY_RACKS,
-      CONTRIBUTE_KEY_PLAYER,       CONTRIBUTE_KEY_BINGO_BONUS,
-      CONTRIBUTE_KEY_SIM_CUTOFF,
+      CONTRIBUTE_KEY_SEED,         CONTRIBUTE_KEY_PLAYER,
+      CONTRIBUTE_KEY_BINGO_BONUS,  CONTRIBUTE_KEY_SIM_CUTOFF,
   };
   assert_fixture_has_keys(request, opening_rack_keys,
                           sizeof(opening_rack_keys) /

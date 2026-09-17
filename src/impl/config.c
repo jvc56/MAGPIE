@@ -974,7 +974,7 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.5.1"
+#define MAGPIE_VERSION "0.1.0"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -8139,20 +8139,6 @@ static void config_contribute_apply_movegen_margin(Config *config,
   config->eq_margin_movegen = double_to_equity(value);
 }
 
-// A simulation seed for one opening rack, derived from the rack itself (64-bit
-// FNV-1a). The executor used config->seed, which nothing in the request sets:
-// it was the process start time, a -seed in settings.txt, or the seed of the
-// last games task this worker ran. A function of the rack is the same on every
-// machine, so a single-threaded analysis of a rack reproduces.
-static uint64_t contribute_rack_seed(const char *rack_str) {
-  uint64_t hash = 14695981039346656037ULL;
-  for (const char *c = rack_str; *c; c++) {
-    hash ^= (uint8_t)*c;
-    hash *= 1099511628211ULL;
-  }
-  return hash;
-}
-
 static char *config_contribute_games(Config *config, const JsonValue *request,
                                      bool game_pairs, int threads,
                                      ContributeState *state,
@@ -8368,13 +8354,20 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
 // and pushing onto the stack on failure. Always the empty board: an opening
 // rack is by definition the start of the game, so the request sends just the
 // racks to analyze rather than full positions.
+//
+// `seed` is the seed the server states for this rack: the task's seed plus the
+// rack's index in the batch, which is its index in the job's rack space. The
+// executor used to derive one from the rack's letters, which was the same on
+// every machine but not the server's to choose; every task now states a seed,
+// this one included, so what a simulation samples is a function of the task.
 static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
+                                           uint64_t seed,
                                            const JsonValue *player,
                                            bool simming, StringBuilder *sb,
                                            ErrorStack *error_stack) {
   game_reset(config->game);
   config_reset_move_list_and_invalidate_sim_results(config);
-  config->seed = contribute_rack_seed(rack_str);
+  config->seed = seed;
   if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -8456,6 +8449,13 @@ static char *config_contribute_opening_rack(Config *config,
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         string_duplicate("server sent an opening rack task with no racks"));
+    return NULL;
+  }
+  // Required, as it is for games and leave generation: rack i of the batch is
+  // analysed from seed + i.
+  const uint64_t seed =
+      json_get_uint64_string(request, CONTRIBUTE_KEY_SEED, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
 
@@ -8564,8 +8564,8 @@ static char *config_contribute_opening_rack(Config *config,
     if (i > 0) {
       string_builder_add_string(sb, ",");
     }
-    if (!config_contribute_analyze_rack(config, rack_str, player, simming, sb,
-                                        error_stack)) {
+    if (!config_contribute_analyze_rack(config, rack_str, seed + (uint64_t)i,
+                                        player, simming, sb, error_stack)) {
       string_builder_destroy(sb);
       return NULL;
     }

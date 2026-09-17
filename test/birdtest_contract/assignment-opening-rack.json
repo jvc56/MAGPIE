@@ -1,7 +1,7 @@
 {
   "claim_token": "2b1c4e7a-9d30-4f61-b2cf-70d5a1e8c934",
   "job_id": "9a2f61c4-5e07-4b13-8d6a-c31f70b2ae58",
-  "min_magpie_version": "0.5.1",
+  "min_magpie_version": "0.1.0",
   "expected_data": {
     "algorithm": "sha256",
     "files": [
@@ -62,6 +62,7 @@
     "variant": "classic",
     "letter_distribution": "english",
     "board_layout": "standard15",
+    "seed": "0",
     "racks": [
       "AEINRST",
       "?AEILNT",

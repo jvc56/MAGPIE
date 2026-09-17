@@ -92,7 +92,7 @@ Clang 12.
 
 ```
 magpie> builders
-{"magpie_version":"0.5.1","build_target":"nehalem","wmp_builder_version":1,
+{"magpie_version":"0.1.0","build_target":"nehalem","wmp_builder_version":1,
  "rit_builder_version":1,"klv_builder_version":1}
 ```
 
