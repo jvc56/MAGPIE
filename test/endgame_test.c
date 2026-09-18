@@ -624,6 +624,59 @@ void test_solve_standard(void) {
       0);
 }
 
+// Solve `cgp` single-threaded with the incremental move lists off and on
+// (separate solvers, so separate transposition tables) and return each run's
+// score and node count through the out-params.
+static void solve_for_incremental_check(const char *cgp, bool incremental,
+                                        int32_t *score_out,
+                                        uint64_t *nodes_out) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -threads 1 -eplies 5");
+  load_and_exec_config_or_die(config, cgp);
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = config_get_endgame_plies(config);
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.incremental_movegen = incremental;
+  args.num_top_moves = 1;
+  args.seed = 42;
+  EndgameCtx *ctx = NULL;
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  *score_out = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+  *nodes_out = endgame_ctx_get_nodes_searched(ctx);
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// The incremental move lists must be invisible to the search: the same
+// score and, single-threaded, the same node count as scratch generation.
+void test_incremental_movegen_identical(void) {
+  const char *cgp =
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
+  int32_t scratch_score = 0;
+  uint64_t scratch_nodes = 0;
+  solve_for_incremental_check(cgp, false, &scratch_score, &scratch_nodes);
+  int32_t incremental_score = 0;
+  uint64_t incremental_nodes = 0;
+  solve_for_incremental_check(cgp, true, &incremental_score,
+                              &incremental_nodes);
+  assert(scratch_score == 11);
+  assert(incremental_score == scratch_score);
+  assert(incremental_nodes == scratch_nodes);
+}
+
 void test_very_deep(void) {
   // This insane endgame requires 25 plies to solve. We end up winning by 1 pt.
   test_single_endgame(
@@ -1609,6 +1662,7 @@ void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
   test_solve_standard();
+  test_incremental_movegen_identical();
   test_very_deep();
   test_small_arena_realloc();
   test_pass_first();
