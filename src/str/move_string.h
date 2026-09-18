@@ -6,6 +6,7 @@
 #include "../ent/move.h"
 #include "../ent/thread_control.h"
 #include "../util/string_util.h"
+#include <stddef.h>
 
 void string_builder_add_move_description(StringBuilder *move_string_builder,
                                          const Move *move,
@@ -13,6 +14,13 @@ void string_builder_add_move_description(StringBuilder *move_string_builder,
 void string_builder_add_move(StringBuilder *string_builder, const Board *board,
                              const Move *m, const LetterDistribution *ld,
                              bool add_score);
+
+// Writes the same representation as string_builder_add_move into dest
+// instead of a StringBuilder, truncating if it does not fit. dest_size must
+// include room for the terminating null.
+void move_get_string(const Move *move, const Board *board,
+                     const LetterDistribution *ld, bool add_score, char *dest,
+                     size_t dest_size);
 
 void string_builder_add_ucgi_move(StringBuilder *move_string_builder,
                                   const Move *move, const Board *board,

@@ -797,8 +797,8 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return false;
     }
 
-    cgp_move_string = string_builder_dump(move_string_builder, NULL);
-    string_builder_destroy(move_string_builder);
+    cgp_move_string =
+        string_builder_dump_and_destroy(move_string_builder, NULL);
 
     // Get the GCG score so it can be compared to the validated move score
     move_score =
@@ -1127,8 +1127,8 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
       return false;
     }
 
-    cgp_move_string = string_builder_dump(move_string_builder, NULL);
-    string_builder_destroy(move_string_builder);
+    cgp_move_string =
+        string_builder_dump_and_destroy(move_string_builder, NULL);
 
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 4,
                                         error_stack);

@@ -63,6 +63,52 @@ To build the former optimized release without PGO:
 make magpie BUILD=no_pgo_release
 ```
 
+### Portable builds
+
+```
+make magpie BUILD=portable_release
+```
+
+Identical to `no_pgo_release` except that the instruction set is fixed
+(`-march=nehalem`) instead of being whatever the building machine happens to
+have. Use it whenever a build's *output bytes* have to match another build's.
+
+That matters for one thing in particular. A wordmap and a rack info table are
+built on each machine that needs one and are far too large to ship, so
+[birdtest](https://github.com/jvc56/birdtest) checks them by building its own
+reference copy on the server and comparing SHA-256s. `-march=native` makes the
+binary's instruction set a property of whatever compiled it, and two builds of
+one commit could then vectorize the same floating-point reduction differently.
+Measurement says they do not — `-march=native` and `-march=nehalem` produce
+byte-identical wordmaps and rack info tables on x86-64 with GCC 10 — but being
+right by construction beats being right by measurement, so birdtest's server
+image and the released contributor binaries both use this flavor.
+
+`PORTABLE_MARCH` overrides the target for a non-x86 host. `nehalem` rather than
+`x86-64-v2`, which names the same instruction set but only reached GCC 11 and
+Clang 12.
+
+### Builder versions
+
+```
+magpie> builders
+{"magpie_version":"0.1.0","build_target":"nehalem","wmp_builder_version":1,
+ "rit_builder_version":1,"klv_builder_version":1}
+```
+
+A derived file's hash is only meaningful together with the builder that
+produced it: a CSW24 wordmap built in December 2025 and one built nine months
+later differ in 72,852,152 bytes with the same inputs and the same wordmap
+format version 3, because the builder changed and the format did not have to.
+So `src/def/builder_defs.h` versions the three builders separately from
+`MAGPIE_VERSION`, and `test/builder_hash_test.c` pins their output — a change
+that alters either derived builder fails that test until someone bumps the
+version and updates the pinned hash.
+
+birdtest reads this command's output from the binary it runs, rather than being
+told in configuration, so the builder recorded beside a published hash is always
+the one that produced it.
+
 Focused targets are available when the resulting binary will spend most of a
 long-running job in one workload:
 
@@ -554,3 +600,39 @@ magpie> autoplay games 10000 -l1 CSW50 -l2 CSW60 -leaves CSW21 -gp true -hr true
 ```
 
 It is highly recommended to run with game pairs to reduce statistical noise. To see more details about game pairs, use `help gp`.
+
+### Rack info tables and rack-equity KLVs
+
+A rack info table is built from a KLV and a wordmap, and stores each full
+rack's precomputed leave values. It therefore belongs to a *(lexicon, leaves)*
+pair rather than to a lexicon: CSW24 played with `CSW_quackle_leaves` and CSW24
+played with its own leaves need different tables. `klvwmp2rit` takes the KLV's
+and the wordmap's names separately so the output does not have to borrow one of
+theirs:
+
+```
+magpie> convert klvwmp2rit CSW24.CSW_quackle_leaves english CSW_quackle_leaves CSW24
+```
+
+Both extra names are optional and default to the output's, so the short form
+still works where a table really is named after its lexicon:
+
+```
+magpie> convert klvwmp2rit CSW24
+```
+
+`rackequity2klv` turns a generation's aggregated full-rack results into the KLV
+they imply, which is the other half of a leave-generation run when the games
+were played somewhere else. It reads `lexica/<name>.csv`, one
+`rack,count,equity_sum` row per full rack:
+
+```
+magpie> convert rackequity2klv gen1 english
+```
+
+Every full rack the distribution draws must appear exactly once. A rack with a
+count of zero is not the same as a missing rack — it was enumerated and never
+drawn, and contributes a mean of zero at full draw weight, exactly as it does
+inside a `leavegen` run — so a file that omits one is refused rather than having
+its gaps valued at zero. This is what birdtest's server uses to build each
+generation's KLV.

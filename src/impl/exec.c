@@ -330,8 +330,8 @@ char *create_command_from_args(int argc, char *argv[]) {
   for (int i = 1; i < argc; i++) {
     string_builder_add_formatted_string(command_string_builder, "%s ", argv[i]);
   }
-  char *command_string = string_builder_dump(command_string_builder, NULL);
-  string_builder_destroy(command_string_builder);
+  char *command_string =
+      string_builder_dump_and_destroy(command_string_builder, NULL);
   return command_string;
 }
 
