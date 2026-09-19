@@ -6,6 +6,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
+#include "pat.h"
 #include "players_data.h"
 #include "rack.h"
 #include "rack_info_table.h"
@@ -28,6 +29,8 @@ struct Player {
   const WMP *wmp;
   const RackInfoTable *rack_info_table;
   const WordInfoTable *word_info_table;
+  const PATWeights *pat;
+  uint32_t pat_disabled_classes_mask;
 };
 
 void player_reset(Player *player) {
@@ -48,6 +51,9 @@ void player_update(const PlayersData *players_data, Player *player) {
       players_data_get_rack_info_table(players_data, player->index);
   player->word_info_table =
       players_data_get_word_info_table(players_data, player->index);
+  player->pat = players_data_get_pat(players_data, player->index);
+  player->pat_disabled_classes_mask =
+      players_data_get_pat_disabled_classes_mask(players_data, player->index);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -77,6 +83,8 @@ Player *player_duplicate(const Player *player) {
   new_player->wmp = player->wmp;
   new_player->rack_info_table = player->rack_info_table;
   new_player->word_info_table = player->word_info_table;
+  new_player->pat = player->pat;
+  new_player->pat_disabled_classes_mask = player->pat_disabled_classes_mask;
   return new_player;
 }
 
@@ -92,6 +100,8 @@ void player_copy(Player *dst, const Player *src) {
   dst->wmp = src->wmp;
   dst->rack_info_table = src->rack_info_table;
   dst->word_info_table = src->word_info_table;
+  dst->pat = src->pat;
+  dst->pat_disabled_classes_mask = src->pat_disabled_classes_mask;
 }
 
 void player_destroy(Player *player) {
@@ -135,7 +145,17 @@ const WordInfoTable *player_get_word_info_table(const Player *player) {
   return player->word_info_table;
 }
 
+const PATWeights *player_get_pat(const Player *player) { return player->pat; }
+
+uint32_t player_get_pat_disabled_classes_mask(const Player *player) {
+  return player->pat_disabled_classes_mask;
+}
+
 void player_set_score(Player *player, Equity score) { player->score = score; }
+
+void player_set_pat(Player *player, const PATWeights *pat) {
+  player->pat = pat;
+}
 
 void player_add_to_score(Player *player, Equity score) {
   player->score += score;

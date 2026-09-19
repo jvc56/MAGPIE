@@ -1,6 +1,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "alias_method_test.h"
 #include "alphabet_test.h"
 #include "analyze_test.h"
@@ -42,6 +43,12 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pat_asset_fit_test.h"
+#include "pat_hyperscale_fit_test.h"
+#include "pat_move_choice_test.h"
+#include "pat_opening_sim_test.h"
+#include "pat_overlap_pilot_test.h"
+#include "pat_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -141,6 +148,7 @@ static TestEntry test_table[] = {
     {"wmpmaker", test_wmp_maker},
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
+    {"pat", test_pat},
     {"endgame", test_endgame},
     {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},
@@ -222,6 +230,23 @@ static TestEntry on_demand_test_table[] = {
     {"genpegmore", test_gen_peg_more},
     {"pegpoll", test_peg_poll},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
+    {"patassetfit", test_pat_own_asset_discount_fit},
+    {"pathyperscalefit", test_pat_hyperscale_fit},
+    {"patlexfloatchoice", test_pat_lexfloat_move_choice},
+    {"patlexfloatconfirm", test_pat_lexfloat_isolated_confirm},
+    {"patsignedisolated", test_pat_signed_move_choice_isolated},
+    {"patsignedchampion", test_pat_signed_move_choice_vs_champion},
+    {"patlexsignedchampion", test_pat_lexsigned_move_choice_vs_champion},
+    {"patoverlap", test_pat_overlap_pilot},
+    {"patpremiumpilot", test_pat_premium_combo_pilot},
+    {"patopeningsim", test_pat_opening_sim},
+    {"patmovechoicecontrols", test_pat_move_choice_controls},
+    {"patmovechoicetargeted", test_pat_move_choice_targeted_controls},
+    {"pattrainparity", test_pat_train_runtime_parity},
+    {"patleafcheck", test_pat_leaf_check},
+    {"patthroughaudit", test_pat_through_table_audit},
+    {"patoverlapstep3dev", test_pat_overlap_step3_dev},
+    {"patoverlapstep3confirm", test_pat_overlap_step3_confirm},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
@@ -246,6 +271,24 @@ void run_test(const char *subtest) {
       return;
     }
   }
+  // Parameterized move-choice comparisons: "patmovechoice:<spec>" (see
+  // pat_move_choice_run_spec).
+  if (has_prefix("pattablecheck:", subtest)) {
+    pat_run_through_table_check(subtest + strlen("pattablecheck:"));
+    return;
+  }
+  if (has_prefix("patopeningsim:", subtest)) {
+    pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
+    return;
+  }
+  if (has_prefix("patmovechoice:", subtest)) {
+    pat_move_choice_run_spec(subtest + strlen("patmovechoice:"));
+    return;
+  }
+  if (has_prefix("pattrainparity:", subtest)) {
+    pat_train_runtime_parity_for(subtest + strlen("pattrainparity:"));
+    return;
+  }
   log_fatal("unrecognized test: %s\n", subtest);
 }
 
@@ -269,12 +312,25 @@ int main(int argc, char *argv[]) {
       }
     }
   } else if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
-    if (argc > 1) {
-      log_warn("Ignoring test arguments when testing default super board "
-               "dimensions of %d.",
-               DEFAULT_SUPER_BOARD_DIM);
+    // The super suite is the default; a parameterized on-demand test
+    // (a "<name>:<spec>" argument, e.g. patopeningsim:CSW24:<pat>:300)
+    // runs on this board instead, so the board-dependent tooling is
+    // available under the 21x21 build.
+    bool ran_on_demand = false;
+    for (int i = 1; i < argc; i++) {
+      if (strchr(argv[i], ':') != NULL) {
+        run_test(argv[i]);
+        ran_on_demand = true;
+      }
     }
-    run_all_super();
+    if (!ran_on_demand) {
+      if (argc > 1) {
+        log_warn("Ignoring test arguments when testing default super board "
+                 "dimensions of %d.",
+                 DEFAULT_SUPER_BOARD_DIM);
+      }
+      run_all_super();
+    }
   } else {
     log_fatal(
         "Testing with unsupported board dimension of %d. Only %d and %d are "
