@@ -16,10 +16,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Define to cross-check every derived list against a scratch generation.
-// Development aid only: it makes the derivation slower than what it replaces.
-// #define PATH_MOVE_LISTS_VERIFY 1
-
 static_assert(PATH_MOVE_LISTS_NUM_LANES <= 64,
               "lane masks are 64-bit; BOARD_DIM must be at most 32");
 static_assert(RACK_SIZE < 8, "packed counts hold at most 7 of a tile type");
@@ -294,30 +290,6 @@ void path_move_lists_pop(PathMoveLists *lists) {
   lists->length--;
 }
 
-#ifdef PATH_MOVE_LISTS_VERIFY
-static void verify_against_scratch(const PathListSlot *slot,
-                                   const MoveGenArgs *args, int length) {
-  generate_moves(args);
-  const MoveList *move_list = args->move_list;
-  if (move_list->count - 1 != slot->count) {
-    log_fatal("path move lists: length %d derived %d plays, scratch %d", length,
-              slot->count, move_list->count - 1);
-  }
-  for (int move_idx = 0; move_idx < slot->count; move_idx++) {
-    const SmallMove *derived = &slot->moves[move_idx];
-    const SmallMove *scratch = move_list->small_moves[move_idx];
-    if (derived->tiny_move != scratch->tiny_move ||
-        derived->metadata.score != scratch->metadata.score ||
-        derived->metadata.play_length != scratch->metadata.play_length ||
-        derived->metadata.tiles_played != scratch->metadata.tiles_played) {
-      log_fatal("path move lists: length %d play %d differs (lane %d vs %d)",
-                length, move_idx, lane_of_small_move(derived),
-                lane_of_small_move(scratch));
-    }
-  }
-}
-#endif
-
 int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
                              const SmallMove **out_moves) {
   const int length = lists->length;
@@ -345,9 +317,6 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
   PathListSlot *out = &lists->slots[length];
   slot_rebuild(out, parent, touched, filter, &avail, args->move_list,
                lists->lane_end);
-#ifdef PATH_MOVE_LISTS_VERIFY
-  verify_against_scratch(out, args, length);
-#endif
   *out_moves = out->moves;
   return out->count;
 }
