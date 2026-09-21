@@ -42,6 +42,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "path_move_lists_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -158,6 +159,8 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"pathmovelists", test_path_move_lists},
+    {"egincremental", test_incremental_movegen_identical},
     {"pegspeedbench1", test_peg_speed_bench_1},
     {"pegspeedbench2", test_peg_speed_bench_2},
     {"positionloaded", test_position_lengths_loaded},

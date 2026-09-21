@@ -499,6 +499,7 @@ void test_benchmark_nonstuck_3v3(void) {
 //   MAGPIE_BENCH_PLIES   endgame plies      (default 4)
 //   MAGPIE_BENCH_THREADS solver threads     (default 1  -> deterministic nodes)
 //   MAGPIE_BENCH_MAX     max positions      (default 100)
+//   MAGPIE_BENCH_INCREMENTAL 1 = incremental move lists (default 0)
 //   MAGPIE_BENCH_TAG     label for the run  (default "bench")
 static int env_int(const char *name, int fallback) {
   const char *v = getenv(name);
@@ -534,6 +535,7 @@ void test_endgame_speed_bench(void) {
   const int plies = env_int("MAGPIE_BENCH_PLIES", 4);
   const int threads = env_int("MAGPIE_BENCH_THREADS", 1);
   const int max_positions = env_int("MAGPIE_BENCH_MAX", 100);
+  const bool incremental = env_int("MAGPIE_BENCH_INCREMENTAL", 0) != 0;
 
   FILE *fp = fopen(cgp_file, "re");
   if (!fp) {
@@ -564,8 +566,9 @@ void test_endgame_speed_bench(void) {
   }
   (void)fclose(fp);
 
-  printf("BENCHCFG tag=%s lex=%s plies=%d threads=%d positions=%d file=%s\n",
-         tag, lex, plies, threads, num_cgps, cgp_file);
+  printf("BENCHCFG tag=%s lex=%s plies=%d threads=%d incremental=%d "
+         "positions=%d file=%s\n",
+         tag, lex, plies, threads, (int)incremental, num_cgps, cgp_file);
 
   double total_time = 0.0;
   uint64_t total_nodes = 0;
@@ -592,6 +595,7 @@ void test_endgame_speed_bench(void) {
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL,
                         .forced_pass_bypass = true,
+                        .incremental_movegen = incremental,
                         .enable_pv_display = false,
                         .seed = 42};
 
@@ -652,6 +656,7 @@ void test_endgame_speed_bench(void) {
 //   MAGPIE_PO_THREADS solver threads (default 1)
 //   MAGPIE_PO_MAXMOVES per-playout move cap (default 40, safety)
 //   MAGPIE_PO_TAG    label           (default "playout")
+//   MAGPIE_PO_INCREMENTAL 1 = incremental move lists (default 0)
 void test_endgame_playout_bench(void) {
   log_set_level(LOG_FATAL);
 
@@ -671,6 +676,7 @@ void test_endgame_playout_bench(void) {
   const int time_ms = env_int("MAGPIE_PO_TIMEMS", 100);
   const int max_plies = env_int("MAGPIE_PO_PLIES", 25);
   const int threads = env_int("MAGPIE_PO_THREADS", 1);
+  const bool incremental = env_int("MAGPIE_PO_INCREMENTAL", 0) != 0;
   const int max_moves = env_int("MAGPIE_PO_MAXMOVES", 40);
 
   FILE *fp = fopen(cgp_file, "re");
@@ -703,8 +709,9 @@ void test_endgame_playout_bench(void) {
   }
   (void)fclose(fp);
 
-  printf("POCFG tag=%s lex=%s time_ms=%d plies=%d threads=%d positions=%d\n",
-         tag, lex, time_ms, max_plies, threads, num_cgps);
+  printf("POCFG tag=%s lex=%s time_ms=%d plies=%d threads=%d incremental=%d "
+         "positions=%d\n",
+         tag, lex, time_ms, max_plies, threads, (int)incremental, num_cgps);
 
   long total_moves = 0;
   uint64_t total_nodes = 0;
@@ -752,6 +759,7 @@ void test_endgame_playout_bench(void) {
                           .num_top_moves = 1,
                           .use_heuristics = true,
                           .forced_pass_bypass = true,
+                          .incremental_movegen = incremental,
                           .enable_pv_display = false,
                           .soft_time_limit = 0,
                           .hard_time_limit = 0,

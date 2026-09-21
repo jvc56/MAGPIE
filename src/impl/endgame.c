@@ -39,6 +39,7 @@
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
+#include "path_move_lists.h"
 #include "word_prune.h"
 #include <assert.h>
 #include <math.h>
@@ -131,6 +132,7 @@ struct EndgameCtx {
   bool negascout_optim;
   bool use_heuristics;
   bool forced_pass_bypass;
+  bool incremental_movegen;
   PVLine principal_variation;
   // If non-NULL, guarantee an exact value for this move alongside the best
   // move (see EndgameArgs.actual_move). Owned by the caller; valid only for
@@ -226,6 +228,12 @@ struct EndgameCtxWorker {
   Game *game_copy;
   Arena *small_move_arena;
   MoveList *move_list;
+  // The incremental move lists (EndgameArgs.incremental_movegen), or NULL
+  // when the current solve generates from scratch at every node. The lists
+  // themselves are allocated on the first solve that enables them and kept
+  // in path_lists_storage for the worker's lifetime.
+  PathMoveLists *path_lists;
+  PathMoveLists *path_lists_storage;
   EndgameCtx *solver;
   int current_iterative_deepening_depth;
   // Array of MoveUndo structures for incremental play/unplay. Sized at
@@ -656,6 +664,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
+  es->incremental_movegen = endgame_args->incremental_movegen;
   es->num_top_moves = endgame_args->num_top_moves;
   // The in-search top-K array (topk_values) and the live multi-PV leaderboard
   // are sized to MAX_ENDGAME_DISPLAY_PVS; clamp so a caller asking for more
@@ -996,6 +1005,22 @@ int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int worker_index,
 // Defined below; used by both the worker create and reset paths.
 static void reset_worker_analysis_state(EndgameCtxWorker *worker);
 
+// Point worker->path_lists at the worker's incremental move lists for a solve
+// that enables them (allocating them on first use), or at NULL for one that
+// does not, so every hook in the search reads one pointer to know.
+static void configure_worker_path_lists(EndgameCtxWorker *worker,
+                                        const EndgameCtx *solver) {
+  if (!solver->incremental_movegen) {
+    worker->path_lists = NULL;
+    return;
+  }
+  if (worker->path_lists_storage == NULL) {
+    worker->path_lists_storage = path_move_lists_create();
+  }
+  worker->path_lists = worker->path_lists_storage;
+  path_move_lists_reset(worker->path_lists);
+}
+
 static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   if (!solver_worker) {
     return;
@@ -1003,6 +1028,7 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   game_destroy(solver_worker->game_copy);
   small_move_list_destroy(solver_worker->move_list);
   arena_destroy(solver_worker->small_move_arena);
+  path_move_lists_destroy(solver_worker->path_lists_storage);
   prng_destroy(solver_worker->prng);
   free(solver_worker);
 }
@@ -1044,6 +1070,8 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
 
   solver_worker->small_move_arena =
       create_arena(solver->initial_small_move_arena_size, 16);
+  solver_worker->path_lists_storage = NULL;
+  configure_worker_path_lists(solver_worker, solver);
 
   solver_worker->solver = solver;
   memset(solver_worker->move_undos, 0, sizeof(solver_worker->move_undos));
@@ -1087,6 +1115,7 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   game_set_endgame_solving_mode(worker->game_copy);
   game_set_backup_mode(worker->game_copy, BACKUP_MODE_SIMULATION);
   arena_reset(worker->small_move_arena);
+  configure_worker_path_lists(worker, solver);
   memset(worker->move_undos, 0, sizeof(worker->move_undos));
   prng_seed(worker->prng, base_seed + (uint64_t)worker->ordinal * 12345);
   worker->best_pv.game = worker->game_copy;
@@ -1426,6 +1455,23 @@ static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
   return move_count + 1;
 }
 
+// The side-to-move's plays from the incremental move lists, copied into the
+// arena with the trailing pass a scratch generation would end in. Returns
+// the play count including the pass.
+static int copy_derived_plays_to_arena(EndgameCtxWorker *worker,
+                                       const MoveGenArgs *args) {
+  const SmallMove *derived = NULL;
+  const int count =
+      path_move_lists_moves_at(worker->path_lists, args, &derived);
+  SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
+      worker->small_move_arena, (size_t)(count + 1) * sizeof(SmallMove));
+  if (count > 0) {
+    memcpy(arena_small_moves, derived, (size_t)count * sizeof(SmallMove));
+  }
+  small_move_set_as_pass(&arena_small_moves[count]);
+  return count + 1;
+}
+
 int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
   // stm means side to move
   // Lazy cross-set generation: only compute if not already valid.
@@ -1463,7 +1509,18 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
+  // Only the root (depth == requested_plies) generates from scratch when the
+  // incremental lists are on; every deeper node derives its list from them.
+  // The single-tile path above never materializes a list, which is safe: a
+  // side that is down to one tile stays there for the rest of the path.
+  const bool is_root = depth == worker->solver->requested_plies;
+  if (worker->path_lists != NULL && !is_root) {
+    return copy_derived_plays_to_arena(worker, &args);
+  }
   generate_moves(&args);
+  if (worker->path_lists != NULL && is_root) {
+    path_move_lists_set_root(worker->path_lists, 0, worker->move_list);
+  }
 
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
@@ -1471,6 +1528,35 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
     arena_small_moves[i] = *(worker->move_list->small_moves[i]);
   }
   return worker->move_list->count;
+}
+
+// Seed the opponent's root list for the incremental move lists: their plays
+// on the root board, which the ply-1 lists derive from. Generated with the
+// opponent temporarily on turn, exactly as a scratch generation at ply 1
+// would see them before the root move lands.
+static void seed_opponent_root_list(EndgameCtxWorker *worker) {
+  Game *game = worker->game_copy;
+  const int on_turn_idx = game_get_player_on_turn_index(game);
+  const int opp_idx = 1 - on_turn_idx;
+  const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
+  if (rack_get_total_letters(opp_rack) < 2) {
+    // Ply-1 nodes take generate_stm_plays' single-tile path instead.
+    return;
+  }
+  game_set_player_on_turn_index(game, opp_idx);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = worker->move_list,
+      .move_record_type = MOVE_RECORD_ALL_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = solver_get_pruned_kwg(worker->solver, opp_idx),
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args);
+  game_set_player_on_turn_index(game, on_turn_idx);
+  path_move_lists_set_root(worker->path_lists, 1, worker->move_list);
 }
 
 // Sum face values of placed tiles in a move, skipping played-through markers.
@@ -2258,6 +2344,10 @@ static uint64_t play_small_move_and_hash(EndgameCtxWorker *worker,
 
   small_move_to_move(worker->move_list->spare_move, small_move,
                      game_get_board(worker_game));
+  if (worker->path_lists != NULL) {
+    path_move_lists_push(worker->path_lists, game_get_board(worker_game),
+                         worker->move_list->spare_move);
+  }
 
   Rack outplay_leftover;
   if (is_outplay) {
@@ -2468,6 +2558,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       int last_consecutive_scoreless_turns =
           game_get_consecutive_scoreless_turns(worker->game_copy);
 
+      if (worker->path_lists != NULL) {
+        path_move_lists_push(worker->path_lists, board,
+                             worker->move_list->spare_move);
+      }
       play_move_incremental(worker->move_list->spare_move, worker->game_copy,
                             &worker->pass_undos[depth]);
 
@@ -2488,6 +2582,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                                      &child_pv, pv_node, false, opp_stuck_frac);
 
       unplay_move_incremental(worker->game_copy, &worker->pass_undos[depth]);
+      if (worker->path_lists != NULL) {
+        path_move_lists_pop(worker->path_lists);
+      }
 
       arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
 
@@ -2744,6 +2841,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       unplay_move_incremental(worker->game_copy,
                               &worker->move_undos[undo_index]);
+      if (worker->path_lists != NULL) {
+        path_move_lists_pop(worker->path_lists);
+      }
       // Cross-sets need no recompute here: any lazy cross-set update in the
       // child's subtree was saved into this undo (or a descendant's undo that
       // was already restored), so the square restore reverted them exactly.
@@ -3053,8 +3153,14 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
                                      ? worker->solver->initial_opp_stuck_frac
                                      : 0.0F;
 
+  if (worker->path_lists != NULL) {
+    path_move_lists_reset(worker->path_lists);
+  }
   int initial_move_count =
       generate_stm_plays(worker, worker->solver->requested_plies);
+  if (worker->path_lists != NULL) {
+    seed_opponent_root_list(worker);
+  }
   // Arena pointer better have started at 0, since it was empty.
   assign_estimates_and_sort(worker, initial_move_count, INVALID_TINY_MOVE,
                             initial_opp_stuck_frac);
@@ -3443,6 +3549,9 @@ static int32_t resolve_root_move_pv(const EndgameCtx *solver,
       abdada_negamax(worker, child_key, depth - 1, -LARGE_VALUE, LARGE_VALUE,
                      &child_pv, true, false, 0.0F);
   unplay_move_incremental(worker_game, &worker->move_undos[undo_index]);
+  if (worker->path_lists != NULL) {
+    path_move_lists_pop(worker->path_lists);
+  }
 
   if (value == ABDADA_INTERRUPTED || value == ON_EVALUATION) {
     return ABDADA_INTERRUPTED;
