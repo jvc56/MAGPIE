@@ -1465,7 +1465,9 @@ static int copy_derived_plays_to_arena(EndgameCtxWorker *worker,
       path_move_lists_moves_at(worker->path_lists, args, &derived);
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
       worker->small_move_arena, (size_t)(count + 1) * sizeof(SmallMove));
-  memcpy(arena_small_moves, derived, (size_t)count * sizeof(SmallMove));
+  if (count > 0) {
+    memcpy(arena_small_moves, derived, (size_t)count * sizeof(SmallMove));
+  }
   small_move_set_as_pass(&arena_small_moves[count]);
   return count + 1;
 }

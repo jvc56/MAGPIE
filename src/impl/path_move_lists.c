@@ -73,8 +73,8 @@ static PackedCounts pack_move_used(const SmallMove *small_move) {
     }
     const bool is_blank =
         ((tiny_move >> (TINY_MOVE_BLANK_SHIFT + tile_idx)) & 1) != 0;
-    packed_counts_add(&counts, is_blank ? BLANK_MACHINE_LETTER
-                                        : (MachineLetter)tile);
+    packed_counts_add(&counts,
+                      is_blank ? BLANK_MACHINE_LETTER : (MachineLetter)tile);
   }
   return counts;
 }
@@ -85,8 +85,8 @@ static PackedCounts pack_move_used(const SmallMove *small_move) {
 static inline bool counts_subset(const PackedCounts *used,
                                  const PackedCounts *avail) {
   for (int word_idx = 0; word_idx < PATH_MOVE_LISTS_COUNT_WORDS; word_idx++) {
-    const uint64_t diff =
-        (avail->words[word_idx] | PACKED_COUNTS_HIGH_BITS) - used->words[word_idx];
+    const uint64_t diff = (avail->words[word_idx] | PACKED_COUNTS_HIGH_BITS) -
+                          used->words[word_idx];
     if ((diff & PACKED_COUNTS_HIGH_BITS) != PACKED_COUNTS_HIGH_BITS) {
       return false;
     }
@@ -106,8 +106,10 @@ static inline uint64_t lane_bit_col(int col) {
 // the row, bits 1-5 the column) for both directions.
 static inline int lane_of_small_move(const SmallMove *small_move) {
   const uint64_t tiny_move = small_move->tiny_move;
-  const int row = (int)((tiny_move >> TINY_MOVE_ROW_SHIFT) & TINY_MOVE_COORD_MASK);
-  const int col = (int)((tiny_move >> TINY_MOVE_COL_SHIFT) & TINY_MOVE_COORD_MASK);
+  const int row =
+      (int)((tiny_move >> TINY_MOVE_ROW_SHIFT) & TINY_MOVE_COORD_MASK);
+  const int col =
+      (int)((tiny_move >> TINY_MOVE_COL_SHIFT) & TINY_MOVE_COORD_MASK);
   return (tiny_move & 1) ? BOARD_DIM + col : row;
 }
 
@@ -237,10 +239,12 @@ static void slot_rebuild(PathListSlot *out, const PathListSlot *parent,
     } else {
       const int begin = parent->lane_begin[lane];
       const int lane_count = parent->lane_begin[lane + 1] - begin;
-      memcpy(out->moves + out->count, parent->moves + begin,
-             (size_t)lane_count * sizeof(SmallMove));
-      memcpy(out->used + out->count, parent->used + begin,
-             (size_t)lane_count * sizeof(PackedCounts));
+      if (lane_count > 0) {
+        memcpy(out->moves + out->count, parent->moves + begin,
+               (size_t)lane_count * sizeof(SmallMove));
+        memcpy(out->used + out->count, parent->used + begin,
+               (size_t)lane_count * sizeof(PackedCounts));
+      }
       out->count += lane_count;
     }
   }
@@ -296,8 +300,8 @@ static void verify_against_scratch(const PathListSlot *slot,
   generate_moves(args);
   const MoveList *move_list = args->move_list;
   if (move_list->count - 1 != slot->count) {
-    log_fatal("path move lists: length %d derived %d plays, scratch %d",
-              length, slot->count, move_list->count - 1);
+    log_fatal("path move lists: length %d derived %d plays, scratch %d", length,
+              slot->count, move_list->count - 1);
   }
   for (int move_idx = 0; move_idx < slot->count; move_idx++) {
     const SmallMove *derived = &slot->moves[move_idx];
@@ -320,10 +324,8 @@ int path_move_lists_moves_at(PathMoveLists *lists, const MoveGenArgs *args,
   assert(length >= 1);
   // The parent is the same side's list two moves up; at lengths 1 and 2 that
   // is a root list.
-  const PathListSlot *parent = &lists->slots[length - 2];
-  if (length <= 2) {
-    parent = &lists->roots[2 - length];
-  }
+  const PathListSlot *parent =
+      length <= 2 ? &lists->roots[2 - length] : &lists->slots[length - 2];
   uint64_t touched = lists->masks[length - 1];
   bool filter = false;
   if (length >= 2) {

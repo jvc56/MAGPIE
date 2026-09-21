@@ -23,6 +23,7 @@
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "path_move_lists_test.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
@@ -630,8 +631,8 @@ void test_solve_standard(void) {
 static void solve_for_incremental_check(const char *cgp, bool incremental,
                                         int32_t *score_out,
                                         uint64_t *nodes_out) {
-  Config *config = config_create_or_die(
-      "set -s1 score -s2 score -threads 1 -eplies 5");
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 5");
   load_and_exec_config_or_die(config, cgp);
   EndgameArgs args = {0};
   args.thread_control = config_get_thread_control(config);
@@ -1663,6 +1664,7 @@ void test_endgame(void) {
   test_ctx_reuse();
   test_solve_standard();
   test_incremental_movegen_identical();
+  test_path_move_lists();
   test_very_deep();
   test_small_arena_realloc();
   test_pass_first();
