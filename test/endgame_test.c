@@ -676,6 +676,21 @@ void test_incremental_movegen_identical(void) {
   assert(scratch_score == 11);
   assert(incremental_score == scratch_score);
   assert(incremental_nodes == scratch_nodes);
+
+  // A stuck-tile position (JMZ against EIOS): the leaf playouts take the
+  // stuck branch, whose full lists and the opponent's stuck fraction the
+  // incremental lists then supply instead of scratch generation.
+  const char *stuck_cgp =
+      "cgp "
+      "11CLAG/9BRAAI1/11N3/11D3/10BOW2/10ERA2/6A3A1R2/C2WEDDInGS1P1I/"
+      "U1VOX1O3T3N/RHO1E1PERILUNES/FEM1A1T3Y3O/1HINT1I7U/2TO2V2GEED1L/"
+      "1AYU2ENTITLES1/QI1N3OAF1KEiR EIOS/JMZ 318/517 0 -lex CSW21";
+  solve_for_incremental_check(stuck_cgp, false, &scratch_score, &scratch_nodes);
+  solve_for_incremental_check(stuck_cgp, true, &incremental_score,
+                              &incremental_nodes);
+  assert(scratch_score == 60);
+  assert(incremental_score == scratch_score);
+  assert(incremental_nodes == scratch_nodes);
 }
 
 void test_very_deep(void) {
