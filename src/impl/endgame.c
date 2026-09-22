@@ -85,13 +85,6 @@ enum {
   // Default cap on the depth-0 interrupt-fallback sweep when first_win_optim is
   // set: 0 = use this default, <0 = skip the sweep, >0 = explicit cap.
   FIRST_WIN_D0_FALLBACK_MOVES = 12,
-  // tiny_move layout (see SmallMove): tile i at bit 20 + 6 * i, its blank
-  // flag at bit 12 + i. The field holds seven tiles whatever RACK_SIZE is.
-  TINY_MOVE_TILE_SHIFT = 20,
-  TINY_MOVE_TILE_BITS = 6,
-  TINY_MOVE_TILE_MASK = 63,
-  TINY_MOVE_BLANK_SHIFT = 12,
-  TINY_MOVE_MAX_TILES = 7,
 };
 
 // A stuck-tile greedy playout extends the incremental lists' path past the
@@ -555,17 +548,15 @@ static inline const KWG *solver_get_pruned_kwg(const EndgameCtx *solver,
 // the blank), as a MOVE_RECORD_TILES_PLAYED generation records them.
 static inline uint64_t small_move_tile_types_bv(const SmallMove *small_move) {
   uint64_t tile_types = 0;
-  const uint64_t tiny_move = small_move->tiny_move;
-  for (int tile_idx = 0; tile_idx < TINY_MOVE_MAX_TILES; tile_idx++) {
-    const uint64_t tile =
-        (tiny_move >> (TINY_MOVE_TILE_SHIFT + TINY_MOVE_TILE_BITS * tile_idx)) &
-        TINY_MOVE_TILE_MASK;
+  for (int tile_idx = 0; tile_idx < SMALL_MOVE_MAX_TILES; tile_idx++) {
+    const MachineLetter tile = small_move_get_tile(small_move, tile_idx);
     if (tile == 0) {
       break;
     }
-    const bool is_blank =
-        ((tiny_move >> (TINY_MOVE_BLANK_SHIFT + tile_idx)) & 1) != 0;
-    tile_types |= (uint64_t)1 << (is_blank ? BLANK_MACHINE_LETTER : tile);
+    const MachineLetter ml = small_move_tile_is_blank(small_move, tile_idx)
+                                 ? BLANK_MACHINE_LETTER
+                                 : tile;
+    tile_types |= (uint64_t)1 << ml;
   }
   return tile_types;
 }
