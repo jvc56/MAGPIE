@@ -15,7 +15,11 @@ enum {
   // in the order the endgame's MOVE_RECORD_ALL_SMALL generation emits them.
   PATH_MOVE_LISTS_NUM_LANES = 2 * BOARD_DIM,
   // Deepest search path the lists follow: a forced-pass bypass can precede
-  // every negamax ply (a bypass never follows another bypass), plus slack.
+  // every negamax ply (a bypass never follows another bypass), so at most
+  // 2 * plies moves reach a leaf, and a stuck-tile greedy playout then pushes
+  // up to MAX_SEARCH_DEPTH + 1 - plies more (see
+  // negamax_greedy_leaf_playout). The total is at most
+  // 2 * MAX_SEARCH_DEPTH + 1; the rest is slack.
   PATH_MOVE_LISTS_MAX_PATH = 2 * MAX_SEARCH_DEPTH + 4,
   // Per-tile-type counts in 4-bit fields (the blank at index 0), packed into
   // 64-bit words.

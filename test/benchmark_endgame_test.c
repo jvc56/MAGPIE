@@ -500,6 +500,9 @@ void test_benchmark_nonstuck_3v3(void) {
 //   MAGPIE_BENCH_THREADS solver threads     (default 1  -> deterministic nodes)
 //   MAGPIE_BENCH_MAX     max positions      (default 100)
 //   MAGPIE_BENCH_INCREMENTAL 1 = incremental move lists (default 0)
+//   MAGPIE_BENCH_INTERLEAVE 1 = solve each position off and on, alternating
+//                           order, TT cleared per solve (default 0);
+//                           MAGPIE_BENCH_INCREMENTAL is then ignored
 //   MAGPIE_BENCH_TAG     label for the run  (default "bench")
 static int env_int(const char *name, int fallback) {
   const char *v = getenv(name);
@@ -536,6 +539,12 @@ void test_endgame_speed_bench(void) {
   const int threads = env_int("MAGPIE_BENCH_THREADS", 1);
   const int max_positions = env_int("MAGPIE_BENCH_MAX", 100);
   const bool incremental = env_int("MAGPIE_BENCH_INCREMENTAL", 0) != 0;
+  // Interleaved A/B: solve every position with the incremental lists off and
+  // on, back to back, alternating which goes first per position so neither
+  // side systematically benefits from a warm cache. The TT is cleared before
+  // every solve so the second solve of a position cannot hit the first's
+  // entries. Rows carry a cfg column and two summaries are printed.
+  const bool interleave = env_int("MAGPIE_BENCH_INTERLEAVE", 0) != 0;
 
   FILE *fp = fopen(cgp_file, "re");
   if (!fp) {
@@ -567,63 +576,92 @@ void test_endgame_speed_bench(void) {
   (void)fclose(fp);
 
   printf("BENCHCFG tag=%s lex=%s plies=%d threads=%d incremental=%d "
-         "positions=%d file=%s\n",
-         tag, lex, plies, threads, (int)incremental, num_cgps, cgp_file);
+         "interleave=%d positions=%d file=%s\n",
+         tag, lex, plies, threads, (int)incremental, (int)interleave, num_cgps,
+         cgp_file);
 
-  double total_time = 0.0;
-  uint64_t total_nodes = 0;
+  // Index 0 = incremental off, 1 = on. Non-interleaved runs use only
+  // cfg_totals[incremental].
+  double cfg_time[2] = {0.0, 0.0};
+  uint64_t cfg_nodes[2] = {0, 0};
 
   for (int ci = 0; ci < num_cgps; ci++) {
-    ErrorStack *err = error_stack_create();
-    game_load_cgp(game, cgp_lines[ci], err);
-    if (!error_stack_is_empty(err)) {
+    const int num_cfgs = interleave ? 2 : 1;
+    for (int cfg_ord = 0; cfg_ord < num_cfgs; cfg_ord++) {
+      // Alternate the order per position: even positions run off first,
+      // odd positions run on first.
+      int cfg = incremental ? 1 : 0;
+      if (interleave) {
+        cfg = (ci % 2 == 0) ? cfg_ord : 1 - cfg_ord;
+      }
+
+      ErrorStack *err = error_stack_create();
+      game_load_cgp(game, cgp_lines[ci], err);
+      if (!error_stack_is_empty(err)) {
+        error_stack_destroy(err);
+        printf("BENCHROW %d SKIP_LOAD\n", ci);
+        // Every config loads the same CGP, so skip the position outright.
+        break;
+      }
       error_stack_destroy(err);
-      printf("BENCHROW %d SKIP_LOAD\n", ci);
-      continue;
+
+      EndgameArgs args = {.game = game,
+                          .thread_control = config_get_thread_control(config),
+                          .plies = plies,
+                          .tt_fraction_of_mem = 0.05,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = threads,
+                          .num_top_moves = 1,
+                          .use_heuristics = true,
+                          .per_ply_callback = NULL,
+                          .per_ply_callback_data = NULL,
+                          .forced_pass_bypass = true,
+                          .incremental_movegen = cfg != 0,
+                          .enable_pv_display = false,
+                          .seed = 42};
+
+      if (interleave && solver != NULL) {
+        endgame_ctx_clear_transposition_table(solver);
+      }
+
+      Timer t;
+      ctimer_start(&t);
+      err = error_stack_create();
+      endgame_solve(&solver, &args, results, err);
+      double elapsed = ctimer_elapsed_seconds(&t);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+
+      int32_t value =
+          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+      uint64_t nodes = endgame_ctx_get_nodes_searched(solver);
+
+      if (interleave) {
+        printf("BENCHROW %d %s %d %llu %.6f\n", ci, cfg ? "on" : "off", value,
+               (unsigned long long)nodes, elapsed);
+      } else {
+        printf("BENCHROW %d %d %llu %.6f\n", ci, value,
+               (unsigned long long)nodes, elapsed);
+      }
+      cfg_time[cfg] += elapsed;
+      cfg_nodes[cfg] += nodes;
     }
-    error_stack_destroy(err);
-
-    EndgameArgs args = {.game = game,
-                        .thread_control = config_get_thread_control(config),
-                        .plies = plies,
-                        .tt_fraction_of_mem = 0.05,
-                        .initial_small_move_arena_size =
-                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                        .num_threads = threads,
-                        .num_top_moves = 1,
-                        .use_heuristics = true,
-                        .per_ply_callback = NULL,
-                        .per_ply_callback_data = NULL,
-                        .forced_pass_bypass = true,
-                        .incremental_movegen = incremental,
-                        .enable_pv_display = false,
-                        .seed = 42};
-
-    Timer t;
-    ctimer_start(&t);
-    err = error_stack_create();
-    endgame_solve(&solver, &args, results, err);
-    double elapsed = ctimer_elapsed_seconds(&t);
-    assert(error_stack_is_empty(err));
-    error_stack_destroy(err);
-
-    int32_t value =
-        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
-    uint64_t nodes = endgame_ctx_get_nodes_searched(solver);
-
-    printf("BENCHROW %d %d %llu %.6f\n", ci, value, (unsigned long long)nodes,
-           elapsed);
-    total_time += elapsed;
-    total_nodes += nodes;
     if ((ci + 1) % 25 == 0) {
       (void)fflush(stdout);
     }
   }
 
-  printf("BENCHSUM tag=%s positions=%d total_time=%.4f total_nodes=%llu "
-         "nps=%.0f\n",
-         tag, num_cgps, total_time, (unsigned long long)total_nodes,
-         total_time > 0 ? (double)total_nodes / total_time : 0.0);
+  const int single_cfg = incremental ? 1 : 0;
+  const int first_cfg = interleave ? 0 : single_cfg;
+  const int last_cfg = interleave ? 1 : single_cfg;
+  for (int cfg = first_cfg; cfg <= last_cfg; cfg++) {
+    printf("BENCHSUM tag=%s cfg=%s positions=%d total_time=%.4f "
+           "total_nodes=%llu nps=%.0f\n",
+           tag, cfg ? "on" : "off", num_cgps, cfg_time[cfg],
+           (unsigned long long)cfg_nodes[cfg],
+           cfg_time[cfg] > 0 ? (double)cfg_nodes[cfg] / cfg_time[cfg] : 0.0);
+  }
   (void)fflush(stdout);
 
   free(cgp_lines);
