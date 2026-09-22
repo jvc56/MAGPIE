@@ -1,5 +1,6 @@
 #include "path_move_lists.h"
 
+#include "../def/board_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
@@ -22,16 +23,6 @@ static_assert(RACK_SIZE < 8, "packed counts hold at most 7 of a tile type");
 
 enum {
   PATH_MOVE_LISTS_INITIAL_CAPACITY = 1024,
-  // tiny_move layout (see SmallMove): tile i at bit 20 + 6 * i, its blank
-  // flag at bit 12 + i.
-  TINY_MOVE_TILE_SHIFT = 20,
-  TINY_MOVE_TILE_BITS = 6,
-  TINY_MOVE_TILE_MASK = 63,
-  TINY_MOVE_BLANK_SHIFT = 12,
-  TINY_MOVE_ROW_SHIFT = 6,
-  TINY_MOVE_COL_SHIFT = 1,
-  TINY_MOVE_COORD_MASK = 31,
-  TINY_MOVE_MAX_TILES = 7,
 };
 
 // High bit of every 4-bit field: the borrow sentinel of counts_subset.
@@ -59,18 +50,14 @@ static PackedCounts pack_rack(const Rack *rack) {
 static PackedCounts pack_move_used(const SmallMove *small_move) {
   PackedCounts counts;
   memset(&counts, 0, sizeof(counts));
-  const uint64_t tiny_move = small_move->tiny_move;
-  for (int tile_idx = 0; tile_idx < TINY_MOVE_MAX_TILES; tile_idx++) {
-    const uint64_t tile =
-        (tiny_move >> (TINY_MOVE_TILE_SHIFT + TINY_MOVE_TILE_BITS * tile_idx)) &
-        TINY_MOVE_TILE_MASK;
+  for (int tile_idx = 0; tile_idx < SMALL_MOVE_MAX_TILES; tile_idx++) {
+    const MachineLetter tile = small_move_get_tile(small_move, tile_idx);
     if (tile == 0) {
       break;
     }
-    const bool is_blank =
-        ((tiny_move >> (TINY_MOVE_BLANK_SHIFT + tile_idx)) & 1) != 0;
-    packed_counts_add(&counts,
-                      is_blank ? BLANK_MACHINE_LETTER : (MachineLetter)tile);
+    packed_counts_add(&counts, small_move_tile_is_blank(small_move, tile_idx)
+                                   ? BLANK_MACHINE_LETTER
+                                   : tile);
   }
   return counts;
 }
@@ -101,12 +88,9 @@ static inline uint64_t lane_bit_col(int col) {
 // tiny_move keeps the true board coordinates of the first square (bits 6-10
 // the row, bits 1-5 the column) for both directions.
 static inline int lane_of_small_move(const SmallMove *small_move) {
-  const uint64_t tiny_move = small_move->tiny_move;
-  const int row =
-      (int)((tiny_move >> TINY_MOVE_ROW_SHIFT) & TINY_MOVE_COORD_MASK);
-  const int col =
-      (int)((tiny_move >> TINY_MOVE_COL_SHIFT) & TINY_MOVE_COORD_MASK);
-  return (tiny_move & 1) ? BOARD_DIM + col : row;
+  return small_move_is_vertical(small_move)
+             ? BOARD_DIM + small_move_get_col_start(small_move)
+             : small_move_get_row_start(small_move);
 }
 
 // The lanes whose legal-play sets can change when `move`'s tiles land on

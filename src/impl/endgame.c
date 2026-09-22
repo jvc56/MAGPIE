@@ -1382,19 +1382,19 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
 
   // Build tiny_move following the same convention as small_move_set_all:
   // for vertical, row_start and col_start are swapped before storing.
-  uint64_t tm = (uint64_t)best_ml << 20;
+  uint64_t tm = (uint64_t)best_ml << SMALL_MOVE_TILES_SHIFT;
   if (is_blank) {
-    tm |= 1ULL << 12; // blank flag for tile index 0
+    tm |= 1ULL << SMALL_MOVE_BLANKS_SHIFT; // blank flag for tile index 0
   }
   if (best_dir_vertical) {
     tm |= 1; // direction bit
-    // small_move_set_all swaps row/col for vertical: bits 1-5 = col, bits 6-10
-    // = row.
-    tm |= (uint64_t)best_col << 1;
-    tm |= (uint64_t)best_start << 6;
+    // small_move_set_all swaps row/col for vertical, so the true board
+    // column goes in the column field and the true row in the row field.
+    tm |= (uint64_t)best_col << SMALL_MOVE_COL_SHIFT;
+    tm |= (uint64_t)best_start << SMALL_MOVE_ROW_SHIFT;
   } else {
-    tm |= (uint64_t)best_start << 1;
-    tm |= (uint64_t)best_row << 6;
+    tm |= (uint64_t)best_start << SMALL_MOVE_COL_SHIFT;
+    tm |= (uint64_t)best_row << SMALL_MOVE_ROW_SHIFT;
   }
   sm->tiny_move = tm;
   return 1;
@@ -1559,16 +1559,16 @@ static void seed_opponent_root_list(EndgameCtxWorker *worker) {
   path_move_lists_set_root(worker->path_lists, 1, worker->move_list);
 }
 
-// Sum face values of placed tiles in a move, skipping played-through markers.
-static int compute_played_tiles_face_value(const SmallMove *sm,
+// Sum the face values of the rack tiles a move places; a designated blank
+// counts as the blank.
+static int compute_played_tiles_face_value(const SmallMove *small_move,
                                            const LetterDistribution *ld) {
   int face_value = 0;
-  int n = sm->metadata.tiles_played;
-  uint64_t tm = sm->tiny_move;
-  for (int i = 0; i < n; i++) {
-    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml =
-        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
+  const int tiles_played = small_move_get_tiles_played(small_move);
+  for (int tile_idx = 0; tile_idx < tiles_played; tile_idx++) {
+    const MachineLetter ml = small_move_tile_is_blank(small_move, tile_idx)
+                                 ? BLANK_MACHINE_LETTER
+                                 : small_move_get_tile(small_move, tile_idx);
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
   return face_value;
@@ -1577,19 +1577,12 @@ static int compute_played_tiles_face_value(const SmallMove *sm,
 // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
 // Returns (CONSERVATION_TILE_WEIGHT * tile_count +
 //          CONSERVATION_VALUE_WEIGHT * face_value) * opp_stuck_frac.
-static int compute_conservation_bonus(const SmallMove *sm,
+static int compute_conservation_bonus(const SmallMove *small_move,
                                       const LetterDistribution *ld,
                                       float opp_stuck_frac) {
-  int n = sm->metadata.tiles_played;
-  int face_value = 0;
-  uint64_t tm = sm->tiny_move;
-  for (int i = 0; i < n; i++) {
-    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml =
-        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
-    face_value += equity_to_int(ld_get_score(ld, ml));
-  }
-  return (int)((float)(CONSERVATION_TILE_WEIGHT * n +
+  const int tiles_played = small_move_get_tiles_played(small_move);
+  const int face_value = compute_played_tiles_face_value(small_move, ld);
+  return (int)((float)(CONSERVATION_TILE_WEIGHT * tiles_played +
                        CONSERVATION_VALUE_WEIGHT * face_value) *
                opp_stuck_frac);
 }
@@ -1661,9 +1654,9 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
       continue;
     }
 
-    int dir_a = (int)(sm_a->tiny_move & 1);
-    int row_a = (int)((sm_a->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
-    int col_a = (int)((sm_a->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
+    bool vert_a = small_move_is_vertical(sm_a);
+    int row_a = small_move_get_row_start(sm_a);
+    int col_a = small_move_get_col_start(sm_a);
     int len_a = small_move_get_play_length(sm_a);
     int tp_a = small_move_get_tiles_played(sm_a);
 
@@ -1685,16 +1678,16 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
       if (tp_b <= tp_a) {
         continue;
       }
-      if ((int)(sm_b->tiny_move & 1) != dir_a) {
+      if (small_move_is_vertical(sm_b) != vert_a) {
         continue;
       }
 
-      int row_b = (int)((sm_b->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
-      int col_b = (int)((sm_b->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
+      int row_b = small_move_get_row_start(sm_b);
+      int col_b = small_move_get_col_start(sm_b);
       int len_b = small_move_get_play_length(sm_b);
 
       bool contained;
-      if (dir_a == 0) {
+      if (!vert_a) {
         contained = (row_a == row_b) && (col_a >= col_b) &&
                     (col_a + len_a <= col_b + len_b);
       } else {
@@ -1717,7 +1710,7 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
 
       // Offset of A's start within B's tile span
       int offset_in_b;
-      if (dir_a == 0) {
+      if (!vert_a) {
         offset_in_b = col_a - col_b;
       } else {
         offset_in_b = row_a - row_b;
