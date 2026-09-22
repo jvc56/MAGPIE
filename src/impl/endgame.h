@@ -162,7 +162,8 @@ typedef struct EndgameArgs {
   // If true, each node's move list is derived from the same side's list two
   // moves up the search path, regenerating only the lanes the intervening
   // moves touched (see path_move_lists.h), instead of generated from scratch.
-  // Results are identical either way. (default: false)
+  // Results are identical either way. (default: true via endgame_args_fill;
+  // hand-built args get whatever they initialize it to)
   bool incremental_movegen;
   bool enable_pv_display; // Whether to prepare PVLine data for display
                           // (default: false)
@@ -250,10 +251,10 @@ static inline void endgame_args_fill(
     EndgamePerRootMoveCallback per_root_move_callback,
     void *per_root_move_callback_data,
     const dual_lexicon_mode_t dual_lexicon_mode, const bool forced_pass_bypass,
-    const bool enable_pv_display, const double soft_time_limit,
-    const double hard_time_limit, const uint64_t seed,
-    const bool skip_word_pruning, TranspositionTable *shared_tt,
-    const int max_workers, const bool first_win,
+    const bool incremental_movegen, const bool enable_pv_display,
+    const double soft_time_limit, const double hard_time_limit,
+    const uint64_t seed, const bool skip_word_pruning,
+    TranspositionTable *shared_tt, const int max_workers, const bool first_win,
     const int first_win_fallback_moves, const bool use_initial_window,
     const int32_t initial_alpha, const int32_t initial_beta,
     const int64_t external_deadline_ns, const Move *actual_move,
@@ -274,6 +275,7 @@ static inline void endgame_args_fill(
   endgame_args->per_root_move_callback_data = per_root_move_callback_data;
   endgame_args->dual_lexicon_mode = dual_lexicon_mode;
   endgame_args->forced_pass_bypass = forced_pass_bypass;
+  endgame_args->incremental_movegen = incremental_movegen;
   endgame_args->enable_pv_display = enable_pv_display;
   endgame_args->soft_time_limit = soft_time_limit;
   endgame_args->hard_time_limit = hard_time_limit;
