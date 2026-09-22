@@ -35,9 +35,10 @@ typedef struct Move {
 } Move;
 
 // SmallMove is a compact 128-bit move representation used by the endgame
-// solver. It encodes up to 7 tiles in 64 bits, so it only supports
-// RACK_SIZE <= 7 and BOARD_DIM <= 16. For larger rack sizes or board
-// dimensions, the endgame solver would need a different move encoding.
+// solver. It encodes up to 7 tiles in 64 bits and each start coordinate in 5
+// bits, so it only supports RACK_SIZE <= 7 and BOARD_DIM <= 32. For larger
+// rack sizes or board dimensions, the endgame solver would need a different
+// move encoding.
 typedef struct SmallMove {
   // tiny_move 64-bit schema:
   // From left to right, (63 to 0):
@@ -77,12 +78,11 @@ typedef struct SmallMove {
 
 #define INVALID_TINY_MOVE (uint64_t)(1ULL << 63)
 
-// The tiny_move layout, in one place. Bit 0 is the direction, bits 1-5 the
-// start column, bits 6-10 the start row, bits 12-18 one blank flag per tile
-// slot, and bits 20 and up the placed tiles, six bits each. The field holds
-// SMALL_MOVE_MAX_TILES slots whatever RACK_SIZE is, so a decoder iterates
-// slots rather than rack positions. Read it through the accessors below
-// rather than shifting tiny_move directly.
+// Field positions of the tiny_move schema above, shared by the encoders
+// (small_move_set_all, the endgame's single-tile generator) and the accessors
+// below. The field holds SMALL_MOVE_MAX_TILES slots whatever RACK_SIZE is, so
+// a decoder iterates slots rather than rack positions. Decode through the
+// accessors rather than shifting tiny_move directly.
 enum {
   SMALL_MOVE_MAX_TILES = 7,
   SMALL_MOVE_TILES_SHIFT = 20,
@@ -283,7 +283,7 @@ small_move_set_all(SmallMove *move, const MachineLetter strip[], int leftstrip,
   }
   uint64_t move_code = 0;
   int tidx = 0;
-  int bts = 20; // start at bitshift of 20 for the first tile
+  int bts = SMALL_MOVE_TILES_SHIFT;
   int blanks_mask = 0;
   for (int i = 0; i < play_length; i++) {
     MachineLetter ml = strip[leftstrip + i];
@@ -298,7 +298,7 @@ small_move_set_all(SmallMove *move, const MachineLetter strip[], int leftstrip,
     }
     move_code |= (val << bts);
     tidx++;
-    bts += 6;
+    bts += SMALL_MOVE_TILE_BITS;
   }
   if (dir_is_vertical) {
     move_code |= 1;
@@ -307,9 +307,9 @@ small_move_set_all(SmallMove *move, const MachineLetter strip[], int leftstrip,
     row_start = col_start;
     col_start = swap;
   }
-  move_code |= (col_start << 1);
-  move_code |= (row_start << 6);
-  move_code |= (blanks_mask << 12);
+  move_code |= (col_start << SMALL_MOVE_COL_SHIFT);
+  move_code |= (row_start << SMALL_MOVE_ROW_SHIFT);
+  move_code |= (blanks_mask << SMALL_MOVE_BLANKS_SHIFT);
 
   move->tiny_move = move_code;
 }
@@ -811,6 +811,9 @@ static inline bool small_move_tile_is_blank(const SmallMove *sm, int tile_idx) {
   return ((sm->tiny_move >> (SMALL_MOVE_BLANKS_SHIFT + tile_idx)) & 1) != 0;
 }
 
+// The true board row and column of the first square for either direction, as
+// Move stores them. (small_move_set_all takes the move generator's transposed
+// coordinates for a vertical play and swaps them before encoding.)
 static inline int small_move_get_row_start(const SmallMove *sm) {
   return (int)((sm->tiny_move >> SMALL_MOVE_ROW_SHIFT) & SMALL_MOVE_COORD_MASK);
 }
