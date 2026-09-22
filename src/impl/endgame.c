@@ -94,6 +94,11 @@ enum {
   TINY_MOVE_MAX_TILES = 7,
 };
 
+// A stuck-tile greedy playout extends the incremental lists' path past the
+// negamax leaf; see negamax_greedy_leaf_playout's max_playout.
+static_assert(PATH_MOVE_LISTS_MAX_PATH > 2 * MAX_SEARCH_DEPTH + 1,
+              "incremental lists' path too short for the greedy playout");
+
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
 // all). A tile is "stuck" if no legal move plays that tile type.
 // tiles_played_bv: bitvector where bit i is set if machine letter i appears in
@@ -570,12 +575,13 @@ static inline uint64_t small_move_tile_types_bv(const SmallMove *small_move) {
 // If tiles_played_bv_out is non-NULL, writes the bitvector of tile types
 // that appear in at least one valid move.
 // solver is nullable; when non-NULL an interrupt check is performed before
-// the expensive generate_moves call so a fired interrupt cuts the work short.
-// Callers detect the interrupt themselves after this returns.
+// the expensive generate_moves call so a fired interrupt cuts the work short;
+// the result is then meaningless, and callers detect the interrupt themselves
+// after this returns.
 // `opp_plays`, when non-NULL, is the opponent's complete list of plays on
 // this board (`opp_play_count` entries; a trailing pass is harmless), which
 // the caller already has. Its tile types then answer exactly, without the
-// MOVE_RECORD_TILES_PLAYED generation.
+// MOVE_RECORD_TILES_PLAYED generation, so no interrupt check is needed.
 static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
                                         const KWG *pruned_kwg, int opp_idx,
                                         uint64_t *tiles_played_bv_out,
@@ -628,18 +634,6 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
     // with opp_tiles_bv pre-seeded so movegen skips re-discovering the
     // already-known playable tiles.
   }
-  // Check for interrupt before the expensive movegen call.  If already fired,
-  // restore game state and return early — the caller will re-detect the
-  // interrupt immediately and discard this 0.0F result.
-  if (solver && iterative_deepening_should_stop(solver)) {
-    if (saved_on_turn != opp_idx) {
-      game_set_player_on_turn_index(game, saved_on_turn);
-    }
-    if (tiles_played_bv_out) {
-      *tiles_played_bv_out = opp_tiles_bv;
-    }
-    return 0.0F;
-  }
   if (opp_plays != NULL) {
     for (int move_idx = 0; move_idx < opp_play_count; move_idx++) {
       opp_tiles_bv |= small_move_tile_types_bv(&opp_plays[move_idx]);
@@ -653,6 +647,18 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
       *tiles_played_bv_out = opp_tiles_bv;
     }
     return derived_result;
+  }
+  // Check for interrupt before the expensive movegen call.  If already fired,
+  // restore game state and return early — the caller will re-detect the
+  // interrupt immediately and discard this 0.0F result.
+  if (solver && iterative_deepening_should_stop(solver)) {
+    if (saved_on_turn != opp_idx) {
+      game_set_player_on_turn_index(game, saved_on_turn);
+    }
+    if (tiles_played_bv_out) {
+      *tiles_played_bv_out = opp_tiles_bv;
+    }
+    return 0.0F;
   }
   const MoveGenArgs tp_args = {
       .game = game,
@@ -1927,6 +1933,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // slot. Without this, full-depth IDS (plies == MAX_SEARCH_DEPTH) gives
   // greedy 0 plies and leaks the static rack-adjusted spread instead of
   // playing a terminating move.
+  // A stuck playout pushes each of its moves onto the incremental lists'
+  // path, on top of up to 2 * plies negamax and bypass moves; the total,
+  // plies + MAX_SEARCH_DEPTH + 1, must stay within PATH_MOVE_LISTS_MAX_PATH.
   int max_playout = MAX_SEARCH_DEPTH + 1 - plies;
   // The incremental lists can follow the playout only from a leaf reached
   // along a pushed path (never from the root itself).
@@ -2019,6 +2028,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     int nplays;
     if (stm_rack_p->number_of_letters == 1) {
       // Single-tile fast path: cross-set scan instead of KWG traversal.
+      // Its move is still pushed when following the path, without a
+      // materialized list; that is safe for the reason generate_stm_plays
+      // gives: a side down to one tile never needs its list derived again.
       // generate_single_tile_plays allocs to the arena; copy the result into
       // move_list and immediately pop the arena so the per-node dealloc in
       // abdada_negamax stays correct.
@@ -2258,15 +2270,10 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
     }
   }
   if (worker->solver->use_heuristics) {
-    // Check for interrupt before the expensive movegen; returning here
-    // leaves the arena untouched, as the caller expects of -1.
-    if (iterative_deepening_should_stop(worker->solver)) {
-      return -1;
-    }
     // Generate first: with the opponent on turn, the list just generated is
     // their complete play list, so its tile types give the stuck fraction
-    // without a MOVE_RECORD_TILES_PLAYED generation. (Otherwise that
-    // generation checks the interrupt itself before running.)
+    // without a MOVE_RECORD_TILES_PLAYED generation. (The caller checked the
+    // interrupt just before calling.)
     nplays = generate_stm_plays(worker, depth);
     const SmallMove *opp_plays = NULL;
     if (game_get_player_on_turn_index(worker->game_copy) == opp_idx) {
@@ -2278,6 +2285,13 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
         worker->game_copy, worker->move_list,
         solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, &opp_tiles_bv,
         worker->solver, opp_plays, nplays);
+    // An interrupt inside compute_opp_stuck_fraction leaves the fraction
+    // meaningless. Release this node's plays so the arena is untouched, as
+    // the caller expects of -1.
+    if (iterative_deepening_should_stop(worker->solver)) {
+      arena_dealloc(worker->small_move_arena, nplays * sizeof(SmallMove));
+      return -1;
+    }
   } else {
     nplays = generate_stm_plays(worker, depth);
     *opp_stuck_frac = 0.0F;

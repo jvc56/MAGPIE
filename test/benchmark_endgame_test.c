@@ -501,7 +501,8 @@ void test_benchmark_nonstuck_3v3(void) {
 //   MAGPIE_BENCH_MAX     max positions      (default 100)
 //   MAGPIE_BENCH_INCREMENTAL 1 = incremental move lists (default 0)
 //   MAGPIE_BENCH_INTERLEAVE 1 = solve each position off and on, alternating
-//                           order, TT cleared per solve (default 0)
+//                           order, TT cleared per solve (default 0);
+//                           MAGPIE_BENCH_INCREMENTAL is then ignored
 //   MAGPIE_BENCH_TAG     label for the run  (default "bench")
 static int env_int(const char *name, int fallback) {
   const char *v = getenv(name);
@@ -599,7 +600,8 @@ void test_endgame_speed_bench(void) {
       if (!error_stack_is_empty(err)) {
         error_stack_destroy(err);
         printf("BENCHROW %d SKIP_LOAD\n", ci);
-        continue;
+        // Every config loads the same CGP, so skip the position outright.
+        break;
       }
       error_stack_destroy(err);
 
