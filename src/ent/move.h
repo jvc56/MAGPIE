@@ -75,19 +75,23 @@ typedef struct SmallMove {
   } metadata;
 } SmallMove;
 
-#define SMALL_MOVE_COL_BITMASK 0x3E   // 0b00111110
-#define SMALL_MOVE_ROW_BITMASK 0x07C0 // 0b00000111_11000000
-#define SMALL_MOVE_BLANKS_BIT_MASK (uint64_t)(127ULL << 12)
 #define INVALID_TINY_MOVE (uint64_t)(1ULL << 63)
 
-static const uint64_t SMALL_MOVE_T_BITMASK[7] = {
-    (uint64_t)(63ULL << 20), // T1
-    (uint64_t)(63ULL << 26), // T2
-    (uint64_t)(63ULL << 32), // T3
-    (uint64_t)(63ULL << 38), // T4
-    (uint64_t)(63ULL << 44), // T5
-    (uint64_t)(63ULL << 50), // T6
-    (uint64_t)(63ULL << 56)  // T7
+// The tiny_move layout, in one place. Bit 0 is the direction, bits 1-5 the
+// start column, bits 6-10 the start row, bits 12-18 one blank flag per tile
+// slot, and bits 20 and up the placed tiles, six bits each. The field holds
+// SMALL_MOVE_MAX_TILES slots whatever RACK_SIZE is, so a decoder iterates
+// slots rather than rack positions. Read it through the accessors below
+// rather than shifting tiny_move directly.
+enum {
+  SMALL_MOVE_MAX_TILES = 7,
+  SMALL_MOVE_TILES_SHIFT = 20,
+  SMALL_MOVE_TILE_BITS = 6,
+  SMALL_MOVE_TILE_MASK = 63,
+  SMALL_MOVE_BLANKS_SHIFT = 12,
+  SMALL_MOVE_ROW_SHIFT = 6,
+  SMALL_MOVE_COL_SHIFT = 1,
+  SMALL_MOVE_COORD_MASK = 31,
 };
 
 typedef struct MoveList {
@@ -791,6 +795,34 @@ static inline uint16_t small_move_get_score(const SmallMove *sm) {
   return sm->metadata.score;
 }
 
+// The letter in tile slot `tile_idx` of a tile-placement move, as it was
+// designated: a blank played as E reads as E, with small_move_tile_is_blank
+// reporting that it came from the blank. Returns 0 for a slot the move does
+// not fill, so a decoder can stop at the first empty slot.
+static inline MachineLetter small_move_get_tile(const SmallMove *sm,
+                                                int tile_idx) {
+  return (MachineLetter)((sm->tiny_move >> (SMALL_MOVE_TILES_SHIFT +
+                                            SMALL_MOVE_TILE_BITS * tile_idx)) &
+                         SMALL_MOVE_TILE_MASK);
+}
+
+// Whether the tile in slot `tile_idx` was played from the blank.
+static inline bool small_move_tile_is_blank(const SmallMove *sm, int tile_idx) {
+  return ((sm->tiny_move >> (SMALL_MOVE_BLANKS_SHIFT + tile_idx)) & 1) != 0;
+}
+
+static inline int small_move_get_row_start(const SmallMove *sm) {
+  return (int)((sm->tiny_move >> SMALL_MOVE_ROW_SHIFT) & SMALL_MOVE_COORD_MASK);
+}
+
+static inline int small_move_get_col_start(const SmallMove *sm) {
+  return (int)((sm->tiny_move >> SMALL_MOVE_COL_SHIFT) & SMALL_MOVE_COORD_MASK);
+}
+
+static inline bool small_move_is_vertical(const SmallMove *sm) {
+  return (sm->tiny_move & 1) != 0;
+}
+
 static inline bool small_move_is_pass(const SmallMove *sm) {
   return sm->tiny_move == 0;
 }
@@ -839,21 +871,16 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
     return;
   }
   // Convert the small move to a Move*
-  int row = (int)((sm->tiny_move & SMALL_MOVE_ROW_BITMASK) >> 6);
-  int col = (int)((sm->tiny_move & SMALL_MOVE_COL_BITMASK) >> 1);
-  bool vert = false;
-  if ((sm->tiny_move & 1) > 0) {
-    vert = true;
-  }
+  int row = small_move_get_row_start(sm);
+  int col = small_move_get_col_start(sm);
+  bool vert = small_move_is_vertical(sm);
   int ri = vert ? 1 : 0;
   int ci = vert ? 0 : 1;
   int bdim = BOARD_DIM;
   int r = row;
   int c = col;
-  int blank_mask = (int)(sm->tiny_move & SMALL_MOVE_BLANKS_BIT_MASK);
   int tidx = 0;
   int midx = 0;
-  int tile_shift = 20;
   bool out_of_bounds = false;
 
   while (!out_of_bounds) {
@@ -868,19 +895,17 @@ static inline void small_move_to_move(Move *move, const SmallMove *sm,
       midx++;
       continue;
     }
-    if (tidx > 6) {
+    if (tidx >= SMALL_MOVE_MAX_TILES) {
       break;
     }
-    uint64_t shifted = sm->tiny_move & SMALL_MOVE_T_BITMASK[tidx];
-    MachineLetter tile = shifted >> tile_shift;
+    MachineLetter tile = small_move_get_tile(sm, tidx);
     if (tile == 0) {
       break;
     }
-    if (blank_mask & (1 << (tidx + 12))) {
+    if (small_move_tile_is_blank(sm, tidx)) {
       tile = get_blanked_machine_letter(tile);
     }
     tidx++;
-    tile_shift += 6;
     move->tiles[midx] = tile;
     midx++;
   }

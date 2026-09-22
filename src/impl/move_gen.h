@@ -308,8 +308,8 @@ void generate_moves(const MoveGenArgs *args);
 // count once that lane has been processed, so lane L's plays occupy
 // [lane_end[L - 1], lane_end[L]) (from 0 for L == 0). Serves the endgame's
 // incremental move lists (path_move_lists.h).
-void generate_small_moves_in_lanes(const MoveGenArgs *args,
-                                   uint64_t lane_mask, int *lane_end);
+void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
+                                   int *lane_end);
 
 MoveGen *get_movegen(void);
 

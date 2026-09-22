@@ -3638,8 +3638,8 @@ void gen_record_pass(MoveGen *gen) {
   }
 }
 
-void generate_small_moves_in_lanes(const MoveGenArgs *args,
-                                   uint64_t lane_mask, int *lane_end) {
+void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
+                                   int *lane_end) {
   MoveGen *gen = get_movegen();
   gen_load_position(gen, args);
   assert(gen->move_record_type == MOVE_RECORD_ALL_SMALL);
