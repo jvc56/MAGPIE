@@ -571,6 +571,7 @@ static bool play_chooser_run_endgame(
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      /*incremental_movegen=*/true,
       /*enable_pv_display=*/false, /*soft_time_limit=*/budget_seconds * 0.9,
       /*hard_time_limit=*/budget_seconds, strategy->seed,
       /*skip_word_pruning=*/false, shared_tt, /*max_workers=*/0,
