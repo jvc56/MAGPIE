@@ -1,5 +1,6 @@
 #include "path_move_lists.h"
 
+#include "../def/board_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
