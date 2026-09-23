@@ -282,6 +282,22 @@ void run_test(const char *subtest) {
       return;
     }
   }
+  if (strcmp(subtest, "patdebugauditcsw24") == 0) {
+    pat_move_choice_debug_audit_csw24();
+    return;
+  }
+  if (strcmp(subtest, "patdebugopeningscsw24") == 0) {
+    pat_move_choice_debug_openings_csw24();
+    return;
+  }
+  if (strcmp(subtest, "patdebugconfirmcsw24") == 0) {
+    pat_move_choice_debug_confirm_csw24();
+    return;
+  }
+  if (strcmp(subtest, "patdebugcsw24") == 0) {
+    pat_move_choice_debug_csw24();
+    return;
+  }
   // Parameterized move-choice comparisons: "patmovechoice:<spec>" (see
   // pat_move_choice_run_spec).
   if (has_prefix("pattablecheck:", subtest)) {

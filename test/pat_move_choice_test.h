@@ -111,6 +111,11 @@ void pat_move_choice_run_spec(const char *spec);
 // candidate spec strings since there is only ever this one axis.
 void pat_move_choice_run_leave_spec(const char *spec);
 
+void pat_move_choice_debug_csw24(void);
+void pat_move_choice_debug_confirm_csw24(void);
+void pat_move_choice_debug_openings_csw24(void);
+void pat_move_choice_debug_audit_csw24(void);
+
 void test_pat_move_choice_controls(void);
 void test_pat_move_choice_targeted_controls(void);
 void test_pat_move_choice_tws_only(void);

@@ -13,8 +13,12 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
+#include "../src/ent/win_pct.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "pat_overlap_pilot_test.h"
 #include "test_util.h"
@@ -23,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 // The common-reference move-choice-benefit harness (design history and
 // rationale in test/pat_hyperscale_fit_test.c, which now calls into
@@ -1279,5 +1284,890 @@ void pat_move_choice_run_leave_spec(const char *spec) {
   PATMoveChoiceResult result;
   pat_move_choice_compare(config, &baseline, &candidate, seed_base,
                           num_positions, num_worlds, &result);
+  config_destroy(config);
+}
+
+// One-off CSW24 diagnostic. Neutral complete-game oracle: after either
+// candidate, both sides finish under production no-PAT static play. The
+// opponent rack is resampled with paired seeds in each world.
+static double pat_debug_complete_value(const Game *position, const Move *move,
+                                       int mover_index, uint64_t world_seed,
+                                       MoveList *reply_list) {
+  Game *continuation = game_duplicate(position);
+  game_seed(continuation, world_seed);
+  player_set_pat(game_get_player(continuation, 0), NULL);
+  player_set_pat(game_get_player(continuation, 1), NULL);
+  // Randomize the hidden rack while it can exchange with the full bag.
+  // Doing this after a candidate empties the bag freezes the source-game
+  // opponent rack and falsely makes the continuation deterministic.
+  set_random_rack(continuation, 1 - mover_index, NULL);
+  play_move(move, continuation, NULL);
+  while (game_get_game_end_reason(continuation) == GAME_END_REASON_NONE) {
+    const Move *reply = get_top_equity_move(continuation, reply_list);
+    play_move(reply, continuation, NULL);
+  }
+  const double spread = equity_to_double(
+      player_get_score(game_get_player(continuation, mover_index)) -
+      player_get_score(game_get_player(continuation, 1 - mover_index)));
+  game_destroy(continuation);
+  return spread;
+}
+
+
+enum { PAT_DEBUG_FULL_GAME_BAG = 21, PAT_DEBUG_HORIZON_PLIES = 4 };
+
+typedef struct {
+  double spread;
+  double horizon_leave;
+  double win_pct;
+  double utility;
+  int horizon_unseen;
+  int plies;
+  bool ended;
+} PATDebugOracleValue;
+
+static PATDebugOracleValue pat_debug_measure_horizon(
+    const Game *continuation, int mover_index, const WinPct *win_pcts,
+    const Rack last_leave[2], const bool has_leave[2], int plies) {
+  PATDebugOracleValue value = {0};
+  const Player *mover = game_get_player(continuation, mover_index);
+  const Player *opponent = game_get_player(continuation, 1 - mover_index);
+  value.spread = equity_to_double(player_get_score(mover) -
+                                  player_get_score(opponent));
+  value.plies = plies;
+  value.ended = game_get_game_end_reason(continuation) != GAME_END_REASON_NONE;
+  if (value.ended) {
+    value.win_pct = value.spread > 0 ? 1.0 :
+                    value.spread < 0 ? 0.0 : 0.5;
+  } else {
+    if (has_leave[mover_index]) {
+      value.horizon_leave += equity_to_double(klv_get_leave_value(
+          player_get_klv(mover), &last_leave[mover_index]));
+    }
+    if (has_leave[1 - mover_index]) {
+      value.horizon_leave -= equity_to_double(klv_get_leave_value(
+          player_get_klv(opponent), &last_leave[1 - mover_index]));
+    }
+    value.horizon_unseen = bag_get_letters(game_get_bag(continuation)) +
+        rack_get_total_letters(player_get_rack(opponent));
+    assert(value.horizon_unseen > 0);
+    const double adjusted_spread = value.spread + value.horizon_leave;
+    int rounded = (int)(adjusted_spread + 0.5 - (adjusted_spread < 0.0));
+    const bool opponent_on_turn =
+        game_get_player_on_turn_index(continuation) != mover_index;
+    if (opponent_on_turn) {
+      rounded = -rounded;
+    }
+    value.win_pct = win_pct_get(win_pcts, rounded, value.horizon_unseen);
+    if (opponent_on_turn) {
+      value.win_pct = 1.0 - value.win_pct;
+    }
+  }
+  value.utility = sim_utility_blend(
+      value.win_pct, double_to_equity(value.spread), 1.0, 0.5, 100.0);
+  return value;
+}
+
+static PATDebugOracleValue pat_debug_hybrid_value(
+    const Game *position, const Move *candidate, int mover_index,
+    uint64_t world_seed, MoveList *reply_list, const WinPct *win_pcts) {
+  Game *continuation = game_duplicate(position);
+  game_seed(continuation, world_seed);
+  player_set_pat(game_get_player(continuation, 0), NULL);
+  player_set_pat(game_get_player(continuation, 1), NULL);
+  set_random_rack(continuation, 1 - mover_index, NULL);
+  Rack last_leave[2];
+  bool has_leave[2] = {false, false};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    rack_set_dist_size(&last_leave[player_index],
+                       ld_get_size(game_get_ld(continuation)));
+    rack_reset(&last_leave[player_index]);
+  }
+  const bool full_game =
+      bag_get_letters(game_get_bag(position)) <= PAT_DEBUG_FULL_GAME_BAG;
+  int ply = 0;
+  while (game_get_game_end_reason(continuation) == GAME_END_REASON_NONE &&
+         (full_game || ply < PAT_DEBUG_HORIZON_PLIES)) {
+    const int actor = game_get_player_on_turn_index(continuation);
+    const Move *selected = ply == 0 ? candidate :
+                           get_top_equity_move(continuation, reply_list);
+    play_move(selected, continuation, &last_leave[actor]);
+    has_leave[actor] = true;
+    ply++;
+  }
+  const PATDebugOracleValue value = pat_debug_measure_horizon(
+      continuation, mover_index, win_pcts, last_leave, has_leave, ply);
+  game_destroy(continuation);
+  return value;
+}
+
+static int pat_debug_find_rank(const MoveList *move_list, const Move *target) {
+  const int count = move_list_get_count(move_list);
+  for (int index = 0; index < count; index++) {
+    if (compare_moves_without_equity(move_list_get_move(move_list, index),
+                                     target, true) == -1) {
+      return index + 1;
+    }
+  }
+  return 0;
+}
+
+static char *pat_debug_rankings(const Game *game, const MoveList *move_list) {
+  StringBuilder *sb = string_builder_create();
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int count = move_list_get_count(move_list);
+  int emitted = 0;
+  for (int index = 0; index < count && index < 10; index++) {
+    const Move *move = move_list_get_move(move_list, index);
+    if (move_get_equity(move) == EQUITY_PASS_VALUE) continue;
+    StringBuilder *move_sb = string_builder_create();
+    string_builder_add_move(move_sb, board, move, ld, true);
+    char *move_text = string_builder_dump(move_sb, NULL);
+    string_builder_destroy(move_sb);
+    if (emitted++ > 0) {
+      string_builder_add_string(sb, ";;");
+    }
+    string_builder_add_formatted_string(
+        sb, "%d|%s|%.3f", index + 1, move_text,
+        equity_to_double(move_get_equity(move)));
+    free(move_text);
+  }
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
+}
+
+static double pat_debug_elapsed(const struct timespec *start) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (double)(now.tv_sec - start->tv_sec) +
+         (double)(now.tv_nsec - start->tv_nsec) / 1e9;
+}
+
+void pat_move_choice_debug_csw24(void) {
+  const int duration_seconds = 1800;
+  const int worlds = 32;
+  const uint64_t seed_base = 8600000000ULL;
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -sinfer false -wmp true -rit true -ritmmap true "
+      "-wit true -pat hookscore_x");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  assert(champion);
+  const PATMoveChooser prod = {.label = "prod_no_pat", .pat = NULL};
+  const PATMoveChooser x = {.label = "hookscore_x", .pat = champion};
+  MoveList *setup_list = move_list_create(1);
+  MoveList *choice_list = move_list_create(PAT_MOVE_CHOICE_MOVE_LIST_CAPACITY);
+  MoveList *reply_list = move_list_create(1);
+  FILE *out = fopen("/tmp/pat_csw24_oracle.tsv", "w");
+  assert(out);
+  fprintf(out, "seed\tbag\tmover\tcgp\tprod_move\tprod_static_equity\tx_"
+               "move\tx_static_equity\tprod_top10\tx_top10\tprod_rank_of_x\tx_"
+               "rank_of_prod\tprod_equity_of_x\tx_equity_of_prod\toracle_x_"
+               "minus_prod\toracle_se\tworlds\n");
+  fflush(out);
+  int games = 0;
+  int positions = 0;
+  int disagreements = 0;
+  struct timespec start;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  double last_progress = 0.0;
+  for (uint64_t attempt = 0; pat_debug_elapsed(&start) < duration_seconds;
+       attempt++) {
+    const uint64_t seed = seed_base + attempt;
+    game_reset(game);
+    game_seed(game, seed);
+    draw_starting_racks(game);
+    player_set_pat(game_get_player(game, 0), NULL);
+    player_set_pat(game_get_player(game, 1), NULL);
+    const int target_bag = 10 + (int)(seed % 60ULL);
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+           bag_get_letters(game_get_bag(game)) > target_bag) {
+      const Move *setup = get_top_equity_move(game, setup_list);
+      play_move(setup, game, NULL);
+    }
+    if (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+        bag_get_letters(game_get_bag(game)) > 0 &&
+        board_get_cross_sets_valid(game_get_board(game)) &&
+        !board_get_transposed(game_get_board(game))) {
+      positions++;
+      const int mover_index = game_get_player_on_turn_index(game);
+      Move move_prod;
+      Move move_x;
+      pat_move_choice_choose(game, mover_index, &prod, choice_list, &move_prod);
+      char *prod_top10 = pat_debug_rankings(game, choice_list);
+      pat_move_choice_choose(game, mover_index, &x, choice_list, &move_x);
+      char *x_top10 = pat_debug_rankings(game, choice_list);
+      const int x_rank_of_prod = pat_debug_find_rank(choice_list, &move_prod);
+      double x_equity_of_prod = 0.0;
+      if (x_rank_of_prod > 0) {
+        x_equity_of_prod = equity_to_double(move_get_equity(
+            move_list_get_move(choice_list, x_rank_of_prod - 1)));
+      }
+      Move ignored_prod;
+      pat_move_choice_choose(game, mover_index, &prod, choice_list,
+                             &ignored_prod);
+      const int prod_rank_of_x = pat_debug_find_rank(choice_list, &move_x);
+      double prod_equity_of_x = 0.0;
+      if (prod_rank_of_x > 0) {
+        prod_equity_of_x = equity_to_double(move_get_equity(
+            move_list_get_move(choice_list, prod_rank_of_x - 1)));
+      }
+      player_set_pat(game_get_player(game, mover_index), NULL);
+      if (move_get_type(&move_prod) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+          move_get_type(&move_x) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+          compare_moves_without_equity(&move_prod, &move_x, true) != -1) {
+        disagreements++;
+        char *cgp = game_get_cgp(game, true);
+        const Board *board = game_get_board(game);
+        const LetterDistribution *ld = game_get_ld(game);
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_move(sb, board, &move_prod, ld, true);
+        char *prod_text = string_builder_dump(sb, NULL);
+        string_builder_destroy(sb);
+        sb = string_builder_create();
+        string_builder_add_move(sb, board, &move_x, ld, true);
+        char *x_text = string_builder_dump(sb, NULL);
+        string_builder_destroy(sb);
+        double sum = 0.0;
+        double sum_sq = 0.0;
+        for (int world = 0; world < worlds; world++) {
+          const uint64_t world_seed =
+              seed + 500000000ULL + (uint64_t)world * 1000003ULL;
+          const double prod_value = pat_debug_complete_value(
+              game, &move_prod, mover_index, world_seed, reply_list);
+          const double x_value = pat_debug_complete_value(
+              game, &move_x, mover_index, world_seed, reply_list);
+          const double difference = x_value - prod_value;
+          sum += difference;
+          sum_sq += difference * difference;
+        }
+        const double mean = sum / worlds;
+        const double variance =
+            fmax(0.0, (sum_sq - sum * sum / worlds) / (worlds - 1));
+        fprintf(out,
+                "%llu\t%d\t%d\t%s\t%s\t%.3f\t%s\t%.3f\t%s\t%s\t%d\t%d\t%.3f\t%."
+                "3f\t%.6f\t%.6f\t%d\n",
+                (unsigned long long)seed, bag_get_letters(game_get_bag(game)),
+                mover_index, cgp, prod_text,
+                equity_to_double(move_get_equity(&move_prod)), x_text,
+                equity_to_double(move_get_equity(&move_x)), prod_top10, x_top10,
+                prod_rank_of_x, x_rank_of_prod, prod_equity_of_x,
+                x_equity_of_prod, mean, sqrt(variance / worlds), worlds);
+        fflush(out);
+        free(cgp);
+        free(prod_text);
+        free(x_text);
+      }
+      free(prod_top10);
+      free(x_top10);
+    }
+    // Finish each sampled game under the production static policy.
+    player_set_pat(game_get_player(game, 0), NULL);
+    player_set_pat(game_get_player(game, 1), NULL);
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+      const Move *reply = get_top_equity_move(game, setup_list);
+      play_move(reply, game, NULL);
+    }
+    games++;
+    const double elapsed = pat_debug_elapsed(&start);
+    if (elapsed - last_progress >= 60.0) {
+      last_progress = elapsed;
+      fprintf(stderr,
+              "[pat-debug-csw24] elapsed=%.0fs games=%d positions=%d "
+              "disagreements=%d\n",
+              elapsed, games, positions, disagreements);
+      fflush(stderr);
+    }
+  }
+  fprintf(stderr,
+          "[pat-debug-csw24] FINAL games=%d positions=%d disagreements=%d\n",
+          games, positions, disagreements);
+  fclose(out);
+  move_list_destroy(reply_list);
+  move_list_destroy(choice_list);
+  move_list_destroy(setup_list);
+  config_destroy(config);
+}
+
+
+// Detailed four-ply or complete-game outcomes for positions on the local
+// CSW24 debug page. This uses the same worlds and continuation as confirmation.
+enum { PAT_DEBUG_AUDIT_MAX_PLIES = 100 };
+
+typedef struct {
+  int reached[PAT_DEBUG_AUDIT_MAX_PLIES];
+  int bingos[PAT_DEBUG_AUDIT_MAX_PLIES];
+  double scores[PAT_DEBUG_AUDIT_MAX_PLIES];
+  double adjustments[PAT_DEBUG_AUDIT_MAX_PLIES];
+  double bag_before[PAT_DEBUG_AUDIT_MAX_PLIES];
+  int wins;
+  int draws;
+  int losses;
+  double spread_sum;
+  double spread_sq_sum;
+  double utility_sum;
+  double win_pct_sum;
+  double horizon_leave_sum;
+  double horizon_unseen_sum;
+  double terminal_adjustment_sum;
+  int completed_worlds;
+  int total_plies;
+} PATDebugAudit;
+
+static void pat_debug_audit_world(const Game *position, const Move *candidate,
+                                  int mover_index, uint64_t world_seed,
+                                  MoveList *reply_list, const WinPct *win_pcts,
+                                  PATDebugAudit *audit, const char *mode,
+                                  FILE *trace) {
+  const PATDebugOracleValue value = pat_debug_hybrid_value(
+      position, candidate, mover_index, world_seed, reply_list, win_pcts);
+  Game *continuation = game_duplicate(position);
+  game_seed(continuation, world_seed);
+  player_set_pat(game_get_player(continuation, 0), NULL);
+  player_set_pat(game_get_player(continuation, 1), NULL);
+  set_random_rack(continuation, 1 - mover_index, NULL);
+  const bool full_game =
+      bag_get_letters(game_get_bag(position)) <= PAT_DEBUG_FULL_GAME_BAG;
+  int ply = 0;
+  while (game_get_game_end_reason(continuation) == GAME_END_REASON_NONE &&
+         (full_game || ply < PAT_DEBUG_HORIZON_PLIES)) {
+    assert(ply < PAT_DEBUG_AUDIT_MAX_PLIES);
+    const int actor = game_get_player_on_turn_index(continuation);
+    const Move *selected = ply == 0 ? candidate
+                                    : get_top_equity_move(continuation, reply_list);
+    const double score = equity_to_double(move_get_score(selected));
+    const Equity raw_equity = move_get_equity(selected);
+  const double adjustment = raw_equity == EQUITY_PASS_VALUE
+      ? 0.0 : equity_to_double(raw_equity) - score;
+    const int bag_before = bag_get_letters(game_get_bag(continuation));
+    const double mover_before = equity_to_double(
+        player_get_score(game_get_player(continuation, mover_index)));
+    const double opponent_before = equity_to_double(
+        player_get_score(game_get_player(continuation, 1 - mover_index)));
+    char *move_text = NULL;
+    if (trace != NULL) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(continuation), selected,
+                              game_get_ld(continuation), true);
+      move_text = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+    }
+    audit->reached[ply]++;
+    audit->scores[ply] += score;
+    audit->adjustments[ply] += adjustment;
+    audit->bag_before[ply] += bag_before;
+    if (move_get_type(selected) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        move_get_tiles_played(selected) == RACK_SIZE) {
+      audit->bingos[ply]++;
+    }
+    play_move(selected, continuation, NULL);
+    const double mover_after = equity_to_double(
+        player_get_score(game_get_player(continuation, mover_index)));
+    const double opponent_after = equity_to_double(
+        player_get_score(game_get_player(continuation, 1 - mover_index)));
+    const double signed_score = actor == mover_index ? score : -score;
+    const double extra_spread =
+        (mover_after - opponent_after) - (mover_before - opponent_before) -
+        signed_score;
+    if (game_get_game_end_reason(continuation) != GAME_END_REASON_NONE) {
+      audit->terminal_adjustment_sum += extra_spread;
+    }
+    if (trace != NULL) {
+      fprintf(trace, "%s\t%d\t%s\t%s\t%.3f\t%.3f\t%d\t%d\t%.3f\t%.3f\t%.3f\n",
+              mode, ply, actor == mover_index ? "mover" : "opponent",
+              move_text, score, adjustment, bag_before,
+              bag_get_letters(game_get_bag(continuation)), mover_after,
+              opponent_after, extra_spread);
+      free(move_text);
+    }
+    ply++;
+  }
+  assert(ply == value.plies);
+  audit->spread_sum += value.spread;
+  audit->spread_sq_sum += value.spread * value.spread;
+  audit->utility_sum += value.utility;
+  audit->win_pct_sum += value.win_pct;
+  audit->horizon_leave_sum += value.horizon_leave;
+  audit->horizon_unseen_sum += value.horizon_unseen;
+  audit->total_plies += value.plies;
+  if (value.ended) {
+    audit->completed_worlds++;
+    if (value.spread > 0) {
+      audit->wins++;
+    } else if (value.spread < 0) {
+      audit->losses++;
+    } else {
+      audit->draws++;
+    }
+  }
+  game_destroy(continuation);
+}
+
+static void pat_debug_audit_rank_row(FILE *ranks, uint64_t seed,
+                                      const char *mode, int rank,
+                                      const Game *game, const Move *move,
+                                      double prod_equity, double x_equity) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game),
+                          true);
+  char *move_text = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  const double score = equity_to_double(move_get_score(move));
+  fprintf(ranks, "%llu\t%s\t%d\t%s\t%.3f\t%.3f\t%.3f\t%.3f\n",
+          (unsigned long long)seed, mode, rank, move_text, score,
+          prod_equity - score, x_equity - prod_equity,
+          strcmp(mode, "x") == 0 ? x_equity : prod_equity);
+  free(move_text);
+}
+
+static void pat_debug_draw_exact_opening(Game *game, uint64_t seed) {
+  static FILE *racks = NULL;
+  if (!racks) {
+    racks = fopen("/tmp/pat_csw24_all_opening_racks.txt", "r");
+    assert(racks);
+  }
+  assert(seed >= 8800000000ULL && seed < 8803199724ULL);
+  const uint64_t index = seed - 8800000000ULL;
+  assert(fseek(racks, (long)(index * 8ULL), SEEK_SET) == 0);
+  char rack_text[64];
+  assert(fscanf(racks, "%63s", rack_text) == 1);
+  MachineLetter letters[RACK_SIZE];
+  assert(ld_str_to_mls(game_get_ld(game), rack_text, false, letters,
+                       RACK_SIZE) == RACK_SIZE);
+  Rack *rack = player_get_rack(game_get_player(game, 0));
+  for (int i = 0; i < RACK_SIZE; i++) {
+    assert(bag_draw_letter(game_get_bag(game), letters[i], 0));
+    rack_add_letter(rack, letters[i]);
+  }
+  draw_to_full_rack(game, 1);
+}
+
+void pat_move_choice_debug_audit_csw24(void) {
+  const int worlds = 1024;
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -sinfer false -wmp true -rit true -ritmmap true "
+      "-wit true -winpct winpct -pat hookscore_x");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  const WinPct *win_pcts = config_get_win_pcts(config);
+  assert(champion && win_pcts);
+  assert(config_get_utility_w_winpct(config) == 1.0);
+  assert(config_get_utility_w_spread(config) == 0.5);
+  assert(config_get_utility_spread_scale(config) == 100.0);
+  const PATMoveChooser prod = {.label = "prod_no_pat", .pat = NULL};
+  const PATMoveChooser x = {.label = "hookscore_x", .pat = champion};
+  MoveList *setup_list = move_list_create(1);
+  MoveList *choice_list = move_list_create(PAT_MOVE_CHOICE_MOVE_LIST_CAPACITY);
+  MoveList *reply_list = move_list_create(1);
+  FILE *input = fopen("/tmp/pat_csw24_audit_seeds.txt", "r");
+  FILE *out = fopen("/tmp/pat_csw24_audit.tsv", "w");
+  FILE *plies = fopen("/tmp/pat_csw24_audit_plies.tsv", "w");
+  FILE *ranks = fopen("/tmp/pat_csw24_audit_ranks.tsv", "w");
+  FILE *trace = fopen("/tmp/pat_csw24_8600071200_trace.tsv", "w");
+  assert(input && out && plies && ranks && trace);
+  fprintf(out, "seed\tmode\twins\tdraws\tlosses\tmean_spread\tspread_se\tmean_utility\tmean_win_pct\tmean_horizon_leave\tmean_horizon_unseen\tmean_plies\tmean_terminal_adjustment\tcompleted_worlds\tmethod\tworlds\n");
+  fprintf(plies, "seed\tmode\tply\treached\tmean_score\tbingo_rate\tmean_equity_minus_score\tmean_bag_before\n");
+  fprintf(ranks, "seed\tmode\trank\tmove\tscore\tleave\tpositional_adjustment\tequity\n");
+  fprintf(trace, "mode\tply\tactor\tmove\tscore\tequity_minus_score\tbag_before\tbag_after\tmover_score_after\topponent_score_after\tterminal_spread_adjustment\n");
+  unsigned long long seed_input;
+  int completed = 0;
+  while (fscanf(input, "%llu", &seed_input) == 1) {
+    const uint64_t seed = (uint64_t)seed_input;
+    const int target_bag = 10 + (int)(seed % 60ULL);
+    game_reset(game);
+    game_seed(game, seed);
+    if (getenv("PAT_DEBUG_OPENING") && seed >= 8800000000ULL) {
+      pat_debug_draw_exact_opening(game, seed);
+    } else {
+      draw_starting_racks(game);
+    }
+    player_set_pat(game_get_player(game, 0), NULL);
+    player_set_pat(game_get_player(game, 1), NULL);
+    const bool opening = getenv("PAT_DEBUG_OPENING") != NULL;
+    while (!opening && game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+           bag_get_letters(game_get_bag(game)) > target_bag) {
+      play_move(get_top_equity_move(game, setup_list), game, NULL);
+    }
+    assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+    const int mover_index = game_get_player_on_turn_index(game);
+    Move move_prod;
+    Move move_x;
+    pat_move_choice_choose(game, mover_index, &prod, choice_list, &move_prod);
+    pat_move_choice_choose(game, mover_index, &x, choice_list, &move_x);
+    const int x_count = move_list_get_count(choice_list) < 10
+                            ? move_list_get_count(choice_list) : 10;
+    Move x_top[10];
+    for (int rank_index = 0; rank_index < x_count; rank_index++) {
+      x_top[rank_index] = *move_list_get_move(choice_list, rank_index);
+    }
+    const int x_rank_of_prod = pat_debug_find_rank(choice_list, &move_prod);
+    const double x_equity_of_prod = x_rank_of_prod > 0
+        ? equity_to_double(move_get_equity(
+              move_list_get_move(choice_list, x_rank_of_prod - 1))) : 0.0;
+    Move ignored_prod;
+    pat_move_choice_choose(game, mover_index, &prod, choice_list,
+                           &ignored_prod);
+    const int prod_count = move_list_get_count(choice_list) < 10
+                               ? move_list_get_count(choice_list) : 10;
+    for (int rank_index = 0; rank_index < prod_count; rank_index++) {
+      const Move *ranked = move_list_get_move(choice_list, rank_index);
+      const double equity = equity_to_double(move_get_equity(ranked));
+      pat_debug_audit_rank_row(ranks, seed, "prod", rank_index + 1,
+                               game, ranked, equity, equity);
+    }
+    const int prod_rank_of_x = pat_debug_find_rank(choice_list, &move_x);
+    if (prod_rank_of_x > 10) {
+      const Move *ranked = move_list_get_move(choice_list, prod_rank_of_x - 1);
+      const double equity = equity_to_double(move_get_equity(ranked));
+      pat_debug_audit_rank_row(ranks, seed, "prod", prod_rank_of_x,
+                               game, ranked, equity, equity);
+    }
+    for (int rank_index = 0; rank_index < x_count; rank_index++) {
+      const Move *ranked = &x_top[rank_index];
+      const int prod_rank = pat_debug_find_rank(choice_list, ranked);
+      assert(prod_rank > 0);
+      const double prod_equity = equity_to_double(move_get_equity(
+          move_list_get_move(choice_list, prod_rank - 1)));
+      pat_debug_audit_rank_row(ranks, seed, "x", rank_index + 1,
+                               game, ranked, prod_equity,
+                               equity_to_double(move_get_equity(ranked)));
+    }
+    if (x_rank_of_prod > 10) {
+      pat_debug_audit_rank_row(ranks, seed, "x", x_rank_of_prod,
+                               game, &move_prod,
+                               equity_to_double(move_get_equity(&move_prod)),
+                               x_equity_of_prod);
+    }
+    player_set_pat(game_get_player(game, mover_index), NULL);
+    PATDebugAudit prod_audit = {0};
+    PATDebugAudit x_audit = {0};
+    for (int world = 0; world < worlds; world++) {
+      const uint64_t world_seed =
+          seed + 700000000ULL + (uint64_t)world * 1000003ULL;
+      FILE *world_trace = seed == 8600071200ULL && world == 0 ? trace : NULL;
+      pat_debug_audit_world(game, &move_prod, mover_index, world_seed,
+                            reply_list, win_pcts, &prod_audit, "prod", world_trace);
+      pat_debug_audit_world(game, &move_x, mover_index, world_seed,
+                            reply_list, win_pcts, &x_audit, "x", world_trace);
+    }
+    const PATDebugAudit *audits[2] = {&prod_audit, &x_audit};
+    const char *modes[2] = {"prod", "x"};
+    for (int mode_index = 0; mode_index < 2; mode_index++) {
+      const PATDebugAudit *audit = audits[mode_index];
+      const double mean = audit->spread_sum / worlds;
+      const double variance = fmax(0.0, (audit->spread_sq_sum -
+          audit->spread_sum * audit->spread_sum / worlds) / (worlds - 1));
+      fprintf(out, "%llu\t%s\t%d\t%d\t%d\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%d\t%s\t%d\n",
+              seed_input, modes[mode_index], audit->wins, audit->draws,
+              audit->losses, mean, sqrt(variance / worlds),
+              audit->utility_sum / worlds, audit->win_pct_sum / worlds,
+              audit->horizon_leave_sum / worlds,
+              audit->horizon_unseen_sum / worlds,
+              (double)audit->total_plies / worlds,
+              audit->terminal_adjustment_sum / worlds,
+              audit->completed_worlds,
+              bag_get_letters(game_get_bag(game)) <= PAT_DEBUG_FULL_GAME_BAG
+                  ? "complete_game" : "four_ply", worlds);
+      for (int ply = 0; ply < PAT_DEBUG_AUDIT_MAX_PLIES; ply++) {
+        const int reached = audit->reached[ply];
+        if (reached == 0) {
+          break;
+        }
+        fprintf(plies, "%llu\t%s\t%d\t%d\t%.6f\t%.6f\t%.6f\t%.6f\n",
+                seed_input, modes[mode_index], ply, reached,
+                audit->scores[ply] / reached,
+                (double)audit->bingos[ply] / reached,
+                audit->adjustments[ply] / reached,
+                audit->bag_before[ply] / reached);
+      }
+    }
+    fflush(out);
+    fflush(plies);
+    completed++;
+    fprintf(stderr, "[pat-debug-audit] completed=%d seed=%llu\n",
+            completed, seed_input);
+    fflush(stderr);
+  }
+  fclose(trace);
+  fclose(ranks);
+  fclose(plies);
+  fclose(out);
+  fclose(input);
+  move_list_destroy(reply_list);
+  move_list_destroy(choice_list);
+  move_list_destroy(setup_list);
+  config_destroy(config);
+}
+
+
+// Empty-board CSW24 move-choice disagreements, including bingo placements.
+void pat_move_choice_debug_openings_csw24(void) {
+  const char *attempt_text = getenv("PAT_OPENING_ATTEMPTS");
+  const int attempts = attempt_text ? atoi(attempt_text) : 100000;
+  const char *rack_file = getenv("PAT_OPENING_RACK_FILE");
+  const char *offset_text = getenv("PAT_OPENING_INDEX_OFFSET");
+  const char *stride_text = getenv("PAT_OPENING_INDEX_STRIDE");
+  const uint64_t offset = offset_text ? strtoull(offset_text, NULL, 10) : 0;
+  const uint64_t stride = stride_text ? strtoull(stride_text, NULL, 10) : 1;
+  assert(stride > 0);
+  FILE *rack_input = rack_file ? fopen(rack_file, "r") : NULL;
+  assert(!rack_file || rack_input);
+  assert(rack_input || attempts > 0);
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -sinfer false -wmp true -rit true -ritmmap true "
+      "-wit true -pat hookscore_x");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  assert(champion);
+  const PATMoveChooser prod = {.label = "prod_no_pat", .pat = NULL};
+  const PATMoveChooser x = {.label = "hookscore_x", .pat = champion};
+  MoveList *choice_list = move_list_create(PAT_MOVE_CHOICE_MOVE_LIST_CAPACITY);
+  const char *output_path = getenv("PAT_OPENING_OUTPUT");
+  FILE *out = fopen(output_path ? output_path : "/tmp/pat_csw24_openings.tsv", "w");
+  assert(out);
+  fprintf(out, "seed\tbag\tmover\tcategory\tcgp\tprod_move\tprod_static_equity\tx_move\tx_static_equity\tprod_top10\tx_top10\tprod_rank_of_x\tx_rank_of_prod\tprod_equity_of_x\tx_equity_of_prod\n");
+  int disagreements = 0;
+  int both_bingo = 0;
+  int one_bingo = 0;
+  int nonbingo = 0;
+  char rack_text[64];
+  for (int attempt = 0; rack_input ? fscanf(rack_input, "%63s", rack_text) == 1
+                                    : attempt < attempts; attempt++) {
+    const uint64_t seed = rack_input
+        ? 8800000000ULL + offset + (uint64_t)attempt * stride
+        : 8700000000ULL + (uint64_t)attempt;
+    game_reset(game);
+    game_seed(game, seed);
+    if (rack_input) {
+      MachineLetter letters[RACK_SIZE];
+      assert(ld_str_to_mls(game_get_ld(game), rack_text, false, letters,
+                           RACK_SIZE) == RACK_SIZE);
+      Rack *rack = player_get_rack(game_get_player(game, 0));
+      for (int i = 0; i < RACK_SIZE; i++) {
+        assert(bag_draw_letter(game_get_bag(game), letters[i], 0));
+        rack_add_letter(rack, letters[i]);
+      }
+      draw_to_full_rack(game, 1);
+    } else {
+      draw_starting_racks(game);
+    }
+    player_set_pat(game_get_player(game, 0), NULL);
+    player_set_pat(game_get_player(game, 1), NULL);
+    const int mover_index = game_get_player_on_turn_index(game);
+    Move move_prod;
+    Move move_x;
+    pat_move_choice_choose(game, mover_index, &prod, choice_list, &move_prod);
+    if (move_get_type(&move_prod) != GAME_EVENT_TILE_PLACEMENT_MOVE) continue;
+    char *prod_top10 = pat_debug_rankings(game, choice_list);
+    pat_move_choice_choose(game, mover_index, &x, choice_list, &move_x);
+    if (move_get_type(&move_x) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      free(prod_top10);
+      continue;
+    }
+    char *x_top10 = pat_debug_rankings(game, choice_list);
+    const int x_rank_of_prod = pat_debug_find_rank(choice_list, &move_prod);
+    const double x_equity_of_prod = x_rank_of_prod > 0
+        ? equity_to_double(move_get_equity(
+              move_list_get_move(choice_list, x_rank_of_prod - 1))) : 0.0;
+    Move ignored_prod;
+    pat_move_choice_choose(game, mover_index, &prod, choice_list,
+                           &ignored_prod);
+    const int prod_rank_of_x = pat_debug_find_rank(choice_list, &move_x);
+    const double prod_equity_of_x = prod_rank_of_x > 0
+        ? equity_to_double(move_get_equity(
+              move_list_get_move(choice_list, prod_rank_of_x - 1))) : 0.0;
+    if (move_get_type(&move_prod) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        move_get_type(&move_x) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        compare_moves_without_equity(&move_prod, &move_x, true) != -1) {
+      const bool prod_bingo = move_get_tiles_played(&move_prod) == RACK_SIZE;
+      const bool x_bingo = move_get_tiles_played(&move_x) == RACK_SIZE;
+      const char *category = prod_bingo && x_bingo ? "both_bingo" :
+                             prod_bingo || x_bingo ? "one_bingo" : "nonbingo";
+      if (prod_bingo && x_bingo) {
+        both_bingo++;
+      } else if (prod_bingo || x_bingo) {
+        one_bingo++;
+      } else {
+        nonbingo++;
+      }
+      char *cgp = game_get_cgp(game, true);
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(game), &move_prod,
+                              game_get_ld(game), true);
+      char *prod_text = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(game), &move_x,
+                              game_get_ld(game), true);
+      char *x_text = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      fprintf(out, "%llu\t%d\t%d\t%s\t%s\t%s\t%.3f\t%s\t%.3f\t%s\t%s\t%d\t%d\t%.3f\t%.3f\n",
+              (unsigned long long)seed, bag_get_letters(game_get_bag(game)),
+              mover_index, category, cgp, prod_text,
+              equity_to_double(move_get_equity(&move_prod)), x_text,
+              equity_to_double(move_get_equity(&move_x)), prod_top10,
+              x_top10, prod_rank_of_x, x_rank_of_prod, prod_equity_of_x,
+              x_equity_of_prod);
+      disagreements++;
+      free(cgp);
+      free(prod_text);
+      free(x_text);
+    }
+    free(prod_top10);
+    free(x_top10);
+    if ((attempt + 1) % 10000 == 0) {
+      fflush(out);
+      fprintf(stderr, "[pat-opening] attempts=%d disagreements=%d both_bingo=%d one_bingo=%d nonbingo=%d\n",
+              attempt + 1, disagreements, both_bingo, one_bingo, nonbingo);
+      fflush(stderr);
+    }
+  }
+  fclose(out);
+  if (rack_input) fclose(rack_input);
+  move_list_destroy(choice_list);
+  config_destroy(config);
+}
+
+// Re-score the discovery run's leading cases on fresh hidden-rack worlds.
+// Input is one source-game seed per line, selected outside this harness;
+// this avoids the discovery worlds' winner's-curse noise in the final ranks.
+void pat_move_choice_debug_confirm_csw24(void) {
+  const char *worlds_text = getenv("PAT_DEBUG_WORLDS");
+  const int worlds = worlds_text ? atoi(worlds_text) : 1024;
+  assert(worlds > 1);
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -sinfer false -wmp true -rit true -ritmmap true "
+      "-wit true -winpct winpct -pat hookscore_x");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  const WinPct *win_pcts = config_get_win_pcts(config);
+  assert(champion && win_pcts);
+  const PATMoveChooser prod = {.label = "prod_no_pat", .pat = NULL};
+  const PATMoveChooser x = {.label = "hookscore_x", .pat = champion};
+  MoveList *setup_list = move_list_create(1);
+  MoveList *choice_list = move_list_create(PAT_MOVE_CHOICE_MOVE_LIST_CAPACITY);
+  MoveList *reply_list = move_list_create(1);
+  const char *input_path = getenv("PAT_DEBUG_INPUT");
+  const char *output_path = getenv("PAT_DEBUG_OUTPUT");
+  FILE *input = fopen(input_path ? input_path :
+                      "/tmp/pat_csw24_confirm_seeds.txt", "r");
+  FILE *out = fopen(output_path ? output_path :
+                    "/tmp/pat_csw24_confirm.tsv", "w");
+  assert(input && out);
+  fprintf(out, "seed\toracle_x_minus_prod\toracle_se\tworlds\tprod_win_pct\tx_win_pct\tprod_mean_spread\tx_mean_spread\tprod_utility\tx_utility\tutility_x_minus_prod\tutility_se\tmethod\tprod_horizon_leave\tx_horizon_leave\tprod_horizon_unseen\tx_horizon_unseen\n");
+  fflush(out);
+  int completed = 0;
+  unsigned long long seed_input;
+  while (fscanf(input, "%llu", &seed_input) == 1) {
+    const uint64_t seed = (uint64_t)seed_input;
+    const int target_bag = 10 + (int)(seed % 60ULL);
+    game_reset(game);
+    game_seed(game, seed);
+    if (getenv("PAT_DEBUG_OPENING") && seed >= 8800000000ULL) {
+      pat_debug_draw_exact_opening(game, seed);
+    } else {
+      draw_starting_racks(game);
+    }
+    player_set_pat(game_get_player(game, 0), NULL);
+    player_set_pat(game_get_player(game, 1), NULL);
+    const bool opening = getenv("PAT_DEBUG_OPENING") != NULL;
+    while (!opening && game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+           bag_get_letters(game_get_bag(game)) > target_bag) {
+      const Move *setup = get_top_equity_move(game, setup_list);
+      play_move(setup, game, NULL);
+    }
+    assert(game_get_game_end_reason(game) == GAME_END_REASON_NONE);
+    const int mover_index = game_get_player_on_turn_index(game);
+    Move move_prod;
+    Move move_x;
+    pat_move_choice_choose(game, mover_index, &prod, choice_list, &move_prod);
+    pat_move_choice_choose(game, mover_index, &x, choice_list, &move_x);
+    player_set_pat(game_get_player(game, mover_index), NULL);
+    assert(compare_moves_without_equity(&move_prod, &move_x, true) != -1);
+    double sum = 0.0;
+    double sum_sq = 0.0;
+    double prod_win_sum = 0.0;
+    double x_win_sum = 0.0;
+    double prod_spread_sum = 0.0;
+    double x_spread_sum = 0.0;
+    double prod_utility_sum = 0.0;
+    double x_utility_sum = 0.0;
+    double utility_diff_sum = 0.0;
+    double utility_diff_sq_sum = 0.0;
+    double prod_leave_sum = 0.0;
+    double x_leave_sum = 0.0;
+    double prod_unseen_sum = 0.0;
+    double x_unseen_sum = 0.0;
+    for (int world = 0; world < worlds; world++) {
+      const uint64_t world_seed =
+          seed + 700000000ULL + (uint64_t)world * 1000003ULL;
+      const PATDebugOracleValue prod_value = pat_debug_hybrid_value(
+          game, &move_prod, mover_index, world_seed, reply_list, win_pcts);
+      const PATDebugOracleValue x_value = pat_debug_hybrid_value(
+          game, &move_x, mover_index, world_seed, reply_list, win_pcts);
+      const double difference = x_value.spread - prod_value.spread;
+      sum += difference;
+      sum_sq += difference * difference;
+      const double prod_win = prod_value.win_pct;
+      const double x_win = x_value.win_pct;
+      const double prod_utility = prod_value.utility;
+      const double x_utility = x_value.utility;
+      const double utility_diff = x_utility - prod_utility;
+      prod_leave_sum += prod_value.horizon_leave;
+      x_leave_sum += x_value.horizon_leave;
+      prod_unseen_sum += prod_value.horizon_unseen;
+      x_unseen_sum += x_value.horizon_unseen;
+      prod_win_sum += prod_win;
+      x_win_sum += x_win;
+      prod_spread_sum += prod_value.spread;
+      x_spread_sum += x_value.spread;
+      prod_utility_sum += prod_utility;
+      x_utility_sum += x_utility;
+      utility_diff_sum += utility_diff;
+      utility_diff_sq_sum += utility_diff * utility_diff;
+    }
+    const double mean = sum / worlds;
+    const double variance =
+        fmax(0.0, (sum_sq - sum * sum / worlds) / (worlds - 1));
+    const double utility_variance = fmax(0.0, (
+        utility_diff_sq_sum - utility_diff_sum * utility_diff_sum / worlds) /
+        (worlds - 1));
+    fprintf(out,
+            "%llu\t%.6f\t%.6f\t%d\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f\t%s\t%.6f\t%.6f\t%.6f\t%.6f\n",
+            seed_input, mean, sqrt(variance / worlds), worlds,
+            prod_win_sum / worlds, x_win_sum / worlds,
+            prod_spread_sum / worlds, x_spread_sum / worlds,
+            prod_utility_sum / worlds, x_utility_sum / worlds,
+            utility_diff_sum / worlds, sqrt(utility_variance / worlds),
+            bag_get_letters(game_get_bag(game)) <= PAT_DEBUG_FULL_GAME_BAG
+                ? "complete_game" : "four_ply",
+            prod_leave_sum / worlds, x_leave_sum / worlds,
+            prod_unseen_sum / worlds, x_unseen_sum / worlds);
+    fflush(out);
+    completed++;
+    fprintf(stderr,
+            "[pat-debug-confirm] completed=%d seed=%llu mean=%.3f se=%.3f\n",
+            completed, seed_input, mean, sqrt(variance / worlds));
+    fflush(stderr);
+  }
+  fclose(out);
+  fclose(input);
+  move_list_destroy(reply_list);
+  move_list_destroy(choice_list);
+  move_list_destroy(setup_list);
   config_destroy(config);
 }
