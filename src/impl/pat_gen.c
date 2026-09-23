@@ -8,6 +8,16 @@
 #include <stdint.h>
 #include <string.h>
 
+// Floor on the per-feature variance the ridge penalty scales by (see
+// pat_regression_solve_into_weights_shrunk): keeps the diagonal strictly
+// positive for a feature with exactly zero empirical variance (e.g.
+// QWS/QLS on a board with no quad squares, whose xtx diagonal is itself
+// exactly zero), without meaningfully inflating the penalty for any
+// feature with real, nonzero variance -- every premium class's channels
+// occur often enough in training data that their true variance sits many
+// orders of magnitude above this.
+static const double PAT_GEN_RIDGE_VARIANCE_FLOOR = 1e-6;
+
 void pat_regression_reset(PATRegression *regression) {
   memset(regression, 0, sizeof(PATRegression));
 }
@@ -213,8 +223,29 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
       a[j][i] = regression->xtx[i][j];
     }
   }
+  // Ridge on standardized features: the penalty for feature i scales with
+  // that feature's own empirical variance (row 0 of XtX/xty holds the
+  // feature sums, so mean_i = xtx[0][i]/N and variance_i =
+  // xtx[i][i]/N - mean_i^2) rather than a flat per-observation constant.
+  // A flat penalty implicitly assumes every feature has unit variance;
+  // premium classes with a smaller natural scale or a lower occurrence
+  // rate than TWS (which is what every non-TWS class is, by construction
+  // -- see pat_defs.h) would otherwise absorb a disproportionately larger
+  // *relative* shrinkage than TWS's own channels for the exact same
+  // ridge_lambda, which is the standard ridge-regression pathology of
+  // penalizing unstandardized features with a single lambda. Scaling by
+  // each feature's own variance removes that asymmetry: a reference
+  // feature with variance 1 gets exactly the old behavior, so
+  // ridge_lambda's calibrated scale carries over unchanged.
   for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
-    a[i][i] += (ridge_lambda + shrink_lambda) * num_observations;
+    const double mean_i = regression->xtx[0][i] / num_observations;
+    const double variance_i =
+        regression->xtx[i][i] / num_observations - mean_i * mean_i;
+    const double effective_variance = variance_i > PAT_GEN_RIDGE_VARIANCE_FLOOR
+                                          ? variance_i
+                                          : PAT_GEN_RIDGE_VARIANCE_FLOOR;
+    a[i][i] +=
+        (ridge_lambda + shrink_lambda) * effective_variance * num_observations;
   }
   // Features held fixed at a value: their contribution moves to the
   // right-hand side (xty_i -= sum_j XtX_ij c_j over fixed j, for every
@@ -232,7 +263,8 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
   //   - the hook-score channels (fit_residual 1 or 2): left free, a fit
   //     moves every bit of hook mass onto them (hook_d* all zero,
   //     hook_score_d1 about -130) and that model loses about 2.6 points
-  //     a pair to count-weighted hooks in whole-game play. CSW21's v3
+  //     a pair to count-weighted hooks in whole-game play. Mode 5 explicitly
+  //     frees them in a full experimental fit. CSW21's v3
   //     predates these channels; a lexicon trained after them was first
   //     built that way by mistake (2026-09-14) and came out at a third
   //     of the strength.
@@ -245,7 +277,7 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
           -equity_to_double(pat_get_weight(pat, feature_index));
     }
   }
-  if (residual_mode != 1 && residual_mode != 2) {
+  if (residual_mode != 1 && residual_mode != 2 && residual_mode != 5) {
     for (int feature_index = PAT_FEATURE_HOOK_SCORE_START;
          feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT;
          feature_index++) {
@@ -260,7 +292,7 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
       fixed[feature_index + 1] = true;
     }
   }
-  if (pat_get_fit_residual(pat)) {
+  if (pat_get_fit_residual(pat) && residual_mode != 5) {
     // Only the hook-score channels move -- and, with fit_residual 2, the
     // triple-word hook flexibility channels they are collinear with, so
     // the fit can shift mass between count-weighted and score-weighted
@@ -301,12 +333,20 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
   double xty[PAT_REGRESSION_DIM];
   memcpy(xty, regression->xty, sizeof(xty));
   // Shrinkage toward the loaded coefficients: the penalty
-  // shrink_lambda * N * (c - loaded)^2 adds shrink_lambda * N to the
-  // diagonal (above) and shrink_lambda * N * loaded to the right-hand
-  // side.
+  // shrink_lambda * variance_i * N * (c - loaded)^2 adds the same
+  // variance-scaled strength to the diagonal (above) and to the loaded
+  // coefficient on the right-hand side.
   if (shrink_lambda > 0.0) {
     for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
-      xty[i] += shrink_lambda * num_observations * loaded[i];
+      const double mean_i = regression->xtx[0][i] / num_observations;
+      const double variance_i =
+          regression->xtx[i][i] / num_observations - mean_i * mean_i;
+      const double effective_variance =
+          variance_i > PAT_GEN_RIDGE_VARIANCE_FLOOR
+              ? variance_i
+              : PAT_GEN_RIDGE_VARIANCE_FLOOR;
+      xty[i] +=
+          shrink_lambda * effective_variance * num_observations * loaded[i];
     }
   }
   for (int i = 0; i < PAT_REGRESSION_DIM; i++) {

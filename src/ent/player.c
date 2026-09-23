@@ -12,6 +12,7 @@
 #include "rack_info_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
+#include <stdbool.h>
 #include <stdlib.h>
 
 struct Player {
@@ -31,6 +32,10 @@ struct Player {
   const WordInfoTable *word_info_table;
   const PATWeights *pat;
   uint32_t pat_disabled_classes_mask;
+  bool rollout_disable_pat;
+  uint32_t rollout_pat_disabled_classes_mask;
+  bool rollout_zero_leave;
+  const KLV *rollout_zero_klv;
 };
 
 void player_reset(Player *player) {
@@ -63,6 +68,10 @@ Player *player_create(const PlayersData *players_data,
   player->score = 0;
   player->rack = rack_create(ld_get_size(ld));
   player->known_rack_from_phonies = rack_create(ld_get_size(ld));
+  player->rollout_disable_pat = false;
+  player->rollout_pat_disabled_classes_mask = 0;
+  player->rollout_zero_leave = false;
+  player->rollout_zero_klv = NULL;
 
   player_update(players_data, player);
 
@@ -85,6 +94,11 @@ Player *player_duplicate(const Player *player) {
   new_player->word_info_table = player->word_info_table;
   new_player->pat = player->pat;
   new_player->pat_disabled_classes_mask = player->pat_disabled_classes_mask;
+  new_player->rollout_disable_pat = player->rollout_disable_pat;
+  new_player->rollout_pat_disabled_classes_mask =
+      player->rollout_pat_disabled_classes_mask;
+  new_player->rollout_zero_leave = player->rollout_zero_leave;
+  new_player->rollout_zero_klv = player->rollout_zero_klv;
   return new_player;
 }
 
@@ -102,6 +116,11 @@ void player_copy(Player *dst, const Player *src) {
   dst->word_info_table = src->word_info_table;
   dst->pat = src->pat;
   dst->pat_disabled_classes_mask = src->pat_disabled_classes_mask;
+  dst->rollout_disable_pat = src->rollout_disable_pat;
+  dst->rollout_pat_disabled_classes_mask =
+      src->rollout_pat_disabled_classes_mask;
+  dst->rollout_zero_leave = src->rollout_zero_leave;
+  dst->rollout_zero_klv = src->rollout_zero_klv;
 }
 
 void player_destroy(Player *player) {
@@ -151,10 +170,45 @@ uint32_t player_get_pat_disabled_classes_mask(const Player *player) {
   return player->pat_disabled_classes_mask;
 }
 
+bool player_get_rollout_disable_pat(const Player *player) {
+  return player->rollout_disable_pat;
+}
+
+uint32_t player_get_rollout_pat_disabled_classes_mask(const Player *player) {
+  return player->rollout_pat_disabled_classes_mask;
+}
+
+bool player_get_rollout_zero_leave(const Player *player) {
+  return player->rollout_zero_leave;
+}
+
+const KLV *player_get_rollout_zero_klv(const Player *player) {
+  return player->rollout_zero_klv;
+}
+
 void player_set_score(Player *player, Equity score) { player->score = score; }
 
 void player_set_pat(Player *player, const PATWeights *pat) {
   player->pat = pat;
+}
+
+void player_set_klv(Player *player, const KLV *klv) { player->klv = klv; }
+
+void player_set_rollout_disable_pat(Player *player, bool disable) {
+  player->rollout_disable_pat = disable;
+}
+
+void player_set_rollout_pat_disabled_classes_mask(Player *player,
+                                                  uint32_t mask) {
+  player->rollout_pat_disabled_classes_mask = mask;
+}
+
+void player_set_rollout_zero_leave(Player *player, bool zero_leave) {
+  player->rollout_zero_leave = zero_leave;
+}
+
+void player_set_rollout_zero_klv(Player *player, const KLV *klv) {
+  player->rollout_zero_klv = klv;
 }
 
 void player_add_to_score(Player *player, Equity score) {

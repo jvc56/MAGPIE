@@ -196,13 +196,15 @@ enum {
 #define PAT_TRAIN_OVERLAY_ROW_PREFIX "train_overlay,"
 #define PAT_DEFAULT_TRAIN_OVERLAY false
 
-// Optional row (0 to 4): whether patgen fits only the hook-score channels
+// Optional row (0 to 5): whether patgen fits only the hook-score channels
 // (PAT_FEATURE_HOOK_SCORE_START onward, PAT_HOOK_BIN_COUNT of them) as a
 // residual on top of the file's other weights, which stay exactly as
 // loaded (1), those plus the triple-word hook flexibility channels (2),
 // only the floater through channels (3), or only the premium-combination
-// channels (PAT_FEATURE_LM_SPAN_START onward) (4); see
-// PATWeights.fit_residual. Absent means 0: every channel fitted.
+// channels (PAT_FEATURE_LM_SPAN_START onward) (4); mode 5 fits all regular
+// channels including hook-score, for an explicit experimental full refit. See
+// PATWeights.fit_residual. Absent means 0: regular channels fit while
+// hook-score channels stay fixed at their loaded values.
 #define PAT_FIT_RESIDUAL_ROW_PREFIX "fit_residual,"
 #define PAT_DEFAULT_FIT_RESIDUAL false
 

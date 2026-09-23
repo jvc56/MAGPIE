@@ -248,12 +248,10 @@ typedef struct PATEvalContext {
   // only those; every other term is exactly zero.
   int nonzero_feature_index[PAT_NUM_FEATURES];
   int num_nonzero_features;
-  // Whether unit scans do the premium-combination bookkeeping
-  // (PAT_FEATURE_LM_SPAN_START onward): only when some weight there is
-  // nonzero, or when every unit is walked for feature rows
-  // (pat_eval_context_load_all_units). Otherwise those channels
-  // contribute exactly zero and the scan skips the work.
-  bool lm_channels;
+  // Bit flags for optional scan work. Training rows enable both; runtime
+  // enables each only when a corresponding weight is nonzero. Reuses the
+  // byte previously occupied by lm_channels, with no per-unit storage.
+  uint8_t channel_flags;
   // The stage factor for this position (see PATWeights.stage_scale),
   // applied to every penalty and bound the context hands out; 1.0 unless
   // the file carries a stage row. The stage is read off the unseen

@@ -133,6 +133,7 @@ typedef enum {
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_PAT,
   ARG_TOKEN_P1_PAT_CLASSES,
+  ARG_TOKEN_P1_ROLLOUT_DISABLE_PAT,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
@@ -142,6 +143,7 @@ typedef enum {
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_PAT,
   ARG_TOKEN_P2_PAT_CLASSES,
+  ARG_TOKEN_P2_ROLLOUT_DISABLE_PAT,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
@@ -154,6 +156,7 @@ typedef enum {
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
+  ARG_TOKEN_PEG_MAX_BAG,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_NESTED,
@@ -311,6 +314,13 @@ struct Config {
   uint64_t p2_min_play_iterations;
   double p1_time_limit_seconds;
   double p2_time_limit_seconds;
+  // Whether this player's own SimArgs.rollout_disable_pat is set (see
+  // sim_args.h): PAT stays on for the top-level candidate list a sim is
+  // handed, but reads as fully off in the sim's own forward-play plies.
+  // False (default) matches every existing behavior: PAT active
+  // throughout. Research/tooling knob, not meant for real play.
+  bool p1_rollout_disable_pat;
+  bool p2_rollout_disable_pat;
   // Milliseconds per game. Negative disables PlayChooser; zero enables it
   // without a clock.
   double p1_play_chooser_time_ms;
@@ -358,6 +368,8 @@ struct Config {
   // default.
   int peg_num_stages;
   int peg_scenario_stride;
+  // Largest bag size PlayChooser runs PEG on; 0 = PEG_MAX_BAG.
+  int peg_max_bag;
   // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
   // the cell always fits the label + a worst-case token) and max wrapped lines
   // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
@@ -1679,6 +1691,19 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "example, a fast tws-only mode for rollouts alongside a full "
              "mode for candidate selection.";
       break;
+    case ARG_TOKEN_P1_ROLLOUT_DISABLE_PAT:
+    case ARG_TOKEN_P2_ROLLOUT_DISABLE_PAT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether the given player's own simulated rollouts "
+             "read PAT as fully off in their forward-play plies, while the "
+             "top-level candidate list a sim is handed still comes from "
+             "generate_moves with PAT on. A research/tooling knob for "
+             "measuring PAT's rollout-time contribution separately from its "
+             "candidate-selection contribution; false (the default) means "
+             "PAT stays active throughout, matching real play.";
+      break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       usages[0] = "<sort_type>";
@@ -1769,6 +1794,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "astronomically slow at higher bag counts. Each count must be "
           "'all'/0 "
           "or an integer >= 2.";
+      break;
+    case ARG_TOKEN_PEG_MAX_BAG:
+      usages[0] = "<bag_size>";
+      examples[0] = "2";
+      examples[1] = "4";
+      text = "Largest bag size at which PlayChooser uses the pre-endgame "
+             "solver; above it PlayChooser sims (or plays statically). Must "
+             "be between 1 and the solver's own maximum; unset uses that "
+             "maximum.";
       break;
     case ARG_TOKEN_PEG_STRIDE:
       usages[0] = "<stride>";
@@ -2489,6 +2523,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
         ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
         ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
+        ARG_TOKEN_PEG_MAX_BAG,             /* pegmaxbag */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
         ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
@@ -3885,6 +3920,12 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_spread_scale, &p2_inference_args,
       &autoplay_args->p2_sim_args);
 
+  // Not part of sim_args_fill (see its own comment); set by hand.
+  autoplay_args->p1_sim_args.rollout_disable_pat =
+      config->p1_rollout_disable_pat;
+  autoplay_args->p2_sim_args.rollout_disable_pat =
+      config->p2_rollout_disable_pat;
+
   autoplay_args->pat_label_plies = config->pat_label_plies;
 
   const double utility_win_pct[2] = {config->p1_utility_w_winpct,
@@ -3901,6 +3942,7 @@ void config_fill_autoplay_args(const Config *config,
             .win_pcts = config->win_pcts,
             .num_threads = num_worker_threads_per_sim,
             .peg_scenario_stride = config->peg_scenario_stride,
+            .peg_max_bag = config->peg_max_bag,
             .utility_w_winpct = utility_win_pct[player_index],
             .utility_w_spread = utility_spread[player_index],
             .utility_spread_scale = utility_spread_scale[player_index],
@@ -7412,6 +7454,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config_load_int(config, ARG_TOKEN_PEG_MAX_BAG, PEG_MIN_BAG, PEG_MAX_BAG,
+                  &config->peg_max_bag, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   config_load_int(config, ARG_TOKEN_PEG_OUT_WIDTH, 0, INT_MAX,
                   &config->peg_out_width, error_stack);
@@ -8000,6 +8047,16 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
   config_load_int(config, ARG_TOKEN_P2_SIM_PLIES, 0, MAX_PLIES,
                   &config->p2_sim_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_ROLLOUT_DISABLE_PAT,
+                   &config->p1_rollout_disable_pat, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_ROLLOUT_DISABLE_PAT,
+                   &config->p2_rollout_disable_pat, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -9653,6 +9710,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
   arg(ARG_TOKEN_P1_PAT, "pat1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_CLASSES, "patclasses1", 1, 1);
+  arg(ARG_TOKEN_P1_ROLLOUT_DISABLE_PAT, "rolloutdisablepat1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -9662,6 +9720,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
   arg(ARG_TOKEN_P2_PAT, "pat2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_CLASSES, "patclasses2", 1, 1);
+  arg(ARG_TOKEN_P2_ROLLOUT_DISABLE_PAT, "rolloutdisablepat2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -9674,6 +9733,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
+  arg(ARG_TOKEN_PEG_MAX_BAG, "pegmaxbag", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
   arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
@@ -9799,6 +9859,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_result.last_completed_stage = -1;
   config->peg_num_stages = 0;
   config->peg_scenario_stride = 0;
+  config->peg_max_bag = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;
   config->peg_show_outcomes = true;
@@ -9831,6 +9892,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->pat_combine_gamma = PAT_TRAINING_COMBINE_GAMMA;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
+  config->p1_rollout_disable_pat = false;
+  config->p2_rollout_disable_pat = false;
   config->p1_num_plays = config->num_plays;
   config->p2_num_plays = config->num_plays;
   config->p1_stop_cond_pct = config->stop_cond_pct;
@@ -10127,6 +10190,10 @@ void config_add_settings_to_string_builder(const Config *config,
       }
       break;
     }
+    case ARG_TOKEN_P1_ROLLOUT_DISABLE_PAT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_rollout_disable_pat);
+      break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
@@ -10191,6 +10258,10 @@ void config_add_settings_to_string_builder(const Config *config,
       }
       break;
     }
+    case ARG_TOKEN_P2_ROLLOUT_DISABLE_PAT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_rollout_disable_pat);
+      break;
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
@@ -10246,6 +10317,12 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_STRIDE:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->peg_scenario_stride);
+      break;
+    case ARG_TOKEN_PEG_MAX_BAG:
+      if (config->peg_max_bag > 0) {
+        config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                                 config->peg_max_bag);
+      }
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

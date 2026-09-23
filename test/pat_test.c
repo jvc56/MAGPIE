@@ -2154,7 +2154,8 @@ static void test_pat_opening_adjustments(const char *data_dir) {
 // must land on hook_d1 under fit_residual 0 (hook_score fixed at its
 // loaded zero), on hook_score_d1 alone under fit_residual 1, and be
 // shared under 2; the premium-combination channel likewise stays zero
-// unless fit_residual is 4. A zeroed file is the bootstrap every recipe
+// unless fit_residual is 4. Mode 5 frees both hook families in a full fit.
+// A zeroed file is the bootstrap every recipe
 // starts from, so this is the case that matters.
 static void test_pat_gen_experimental_channels_fixed(void) {
   PATRegression *regression = malloc_or_die(sizeof(PATRegression));
@@ -2171,22 +2172,23 @@ static void test_pat_gen_experimental_channels_fixed(void) {
     pat_regression_add_observation(regression, features,
                                    3.0 * x + ((i % 3) - 1) * 0.01);
   }
-  const int modes[3] = {0, 1, 2};
-  for (int m = 0; m < 3; m++) {
+  const int modes[4] = {0, 1, 2, 5};
+  for (int m = 0; m < 4; m++) {
     PATWeights *pat = pat_create_zeroed("gen_fixed");
     if (modes[m] != 0) {
       // Set the residual mode through the file rows.
       pat_set_fit_residual(pat, true);
     }
-    // fit_residual 2 needs the mode itself; pat_set_fit_residual only
-    // knows 0/1, so write and reread through the parser for 2.
-    if (modes[m] == 2) {
+    // Modes 2 and 5 need the mode itself; pat_set_fit_residual only
+    // knows 0/1, so write and reread through the parser.
+    if (modes[m] == 2 || modes[m] == 5) {
       char *data_dir = create_temp_pat_data_dir();
       pat_destroy(pat);
       char header[64];
       current_pat_header(header, sizeof(header));
       StringBuilder *sb = string_builder_create();
-      string_builder_add_formatted_string(sb, "%s\nfit_residual,2\n", header);
+      string_builder_add_formatted_string(sb, "%s\nfit_residual,%d\n", header,
+                                          modes[m]);
       char feature_name[64];
       for (int f = 0; f < PAT_NUM_FEATURES; f++) {
         pat_feature_name(f, feature_name, sizeof(feature_name));
@@ -2221,6 +2223,104 @@ static void test_pat_gen_experimental_channels_fixed(void) {
     pat_destroy(pat);
   }
   free(regression);
+}
+
+// Shrinkage toward loaded weights must use the same feature-variance scale
+// on both sides of the normal equations. A low-variance feature exposes a
+// mismatch: the unscaled right-hand side would amplify its weight hugely.
+static void test_pat_gen_shrink_variance_scale(void) {
+  PATRegression *regression = malloc_or_die(sizeof(PATRegression));
+  pat_regression_reset(regression);
+  double features[PAT_NUM_FEATURES] = {0};
+  for (int observation_index = 0; observation_index < 400;
+       observation_index++) {
+    features[PAT_FEATURE_HOOK_SCORE_START] =
+        observation_index % 2 == 0 ? 0.0 : 0.01;
+    pat_regression_add_observation_double(
+        regression, features, features[PAT_FEATURE_HOOK_SCORE_START]);
+  }
+  PATWeights *pat = pat_create_zeroed("shrink_variance_scale");
+  pat_set_fit_residual(pat, true);
+  pat_set_weight(pat, PAT_FEATURE_HOOK_SCORE_START, -1000);
+  const PATSolveResult result =
+      pat_regression_solve_into_weights_shrunk(regression, 1.0, 100.0, pat);
+  assert(result.solved);
+  const Equity weight = pat_get_weight(pat, PAT_FEATURE_HOOK_SCORE_START);
+  assert(weight < -900 && weight > -1100);
+  pat_destroy(pat);
+  free(regression);
+}
+
+// On-demand statistics from actual CSW21 self-play choices under the incumbent.
+// The label is unused; PATRegression retains exactly the feature moments the
+// training solve uses. Keep this outside the normal unit-test run.
+void test_pat_hookscore_diagnostics(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -rit true -ritmmap true -wit true "
+      "-s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-pat pat_ridgefix_champion_v5");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  const PATWeights *pat = player_get_pat(game_get_player(game, 0));
+  assert(pat);
+  MoveList *best_list = move_list_create(1);
+  PATRegression *regression = malloc_or_die(sizeof(PATRegression));
+  pat_regression_reset(regression);
+  double *features = malloc_or_die(sizeof(double) * PAT_NUM_FEATURES);
+  for (int game_index = 0; game_index < 10000; game_index++) {
+    game_reset(game);
+    game_seed(game, 912300000ULL + (uint64_t)game_index);
+    draw_starting_racks(game);
+    while (!game_over(game)) {
+      const int pre_move_bag_count = bag_get_letters(game_get_bag(game));
+      const int mover_index = game_get_player_on_turn_index(game);
+      const Move *move = get_top_equity_move(game, best_list);
+      Rack leave;
+      get_leave_for_move(move, game, &leave);
+      play_move(move, game, NULL);
+      if (pre_move_bag_count > 0 && !game_over(game)) {
+        pat_extract_features_combined(
+            board_get_readonly_lanes(game_get_board(game), 0),
+            game_get_ld(game), &leave, pat,
+            rack_get_total_letters(
+                player_get_rack(game_get_player(game, 1 - mover_index))),
+            features);
+        pat_regression_add_observation_double(regression, features, 0.0);
+      }
+    }
+  }
+  const double observations = (double)regression->num_observations;
+  printf("hook-score diagnostics: %.0f self-play observations, lambda=1\n",
+         observations);
+  printf("d,hook_mean,hook_variance,score_mean,score_variance,correlation,"
+         "old_hook_penalty,old_score_penalty,new_hook_penalty,"
+         "new_score_penalty\n");
+  for (int bin_index = 0; bin_index < PAT_HOOK_BIN_COUNT; bin_index++) {
+    const int hook_index = PAT_FEATURE_HOOK_START + bin_index + 1;
+    const int score_index = PAT_FEATURE_HOOK_SCORE_START + bin_index + 1;
+    const double hook_mean = regression->xtx[0][hook_index] / observations;
+    const double score_mean = regression->xtx[0][score_index] / observations;
+    const double hook_variance =
+        regression->xtx[hook_index][hook_index] / observations -
+        hook_mean * hook_mean;
+    const double score_variance =
+        regression->xtx[score_index][score_index] / observations -
+        score_mean * score_mean;
+    const double covariance =
+        regression->xtx[hook_index][score_index] / observations -
+        hook_mean * score_mean;
+    const double correlation =
+        covariance / sqrt(hook_variance * score_variance);
+    printf("%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.0f,%.0f,%.6f,%.6f\n", bin_index + 1,
+           hook_mean, hook_variance, score_mean, score_variance, correlation,
+           observations, observations, observations * fmax(hook_variance, 1e-6),
+           observations * fmax(score_variance, 1e-6));
+  }
+  free(features);
+  free(regression);
+  move_list_destroy(best_list);
+  config_destroy(config);
 }
 
 static void test_pat_movegen_integration(void) {
@@ -2319,6 +2419,7 @@ void test_pat(void) {
   test_pat_stage_scale(data_dir);
   test_pat_opening_adjustments(data_dir);
   test_pat_gen_experimental_channels_fixed();
+  test_pat_gen_shrink_variance_scale();
   test_pat_transposition_invariance();
   test_pat_blank_floater();
   test_pat_run_through_table();

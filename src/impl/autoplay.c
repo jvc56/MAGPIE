@@ -1028,9 +1028,16 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   }
 
   ErrorStack *error_stack = autoplay_worker->error_stack;
+  Player *player_on_turn = game_get_player(game, player_on_turn_index);
+  if (sim_args->rollout_disable_pat) {
+    player_set_rollout_disable_pat(player_on_turn, true);
+  }
   const Move *move =
       get_top_simming_move(game, move_list, sim_args, &autoplay_worker->sim_ctx,
                            autoplay_worker->sim_results, error_stack);
+  if (sim_args->rollout_disable_pat) {
+    player_set_rollout_disable_pat(player_on_turn, false);
+  }
   if (autoplay_worker->sim_results != NULL) {
     atomic_fetch_add_explicit(
         &autoplay_total_sim_iterations,
@@ -1334,7 +1341,8 @@ static void game_runner_assess_overtime(AutoplayWorker *autoplay_worker,
 }
 
 void print_current_status(AutoplayWorker *autoplay_worker,
-                          AutoplayIterCompletedOutput *iter_completed_output) {
+                          AutoplayIterCompletedOutput *iter_completed_output,
+                          const GameRunner *game_runner) {
   StringBuilder *status_sb = string_builder_create();
   AutoplaySharedData *shared_data = autoplay_worker->shared_data;
   string_builder_add_formatted_string(
@@ -1352,7 +1360,14 @@ void print_current_status(AutoplayWorker *autoplay_worker,
         lg_shared_data->gens_completed + 1,
         rack_list_get_racks_below_target_count(lg_shared_data->rack_list));
   } else {
-    string_builder_add_string(status_sb, "\n");
+    // The game just completed, so a run can be followed game by game
+    // (a game pair's two games share a seed).
+    const Game *game = game_runner->game;
+    string_builder_add_formatted_string(
+        status_sb, " Last game: seed %llu p1 %d p2 %d\n",
+        (unsigned long long)game_runner->seed,
+        equity_to_int(player_get_score(game_get_player(game, 0))),
+        equity_to_int(player_get_score(game_get_player(game, 1))));
   }
   thread_control_print(autoplay_worker->args.thread_control,
                        string_builder_peek(status_sb));
@@ -1370,7 +1385,7 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker,
   AutoplayIterCompletedOutput iter_completed_output;
   autoplay_complete_iter(autoplay_worker->shared_data, &iter_completed_output);
   if (iter_completed_output.print_info) {
-    print_current_status(autoplay_worker, &iter_completed_output);
+    print_current_status(autoplay_worker, &iter_completed_output, game_runner);
   }
 }
 

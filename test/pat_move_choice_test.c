@@ -49,7 +49,7 @@
 Config *pat_move_choice_config_create(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
-      "-pat " PAT_MOVE_CHOICE_CHAMPION);
+      "-sinfer false -pat " PAT_MOVE_CHOICE_CHAMPION);
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   return config;
@@ -69,10 +69,10 @@ Config *pat_move_choice_config_create(void) {
 // spec's optional trailing field.
 static int pat_move_choice_reference_plies = 2;
 
-static double pat_move_choice_reference_value(const Game *game,
-                                              const Move *move, int mover_index,
-                                              const PATWeights *reference_pat,
-                                              uint64_t world_seed) {
+double pat_move_choice_reference_value(const Game *game, const Move *move,
+                                       int mover_index,
+                                       const PATWeights *reference_pat,
+                                       uint64_t world_seed) {
   Game *rollout_game = game_duplicate(game);
   game_seed(rollout_game, world_seed);
   player_set_pat(game_get_player(rollout_game, 0), reference_pat);
@@ -129,11 +129,11 @@ static double pat_move_choice_reference_value(const Game *game,
 
 // One reference value per world, world r of every candidate at a position
 // sharing the same seed.
-static void pat_move_choice_reference_values(const Game *game, const Move *move,
-                                             int mover_index,
-                                             const PATWeights *reference_pat,
-                                             uint64_t base_seed, int num_worlds,
-                                             double *values_out) {
+void pat_move_choice_reference_values(const Game *game, const Move *move,
+                                      int mover_index,
+                                      const PATWeights *reference_pat,
+                                      uint64_t base_seed, int num_worlds,
+                                      double *values_out) {
   for (int world = 0; world < num_worlds; world++) {
     const uint64_t world_seed =
         base_seed + (uint64_t)world * 1000003ULL; // a prime stride
@@ -171,7 +171,19 @@ static double pat_move_choice_move_equity(const Move *move) {
 static void pat_move_choice_choose(Game *game, int mover_index,
                                    const PATMoveChooser *chooser,
                                    MoveList *move_list, Move *move_out) {
-  player_set_pat(game_get_player(game, mover_index), chooser->pat);
+  Player *mover_player = game_get_player(game, mover_index);
+  player_set_pat(mover_player, chooser->pat);
+  // See PATMoveChooser.zero_leave's comment: swap in the all-zero KLV
+  // player_set_rollout_zero_klv already attached (the caller's
+  // responsibility), for the duration of this call's own generate_moves
+  // only, then restore the real klv immediately after -- the same
+  // swap-and-restore pattern get_top_equity_move uses for rollout
+  // forward-play, just applied to this one static choice instead.
+  const KLV *real_klv = NULL;
+  if (chooser->zero_leave) {
+    real_klv = player_get_klv(mover_player);
+    player_set_klv(mover_player, player_get_rollout_zero_klv(mover_player));
+  }
   const MoveGenArgs args = {
       .game = game,
       .move_list = move_list,
@@ -181,8 +193,12 @@ static void pat_move_choice_choose(Game *game, int mover_index,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .pat_disabled_classes_mask = chooser->disabled_classes_mask,
   };
   generate_moves(&args);
+  if (chooser->zero_leave) {
+    player_set_klv(mover_player, real_klv);
+  }
   move_list_sort_moves(move_list);
   const int num_moves = move_list_get_count(move_list);
   assert(num_moves > 0);
@@ -637,6 +653,113 @@ void test_pat_move_choice_targeted_controls(void) {
   config_destroy(config);
 }
 
+// TWS-only PAT: every premium class but PAT_PREMIUM_TWS treated as
+// zero-weighted (PAT_CLASS_MASK_TWS_ONLY, see pat.h), the champion's own
+// trained TWS weights otherwise unchanged -- not a retrained model, just a
+// restricted read of the same file. pat.h's own comment names this "a fast
+// mode (e.g. TWS only, for rollouts)"; this measures the static (non-
+// rollout) side of that tradeoff: how much of the champion's full static
+// advantage over no PAT at all a TWS-only read alone accounts for, and how
+// much is left on the table relative to full PAT.
+void test_pat_move_choice_tws_only(void) {
+  Config *config = pat_move_choice_config_create();
+  Game *game = config_get_game(config);
+  const PATWeights *champion = player_get_pat(game_get_player(game, 0));
+  const PATMoveChooser champion_chooser = {.label = "champion",
+                                           .pat = champion,
+                                           .degrade_margin = 0.0,
+                                           .overlap_correction = 0.0};
+  PATWeights *zeroed = pat_create_zeroed("zeroed");
+  pat_prepare_hook_flex(zeroed, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
+  const PATMoveChooser zeroed_chooser = {.label = "all PAT weights zero",
+                                         .pat = zeroed,
+                                         .degrade_margin = 0.0,
+                                         .overlap_correction = 0.0};
+  const PATMoveChooser tws_only_chooser = {
+      .label = "champion, TWS classes only",
+      .pat = champion,
+      .degrade_margin = 0.0,
+      .overlap_correction = 0.0,
+      .disabled_classes_mask =
+          PAT_CLASS_MASK_ALL & ~(uint32_t)PAT_CLASS_MASK_TWS_ONLY};
+  // Same seed_base/position count for all three legs of the triangle
+  // (champion, zeroed, TWS-only) so they visit the identical 4000
+  // positions: the two per-decision (unconditional) effects below are then
+  // exactly additive -- (tws_only-zeroed) + (champion-tws_only) ==
+  // (champion-zeroed) -- rather than three independently-sampled numbers
+  // that need not agree.
+  PATMoveChoiceResult result;
+  printf("\nchampion (full PAT) vs no PAT:\n");
+  pat_move_choice_compare(config, &zeroed_chooser, &champion_chooser,
+                          975000000ULL, 300000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  printf("\nTWS-only vs no PAT:\n");
+  pat_move_choice_compare(config, &zeroed_chooser, &tws_only_chooser,
+                          975000000ULL, 300000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  printf("\nchampion (full PAT) vs TWS-only:\n");
+  pat_move_choice_compare(config, &champion_chooser, &tws_only_chooser,
+                          975000000ULL, 300000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  pat_destroy(zeroed);
+  config_destroy(config);
+}
+
+// Same triangle as test_pat_move_choice_tws_only, but against
+// pat_ridgefix_champion_v5 (the full retrain under the variance-scaled
+// ridge fix in pat_gen.c -- see notes/pat_champion_recipe.md's provenance
+// header in that file) instead of the shipped pat_dls_champion_v2, to see
+// whether fixing the regularization closes the gap that motivated this
+// file: pat_dls_champion_v2's TWS-only read beat the full champion by
+// +0.185/disagreement (95% CI [0.149, 0.221], N=1999990) in the
+// production-scale run this triangle's own smaller version predicted.
+void test_pat_move_choice_tws_only_ridgefix(void) {
+  Config *config = pat_move_choice_config_create();
+  Game *game = config_get_game(config);
+  ErrorStack *error_stack = error_stack_create();
+  PATWeights *champion = pat_create(config_get_data_paths(config),
+                                    "pat_ridgefix_champion_v5", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  pat_prepare_hook_flex(champion, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
+  const PATMoveChooser champion_chooser = {.label = "ridgefix champion",
+                                           .pat = champion,
+                                           .degrade_margin = 0.0,
+                                           .overlap_correction = 0.0};
+  PATWeights *zeroed = pat_create_zeroed("zeroed");
+  pat_prepare_hook_flex(zeroed, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
+  const PATMoveChooser zeroed_chooser = {.label = "all PAT weights zero",
+                                         .pat = zeroed,
+                                         .degrade_margin = 0.0,
+                                         .overlap_correction = 0.0};
+  const PATMoveChooser tws_only_chooser = {
+      .label = "ridgefix champion, TWS classes only",
+      .pat = champion,
+      .degrade_margin = 0.0,
+      .overlap_correction = 0.0,
+      .disabled_classes_mask =
+          PAT_CLASS_MASK_ALL & ~(uint32_t)PAT_CLASS_MASK_TWS_ONLY};
+  PATMoveChoiceResult result;
+  printf("\nridgefix champion (full PAT) vs no PAT:\n");
+  pat_move_choice_compare(config, &zeroed_chooser, &champion_chooser,
+                          975000000ULL, 300000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  printf("\nridgefix TWS-only vs no PAT:\n");
+  pat_move_choice_compare(config, &zeroed_chooser, &tws_only_chooser,
+                          975000000ULL, 300000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  printf("\nridgefix champion (full PAT) vs ridgefix TWS-only:\n");
+  pat_move_choice_compare(config, &champion_chooser, &tws_only_chooser,
+                          975000000ULL, 300000, PAT_MOVE_CHOICE_DEFAULT_WORLDS,
+                          &result);
+  pat_destroy(zeroed);
+  pat_destroy(champion);
+  config_destroy(config);
+}
+
 // Step 3 of Astra's stopping rule for the narrow overlap measure: the
 // champion reranked by equity - c * narrow_overlap(resulting board), for
 // c = -2 (credit) and c = +2 (penalty), each against the champion. This
@@ -704,11 +827,14 @@ void test_pat_overlap_step3_confirm(void) {
   config_destroy(config);
 }
 
-// A chooser from a short spec: "champion"; "overlap<c>" (the champion
-// reranked by equity - c * narrow_overlap, e.g. overlap+2, overlap-2);
-// "degrade<m>" (the champion's best move at least m equity below the
-// top); anything else is a PAT file name, loaded with its lexicon tables
-// prepared. *owned_out receives a PATWeights to destroy, or NULL.
+// A chooser from a short spec: "champion"; "twsonly" (the champion's own
+// weights, read with every PAT premium class but TWS masked off --
+// PAT_CLASS_MASK_TWS_ONLY, see pat.h and test_pat_move_choice_tws_only);
+// "overlap<c>" (the champion reranked by equity - c * narrow_overlap, e.g.
+// overlap+2, overlap-2); "degrade<m>" (the champion's best move at least m
+// equity below the top); anything else is a PAT file name, loaded with its
+// lexicon tables prepared. *owned_out receives a PATWeights to destroy, or
+// NULL.
 static PATMoveChooser
 pat_move_choice_chooser_from_spec(Config *config, const char *spec,
                                   PATWeights **owned_out) {
@@ -721,6 +847,11 @@ pat_move_choice_chooser_from_spec(Config *config, const char *spec,
                             .pat_scale = 0.0};
   *owned_out = NULL;
   if (strcmp(spec, "champion") == 0) {
+    return chooser;
+  }
+  if (strcmp(spec, "twsonly") == 0) {
+    chooser.disabled_classes_mask =
+        PAT_CLASS_MASK_ALL & ~(uint32_t)PAT_CLASS_MASK_TWS_ONLY;
     return chooser;
   }
   if (strncmp(spec, "overlap", 7) == 0) {
@@ -1084,5 +1215,69 @@ void test_pat_through_table_audit(void) {
              8.0 * log2(1.0 + words_start), words_start, target_length);
     }
   }
+  config_destroy(config);
+}
+
+// Static (non-rollout) per-move-choice comparison: real leave value vs
+// zeroed leave value, same PAT champion for both choosers throughout, so
+// only leave toggles. Directly comparable to a PAT-vs-no-PAT
+// pat_move_choice_run_spec run -- same disagreement-then-2-ply-reference-
+// oracle methodology (pat_move_choice_reference_value(s), reused
+// unchanged via pat_move_choice_compare), just a different single axis.
+// "seed:num_positions:num_worlds" -- simpler than pat_move_choice_run_spec
+// since there is no baseline/candidate PAT file to name; the champion
+// config's own PAT stays on both choosers the whole time.
+void pat_move_choice_run_leave_spec(const char *spec) {
+  char buffer[512];
+  snprintf(buffer, sizeof(buffer), "%s", spec);
+  char *fields[3] = {NULL, NULL, NULL};
+  int num_fields = 0;
+  char *save = NULL;
+  for (char *tok = strtok_r(buffer, ":", &save); tok && num_fields < 3;
+       tok = strtok_r(NULL, ":", &save)) {
+    fields[num_fields++] = tok;
+  }
+  if (num_fields != 3) {
+    log_fatal("leavemovechoice spec needs 3 colon-separated fields "
+              "(seed:num_positions:num_worlds): %s",
+              spec);
+  }
+  const uint64_t seed_base = strtoull(fields[0], NULL, 10);
+  const int num_positions = atoi(fields[1]);
+  const int num_worlds = atoi(fields[2]);
+
+  Config *config = pat_move_choice_config_create();
+  Player *player0 = game_get_player(config_get_game(config), 0);
+  Player *player1 = game_get_player(config_get_game(config), 1);
+  const PATWeights *reference_pat = player_get_pat(player0);
+  assert(reference_pat);
+
+  // The all-zero KLV both choosers' zero_leave path swaps in when active
+  // (see pat_move_choice_choose): built once from the real KLV already
+  // loaded (same kwg, same leave count, all values zeroed), attached to
+  // both players since either can be on turn at a sampled position.
+  const KLV *real_klv0 = player_get_klv(player0);
+  assert(real_klv0);
+  KLV *zero_klv = klv_create_zeroed_from_kwg(
+      (KWG *)klv_get_kwg(real_klv0), (int)klv_get_number_of_leaves(real_klv0),
+      "leave_move_choice_zero_klv");
+  player_set_rollout_zero_klv(player0, zero_klv);
+  player_set_rollout_zero_klv(player1, zero_klv);
+
+  const PATMoveChooser baseline = {.label = "real_leave",
+                                   .pat = reference_pat,
+                                   .degrade_margin = 0.0,
+                                   .overlap_correction = 0.0,
+                                   .pat_scale = 0.0,
+                                   .zero_leave = false};
+  const PATMoveChooser candidate = {.label = "zero_leave",
+                                    .pat = reference_pat,
+                                    .degrade_margin = 0.0,
+                                    .overlap_correction = 0.0,
+                                    .pat_scale = 0.0,
+                                    .zero_leave = true};
+  PATMoveChoiceResult result;
+  pat_move_choice_compare(config, &baseline, &candidate, seed_base,
+                          num_positions, num_worlds, &result);
   config_destroy(config);
 }

@@ -37,6 +37,7 @@
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
 #include "leave_map_test.h"
+#include "leave_rollout_value_test.h"
 #include "leaves_test.h"
 #include "letter_distribution_test.h"
 #include "load_gcg_test.h"
@@ -44,10 +45,12 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "pat_asset_fit_test.h"
+#include "pat_cost_ratio_test.h"
 #include "pat_hyperscale_fit_test.h"
 #include "pat_move_choice_test.h"
 #include "pat_opening_sim_test.h"
 #include "pat_overlap_pilot_test.h"
+#include "pat_rollout_value_test.h"
 #include "pat_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
@@ -230,6 +233,7 @@ static TestEntry on_demand_test_table[] = {
     {"genpegmore", test_gen_peg_more},
     {"pegpoll", test_peg_poll},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
+    {"pathookdiag", test_pat_hookscore_diagnostics},
     {"patassetfit", test_pat_own_asset_discount_fit},
     {"pathyperscalefit", test_pat_hyperscale_fit},
     {"patlexfloatchoice", test_pat_lexfloat_move_choice},
@@ -242,6 +246,13 @@ static TestEntry on_demand_test_table[] = {
     {"patopeningsim", test_pat_opening_sim},
     {"patmovechoicecontrols", test_pat_move_choice_controls},
     {"patmovechoicetargeted", test_pat_move_choice_targeted_controls},
+    {"pattwsonly", test_pat_move_choice_tws_only},
+    {"pattwsonlyridgefix", test_pat_move_choice_tws_only_ridgefix},
+    {"patrolloutvalue", test_pat_rollout_value},
+    {"patrolloutvalueaccumulate", test_pat_rollout_value_accumulate},
+    {"leaverolloutvalueaccumulate", test_leave_rollout_value_accumulate},
+    {"patcostratiomeasure", test_pat_cost_ratio_measure},
+    {"patcostratiotwsonly", test_pat_cost_ratio_tws_only_measure},
     {"pattrainparity", test_pat_train_runtime_parity},
     {"patleafcheck", test_pat_leaf_check},
     {"patthroughaudit", test_pat_through_table_audit},
@@ -283,6 +294,14 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("patmovechoice:", subtest)) {
     pat_move_choice_run_spec(subtest + strlen("patmovechoice:"));
+    return;
+  }
+  if (has_prefix("leavemovechoice:", subtest)) {
+    pat_move_choice_run_leave_spec(subtest + strlen("leavemovechoice:"));
+    return;
+  }
+  if (has_prefix("patcostratiopilot:", subtest)) {
+    pat_cost_ratio_run_pilot_spec(subtest + strlen("patcostratiopilot:"));
     return;
   }
   if (has_prefix("pattrainparity:", subtest)) {
