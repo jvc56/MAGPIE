@@ -56,10 +56,10 @@ typedef struct PATSolveResult {
 PATSolveResult
 pat_regression_solve_into_weights(const PATRegression *regression,
                                   double ridge_lambda, PATWeights *pat);
-// The same solve with an extra penalty shrink_lambda * N * (c - c0)^2
-// pulling every free coefficient toward the weights the file was loaded
-// with (c0), so a fit on new data adapts an incumbent instead of
-// replacing it; shrink_lambda 0 is the plain solve.
+// The same solve with an extra per-feature penalty
+// shrink_lambda * variance_i * N * (c_i - c0_i)^2, pulling each free
+// coefficient toward its loaded value (c0_i). The variance floor matches
+// the ridge diagonal; shrink_lambda 0 is the plain solve.
 PATSolveResult
 pat_regression_solve_into_weights_shrunk(const PATRegression *regression,
                                          double ridge_lambda,

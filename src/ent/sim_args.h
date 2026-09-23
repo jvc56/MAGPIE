@@ -37,6 +37,16 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // Whether this player's own rollout forward-play plies (get_top_equity_
+  // move, called at every simulated ply -- see random_variable.c's
+  // rv_sim_sample) should read PAT as fully off, via player_set_rollout_
+  // disable_pat, while the top-level candidate list this sim is handed
+  // stays whatever generate_moves already produced with PAT on. False
+  // (the default from a zero-initialized SimArgs) matches every existing
+  // caller's behavior: PAT active throughout, both candidate selection and
+  // rollout continuation. Not part of sim_args_fill (see its own comment);
+  // callers that want this set it by hand after filling the rest.
+  bool rollout_disable_pat;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter

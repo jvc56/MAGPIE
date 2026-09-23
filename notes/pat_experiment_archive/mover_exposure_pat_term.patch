@@ -1,0 +1,192 @@
+diff --git a/src/impl/random_variable.c b/src/impl/random_variable.c
+index 1d379f3c..d99c1f1c 100644
+--- a/src/impl/random_variable.c
++++ b/src/impl/random_variable.c
+@@ -5,8 +5,10 @@
+ #include "../def/game_defs.h"
+ #include "../ent/alias_method.h"
+ #include "../ent/bag.h"
++#include "../ent/board.h"
+ #include "../ent/equity.h"
+ #include "../ent/game.h"
++#include "../ent/pat.h"
+ #include "../ent/inference_results.h"
+ #include "../ent/letter_distribution.h"
+ #include "../ent/move.h"
+@@ -430,6 +432,133 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
+   free(simmer_worker);
+ }
+ 
++// Credits the final position each sim sample's simulated trajectory reaches
++// with a PAT evaluation of both sides' resulting exposure, symmetrically
++// for both players and unconditionally regardless of whether this
++// trajectory's own move-selection had PAT available (see
++// player_get_rollout_disable_pat / get_top_equity_move in gameplay.c for
++// that separate, move-SELECTION-only mechanism -- untouched by this
++// function). This is an evaluation of the position reached, not a change
++// to how it was reached. Without this, a walk that trades a little score
++// to close off a premium square only ever pays that trade's cost (in
++// spread) and never receives its defensive payoff, since spread plus leave
++// value alone -- the pre-existing inputs to
++// simmed_play_add_equity_stat/win_pct_stat just below -- carry no
++// positional term.
++//
++// pat_eval_context_load's pre_penalty is, per its own header comment
++// (pat.h), "the penalty for the opponent's TWS access on the board as it
++// stands" for whichever player's rack the context was loaded with -- a
++// self-charged cost (always <= 0) added directly into THAT player's own
++// equity elsewhere in the engine (move_gen.c's MOVE_SORT_EQUITY branch).
++// So pen(X) is already a valid "how good is this position for X" additive
++// term in X's own units, exactly like score(X) is; the symmetric term
++// added to a spread-shaped value (initial player's good thing minus
++// opponent's) is therefore pen(initial) - pen(opponent), mirroring
++// spread = score(initial) - score(opponent) itself. Worked example: if
++// only the initial player's final rack leaves them exposed (pen(initial)
++// very negative, pen(opponent) ~= 0), the term is negative -- correctly
++// costing the initial player -- and vice versa if only the opponent is
++// exposed.
++//
++// Bag-gated and cross-set-gated exactly like move_gen.c's own PAT branch
++// (see its comment there: "bag-gated like the leave value, and requires
++// valid cross sets"). The walk's final ply is played with
++// play_move_no_cross_set_update (a few lines above in rv_sim_sample)
++// precisely because nothing used to need valid cross sets after it --
++// this function does, so it regenerates them for both players right
++// before evaluating. That regeneration is safe to leave in place
++// afterward: game_unplay_last_move (called once, right after
++// rv_sim_sample computes spread) restores the whole board via board_copy
++// from the single MinimalGameBackup taken before the ply loop began,
++// discarding whatever cross-set state this function leaves behind -- nothing
++// here leaks into the next sample. Thread-safe: each simmer worker has its
++// own private Game (simmer_worker->game in rv_sim_sample), never shared
++// across threads, so this mutates no state another thread can see.
++// Single-sided, mover-referenced replacement for the earlier
++// self-minus-opponent version (see git history): that version evaluated a
++// symmetric pen(initial)-pen(opponent) difference at whatever position the
++// ply loop happened to end on, but which player's turn that final position
++// lands on is parity-dependent on `plies` (turns strictly alternate from
++// the candidate move on, so an even `plies` ends with the mover having
++// just moved -- opponent to act next -- while an odd `plies` ends with the
++// opponent having just moved -- mover to act next). That made the
++// reference point inconsistent across configurations instead of tied to a
++// specific player's turn.
++//
++// This mirrors the leave-value residual's own convention just above (ply
++// == plies-2 || ply == plies-1): that residual captures each player's own
++// CURRENT leave at the latest ply where it is still current for them
++// (their own last move within the horizon), because a rack's leave value
++// goes stale the moment its owner draws again. This function is called
++// from that same two-ply window, but only on the one ply of the two that
++// belongs to the OPPONENT (consecutive plies always alternate players, so
++// within any two consecutive plies exactly one is the opponent's and one
++// is the mover's -- see the call site). Right after the opponent's move at
++// that ply, it is about to be the mover's turn again: a well-defined,
++// parity-independent moment, always immediately before whatever the mover
++// does last within the horizon. Evaluating there attributes the exposure
++// to the candidate move and the walk up to this point, not to the mover's
++// own subsequent (and not-yet-decided) reply.
++//
++// Returns pen(mover) alone (single-sided, not a difference): pat.h's own
++// doc on pre_penalty says it is already a valid self-charged additive
++// equity term for whichever player's rack the context was loaded with (see
++// move_gen.c's identical use in its MOVE_SORT_EQUITY branch), so no
++// further sign flip is needed before adding it to a spread-shaped value.
++static Equity rv_sim_mover_exposure_pat_term(const Game *game,
++                                             int initial_player_index) {
++  const int opponent_index = 1 - initial_player_index;
++  const Player *initial_player = game_get_player(game, initial_player_index);
++  const Player *opponent = game_get_player(game, opponent_index);
++  const PATWeights *initial_pat = player_get_pat(initial_player);
++  if (!initial_pat) {
++    return 0;
++  }
++  if (bag_get_letters(game_get_bag(game)) == 0) {
++    return 0; // bag-gated, exactly like move_gen.c's own PAT branch
++  }
++  const Board *board = game_get_board(game);
++  // The calling ply may or may not have updated cross-sets (see the call
++  // site: only the ply played via play_move_no_cross_set_update leaves
++  // them stale), so only pay for a regen when they actually need it.
++  if (!board_get_cross_sets_valid(board)) {
++    game_gen_all_cross_sets(game);
++    if (!board_get_cross_sets_valid(board)) {
++      return 0; // defensive: game_gen_all_cross_sets should always leave this true
++    }
++  }
++  const bool kwgs_shared =
++      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
++  const LetterDistribution *ld = game_get_ld(game);
++  const int cross_index =
++      board_get_cross_set_index(kwgs_shared, initial_player_index);
++  const Square *lanes = board_get_readonly_lanes(board, cross_index);
++  PATEvalContext ctx;
++  // player_rack is NULL here deliberately, not player_get_rack(initial_player)
++  // (see the double-counting note above): pat_compute_unseen_counts
++  // (pat.c) subtracts whatever rack it is given from the unseen-tile pool
++  // before scoring hook danger, so passing the mover's actual rack would
++  // give a lower (safer) penalty whenever the mover happens to hold a
++  // scarce/dangerous letter -- the same "holding tile X is good" signal
++  // KLV leave value (leftover, above) already prices from real game
++  // outcomes. A NULL player_rack is explicitly supported (pat.c's
++  // pat_compute_unseen_counts early-returns after the board-only
++  // subtraction when it is NULL; it is the only place player_rack affects
++  // pre_penalty -- confirmed by inspection of pat_eval_context_load_units,
++  // whose only other use of player_rack, at the own_asset_discount /
++  // worst_case_leave_units block, is itself guarded by `&& player_rack`
++  // and feeds only pat_eval_move_penalty_bound, which this function never
++  // calls), so this isolates the part of PAT's signal pre_penalty was
++  // designed to capture that leave value cannot: purely how dangerous
++  // THIS board's specific hook geometry is (unseen tiles pooled from the
++  // full distribution and the board alone), independent of whose hands
++  // happen to hold which tiles right now.
++  pat_eval_context_load(&ctx, initial_pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
++                        rack_get_total_letters(player_get_rack(opponent)));
++  return ctx.pre_penalty;
++}
++
+ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
+                      const int thread_index, const uint64_t sample_count,
+                      BAILogger __attribute__((unused)) * bai_logger) {
+@@ -481,6 +610,10 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
+   }
+ 
+   Equity leftover = 0;
++  // Set once, at the single well-defined ply rv_sim_mover_exposure_pat_term
++  // targets (see its comment); 0 if that ply never executes (an early
++  // game_over break), same graceful degradation as leftover above.
++  Equity pat_exposure = 0;
+   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
+   // For one-ply sims, we need to account for the candidate move's leave value
+   if (plies == 1) {
+@@ -525,14 +658,30 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
+         leftover += this_leftover;
+       } else {
+         leftover -= this_leftover;
++        // player_on_turn_index is the opponent here (the branch above is
++        // the only other option, since consecutive plies always alternate
++        // players): the board as it stands right after this move is
++        // exactly "about to be the mover's turn again" -- see
++        // rv_sim_mover_exposure_pat_term's comment for why that is the
++        // targeted reference point.
++        pat_exposure =
++            rv_sim_mover_exposure_pat_term(game, simmer->initial_player);
+       }
+     }
+     simmed_play_add_stats_for_ply(simmed_play, ply, best_play);
+   }
+ 
++  // Horizon fix: charge the mover's own PAT-evaluated exposure,
++  // unconditionally, at the single well-defined ply
++  // rv_sim_mover_exposure_pat_term targets (see its comment and the call
++  // site above) -- this feeds equity_stat, win_pct_stat (both take
++  // spread+leftover directly), and, downstream of wpct, the blended
++  // utility_stat too, so all three derived statistics see the same
++  // corrected value.
+   const Equity spread =
+       player_get_score(game_get_player(game, simmer->initial_player)) -
+-      player_get_score(game_get_player(game, 1 - simmer->initial_player));
++      player_get_score(game_get_player(game, 1 - simmer->initial_player)) +
++      pat_exposure;
+   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
+                               leftover);
+   const double wpct = simmed_play_add_win_pct_stat(

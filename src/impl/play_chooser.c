@@ -321,16 +321,24 @@ static bool play_chooser_game_is_in_endgame(const Game *game) {
   return bag_get_letters(game_get_bag(game)) == 0;
 }
 
+static int play_chooser_peg_max_bag(const PlayChooserStrategy *strategy) {
+  if (strategy->peg_max_bag <= 0 || strategy->peg_max_bag > PEG_MAX_BAG) {
+    return PEG_MAX_BAG;
+  }
+  return strategy->peg_max_bag;
+}
+
 static play_chooser_eval_t
 play_chooser_get_eval_for_phase(const PlayChooserStrategy *strategy,
                                 const Game *game) {
   if (play_chooser_game_is_in_endgame(game)) {
     return strategy->endgame_eval;
   }
-  // PEG only applies in the low-bag pre-endgame; above PEG_MAX_BAG it cannot
-  // run, so fall back to SIM (when win_pcts are available) or STATIC.
+  // PEG only applies in the low-bag pre-endgame; above its bag cap it does
+  // not run, so fall back to SIM (when win_pcts are available) or STATIC.
   if (strategy->pre_endgame_eval == PLAY_CHOOSER_EVAL_PEG &&
-      bag_get_letters(game_get_bag(game)) > PEG_MAX_BAG) {
+      bag_get_letters(game_get_bag(game)) >
+          play_chooser_peg_max_bag(strategy)) {
     return strategy->win_pcts != NULL ? PLAY_CHOOSER_EVAL_SIM
                                       : PLAY_CHOOSER_EVAL_STATIC;
   }
@@ -686,19 +694,20 @@ static double play_chooser_peg_decided_utility(const PlayChooserStrategy *s,
 
 // Solve the pre-endgame for the player on turn within the time budget,
 // reporting their best move and the score+win utility of the resulting
-// position. Requires the bag size to be in [PEG_MIN_BAG, PEG_MAX_BAG];
-// returns false otherwise, or when the solve produced no usable evaluation
-// (no candidate finished within the budget, leaving a negative-win% sentinel),
-// so the caller can fall back.
+// position. Requires the bag size to be in [PEG_MIN_BAG, the strategy's PEG
+// bag cap]; returns false otherwise, or when the solve produced no usable
+// evaluation (no candidate finished within the budget, leaving a negative-win%
+// sentinel), so the caller can fall back.
 static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                                  double budget_seconds, int num_threads,
                                  bool greedy_only, Move *out_move,
                                  double *out_value, ErrorStack *error_stack) {
+  const PlayChooserStrategy *strategy = &play_chooser->strategy;
   const int bag_letters = bag_get_letters(game_get_bag(game));
-  if (bag_letters < PEG_MIN_BAG || bag_letters > PEG_MAX_BAG) {
+  if (bag_letters < PEG_MIN_BAG ||
+      bag_letters > play_chooser_peg_max_bag(strategy)) {
     return false;
   }
-  const PlayChooserStrategy *strategy = &play_chooser->strategy;
   const bool benchmarking = play_chooser_benchmark_is_enabled();
   PlayChooserPegBenchmarkContext benchmark_context = {0};
   if (benchmarking) {

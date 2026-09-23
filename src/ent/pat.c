@@ -28,6 +28,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  PAT_CONTEXT_CHANNEL_LM = 1,
+  PAT_CONTEXT_CHANNEL_HOOK_SCORE = 2,
+};
+
 struct PATWeights {
   char *name;
   Equity weights[PAT_NUM_FEATURES];
@@ -669,11 +674,11 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
     if (has_prefix(PAT_FIT_RESIDUAL_ROW_PREFIX, line)) {
       const int flag = string_to_int(line + strlen(PAT_FIT_RESIDUAL_ROW_PREFIX),
                                      error_stack);
-      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 4) {
+      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 5) {
         error_stack_push(
             error_stack, ERROR_STATUS_PAT_INVALID_ROW,
             get_formatted_string("PAT file '%s' line %d has a fit_residual "
-                                 "value other than 0 to 4: '%s'",
+                                 "value other than 0 to 5: '%s'",
                                  pat_name, line_index + 1, line));
         return;
       }
@@ -1626,17 +1631,22 @@ static PATCrossInfo pat_effective_cross_info(
 // lm_channels: whether to do the premium-combination bookkeeping at all.
 // Training rows always want it; evaluation skips it when every weight
 // on those channels is zero, since their dot product is then exactly
-// zero whatever the features (see PATEvalContext.lm_channels).
+// zero whatever the features (see PATEvalContext.channel_flags).
 static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           const uint8_t *unseen_counts, const PATWeights *pat,
                           int tws_row, int tws_col, int premium_class, int dir,
                           const PATMoveOverlay *overlay, int32_t *features,
                           int *extent_lo, int *extent_hi,
                           int opponent_rack_size, uint64_t *hook_letters_out,
-                          bool lm_channels) {
+                          bool lm_channels, bool score_channels) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const double hyper_scale = pat_hyper_scale(unseen_counts, opponent_rack_size);
+  // Feature extraction needs every score channel even from a zero bootstrap.
+  // Runtime scans with zero hook-score weights can skip the exposure work;
+  // exact created hooks still need ld for their cross-set calculation.
+  const LetterDistribution *hook_score_ld =
+      score_channels || (overlay != NULL && overlay->kwg != NULL) ? ld : NULL;
   // Each premium class writes its own hook and floater-value channels. The
   // richer channels (floater flexibility, the lexicon through-table, and
   // the triple-triple pair) stay exclusive to triple word squares, which
@@ -1704,8 +1714,8 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       bonus_square_get_word_multiplier(square_get_bonus_square(&lane[tws_idx]));
   const PATCrossInfo tws_info = pat_effective_cross_info(
       lane, tws_idx, dir, overlay, pat_unit_row(dir, lane_index, tws_idx),
-      pat_unit_col(dir, lane_index, tws_idx), unseen_counts, hyper_scale, ld,
-      premium_word_multiplier);
+      pat_unit_col(dir, lane_index, tws_idx), unseen_counts, hyper_scale,
+      hook_score_ld, premium_word_multiplier);
   if (tws_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -1904,7 +1914,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       const PATCrossInfo info = pat_effective_cross_info(
           lane, idx, dir, overlay, square_row, square_col, unseen_counts,
-          hyper_scale, ld, premium_word_multiplier);
+          hyper_scale, hook_score_ld, premium_word_multiplier);
       if (info.dead) {
         break;
       }
@@ -2206,11 +2216,11 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true);
+                  opponent_rack_size, NULL, true, true);
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true);
+                  opponent_rack_size, NULL, true, true);
   }
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
@@ -2386,12 +2396,13 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
     const int tws_col = pat_eval_ctx->tws_cols[tws_idx];
     *dir_out = dir;
     *lane_out = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
-    pat_scan_unit(pat_eval_ctx->lanes, pat_eval_ctx->ld,
-                  pat_eval_ctx->unseen_counts, pat_eval_ctx->weights, tws_row,
-                  tws_col, pat_eval_ctx->tws_classes[tws_idx], dir, overlay,
-                  features, extent_lo, extent_hi,
-                  pat_eval_ctx->opponent_rack_size, hook_letters_out,
-                  pat_eval_ctx->lm_channels);
+    pat_scan_unit(
+        pat_eval_ctx->lanes, pat_eval_ctx->ld, pat_eval_ctx->unseen_counts,
+        pat_eval_ctx->weights, tws_row, tws_col,
+        pat_eval_ctx->tws_classes[tws_idx], dir, overlay, features, extent_lo,
+        extent_hi, pat_eval_ctx->opponent_rack_size, hook_letters_out,
+        (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_LM) != 0,
+        (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_HOOK_SCORE) != 0);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
@@ -2583,7 +2594,10 @@ static void pat_eval_context_load_units(
         weights->stage_scale[pat_stage_for_bag(bag_count)];
   }
   pat_eval_ctx->num_nonzero_features = 0;
-  pat_eval_ctx->lm_channels = !drop_unweighted_units;
+  pat_eval_ctx->channel_flags =
+      drop_unweighted_units
+          ? 0
+          : PAT_CONTEXT_CHANNEL_LM | PAT_CONTEXT_CHANNEL_HOOK_SCORE;
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     if (weights->weights[feature_index] != 0) {
@@ -2591,7 +2605,11 @@ static void pat_eval_context_load_units(
           ->nonzero_feature_index[pat_eval_ctx->num_nonzero_features++] =
           feature_index;
       if (feature_index >= PAT_FEATURE_LM_SPAN_START) {
-        pat_eval_ctx->lm_channels = true;
+        pat_eval_ctx->channel_flags |= PAT_CONTEXT_CHANNEL_LM;
+      } else if (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
+                 feature_index <
+                     PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT) {
+        pat_eval_ctx->channel_flags |= PAT_CONTEXT_CHANNEL_HOOK_SCORE;
       }
     }
   }
@@ -3159,7 +3177,8 @@ void pat_extract_features_combined(const Square *lanes,
       const int tws_idx = unit_index / 2;
       pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                     tws_cols[tws_idx], tws_classes[tws_idx], unit_index % 2,
-                    NULL, row, NULL, NULL, opponent_rack_size, NULL, true);
+                    NULL, row, NULL, NULL, opponent_rack_size, NULL, true,
+                    true);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],

@@ -911,16 +911,51 @@ void generate_moves_for_game(const MoveGenArgs *args) {
 }
 
 const Move *get_top_equity_move(Game *game, MoveList *move_list) {
-  const MoveGenArgs args = {.game = game,
-                            .move_list = move_list,
-                            .move_record_type = MOVE_RECORD_BEST,
-                            .move_sort_type = MOVE_SORT_EQUITY,
-                            .override_kwg = NULL,
-                            .eq_margin_movegen = 0,
-                            .target_equity = EQUITY_MAX_VALUE,
-                            .target_leave_size_for_exchange_cutoff =
-                                UNSET_LEAVE_SIZE};
+  // This is what a Monte Carlo rollout's forward-play plies call at every
+  // simulated ply (random_variable.c's rv_sim_sample), so a player's
+  // rollout_disable_pat flag has to be read here rather than left at this
+  // call's usual default of PAT fully on. Real gameplay never sets the
+  // flag, so this is a no-op everywhere else get_top_equity_move is called
+  // (autoplay, play_chooser, test position setup). rollout_pat_disabled_
+  // classes_mask is the same idea at class-mask granularity instead of a
+  // full on/off switch (see player_set_rollout_pat_disabled_classes_mask):
+  // 0 by default, so also a no-op outside tooling that sets it.
+  Player *player_on_turn =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  // Leave-value zeroing (player_set_rollout_zero_leave): a separate,
+  // analogous toggle for leave instead of PAT. Unlike disable_pat, there is
+  // no flag plumbed through MoveGenArgs for this -- move_gen.c reads leave
+  // value deep in its own hot path via gen->klv, so the surgical option is
+  // to swap the player's own klv pointer to an all-zero one (see
+  // player.h's comment on player_set_rollout_zero_leave for why this is
+  // safe) for the duration of this call only, then restore the real klv
+  // immediately after returning from generate_moves. Scoped tightly: any
+  // other leave-value read elsewhere (e.g. random_variable.c's own
+  // leftover/leave-residual bookkeeping, a few lines after this call
+  // returns in its caller) happens after the real klv is already back in
+  // place.
+  const bool zero_leave = player_get_rollout_zero_leave(player_on_turn);
+  const KLV *real_klv = NULL;
+  if (zero_leave) {
+    real_klv = player_get_klv(player_on_turn);
+    player_set_klv(player_on_turn, player_get_rollout_zero_klv(player_on_turn));
+  }
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .disable_pat = player_get_rollout_disable_pat(player_on_turn),
+      .pat_disabled_classes_mask =
+          player_get_rollout_pat_disabled_classes_mask(player_on_turn)};
   generate_moves(&args);
+  if (zero_leave) {
+    player_set_klv(player_on_turn, real_klv);
+  }
   return move_list_get_move(move_list, 0);
 }
 
