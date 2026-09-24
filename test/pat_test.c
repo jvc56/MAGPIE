@@ -1645,9 +1645,14 @@ static void test_pat_opening_and_hook_flex(void) {
 // those with WMP on and off. Heavy weights on every channel with both
 // floater semantics on, so any path that drops or misreads the term
 // shows up as a different equity for the same move.
-static void test_pat_path_parity(void) {
+// utility_adjust > 0 also puts the utility correction (see
+// PAT_UTILITY_ADJUST_ROW_PREFIX) on the weights: it is the one PAT term
+// that can be positive, so every pruning bound has to carry it for the
+// paths to keep agreeing.
+static void pat_path_parity_run(double utility_adjust) {
   const char *set_cmd =
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 ";
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-winpct winpct ";
   Config *config_wmp = config_create_or_die(set_cmd);
   load_and_exec_config_or_die(config_wmp, "set -wmp true");
   Config *config_no_wmp = config_create_or_die(set_cmd);
@@ -1663,6 +1668,8 @@ static void test_pat_path_parity(void) {
     pat_set_combine_gamma(pat, 0.5);
     pat_set_lexicon_floaters(pat, true);
     pat_set_signed_through(pat, true);
+    pat_set_utility_adjust(pat, utility_adjust,
+                           config_get_win_pcts(configs[c]));
     players_data_set_data(config_get_players_data(configs[c]),
                           PLAYERS_DATA_TYPE_PAT, 0, pat);
     players_data_set_data(config_get_players_data(configs[c]),
@@ -1694,6 +1701,7 @@ static void test_pat_path_parity(void) {
   int positions_checked = 0;
   int moves_checked = 0;
   int rows_checked = 0;
+  int utility_nonzero = 0;
   for (int attempt = 0; attempt < 40; attempt++) {
     // Positions from seeded self-play in the WMP config, mirrored into
     // the other config through their CGP.
@@ -1808,6 +1816,36 @@ static void test_pat_path_parity(void) {
         assert(fabs(dot - runtime) < 0.002);
         rows_checked++;
       }
+      // The utility correction is not a feature, so the rows above are
+      // checked without it. Here: each move's correction is the difference
+      // between the term with and without it, and it never exceeds the
+      // position's bound or the move's own bound.
+      const int margin = equity_to_int(
+          player_get_score(mover) -
+          player_get_score(game_get_player(game_wmp, 1 - mover_index)));
+      const int bag = bag_get_letters(game_get_bag(game_wmp));
+      Equity without_utility[20];
+      for (int i = 0; i < num_top && i < 20; i++) {
+        const Move *move = move_list_get_move(all_list_wmp, i);
+        Rack leave;
+        get_leave_for_move(move, game_wmp, &leave);
+        without_utility[i] = pat_eval_move_penalty(parity_ctx, move, &leave);
+      }
+      pat_eval_context_set_utility(parity_ctx, margin, bag);
+      const Equity utility_bound = pat_eval_utility_bound(parity_ctx);
+      for (int i = 0; i < num_top && i < 20; i++) {
+        const Move *move = move_list_get_move(all_list_wmp, i);
+        Rack leave;
+        get_leave_for_move(move, game_wmp, &leave);
+        const Equity with_utility =
+            pat_eval_move_penalty(parity_ctx, move, &leave);
+        assert(with_utility <=
+               pat_eval_move_penalty_bound(parity_ctx, move, &leave));
+        assert(with_utility - without_utility[i] <= utility_bound);
+        if (with_utility != without_utility[i]) {
+          utility_nonzero++;
+        }
+      }
     }
     // WMP on and off: identical exhaustive lists, move for move.
     const int num_all = move_list_get_count(all_list_wmp);
@@ -1819,11 +1857,13 @@ static void test_pat_path_parity(void) {
       assert(move_get_equity(m1) == move_get_equity(m2));
     }
   }
-  printf("PAT path parity: %d positions, %d within-margin moves, %d overlay "
-         "training rows checked\n",
-         positions_checked, moves_checked, rows_checked);
+  printf("PAT path parity (utility %.0f): %d positions, %d within-margin "
+         "moves, %d overlay training rows checked, %d moves corrected\n",
+         utility_adjust, positions_checked, moves_checked, rows_checked,
+         utility_nonzero);
   assert(positions_checked >= 30);
   assert(rows_checked >= 300);
+  assert((utility_adjust > 0.0) == (utility_nonzero > 0));
   free(parity_ctx);
   free(parity_row);
   move_list_destroy(best_list);
@@ -1832,6 +1872,12 @@ static void test_pat_path_parity(void) {
   move_list_destroy(within_list);
   config_destroy(config_wmp);
   config_destroy(config_no_wmp);
+}
+
+static void test_pat_path_parity(void) {
+  pat_path_parity_run(0.0);
+  // Far stronger than any file uses, to stress every bound it enters.
+  pat_path_parity_run(2000.0);
 }
 
 // Stage scaling: a file's stage rows multiply the applied term (and every

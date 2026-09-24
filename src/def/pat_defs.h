@@ -242,6 +242,26 @@ enum {
 // the plain fit every file so far was trained with.
 #define PAT_FIT_SHRINK_ROW_PREFIX "fit_shrink,"
 #define PAT_DEFAULT_FIT_SHRINK false
+
+// Utility-shaped equity correction. With utility_adjust,V (points squared,
+// > 0), every move whose PAT term is applied also gets
+//   0.5 * V * kappa(margin + score, unseen after the move)
+// where kappa = -U''/U' of the default win/spread utility (win 1.0, spread
+// 0.5, scale 100) read off the PAT_UTILITY_WIN_PCT_NAME table with the
+// opponent on turn, and margin is the mover's lead before the move. It
+// reweights banked points against the rest of equity by margin, and tile
+// turnover by margin and stage: points and turnover are worth more where
+// the utility is concave (ahead) than where it is convex (behind). Unlike
+// every other PAT term it can be positive; the context folds its per-turn
+// maximum into every movegen bound (see pat_eval_utility_bound). Absent
+// means 0: no correction, and no table is loaded.
+#define PAT_UTILITY_ADJUST_ROW_PREFIX "utility_adjust,"
+#define PAT_UTILITY_WIN_PCT_NAME "winpct"
+// Margins beyond this are read at it; kappa has flattened to ~0 there.
+#define PAT_UTILITY_MARGIN_LIMIT 600
+// Finite-difference half-width, in points, for kappa: wide enough to
+// smooth the table's integer margin buckets.
+#define PAT_UTILITY_KAPPA_STEP 15
 #define PAT_GEN_HELDOUT_EVERY 10
 
 // Optional rows: a nonnegative factor applied to the whole defense term,
