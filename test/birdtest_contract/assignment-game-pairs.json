@@ -67,7 +67,7 @@
       "movegen_margin": 5.0
     }
   },
-  "min_magpie_version": "0.1.0",
+  "min_magpie_version": "0.1.1",
   "expected_data": {
     "algorithm": "sha256",
     "files": [

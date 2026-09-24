@@ -43,6 +43,15 @@ int http_client_backoff_seconds(int retry_idx) {
              : HTTP_CLIENT_MAX_BACKOFF_SECONDS;
 }
 
+int http_client_rate_limit_wait_seconds(int retry_after_seconds) {
+  if (retry_after_seconds < 1) {
+    return 1;
+  }
+  return retry_after_seconds < HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS
+             ? retry_after_seconds
+             : HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS;
+}
+
 struct HttpClient {
   char *base_url;
   char *api_key;
@@ -136,7 +145,8 @@ void http_client_destroy(HttpClient *client) {
 
 static void perform(HttpClient *client, chttp_method_t method, const char *path,
                     const char *body, int max_transient_retries,
-                    ChttpResponse *response, ErrorStack *error_stack) {
+                    int max_rate_limit_retries, ChttpResponse *response,
+                    ErrorStack *error_stack) {
   char *url = get_formatted_string("%s%s", client->base_url, path);
 
   const char *headers[MAX_HEADERS];
@@ -190,10 +200,10 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
     // least two requests, so 429 is reached in normal operation. It is
     // backoff, not an error.
     if (response->status_code == 429 &&
-        rate_limit_retries < MAX_RATE_LIMIT_RETRIES) {
+        rate_limit_retries < max_rate_limit_retries) {
       rate_limit_retries++;
       const int wait =
-          response->retry_after_seconds > 0 ? response->retry_after_seconds : 1;
+          http_client_rate_limit_wait_seconds(response->retry_after_seconds);
       chttp_response_destroy(response);
       ctime_nap(wait);
       continue;
@@ -217,26 +227,32 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
 void http_client_get(HttpClient *client, const char *path,
                      ChttpResponse *response, ErrorStack *error_stack) {
   perform(client, CHTTP_GET, path, NULL, HTTP_CLIENT_MAX_TRANSIENT_RETRIES,
-          response, error_stack);
+          MAX_RATE_LIMIT_RETRIES, response, error_stack);
 }
 
 void http_client_post_json(HttpClient *client, const char *path,
                            const char *body, ChttpResponse *response,
                            ErrorStack *error_stack) {
   perform(client, CHTTP_POST, path, body ? body : "{}",
-          HTTP_CLIENT_MAX_TRANSIENT_RETRIES, response, error_stack);
+          HTTP_CLIENT_MAX_TRANSIENT_RETRIES, MAX_RATE_LIMIT_RETRIES, response,
+          error_stack);
 }
 
 void http_client_post_json_persistent(HttpClient *client, const char *path,
                                       const char *body, ChttpResponse *response,
                                       ErrorStack *error_stack) {
   perform(client, CHTTP_POST, path, body ? body : "{}", RETRY_WITHOUT_LIMIT,
-          response, error_stack);
+          MAX_RATE_LIMIT_RETRIES, response, error_stack);
 }
 
 void http_client_post_json_once(HttpClient *client, const char *path,
                                 const char *body, ChttpResponse *response,
                                 ErrorStack *error_stack) {
+  // Once means once: a 429 is not waited out either. The heartbeat is the
+  // caller, and a heartbeat asleep on a Retry-After holds up heartbeat_stop
+  // and so the task's own submission; the next heartbeat is thirty seconds
+  // away regardless.
   perform(client, CHTTP_POST, path, body ? body : "{}",
-          /*max_transient_retries=*/0, response, error_stack);
+          /*max_transient_retries=*/0, /*max_rate_limit_retries=*/0, response,
+          error_stack);
 }

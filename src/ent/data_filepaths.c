@@ -253,3 +253,26 @@ StringList *data_filepaths_get_all_data_path_names(const char *data_paths,
 
   return file_path_list;
 }
+
+static bool is_safe_name_char(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9') || c == '_' || c == '-';
+}
+
+bool data_filepaths_is_safe_name(const char *name) {
+  if (!name || !is_safe_name_char(*name)) {
+    return false;
+  }
+  bool seen_dot = false;
+  for (const char *c = name; *c; c++) {
+    if (*c == '.') {
+      if (seen_dot || !is_safe_name_char(c[1])) {
+        return false;
+      }
+      seen_dot = true;
+    } else if (!is_safe_name_char(*c)) {
+      return false;
+    }
+  }
+  return true;
+}

@@ -379,6 +379,13 @@ FILE *popen_or_die(const char *command, const char *mode);
 
 bool path_is_directory(const char *path);
 
+// Identity of a file's *contents*, as far as the filesystem can report it:
+// size, mtime, inode and ctime, the times to the nanosecond where the
+// filesystem records them. Two calls return the same string only if nothing
+// has written to or replaced the file in between. Returns NULL if the file
+// cannot be stat'ed; the caller frees.
+char *get_file_identity(const char *path);
+
 // Returns a sorted, heap-allocated array of filenames ending with suffix found
 // in dir_path. *num_files is set to the count. Caller frees each string and
 // the array. On error, pushes to error_stack and returns NULL.

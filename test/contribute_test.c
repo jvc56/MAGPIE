@@ -5,6 +5,8 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/client_state.h"
+#include "../src/ent/data_filepaths.h"
+#include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
@@ -983,6 +985,19 @@ static void test_a_request_must_state_its_distribution_and_layout(void) {
       // A name that would leave the data directory.
       "{\"variant\":\"classic\",\"letter_distribution\":\"../english\","
       "\"board_layout\":\"standard15\"}",
+
+      // Every name in a player object becomes a path as well.
+      "{\"variant\":\"classic\",\"letter_distribution\":\"english\","
+      "\"board_layout\":\"standard15\",\"player1\":{\"leaves\":\"../x\"}}",
+      "{\"variant\":\"classic\",\"letter_distribution\":\"english\","
+      "\"board_layout\":\"standard15\",\"player2\":{\"rit_name\":"
+      "\"../../home/x\"}}",
+      "{\"variant\":\"classic\",\"letter_distribution\":\"english\","
+      "\"board_layout\":\"standard15\",\"player\":{\"win_pct_model\":"
+      "\"/etc/passwd\"}}",
+      "{\"variant\":\"classic\",\"letter_distribution\":\"english\","
+      "\"board_layout\":\"standard15\",\"player1\":{\"lexicon\":"
+      "\"NWL23..x\"}}",
   };
   for (size_t i = 0; i < sizeof(incomplete) / sizeof(incomplete[0]); i++) {
     const JsonValue *request = json_parse(incomplete[i], error_stack);
@@ -996,6 +1011,17 @@ static void test_a_request_must_state_its_distribution_and_layout(void) {
   }
 
   error_stack_destroy(error_stack);
+
+  // A rack info table's name joins a lexicon and leaves with one dot.
+  assert(data_filepaths_is_safe_name("NWL23.CSW21"));
+  assert(data_filepaths_is_safe_name("CSW24"));
+  assert(!data_filepaths_is_safe_name(".."));
+  assert(!data_filepaths_is_safe_name("a..b"));
+  assert(!data_filepaths_is_safe_name("a.b.c"));
+  assert(!data_filepaths_is_safe_name("a."));
+  assert(!data_filepaths_is_safe_name(".a"));
+  assert(!data_filepaths_is_safe_name("a/b"));
+  assert(!data_filepaths_is_safe_name(""));
 }
 
 // The retry budget exists to outlast a birdtest deployment, which stops the
@@ -1025,6 +1051,100 @@ static void test_http_retries_outlast_a_server_deployment(void) {
   const int capped = http_client_backoff_seconds(1000);
   assert(capped == HTTP_CLIENT_MAX_BACKOFF_SECONDS);
   assert(capped <= 60);
+
+  // A 429's Retry-After is obeyed, but never for long: it was once read from
+  // the wrong libcurl field, the connect time in microseconds, and a worker
+  // slept for hours on its first 429.
+  assert(http_client_rate_limit_wait_seconds(0) == 1);
+  assert(http_client_rate_limit_wait_seconds(3) == 3);
+  assert(http_client_rate_limit_wait_seconds(45000) ==
+         HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS);
+  assert(HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS <= 60);
+}
+
+// Copies src's bytes over dst, the way contribute writes a fetched KLV.
+static void copy_file_bytes(const char *src, const char *dst) {
+  FILE *in = fopen_or_die(src, "rb");
+  FILE *out = fopen_or_die(dst, "wb");
+  char buffer[65536];
+  size_t read_count;
+  while ((read_count = fread(buffer, 1, sizeof(buffer), in)) > 0) {
+    fwrite_or_die(buffer, 1, read_count, out, "copied klv bytes");
+  }
+  fclose_or_die(in);
+  fclose_or_die(out);
+}
+
+static bool klv_values_match(const KLV *a, const KLV *b) {
+  if (klv_get_number_of_leaves(a) != klv_get_number_of_leaves(b)) {
+    return false;
+  }
+  for (uint32_t i = 0; i < klv_get_number_of_leaves(a); i++) {
+    if (klv_get_indexed_leave_value(a, i) !=
+        klv_get_indexed_leave_value(b, i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A leave task writes the KLV it fetched under one fixed name and loads it.
+// Lexical data is cached by name, so from the second leave task in a process
+// the load found the previous generation's KLV already in memory under that
+// name and played it, whatever the file now held. A file that changes on disk
+// must be read again; one that has not must not be.
+static void test_a_rewritten_klv_is_read_again(void) {
+  const char *name = "CSW21_contribute_klv_reload";
+  const char *path = "testdata/lexica/CSW21_contribute_klv_reload.klv2";
+  KLV *csw21 = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
+  KLV *csw24 = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW24");
+  assert(!klv_values_match(csw21, csw24));
+
+  Config *config = config_create_or_die("set -lex CSW21");
+  PlayersData *players_data = config_get_players_data(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  // From wherever the test data path resolves each name, which is where the
+  // two reference KLVs above were read from.
+  char *csw21_path = data_filepaths_get_readable_filename(
+      DEFAULT_TEST_DATA_PATH, "CSW21", DATA_FILEPATH_TYPE_KLV, error_stack);
+  char *csw24_path = data_filepaths_get_readable_filename(
+      DEFAULT_TEST_DATA_PATH, "CSW24", DATA_FILEPATH_TYPE_KLV, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  copy_file_bytes(csw21_path, path);
+  config_contribute_load_lexicon_and_variant(
+      config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
+      false, NULL, NULL, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(klv_values_match(players_data_get_klv(players_data, 0), csw21));
+  const KLV *first = players_data_get_klv(players_data, 0);
+
+  // Unchanged on disk: the loaded copy is kept.
+  config_contribute_load_lexicon_and_variant(
+      config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
+      false, NULL, NULL, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(players_data_get_klv(players_data, 0) == first);
+
+  // The next generation's artifact, written under the same name.
+  copy_file_bytes(csw24_path, path);
+  config_contribute_load_lexicon_and_variant(
+      config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
+      false, NULL, NULL, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  for (int player_index = 0; player_index < 2; player_index++) {
+    assert(klv_values_match(players_data_get_klv(players_data, player_index),
+                            csw24));
+  }
+
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  klv_destroy(csw21);
+  klv_destroy(csw24);
+  free(csw21_path);
+  free(csw24_path);
+  (void)remove(path);
 }
 
 void test_contribute(void) {
@@ -1044,4 +1164,5 @@ void test_contribute(void) {
   test_results_carry_every_key_the_server_reads();
   test_capturing_positions_does_not_change_the_games();
   test_player_settings_do_not_leak_between_tasks();
+  test_a_rewritten_klv_is_read_again();
 }

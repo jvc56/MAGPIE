@@ -428,6 +428,10 @@ struct Config {
   // pinned a hash for, and these carry that name to the load.
   char *p1_rit_name_override;
   char *p2_rit_name_override;
+  // The identity (get_file_identity) of the file each player's lexical data
+  // was read from, as of the last contribute load; NULL for data that load
+  // did not read or could not stat. See config_contribute_evict_changed_data.
+  char *contribute_loaded_identities[NUMBER_OF_DATA][2];
   bool autosave_gcg;
   bool fg_required;
   bool loaded_settings;
@@ -974,7 +978,13 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.1.0"
+// birdtest refuses a claim from a build below its MIN_MAGPIE_VERSION, and that
+// floor is the only way it can keep a build that computes a wrong result off
+// its jobs. So the version moves with every change that can alter what a task
+// computes or submits, and the floor moves with it. 0.1.1: a capturing static
+// player no longer plays its worst move (dfc79f1a); a leave task plays the KLV
+// it fetched rather than the one before it; a 429 no longer sleeps for hours.
+#define MAGPIE_VERSION "0.1.1"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -7175,6 +7185,29 @@ bool config_contribute_validate_common(const JsonValue *request,
   if (!error_stack_is_empty(error_stack)) {
     return false;
   }
+  // Every other name a request carries becomes a path too: each player's
+  // lexicon, leaves and win percentage model, and the rack info table a
+  // player pins, which this worker may be asked to *build* -- 1.9 GB written
+  // wherever the name points.
+  static const char *const player_keys[] = {
+      CONTRIBUTE_KEY_PLAYER, CONTRIBUTE_KEY_PLAYER1, CONTRIBUTE_KEY_PLAYER2};
+  static const char *const name_keys[] = {
+      CONTRIBUTE_KEY_PLAYER_LEXICON, CONTRIBUTE_KEY_LEAVES,
+      CONTRIBUTE_KEY_WIN_PCT_MODEL, CONTRIBUTE_KEY_RIT_NAME};
+  for (size_t p = 0; p < sizeof(player_keys) / sizeof(player_keys[0]); p++) {
+    const JsonValue *player = json_object_get(request, player_keys[p]);
+    for (size_t k = 0; player && k < sizeof(name_keys) / sizeof(name_keys[0]);
+         k++) {
+      const char *name = json_get_string_or_null(player, name_keys[k]);
+      if (name && !data_filepaths_is_safe_name(name)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+            get_formatted_string("server sent an unusable %s.%s: '%s'",
+                                 player_keys[p], name_keys[k], name));
+        return false;
+      }
+    }
+  }
   if ((*lexicon && !contribute_is_safe_data_name(*lexicon)) ||
       !contribute_is_safe_data_name(*variant) ||
       (*letter_distribution &&
@@ -7549,6 +7582,97 @@ static void config_contribute_set_rit_names(Config *config, const char *p1,
   config->p2_rit_name_override = p2 ? string_duplicate(p2) : NULL;
 }
 
+// The lexical data a contribute load can find already in memory, and the
+// file each is read from.
+static const players_data_t contribute_cached_types[] = {
+    PLAYERS_DATA_TYPE_KWG, PLAYERS_DATA_TYPE_KLV, PLAYERS_DATA_TYPE_WMP,
+    PLAYERS_DATA_TYPE_RIT};
+
+static data_filepath_t
+contribute_cached_filepath_type(players_data_t players_data_type) {
+  switch (players_data_type) {
+  case PLAYERS_DATA_TYPE_KLV:
+    return DATA_FILEPATH_TYPE_KLV;
+  case PLAYERS_DATA_TYPE_WMP:
+    return DATA_FILEPATH_TYPE_WORDMAP;
+  case PLAYERS_DATA_TYPE_RIT:
+    return DATA_FILEPATH_TYPE_RACK_INFO_TABLE;
+  default:
+    return DATA_FILEPATH_TYPE_KWG;
+  }
+}
+
+// The identity of the file `player_index`'s loaded data of this type would be
+// read from now, or NULL if nothing is loaded or the file cannot be found.
+static char *contribute_current_identity(const Config *config,
+                                         players_data_t players_data_type,
+                                         int player_index) {
+  const char *name = players_data_get_data_name(
+      config->players_data, players_data_type, player_index);
+  if (!name) {
+    return NULL;
+  }
+  ErrorStack *path_errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(
+      config->data_paths, name,
+      contribute_cached_filepath_type(players_data_type), path_errors);
+  char *identity = NULL;
+  if (error_stack_is_empty(path_errors)) {
+    identity = get_file_identity(path);
+  }
+  error_stack_destroy(path_errors);
+  free(path);
+  return identity;
+}
+
+// Players' lexical data is cached in memory by *name*: a load that finds a
+// KWG, KLV, wordmap or rack info table of the requested name already loaded
+// keeps it and never opens the file. What a task has verified, though, is the
+// file on disk -- its digest against the job's pin, or (for a leave task's
+// KLV) the artifact just fetched and written under a fixed name. Every leave
+// task after a process's first wrote the new generation's KLV over the old
+// one and then played the old one, still in memory under the same name; a
+// wordmap or table this run rebuilt after its pin moved, or a lexicon a
+// contributor updated mid-run, went the same way. So before each load, data
+// whose file has changed since it was read -- or that this path did not read
+// itself (settings.txt, an earlier command) -- is dropped and read again.
+static void config_contribute_evict_changed_data(Config *config) {
+  for (size_t i = 0;
+       i < sizeof(contribute_cached_types) / sizeof(contribute_cached_types[0]);
+       i++) {
+    const players_data_t type = contribute_cached_types[i];
+    bool changed = false;
+    for (int player_index = 0; player_index < 2; player_index++) {
+      if (!players_data_get_data(config->players_data, type, player_index)) {
+        continue;
+      }
+      char *identity = contribute_current_identity(config, type, player_index);
+      const char *recorded =
+          config->contribute_loaded_identities[type][player_index];
+      if (!identity || !recorded || !strings_equal(identity, recorded)) {
+        changed = true;
+      }
+      free(identity);
+    }
+    if (changed) {
+      players_data_evict(config->players_data, type);
+    }
+  }
+}
+
+static void config_contribute_record_loaded_data(Config *config) {
+  for (size_t i = 0;
+       i < sizeof(contribute_cached_types) / sizeof(contribute_cached_types[0]);
+       i++) {
+    const players_data_t type = contribute_cached_types[i];
+    for (int player_index = 0; player_index < 2; player_index++) {
+      free(config->contribute_loaded_identities[type][player_index]);
+      config->contribute_loaded_identities[type][player_index] =
+          contribute_current_identity(config, type, player_index);
+    }
+  }
+}
+
 // Sets the variant, board layout, lexicon, letter distribution and (for each
 // player) leaves that config_autoplay or game_load_cgp then need already
 // loaded -- the direct-value equivalent of "-var/-bdn/-lex/-ld/-k1/-k2", never
@@ -7604,6 +7728,7 @@ void config_contribute_load_lexicon_and_variant(
     const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
     const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
     const char *p1_rit_name, const char *p2_rit_name, ErrorStack *error_stack) {
+  config_contribute_evict_changed_data(config);
   config_contribute_set_rit_names(config, p1_rit_name, p2_rit_name);
   for (int player_index = 0; player_index < 2; player_index++) {
     players_data_set_use_when_available(
@@ -7645,6 +7770,7 @@ void config_contribute_load_lexicon_and_variant(
       /*p1_use_wit_has_value=*/false, /*p2_use_wit_has_value=*/false,
       /*disable_rit=*/false, /*is_loading_game_history=*/false, error_stack);
   free(default_ld);
+  config_contribute_record_loaded_data(config);
 }
 
 // Parses a threshold/sampling-rule name the same way the CLI's th1/th2/
@@ -11620,6 +11746,11 @@ void config_destroy(Config *config) {
   free(config->peg_noprune_str);
   free(config->p1_rit_name_override);
   free(config->p2_rit_name_override);
+  for (int type = 0; type < NUMBER_OF_DATA; type++) {
+    for (int player_index = 0; player_index < 2; player_index++) {
+      free(config->contribute_loaded_identities[type][player_index]);
+    }
+  }
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);

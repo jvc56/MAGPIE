@@ -576,6 +576,34 @@ bool path_is_directory(const char *path) {
   return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
 }
 
+// (size, mtime) alone collides: a file replaced with different bytes of the
+// same size inside one mtime tick is identical to the old one, and archive
+// extraction routinely sets mtimes rather than letting them fall to now. The
+// inode and the ctime close that -- ctime moves on any change to the inode and
+// cannot be set backwards by a program -- but only at the resolution they are
+// read at: whole seconds is not enough, because the whole problem is two
+// writes inside one tick. So the identity carries nanoseconds where the
+// filesystem records them.
+#if defined(__APPLE__)
+#define STAT_MTIM(info) ((info).st_mtimespec)
+#define STAT_CTIM(info) ((info).st_ctimespec)
+#else
+#define STAT_MTIM(info) ((info).st_mtim)
+#define STAT_CTIM(info) ((info).st_ctim)
+#endif
+
+char *get_file_identity(const char *path) {
+  struct stat info;
+  if (!path || stat(path, &info) != 0) {
+    return NULL;
+  }
+  return get_formatted_string(
+      "%lld|%lld.%09ld|%llu|%lld.%09ld", (long long)info.st_size,
+      (long long)STAT_MTIM(info).tv_sec, (long)STAT_MTIM(info).tv_nsec,
+      (unsigned long long)info.st_ino, (long long)STAT_CTIM(info).tv_sec,
+      (long)STAT_CTIM(info).tv_nsec);
+}
+
 enum {
   FILENAME_SORT_DIGIT_BUFFER_SIZE = 256,
 };

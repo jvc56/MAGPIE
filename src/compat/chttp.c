@@ -122,7 +122,7 @@ static bool chttp_win32_perform_request(const ChttpRequest *request,
 
   resources->session =
       WinHttpOpen(L"MAGPIE", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                 WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+                  WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
   if (!resources->session) {
     error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
                      string_duplicate("WinHttpOpen failed"));
@@ -145,8 +145,8 @@ static bool chttp_win32_perform_request(const ChttpRequest *request,
       (components.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
   resources->handle = WinHttpOpenRequest(
       resources->connection, request->method == CHTTP_POST ? L"POST" : L"GET",
-      resources->path, NULL, WINHTTP_NO_REFERER,
-      WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+      resources->path, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+      flags);
   if (!resources->handle) {
     error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
                      string_duplicate("WinHttpOpenRequest failed"));
@@ -194,7 +194,7 @@ static bool chttp_win32_perform_request(const ChttpRequest *request,
   char *body = (char *)malloc_or_die(capacity);
   DWORD available = 0;
   while (WinHttpQueryDataAvailable(resources->handle, &available) &&
-        available > 0) {
+         available > 0) {
     if (length + available + 1 > capacity) {
       while (length + available + 1 > capacity) {
         capacity *= 2;
@@ -219,9 +219,9 @@ void chttp_request(const ChttpRequest *request, ChttpResponse *response,
 
   wchar_t *wide_url = widen(request->url);
   if (!wide_url) {
-    error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
-                     get_formatted_string("could not encode url %s",
-                                          request->url));
+    error_stack_push(
+        error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
+        get_formatted_string("could not encode url %s", request->url));
     return;
   }
 
@@ -256,6 +256,11 @@ enum {
   CURLOPT_POSTFIELDSIZE_LARGE = 30120,
   CURLOPT_HTTPHEADER = 10023,
   CURLOPT_TIMEOUT = 13,
+  CURLOPT_LOW_SPEED_LIMIT = 19,
+  CURLOPT_LOW_SPEED_TIME = 20,
+  CURLOPT_CONNECTTIMEOUT = 78,
+  CURLOPT_POSTREDIR = 161,
+  CURL_REDIR_POST_ALL = 7,
   CURLOPT_FOLLOWLOCATION = 52,
   CURLOPT_MAXREDIRS = 68,
   CURLOPT_SSL_VERIFYPEER = 64,
@@ -264,7 +269,10 @@ enum {
   CURLOPT_POST = 47,
   CURLOPT_NOSIGNAL = 99,
   CURLINFO_RESPONSE_CODE = 2097154,
-  CURLINFO_RETRY_AFTER = 6291508,
+  // CURLINFO_OFF_T (0x600000) + 57. It was + 52, which is
+  // CURLINFO_CONNECT_TIME_T: the connect time in microseconds, read as the
+  // seconds a 429 said to wait -- hours, for any real connection.
+  CURLINFO_RETRY_AFTER = 6291513,
 };
 
 typedef CURL *(*curl_easy_init_fn)(void);
@@ -298,7 +306,10 @@ static bool load_curl(void) {
 
   // Distributions and macOS name the library differently; try each in turn.
   static const char *const candidates[] = {
-      "libcurl.so.4", "libcurl.so", "libcurl.4.dylib", "libcurl.dylib",
+      "libcurl.so.4",
+      "libcurl.so",
+      "libcurl.4.dylib",
+      "libcurl.dylib",
   };
   for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
     curl_api.handle = dlopen(candidates[i], RTLD_LAZY | RTLD_LOCAL);
@@ -389,8 +400,22 @@ void chttp_request(const ChttpRequest *request, ChttpResponse *response,
   curl_api.easy_setopt(handle, CURLOPT_URL, request->url);
   curl_api.easy_setopt(handle, CURLOPT_WRITEFUNCTION, write_callback);
   curl_api.easy_setopt(handle, CURLOPT_WRITEDATA, &buffer);
-  curl_api.easy_setopt(handle, CURLOPT_TIMEOUT, (long)request->timeout_seconds);
+  // A stall bound, not a bound on the whole exchange (see ChttpRequest): it
+  // was CURLOPT_TIMEOUT at 120 seconds, which no uplink under about 4.5 Mb/s
+  // could send the largest result the server accepts inside, and every retry
+  // uploaded it all again.
+  curl_api.easy_setopt(handle, CURLOPT_CONNECTTIMEOUT,
+                       (long)request->timeout_seconds);
+  curl_api.easy_setopt(handle, CURLOPT_LOW_SPEED_LIMIT, 1L);
+  curl_api.easy_setopt(handle, CURLOPT_LOW_SPEED_TIME,
+                       (long)request->timeout_seconds);
+  curl_api.easy_setopt(handle, CURLOPT_TIMEOUT,
+                       (long)CHTTP_MAX_EXCHANGE_SECONDS);
   curl_api.easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
+  // A redirect keeps a POST a POST. libcurl's default turns it into a GET on
+  // a 301 or 302 -- a server URL given as http:// behind a load balancer that
+  // redirects to https:// -- and the claim is answered 405.
+  curl_api.easy_setopt(handle, CURLOPT_POSTREDIR, (long)CURL_REDIR_POST_ALL);
   curl_api.easy_setopt(handle, CURLOPT_MAXREDIRS, 5L);
   curl_api.easy_setopt(handle, CURLOPT_USERAGENT, "MAGPIE");
   // Without this libcurl installs signal handlers, which is hostile inside a

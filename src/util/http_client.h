@@ -56,14 +56,21 @@ void http_client_set_retry_listener(HttpClient *client,
                                     http_client_retry_listener_t listener,
                                     void *context);
 
-// One attempt, with no retry of a transport failure or a 5xx. For a request
-// whose own schedule is the retry: the heartbeat goes out every thirty seconds
-// whatever happened to the last one, and a heartbeat that spent minutes backing
-// off would hold up the task's submission, which waits for the heartbeat
-// thread to stop.
+// One attempt, with no retry of a transport failure, a 5xx or a 429. For a
+// request whose own schedule is the retry: the heartbeat goes out every thirty
+// seconds whatever happened to the last one, and a heartbeat that spent minutes
+// backing off would hold up the task's submission, which waits for the
+// heartbeat thread to stop.
 void http_client_post_json_once(HttpClient *client, const char *path,
                                 const char *body, ChttpResponse *response,
                                 ErrorStack *error_stack);
+
+// Seconds to wait before retrying a 429 that said to wait
+// `retry_after_seconds` (0 when it said nothing): at least 1, and never more
+// than HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS. birdtest's limiter refills a
+// token a second; a longer wait is a misconfigured or hostile server, and a
+// worker asleep on it lets its claim lapse.
+int http_client_rate_limit_wait_seconds(int retry_after_seconds);
 
 // Seconds to wait before retry number `retry_idx` (from 0) of a transport
 // failure or a 5xx: 1, 2, 4, ... and never more than

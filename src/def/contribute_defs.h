@@ -17,6 +17,7 @@
 enum {
   HTTP_CLIENT_MAX_TRANSIENT_RETRIES = 20,
   HTTP_CLIENT_MAX_BACKOFF_SECONDS = 60,
+  HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS = 60,
 };
 
 // Task request fields, read in config.c's config_contribute_* functions.
@@ -70,7 +71,6 @@ enum {
 // config_contribute_ensure_rack_info_table.
 #define CONTRIBUTE_KEY_RIT_NAME "rit_name"
 #define CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS "min_play_iterations"
-#define CONTRIBUTE_KEY_PLAY_CHOOSER_TIME_SECS "play_chooser_time_secs"
 #define CONTRIBUTE_KEY_THRESHOLD "threshold"
 #define CONTRIBUTE_KEY_SAMPLING_RULE "sampling_rule"
 #define CONTRIBUTE_KEY_INFERENCE_MARGIN "inference_margin"
@@ -85,15 +85,6 @@ enum {
 // config_contribute_apply_shared_settings.
 #define CONTRIBUTE_KEY_WIN_PCT_MODEL "win_pct_model"
 #define CONTRIBUTE_KEY_MOVEGEN_MARGIN "movegen_margin"
-#define CONTRIBUTE_KEY_ENDGAME_PLIES "endgame_plies"
-#define CONTRIBUTE_KEY_ENDGAME_TOP_K "endgame_top_k"
-#define CONTRIBUTE_KEY_ENDGAME_TIME_LIMIT_SECS "endgame_time_limit_secs"
-#define CONTRIBUTE_KEY_PRE_ENDGAME_TOP_K "pre_endgame_top_k"
-#define CONTRIBUTE_KEY_PRE_ENDGAME_TIME_LIMIT_SECS "pre_endgame_time_limit_secs"
-#define CONTRIBUTE_KEY_PRE_ENDGAME_STRIDE "pre_endgame_stride"
-#define CONTRIBUTE_KEY_PRE_ENDGAME_NO_PRUNE "pre_endgame_no_prune"
-#define CONTRIBUTE_KEY_PRE_ENDGAME_PESSIMISTIC "pre_endgame_pessimistic"
-#define CONTRIBUTE_KEY_PRE_ENDGAME_NESTED "pre_endgame_nested"
 
 // Game recorder ("games" job type): written once per GameData set
 // (all_games, and divergent_games for a paired run).

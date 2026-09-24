@@ -16,7 +16,6 @@
 #include "../util/string_util.h"
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 enum {
   HEARTBEAT_INTERVAL_SECONDS = 30,
@@ -232,35 +231,15 @@ static bool role_to_filepath_type(const char *role, data_filepath_t *out) {
   return true;
 }
 
-// Identity of a file's *contents*, as far as the filesystem can report it.
-//
-// (path, size, mtime) alone collides: a file replaced with different bytes of
-// the same size inside one mtime tick keys identically to the old one, and
-// archive extraction routinely sets mtimes rather than letting them fall to
-// now. The inode and the ctime close that -- ctime moves on any change to the
-// inode and cannot be set backwards by a program -- but only at the
-// resolution they are read at: whole seconds is not enough, because the whole
-// problem is two writes inside one tick. So the key carries nanoseconds where
-// the filesystem records them. A cached digest must never be the reason a bad
-// file passes.
-#if defined(__APPLE__)
-#define STAT_MTIM(info) ((info).st_mtimespec)
-#define STAT_CTIM(info) ((info).st_ctimespec)
-#else
-#define STAT_MTIM(info) ((info).st_mtim)
-#define STAT_CTIM(info) ((info).st_ctim)
-#endif
-
+// The path is part of the key: the cache holds digests for many files.
 char *contribute_digest_cache_key(const char *path) {
-  struct stat info;
-  if (stat(path, &info) != 0) {
+  char *identity = get_file_identity(path);
+  if (!identity) {
     return NULL;
   }
-  return get_formatted_string(
-      "%s|%lld|%lld.%09ld|%llu|%lld.%09ld", path, (long long)info.st_size,
-      (long long)STAT_MTIM(info).tv_sec, (long)STAT_MTIM(info).tv_nsec,
-      (unsigned long long)info.st_ino, (long long)STAT_CTIM(info).tv_sec,
-      (long)STAT_CTIM(info).tv_nsec);
+  char *key = get_formatted_string("%s|%s", path, identity);
+  free(identity);
+  return key;
 }
 
 static const char *cache_lookup(const StringList *cache, const char *key) {
@@ -368,13 +347,19 @@ static bool expected_data_matches(ContributeState *state,
       continue;
     }
 
-    char *path =
-        data_filepaths_get_readable_filename(data_paths, name, type, errors);
+    // The name is the server's, and becomes a path: one that could leave the
+    // data directory is never resolved, and so never hashed and reported
+    // back. It is simply a file this worker does not have.
+    char *path = NULL;
     char *actual = NULL;
-    if (error_stack_is_empty(errors)) {
-      actual = hash_with_cache(state, path, errors);
+    if (data_filepaths_is_safe_name(name)) {
+      path =
+          data_filepaths_get_readable_filename(data_paths, name, type, errors);
+      if (error_stack_is_empty(errors)) {
+        actual = hash_with_cache(state, path, errors);
+      }
+      error_stack_reset(errors);
     }
-    error_stack_reset(errors);
 
     if (actual && strings_equal(actual, expected_digest)) {
       free(actual);

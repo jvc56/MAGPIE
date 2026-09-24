@@ -363,6 +363,22 @@ void players_data_set(PlayersData *players_data,
                              new_data_is_shared);
 }
 
+void players_data_evict(PlayersData *players_data,
+                        players_data_t players_data_type) {
+  const bool data_is_shared =
+      players_data_get_is_shared(players_data, players_data_type);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const int data_index =
+        players_data_get_player_data_index(players_data_type, player_index);
+    if (player_index == 0 || !data_is_shared) {
+      players_data_destroy_data(players_data, players_data_type, player_index);
+    }
+    // Not players_data_set_data, which would also clear use_when_available.
+    players_data->data[data_index] = NULL;
+  }
+  players_data_set_is_shared(players_data, players_data_type, false);
+}
+
 // Destroys and recreates the existing data for both players.
 // A word info table describes the words of the KWG it was built from. Pair
 // each player's table with that player's KWG by hash, so a stale or mismatched

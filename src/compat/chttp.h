@@ -35,8 +35,17 @@ typedef struct ChttpRequest {
   // is authoritative.
   const char *body;
   size_t body_length;
+  // How long the exchange may make no progress -- connecting, or moving no
+  // bytes in either direction -- before it fails. Not a bound on the whole
+  // exchange: a result of tens of megabytes on a contributor's uplink takes
+  // minutes to send and is still progressing. CHTTP_MAX_EXCHANGE_SECONDS is
+  // the only bound on that.
   int timeout_seconds;
 } ChttpRequest;
+
+enum {
+  CHTTP_MAX_EXCHANGE_SECONDS = 3600,
+};
 
 typedef struct ChttpResponse {
   long status_code;
