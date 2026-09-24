@@ -19,6 +19,7 @@
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
+#include "win_pct.h"
 #include <assert.h>
 #include <math.h>
 #include <stdbool.h>
@@ -145,6 +146,15 @@ struct PATWeights {
   bool run_through;
   // See PAT_FIT_SHRINK_ROW_PREFIX.
   bool fit_shrink;
+  // See PAT_UTILITY_ADJUST_ROW_PREFIX. The tables are built at load when
+  // utility_adjust is nonzero and NULL otherwise, indexed
+  // [(unseen - 1) * PAT_UTILITY_WIDTH + margin + PAT_UTILITY_MARGIN_LIMIT]:
+  // the correction itself, and its maximum over all margins at or above
+  // the index (a move can only add score).
+  double utility_adjust;
+  int utility_max_unseen;
+  Equity *utility_table;
+  Equity *utility_suffix_max;
   // Per-stage factor on the applied term (see the row prefixes in
   // pat_defs.h); indexed by PAT_STAGE_*.
   double stage_scale[PAT_STAGE_COUNT];
@@ -478,6 +488,10 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
   pat->fit_shrink = PAT_DEFAULT_FIT_SHRINK;
+  pat->utility_adjust = 0.0;
+  pat->utility_max_unseen = 0;
+  pat->utility_table = NULL;
+  pat->utility_suffix_max = NULL;
   for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
     pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
   }
@@ -492,10 +506,93 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   return pat;
 }
 
+enum { PAT_UTILITY_WIDTH = 2 * PAT_UTILITY_MARGIN_LIMIT + 1 };
+
+// The default sim utility (win 1.0, spread 0.5, scale 100; see
+// sim_utility_blend) of the mover at margin with unseen tiles left and the
+// opponent on turn.
+static double pat_utility_mover_value(const WinPct *win_pcts, int margin,
+                                      unsigned int unseen) {
+  const double win = 1.0 - win_pct_get(win_pcts, -margin, unseen);
+  const double scaled_spread = margin / 100.0;
+  const double spread_sigmoid =
+      scaled_spread >= 0.0 ? 1.0 / (1.0 + exp(-scaled_spread))
+                           : exp(scaled_spread) / (1.0 + exp(scaled_spread));
+  return (2.0 / 3.0) * win + (1.0 / 3.0) * spread_sigmoid;
+}
+
+static void pat_build_utility_tables(PATWeights *pat, const WinPct *win_pcts) {
+  const int max_unseen = (int)win_pct_get_max_tiles_unseen(win_pcts);
+  const size_t size = (size_t)max_unseen * PAT_UTILITY_WIDTH;
+  pat->utility_max_unseen = max_unseen;
+  pat->utility_table = malloc_or_die(sizeof(Equity) * size);
+  pat->utility_suffix_max = malloc_or_die(sizeof(Equity) * size);
+  const int step = PAT_UTILITY_KAPPA_STEP;
+  for (int unseen = 1; unseen <= max_unseen; unseen++) {
+    Equity *row = pat->utility_table + (size_t)(unseen - 1) * PAT_UTILITY_WIDTH;
+    Equity *suffix =
+        pat->utility_suffix_max + (size_t)(unseen - 1) * PAT_UTILITY_WIDTH;
+    for (int offset = 0; offset < PAT_UTILITY_WIDTH; offset++) {
+      const int margin = offset - PAT_UTILITY_MARGIN_LIMIT;
+      const double lower =
+          pat_utility_mover_value(win_pcts, margin - step, (unsigned)unseen);
+      const double middle =
+          pat_utility_mover_value(win_pcts, margin, (unsigned)unseen);
+      const double upper =
+          pat_utility_mover_value(win_pcts, margin + step, (unsigned)unseen);
+      const double slope = (upper - lower) / (2.0 * step);
+      const double curvature = (upper - 2.0 * middle + lower) / (step * step);
+      const double kappa = slope > 0.0 ? -curvature / slope : 0.0;
+      row[offset] = double_to_equity(0.5 * pat->utility_adjust * kappa);
+    }
+    Equity running = row[PAT_UTILITY_WIDTH - 1];
+    for (int offset = PAT_UTILITY_WIDTH - 1; offset >= 0; offset--) {
+      if (row[offset] > running) {
+        running = row[offset];
+      }
+      suffix[offset] = running;
+    }
+  }
+}
+
+// Row and column of the tables for a move to unseen from margin.
+static inline size_t pat_utility_index(const PATWeights *pat, int unseen,
+                                       int margin) {
+  if (unseen < 1) {
+    unseen = 1;
+  }
+  if (unseen > pat->utility_max_unseen) {
+    unseen = pat->utility_max_unseen;
+  }
+  if (margin < -PAT_UTILITY_MARGIN_LIMIT) {
+    margin = -PAT_UTILITY_MARGIN_LIMIT;
+  }
+  if (margin > PAT_UTILITY_MARGIN_LIMIT) {
+    margin = PAT_UTILITY_MARGIN_LIMIT;
+  }
+  return (size_t)(unseen - 1) * PAT_UTILITY_WIDTH +
+         (size_t)(margin + PAT_UTILITY_MARGIN_LIMIT);
+}
+
+void pat_set_utility_adjust(PATWeights *pat, double utility_adjust,
+                            const WinPct *win_pcts) {
+  free(pat->utility_table);
+  free(pat->utility_suffix_max);
+  pat->utility_table = NULL;
+  pat->utility_suffix_max = NULL;
+  pat->utility_max_unseen = 0;
+  pat->utility_adjust = utility_adjust;
+  if (utility_adjust > 0.0) {
+    pat_build_utility_tables(pat, win_pcts);
+  }
+}
+
 void pat_destroy(PATWeights *pat) {
   if (!pat) {
     return;
   }
+  free(pat->utility_table);
+  free(pat->utility_suffix_max);
   free(pat->name);
   free(pat->run_through_count);
   free(pat->run_through_score);
@@ -769,6 +866,21 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         continue;
       }
     }
+    if (has_prefix(PAT_UTILITY_ADJUST_ROW_PREFIX, line)) {
+      const char *text = line + strlen(PAT_UTILITY_ADJUST_ROW_PREFIX);
+      char *end = NULL;
+      const double parsed = strtod(text, &end);
+      if (end == text || parsed < 0.0) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a utility_adjust "
+                                 "that is not a nonnegative number: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->utility_adjust = parsed;
+      continue;
+    }
     if (has_prefix(PAT_FIT_SHRINK_ROW_PREFIX, line)) {
       const int flag =
           string_to_int(line + strlen(PAT_FIT_SHRINK_ROW_PREFIX), error_stack);
@@ -873,6 +985,14 @@ PATWeights *pat_create(const char *data_paths, const char *pat_name,
       if (error_stack_is_empty(error_stack)) {
         pat = pat_create_zeroed(pat_name);
         pat_parse_contents(pat, pat_name, split_contents, error_stack);
+        if (error_stack_is_empty(error_stack) && pat->utility_adjust > 0.0) {
+          WinPct *win_pcts =
+              win_pct_create(data_paths, PAT_UTILITY_WIN_PCT_NAME, error_stack);
+          if (error_stack_is_empty(error_stack)) {
+            pat_build_utility_tables(pat, win_pcts);
+          }
+          win_pct_destroy(win_pcts);
+        }
       }
       string_splitter_destroy(split_contents);
     }
@@ -920,6 +1040,10 @@ void pat_write(const PATWeights *pat, const char *data_paths,
                                       pat->run_through ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SHRINK_ROW_PREFIX,
                                       pat->fit_shrink ? 1 : 0);
+  if (pat->utility_adjust > 0.0) {
+    string_builder_add_formatted_string(
+        sb, "%s%.6f\n", PAT_UTILITY_ADJUST_ROW_PREFIX, pat->utility_adjust);
+  }
   string_builder_add_formatted_string(sb, "%s%.6f\n",
                                       PAT_STAGE_SCALE_EARLY_ROW_PREFIX,
                                       pat->stage_scale[PAT_STAGE_EARLY]);
@@ -2377,6 +2501,56 @@ static Equity pat_units_penalty_bound(const PATEvalContext *pat_eval_ctx,
 
 void pat_eval_context_disable(PATEvalContext *pat_eval_ctx) {
   pat_eval_ctx->weights = NULL;
+  pat_eval_ctx->utility_row = NULL;
+  pat_eval_ctx->utility_bound = 0;
+  pat_eval_ctx->utility_non_placement = 0;
+}
+
+void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
+                                  int bag) {
+  const PATWeights *weights = pat_eval_ctx->weights;
+  if (!weights || !weights->utility_table) {
+    return;
+  }
+  pat_eval_ctx->utility_margin = margin;
+  pat_eval_ctx->utility_bag = bag;
+  pat_eval_ctx->utility_row = weights->utility_table;
+  pat_eval_ctx->utility_non_placement =
+      weights
+          ->utility_table[pat_utility_index(weights, bag + RACK_SIZE, margin)];
+  // Every move adds a nonnegative score and draws 0 to RACK_SIZE tiles, so
+  // the largest correction any move can get is the largest suffix maximum
+  // from the current margin over those unseen counts.
+  Equity bound = pat_eval_ctx->utility_non_placement;
+  for (int drawn = 0; drawn <= RACK_SIZE; drawn++) {
+    const int unseen = (bag > drawn ? bag - drawn : 0) + RACK_SIZE;
+    const Equity suffix_max =
+        weights->utility_suffix_max[pat_utility_index(weights, unseen, margin)];
+    if (suffix_max > bound) {
+      bound = suffix_max;
+    }
+  }
+  pat_eval_ctx->utility_bound = bound;
+}
+
+// The utility correction for move (see PAT_UTILITY_ADJUST_ROW_PREFIX), 0
+// when the context has none.
+static inline Equity
+pat_eval_utility_adjustment(const PATEvalContext *pat_eval_ctx,
+                            const Move *move) {
+  if (!pat_eval_ctx->utility_row) {
+    return 0;
+  }
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return pat_eval_ctx->utility_non_placement;
+  }
+  const int bag = pat_eval_ctx->utility_bag;
+  const int drawn = move_get_tiles_played(move);
+  const int unseen = (bag > drawn ? bag - drawn : 0) + RACK_SIZE;
+  const int margin =
+      pat_eval_ctx->utility_margin + equity_to_int(move_get_score(move));
+  return pat_eval_ctx
+      ->utility_row[pat_utility_index(pat_eval_ctx->weights, unseen, margin)];
 }
 
 // Scans one of the context's units into `features`, reporting the lane it
@@ -2537,6 +2711,10 @@ static void pat_eval_context_load_units(
     bool drop_unweighted_units, uint32_t enabled_classes_mask,
     int opponent_rack_size) {
   pat_eval_ctx->weights = weights;
+  // Inert until pat_eval_context_set_utility says otherwise.
+  pat_eval_ctx->utility_row = NULL;
+  pat_eval_ctx->utility_bound = 0;
+  pat_eval_ctx->utility_non_placement = 0;
   if (!weights) {
     return;
   }
@@ -2866,8 +3044,11 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
+  // The utility correction is exact and cheap, so the bound carries it
+  // as is rather than bounding it.
+  const Equity utility = pat_eval_utility_adjustment(pat_eval_ctx, move);
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty);
+    return pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty) + utility;
   }
   const bool vertical = board_is_dir_vertical(move_get_dir(move));
   const int row_start = move_get_row_start(move);
@@ -2890,8 +3071,9 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   for (int word = 0; word < PAT_MASK_WORDS; word++) {
     combined_units[word] = affected_units[word] | leave_units[word];
   }
-  return pat_eval_scaled(pat_eval_ctx,
-                         pat_units_penalty_bound(pat_eval_ctx, combined_units));
+  return pat_eval_scaled(pat_eval_ctx, pat_units_penalty_bound(
+                                           pat_eval_ctx, combined_units)) +
+         utility;
 }
 
 // The opening adjustment for a move on an empty board (see
@@ -2923,9 +3105,11 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
     return 0;
   }
   // The opening adjustment is <= 0 like everything else here, so every
-  // bound on the term stays a bound without knowing about it.
+  // bound on the term stays a bound without knowing about it. The utility
+  // correction is not; see pat_eval_utility_bound.
   return pat_eval_move_penalty_scaled(pat_eval_ctx, move, leave) +
-         pat_opening_adjustment(pat_eval_ctx, move);
+         pat_opening_adjustment(pat_eval_ctx, move) +
+         pat_eval_utility_adjustment(pat_eval_ctx, move);
 }
 
 static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,

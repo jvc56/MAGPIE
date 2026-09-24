@@ -782,15 +782,19 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     const bool has_precomputed_equity = get_wmp_equity_without_move(
         gen, score, leave_value, &precomputed_equity);
     if (has_precomputed_equity && !gen->stop_on_threshold) {
+      // The defense term is <= 0 except for the utility correction, whose
+      // largest possible value keeps these upper-bound skips sound.
+      const Equity equity_bound =
+          precomputed_equity + pat_eval_utility_bound(&gen->pat_eval_ctx);
       if (gen->move_record_type == MOVE_RECORD_ALL &&
           move_list_get_count(gen->move_list) ==
               move_list_get_capacity(gen->move_list) &&
-          precomputed_equity < move_list_peek_equity(gen->move_list)) {
+          equity_bound < move_list_peek_equity(gen->move_list)) {
         return;
       }
       if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST &&
           gen->best_move_equity_or_score != EQUITY_INITIAL_VALUE &&
-          precomputed_equity < gen_get_cutoff_equity_or_score(gen)) {
+          equity_bound < gen_get_cutoff_equity_or_score(gen)) {
         return;
       }
     }
@@ -825,7 +829,8 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     const bool has_precomputed_equity = get_wmp_equity_without_move(
         gen, score, leave_value, &precomputed_equity);
     if (has_precomputed_equity &&
-        precomputed_equity < move_get_equity(gen_get_readonly_best_move(gen))) {
+        precomputed_equity + pat_eval_utility_bound(&gen->pat_eval_ctx) <
+            move_get_equity(gen_get_readonly_best_move(gen))) {
       return;
     }
     Move *current_move = gen_get_current_move(gen);
@@ -3424,6 +3429,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                                 ~args->pat_disabled_classes_mask,
                             rack_get_total_letters(&gen->opponent_rack));
       pat_eval_context_set_kwg(&gen->pat_eval_ctx, gen->kwg);
+      pat_eval_context_set_utility(
+          &gen->pat_eval_ctx,
+          equity_to_int(player_get_score(player) - player_get_score(opponent)),
+          gen->number_of_tiles_in_bag);
     } else {
       pat_eval_context_disable(&gen->pat_eval_ctx);
     }

@@ -9,6 +9,7 @@
 #include "letter_distribution.h"
 #include "move.h"
 #include "rack.h"
+#include "win_pct.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -278,6 +279,16 @@ typedef struct PATEvalContext {
   // <= 0, so the bounds stay valid, and it is a plain array lookup so the
   // shadow hot path pays nothing for it.
   Equity lane_penalty_bound[2][BOARD_DIM];
+  // Utility correction (see PAT_UTILITY_ADJUST_ROW_PREFIX), set per
+  // position by pat_eval_context_set_utility; utility_row is NULL (and the
+  // other two 0) when the weights carry none or it was not set.
+  const Equity *utility_row;
+  int utility_margin;
+  int utility_bag;
+  // The correction for an exchange or pass, and the largest any move can
+  // get this position (folded into every movegen bound).
+  Equity utility_non_placement;
+  Equity utility_bound;
   // Bitmask of PAT_CLASS_MASK_* classes this context actually applies
   // (weighted in the file and not excluded by the runtime mask); see
   // pat_eval_ctx_active_classes, the safe way to read this from outside
@@ -348,6 +359,16 @@ void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
 // unknown. Training never comes through here (it extracts every feature
 // from the board directly), so a class the weights have not learned yet
 // still reaches the fit.
+// Sets the position the utility correction (see
+// PAT_UTILITY_ADJUST_ROW_PREFIX) reads: the mover's lead before the move,
+// in points, and the tiles in the bag. A no-op when the loaded weights carry
+// no correction; every load or disable clears it.
+// Sets the utility correction (see PAT_UTILITY_ADJUST_ROW_PREFIX) and
+// builds its tables from win_pcts; 0 removes it.
+void pat_set_utility_adjust(PATWeights *pat, double utility_adjust,
+                            const WinPct *win_pcts);
+void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
+                                  int bag);
 void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg);
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
@@ -390,7 +411,19 @@ pat_eval_non_placement_penalty(const PATEvalContext *pat_eval_ctx) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
-  return pat_eval_ctx->pre_penalty;
+  return pat_eval_ctx->pre_penalty + pat_eval_ctx->utility_non_placement;
+}
+// The largest utility correction (see PAT_UTILITY_ADJUST_ROW_PREFIX) any
+// move can get at this position: every other PAT term is <= 0, so an
+// upper bound on a move's equity that leaves the PAT term out, or bounds it
+// by 0, stays a bound only once this is added. Zero when the context is
+// NULL, disabled, or carries no correction.
+static inline Equity
+pat_eval_utility_bound(const PATEvalContext *pat_eval_ctx) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights) {
+    return 0;
+  }
+  return pat_eval_ctx->utility_bound;
 }
 // Bitmask of PAT_CLASS_MASK_* classes this context actually applies, or 0
 // when the context is NULL or disabled. See placement_adjustment, which
@@ -424,7 +457,8 @@ pat_eval_lane_penalty_bound(const PATEvalContext *pat_eval_ctx, int dir,
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
-  return pat_eval_ctx->lane_penalty_bound[dir][lane];
+  return pat_eval_ctx->lane_penalty_bound[dir][lane] +
+         pat_eval_ctx->utility_bound;
 }
 // Extracts the feature vector for the board as it stands (no move overlay).
 // Used for the context baseline and, exactly as-is, by the training loop on
