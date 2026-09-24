@@ -20,6 +20,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "pat_overlap_pilot_test.h"
 #include "test_util.h"
 #include <assert.h>
@@ -2169,5 +2170,181 @@ void pat_move_choice_debug_confirm_csw24(void) {
   move_list_destroy(reply_list);
   move_list_destroy(choice_list);
   move_list_destroy(setup_list);
+  config_destroy(config);
+}
+
+// Decision diagnostic between two PAT models on any lexicon:
+//   patdecide:<lex>:<pat_a>:<pat_b>:<seed>:<positions>:<worlds>
+//       [:<shard>:<num_shards>]
+// Positions come from pat_a self-play stopped at a bag size drawn from
+// [1, PAT_DECIDE_MAX_BAG] (the top value is the opening). Each model picks
+// its move independently from the same exhaustive list; on disagreement both
+// moves are scored by pat_debug_hybrid_value on identical paired worlds
+// (opponent rack resampled before either move, production no-PAT static
+// continuation, four plies plus leave and winpct above
+// PAT_DEBUG_FULL_GAME_BAG bag tiles, game end at or below it). One CASE line
+// per disagreement (b minus a) and one POS line per shard, for pooling.
+// "none" loads no PAT for that side.
+enum { PAT_DECIDE_MAX_BAG = 86 };
+
+static PATWeights *pat_decide_load(Config *config, const char *name) {
+  if (strings_iequal(name, "none")) {
+    return NULL;
+  }
+  Game *game = config_get_game(config);
+  ErrorStack *error_stack = error_stack_create();
+  PATWeights *pat =
+      pat_create(config_get_data_paths(config), name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("could not load PAT file '%s'", name);
+  }
+  error_stack_destroy(error_stack);
+  pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
+                        game_get_ld(game));
+  return pat;
+}
+
+static bool pat_decide_file_exists(const char *path) {
+  FILE *file = fopen(path, "r");
+  if (!file) {
+    return false;
+  }
+  fclose(file);
+  return true;
+}
+
+void pat_move_choice_run_decision_spec(const char *spec) {
+  char buffer[512];
+  snprintf(buffer, sizeof(buffer), "%s", spec);
+  char *fields[8] = {NULL};
+  int num_fields = 0;
+  char *save = NULL;
+  for (char *tok = strtok_r(buffer, ":", &save); tok && num_fields < 8;
+       tok = strtok_r(NULL, ":", &save)) {
+    fields[num_fields++] = tok;
+  }
+  if (num_fields != 6 && num_fields != 8) {
+    log_fatal("patdecide spec needs 6 or 8 colon-separated fields: %s", spec);
+  }
+  const char *lexicon = fields[0];
+  const uint64_t seed_base = strtoull(fields[3], NULL, 10);
+  const int num_positions = atoi(fields[4]);
+  const int worlds = atoi(fields[5]);
+  const int shard = (num_fields == 8) ? atoi(fields[6]) : 0;
+  const int num_shards = (num_fields == 8) ? atoi(fields[7]) : 1;
+  assert(worlds > 0 && num_shards >= 1 && shard >= 0 && shard < num_shards);
+
+  char *rit_path = get_formatted_string("data/lexica/%s.rit", lexicon);
+  char *wit_path = get_formatted_string("data/lexica/%s.wit", lexicon);
+  char *set_cmd = get_formatted_string(
+      "set -lex %s -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-sinfer false -wmp true %s %s -winpct winpct",
+      lexicon,
+      pat_decide_file_exists(rit_path) ? "-rit true -ritmmap true" : "",
+      pat_decide_file_exists(wit_path) ? "-wit true" : "");
+  free(rit_path);
+  free(wit_path);
+  Config *config = config_create_or_die(set_cmd);
+  free(set_cmd);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  const WinPct *win_pcts = config_get_win_pcts(config);
+  assert(win_pcts);
+  PATWeights *pat_a = pat_decide_load(config, fields[1]);
+  PATWeights *pat_b = pat_decide_load(config, fields[2]);
+  const PATMoveChooser chooser_a = {.label = fields[1], .pat = pat_a};
+  const PATMoveChooser chooser_b = {.label = fields[2], .pat = pat_b};
+  Game *game = config_get_game(config);
+  MoveList *setup_list = move_list_create(1);
+  MoveList *choice_list =
+      move_list_create(PAT_MOVE_CHOICE_MOVE_LIST_CAPACITY);
+  MoveList *reply_list = move_list_create(1);
+
+  long positions = 0;
+  long disagreements = 0;
+  for (int attempt = 0; attempt < num_positions; attempt++) {
+    if (attempt % num_shards != shard) {
+      continue;
+    }
+    const uint64_t seed = seed_base + (uint64_t)attempt;
+    game_reset(game);
+    game_seed(game, seed);
+    draw_starting_racks(game);
+    player_set_pat(game_get_player(game, 0), pat_a);
+    player_set_pat(game_get_player(game, 1), pat_a);
+    const int target_bag = 1 + (int)(seed % (uint64_t)PAT_DECIDE_MAX_BAG);
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE &&
+           bag_get_letters(game_get_bag(game)) > target_bag) {
+      play_move(get_top_equity_move(game, setup_list), game, NULL);
+    }
+    const Board *board = game_get_board(game);
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE ||
+        bag_get_letters(game_get_bag(game)) == 0 ||
+        !board_get_cross_sets_valid(board) || board_get_transposed(board)) {
+      continue;
+    }
+    positions++;
+    const int mover_index = game_get_player_on_turn_index(game);
+    Move move_a;
+    Move move_b;
+    pat_move_choice_choose(game, mover_index, &chooser_a, choice_list,
+                           &move_a);
+    pat_move_choice_choose(game, mover_index, &chooser_b, choice_list,
+                           &move_b);
+    player_set_pat(game_get_player(game, mover_index), pat_a);
+    if (compare_moves_without_equity(&move_a, &move_b, true) == -1) {
+      continue;
+    }
+    disagreements++;
+    double sum_utility = 0.0;
+    double sum_utility_sq = 0.0;
+    double sum_spread = 0.0;
+    double sum_win = 0.0;
+    for (int world = 0; world < worlds; world++) {
+      const uint64_t world_seed =
+          seed + 500000000ULL + (uint64_t)world * 1000003ULL;
+      const PATDebugOracleValue value_a = pat_debug_hybrid_value(
+          game, &move_a, mover_index, world_seed, reply_list, win_pcts);
+      const PATDebugOracleValue value_b = pat_debug_hybrid_value(
+          game, &move_b, mover_index, world_seed, reply_list, win_pcts);
+      const double utility_diff = value_b.utility - value_a.utility;
+      sum_utility += utility_diff;
+      sum_utility_sq += utility_diff * utility_diff;
+      sum_spread += value_b.spread - value_a.spread;
+      sum_win += value_b.win_pct - value_a.win_pct;
+    }
+    const int bag = bag_get_letters(game_get_bag(game));
+    const bool bingo_a = move_get_type(&move_a) ==
+                             GAME_EVENT_TILE_PLACEMENT_MOVE &&
+                         move_get_tiles_played(&move_a) == RACK_SIZE;
+    const bool bingo_b = move_get_type(&move_b) ==
+                             GAME_EVENT_TILE_PLACEMENT_MOVE &&
+                         move_get_tiles_played(&move_b) == RACK_SIZE;
+    const char *bingo_class = (bingo_a && bingo_b)     ? "bb"
+                              : (!bingo_a && !bingo_b) ? "nn"
+                                                       : "mixed";
+    const double utility_mean = sum_utility / worlds;
+    const double utility_var =
+        worlds > 1 ? fmax(0.0, (sum_utility_sq - sum_utility * sum_utility /
+                                                      worlds) /
+                                   (worlds - 1))
+                   : 0.0;
+    printf("CASE\t%llu\t%d\t%s\t%.6f\t%.6f\t%.6f\t%.6f\n",
+           (unsigned long long)seed, bag, bingo_class, utility_mean,
+           sum_win / worlds, sum_spread / worlds, utility_var);
+  }
+  printf("POS\t%ld\t%ld\n", positions, disagreements);
+  move_list_destroy(reply_list);
+  move_list_destroy(choice_list);
+  move_list_destroy(setup_list);
+  player_set_pat(game_get_player(game, 0), NULL);
+  player_set_pat(game_get_player(game, 1), NULL);
+  if (pat_a) {
+    pat_destroy(pat_a);
+  }
+  if (pat_b) {
+    pat_destroy(pat_b);
+  }
   config_destroy(config);
 }

@@ -271,6 +271,14 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
   const int residual_mode = pat_get_fit_residual_mode(pat);
   if (residual_mode != 4) {
     for (int feature_index = PAT_FEATURE_LM_SPAN_START;
+         feature_index < PAT_FEATURE_PLAIN_HOOK_FLEX; feature_index++) {
+      fixed[feature_index + 1] = true;
+      fixed_value[feature_index + 1] =
+          -equity_to_double(pat_get_weight(pat, feature_index));
+    }
+  }
+  if (residual_mode != 6 && residual_mode != 7) {
+    for (int feature_index = PAT_FEATURE_PLAIN_HOOK_FLEX;
          feature_index < PAT_NUM_FEATURES; feature_index++) {
       fixed[feature_index + 1] = true;
       fixed_value[feature_index + 1] =
@@ -318,9 +326,16 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
           feature_index >= PAT_FEATURE_FLOAT_THROUGH_SCORE_START &&
           feature_index <
               PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT;
-      const bool is_lm = feature_index >= PAT_FEATURE_LM_SPAN_START;
+      const bool is_lm = feature_index >= PAT_FEATURE_LM_SPAN_START &&
+                         feature_index < PAT_FEATURE_PLAIN_HOOK_FLEX;
+      const bool is_plain_hook =
+          feature_index >= PAT_FEATURE_PLAIN_HOOK_FLEX;
+      const bool is_isolated_hook =
+          feature_index >= PAT_FEATURE_ISOLATED_HOOK_FLEX;
       const bool free_here =
-          lm_free        ? is_lm
+          mode == 7      ? is_isolated_hook
+          : mode == 6    ? is_plain_hook
+          : lm_free      ? is_lm
           : through_free ? is_through
                          : (is_hook_score || (hooks_free && is_tws_hook));
       if (!free_here) {

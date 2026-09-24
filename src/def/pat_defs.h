@@ -139,7 +139,15 @@ enum {
   PAT_FEATURE_DWS_LM_SPAN_START = PAT_FEATURE_LM_EXT_START + PAT_HOOK_BIN_COUNT,
   PAT_FEATURE_DWS_LM_EXT_START =
       PAT_FEATURE_DWS_LM_SPAN_START + PAT_HOOK_BIN_COUNT,
-  PAT_NUM_FEATURES = PAT_FEATURE_DWS_LM_EXT_START + PAT_HOOK_BIN_COUNT,
+  // Hook squares on ordinary (non-premium) squares, irrespective of whether
+  // another premium can be reached along the lane, and the subset with no
+  // such premium within the opponent's rack budget. Added in version 6.
+  PAT_FEATURE_PLAIN_HOOK_FLEX =
+      PAT_FEATURE_DWS_LM_EXT_START + PAT_HOOK_BIN_COUNT,
+  PAT_FEATURE_PLAIN_HOOK_SCORE = PAT_FEATURE_PLAIN_HOOK_FLEX + 1,
+  PAT_FEATURE_ISOLATED_HOOK_FLEX = PAT_FEATURE_PLAIN_HOOK_SCORE + 1,
+  PAT_FEATURE_ISOLATED_HOOK_SCORE = PAT_FEATURE_ISOLATED_HOOK_FLEX + 1,
+  PAT_NUM_FEATURES = PAT_FEATURE_ISOLATED_HOOK_SCORE + 1,
 };
 
 // The label a training observation carries is the opponent's net gain over
@@ -196,13 +204,15 @@ enum {
 #define PAT_TRAIN_OVERLAY_ROW_PREFIX "train_overlay,"
 #define PAT_DEFAULT_TRAIN_OVERLAY false
 
-// Optional row (0 to 5): whether patgen fits only the hook-score channels
+// Optional row (0 to 6): whether patgen fits only the hook-score channels
 // (PAT_FEATURE_HOOK_SCORE_START onward, PAT_HOOK_BIN_COUNT of them) as a
 // residual on top of the file's other weights, which stay exactly as
 // loaded (1), those plus the triple-word hook flexibility channels (2),
 // only the floater through channels (3), or only the premium-combination
 // channels (PAT_FEATURE_LM_SPAN_START onward) (4); mode 5 fits all regular
-// channels including hook-score, for an explicit experimental full refit. See
+// channels including hook-score, for an explicit experimental full refit.
+// Mode 6 fits the ordinary-square hook channels; mode 7 fits only the
+// no-premium subset of those channels. See
 // PATWeights.fit_residual. Absent means 0: regular channels fit while
 // hook-score channels stay fixed at their loaded values.
 #define PAT_FIT_RESIDUAL_ROW_PREFIX "fit_residual,"
@@ -288,14 +298,15 @@ enum {
 // version 2 predates the hypergeometric-scaled channels
 // (PAT_FEATURE_HOOK_SCALED_START onward), version 3 the hook-score
 // channels (PAT_FEATURE_HOOK_SCORE_START onward), and version 4 the
-// premium-combination channels (PAT_FEATURE_LM_SPAN_START onward): an
+// premium-combination channels (PAT_FEATURE_LM_SPAN_START onward), and
+// version 5 predates the ordinary-square hook channels: an
 // older file has no rows for the channels added after it and they read
 // as zero, so raising PAT_EARLIEST_SUPPORTED_VERSION is never required by
 // adding a class.
 #define PAT_MAGIC_PREFIX "magpie_pat_v"
 enum {
   PAT_EARLIEST_SUPPORTED_VERSION = 1,
-  PAT_VERSION = 5,
+  PAT_VERSION = 6,
 };
 
 #endif

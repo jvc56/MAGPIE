@@ -1983,8 +1983,10 @@ static void test_pat_stage_scale(const char *data_dir) {
       }
       const Equity term = move_get_equity(plain) - move_get_equity(none);
       assert(term <= 0);
-      assert(move_get_equity(with_scale) ==
-             move_get_equity(none) + (Equity)lround(0.5 * term));
+      // The global plain-hook term and premium-unit term are scaled and
+      // rounded independently, so the combined half can differ by 1 mp.
+      assert(abs(move_get_equity(with_scale) - move_get_equity(none) -
+                 (Equity)lround(0.5 * term)) <= 1);
       matched++;
       moves_checked++;
     }
@@ -2000,6 +2002,30 @@ static void test_pat_stage_scale(const char *data_dir) {
   player_set_pat(game_get_player(game, 1), NULL);
   pat_destroy(unscaled);
   pat_destroy(scaled);
+  config_destroy(config);
+}
+
+static void test_pat_plain_hooks(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/7j7/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  PATWeights *pat = pat_test_create_prepared("plain_hooks", game);
+  double j[PAT_NUM_FEATURES];
+  pat_extract_features_combined(
+      board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
+      NULL, pat, RACK_SIZE, j);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/7s7/15/15/15/15 / 0/0 0");
+  double s[PAT_NUM_FEATURES];
+  pat_extract_features_combined(
+      board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
+      NULL, pat, RACK_SIZE, s);
+  assert(s[PAT_FEATURE_PLAIN_HOOK_FLEX] > j[PAT_FEATURE_PLAIN_HOOK_FLEX]);
+  assert(s[PAT_FEATURE_ISOLATED_HOOK_FLEX] <=
+         s[PAT_FEATURE_PLAIN_HOOK_FLEX]);
+  pat_destroy(pat);
   config_destroy(config);
 }
 
@@ -2417,6 +2443,7 @@ void test_pat(void) {
   test_pat_hook_score_channel();
   test_pat_lm_channels();
   test_pat_stage_scale(data_dir);
+  test_pat_plain_hooks();
   test_pat_opening_adjustments(data_dir);
   test_pat_gen_experimental_channels_fixed();
   test_pat_gen_shrink_variance_scale();

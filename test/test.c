@@ -312,6 +312,10 @@ void run_test(const char *subtest) {
     pat_move_choice_run_spec(subtest + strlen("patmovechoice:"));
     return;
   }
+  if (has_prefix("patdecide:", subtest)) {
+    pat_move_choice_run_decision_spec(subtest + strlen("patdecide:"));
+    return;
+  }
   if (has_prefix("leavemovechoice:", subtest)) {
     pat_move_choice_run_leave_spec(subtest + strlen("leavemovechoice:"));
     return;

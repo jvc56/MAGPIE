@@ -456,9 +456,17 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
   } else if (feature_index < PAT_FEATURE_DWS_LM_EXT_START) {
     snprintf(buf, buf_size, "dws_lm_span_d%d",
              feature_index - PAT_FEATURE_DWS_LM_SPAN_START + 1);
-  } else if (feature_index < PAT_NUM_FEATURES) {
+  } else if (feature_index < PAT_FEATURE_PLAIN_HOOK_FLEX) {
     snprintf(buf, buf_size, "dws_lm_ext_d%d",
              feature_index - PAT_FEATURE_DWS_LM_EXT_START + 1);
+  } else if (feature_index == PAT_FEATURE_PLAIN_HOOK_FLEX) {
+    snprintf(buf, buf_size, "plain_hook_flex");
+  } else if (feature_index == PAT_FEATURE_PLAIN_HOOK_SCORE) {
+    snprintf(buf, buf_size, "plain_hook_score");
+  } else if (feature_index == PAT_FEATURE_ISOLATED_HOOK_FLEX) {
+    snprintf(buf, buf_size, "isolated_hook_flex");
+  } else if (feature_index == PAT_FEATURE_ISOLATED_HOOK_SCORE) {
+    snprintf(buf, buf_size, "isolated_hook_score");
   } else {
     log_fatal("invalid PAT feature index: %d", feature_index);
   }
@@ -674,11 +682,11 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
     if (has_prefix(PAT_FIT_RESIDUAL_ROW_PREFIX, line)) {
       const int flag = string_to_int(line + strlen(PAT_FIT_RESIDUAL_ROW_PREFIX),
                                      error_stack);
-      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 5) {
+      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 7) {
         error_stack_push(
             error_stack, ERROR_STATUS_PAT_INVALID_ROW,
             get_formatted_string("PAT file '%s' line %d has a fit_residual "
-                                 "value other than 0 to 5: '%s'",
+                                 "value other than 0 to 7: '%s'",
                                  pat_name, line_index + 1, line));
         return;
       }
@@ -848,6 +856,9 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
   // A version below 5 has no premium-combination rows: added in version
   // 5 at the end, so such a file simply stops before them.
   if (version < 5 && feature_index == PAT_FEATURE_LM_SPAN_START) {
+    feature_index = PAT_NUM_FEATURES;
+  }
+  if (version < 6 && feature_index == PAT_FEATURE_PLAIN_HOOK_FLEX) {
     feature_index = PAT_NUM_FEATURES;
   }
   if (feature_index != PAT_NUM_FEATURES) {
@@ -1616,6 +1627,135 @@ static PATCrossInfo pat_effective_cross_info(
     info.hooky = true;
   }
   return info;
+}
+
+#ifndef PAT_ISO_LIVE
+#define PAT_ISO_LIVE 0
+#endif
+
+// An ordinary hook is isolated when a single opponent play through its
+// lane cannot cover an unoccupied premium, even using every rack tile.
+static bool pat_hook_reaches_premium(const Square *lane, int idx, int dir,
+                                     int lane_index,
+                                     const PATMoveOverlay *overlay,
+                                     const uint8_t *unseen_counts,
+                                     const LetterDistribution *ld,
+                                     bool require_live,
+                                     int opponent_rack_size) {
+  const int budget = opponent_rack_size < RACK_SIZE ? opponent_rack_size
+                                                  : RACK_SIZE;
+  for (int side = -1; side <= 1; side += 2) {
+    int empties = 1;
+    for (int pos = idx + side; pos >= 0 && pos < BOARD_DIM; pos += side) {
+      if (square_get_is_brick(&lane[pos])) {
+        break;
+      }
+      const int row = pat_unit_row(dir, lane_index, pos);
+      const int col = pat_unit_col(dir, lane_index, pos);
+      if (pat_effective_letter(lane, pos, overlay, row, col) !=
+          ALPHABET_EMPTY_SQUARE_MARKER) {
+        continue;
+      }
+      if (++empties > budget) {
+        break;
+      }
+      // X's premium walks stop at a square no letter can fill; a route
+      // through one is lexically impossible even when geometrically short.
+      if (require_live &&
+          pat_effective_cross_info(lane, pos, dir, overlay, row, col,
+                                   unseen_counts, 1.0, ld, 1)
+              .dead) {
+        break;
+      }
+      const BonusSquare bonus = square_get_bonus_square(&lane[pos]);
+      if (bonus_square_get_letter_multiplier(bonus) > 1 ||
+          bonus_square_get_word_multiplier(bonus) > 1) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+#ifndef PAT_ISO_DEBUG
+#define PAT_ISO_DEBUG 0
+#endif
+#if PAT_ISO_DEBUG
+int64_t pat_iso_debug_counts[4];
+
+static void pat_iso_debug_report(void) {
+  fprintf(stderr, "ISO hooks=%lld geo_isolated=%lld live_isolated=%lld flex=%lld\n",
+          (long long)pat_iso_debug_counts[0],
+          (long long)pat_iso_debug_counts[1],
+          (long long)pat_iso_debug_counts[2],
+          (long long)pat_iso_debug_counts[3]);
+}
+
+static void pat_iso_debug_register(void) {
+  static bool registered = false;
+  if (!registered) {
+    registered = true;
+    atexit(pat_iso_debug_report);
+  }
+}
+#endif
+
+static void pat_scan_plain_hooks(const Square *lanes,
+                                 const LetterDistribution *ld,
+                                 const uint8_t *unseen_counts,
+                                 const PATMoveOverlay *overlay,
+                                 int opponent_rack_size, double *features) {
+  int64_t totals[4] = {0};
+  for (int dir = 0; dir < 2; dir++) {
+    for (int lane_index = 0; lane_index < BOARD_DIM; lane_index++) {
+      const Square *lane = board_get_row_cache(lanes, lane_index, dir);
+      for (int idx = 0; idx < BOARD_DIM; idx++) {
+        if (square_get_is_brick(&lane[idx])) {
+          continue;
+        }
+        const int row = pat_unit_row(dir, lane_index, idx);
+        const int col = pat_unit_col(dir, lane_index, idx);
+        if (pat_effective_letter(lane, idx, overlay, row, col) !=
+            ALPHABET_EMPTY_SQUARE_MARKER) {
+          continue;
+        }
+        const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
+        if (bonus_square_get_letter_multiplier(bonus) != 1 ||
+            bonus_square_get_word_multiplier(bonus) != 1) {
+          continue;
+        }
+        const PATCrossInfo info = pat_effective_cross_info(
+            lane, idx, dir, overlay, row, col, unseen_counts, 1.0, ld, 1);
+        if (!info.hooky || info.flex == 0) {
+          continue;
+        }
+        totals[0] += info.flex;
+        totals[1] += info.score_exposure;
+        const bool geo_reach = pat_hook_reaches_premium(
+            lane, idx, dir, lane_index, overlay, unseen_counts, ld, false,
+            opponent_rack_size);
+        const bool live_reach =
+            geo_reach && (PAT_ISO_LIVE || PAT_ISO_DEBUG) &&
+            pat_hook_reaches_premium(lane, idx, dir, lane_index,
+                                                  overlay, unseen_counts, ld, true,
+                                                  opponent_rack_size);
+#if PAT_ISO_DEBUG
+        pat_iso_debug_register();
+        pat_iso_debug_counts[0]++;
+        pat_iso_debug_counts[1] += !geo_reach;
+        pat_iso_debug_counts[2] += !live_reach;
+        pat_iso_debug_counts[3] += info.flex;
+#endif
+        if (!(PAT_ISO_LIVE ? live_reach : geo_reach)) {
+          totals[2] += info.flex;
+          totals[3] += info.score_exposure;
+        }
+      }
+    }
+  }
+  for (int i = 0; i < 4; i++) {
+    features[PAT_FEATURE_PLAIN_HOOK_FLEX + i] = (double)totals[i] / 4.0;
+  }
 }
 
 // Scans one (TWS, dir) unit: walks outward from the empty TWS square along
@@ -2924,8 +3064,43 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
   }
   // The opening adjustment is <= 0 like everything else here, so every
   // bound on the term stays a bound without knowing about it.
+  Equity plain_penalty = 0;
+  bool has_plain_weights = false;
+  for (int i = PAT_FEATURE_PLAIN_HOOK_FLEX; i < PAT_NUM_FEATURES; i++) {
+    has_plain_weights |= pat_get_weight(pat_eval_ctx->weights, i) != 0;
+  }
+  if (has_plain_weights) {
+    PATMoveOverlay overlay;
+    const PATMoveOverlay *overlay_ptr = NULL;
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      const bool vertical = board_is_dir_vertical(move_get_dir(move));
+      overlay.move = move;
+      overlay.row_start = move_get_row_start(move);
+      overlay.col_start = move_get_col_start(move);
+      overlay.row_end = overlay.row_start +
+                        (vertical ? move_get_tiles_length(move) - 1 : 0);
+      overlay.col_end = overlay.col_start +
+                        (vertical ? 0 : move_get_tiles_length(move) - 1);
+      overlay.vertical = vertical;
+      overlay.hook_flex = pat_eval_ctx->weights->hook_flex;
+      overlay.kwg = pat_eval_ctx->weights->exact_created_hooks
+                        ? pat_eval_ctx->kwg
+                        : NULL;
+      overlay.lanes = pat_eval_ctx->lanes;
+      overlay_ptr = &overlay;
+    }
+    double features[PAT_NUM_FEATURES] = {0};
+    pat_scan_plain_hooks(pat_eval_ctx->lanes, pat_eval_ctx->ld,
+                         pat_eval_ctx->unseen_counts, overlay_ptr,
+                         pat_eval_ctx->opponent_rack_size, features);
+    double total = 0.0;
+    for (int i = PAT_FEATURE_PLAIN_HOOK_FLEX; i < PAT_NUM_FEATURES; i++) {
+      total += (double)pat_get_weight(pat_eval_ctx->weights, i) * features[i];
+    }
+    plain_penalty = pat_eval_scaled(pat_eval_ctx, (Equity)lround(total));
+  }
   return pat_eval_move_penalty_scaled(pat_eval_ctx, move, leave) +
-         pat_opening_adjustment(pat_eval_ctx, move);
+         pat_opening_adjustment(pat_eval_ctx, move) + plain_penalty;
 }
 
 static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
@@ -3072,7 +3247,7 @@ void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
        feature_index++) {
     features[feature_index] = 0.0;
   }
-  if (!pat_eval_ctx || !pat_eval_ctx->weights || pat_eval_ctx->num_units == 0) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return;
   }
   const int num_units = pat_eval_ctx->num_units;
@@ -3101,6 +3276,10 @@ void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
         pat_eval_ctx->weights->exact_created_hooks ? pat_eval_ctx->kwg : NULL;
     overlay.lanes = pat_eval_ctx->lanes;
   }
+  pat_scan_plain_hooks(pat_eval_ctx->lanes, pat_eval_ctx->ld,
+                       pat_eval_ctx->unseen_counts,
+                       is_placement ? &overlay : NULL,
+                       pat_eval_ctx->opponent_rack_size, features);
   int32_t unit_rows[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
   int worst_unit = -1;
   Equity worst_penalty = 0;
@@ -3154,6 +3333,8 @@ void pat_extract_features_combined(const Square *lanes,
   }
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
   pat_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
+  pat_scan_plain_hooks(lanes, ld, unseen_counts, NULL, opponent_rack_size,
+                       features);
   uint8_t tws_rows[PAT_MAX_PREMIUM];
   uint8_t tws_cols[PAT_MAX_PREMIUM];
   uint8_t tws_classes[PAT_MAX_PREMIUM];
