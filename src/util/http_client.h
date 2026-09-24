@@ -49,12 +49,14 @@ void http_client_post_json_persistent(HttpClient *client, const char *path,
                                       const char *body, ChttpResponse *response,
                                       ErrorStack *error_stack);
 
-// Called before each wait of a transient retry, with the number of the retry
-// (from 0), the seconds about to be waited, and `context`. Optional; NULL
-// clears it. The client itself prints nothing: it has no terminal to print to,
-// and a caller that retries for minutes owes its user a line saying so.
+// Called before each wait of a retry, with the number of the retry (from 0),
+// the seconds about to be waited, whether it is a 429 being waited out rather
+// than a server that is not answering, and `context`. Optional; NULL clears
+// it. The client itself prints nothing: it has no terminal to print to, and a
+// caller that retries for minutes owes its user a line saying so.
 typedef void (*http_client_retry_listener_t)(void *context, int retry_idx,
-                                             int wait_seconds);
+                                             int wait_seconds,
+                                             bool rate_limited);
 void http_client_set_retry_listener(HttpClient *client,
                                     http_client_retry_listener_t listener,
                                     void *context);

@@ -506,9 +506,19 @@ static void adopt_server_assigned_uuid(ContributeState *state,
 // has gone quiet can tell waiting from hanging. Once when the trouble starts,
 // then once per wait at the back-off's ceiling -- a line a minute, which is
 // also the rate at which the server is being asked.
-static void report_server_retry(void *context, int retry_idx,
-                                int wait_seconds) {
+static void report_server_retry(void *context, int retry_idx, int wait_seconds,
+                                bool rate_limited) {
   ThreadControl *thread_control = (ThreadControl *)context;
+  if (rate_limited) {
+    // One 429 is routine; a claim now waits them out without limit, so a run
+    // of them -- a server limiting this worker for good -- says so once.
+    if (retry_idx == 4) {
+      thread_control_print_formatted(
+          thread_control,
+          "the server is rate-limiting this worker; waiting it out\n");
+    }
+    return;
+  }
   if (retry_idx == 0) {
     thread_control_print_formatted(thread_control,
                                    "the server is not answering; retrying\n");

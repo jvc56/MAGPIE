@@ -8862,16 +8862,24 @@ static char *config_contribute_leave_gen(Config *config,
   }
   char *fetched_sha256 = sha256_hash_bytes(artifact.body, artifact.body_length);
   const bool intact = strings_equal(fetched_sha256, previous_artifact_sha256);
-  free(fetched_sha256);
   if (!intact) {
+    // Declined as a derived-file mismatch rather than failed: the fault is
+    // the server's artifact, not this worker, so the job is set aside for
+    // the run -- and a failure would count toward the five that stop it,
+    // so one bad artifact would end every contributor's run in turn.
     chttp_response_destroy(&artifact);
+    contribute_record_derived_mismatch(state, "klv", previous_artifact_key,
+                                       previous_artifact_sha256,
+                                       fetched_sha256);
+    free(fetched_sha256);
     error_stack_push(
-        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
         get_formatted_string("the KLV fetched from %s does not match the "
                              "sha256 the server recorded for it",
                              previous_artifact_key));
     return NULL;
   }
+  free(fetched_sha256);
   char *leaves_name = get_formatted_string("%s_birdtest_%.16s", lexicon,
                                            previous_artifact_sha256);
   char *klv_path = data_filepaths_get_writable_filename(
@@ -8881,8 +8889,9 @@ static char *config_contribute_leave_gen(Config *config,
     free(leaves_name);
     return NULL;
   }
-  char *temp_path =
-      get_formatted_string("%s.%llu.tmp", klv_path, (unsigned long long)seed);
+  // Per process: two processes playing the same reissued task would share a
+  // name made from the task.
+  char *temp_path = temporary_sibling(klv_path);
   FILE *klv_file = fopen(temp_path, "wbe");
   bool written = klv_file && fwrite(artifact.body, 1, artifact.body_length,
                                     klv_file) == artifact.body_length;

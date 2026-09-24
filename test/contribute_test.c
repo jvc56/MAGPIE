@@ -464,6 +464,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
       CONTRIBUTE_KEY_FORCED_RACKS,
       CONTRIBUTE_KEY_NUM_GAMES,
       CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY,
+      CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_SHA256,
       CONTRIBUTE_KEY_USE_WORDMAP,
       CONTRIBUTE_KEY_BINGO_BONUS,
   };

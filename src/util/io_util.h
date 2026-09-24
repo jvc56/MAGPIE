@@ -386,6 +386,16 @@ bool path_is_directory(const char *path);
 // cannot be stat'ed; the caller frees.
 char *get_file_identity(const char *path);
 
+// A name beside `filename` for writing it in full before renaming it into
+// place -- `<filename>.<pid>.tmp` -- so that no reader, and no other process
+// writing the same file, ever sees half of it. The caller frees.
+char *temporary_sibling(const char *filename);
+
+// Renames `temporary` over `filename`, or removes it and pushes an error
+// naming `what` if it cannot. Frees nothing.
+void rename_into_place(const char *temporary, const char *filename,
+                       const char *what, ErrorStack *error_stack);
+
 // Returns a sorted, heap-allocated array of filenames ending with suffix found
 // in dir_path. *num_files is set to the count. Caller frees each string and
 // the array. On error, pushes to error_stack and returns NULL.

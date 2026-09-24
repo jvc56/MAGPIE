@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 enum { ERROR_STACK_CAPACITY = 100 };
 
@@ -602,6 +603,21 @@ char *get_file_identity(const char *path) {
       (long long)STAT_MTIM(info).tv_sec, (long)STAT_MTIM(info).tv_nsec,
       (unsigned long long)info.st_ino, (long long)STAT_CTIM(info).tv_sec,
       (long)STAT_CTIM(info).tv_nsec);
+}
+
+char *temporary_sibling(const char *filename) {
+  return get_formatted_string("%s.%ld.tmp", filename, (long)getpid());
+}
+
+void rename_into_place(const char *temporary, const char *filename,
+                       const char *what, ErrorStack *error_stack) {
+  if (rename(temporary, filename) != 0) {
+    const int error_number = errno;
+    (void)remove(temporary);
+    error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+                     get_formatted_string("could not write %s %s: %s", what,
+                                          filename, strerror(error_number)));
+  }
 }
 
 enum {

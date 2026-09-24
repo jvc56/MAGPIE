@@ -121,7 +121,7 @@ static void nap_before_retry(const HttpClient *client, int retry_idx) {
   const int wait_seconds = http_client_backoff_seconds(retry_idx);
   if (client->retry_listener) {
     client->retry_listener(client->retry_listener_context, retry_idx,
-                           wait_seconds);
+                           wait_seconds, /*rate_limited=*/false);
   }
   ctime_nap(wait_seconds);
 }
@@ -211,6 +211,11 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
       const int wait =
           http_client_rate_limit_wait_seconds(response->retry_after_seconds);
       chttp_response_destroy(response);
+      if (client->retry_listener) {
+        client->retry_listener(client->retry_listener_context,
+                               rate_limit_retries - 1, wait,
+                               /*rate_limited=*/true);
+      }
       ctime_nap(wait);
       continue;
     }
