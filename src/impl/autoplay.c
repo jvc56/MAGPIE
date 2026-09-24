@@ -30,8 +30,10 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
@@ -40,6 +42,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "move_gen.h"
 #include "pat_gen.h"
 #include "play_chooser.h"
 #include "rack_list.h"
@@ -613,6 +616,9 @@ typedef struct AutoplayWorker {
   // PAT label_resample: its own list, since a game pair compares both
   // games' chosen moves (pointers into move_lists) after both have played.
   MoveList *pat_resample_move_list;
+  // Volatility rerank (PAT_VOL_MODEL_ROW_PREFIX), created on first use.
+  MoveList *vol_move_list;
+  PATEvalContext *vol_ctx;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -647,6 +653,8 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->move_lists[1] =
       move_list_create(ap_args->p2_sim_args.num_plays);
   autoplay_worker->pat_resample_move_list = move_list_create(1);
+  autoplay_worker->vol_move_list = NULL;
+  autoplay_worker->vol_ctx = NULL;
 
   autoplay_worker->sim_results = NULL;
   autoplay_worker->inference_results = NULL;
@@ -691,6 +699,8 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   move_list_destroy(autoplay_worker->move_lists[0]);
   move_list_destroy(autoplay_worker->move_lists[1]);
   move_list_destroy(autoplay_worker->pat_resample_move_list);
+  move_list_destroy(autoplay_worker->vol_move_list);
+  free(autoplay_worker->vol_ctx);
   free(autoplay_worker);
 }
 
@@ -839,6 +849,9 @@ typedef struct GameRunner {
   Game *game_one_move_behind;
   Move previous_move;
   Move play_chooser_move;
+  // The volatility rerank's choice, copied out of the worker's list, which
+  // the other game of a pair reuses before the two moves are compared.
+  Move vol_move;
   // PAT training (AUTOPLAY_TYPE_PAT_GEN): observations
   // opened by recent moves of this game, each still accumulating its label.
   // One opens per move and one closes every label_plies plies later, so at
@@ -1076,6 +1089,133 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   return move;
 }
 
+enum {
+  AUTOPLAY_VOL_MOVE_LIST_CAPACITY = 3000,
+  // Candidates further than this below the top keep their equity: the
+  // volatility term is a few points at most.
+  AUTOPLAY_VOL_EQUITY_WINDOW = 25,
+  // Finite-difference half-width, in points, for the utility curvature.
+  AUTOPLAY_VOL_KAPPA_STEP = 15,
+};
+
+// The default sim utility (win 1.0, spread 0.5, scale 100) of the mover at
+// margin with the opponent on turn and unseen tiles left.
+static double autoplay_vol_utility(const WinPct *win_pcts, double margin,
+                                   int unseen) {
+  const int rounded = (int)lround(margin);
+  const double win = 1.0 - win_pct_get(win_pcts, -rounded, (unsigned)unseen);
+  return sim_utility_blend(win, double_to_equity(margin), 1.0, 0.5, 100.0);
+}
+
+// -U''/U' of that utility at margin, by central differences.
+static double autoplay_vol_kappa(const WinPct *win_pcts, double margin,
+                                 int unseen) {
+  const double step = AUTOPLAY_VOL_KAPPA_STEP;
+  const double lower = autoplay_vol_utility(win_pcts, margin - step, unseen);
+  const double middle = autoplay_vol_utility(win_pcts, margin, unseen);
+  const double upper = autoplay_vol_utility(win_pcts, margin + step, unseen);
+  const double slope = (upper - lower) / (2.0 * step);
+  const double curvature = (upper - 2.0 * middle + lower) / (step * step);
+  return slope > 0.0 ? -curvature / slope : 0.0;
+}
+
+// The static move under PAT's volatility rerank: every move is generated
+// and scored with the player's PAT, then those within
+// AUTOPLAY_VOL_EQUITY_WINDOW of the top are rescored as
+// equity - vol_scale * 0.5 * kappa * sigma2 (kappa from the win/spread
+// utility at the post-move margin, sigma2 minus the vol model's term).
+static const Move *autoplay_vol_best_move(AutoplayWorker *autoplay_worker,
+                                          GameRunner *game_runner,
+                                          const PATWeights *pat) {
+  Game *game = game_runner->game;
+  if (autoplay_worker->vol_move_list == NULL) {
+    autoplay_worker->vol_move_list =
+        move_list_create(AUTOPLAY_VOL_MOVE_LIST_CAPACITY);
+    autoplay_worker->vol_ctx = malloc_or_die(sizeof(PATEvalContext));
+  }
+  // The config's table, shared read-only by every worker.
+  const WinPct *win_pcts =
+      autoplay_worker->args.play_chooser_strategies[0].win_pcts;
+  if (win_pcts == NULL) {
+    log_fatal("volatility rerank needs a win percentage table (-winpct)");
+  }
+  MoveList *move_list = autoplay_worker->vol_move_list;
+  const int mover_index = game_get_player_on_turn_index(game);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      // The player's own PAT is nonpositive, so movegen's bounds stay
+      // sound; only the signed vol term is applied afterwards, to the
+      // moves the window keeps.
+      .move_record_type = MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = int_to_equity(AUTOPLAY_VOL_EQUITY_WINDOW),
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args);
+  move_list_sort_moves(move_list);
+  const int num_moves = move_list_get_count(move_list);
+  const Player *mover = game_get_player(game, mover_index);
+  const Player *opponent = game_get_player(game, 1 - mover_index);
+  const PATWeights *vol_model = pat_get_vol_model(pat);
+  const double vol_scale = pat_get_vol_scale(pat);
+  PATEvalContext *ctx = autoplay_worker->vol_ctx;
+  const int csi = board_get_cross_set_index(
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), mover_index);
+  pat_eval_context_load(ctx, vol_model,
+                        board_get_readonly_lanes(game_get_board(game), csi),
+                        game_get_ld(game), player_get_rack(mover),
+                        PAT_CLASS_MASK_ALL,
+                        rack_get_total_letters(player_get_rack(opponent)));
+  pat_eval_context_set_kwg(ctx, player_get_kwg(mover));
+  const double margin_before = equity_to_double(player_get_score(mover) -
+                                                player_get_score(opponent));
+  const int bag = bag_get_letters(game_get_bag(game));
+  // A pass carries a sentinel equity, so the window is anchored on the
+  // first real move; a list with only the pass keeps it.
+  int chosen = 0;
+  bool have_choice = false;
+  double best_equity = 0.0;
+  double best_adjusted = 0.0;
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      continue;
+    }
+    double adjusted = equity_to_double(move_get_equity(move));
+    if (!have_choice) {
+      best_equity = adjusted;
+    }
+    if (best_equity - adjusted > AUTOPLAY_VOL_EQUITY_WINDOW) {
+      break;
+    }
+    if (vol_scale != 0.0) {
+      Rack leave;
+      get_leave_for_move(move, game, &leave);
+      const double sigma2 =
+          -equity_to_double(pat_eval_move_penalty(ctx, move, &leave));
+      const int drawn = move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE
+                            ? move_get_tiles_played(move)
+                            : 0;
+      const int unseen = (bag > drawn ? bag - drawn : 0) + RACK_SIZE;
+      const double margin =
+          margin_before + equity_to_double(move_get_score(move));
+      adjusted -= vol_scale * 0.5 *
+                  autoplay_vol_kappa(win_pcts, margin, unseen) *
+                  sigma2;
+    }
+    if (!have_choice || adjusted > best_adjusted) {
+      have_choice = true;
+      best_adjusted = adjusted;
+      chosen = move_idx;
+    }
+  }
+  move_copy(&game_runner->vol_move, move_list_get_move(move_list, chosen));
+  return &game_runner->vol_move;
+}
+
 const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                       GameRunner *game_runner) {
   const int player_on_turn_index =
@@ -1105,6 +1245,11 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
+    const PATWeights *pat = player_get_pat(
+        game_get_player(game_runner->game, player_on_turn_index));
+    if (pat != NULL && pat_get_vol_model(pat) != NULL) {
+      return autoplay_vol_best_move(autoplay_worker, game_runner, pat);
+    }
     return get_top_move_for_player_on_turn(
         game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
   }

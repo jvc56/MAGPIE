@@ -271,6 +271,13 @@ enum {
 // such a file is only sound where every move is generated and scored
 // (MOVE_RECORD_ALL). Must precede the weight rows. Absent means 0.
 #define PAT_SIGNED_WEIGHTS_ROW_PREFIX "signed_weights,"
+// Experimental volatility rerank: vol_model names a signed label_square
+// file (the fitted second moment of the net swing), loaded alongside this
+// one; a player whose PAT carries one picks its static move from the full
+// move list by equity - vol_scale * 0.5 * kappa * sigma2 (see
+// autoplay.c). Absent means no rerank.
+#define PAT_VOL_MODEL_ROW_PREFIX "vol_model,"
+#define PAT_VOL_SCALE_ROW_PREFIX "vol_scale,"
 
 // Optional rows: a nonnegative factor applied to the whole defense term,
 // and to every pruning bound on it, by game stage (see

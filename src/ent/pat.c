@@ -151,6 +151,10 @@ struct PATWeights {
   bool label_square;
   // See PAT_SIGNED_WEIGHTS_ROW_PREFIX.
   bool signed_weights;
+  // See PAT_VOL_MODEL_ROW_PREFIX. Owned.
+  char *vol_model_name;
+  PATWeights *vol_model;
+  double vol_scale;
   // Per-stage factor on the applied term (see the row prefixes in
   // pat_defs.h); indexed by PAT_STAGE_*.
   double stage_scale[PAT_STAGE_COUNT];
@@ -245,6 +249,12 @@ bool pat_get_label_square(const PATWeights *pat) { return pat->label_square; }
 bool pat_get_signed_weights(const PATWeights *pat) {
   return pat->signed_weights;
 }
+
+const PATWeights *pat_get_vol_model(const PATWeights *pat) {
+  return pat->vol_model;
+}
+
+double pat_get_vol_scale(const PATWeights *pat) { return pat->vol_scale; }
 
 Equity pat_get_opening_tiles_adjustment(const PATWeights *pat, int tiles) {
   return pat->opening_tiles[tiles];
@@ -505,6 +515,9 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->label_resample = 0;
   pat->label_square = false;
   pat->signed_weights = false;
+  pat->vol_model_name = NULL;
+  pat->vol_model = NULL;
+  pat->vol_scale = 1.0;
   for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
     pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
   }
@@ -524,6 +537,8 @@ void pat_destroy(PATWeights *pat) {
     return;
   }
   free(pat->name);
+  free(pat->vol_model_name);
+  pat_destroy(pat->vol_model);
   free(pat->run_through_count);
   free(pat->run_through_score);
   free(pat);
@@ -796,6 +811,16 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         continue;
       }
     }
+    if (has_prefix(PAT_VOL_MODEL_ROW_PREFIX, line)) {
+      free(pat->vol_model_name);
+      pat->vol_model_name =
+          string_duplicate(line + strlen(PAT_VOL_MODEL_ROW_PREFIX));
+      continue;
+    }
+    if (has_prefix(PAT_VOL_SCALE_ROW_PREFIX, line)) {
+      pat->vol_scale = strtod(line + strlen(PAT_VOL_SCALE_ROW_PREFIX), NULL);
+      continue;
+    }
     if (has_prefix(PAT_SIGNED_WEIGHTS_ROW_PREFIX, line)) {
       const int flag = string_to_int(
           line + strlen(PAT_SIGNED_WEIGHTS_ROW_PREFIX), error_stack);
@@ -947,6 +972,10 @@ PATWeights *pat_create(const char *data_paths, const char *pat_name,
       if (error_stack_is_empty(error_stack)) {
         pat = pat_create_zeroed(pat_name);
         pat_parse_contents(pat, pat_name, split_contents, error_stack);
+        if (error_stack_is_empty(error_stack) && pat->vol_model_name) {
+          pat->vol_model =
+              pat_create(data_paths, pat->vol_model_name, error_stack);
+        }
       }
       string_splitter_destroy(split_contents);
     }
@@ -1118,6 +1147,9 @@ static void pat_walk_words(const KWG *kwg, const LetterDistribution *ld,
 
 void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
                            const LetterDistribution *ld) {
+  if (pat->vol_model) {
+    pat_prepare_hook_flex(pat->vol_model, kwg, ld);
+  }
   pat->prepared = true;
   memset(pat->hook_flex, 0, sizeof(pat->hook_flex));
   memset(pat->through_score, 0, sizeof(pat->through_score));
