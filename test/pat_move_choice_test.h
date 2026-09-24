@@ -2,6 +2,7 @@
 #define PAT_MOVE_CHOICE_TEST_H
 
 #include "../src/ent/pat.h"
+#include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -35,6 +36,18 @@ typedef struct PATMoveChooser {
   // gets by omitting this field) disables nothing, i.e. full PAT: matches
   // every chooser's behavior before this field existed.
   uint32_t disabled_classes_mask;
+  // Volatility rerank (bogopoints): when vol_pat is set, every candidate
+  // within PAT_VOL_EQUITY_WINDOW of the top is rescored as
+  // equity - vol_scale * 0.5 * kappa * sigma2, where sigma2 is minus
+  // vol_pat's term for the move (a fitted second moment of the net swing,
+  // see PAT_LABEL_SQUARE_ROW_PREFIX, in points squared) and kappa is
+  // -U''/U' of the default win/spread utility at the mover's post-move
+  // margin (see pat_move_choice_kappa). kappa is positive when the
+  // utility is concave (ahead: volatility costs) and negative when it is
+  // convex (behind: volatility pays).
+  const PATWeights *vol_pat;
+  double vol_scale;
+  const WinPct *win_pcts;
 } PATMoveChooser;
 
 typedef struct PATMoveChoiceResult {
@@ -110,6 +123,7 @@ void pat_move_choice_run_spec(const char *spec);
 // full comparison. Simpler than pat_move_choice_run_spec's baseline/
 // candidate spec strings since there is only ever this one axis.
 void pat_move_choice_run_leave_spec(const char *spec);
+void pat_move_choice_print_kappa(void);
 
 void pat_move_choice_debug_csw24(void);
 void pat_move_choice_debug_confirm_csw24(void);

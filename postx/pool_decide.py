@@ -12,7 +12,8 @@ for f in glob.glob(f"{out}/shard*.txt"):
         elif p[0] == "CASE":
             cases.append(dict(seed=int(p[1]), bag=int(p[2]), cls=p[3],
                               u=float(p[4]) * 100, w=float(p[5]) * 100,
-                              s=float(p[6])))
+                              s=float(p[6]),
+                              lead=float(p[8]) if len(p) > 8 else None))
 def stats(xs):
     n = len(xs)
     if n == 0: return (0, float("nan"), float("nan"))
@@ -41,5 +42,13 @@ print("  by bingo class (utility pp per disagreement):")
 for cls in ("nn", "bb", "mixed"):
     n, m, se = stats([c["u"] for c in cases if c["cls"] == cls])
     print(f"    {cls:6s} n={n:5d}  {m:+.3f} ± {se:.3f}")
+leads = [c for c in cases if c["lead"] is not None]
+if leads:
+    print("  by mover lead before the move (utility pp per disagreement):")
+    for lo, hi, lab in ((-1e9, -50, "<= -50"), (-50, -15, "-50..-15"),
+                        (-15, 15, "-15..15"), (15, 50, "15..50"),
+                        (50, 1e9, ">= 50")):
+        n, m, se = stats([c["u"] for c in leads if lo < c["lead"] <= hi])
+        print(f"    lead {lab:9s} n={n:5d}  {m:+.3f} ± {se:.3f}")
 json.dump(dict(tag=tag, positions=positions, disagreements=disagreements, cases=cases),
           open(f"{out}/pooled.json", "w"))

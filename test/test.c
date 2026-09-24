@@ -244,6 +244,7 @@ static TestEntry on_demand_test_table[] = {
     {"patoverlap", test_pat_overlap_pilot},
     {"patpremiumpilot", test_pat_premium_combo_pilot},
     {"patopeningsim", test_pat_opening_sim},
+    {"patkappa", pat_move_choice_print_kappa},
     {"patmovechoicecontrols", test_pat_move_choice_controls},
     {"patmovechoicetargeted", test_pat_move_choice_targeted_controls},
     {"pattwsonly", test_pat_move_choice_tws_only},

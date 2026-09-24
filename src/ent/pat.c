@@ -147,6 +147,10 @@ struct PATWeights {
   bool fit_shrink;
   // See PAT_LABEL_RESAMPLE_ROW_PREFIX.
   int label_resample;
+  // See PAT_LABEL_SQUARE_ROW_PREFIX.
+  bool label_square;
+  // See PAT_SIGNED_WEIGHTS_ROW_PREFIX.
+  bool signed_weights;
   // Per-stage factor on the applied term (see the row prefixes in
   // pat_defs.h); indexed by PAT_STAGE_*.
   double stage_scale[PAT_STAGE_COUNT];
@@ -234,6 +238,12 @@ void pat_set_fit_shrink(PATWeights *pat, bool fit_shrink) {
 
 int pat_get_label_resample(const PATWeights *pat) {
   return pat->label_resample;
+}
+
+bool pat_get_label_square(const PATWeights *pat) { return pat->label_square; }
+
+bool pat_get_signed_weights(const PATWeights *pat) {
+  return pat->signed_weights;
 }
 
 Equity pat_get_opening_tiles_adjustment(const PATWeights *pat, int tiles) {
@@ -371,7 +381,7 @@ Equity pat_get_weight(const PATWeights *pat, int feature_index) {
 }
 
 void pat_set_weight(PATWeights *pat, int feature_index, Equity weight) {
-  if (weight > 0) {
+  if (weight > 0 && !pat->signed_weights) {
     log_fatal("PAT weight for feature %d must be <= 0, got %d", feature_index,
               weight);
   }
@@ -493,6 +503,8 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
   pat->fit_shrink = PAT_DEFAULT_FIT_SHRINK;
   pat->label_resample = 0;
+  pat->label_square = false;
+  pat->signed_weights = false;
   for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
     pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
   }
@@ -784,6 +796,34 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         continue;
       }
     }
+    if (has_prefix(PAT_SIGNED_WEIGHTS_ROW_PREFIX, line)) {
+      const int flag = string_to_int(
+          line + strlen(PAT_SIGNED_WEIGHTS_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a signed_weights "
+                                 "flag other than 0 or 1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->signed_weights = (flag == 1);
+      continue;
+    }
+    if (has_prefix(PAT_LABEL_SQUARE_ROW_PREFIX, line)) {
+      const int flag = string_to_int(
+          line + strlen(PAT_LABEL_SQUARE_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a label_square "
+                                 "flag other than 0 or 1: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->label_square = (flag == 1);
+      continue;
+    }
     if (has_prefix(PAT_LABEL_RESAMPLE_ROW_PREFIX, line)) {
       const int count = string_to_int(
           line + strlen(PAT_LABEL_RESAMPLE_ROW_PREFIX), error_stack);
@@ -863,7 +903,7 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
                            pat_name, line_index + 1, comma + 1));
       return;
     }
-    if (weight > 0) {
+    if (weight > 0 && !pat->signed_weights) {
       error_stack_push(
           error_stack, ERROR_STATUS_PAT_POSITIVE_WEIGHT,
           get_formatted_string(
@@ -954,6 +994,14 @@ void pat_write(const PATWeights *pat, const char *data_paths,
                                       pat->run_through ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SHRINK_ROW_PREFIX,
                                       pat->fit_shrink ? 1 : 0);
+  if (pat->signed_weights) {
+    string_builder_add_formatted_string(sb, "%s1\n",
+                                        PAT_SIGNED_WEIGHTS_ROW_PREFIX);
+  }
+  if (pat->label_square) {
+    string_builder_add_formatted_string(sb, "%s1\n",
+                                        PAT_LABEL_SQUARE_ROW_PREFIX);
+  }
   if (pat->label_resample > 0) {
     string_builder_add_formatted_string(
         sb, "%s%d\n", PAT_LABEL_RESAMPLE_ROW_PREFIX, pat->label_resample);
@@ -2416,11 +2464,9 @@ static Equity pat_clamp_dot(int64_t acc) {
   if (acc < EQUITY_MIN_VALUE) {
     acc = EQUITY_MIN_VALUE;
   }
-  if (acc > 0) {
-    // Cannot happen with the enforced weight and feature signs; clamp
-    // anyway so the shadow invariant survives any future bug here.
-    acc = 0;
-  }
+  // No clamp above zero: with nonpositive weights and nonnegative
+  // features the sum never exceeds it, and signed files (see
+  // PAT_SIGNED_WEIGHTS_ROW_PREFIX) need their positive terms.
   return (Equity)acc;
 }
 
@@ -2488,9 +2534,6 @@ static inline bool pat_mask_is_empty(const uint64_t *mask) {
 static Equity pat_combine(int64_t worst, int64_t sum, double combine_gamma) {
   double combined =
       (1.0 - combine_gamma) * (double)worst + combine_gamma * (double)sum;
-  if (combined > 0.0) {
-    combined = 0.0;
-  }
   if (combined < (double)EQUITY_MIN_VALUE) {
     combined = (double)EQUITY_MIN_VALUE;
   }
@@ -3330,8 +3373,9 @@ void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
       worst_unit = unit_index;
     }
   }
-  const double gamma =
-      (worst_unit >= 0) ? pat_eval_ctx->weights->combine_gamma : 1.0;
+  const double gamma = (worst_unit >= 0 && !pat_eval_ctx->weights->signed_weights)
+                           ? pat_eval_ctx->weights->combine_gamma
+                           : 1.0;
   for (int unit_index = 0; unit_index < num_units; unit_index++) {
     for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
          feature_index++) {
@@ -3403,7 +3447,9 @@ void pat_extract_features_combined(const Square *lanes,
   // Untrained weights rank every unit alike, so there is no worst one to
   // charge in full. Fall back to the sum, which makes the first generation
   // an ordinary fit and gives later ones something to rank with.
-  const double gamma = (worst_unit >= 0) ? pat->combine_gamma : 1.0;
+  const double gamma = (worst_unit >= 0 && !pat->signed_weights)
+                           ? pat->combine_gamma
+                           : 1.0;
   for (int unit_index = 0; unit_index < num_units; unit_index++) {
     for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
          feature_index++) {

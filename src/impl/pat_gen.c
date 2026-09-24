@@ -429,11 +429,15 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     double coefficient = result.coefficients[feature_index];
-    if (coefficient < 0.0) {
+    if (coefficient < 0.0 && !pat_get_signed_weights(pat)) {
       coefficient = 0.0;
     }
     pat_set_weight(pat, feature_index,
                    equity_negate(double_to_equity(coefficient)));
+  }
+  if (pat_get_signed_weights(pat)) {
+    // Signed rows are plain sums; see PAT_SIGNED_WEIGHTS_ROW_PREFIX.
+    pat_set_combine_gamma(pat, 1.0);
   }
   pat_bump_mutation_counter(pat);
   return result;

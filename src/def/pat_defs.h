@@ -259,6 +259,18 @@ enum {
 // the game produced. Requires label plies 1. Absent means 0.
 #define PAT_LABEL_RESAMPLE_ROW_PREFIX "label_resample,"
 #define PAT_MAX_LABEL_RESAMPLE 64
+// Training only: when 1, patgen regresses the squared label (the second
+// moment of the net swing over the label plies) instead of the label, so
+// the fitted weights are minus each feature's effect on that moment: a
+// volatility model, not a penalty. Absent means 0.
+#define PAT_LABEL_SQUARE_ROW_PREFIX "label_square,"
+// Experimental: when 1, weights may be positive. patgen fits without
+// clipping at zero, builds training rows as plain sums over units, and
+// writes the result with combine gamma 1, so the file is a plain signed
+// linear model. Movegen's optimistic bounds assume nonpositive terms, so
+// such a file is only sound where every move is generated and scored
+// (MOVE_RECORD_ALL). Must precede the weight rows. Absent means 0.
+#define PAT_SIGNED_WEIGHTS_ROW_PREFIX "signed_weights,"
 
 // Optional rows: a nonnegative factor applied to the whole defense term,
 // and to every pruning bound on it, by game stage (see

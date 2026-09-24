@@ -1234,8 +1234,12 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        ->heldout_regressions[autoplay_worker->worker_index]
                 : &pat_gen_shared_data
                        ->regressions[autoplay_worker->worker_index];
+        const double label =
+            pat_get_label_square(pat_gen_shared_data->pat)
+                ? observation->label * observation->label
+                : observation->label;
         pat_regression_add_observation_double(target, observation->features,
-                                              observation->label);
+                                              label);
         observation->valid = false;
       }
     }
@@ -1374,8 +1378,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        ->heldout_regressions[autoplay_worker->worker_index]
                 : &pat_gen_shared_data
                        ->regressions[autoplay_worker->worker_index];
-        pat_regression_add_observation_double(target, observation->features,
-                                              label);
+        pat_regression_add_observation_double(
+            target, observation->features,
+            pat_get_label_square(pat_gen_shared_data->pat) ? label * label
+                                                           : label);
         break;
       }
       observation->plies_seen = 0;

@@ -157,6 +157,47 @@ static PATEvalContext *pat_move_choice_scale_ctx(void) {
   return ctx;
 }
 
+// Scratch context for the volatility chooser (single-threaded tests).
+static PATEvalContext *pat_move_choice_vol_ctx(void) {
+  static PATEvalContext *ctx = NULL;
+  if (ctx == NULL) {
+    ctx = malloc_or_die(sizeof(PATEvalContext));
+  }
+  return ctx;
+}
+
+enum {
+  // Candidates further than this below the top keep their equity: the
+  // volatility term is a few points at most.
+  PAT_VOL_EQUITY_WINDOW = 25,
+  // Finite-difference half-width, in points, for the utility curvature;
+  // wide enough to smooth the table's integer margin buckets.
+  PAT_VOL_KAPPA_STEP = 15,
+};
+
+// The default sim utility (win 1.0, spread 0.5, scale 100) of the mover at
+// margin with the opponent on turn and unseen tiles left.
+static double pat_move_choice_mover_utility(const WinPct *win_pcts,
+                                            double margin, int unseen) {
+  const int rounded = (int)lround(margin);
+  const double win = 1.0 - win_pct_get(win_pcts, -rounded, (unsigned)unseen);
+  return sim_utility_blend(win, double_to_equity(margin), 1.0, 0.5, 100.0);
+}
+
+// -U''/U' of that utility at margin, by central differences.
+static double pat_move_choice_kappa(const WinPct *win_pcts, double margin,
+                                    int unseen) {
+  const double step = PAT_VOL_KAPPA_STEP;
+  const double lower =
+      pat_move_choice_mover_utility(win_pcts, margin - step, unseen);
+  const double middle = pat_move_choice_mover_utility(win_pcts, margin, unseen);
+  const double upper =
+      pat_move_choice_mover_utility(win_pcts, margin + step, unseen);
+  const double slope = (upper - lower) / (2.0 * step);
+  const double curvature = (upper - 2.0 * middle + lower) / (step * step);
+  return slope > 0.0 ? -curvature / slope : 0.0;
+}
+
 // A move's equity as a double, with the pass sentinel mapped far below
 // anything a real move scores (MOVE_RECORD_ALL lists include the pass).
 static double pat_move_choice_move_equity(const Move *move) {
@@ -212,8 +253,52 @@ static void pat_move_choice_choose(Game *game, int mover_index,
       pat_move_choice_move_equity(move_list_get_move(move_list, 0));
   int chosen = 0;
   const bool scaled = chooser->pat_scale != 0.0 && chooser->pat_scale != 1.0;
-  if (chooser->degrade_margin <= 0.0 && chooser->overlap_correction == 0.0 &&
-      !scaled) {
+  if (chooser->vol_pat != NULL) {
+    const Player *mover = game_get_player(game, mover_index);
+    const Player *opponent = game_get_player(game, 1 - mover_index);
+    const int csi = board_get_cross_set_index(
+        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG), mover_index);
+    PATEvalContext *ctx = pat_move_choice_vol_ctx();
+    pat_eval_context_load(
+        ctx, chooser->vol_pat,
+        board_get_readonly_lanes(game_get_board(game), csi),
+        game_get_ld(game), player_get_rack(mover), PAT_CLASS_MASK_ALL,
+        rack_get_total_letters(player_get_rack(opponent)));
+    pat_eval_context_set_kwg(ctx, player_get_kwg(mover));
+    const double margin_before = equity_to_double(player_get_score(mover) -
+                                                  player_get_score(opponent));
+    const int bag = bag_get_letters(game_get_bag(game));
+    double best_adjusted = 0.0;
+    for (int i = 0; i < num_moves; i++) {
+      const Move *move = move_list_get_move(move_list, i);
+      double adjusted = pat_move_choice_move_equity(move);
+      if (best_equity - adjusted > PAT_VOL_EQUITY_WINDOW) {
+        break;
+      }
+      if (move_get_type(move) != GAME_EVENT_PASS) {
+        Rack leave;
+        get_leave_for_move(move, game, &leave);
+        const double sigma2 =
+            -equity_to_double(pat_eval_move_penalty(ctx, move, &leave));
+        const int drawn =
+            move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE
+                ? move_get_tiles_played(move)
+                : 0;
+        const int unseen =
+            (bag > drawn ? bag - drawn : 0) + RACK_SIZE;
+        const double margin =
+            margin_before + equity_to_double(move_get_score(move));
+        adjusted -= chooser->vol_scale * 0.5 *
+                    pat_move_choice_kappa(chooser->win_pcts, margin, unseen) *
+                    sigma2;
+      }
+      if (i == 0 || adjusted > best_adjusted) {
+        best_adjusted = adjusted;
+        chosen = i;
+      }
+    }
+  } else if (chooser->degrade_margin <= 0.0 &&
+             chooser->overlap_correction == 0.0 && !scaled) {
     // Plain: the top of the sorted list.
   } else if (scaled) {
     // The PAT term of each candidate, recomputed from the position
@@ -2251,10 +2336,28 @@ void pat_move_choice_run_decision_spec(const char *spec) {
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   const WinPct *win_pcts = config_get_win_pcts(config);
   assert(win_pcts);
+  // Side B may be "<pat>@<volatility pat>@<scale>" (see
+  // PATMoveChooser.vol_pat).
+  char *vol_name = strchr(fields[2], '@');
+  double vol_scale = 0.0;
+  if (vol_name) {
+    *vol_name++ = '\0';
+    char *scale_text = strchr(vol_name, '@');
+    if (!scale_text) {
+      log_fatal("patdecide volatility side needs <pat>@<vol>@<scale>");
+    }
+    *scale_text++ = '\0';
+    vol_scale = strtod(scale_text, NULL);
+  }
   PATWeights *pat_a = pat_decide_load(config, fields[1]);
   PATWeights *pat_b = pat_decide_load(config, fields[2]);
+  PATWeights *vol_pat = vol_name ? pat_decide_load(config, vol_name) : NULL;
   const PATMoveChooser chooser_a = {.label = fields[1], .pat = pat_a};
-  const PATMoveChooser chooser_b = {.label = fields[2], .pat = pat_b};
+  const PATMoveChooser chooser_b = {.label = fields[2],
+                                    .pat = pat_b,
+                                    .vol_pat = vol_pat,
+                                    .vol_scale = vol_scale,
+                                    .win_pcts = win_pcts};
   Game *game = config_get_game(config);
   MoveList *setup_list = move_list_create(1);
   MoveList *choice_list =
@@ -2315,6 +2418,9 @@ void pat_move_choice_run_decision_spec(const char *spec) {
       sum_win += value_b.win_pct - value_a.win_pct;
     }
     const int bag = bag_get_letters(game_get_bag(game));
+    const double margin_before = equity_to_double(
+        player_get_score(game_get_player(game, mover_index)) -
+        player_get_score(game_get_player(game, 1 - mover_index)));
     const bool bingo_a = move_get_type(&move_a) ==
                              GAME_EVENT_TILE_PLACEMENT_MOVE &&
                          move_get_tiles_played(&move_a) == RACK_SIZE;
@@ -2330,9 +2436,9 @@ void pat_move_choice_run_decision_spec(const char *spec) {
                                                       worlds) /
                                    (worlds - 1))
                    : 0.0;
-    printf("CASE\t%llu\t%d\t%s\t%.6f\t%.6f\t%.6f\t%.6f\n",
+    printf("CASE\t%llu\t%d\t%s\t%.6f\t%.6f\t%.6f\t%.6f\t%.0f\n",
            (unsigned long long)seed, bag, bingo_class, utility_mean,
-           sum_win / worlds, sum_spread / worlds, utility_var);
+           sum_win / worlds, sum_spread / worlds, utility_var, margin_before);
   }
   printf("POS\t%ld\t%ld\n", positions, disagreements);
   move_list_destroy(reply_list);
@@ -2345,6 +2451,27 @@ void pat_move_choice_run_decision_spec(const char *spec) {
   }
   if (pat_b) {
     pat_destroy(pat_b);
+  }
+  if (vol_pat) {
+    pat_destroy(vol_pat);
+  }
+  config_destroy(config);
+}
+
+// Prints the mover's win% and utility curvature kappa on a margin grid.
+void pat_move_choice_print_kappa(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -winpct winpct");
+  const WinPct *win_pcts = config_get_win_pcts(config);
+  const int unseen_values[] = {10, 20, 40, 60, 90};
+  for (int unseen_idx = 0; unseen_idx < 5; unseen_idx++) {
+    const int unseen = unseen_values[unseen_idx];
+    for (int margin = -150; margin <= 150; margin += 25) {
+      const double win =
+          1.0 - win_pct_get(win_pcts, -margin, (unsigned)unseen);
+      printf("KAPPA\t%d\t%d\t%.4f\t%.5f\n", unseen, margin, win,
+             pat_move_choice_kappa(win_pcts, margin, unseen));
+    }
   }
   config_destroy(config);
 }
