@@ -49,6 +49,25 @@ bool json_is_array(const JsonValue *value) {
   return value && cJSON_IsArray(as_cjson(value));
 }
 
+bool json_is_object(const JsonValue *value) {
+  return value && cJSON_IsObject(as_cjson(value));
+}
+
+int json_object_size(const JsonValue *object) {
+  if (!json_is_object(object)) {
+    return 0;
+  }
+  return cJSON_GetArraySize(as_cjson(object));
+}
+
+const char *json_object_key_at(const JsonValue *object, int index) {
+  if (!json_is_object(object)) {
+    return NULL;
+  }
+  const cJSON *member = cJSON_GetArrayItem(as_cjson(object), index);
+  return member ? member->string : NULL;
+}
+
 int json_array_length(const JsonValue *array) {
   if (!json_is_array(array)) {
     return 0;

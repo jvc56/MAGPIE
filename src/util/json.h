@@ -18,6 +18,13 @@ void json_destroy(const JsonValue *value);
 const JsonValue *json_object_get(const JsonValue *object, const char *key);
 bool json_is_null(const JsonValue *value);
 bool json_is_array(const JsonValue *value);
+bool json_is_object(const JsonValue *value);
+// An object's members in document order: how many there are, and the key of
+// the one at `index` (NULL past the end, or for anything but an object). For
+// code that has to walk a document it does not know the shape of, such as the
+// contract tests comparing one against another.
+int json_object_size(const JsonValue *object);
+const char *json_object_key_at(const JsonValue *object, int index);
 int json_array_length(const JsonValue *array);
 const JsonValue *json_array_get(const JsonValue *array, int index);
 // The string at `index`, or NULL if the element is absent or not a string.

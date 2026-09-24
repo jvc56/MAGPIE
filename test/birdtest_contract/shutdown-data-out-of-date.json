@@ -1,0 +1,9 @@
+{
+  "shutdown": {
+    "reason": "data_out_of_date",
+    "message": "Every active job needs input data you do not have.",
+    "required_tarball_dates": ["20260101"],
+    "required_magpie_version": null,
+    "download_url": null
+  }
+}

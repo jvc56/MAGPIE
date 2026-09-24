@@ -1,0 +1,32 @@
+{
+  "claim_token": "98eac535-7654-4851-9d94-75109abf273b",
+  "result": {
+    "all_games": {
+      "games": 4,
+      "wins": 2,
+      "losses": 2,
+      "ties": 0,
+      "p1_score_mean": 405.75,
+      "p1_score_sd": 93.392987,
+      "p2_score_mean": 373.5,
+      "p2_score_sd": 56.512535
+    },
+    "pentanomial": [
+      0,
+      0,
+      2,
+      0,
+      0
+    ],
+    "divergent_games": {
+      "games": 4,
+      "wins": 2,
+      "losses": 2,
+      "ties": 0,
+      "p1_score_mean": 405.75,
+      "p1_score_sd": 93.392987,
+      "p2_score_mean": 373.5,
+      "p2_score_sd": 56.512535
+    }
+  }
+}

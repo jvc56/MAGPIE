@@ -1,14 +1,19 @@
 #include "contribute_test.h"
 
 #include "../src/def/contribute_defs.h"
+#include "../src/ent/autoplay_results.h"
 #include "../src/ent/client_state.h"
+#include "../src/ent/letter_distribution.h"
+#include "../src/ent/rack.h"
 #include "../src/impl/config.h"
 #include "../src/impl/contribute.h"
+#include "../src/impl/rack_list.h"
 #include "../src/util/hash.h"
 #include "../src/util/http_client.h"
 #include "../src/util/io_util.h"
 #include "../src/util/json.h"
 #include "../src/util/string_util.h"
+#include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
@@ -271,6 +276,34 @@ static const char *const BIRDTEST_LEAVE_FIXTURE =
     "test/birdtest_contract/assignment-leave-generation.json";
 static const char *const BIRDTEST_OPENING_RACK_FIXTURE =
     "test/birdtest_contract/assignment-opening-rack.json";
+// Captured from a real exchange between this client and birdtest by
+// birdtest's scripts/capture_contract.py, not written by hand.
+static const char *const BIRDTEST_GAME_PAIRS_FIXTURE =
+    "test/birdtest_contract/assignment-game-pairs.json";
+static const char *const BIRDTEST_ANON_UUID_FIXTURE =
+    "test/birdtest_contract/anon-uuid-assignment.json";
+static const char *const BIRDTEST_EXPECTED_DATA_FIXTURE =
+    "test/birdtest_contract/expected-data.json";
+static const char *const BIRDTEST_HEARTBEAT_FIXTURE =
+    "test/birdtest_contract/heartbeat.json";
+static const char *const BIRDTEST_RESULT_GAMES_FIXTURE =
+    "test/birdtest_contract/result-games.json";
+static const char *const BIRDTEST_RESULT_GAME_PAIRS_FIXTURE =
+    "test/birdtest_contract/result-game-pairs.json";
+static const char *const BIRDTEST_RESULT_OPENING_RACK_FIXTURE =
+    "test/birdtest_contract/result-opening-rack.json";
+static const char *const BIRDTEST_RESULT_LEAVE_FIXTURE =
+    "test/birdtest_contract/result-leave-generation.json";
+
+static JsonValue *load_fixture(const char *path) {
+  ErrorStack *error_stack = error_stack_create();
+  char *text = get_string_from_file_or_die(path);
+  JsonValue *fixture = json_parse(text, error_stack);
+  free(text);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return fixture;
+}
 
 static JsonValue *load_task_request_fixture(const char *path,
                                             const JsonValue **request) {
@@ -307,8 +340,7 @@ static void assert_fixture_has_keys(const JsonValue *object,
 // only thing that says the bytes are the ones the job means -- a fixture
 // missing a field here is a worker running unverified, which is the state this
 // whole mechanism replaces.
-static void assert_fixture_pins_derived_files(const JsonValue *fixture) {
-  const JsonValue *expected = json_object_get(fixture, "expected_data");
+static void assert_expected_data_pins_derived_files(const JsonValue *expected) {
   assert(expected);
   const JsonValue *derived = json_object_get(expected, "derived");
   if (!derived) {
@@ -329,6 +361,27 @@ static void assert_fixture_pins_derived_files(const JsonValue *fixture) {
     assert(json_get_string_or_null(entry, "builder"));
     assert(json_get_string_or_null(entry, "build_target"));
   }
+}
+
+static void assert_fixture_pins_derived_files(const JsonValue *fixture) {
+  assert_expected_data_pins_derived_files(
+      json_object_get(fixture, "expected_data"));
+}
+
+// What contribute_claim_task reads off every assignment, whatever its job
+// type. `worker_uuid` is not among them: the server sends it only to a worker
+// that arrived with no identity, which is its own fixture.
+static void assert_fixture_is_an_assignment(const JsonValue *fixture,
+                                            const char *where) {
+  const char *const envelope_keys[] = {
+      "claim_token",        "job_id",        "task_request",
+      "min_magpie_version", "expected_data",
+  };
+  assert_fixture_has_keys(fixture, envelope_keys,
+                          sizeof(envelope_keys) / sizeof(envelope_keys[0]),
+                          where);
+  assert(json_get_string_or_null(json_object_get(fixture, "task_request"),
+                                 "job_type"));
 }
 
 static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
@@ -415,6 +468,275 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   // required it would fail every leave_generation task.
   assert(!json_object_get(request, "target_rack_count"));
   json_destroy(leave);
+
+  // A game_pairs task is run by the games executor, told apart only by its
+  // job_type, so it needs every key a games request does.
+  JsonValue *pairs =
+      load_task_request_fixture(BIRDTEST_GAME_PAIRS_FIXTURE, &request);
+  assert_fixture_is_an_assignment(pairs, "game_pairs assignment");
+  assert_strings_equal(json_get_string_or_null(request, "job_type"),
+                       "game_pairs");
+  assert(json_get_bool_or(request, "game_pairs", false));
+  assert_fixture_has_keys(request, request_keys,
+                          sizeof(request_keys) / sizeof(request_keys[0]),
+                          "game_pairs task_request");
+  assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER1),
+                          player_keys, num_player_keys, "game_pairs player1");
+  assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER2),
+                          player_keys, num_player_keys, "game_pairs player2");
+  assert_fixture_pins_derived_files(pairs);
+  assert(!json_object_get(pairs, "worker_uuid"));
+  json_destroy(pairs);
+
+  // The first task a worker with no identity is given carries the identity
+  // the server minted for it, which adopt_server_assigned_uuid persists.
+  JsonValue *anon =
+      load_task_request_fixture(BIRDTEST_ANON_UUID_FIXTURE, &request);
+  assert_fixture_is_an_assignment(anon, "first assignment");
+  assert(json_get_string_or_null(anon, "worker_uuid"));
+  json_destroy(anon);
+
+  // Everything expected_data_matches reads off the digest list.
+  JsonValue *expected = load_fixture(BIRDTEST_EXPECTED_DATA_FIXTURE);
+  assert_strings_equal(json_get_string_or_null(expected, "algorithm"),
+                       "sha256");
+  const JsonValue *files = json_object_get(expected, "files");
+  assert(json_array_length(files) > 0);
+  const char *const file_keys[] = {"role", "name", "sha256", "path",
+                                   "tarball_date"};
+  for (int i = 0; i < json_array_length(files); i++) {
+    const JsonValue *file = json_array_get(files, i);
+    assert_fixture_has_keys(file, file_keys,
+                            sizeof(file_keys) / sizeof(file_keys[0]),
+                            "expected_data file");
+    const char *role = json_get_string_or_null(file, "role");
+    // The roles role_to_filepath_type resolves; any other is skipped, which
+    // would be a file the job pins and this client never checks.
+    assert(strings_equal(role, "kwg") || strings_equal(role, "klv") ||
+           strings_equal(role, "winpct") || strings_equal(role, "letterdist") ||
+           strings_equal(role, "layout"));
+  }
+  assert_expected_data_pins_derived_files(expected);
+  json_destroy(expected);
+
+  // A heartbeat is the claim token and nothing else.
+  JsonValue *heartbeat = load_fixture(BIRDTEST_HEARTBEAT_FIXTURE);
+  assert(json_object_size(heartbeat) == 1);
+  assert(json_get_string_or_null(heartbeat, "claim_token"));
+  json_destroy(heartbeat);
+}
+
+// Every key `fixture` has, at every depth, `produced` has too. An array is
+// matched member by member against whichever produced element carries the
+// key, so a member only some elements have -- a captured position's
+// previous_move -- counts once any element produces it.
+static void assert_produces_every_fixture_key(const JsonValue *fixture,
+                                              const JsonValue *produced,
+                                              const char *where) {
+  if (json_is_object(fixture)) {
+    if (!json_is_object(produced)) {
+      log_fatal("%s: birdtest's fixture has an object where MAGPIE's result "
+                "does not",
+                where);
+    }
+    for (int i = 0; i < json_object_size(fixture); i++) {
+      const char *key = json_object_key_at(fixture, i);
+      const JsonValue *mine = json_object_get(produced, key);
+      if (!mine) {
+        log_fatal("%s: birdtest's fixture has '%s', which MAGPIE's result "
+                  "does not",
+                  where, key);
+      }
+      char *path = get_formatted_string("%s.%s", where, key);
+      assert_produces_every_fixture_key(json_object_get(fixture, key), mine,
+                                        path);
+      free(path);
+    }
+    return;
+  }
+  if (!json_is_array(fixture)) {
+    return;
+  }
+  if (!json_is_array(produced)) {
+    log_fatal("%s: birdtest's fixture has an array where MAGPIE's result "
+              "does not",
+              where);
+  }
+  for (int i = 0; i < json_array_length(fixture); i++) {
+    const JsonValue *element = json_array_get(fixture, i);
+    for (int k = 0; k < json_object_size(element); k++) {
+      const char *key = json_object_key_at(element, k);
+      const JsonValue *mine = NULL;
+      for (int j = 0; j < json_array_length(produced) && !mine; j++) {
+        mine = json_object_get(json_array_get(produced, j), key);
+      }
+      if (!mine) {
+        log_fatal("%s[]: birdtest's fixture has '%s', which no element of "
+                  "MAGPIE's result does",
+                  where, key);
+      }
+      char *path = get_formatted_string("%s[].%s", where, key);
+      assert_produces_every_fixture_key(json_object_get(element, key), mine,
+                                        path);
+      free(path);
+    }
+  }
+}
+
+// The result a fixture holds, under the envelope submit_result_over_http
+// writes around it.
+static const JsonValue *fixture_result(const JsonValue *fixture) {
+  assert(json_object_size(fixture) == 2);
+  assert(json_get_string_or_null(fixture, "claim_token"));
+  const JsonValue *result = json_object_get(fixture, "result");
+  assert(json_is_object(result));
+  return result;
+}
+
+static void assert_result_produces_fixture_keys(const char *fixture_path,
+                                                const char *produced_json) {
+  ErrorStack *error_stack = error_stack_create();
+  JsonValue *produced = json_parse(produced_json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  JsonValue *fixture = load_fixture(fixture_path);
+  assert_produces_every_fixture_key(fixture_result(fixture), produced,
+                                    fixture_path);
+  json_destroy(fixture);
+  json_destroy(produced);
+}
+
+// birdtest's result fixtures are what this client submitted in a real
+// exchange, and birdtest parses each against the types that store it. This is
+// the other half: the serializers a task's result is built with still produce
+// every key those fixtures carry -- so a key renamed here fails this test
+// rather than every submission, which the server would refuse as malformed.
+static void test_results_carry_every_key_the_server_reads(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 score -r1 best -r2 best "
+      "-threads 1 -maxnumdplays 5");
+
+  // games, with capture on: the game recorder and the positions recorder,
+  // together, as config_contribute_games asks for them.
+  load_and_exec_config_or_die(config, "autoplay games,positions 2 -seed 3");
+  assert_result_produces_fixture_keys(
+      BIRDTEST_RESULT_GAMES_FIXTURE,
+      autoplay_results_get_json(config_get_autoplay_results(config), false));
+
+  // game_pairs: all_games, the pentanomial and the divergent subset.
+  load_and_exec_config_or_die(config, "autoplay games 2 -seed 3 -gp true");
+  assert_result_produces_fixture_keys(
+      BIRDTEST_RESULT_GAME_PAIRS_FIXTURE,
+      autoplay_results_get_json(config_get_autoplay_results(config), true));
+
+  // leave_generation: every rack that occurred, from the rack list the task
+  // accumulates.
+  ErrorStack *error_stack = error_stack_create();
+  const LetterDistribution *ld = config_get_ld(config);
+  const char *forced_racks[] = {"AEINRST"};
+  RackList *rack_list = rack_list_create(ld, 1, forced_racks, 1, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  Rack rack;
+  rack_set_dist_size(&rack, ld_get_size(ld));
+  rack_set_to_string(ld, &rack, "AEINRST");
+  rack_list_add_rack(rack_list, &rack, 25.0);
+  char *leave_json = rack_list_get_rack_equity_json(rack_list, ld);
+  assert_result_produces_fixture_keys(BIRDTEST_RESULT_LEAVE_FIXTURE,
+                                      leave_json);
+  free(leave_json);
+  rack_list_destroy(rack_list);
+  config_destroy(config);
+
+  // opening_rack: a simulated analysis, written the way
+  // config_contribute_analyze_rack writes one -- the rack, the ranked plays
+  // with their simulation statistics, and how many were ranked.
+  config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 5 -plies 2 -threads 1 -iter 30 -scond none -seed 10");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEINRST");
+  load_and_exec_config_or_die(config, "gen");
+  SimResults *sim_results = config_get_sim_results(config);
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_array_start(sb, CONTRIBUTE_KEY_RACKS, &first);
+  bool rack_first = true;
+  json_write_object_start(sb);
+  json_write_string_field(sb, CONTRIBUTE_KEY_RACK, "AEINRST", &rack_first);
+  const int num_moves = autoplay_results_write_ranked_plays_json(
+      sb, &rack_first, config_get_game(config), config_get_move_list(config),
+      sim_results, 5, 2);
+  json_write_int_field(sb, CONTRIBUTE_KEY_NUM_MOVES, num_moves, &rack_first);
+  json_write_object_end(sb);
+  json_write_array_end(sb);
+  json_write_object_end(sb);
+  assert_result_produces_fixture_keys(BIRDTEST_RESULT_OPENING_RACK_FIXTURE,
+                                      string_builder_peek(sb));
+  string_builder_destroy(sb);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Capturing positions decides what a games task reports, never what it plays.
+// The case this pins: with capture on, a static player read the first element
+// of its move list as the move to play, and recording every move leaves that
+// list a min-heap -- so it played its lowest-ranked move, a pass whenever it
+// had one, and each captured position reported the worst plays as its
+// analysis. A capture job played entirely different, far weaker games than the
+// same job without capture, and nothing failed.
+static void test_capturing_positions_does_not_change_the_games(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "-threads 1 -maxnumdplays 5");
+  ErrorStack *error_stack = error_stack_create();
+
+  load_and_exec_config_or_die(config, "autoplay games 4 -seed 21");
+  JsonValue *plain = json_parse(
+      autoplay_results_get_json(config_get_autoplay_results(config), false),
+      error_stack);
+  load_and_exec_config_or_die(config, "autoplay games,positions 4 -seed 21");
+  JsonValue *captured = json_parse(
+      autoplay_results_get_json(config_get_autoplay_results(config), false),
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const JsonValue *plain_games = json_object_get(plain, "all_games");
+  const JsonValue *captured_games = json_object_get(captured, "all_games");
+  const char *const tallies[] = {"games", "wins", "losses", "ties"};
+  for (size_t i = 0; i < sizeof(tallies) / sizeof(tallies[0]); i++) {
+    assert(json_get_int(plain_games, tallies[i], error_stack) ==
+           json_get_int(captured_games, tallies[i], error_stack));
+  }
+  const char *const means[] = {"p1_score_mean", "p2_score_mean"};
+  for (size_t i = 0; i < sizeof(means) / sizeof(means[0]); i++) {
+    assert(json_get_double(plain_games, means[i], error_stack) ==
+           json_get_double(captured_games, means[i], error_stack));
+  }
+  assert(error_stack_is_empty(error_stack));
+
+  // And every position's plays come best-first, as the server stores them:
+  // the first is the one played.
+  const JsonValue *positions = json_object_get(captured, "positions");
+  assert(json_array_length(positions) > 0);
+  for (int i = 0; i < json_array_length(positions); i++) {
+    const JsonValue *moves =
+        json_object_get(json_array_get(positions, i), "moves");
+    assert(json_array_length(moves) > 0);
+    for (int m = 1; m < json_array_length(moves); m++) {
+      assert(json_get_double(json_array_get(moves, m - 1), "equity",
+                             error_stack) >=
+             json_get_double(json_array_get(moves, m), "equity", error_stack));
+    }
+  }
+  assert(error_stack_is_empty(error_stack));
+
+  json_destroy(captured);
+  json_destroy(plain);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
 }
 
 // A null in a request means MAGPIE's default, not whatever the process last
@@ -713,5 +1035,7 @@ void test_contribute(void) {
   test_sha256();
   test_digest_cache_key_notices_a_same_size_replacement();
   test_contract_fixtures_carry_every_key_contribute_reads();
+  test_results_carry_every_key_the_server_reads();
+  test_capturing_positions_does_not_change_the_games();
   test_player_settings_do_not_leak_between_tasks();
 }
