@@ -1,0 +1,983 @@
+{
+  "claim_token": "df5b4e78-d5b5-4fbc-9be5-8317a685bb18",
+  "result": {
+    "all_games": {
+      "games": 1,
+      "wins": 0,
+      "losses": 1,
+      "ties": 0,
+      "p1_score_mean": 349.0,
+      "p1_score_sd": 0.0,
+      "p2_score_mean": 415.0,
+      "p2_score_sd": 0.0
+    },
+    "positions": [
+      {
+        "game_index": 0,
+        "turn_number": 0,
+        "rack": "HHIRRUV",
+        "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 HHIRRUV/AEFLMST 0/0 0",
+        "num_moves": 79,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "8G HUH",
+            "score": 18,
+            "equity": 7.356,
+            "iterations": 0
+          },
+          {
+            "move": "8F HUH",
+            "score": 18,
+            "equity": 6.656,
+            "iterations": 0
+          },
+          {
+            "move": "8H HUH",
+            "score": 18,
+            "equity": 6.656,
+            "iterations": 0
+          },
+          {
+            "move": "(exch HIRUV)",
+            "score": 0,
+            "equity": 1.329,
+            "iterations": 0
+          },
+          {
+            "move": "(exch HIRRUV)",
+            "score": 0,
+            "equity": 1.14,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 1,
+        "rack": "AEFLMST",
+        "position": "15/15/15/15/15/15/15/6HUH6/15/15/15/15/15/15/15 IMRRRUV/AEFLMST 18/0 0",
+        "previous_move": "8G HUH",
+        "previous_move_score": 18,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "9C FLEAMS",
+            "score": 30,
+            "equity": 30.0,
+            "iterations": 0
+          },
+          {
+            "move": "7D FLEAMS",
+            "score": 29,
+            "equity": 29.0,
+            "iterations": 0
+          },
+          {
+            "move": "7E FLAMES",
+            "score": 29,
+            "equity": 29.0,
+            "iterations": 0
+          },
+          {
+            "move": "9E FLAMES",
+            "score": 29,
+            "equity": 29.0,
+            "iterations": 0
+          },
+          {
+            "move": "7E FLAME",
+            "score": 28,
+            "equity": 28.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 2,
+        "rack": "IMRRRUV",
+        "position": "15/15/15/15/15/15/15/6HUH6/2FLEAMS7/15/15/15/15/15/15 IMRRRUV/BGLOTTX 18/30 0",
+        "previous_move": "9C FLEAMS",
+        "previous_move_score": 30,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "E9 (E)RUVIM",
+            "score": 22,
+            "equity": 16.053,
+            "iterations": 0
+          },
+          {
+            "move": "7H MURR",
+            "score": 18,
+            "equity": 13.894,
+            "iterations": 0
+          },
+          {
+            "move": "E5 MURR(E)",
+            "score": 14,
+            "equity": 9.894,
+            "iterations": 0
+          },
+          {
+            "move": "E9 (E)RUV",
+            "score": 14,
+            "equity": 7.78,
+            "iterations": 0
+          },
+          {
+            "move": "10E RIM",
+            "score": 23,
+            "equity": 7.027,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 3,
+        "rack": "BGLOTTX",
+        "position": "15/15/15/15/15/15/15/6HUH6/2FLEAMS7/4R10/4U10/4V10/4I10/4M10/15 ANORRRY/BGLOTTX 40/30 0",
+        "previous_move": "E9 (E)RUVIM",
+        "previous_move_score": 22,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "D13 BOX",
+            "score": 28,
+            "equity": 28.0,
+            "iterations": 0
+          },
+          {
+            "move": "D13 GOX",
+            "score": 26,
+            "equity": 26.0,
+            "iterations": 0
+          },
+          {
+            "move": "7H BOX",
+            "score": 24,
+            "equity": 24.0,
+            "iterations": 0
+          },
+          {
+            "move": "D13 LOX",
+            "score": 24,
+            "equity": 24.0,
+            "iterations": 0
+          },
+          {
+            "move": "10D O(R)B",
+            "score": 23,
+            "equity": 23.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 4,
+        "rack": "ANORRRY",
+        "position": "15/15/15/15/15/15/15/6HUH6/2FLEAMS7/4R10/4U10/4V10/3BI10/3OM10/3X11 ANORRRY/EGLOTTZ 40/58 0",
+        "previous_move": "D13 BOX",
+        "previous_move_score": 28,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "15A ORY(X)",
+            "score": 42,
+            "equity": 35.578,
+            "iterations": 0
+          },
+          {
+            "move": "14B RO(OM)Y",
+            "score": 36,
+            "equity": 29.578,
+            "iterations": 0
+          },
+          {
+            "move": "15A ONY(X)",
+            "score": 42,
+            "equity": 27.62,
+            "iterations": 0
+          },
+          {
+            "move": "C9 (F)ARRO",
+            "score": 26,
+            "equity": 24.712,
+            "iterations": 0
+          },
+          {
+            "move": "C13 ORA",
+            "score": 30,
+            "equity": 21.608,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 5,
+        "rack": "EGLOTTZ",
+        "position": "15/15/15/15/15/15/15/6HUH6/2FLEAMS7/4R10/4U10/4V10/3BI10/3OM10/ORYX11 ANORRTY/EGLOTTZ 82/58 0",
+        "previous_move": "15A ORY(X)",
+        "previous_move_score": 42,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "C11 ZLOT(Y)",
+            "score": 49,
+            "equity": 49.0,
+            "iterations": 0
+          },
+          {
+            "move": "C11 EGO",
+            "score": 18,
+            "equity": 18.0,
+            "iterations": 0
+          },
+          {
+            "move": "8A EGO",
+            "score": 17,
+            "equity": 17.0,
+            "iterations": 0
+          },
+          {
+            "move": "10D O(R)G",
+            "score": 17,
+            "equity": 17.0,
+            "iterations": 0
+          },
+          {
+            "move": "B10 LOTTE(R)",
+            "score": 16,
+            "equity": 16.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 6,
+        "rack": "ANORRTY",
+        "position": "15/15/15/15/15/15/15/6HUH6/2FLEAMS7/4R10/2Z1U10/2L1V10/2OBI10/2TOM10/ORYX11 ANORRTY/EEGNTU? 82/107 0",
+        "previous_move": "C11 ZLOT(Y)",
+        "previous_move_score": 49,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "14B A(TOM)Y",
+            "score": 40,
+            "equity": 30.182,
+            "iterations": 0
+          },
+          {
+            "move": "7E TRONA",
+            "score": 25,
+            "equity": 25.189,
+            "iterations": 0
+          },
+          {
+            "move": "7H NOTARY",
+            "score": 23,
+            "equity": 23.784,
+            "iterations": 0
+          },
+          {
+            "move": "7D RAYON",
+            "score": 21,
+            "equity": 21.68,
+            "iterations": 0
+          },
+          {
+            "move": "7D TYRO",
+            "score": 17,
+            "equity": 18.785,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 7,
+        "rack": "EEGNTU?",
+        "position": "15/15/15/15/15/15/15/6HUH6/2FLEAMS7/4R10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX11 EINORRT/EEGNTU? 122/107 0",
+        "previous_move": "14B A(TOM)Y",
+        "previous_move_score": 40,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "D3 UNGEnT(L)E",
+            "score": 70,
+            "equity": 70.0,
+            "iterations": 0
+          },
+          {
+            "move": "D3 UnGENT(L)E",
+            "score": 70,
+            "equity": 70.0,
+            "iterations": 0
+          },
+          {
+            "move": "8A GhEE",
+            "score": 23,
+            "equity": 23.0,
+            "iterations": 0
+          },
+          {
+            "move": "8A GlEE",
+            "score": 23,
+            "equity": 23.0,
+            "iterations": 0
+          },
+          {
+            "move": "8A GrEE",
+            "score": 23,
+            "equity": 23.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 8,
+        "rack": "EINORRT",
+        "position": "15/15/3U11/3N11/3G11/3E11/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX11 EINORRT/AACDQTT 122/177 0",
+        "previous_move": "D3 UNGEnT(L)E",
+        "previous_move_score": 70,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "6A ORI(E)NTER",
+            "score": 62,
+            "equity": 62.0,
+            "iterations": 0
+          },
+          {
+            "move": "6C R(E)ORIENT",
+            "score": 62,
+            "equity": 62.0,
+            "iterations": 0
+          },
+          {
+            "move": "E5 OR",
+            "score": 12,
+            "equity": 27.53,
+            "iterations": 0
+          },
+          {
+            "move": "E3 NOIR",
+            "score": 20,
+            "equity": 26.833,
+            "iterations": 0
+          },
+          {
+            "move": "10D (ER)R",
+            "score": 9,
+            "equity": 25.456,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 9,
+        "rack": "AACDQTT",
+        "position": "15/15/3U11/3N11/3G11/ORIENTER7/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX11 CGIIIOT/AACDQTT 184/177 0",
+        "previous_move": "6A ORI(E)NTER",
+        "previous_move_score": 62,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "3C Q(U)AD",
+            "score": 28,
+            "equity": 28.0,
+            "iterations": 0
+          },
+          {
+            "move": "3B AQ(U)A",
+            "score": 26,
+            "equity": 26.0,
+            "iterations": 0
+          },
+          {
+            "move": "3C Q(U)A",
+            "score": 24,
+            "equity": 24.0,
+            "iterations": 0
+          },
+          {
+            "move": "A6 (O)CTAD",
+            "score": 24,
+            "equity": 24.0,
+            "iterations": 0
+          },
+          {
+            "move": "15F ACTA",
+            "score": 23,
+            "equity": 23.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 10,
+        "rack": "CGIIIOT",
+        "position": "15/15/2QUAD9/3N11/3G11/ORIENTER7/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX11 CGIIIOT/AACETTW 184/205 0",
+        "previous_move": "3C Q(U)AD",
+        "previous_move_score": 28,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "4A ICI(N)G",
+            "score": 23,
+            "equity": 19.139,
+            "iterations": 0
+          },
+          {
+            "move": "A1 COGIT(O)",
+            "score": 30,
+            "equity": 18.749,
+            "iterations": 0
+          },
+          {
+            "move": "A5 C(O)GITO",
+            "score": 27,
+            "equity": 15.749,
+            "iterations": 0
+          },
+          {
+            "move": "4C I(N)GOT",
+            "score": 23,
+            "equity": 14.838,
+            "iterations": 0
+          },
+          {
+            "move": "15F OTIC",
+            "score": 23,
+            "equity": 11.368,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 11,
+        "rack": "AACETTW",
+        "position": "15/15/2QUAD9/ICING10/3G11/ORIENTER7/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX11 DIOORST/AACETTW 207/205 0",
+        "previous_move": "4A ICI(N)G",
+        "previous_move_score": 23,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "H1 WATTE(R)",
+            "score": 30,
+            "equity": 30.0,
+            "iterations": 0
+          },
+          {
+            "move": "15F ACETA",
+            "score": 26,
+            "equity": 26.0,
+            "iterations": 0
+          },
+          {
+            "move": "15F AWA",
+            "score": 23,
+            "equity": 23.0,
+            "iterations": 0
+          },
+          {
+            "move": "15F AWE",
+            "score": 23,
+            "equity": 23.0,
+            "iterations": 0
+          },
+          {
+            "move": "15F ACTA",
+            "score": 23,
+            "equity": 23.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 12,
+        "rack": "DIOORST",
+        "position": "7W7/7A7/2QUAD1T7/ICING2T7/3G3E7/ORIENTER7/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX11 DIOORST/ACEELSW 207/235 0",
+        "previous_move": "H1 WATTE(R)",
+        "previous_move_score": 30,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "5D (G)OIT(E)R",
+            "score": 28,
+            "equity": 35.66,
+            "iterations": 0
+          },
+          {
+            "move": "8A DOI(T)",
+            "score": 20,
+            "equity": 33.736,
+            "iterations": 0
+          },
+          {
+            "move": "15F OOTID",
+            "score": 23,
+            "equity": 32.928,
+            "iterations": 0
+          },
+          {
+            "move": "E1 DR(AG)O(N)",
+            "score": 22,
+            "equity": 31.255,
+            "iterations": 0
+          },
+          {
+            "move": "5D (G)O",
+            "score": 16,
+            "equity": 31.114,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 13,
+        "rack": "ACEELSW",
+        "position": "7W7/7A7/2QUAD1T7/ICING2T7/3GOITER6/ORIENTER7/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX11 BDEIJOS/ACEELSW 235/235 0",
+        "previous_move": "5D (G)OIT(E)R",
+        "previous_move_score": 28,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "B2 ES(C)A(R)",
+            "score": 29,
+            "equity": 29.0,
+            "iterations": 0
+          },
+          {
+            "move": "I2 WEA(R)S",
+            "score": 28,
+            "equity": 28.0,
+            "iterations": 0
+          },
+          {
+            "move": "J2 WEASEL",
+            "score": 27,
+            "equity": 27.0,
+            "iterations": 0
+          },
+          {
+            "move": "8A WEE(T)",
+            "score": 26,
+            "equity": 26.0,
+            "iterations": 0
+          },
+          {
+            "move": "15F AWEE",
+            "score": 26,
+            "equity": 26.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 14,
+        "rack": "BDEIJOS",
+        "position": "7W7/1E5A7/1SQUAD1T7/ICING2T7/1A1GOITER6/ORIENTER7/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX11 BDEIJOS/ACDDELW 235/264 0",
+        "previous_move": "B2 ES(C)A(R)",
+        "previous_move_score": 29,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "15F EJIDO",
+            "score": 44,
+            "equity": 49.743,
+            "iterations": 0
+          },
+          {
+            "move": "15F EJIDOS",
+            "score": 47,
+            "equity": 44.938,
+            "iterations": 0
+          },
+          {
+            "move": "A1 JO",
+            "score": 29,
+            "equity": 43.729,
+            "iterations": 0
+          },
+          {
+            "move": "J2 JOBS",
+            "score": 37,
+            "equity": 39.338,
+            "iterations": 0
+          },
+          {
+            "move": "J2 JIBS",
+            "score": 37,
+            "equity": 37.956,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 15,
+        "rack": "ACDDELW",
+        "position": "7W7/1E5A7/1SQUAD1T7/ICING2T7/1A1GOITER6/ORIENTER7/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY9/ORYX1EJIDO5 ABEIOSU/ACDDELW 279/264 0",
+        "previous_move": "15F EJIDO",
+        "previous_move_score": 44,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "14J WADDLE",
+            "score": 51,
+            "equity": 51.0,
+            "iterations": 0
+          },
+          {
+            "move": "14J WADED",
+            "score": 49,
+            "equity": 49.0,
+            "iterations": 0
+          },
+          {
+            "move": "14J WALED",
+            "score": 47,
+            "equity": 47.0,
+            "iterations": 0
+          },
+          {
+            "move": "14J WEALD",
+            "score": 47,
+            "equity": 47.0,
+            "iterations": 0
+          },
+          {
+            "move": "14J DECLAW",
+            "score": 39,
+            "equity": 39.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 16,
+        "rack": "ABEIOSU",
+        "position": "7W7/1E5A7/1SQUAD1T7/ICING2T7/1A1GOITER6/ORIENTER7/3n11/3T2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY3WADDLE/ORYX1EJIDO5 ABEIOSU/ACNOPPR 279/315 0",
+        "previous_move": "14J WADDLE",
+        "previous_move_score": 51,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "8A OBI(T)",
+            "score": 23,
+            "equity": 25.692,
+            "iterations": 0
+          },
+          {
+            "move": "13K BIO",
+            "score": 23,
+            "equity": 25.692,
+            "iterations": 0
+          },
+          {
+            "move": "8A BAI(T)",
+            "score": 23,
+            "equity": 24.122,
+            "iterations": 0
+          },
+          {
+            "move": "13K BOA",
+            "score": 23,
+            "equity": 23.799,
+            "iterations": 0
+          },
+          {
+            "move": "I1 OBI",
+            "score": 18,
+            "equity": 20.692,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 17,
+        "rack": "ACNOPPR",
+        "position": "7W7/1E5A7/1SQUAD1T7/ICING2T7/1A1GOITER6/ORIENTER7/3n11/OBIT2HUH6/2FLEAMS7/3ER10/2Z1U10/2L1V10/2OBI10/1ATOMY3WADDLE/ORYX1EJIDO5 AEEGNSU/ACNOPPR 302/315 0",
+        "previous_move": "8A OBI(T)",
+        "previous_move_score": 23,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "O10 CAPP(E)R",
+            "score": 45,
+            "equity": 45.0,
+            "iterations": 0
+          },
+          {
+            "move": "O10 COPP(E)R",
+            "score": 45,
+            "equity": 45.0,
+            "iterations": 0
+          },
+          {
+            "move": "O10 NAPP(E)R",
+            "score": 39,
+            "equity": 39.0,
+            "iterations": 0
+          },
+          {
+            "move": "O10 RAPP(E)N",
+            "score": 39,
+            "equity": 39.0,
+            "iterations": 0
+          },
+          {
+            "move": "O8 PROPAN(E)",
+            "score": 36,
+            "equity": 36.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 18,
+        "rack": "AEEGNSU",
+        "position": "7W7/1E5A7/1SQUAD1T7/ICING2T7/1A1GOITER6/ORIENTER7/3n11/OBIT2HUH6/2FLEAMS7/3ER9C/2Z1U9A/2L1V9P/2OBI9P/1ATOMY3WADDLE/ORYX1EJIDO4R AEEGNSU/ELNNOV? 302/360 0",
+        "previous_move": "O10 CAPP(E)R",
+        "previous_move_score": 45,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "M9 AUGEN(D)",
+            "score": 18,
+            "equity": 29.19,
+            "iterations": 0
+          },
+          {
+            "move": "M9 UNAGE(D)",
+            "score": 18,
+            "equity": 29.19,
+            "iterations": 0
+          },
+          {
+            "move": "L12 GU(D)E",
+            "score": 14,
+            "equity": 27.967,
+            "iterations": 0
+          },
+          {
+            "move": "L9 AUGEN(D)",
+            "score": 16,
+            "equity": 27.19,
+            "iterations": 0
+          },
+          {
+            "move": "L9 UNAGE(D)",
+            "score": 16,
+            "equity": 27.19,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 19,
+        "rack": "ELNNOV?",
+        "position": "7W7/1E5A7/1SQUAD1T7/ICING2T7/1A1GOITER6/ORIENTER7/3n11/OBIT2HUH6/2FLEAMS4A2/3ER7U1C/2Z1U7G1A/2L1V7E1P/2OBI7N1P/1ATOMY3WADDLE/ORYX1EJIDO4R AEEFIKS/ELNNOV? 320/360 0",
+        "previous_move": "M9 AUGEN(D)",
+        "previous_move_score": 18,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "K9 NOVEN(A)s",
+            "score": 31,
+            "equity": 31.0,
+            "iterations": 0
+          },
+          {
+            "move": "K11 LEV(A)s",
+            "score": 27,
+            "equity": 27.0,
+            "iterations": 0
+          },
+          {
+            "move": "K11 NOV(A)s",
+            "score": 27,
+            "equity": 27.0,
+            "iterations": 0
+          },
+          {
+            "move": "12H VELOc(E)",
+            "score": 24,
+            "equity": 24.0,
+            "iterations": 0
+          },
+          {
+            "move": "12H VENOs(E)",
+            "score": 24,
+            "equity": 24.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 20,
+        "rack": "AEEFIKS",
+        "position": "7W7/1E5A7/1SQUAD1T7/ICING2T7/1A1GOITER6/ORIENTER7/3n11/OBIT2HUH6/2FLEAMS2N1A2/3ER5O1U1C/2Z1U5V1G1A/2L1V5E1E1P/2OBI5N1N1P/1ATOMY3WADDLE/ORYX1EJIDOs3R AEEFIKS/ILNS 320/391 0",
+        "previous_move": "K9 NOVEN(A)s",
+        "previous_move_score": 31,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "J2 KAFS",
+            "score": 29,
+            "equity": 13.0,
+            "iterations": 0
+          },
+          {
+            "move": "J2 KEFS",
+            "score": 29,
+            "equity": 13.0,
+            "iterations": 0
+          },
+          {
+            "move": "J2 KIFS",
+            "score": 29,
+            "equity": 13.0,
+            "iterations": 0
+          },
+          {
+            "move": "N4 FAKIES",
+            "score": 25,
+            "equity": 13.0,
+            "iterations": 0
+          },
+          {
+            "move": "J1 FAKES",
+            "score": 22,
+            "equity": 8.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 21,
+        "rack": "ILNS",
+        "position": "7W7/1E5A1K5/1SQUAD1T1A5/ICING2T1F5/1A1GOITERS5/ORIENTER7/3n11/OBIT2HUH6/2FLEAMS2N1A2/3ER5O1U1C/2Z1U5V1G1A/2L1V5E1E1P/2OBI5N1N1P/1ATOMY3WADDLE/ORYX1EJIDOs3R EEI/ILNS 349/391 0",
+        "previous_move": "J2 KAFS",
+        "previous_move_score": 29,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "2J (K)ILNS",
+            "score": 18,
+            "equity": 18.0,
+            "iterations": 0
+          },
+          {
+            "move": "4J (F)ILS",
+            "score": 14,
+            "equity": 14.0,
+            "iterations": 0
+          },
+          {
+            "move": "4J (F)INS",
+            "score": 14,
+            "equity": 14.0,
+            "iterations": 0
+          },
+          {
+            "move": "15M SI(R)",
+            "score": 14,
+            "equity": 14.0,
+            "iterations": 0
+          },
+          {
+            "move": "4J (F)IL",
+            "score": 12,
+            "equity": 12.0,
+            "iterations": 0
+          }
+        ]
+      }
+    ]
+  }
+}

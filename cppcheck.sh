@@ -79,6 +79,10 @@ echo "Running cppcheck analysis on src/, test/, cmd/, and tools/ directories..."
     --suppress=checkLevelNormal \
     --suppress='*:*/linenoise.c' \
     --suppress='*:*/linenoise.h' \
+    --suppress='*:*/cjson.c' \
+    --suppress='*:*/cjson.h' \
+    --suppress='*:*/sha256.c' \
+    --suppress='*:*/sha256.h' \
     --std=c99 \
     --error-exitcode=1 \
     -U_WIN32 \

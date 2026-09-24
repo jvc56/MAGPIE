@@ -456,8 +456,7 @@ void game_history_set_gcg_filename(GameHistory *game_history,
       StringBuilder *sb = string_builder_create();
       string_builder_add_formatted_string(sb, "%s%s", new_gcg_filename,
                                           GCG_EXTENSION);
-      game_history->gcg_filename = string_builder_dump(sb, NULL);
-      string_builder_destroy(sb);
+      game_history->gcg_filename = string_builder_dump_and_destroy(sb, NULL);
     } else {
       game_history->gcg_filename = string_duplicate(new_gcg_filename);
     }

@@ -25,6 +25,14 @@ static inline Equity double_to_equity(double x) {
   return (Equity)rounded;
 }
 
+// True when an equity holds an actual value rather than one of the sentinels.
+// Callers that must not abort on a pass -- serializing a full ranked move list,
+// for instance, where a pass is a legitimate entry -- check this first.
+static inline bool equity_is_convertible(Equity eq) {
+  return eq != EQUITY_UNDEFINED_VALUE && eq != EQUITY_INITIAL_VALUE &&
+         eq != EQUITY_PASS_VALUE;
+}
+
 // Used for tests and accumulating stats.
 static inline double equity_to_double(Equity eq) {
   if (eq == EQUITY_UNDEFINED_VALUE) {

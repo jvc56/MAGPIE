@@ -1,11 +1,14 @@
 #include "config.h"
 
+#include "../compat/chttp.h"
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
 #include "../def/board_defs.h"
+#include "../def/builder_defs.h"
 #include "../def/config_defs.h"
+#include "../def/contribute_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
@@ -23,6 +26,7 @@
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
+#include "../ent/data_filepaths.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -51,11 +55,14 @@
 #include "../str/rack_string.h"
 #include "../str/sim_string.h"
 #include "../str/validated_moves_string.h"
+#include "../util/hash.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/string_util.h"
 #include "analyze.h"
 #include "autoplay.h"
 #include "cgp.h"
+#include "contribute.h"
 #include "convert.h"
 #include "endgame.h"
 #include "gameplay.h"
@@ -106,6 +113,7 @@ typedef enum {
   ARG_TOKEN_PEG,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
+  ARG_TOKEN_CONTRIBUTE,
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
@@ -247,7 +255,7 @@ typedef enum {
   ARG_TOKEN_MULTI_THREADING_MODE,
   ARG_TOKEN_ANALYZE,
   ARG_TOKEN_VERSION,
-  ARG_TOKEN_WRITE_RACK_EQUITY_CSV,
+  ARG_TOKEN_BUILDERS,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -348,6 +356,15 @@ struct Config {
   // default.
   int peg_num_stages;
   int peg_scenario_stride;
+  // AUTOPLAY_TYPE_LEAVE_GEN only: see AutoplayArgs.leavegen_max_games, which
+  // this feeds via config_fill_autoplay_args. 0 = unbounded (the CLI
+  // leavegen command's default, since leavegen is bounded by its rack
+  // targets rather than by a game count); only the contribute
+  // leave_generation executor sets this.
+  uint64_t leavegen_max_games;
+  // AUTOPLAY_TYPE_LEAVE_GEN only: see AutoplayArgs.leavegen_write_files. True
+  // except while the contribute leave_generation executor runs.
+  bool leavegen_write_files;
   // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
   // the cell always fits the label + a worst-case token) and max wrapped lines
   // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
@@ -399,14 +416,21 @@ struct Config {
   bool show_prompt;
   bool save_settings;
   bool use_mmap_for_rit;
+  // The names to load each player's rack info table under, in place of that
+  // player's lexicon name. Set only on the contribute path; NULL everywhere
+  // else, which keeps the CLI's "a table is named after its lexicon" rule.
+  //
+  // A table belongs to a (.kwg, .klv2) pair, not to a lexicon: it stores
+  // precomputed leave values, so CSW24 with CSW_quackle_leaves and CSW24 with
+  // its own leaves need different tables. Found by lexicon name alone they
+  // would silently share one, and every full-rack position in one of the two
+  // jobs would be ranked on the other's leaves. birdtest names the file it
+  // pinned a hash for, and these carry that name to the load.
+  char *p1_rit_name_override;
+  char *p2_rit_name_override;
   bool autosave_gcg;
   bool fg_required;
   bool loaded_settings;
-  // Whether each leavegen generation should also dump a
-  // "<rack>,<count>,<mean>" CSV of rack_list's current data (see
-  // rack_list_write_rack_equity_csv). Independent of whether a
-  // forceracksfile restriction is in use.
-  bool write_rack_equity_csv;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
   // Set when the most recent sim ran inference internally and it completed
@@ -950,7 +974,23 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
-#define MAGPIE_VERSION "0.0.0"
+#define MAGPIE_VERSION "0.1.0"
+
+const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
+
+int config_get_player_sim_plies(const Config *config, int player_index) {
+  return player_index == 0 ? config->p1_sim_plies : config->p2_sim_plies;
+}
+
+int config_get_player_num_plays(const Config *config, int player_index) {
+  return player_index == 0 ? config->p1_num_plays : config->p2_num_plays;
+}
+
+uint64_t config_get_player_max_iterations(const Config *config,
+                                          int player_index) {
+  return player_index == 0 ? config->p1_max_iterations
+                           : config->p2_max_iterations;
+}
 
 void execute_version(Config *config,
                      ErrorStack __attribute__((unused)) * error_stack) {
@@ -960,6 +1000,36 @@ void execute_version(Config *config,
 char *str_api_version(Config __attribute__((unused)) * config,
                       ErrorStack __attribute__((unused)) * error_stack) {
   return string_duplicate(MAGPIE_VERSION "\n");
+}
+
+// The identity of every builder in this binary, as one JSON object.
+//
+// birdtest's server runs a pinned MAGPIE to build a reference wordmap, rack
+// info table or leave-generation KLV, and records the builder that produced
+// each hash alongside it. It reads that identity from here rather than being
+// told it in configuration, so the recorded builder is always the one that did
+// the work. See src/def/builder_defs.h.
+static char *builders_json(void) {
+  return get_formatted_string("{\"magpie_version\":\"%s\","
+                              "\"build_target\":\"%s\","
+                              "\"wmp_builder_version\":%d,"
+                              "\"rit_builder_version\":%d,"
+                              "\"klv_builder_version\":%d}\n",
+                              MAGPIE_VERSION, MAGPIE_BUILD_TARGET,
+                              WMP_BUILDER_VERSION, RIT_BUILDER_VERSION,
+                              KLV_BUILDER_VERSION);
+}
+
+void execute_builders(Config *config,
+                      ErrorStack __attribute__((unused)) * error_stack) {
+  char *json = builders_json();
+  thread_control_print(config->thread_control, json);
+  free(json);
+}
+
+char *str_api_builders(Config __attribute__((unused)) * config,
+                       ErrorStack __attribute__((unused)) * error_stack) {
+  return builders_json();
 }
 
 // Used for commands that only update the config state
@@ -1041,8 +1111,7 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
   // Remove the trailing comma
   string_builder_truncate(sb, string_builder_length(sb) - 1);
   error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
-                   string_builder_dump(sb, NULL));
-  string_builder_destroy(sb);
+                   string_builder_dump_and_destroy(sb, NULL));
   return NUMBER_OF_ARG_TOKENS;
 }
 
@@ -1216,27 +1285,48 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "game pairs option is set to true, autoplay will run <num_games> "
              "game pairs resulting in a total of 2 * <num_games> games.";
       break;
+    case ARG_TOKEN_CONTRIBUTE:
+      usages[0] = "[<settings_path>]";
+      examples[0] = "";
+      examples[1] = "my_contribute.txt";
+      text =
+          "Contributes to birdtest: claims tasks, executes them with MAGPIE's "
+          "own command API, and submits the results, repeating until the "
+          "server has no more work or the settings file's maxtasks is "
+          "reached. Settings (server, apikey, threads, ...) come from the "
+          "given file, or contribute.txt in the working directory if no path "
+          "is given -- never from the command line, since an API key there "
+          "ends up in shell history and ps output.";
+      break;
     case ARG_TOKEN_CONVERT:
-      usages[0] = "<type> <name_without_extension> [<letter_distribution>]";
+      usages[0] = "<type> <name_without_extension> [<letter_distribution>] "
+                  "[<klv_name>] [<wmp_name>]";
       examples[0] = "klv2csv CSW21";
       examples[1] = "kwg2wit CSW24";
-      examples[2] = "text2wordmap NWL20";
-      examples[3] = "kwg2witifneeded CSW24";
+      examples[2] = "dawg2wordmap NWL20 english";
+      examples[3] = "klvwmp2rit CSW24.CSW_quackle_leaves english "
+                    "CSW_quackle_leaves CSW24";
+      examples[4] = "rackequity2klv gen1 english";
       text =
           "Runs the convert command for the specified type with the given "
           "input and output name, using different file extensions. The letter "
-          "distribution defaults to the lexicon's distribution. kwg2wit reads "
-          "the KWG and creates ordinary and positional word-info tables. "
-          "kwg2witifneeded preserves a current matching table and otherwise "
-          "rebuilds it before use.";
+          "distribution defaults to the lexicon's distribution. Types include "
+          "text2kwg, text2wordmap, dawg2wordmap, dawg2text, csv2klv, klv2csv, "
+          "klvwmp2rit, rackequity2klv, kwg2wit and kwg2witifneeded. kwg2wit "
+          "reads the KWG and creates ordinary and positional word-info "
+          "tables; kwg2witifneeded preserves a current matching table and "
+          "otherwise rebuilds it before use. klvwmp2rit optionally takes the "
+          "KLV's and the wordmap's names separately, since a rack info table "
+          "stores precomputed leave values and so belongs to a (lexicon, "
+          "leaves) pair rather than to either input. rackequity2klv reads "
+          "lexica/<name>.csv, one 'rack,count,equity_sum' row per full rack, "
+          "and writes the KLV those results imply; every full rack the "
+          "distribution draws must appear exactly once.";
       break;
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
                   "[<games_before_force_draw>]";
-      usages[1] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
-                  "[<games_before_force_draw>] [<forceracksfile>]";
       examples[0] = "100,200,500,1000,1000,1000 100000000";
-      examples[1] = "1000,1000 0 my_racks.txt";
       text =
           "Generates leaves for the current lexicon. The minimum rack targets "
           "specify the required minimum number of rack occurrences for all "
@@ -1254,14 +1344,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "last generation, otherwise the leavegen command will start over at "
           "the first generation. It is recommended to use the autoplay command "
           "with game pairs to evaluate the resulting leaves. Depending on your "
-          "hardware, this command could take days or weeks. The optional third "
-          "argument, <forceracksfile>, is a path to a file listing racks, one "
-          "per line, that restricts which racks are ever forced as rare (used "
-          "to run a distributed leavegen worker on a fixed set of "
-          "externally-provided racks). See -writerackequitycsv for a way to "
-          "dump each generation's rack data to a CSV. Rack info tables are "
-          "automatically disabled because they cache leave values that become "
-          "stale during generation.";
+          "hardware, this command could take days or weeks. Rack info tables "
+          "are automatically disabled because they cache leave values that "
+          "become stale during generation.";
       break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
@@ -2084,17 +2169,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to print a finished message when a "
              "command completes execution.";
       break;
-    case ARG_TOKEN_WRITE_RACK_EQUITY_CSV:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether or not each leavegen generation should also "
-             "write a '<rack>,<count>,<mean>' CSV of the current rack_list "
-             "data, in addition to the usual KLV/leaves/report files. "
-             "Independent of whether a forceracksfile restriction (the "
-             "optional third leavegen argument) is in use; for an "
-             "unrestricted leavegen run this can produce a very large file.";
-      break;
     case ARG_TOKEN_SHOW_GAME_WITH_MOVES:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2240,6 +2314,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "";
       text = "Prints the version of the magpie executable.";
       break;
+    case ARG_TOKEN_BUILDERS:
+      usages[0] = "";
+      text = "Prints, as JSON, the versions of the builders that derive one "
+             "data file from another (wordmap, rack info table, KLV) and the "
+             "instruction-set target this binary was compiled for. A "
+             "derived file's bytes are only comparable between two builds "
+             "that agree on these.";
+      break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
       break;
@@ -2349,8 +2431,10 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Other Commands (alphabetical by name)
     static const arg_token_t other_cmds[] = {
         ARG_TOKEN_AUTOPLAY,    /* autoplay */
+        ARG_TOKEN_BUILDERS,    /* builders */
         ARG_TOKEN_CGP,         /* cgp */
         ARG_TOKEN_CONVERT,     /* convert */
+        ARG_TOKEN_CONTRIBUTE,  /* contribute */
         ARG_TOKEN_CREATE_DATA, /* createdata */
         ARG_TOKEN_HELP,        /* help */
         ARG_TOKEN_SET,         /* setoptions */
@@ -2472,17 +2556,16 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Other Options (alphabetical by name)
     static const arg_token_t other_opts[] = {
-        ARG_TOKEN_AUTOSAVE_GCG,          /* autosavegcg */
-        ARG_TOKEN_FG_REQUIRED,           /* fgrequired */
-        ARG_TOKEN_EXEC_MODE,             /* mode */
-        ARG_TOKEN_DATA_PATH,             /* path */
-        ARG_TOKEN_PRINT_INTERVAL,        /* pfrequency */
-        ARG_TOKEN_PRINT_ON_FINISH,       /* printonfinish */
-        ARG_TOKEN_SAVE_SETTINGS,         /* savesettings */
-        ARG_TOKEN_RANDOM_SEED,           /* seed */
-        ARG_TOKEN_SHOW_PROMPT,           /* shprompt */
-        ARG_TOKEN_NUMBER_OF_THREADS,     /* threads */
-        ARG_TOKEN_WRITE_RACK_EQUITY_CSV, /* writerackequitycsv */
+        ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
+        ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
+        ARG_TOKEN_EXEC_MODE,         /* mode */
+        ARG_TOKEN_DATA_PATH,         /* path */
+        ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
+        ARG_TOKEN_PRINT_ON_FINISH,   /* printonfinish */
+        ARG_TOKEN_SAVE_SETTINGS,     /* savesettings */
+        ARG_TOKEN_RANDOM_SEED,       /* seed */
+        ARG_TOKEN_SHOW_PROMPT,       /* shprompt */
+        ARG_TOKEN_NUMBER_OF_THREADS, /* threads */
     };
     int total_tokens = 0;
     string_builder_add_string(sb, "Game Navigation Commands\n\n");
@@ -2546,8 +2629,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     add_help_arg_to_string_builder(config, help_arg_token, sb, false, false);
   }
   string_builder_add_string(sb, "\n");
-  char *result = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *result = string_builder_dump_and_destroy(sb, NULL);
   return result;
 }
 
@@ -2632,8 +2714,7 @@ char *impl_add_moves(Config *config, ErrorStack *error_stack) {
     StringBuilder *phonies_sb = string_builder_create();
     string_builder_add_validated_moves_phonies(phonies_sb, new_validated_moves,
                                                ld, board);
-    phonies_str = string_builder_dump(phonies_sb, NULL);
-    string_builder_destroy(phonies_sb);
+    phonies_str = string_builder_dump_and_destroy(phonies_sb, NULL);
     config_init_move_list(config, number_of_new_moves);
     validated_moves_add_to_sorted_move_list(new_validated_moves,
                                             config->move_list);
@@ -3696,12 +3777,16 @@ void config_fill_autoplay_args(const Config *config,
                                autoplay_t autoplay_type,
                                const char *num_games_or_min_rack_targets,
                                int games_before_force_draw_start,
-                               const char *force_racks_filename) {
+                               const char *const *forced_racks,
+                               int num_forced_racks) {
   autoplay_args->type = autoplay_type;
   autoplay_args->num_games_or_min_rack_targets = num_games_or_min_rack_targets;
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
-  autoplay_args->force_racks_filename = force_racks_filename;
-  autoplay_args->write_rack_equity_csv = config->write_rack_equity_csv;
+  autoplay_args->forced_racks = forced_racks;
+  autoplay_args->num_forced_racks = num_forced_racks;
+  autoplay_args->leavegen_max_games = config->leavegen_max_games;
+  autoplay_args->leavegen_write_files = config->leavegen_write_files;
+  autoplay_args->position_play_cap = config->max_num_display_plays;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
@@ -3831,14 +3916,14 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
-                     const char *force_racks_filename,
+                     const char *const *forced_racks, int num_forced_racks,
                      ErrorStack *error_stack) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(
       config, &args, autoplay_type, num_games_or_min_rack_targets,
-      games_before_force_draw_start, force_racks_filename);
+      games_before_force_draw_start, forced_racks, num_forced_racks);
   autoplay(&args, autoplay_results, error_stack);
 }
 
@@ -3870,7 +3955,8 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
       config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 1);
 
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_DEFAULT,
-                  num_games_str, 0, /*force_racks_filename=*/NULL, error_stack);
+                  num_games_str, 0, /*forced_racks=*/NULL,
+                  /*num_forced_racks=*/0, error_stack);
 }
 
 char *status_autoplay(Config *config) {
@@ -3890,6 +3976,11 @@ void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
   args->input_and_output_name =
       config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
   args->ld_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
+  // klvwmp2rit's optional third and fourth names: the KLV and the wordmap to
+  // build the table from, when the table is not named after either of them.
+  // NULL for every other conversion and for `convert klvwmp2rit CSW24`.
+  args->klv_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 3);
+  args->wmp_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 4);
   args->num_threads = config_get_num_threads(config);
 }
 
@@ -3946,16 +4037,13 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  // Optional third argument: a file listing racks (one per line) that
-  // restricts which racks leavegen's RackList treats as eligible to be
-  // drawn as rare (see rack_list_create). NULL if not supplied, meaning
-  // every rack is eligible, as leavegen normally expects.
-  const char *force_racks_filename =
-      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 2);
-
+  // A hand-run leavegen never restricts which racks are eligible to be
+  // forced as rare: every rack is, as rack_list_create's unrestricted mode
+  // expects. Only a contribute leave_generation task, whose forced racks
+  // come from the server in its request, passes a restriction.
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                   min_rack_targets_str, games_before_force_draw_start,
-                  force_racks_filename, error_stack);
+                  /*forced_racks=*/NULL, /*num_forced_racks=*/0, error_stack);
 }
 
 // Create
@@ -4019,8 +4107,7 @@ char *impl_show_game(Config *config, ErrorStack *error_stack) {
                           config->game_history, game_string);
 
   // Get the string and destroy the builder
-  char *result = string_builder_dump(game_string, NULL);
-  string_builder_destroy(game_string);
+  char *result = string_builder_dump_and_destroy(game_string, NULL);
 
   return result;
 }
@@ -4255,8 +4342,7 @@ char *impl_show_moves_or_sim_results(const Config *config,
     StringBuilder *game_sb = string_builder_create();
     string_builder_add_game(config->game, NULL, config->game_string_options,
                             config->game_history, game_sb);
-    game_board_string = string_builder_dump(game_sb, NULL);
-    string_builder_destroy(game_sb);
+    game_board_string = string_builder_dump_and_destroy(game_sb, NULL);
     // The board string starts with a leading '\n'; skip it so the board's
     // column-header line aligns with the moves header row.
     board_display_start = game_board_string;
@@ -4408,8 +4494,7 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
   StringBuilder *sb = string_builder_create();
   string_builder_endgame_single_pv(sb, display_endgame_results, source_game,
                                    config->game_history, pv_index);
-  char *result = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *result = string_builder_dump_and_destroy(sb, NULL);
   return result;
 }
 
@@ -4571,8 +4656,7 @@ char *impl_show_heat_map(const Config *config, ErrorStack *error_stack) {
         heat_map, heat_map_type, hm_string);
     game_destroy(game_dupe);
   }
-  result = string_builder_dump(hm_string, NULL);
-  string_builder_destroy(hm_string);
+  result = string_builder_dump_and_destroy(hm_string, NULL);
 
   return result;
 }
@@ -5402,8 +5486,7 @@ static char *build_interpolated_note(const Config *config, const char *raw_note,
       p++;
     }
   }
-  char *note = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *note = string_builder_dump_and_destroy(sb, NULL);
   return note;
 }
 
@@ -6522,11 +6605,13 @@ void config_load_lexicon_dependent_data(
   // the lexicon name and non-NULL -> NULL transitions are allowed.
   const char *p1_rit_name = NULL;
   if (p1_rit_use_when_available) {
-    p1_rit_name = updated_p1_lexicon_name;
+    p1_rit_name = config->p1_rit_name_override ? config->p1_rit_name_override
+                                               : updated_p1_lexicon_name;
   }
   const char *p2_rit_name = NULL;
   if (p2_rit_use_when_available) {
-    p2_rit_name = updated_p2_lexicon_name;
+    p2_rit_name = config->p2_rit_name_override ? config->p2_rit_name_override
+                                               : updated_p2_lexicon_name;
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,
@@ -6756,8 +6841,7 @@ static void config_set_gcg_filename_and_save(Config *config,
   string_builder_add_formatted_string(sb, "%s-",
                                       gcg_result->basename_or_filepath);
   string_builder_add_gcg_filename(sb, config->game_history, 0);
-  char *gcg_filename = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *gcg_filename = string_builder_dump_and_destroy(sb, NULL);
   game_history_set_gcg_filename(config->game_history, gcg_filename);
   write_string_to_file(gcg_filename, "w", gcg_result->gcg_string, error_stack);
   free(gcg_filename);
@@ -7000,6 +7084,1901 @@ void string_builder_add_move_record_type(StringBuilder *sb,
   case MOVE_RECORD_BEST_SMALL:
     log_fatal("cannot serialize internal move record type: %d", record_type);
   }
+}
+
+// Per-player defaults, shared by config_create and the contribute path. The
+// contribute path resets every per-player setting a task request can leave
+// null back to these before applying the request, so they have to be exactly
+// the values a fresh Config starts with; one copy is what keeps the two from
+// drifting apart.
+enum {
+  CONFIG_DEFAULT_NUM_PLAYS = 100,
+  CONFIG_DEFAULT_SHPLIES = 2,
+  CONFIG_DEFAULT_MIN_PLAY_ITERATIONS = 500,
+  CONFIG_DEFAULT_STOP_COND_PCT = 99,
+  CONFIG_DEFAULT_TIME_LIMIT_SECONDS = 60,
+  CONFIG_DEFAULT_EQ_MARGIN = 5,
+};
+#define CONFIG_DEFAULT_MAX_ITERATIONS 1000000000000ULL
+#define CONFIG_DEFAULT_UTILITY_W_WINPCT 1.0
+#define CONFIG_DEFAULT_UTILITY_W_SPREAD 0.5
+#define CONFIG_DEFAULT_UTILITY_SPREAD_SCALE 100.0
+#define CONFIG_DEFAULT_USER_CUTOFF 0.005
+
+// Contribute
+//
+// contribute.c owns only the birdtest HTTP/JSON protocol (claiming,
+// heartbeating, submitting); it knows nothing of Config. Between a claim and
+// its matching submit, impl_contribute is what a task actually becomes:
+// reading the claimed job's JSON fields, driving MAGPIE with the same direct
+// methods every other command uses (config_autoplay, game_load_cgp, ...) --
+// never a command string -- and reading the result back out of Config's own
+// result structs, the same way impl_load_gcg does for a downloaded GCG.
+
+// Every field of a task request is untrusted: it becomes file paths and
+// allocation sizes. Lexicon and variant reach data_filepaths, so they must not
+// be able to escape the data directory.
+static bool contribute_is_safe_data_name(const char *name) {
+  if (!name || *name == '\0') {
+    return false;
+  }
+  for (const char *c = name; *c; c++) {
+    const bool allowed = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+                         (*c >= '0' && *c <= '9') || *c == '_' || *c == '-';
+    if (!allowed) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A lexicon belongs to a *player*, not to a job: MAGPIE takes -l1 and -l2
+// independently, and a job may deliberately pit two lexicons against each
+// other. So only leave_generation -- which has a single bot and no player
+// object to hold one -- sends a top-level "lexicon". For every other job type
+// this is NULL here and each player's own field supplies it.
+//
+// The variant is genuinely job-wide (two players cannot play different rules)
+// and stays required.
+//
+// The letter distribution and board layout are job-wide as well, and both are
+// pinned by digest in expected_data. They are read here so every executor
+// applies them, and both are required, like every other setting that changes
+// what a task computes (see contribute_required_player_keys).
+//
+// They used to be optional, with absent meaning this build's defaults: the
+// distribution inferred from the lexicon's name and the layout named for the
+// compile-time BOARD_DIM. That was the last setting on this path a request
+// could leave to the build that ran it. birdtest states both on every request
+// of every job type -- the job pins the two files by digest and the worker has
+// just verified them -- so a request without one comes from a server this
+// build does not understand, and is refused rather than filled in. (The load
+// below still accepts NULLs; nothing on this path passes one any more.)
+bool config_contribute_validate_common(const JsonValue *request,
+                                       const char **lexicon,
+                                       const char **variant,
+                                       const char **letter_distribution,
+                                       const char **board_layout,
+                                       ErrorStack *error_stack) {
+  *lexicon = json_get_string_or_null(request, CONTRIBUTE_KEY_LEXICON);
+  *variant = json_get_string(request, CONTRIBUTE_KEY_VARIANT, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  *letter_distribution =
+      json_get_string(request, CONTRIBUTE_KEY_LETTER_DISTRIBUTION, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  *board_layout =
+      json_get_string(request, CONTRIBUTE_KEY_BOARD_LAYOUT, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  if ((*lexicon && !contribute_is_safe_data_name(*lexicon)) ||
+      !contribute_is_safe_data_name(*variant) ||
+      (*letter_distribution &&
+       !contribute_is_safe_data_name(*letter_distribution)) ||
+      (*board_layout && !contribute_is_safe_data_name(*board_layout))) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string(
+            "server sent an unusable data name: lexicon '%s', variant '%s', "
+            "letter distribution '%s', board layout '%s'",
+            *lexicon ? *lexicon : "(absent)", *variant,
+            *letter_distribution ? *letter_distribution : "(absent)",
+            *board_layout ? *board_layout : "(absent)"));
+    return false;
+  }
+  return true;
+}
+
+// The lexicon to fall back on where one is needed but not stated per player.
+// With a top-level lexicon absent, player 1's stands in: for a games task both
+// players state their own and this is never consulted, and for an opening-rack
+// task there is only one player anyway.
+static const char *contribute_shared_lexicon(const char *lexicon,
+                                             const char *p1_lexicon) {
+  return lexicon ? lexicon : p1_lexicon;
+}
+
+// True if the settings the server sent ask for a wordmap. Wordmaps are not
+// assumed: a job that does not ask for one runs without it, so a worker
+// neither builds nor loads one. `settings` is the object carrying the
+// use_wordmap flag (a "player1"/"player2"/"player" object for the job types
+// that have one, the request itself for leave_generation); a NULL object or
+// an absent flag both mean "no wordmap".
+static bool contribute_wants_wordmap(const JsonValue *settings) {
+  return json_get_bool_or(settings, CONTRIBUTE_KEY_USE_WORDMAP, false);
+}
+
+// True if the settings ask for a rack info table. Read the same way as
+// use_wordmap, and absent means no -- a contributor's settings.txt must never
+// be able to switch one on for a job that did not ask.
+static bool contribute_wants_rit(const JsonValue *settings) {
+  return json_get_bool_or(settings, CONTRIBUTE_KEY_USE_RIT, false);
+}
+
+// The name the server pinned this task's rack info table under, or NULL.
+//
+// A table belongs to a (.kwg, .klv2) pair rather than to a lexicon, so its
+// name is the server's to choose and not something to infer here: inferring it
+// is how two jobs on one lexicon with different leaves end up sharing a table
+// built from only one of them.
+static const char *contribute_rit_name(const JsonValue *settings) {
+  return json_get_string_or_null(settings, CONTRIBUTE_KEY_RIT_NAME);
+}
+
+// The sidecar beside a wordmap, naming the .kwg digest it was built from.
+//
+// This is the weaker of the two checks and is now the fallback. A wordmap is
+// derived from a lexicon, and nothing else notices when the lexicon changes
+// underneath it: download_data.sh overwrites the .kwg in place and leaves the
+// old .wmp sitting next to it, which passes every check -- the .kwg genuinely
+// is the right lexicon, and the .wmp was covered by no digest because the
+// server never pinned a file the contributor generated locally. The worker
+// then plays with a wordmap describing a lexicon that no longer exists on its
+// disk.
+//
+// A server that pins the wordmap's own hash (expected_data.derived) supersedes
+// this entirely: the recorded input digest says a file was built from the
+// right things and still trusts the builder, where the output hash checks the
+// bytes that will actually load. The sidecar stays for servers that do not
+// send one, and for the CLI, which has no server at all.
+static char *wordmap_source_path(const char *wmp_path) {
+  return get_formatted_string("%s.src", wmp_path);
+}
+
+// True when `wmp_path` was built from the .kwg currently on disk. A wordmap
+// with no sidecar at all -- every wordmap a contributor already has -- is
+// stale by this rule, and is rebuilt once. That is correct: nothing recorded
+// what it was built from.
+static bool wordmap_is_current(const char *wmp_path, const char *kwg_digest) {
+  if (!kwg_digest) {
+    return true;
+  }
+  char *src_path = wordmap_source_path(wmp_path);
+  ErrorStack *errors = error_stack_create();
+  char *recorded = get_string_from_file(src_path, errors);
+  const bool current = error_stack_is_empty(errors) && recorded &&
+                       has_prefix(kwg_digest, recorded);
+  free(recorded);
+  error_stack_destroy(errors);
+  free(src_path);
+  return current;
+}
+
+// The SHA-256 of the derived file `name` of type `type`, or NULL if it is not
+// on disk. Never an error: absent is the ordinary first-run case.
+static char *contribute_derived_digest(const Config *config,
+                                       ContributeState *state, const char *name,
+                                       data_filepath_t type) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(config->data_paths, name,
+                                                    type, errors);
+  char *digest = NULL;
+  if (error_stack_is_empty(errors)) {
+    digest = contribute_hash_file(state, path, errors);
+  }
+  error_stack_reset(errors);
+  error_stack_destroy(errors);
+  free(path);
+  return digest;
+}
+
+// Runs one `convert` conversion with this task's settings.
+static void contribute_convert(Config *config, const char *conversion_type,
+                               const char *name, const char *ld_name,
+                               const char *klv_name, const char *wmp_name,
+                               ErrorStack *error_stack) {
+  const ConversionArgs args = {
+      .conversion_type_string = conversion_type,
+      .data_paths = config_get_data_paths(config),
+      .input_and_output_name = name,
+      .ld_name = ld_name,
+      .klv_name = klv_name,
+      .wmp_name = wmp_name,
+      .num_threads = config_get_num_threads(config),
+  };
+  convert(&args, config->conversion_results, error_stack);
+}
+
+// Makes a wordmap for `lexicon` available, building it if what is on disk is
+// absent or does not match.
+//
+// Wordmaps are never transmitted -- roughly ten times the size of everything
+// else MAGPIE ships -- so the client derives them from the .kwg it already
+// has, which costs about a second per lexicon, once. Only a lexicon some
+// player's settings actually asked to use a wordmap for reaches this.
+//
+// When the claim pins the wordmap's SHA-256, that is the check: build if the
+// file on disk does not have that hash, and if the rebuilt file still does
+// not, record the mismatch and give up rather than playing with bytes the
+// server did not mean. When it does not -- an older server, or a CLI-style
+// run -- fall back to the .kwg sidecar, which is what this did before.
+//
+// `ld_name` is the letter distribution the job pins. It is passed rather than
+// inferred from the lexicon's name because a wordmap is built against a letter
+// distribution, and inferring one is how a worker builds a different file from
+// the server's for the same lexicon.
+static void config_contribute_ensure_wordmap(Config *config,
+                                             ContributeState *state,
+                                             const char *lexicon,
+                                             const char *ld_name,
+                                             ErrorStack *error_stack) {
+  const char *data_paths = config_get_data_paths(config);
+
+  ContributeDerived pinned;
+  const bool have_pin = contribute_find_derived(state, "wmp", lexicon, &pinned);
+
+  if (have_pin) {
+    char *actual = contribute_derived_digest(config, state, lexicon,
+                                             DATA_FILEPATH_TYPE_WORDMAP);
+    const bool matches = actual && strings_equal(actual, pinned.sha256);
+    free(actual);
+    if (matches) {
+      return;
+    }
+  } else {
+    // The digest of the lexicon the wordmap must match. Missing is not an
+    // error here: without a .kwg there is nothing to build from either, and
+    // the conversion below reports that far better than this could.
+    char *kwg_path = data_filepaths_get_readable_filename(
+        data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, error_stack);
+    char *kwg_digest = NULL;
+    if (error_stack_is_empty(error_stack)) {
+      kwg_digest = sha256_hash_file(kwg_path, error_stack);
+    }
+    error_stack_reset(error_stack);
+    free(kwg_path);
+
+    char *wmp_path = data_filepaths_get_readable_filename(
+        data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+    const bool current = error_stack_is_empty(error_stack) &&
+                         wordmap_is_current(wmp_path, kwg_digest);
+    error_stack_reset(error_stack);
+    free(wmp_path);
+    if (current) {
+      free(kwg_digest);
+      return;
+    }
+    // Built from a lexicon that is no longer here, or never built. Rebuilding
+    // costs about a second; playing with it costs a corrupt contribution
+    // nobody would catch.
+    contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
+                       /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      free(kwg_digest);
+      return;
+    }
+    // Written only now, *after* the wordmap itself is in place: a sidecar
+    // written first and then interrupted claims a wordmap that does not
+    // exist, and the next run would trust it.
+    char *built_path = data_filepaths_get_readable_filename(
+        data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_reset(error_stack);
+      free(kwg_digest);
+      free(built_path);
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
+          get_formatted_string(
+              "could not build a wordmap for %s. The data directory must be "
+              "writable; this job's settings ask for a wordmap.",
+              lexicon));
+      return;
+    }
+    if (kwg_digest) {
+      char *src_path = wordmap_source_path(built_path);
+      ErrorStack *sidecar_errors = error_stack_create();
+      write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
+      // A missing sidecar only costs one rebuild next time, which is not
+      // worth failing a task over.
+      error_stack_reset(sidecar_errors);
+      error_stack_destroy(sidecar_errors);
+      free(src_path);
+    }
+    free(kwg_digest);
+    free(built_path);
+    return;
+  }
+
+  // Pinned, and what is on disk is not it. Build from the .kwg this task's
+  // expected_data has already verified, and check the result.
+  //
+  // `dawg2wordmap` rather than the `dawg2text` + `text2wordmap` pair this used
+  // to run: the two produce identical bytes, this is the one the server builds
+  // its reference copy with, and it writes no intermediate .txt.
+  contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
+                     /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  char *built = contribute_derived_digest(config, state, lexicon,
+                                          DATA_FILEPATH_TYPE_WORDMAP);
+  if (built && strings_equal(built, pinned.sha256)) {
+    // The sidecar is redundant next to a pinned hash, but a later task on a
+    // server that pins nothing reads it, so keep it accurate.
+    ErrorStack *sidecar_errors = error_stack_create();
+    char *kwg_path = data_filepaths_get_readable_filename(
+        data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, sidecar_errors);
+    char *kwg_digest = error_stack_is_empty(sidecar_errors)
+                           ? sha256_hash_file(kwg_path, sidecar_errors)
+                           : NULL;
+    char *wmp_path = error_stack_is_empty(sidecar_errors)
+                         ? data_filepaths_get_readable_filename(
+                               data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP,
+                               sidecar_errors)
+                         : NULL;
+    if (error_stack_is_empty(sidecar_errors) && kwg_digest && wmp_path) {
+      char *src_path = wordmap_source_path(wmp_path);
+      write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
+      free(src_path);
+    }
+    error_stack_reset(sidecar_errors);
+    error_stack_destroy(sidecar_errors);
+    free(kwg_path);
+    free(kwg_digest);
+    free(wmp_path);
+    free(built);
+    return;
+  }
+
+  contribute_record_derived_mismatch(state, "wmp", lexicon, pinned.sha256,
+                                     built);
+  free(built);
+  error_stack_push(
+      error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+      get_formatted_string(
+          "the wordmap built here for %s is not the one this job pins "
+          "(builder %s, target %s)",
+          lexicon, pinned.builder ? pinned.builder : "unstated",
+          pinned.build_target ? pinned.build_target : "unstated"));
+}
+
+// Makes the rack info table `table_name` available, building it if what is on
+// disk is absent or does not match.
+//
+// Unlike a wordmap this is only ever done against a pinned hash. A table is
+// 1.9 GB and stores precomputed leave values that move generation uses in
+// place of the loaded KLV, so a wrong one silently reranks every full-rack
+// position; with nothing to check it against, the only safe answer is not to
+// load one, which is what this build did until now and what it still does
+// when the claim pins nothing.
+//
+// The table is built from the player's .klv2 and the wordmap for its lexicon,
+// so `config_contribute_ensure_wordmap` must have run first -- which also
+// means a player that asks for a table and no wordmap still builds one, since
+// the table cannot be made without it.
+static void config_contribute_ensure_rack_info_table(
+    Config *config, ContributeState *state, const char *table_name,
+    const char *lexicon, const char *leaves, const char *ld_name,
+    ErrorStack *error_stack) {
+  if (!leaves) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("a player asking for the rack info table %s "
+                             "states no leaves to build it from",
+                             table_name));
+    return;
+  }
+  ContributeDerived pinned;
+  if (!contribute_find_derived(state, "rit", table_name, &pinned)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+        get_formatted_string(
+            "this job asks for the rack info table %s but pins no hash for "
+            "it; a table that cannot be checked would rank every full rack on "
+            "leave values nothing verified",
+            table_name));
+    return;
+  }
+
+  char *actual = contribute_derived_digest(config, state, table_name,
+                                           DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
+  const bool matches = actual && strings_equal(actual, pinned.sha256);
+  free(actual);
+  if (matches) {
+    return;
+  }
+
+  // The wordmap the table is built from has to be the right one, and a player
+  // that asked for a table but no wordmap has not had one checked yet.
+  config_contribute_ensure_wordmap(config, state, lexicon, ld_name,
+                                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // One to three minutes and about 2.4 GB of memory, once per (.kwg, .klv2)
+  // pair. The heartbeat is already running by the time a task executes, which
+  // is why this can take that long without the claim lapsing.
+  contribute_convert(config, "klvwmp2rit", table_name, ld_name, leaves, lexicon,
+                     error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  char *built = contribute_derived_digest(config, state, table_name,
+                                          DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
+  if (built && strings_equal(built, pinned.sha256)) {
+    free(built);
+    return;
+  }
+  contribute_record_derived_mismatch(state, "rit", table_name, pinned.sha256,
+                                     built);
+  free(built);
+  error_stack_push(
+      error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+      get_formatted_string(
+          "the rack info table built here for %s is not the one this job pins "
+          "(builder %s, target %s)",
+          table_name, pinned.builder ? pinned.builder : "unstated",
+          pinned.build_target ? pinned.build_target : "unstated"));
+}
+
+// Sets the rack info table names the next lexicon load should use, or clears
+// them with two NULLs. Duplicated rather than borrowed: the JSON they come
+// from is the claim's, and the load happens while it is still alive, but a
+// table name that outlived its assignment would be the kind of bug that only
+// shows up on the task after the one that caused it.
+static void config_contribute_set_rit_names(Config *config, const char *p1,
+                                            const char *p2) {
+  free(config->p1_rit_name_override);
+  free(config->p2_rit_name_override);
+  config->p1_rit_name_override = p1 ? string_duplicate(p1) : NULL;
+  config->p2_rit_name_override = p2 ? string_duplicate(p2) : NULL;
+}
+
+// Sets the variant, board layout, lexicon, letter distribution and (for each
+// player) leaves that config_autoplay or game_load_cgp then need already
+// loaded -- the direct-value equivalent of "-var/-bdn/-lex/-ld/-k1/-k2", never
+// a command string. p1_lexicon/p2_lexicon (from each player's own "lexicon"
+// field, -l1/-l2) override the job's shared lexicon for that player only, e.g.
+// to compare bots on different lexicons; NULL means "use the shared lexicon".
+//
+// letter_distribution and board_layout are the files the job pins and the
+// worker has just verified by digest. Every executor passes both: a task
+// request must state them (config_contribute_validate_common). NULL for either
+// is still accepted here and means MAGPIE's default -- the lexicon's own
+// distribution, standard15 -- and never the one an earlier task or the
+// contributor's settings.txt last loaded: a worker whose settings left
+// standard21 loaded would otherwise verify standard15.txt and play every game
+// on the other board.
+//
+// Every one of these flags is stated here, *before* the lexical data loads:
+// config_load_lexicon_dependent_data decides whether to load a wordmap or a
+// rack info table from them as it loads, and players pick up whatever it
+// leaves behind. Setting them after the load, as the executors used to,
+// applied each task's settings to the next task's load. A task that asked for
+// no wordmap then got one if the task before it had asked -- for its own
+// lexicon, whose wordmap nothing had checked against the .kwg on disk -- and a
+// rack info table switched on by the contributor's settings or an earlier task
+// stayed on.
+//
+// p1_rit_name/p2_rit_name are the names the server pinned a hash for, or NULL
+// for a player that asked for no table. They are names rather than booleans
+// because a table belongs to a (.kwg, .klv2) pair: a player on CSW24 with
+// CSW_quackle_leaves and one on CSW24 with its own leaves need different
+// tables, and both would be called CSW24.rit if the table were found by
+// lexicon name the way the CLI finds it.
+//
+// Until birdtest could pin a table's hash, the table was switched off here
+// unconditionally. It is not an exact accelerator the way a wordmap is -- each
+// entry stores precomputed leave values that move generation uses in place of
+// the loaded leaves -- so a table nothing had checked would silently rerank
+// every full-rack position. What changed is that there is now something to
+// check it against; the caller has verified the file's bytes against the hash
+// the job pins before reaching here.
+//
+// The word info table is switched off here for both players, always. It is
+// the third file the load can open by lexicon name -- a per-substring letter
+// mask move generation prunes with -- and birdtest neither offers nor pins
+// one, so nothing a task carries has checked it: built from the lexicon on
+// disk it prunes nothing legal, built from an older one it prunes plays that
+// exist. It is opt-in (-wit, -wit1, -wit2), and nothing else on this path
+// reset the flag, so a contributor whose settings.txt or an earlier command
+// in this process had switched one on played every task with it.
+void config_contribute_load_lexicon_and_variant(
+    Config *config, const char *lexicon, const char *variant,
+    const char *letter_distribution, const char *board_layout,
+    const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
+    const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
+    const char *p1_rit_name, const char *p2_rit_name, ErrorStack *error_stack) {
+  config_contribute_set_rit_names(config, p1_rit_name, p2_rit_name);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    players_data_set_use_when_available(
+        config->players_data, PLAYERS_DATA_TYPE_WMP, player_index,
+        player_index == 0 ? p1_use_wordmap : p2_use_wordmap);
+    players_data_set_use_when_available(
+        config->players_data, PLAYERS_DATA_TYPE_RIT, player_index,
+        (player_index == 0 ? p1_rit_name : p2_rit_name) != NULL);
+    players_data_set_use_when_available(
+        config->players_data, PLAYERS_DATA_TYPE_WIT, player_index, false);
+  }
+  config_load_game_variant(config, variant, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  char *default_layout = board_layout_get_default_name();
+  config_load_board_layout(config, board_layout ? board_layout : default_layout,
+                           error_stack);
+  free(default_layout);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const char *ld_source_lexicon = p1_lexicon ? p1_lexicon : lexicon;
+  char *default_ld = NULL;
+  if (!letter_distribution && ld_source_lexicon) {
+    default_ld =
+        ld_get_default_name_from_lexicon_name(ld_source_lexicon, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  config_load_lexicon_dependent_data(
+      config, lexicon, p1_lexicon, p2_lexicon, NULL, p1_leaves, p2_leaves,
+      letter_distribution ? letter_distribution : default_ld,
+      /*use_wmp_has_value=*/false, /*p1_use_wmp_has_value=*/false,
+      /*p2_use_wmp_has_value=*/false, /*use_rit_has_value=*/false,
+      /*p1_use_rit_has_value=*/false, /*p2_use_rit_has_value=*/false,
+      /*use_mmap_for_rit_has_value=*/false, /*use_wit_has_value=*/false,
+      /*p1_use_wit_has_value=*/false, /*p2_use_wit_has_value=*/false,
+      /*disable_rit=*/false, /*is_loading_game_history=*/false, error_stack);
+  free(default_ld);
+}
+
+// Parses a threshold/sampling-rule name the same way the CLI's th1/th2/
+// sa1/sa2 args do (see the ARG_TOKEN_P1_THRESHOLD/ARG_TOKEN_P1_SAMPLING_RULE
+// handling below), without going through a parsed CLI arg.
+static void config_contribute_parse_threshold(const char *value,
+                                              bai_threshold_t *out,
+                                              ErrorStack *error_stack) {
+  if (has_iprefix(value, BAI_THRESHOLD_NONE_STRING)) {
+    *out = BAI_THRESHOLD_NONE;
+  } else if (has_iprefix(value, BAI_THRESHOLD_GK16_STRING)) {
+    *out = BAI_THRESHOLD_GK16;
+  } else {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_THRESHOLD,
+                     get_formatted_string(
+                         "server sent an unrecognized threshold: %s", value));
+  }
+}
+
+//
+// birdtest names the rules "round_robin" and "top_two_ids" -- its validation
+// and schema accept nothing else -- which the CLI's "rr"/"tt" matching below
+// refuses. That went unnoticed while a request could leave the rule null, and
+// would have failed every simulating task once requests state every setting,
+// so birdtest's names are matched exactly first.
+static void config_contribute_parse_sampling_rule(const char *value,
+                                                  bai_sampling_rule_t *out,
+                                                  ErrorStack *error_stack) {
+  // Neither exact name is a prefix of the other rule's CLI spelling, so
+  // testing each rule's two forms together matches what testing the exact
+  // names first did.
+  if (strings_equal(value, "round_robin") ||
+      has_iprefix(value, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
+    *out = BAI_SAMPLING_RULE_ROUND_ROBIN;
+  } else if (strings_equal(value, "top_two_ids") ||
+             has_iprefix(value, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
+    *out = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_SAMPLING_RULE,
+        get_formatted_string("server sent an unrecognized sampling rule: %s",
+                             value));
+  }
+}
+
+// Resets every per-player setting a task request can leave null to MAGPIE's
+// own defaults: static play (no plies), the default play count, stopping
+// condition, iteration limits, BAI settings and utility weights, "best"
+// recording and "equity" sorting, and PlayChooser off.
+//
+// A null in a request has to mean the same thing on every contributor's
+// machine. Without this it meant "whatever this process last had": the
+// contributor's settings.txt, a command run before contribute -- or, the case
+// that actually bites, the previous task in the same run. A job pitting two
+// static players, claimed right after one with a simming player, would have
+// simulated every move, because a null num_plies left the previous job's
+// plies in place.
+//
+// PlayChooser is reset for the same reason: birdtest has no field for -pcN
+// (it is a different move-selection algorithm from everything else here), so
+// a PlayChooser left on from an earlier manual session would otherwise govern
+// how this player plays.
+static void config_contribute_reset_player_settings(Config *config,
+                                                    int player_index,
+                                                    ErrorStack *error_stack) {
+  const bool p1 = player_index == 0;
+  *(p1 ? &config->p1_max_iterations : &config->p2_max_iterations) =
+      CONFIG_DEFAULT_MAX_ITERATIONS;
+  *(p1 ? &config->p1_sim_plies : &config->p2_sim_plies) = 0;
+  *(p1 ? &config->p1_num_plays : &config->p2_num_plays) =
+      CONFIG_DEFAULT_NUM_PLAYS;
+  *(p1 ? &config->p1_stop_cond_pct : &config->p2_stop_cond_pct) =
+      CONFIG_DEFAULT_STOP_COND_PCT;
+  *(p1 ? &config->p1_sim_with_inference : &config->p2_sim_with_inference) =
+      true;
+  *(p1 ? &config->p1_time_limit_seconds : &config->p2_time_limit_seconds) =
+      CONFIG_DEFAULT_TIME_LIMIT_SECONDS;
+  *(p1 ? &config->p1_min_play_iterations : &config->p2_min_play_iterations) =
+      CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
+  *(p1 ? &config->p1_threshold : &config->p2_threshold) = BAI_THRESHOLD_GK16;
+  *(p1 ? &config->p1_sampling_rule : &config->p2_sampling_rule) =
+      BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  *(p1 ? &config->p1_eq_margin_inference : &config->p2_eq_margin_inference) =
+      int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  *(p1 ? &config->p1_utility_w_winpct : &config->p2_utility_w_winpct) =
+      CONFIG_DEFAULT_UTILITY_W_WINPCT;
+  *(p1 ? &config->p1_utility_w_spread : &config->p2_utility_w_spread) =
+      CONFIG_DEFAULT_UTILITY_W_SPREAD;
+  *(p1 ? &config->p1_utility_spread_scale : &config->p2_utility_spread_scale) =
+      CONFIG_DEFAULT_UTILITY_SPREAD_SCALE;
+  *(p1 ? &config->p1_play_chooser_time_ms : &config->p2_play_chooser_time_ms) =
+      -1.0;
+  config_load_record_type(config, MOVE_RECORD_BEST_STRING, player_index,
+                          error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_sort_type(config, MOVE_SORT_EQUITY_STRING, player_index,
+                        error_stack);
+}
+
+// The keys every player object must state, whether or not the player
+// simulates. A request used to leave most settings null, meaning "this
+// worker's compile-time default", which made a result a function of the task
+// *and* of the MAGPIE release that ran it: two workers on releases with
+// different defaults played the same task differently, and a version floor --
+// a minimum, not a pin -- could not exclude either. The server now writes
+// every one of these into the player config when the config is created, so a
+// request without one comes from a server this build does not understand, and
+// is refused rather than filled in.
+//
+// num_plays is here, not with the simulation keys: an opening-rack analysis
+// sizes its move list from it, simulating or not.
+static const char *const contribute_required_player_keys[] = {
+    CONTRIBUTE_KEY_RECORDER_TYPE,      CONTRIBUTE_KEY_SORT_STRATEGY,
+    CONTRIBUTE_KEY_NUM_PLIES,          CONTRIBUTE_KEY_NUM_PLAYS,
+    CONTRIBUTE_KEY_NUM_PLIES_RECORDED, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,
+    CONTRIBUTE_KEY_MOVEGEN_MARGIN,
+};
+
+// The keys a simulating player must state as well. A static player never
+// reads them, and the server sends them null for one.
+static const char *const contribute_required_simmer_keys[] = {
+    CONTRIBUTE_KEY_MAX_ITERATIONS,       CONTRIBUTE_KEY_STOPPING_PCT,
+    CONTRIBUTE_KEY_USE_INFERENCE,        CONTRIBUTE_KEY_TIME_LIMIT_SECS,
+    CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS,  CONTRIBUTE_KEY_THRESHOLD,
+    CONTRIBUTE_KEY_SAMPLING_RULE,        CONTRIBUTE_KEY_INFERENCE_MARGIN,
+    CONTRIBUTE_KEY_UTILITY_W_WINPCT,     CONTRIBUTE_KEY_UTILITY_W_SPREAD,
+    CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE, CONTRIBUTE_KEY_WIN_PCT_MODEL,
+};
+
+// Pushes an error naming the first of `keys` that `object` leaves absent or
+// null, and returns false. `what` names the object in the message.
+static bool contribute_require_keys(const JsonValue *object,
+                                    const char *const *keys, int num_keys,
+                                    const char *what, ErrorStack *error_stack) {
+  for (int i = 0; i < num_keys; i++) {
+    const JsonValue *value = json_object_get(object, keys[i]);
+    if (!value || json_is_null(value)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent a %s with no %s, and contribute "
+                               "takes no setting from this build's defaults",
+                               what, keys[i]));
+      return false;
+    }
+  }
+  return true;
+}
+
+// Applies one player's settings from a task request's "player1"/"player2"/
+// "player" object, on top of config_contribute_reset_player_settings. Every
+// setting that can change a result must be stated (see
+// contribute_required_player_keys); the reset still runs first, so a setting
+// no request carries at all -- the PlayChooser -- is never inherited.
+void config_contribute_apply_player_settings(Config *config,
+                                             const JsonValue *player,
+                                             int player_index,
+                                             ErrorStack *error_stack) {
+  uint64_t *max_iterations = player_index == 0 ? &config->p1_max_iterations
+                                               : &config->p2_max_iterations;
+  int *sim_plies =
+      player_index == 0 ? &config->p1_sim_plies : &config->p2_sim_plies;
+  int *num_plays =
+      player_index == 0 ? &config->p1_num_plays : &config->p2_num_plays;
+  double *stop_cond_pct =
+      player_index == 0 ? &config->p1_stop_cond_pct : &config->p2_stop_cond_pct;
+  bool *sim_with_inference = player_index == 0 ? &config->p1_sim_with_inference
+                                               : &config->p2_sim_with_inference;
+  double *time_limit_seconds = player_index == 0
+                                   ? &config->p1_time_limit_seconds
+                                   : &config->p2_time_limit_seconds;
+  uint64_t *min_play_iterations = player_index == 0
+                                      ? &config->p1_min_play_iterations
+                                      : &config->p2_min_play_iterations;
+  bai_threshold_t *threshold =
+      player_index == 0 ? &config->p1_threshold : &config->p2_threshold;
+  bai_sampling_rule_t *sampling_rule =
+      player_index == 0 ? &config->p1_sampling_rule : &config->p2_sampling_rule;
+  Equity *eq_margin_inference = player_index == 0
+                                    ? &config->p1_eq_margin_inference
+                                    : &config->p2_eq_margin_inference;
+  double *utility_w_winpct = player_index == 0 ? &config->p1_utility_w_winpct
+                                               : &config->p2_utility_w_winpct;
+  double *utility_w_spread = player_index == 0 ? &config->p1_utility_w_spread
+                                               : &config->p2_utility_w_spread;
+  double *utility_spread_scale = player_index == 0
+                                     ? &config->p1_utility_spread_scale
+                                     : &config->p2_utility_spread_scale;
+
+  config_contribute_reset_player_settings(config, player_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (!contribute_require_keys(player, contribute_required_player_keys,
+                               sizeof(contribute_required_player_keys) /
+                                   sizeof(contribute_required_player_keys[0]),
+                               "player", error_stack)) {
+    return;
+  }
+  if (json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES, 0) > 0 &&
+      !contribute_require_keys(player, contribute_required_simmer_keys,
+                               sizeof(contribute_required_simmer_keys) /
+                                   sizeof(contribute_required_simmer_keys[0]),
+                               "simulating player", error_stack)) {
+    return;
+  }
+
+  const char *recorder =
+      json_get_string_or_null(player, CONTRIBUTE_KEY_RECORDER_TYPE);
+  if (recorder) {
+    config_load_record_type(config, recorder, player_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  const char *sort =
+      json_get_string_or_null(player, CONTRIBUTE_KEY_SORT_STRATEGY);
+  if (sort) {
+    config_load_sort_type(config, sort, player_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  const JsonValue *iterations =
+      json_object_get(player, CONTRIBUTE_KEY_MAX_ITERATIONS);
+  if (iterations && !json_is_null(iterations)) {
+    const int64_t value =
+        json_get_int_or(player, CONTRIBUTE_KEY_MAX_ITERATIONS, 0);
+    if (value < 1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid max_iterations: %lld",
+                               (long long)value));
+      return;
+    }
+    *max_iterations = (uint64_t)value;
+  }
+  // A player simulates exactly when this is above zero: autoplay decides
+  // per player on sim_args->num_plies, so a null here is a static player.
+  const JsonValue *plies = json_object_get(player, CONTRIBUTE_KEY_NUM_PLIES);
+  if (plies && !json_is_null(plies)) {
+    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES, -1);
+    if (value < 0 || value > MAX_PLIES) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid num_plies: %lld",
+                               (long long)value));
+      return;
+    }
+    *sim_plies = (int)value;
+  }
+  const JsonValue *plays = json_object_get(player, CONTRIBUTE_KEY_NUM_PLAYS);
+  if (plays && !json_is_null(plays)) {
+    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLAYS, 0);
+    if (value < 1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid num_plays: %lld",
+                               (long long)value));
+      return;
+    }
+    *num_plays = (int)value;
+  }
+  const JsonValue *stopping =
+      json_object_get(player, CONTRIBUTE_KEY_STOPPING_PCT);
+  if (stopping && !json_is_null(stopping)) {
+    const double value =
+        json_get_double_or(player, CONTRIBUTE_KEY_STOPPING_PCT, 0.0);
+    if (!isfinite(value) || value <= 0 || value >= 100) {
+      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                       get_formatted_string(
+                           "server sent an invalid stopping_pct: %f", value));
+      return;
+    }
+    *stop_cond_pct = value;
+  }
+  const JsonValue *inference =
+      json_object_get(player, CONTRIBUTE_KEY_USE_INFERENCE);
+  if (inference && !json_is_null(inference)) {
+    *sim_with_inference =
+        json_get_bool_or(player, CONTRIBUTE_KEY_USE_INFERENCE, false);
+  }
+  const JsonValue *time_limit =
+      json_object_get(player, CONTRIBUTE_KEY_TIME_LIMIT_SECS);
+  if (time_limit && !json_is_null(time_limit)) {
+    const double value =
+        json_get_double_or(player, CONTRIBUTE_KEY_TIME_LIMIT_SECS, 0.0);
+    if (!isfinite(value) || value < 0 || value > 1e9) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid time_limit_secs: %f",
+                               value));
+      return;
+    }
+    *time_limit_seconds = value;
+  }
+
+  const JsonValue *min_iterations =
+      json_object_get(player, CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS);
+  if (min_iterations && !json_is_null(min_iterations)) {
+    const int64_t value =
+        json_get_int_or(player, CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS, 0);
+    if (value < 0) {
+      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                       get_formatted_string(
+                           "server sent an invalid min_play_iterations: %lld",
+                           (long long)value));
+      return;
+    }
+    *min_play_iterations = (uint64_t)value;
+  }
+
+  const char *threshold_str =
+      json_get_string_or_null(player, CONTRIBUTE_KEY_THRESHOLD);
+  if (threshold_str) {
+    config_contribute_parse_threshold(threshold_str, threshold, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  const char *sampling_rule_str =
+      json_get_string_or_null(player, CONTRIBUTE_KEY_SAMPLING_RULE);
+  if (sampling_rule_str) {
+    config_contribute_parse_sampling_rule(sampling_rule_str, sampling_rule,
+                                          error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  const JsonValue *inference_margin =
+      json_object_get(player, CONTRIBUTE_KEY_INFERENCE_MARGIN);
+  if (inference_margin && !json_is_null(inference_margin)) {
+    const double value =
+        json_get_double_or(player, CONTRIBUTE_KEY_INFERENCE_MARGIN, 0.0);
+    if (!isfinite(value) || value < 0 || value > EQUITY_MAX_DOUBLE) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent an invalid inference_margin: %f",
+                               value));
+      return;
+    }
+    *eq_margin_inference = double_to_equity(value);
+  }
+
+  const JsonValue *uwin =
+      json_object_get(player, CONTRIBUTE_KEY_UTILITY_W_WINPCT);
+  if (uwin && !json_is_null(uwin)) {
+    *utility_w_winpct =
+        json_get_double_or(player, CONTRIBUTE_KEY_UTILITY_W_WINPCT, 1.0);
+  }
+  const JsonValue *uspread =
+      json_object_get(player, CONTRIBUTE_KEY_UTILITY_W_SPREAD);
+  if (uspread && !json_is_null(uspread)) {
+    *utility_w_spread =
+        json_get_double_or(player, CONTRIBUTE_KEY_UTILITY_W_SPREAD, 0.0);
+  }
+  const JsonValue *uspread_scale =
+      json_object_get(player, CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE);
+  if (uspread_scale && !json_is_null(uspread_scale)) {
+    *utility_spread_scale =
+        json_get_double_or(player, CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE, 1.0);
+  }
+}
+
+// Resets the run-wide settings to MAGPIE's own defaults, for the same reason
+// config_contribute_reset_player_settings resets the per-player ones: nothing
+// a task computes may depend on the contributor's settings.txt, a command run
+// before contribute, or an earlier task. The bingo bonus and the cutoff are
+// then overwritten by what the request states
+// (config_contribute_apply_run_settings); the rest have no field in birdtest's
+// request, and each still changes what a task computes when left over:
+//
+// - the bingo bonus is part of every play's score, so it moves every game's
+//   result and every move's equity;
+// - the movegen margin decides which plays an 'equity' recorder keeps;
+// - the cutoff decides when a simulation treats two plays as equivalent and
+//   stops distinguishing them;
+// - intra-game parallelism hands a simming player's simulations every thread
+//   rather than one, which changes what a sampled simulation plays;
+// - small plays are the endgame's move list shape, not a ranked list.
+//
+// print_interval is cosmetic, but a leftover one prints simulation progress
+// into a contributor's terminal on every rack.
+void config_contribute_reset_shared_settings(Config *config) {
+  config->bingo_bonus = DEFAULT_BINGO_BONUS;
+  config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  config->cutoff = convert_user_cutoff_to_cutoff(CONFIG_DEFAULT_USER_CUTOFF);
+  config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
+  config->use_small_plays = false;
+  config->use_heat_map = false;
+  config->leavegen_max_games = 0;
+  config->print_interval = 0;
+}
+
+// Applies the run-wide settings a task request states, on top of
+// config_contribute_reset_shared_settings. Every job type states the bingo
+// bonus, since it is part of every play's score; the job types that can
+// simulate state the cutoff as well. Both are required, for the reason
+// contribute_required_player_keys gives.
+void config_contribute_apply_run_settings(Config *config,
+                                          const JsonValue *request,
+                                          bool states_cutoff,
+                                          ErrorStack *error_stack) {
+  const int64_t bingo_bonus =
+      json_get_int(request, CONTRIBUTE_KEY_BINGO_BONUS, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (bingo_bonus < INT_MIN || bingo_bonus > INT_MAX) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an invalid bingo_bonus: %lld",
+                             (long long)bingo_bonus));
+    return;
+  }
+  config->bingo_bonus = (int)bingo_bonus;
+  if (!states_cutoff) {
+    return;
+  }
+  const double user_cutoff =
+      json_get_double(request, CONTRIBUTE_KEY_SIM_CUTOFF, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  // The same range the -cutoff argument accepts.
+  if (!isfinite(user_cutoff) || user_cutoff < 0 || user_cutoff > 100) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "server sent an invalid sim_cutoff: %f", user_cutoff));
+    return;
+  }
+  config->cutoff = convert_user_cutoff_to_cutoff(user_cutoff);
+}
+
+// impl_move_gen and impl_sim are the entry points the CLI's generate and
+// simulate commands use, and they read the run-wide settings (-plies,
+// -numplays, -iterations, ...) rather than a player's. Autoplay is the only
+// caller that reads per-player ones. So the opening-rack executor, which
+// applies its player to the per-player settings like every executor does, was
+// analysing every rack with the contributor's run-wide settings instead: a job
+// asking for a 4-ply simmer ran whatever plies the worker's own MAGPIE had.
+// This copies the player's settings across before the analysis.
+void config_contribute_use_player_settings_for_analysis(Config *config,
+                                                        int player_index) {
+  const bool p1 = player_index == 0;
+  config->plies = p1 ? config->p1_sim_plies : config->p2_sim_plies;
+  config->num_plays = p1 ? config->p1_num_plays : config->p2_num_plays;
+  config->max_iterations =
+      p1 ? config->p1_max_iterations : config->p2_max_iterations;
+  config->min_play_iterations =
+      p1 ? config->p1_min_play_iterations : config->p2_min_play_iterations;
+  config->stop_cond_pct =
+      p1 ? config->p1_stop_cond_pct : config->p2_stop_cond_pct;
+  config->time_limit_seconds =
+      p1 ? config->p1_time_limit_seconds : config->p2_time_limit_seconds;
+  config->threshold = p1 ? config->p1_threshold : config->p2_threshold;
+  config->sampling_rule =
+      p1 ? config->p1_sampling_rule : config->p2_sampling_rule;
+  config->eq_margin_inference =
+      p1 ? config->p1_eq_margin_inference : config->p2_eq_margin_inference;
+  config->utility_w_winpct =
+      p1 ? config->p1_utility_w_winpct : config->p2_utility_w_winpct;
+  config->utility_w_spread =
+      p1 ? config->p1_utility_w_spread : config->p2_utility_w_spread;
+  config->utility_spread_scale =
+      p1 ? config->p1_utility_spread_scale : config->p2_utility_spread_scale;
+  // An opening rack has no previous play, so there is nothing to infer from.
+  // Left on, impl_sim infers from config->game_history -- which is not reset
+  // by the executor, and holds whatever game the contributor last loaded.
+  config->sim_with_inference = false;
+}
+
+// The object of whichever player states `key`, preferring player 1: used for
+// the settings MAGPIE has one value of for the whole run. birdtest only
+// accepts a job whose two players agree on them where both state one, and a
+// static player states no win% model at all -- so reading player 1's alone
+// loaded no model for a static player 1 facing a simming player 2, and the run
+// used whatever model an earlier task had left loaded.
+static const JsonValue *contribute_stated_by_either(const JsonValue *player1,
+                                                    const JsonValue *player2,
+                                                    const char *key) {
+  const JsonValue *value = json_object_get(player1, key);
+  if (value && !json_is_null(value)) {
+    return player1;
+  }
+  value = json_object_get(player2, key);
+  return value && !json_is_null(value) ? player2 : player1;
+}
+
+// Applies a player's movegen_margin, on top of the default the shared reset
+// put back.
+static void config_contribute_apply_movegen_margin(Config *config,
+                                                   const JsonValue *player,
+                                                   ErrorStack *error_stack) {
+  const JsonValue *movegen_margin =
+      json_object_get(player, CONTRIBUTE_KEY_MOVEGEN_MARGIN);
+  if (!movegen_margin || json_is_null(movegen_margin)) {
+    return;
+  }
+  const double value =
+      json_get_double_or(player, CONTRIBUTE_KEY_MOVEGEN_MARGIN, 0.0);
+  if (!isfinite(value) || value < 0 || value > EQUITY_MAX_DOUBLE) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "server sent an invalid movegen_margin: %f", value));
+    return;
+  }
+  config->eq_margin_movegen = double_to_equity(value);
+}
+
+static char *config_contribute_games(Config *config, const JsonValue *request,
+                                     bool game_pairs, int threads,
+                                     ContributeState *state,
+                                     ErrorStack *error_stack) {
+  const char *lexicon = NULL;
+  const char *variant = NULL;
+  const char *letter_distribution = NULL;
+  const char *board_layout = NULL;
+  if (!config_contribute_validate_common(request, &lexicon, &variant,
+                                         &letter_distribution, &board_layout,
+                                         error_stack)) {
+    return NULL;
+  }
+
+  const uint64_t seed =
+      json_get_uint64_string(request, CONTRIBUTE_KEY_SEED, error_stack);
+  const int64_t num_games =
+      json_get_int(request, CONTRIBUTE_KEY_NUM_GAMES, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  if (num_games <= 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server asked for a non-positive batch size: %lld",
+                             (long long)num_games));
+    return NULL;
+  }
+
+  const JsonValue *player1 = json_object_get(request, CONTRIBUTE_KEY_PLAYER1);
+  const JsonValue *player2 = json_object_get(request, CONTRIBUTE_KEY_PLAYER2);
+  const char *p1_lexicon =
+      json_get_string_or_null(player1, CONTRIBUTE_KEY_PLAYER_LEXICON);
+  const char *p2_lexicon =
+      json_get_string_or_null(player2, CONTRIBUTE_KEY_PLAYER_LEXICON);
+
+  // Each player's use_wordmap applies to the lexicon that player actually
+  // plays with, which is its own p*_lexicon when it has one and the job's
+  // shared lexicon otherwise -- so two players on the same lexicon only need
+  // it built once, and a player that did not ask for one never triggers a
+  // build.
+  const char *shared_lexicon = contribute_shared_lexicon(lexicon, p1_lexicon);
+
+  if (contribute_wants_wordmap(player1)) {
+    config_contribute_ensure_wordmap(config, state,
+                                     p1_lexicon ? p1_lexicon : shared_lexicon,
+                                     letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  if (contribute_wants_wordmap(player2)) {
+    config_contribute_ensure_wordmap(config, state,
+                                     p2_lexicon ? p2_lexicon : shared_lexicon,
+                                     letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+
+  // After the wordmaps: a rack info table is built from a .klv2 and the
+  // wordmap for its lexicon, so the wordmap has to be in place and correct
+  // first. Two players that share a table build it once, since the second
+  // finds the first's on disk with the right hash.
+  const char *p1_rit_name =
+      contribute_wants_rit(player1) ? contribute_rit_name(player1) : NULL;
+  const char *p2_rit_name =
+      contribute_wants_rit(player2) ? contribute_rit_name(player2) : NULL;
+  if (p1_rit_name) {
+    config_contribute_ensure_rack_info_table(
+        config, state, p1_rit_name, p1_lexicon ? p1_lexicon : shared_lexicon,
+        json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
+        letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  if (p2_rit_name &&
+      !(p1_rit_name && strings_equal(p1_rit_name, p2_rit_name))) {
+    config_contribute_ensure_rack_info_table(
+        config, state, p2_rit_name, p2_lexicon ? p2_lexicon : shared_lexicon,
+        json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES),
+        letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+
+  config_contribute_load_lexicon_and_variant(
+      config, shared_lexicon, variant, letter_distribution, board_layout,
+      p1_lexicon, p2_lexicon,
+      json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
+      json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES),
+      contribute_wants_wordmap(player1), contribute_wants_wordmap(player2),
+      p1_rit_name, p2_rit_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  config->seed = seed;
+  config->num_threads = threads;
+  config->human_readable = false;
+  config->print_on_finish = false;
+  config->use_game_pairs = game_pairs;
+  config_contribute_apply_player_settings(config, player1, 0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config_contribute_apply_player_settings(config, player2, 1, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  // Shared (not per-player) MAGPIE options that still affect play. birdtest
+  // validates that two players stating one agree before a job is even
+  // created, since MAGPIE has one value for the whole run; each is read from
+  // whichever player states it, because a static player states no win% model.
+  config_contribute_reset_shared_settings(config);
+  config_contribute_apply_run_settings(config, request, /*states_cutoff=*/true,
+                                       error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  const char *win_pct_model = json_get_string_or_null(
+      contribute_stated_by_either(player1, player2,
+                                  CONTRIBUTE_KEY_WIN_PCT_MODEL),
+      CONTRIBUTE_KEY_WIN_PCT_MODEL);
+  config_contribute_apply_movegen_margin(
+      config,
+      contribute_stated_by_either(player1, player2,
+                                  CONTRIBUTE_KEY_MOVEGEN_MARGIN),
+      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot autoplay without lexicon"));
+    return NULL;
+  }
+  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
+    if (win_pct_model) {
+      win_pct_destroy(config->win_pcts);
+      config->win_pcts =
+          win_pct_create(config->data_paths, win_pct_model, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+            string_duplicate(
+                "encountered an error loading the win percentage file"));
+        return NULL;
+      }
+    } else {
+      config_load_win_pcts(config, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return NULL;
+      }
+    }
+  }
+  // A worker analyses a position on every turn regardless; the job decides
+  // whether those analyses are kept rather than discarded.
+  const bool capture_positions =
+      json_get_bool_or(request, CONTRIBUTE_KEY_CAPTURE_POSITIONS, false);
+  // How many ranked plays to report per position: the player config's
+  // num_plays_recorded, which is not how many were simulated.
+  const JsonValue *capture_player =
+      json_object_get(request, CONTRIBUTE_KEY_PLAYER1);
+  config->max_num_display_plays =
+      json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, 10);
+  // And how many plies to report, the other half of that pair.
+  config->shplies =
+      json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED,
+                      CONFIG_DEFAULT_SHPLIES);
+  autoplay_results_set_options(config->autoplay_results,
+                               capture_positions ? "games,positions" : "games",
+                               error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  char *num_games_str = get_formatted_string("%lld", (long long)num_games);
+  config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_DEFAULT,
+                  num_games_str, 0, /*forced_racks=*/NULL,
+                  /*num_forced_racks=*/0, error_stack);
+  free(num_games_str);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  // The game recorder is always requested above, so this is a defensive
+  // check rather than an expected failure.
+  if (!(autoplay_results_get_options(config->autoplay_results) &
+        autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME))) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     string_duplicate("autoplay produced no game results"));
+    return NULL;
+  }
+
+  // The game recorder writes "all_games" and, for game pairs, "divergent_games"
+  // (the subset whose two games did not play identically, where a paired run's
+  // signal lives). The positions recorder, when the job asked for positions to
+  // be captured, writes "positions" alongside it -- each recorder decides its
+  // own shape, the same as autoplay_results_to_string.
+  //
+  // autoplay_results owns the string autoplay_results_get_json returns, but
+  // the caller of this function frees what it gets back, so that string is
+  // copied here rather than handed out directly.
+  return string_duplicate(
+      autoplay_results_get_json(config->autoplay_results, game_pairs));
+}
+
+// Analyzes one opening rack onto an already-open JSON array, returning false
+// and pushing onto the stack on failure. Always the empty board: an opening
+// rack is by definition the start of the game, so the request sends just the
+// racks to analyze rather than full positions.
+//
+// `seed` is the seed the server states for this rack: the task's seed plus the
+// rack's index in the batch, which is its index in the job's rack space. The
+// executor used to derive one from the rack's letters, which was the same on
+// every machine but not the server's to choose; every task now states a seed,
+// this one included, so what a simulation samples is a function of the task.
+static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
+                                           uint64_t seed,
+                                           const JsonValue *player,
+                                           bool simming, StringBuilder *sb,
+                                           ErrorStack *error_stack) {
+  game_reset(config->game);
+  config_reset_move_list_and_invalidate_sim_results(config);
+  config->seed = seed;
+  if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an unusable rack: '%s'", rack_str));
+    return false;
+  }
+
+  // Simulating needs a move list to simulate over; the CLI's "simulate"
+  // command relies on the user already having run "generate", but a task
+  // request has no such prior step to reuse.
+  impl_move_gen(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return false;
+  }
+  if (simming) {
+    impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return false;
+    }
+  }
+
+  if (move_list_get_count(config->move_list) == 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("no moves generated for rack '%s'", rack_str));
+    return false;
+  }
+
+  // The leading num_plays_recorded moves are reported, and num_moves says how
+  // many were actually ranked -- the same pair a position captured during a
+  // game reports, and the same two numbers the server stores.
+  //
+  // The cap is not cosmetic. The server keeps num_plays_recorded moves per
+  // rack and discards the rest, so everything past it is bytes nobody stores;
+  // and a task is a *batch* of up to 10,000 racks, with a simming player's
+  // num_plays (or a recorder type of 'equity'/'all') deciding how many moves
+  // each one ranks. Uncapped, an ordinary job could put a submission past the
+  // server's 64 MiB ceiling, which comes back 413 and counts as a failed task.
+  // Both are required of every player (config_contribute_apply_player_settings
+  // refuses a request without them), so the fallbacks here are never taken.
+  const int max_plies =
+      json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED, INT_MAX);
+  const int play_cap =
+      json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, 0);
+  bool rack_first = true;
+  json_write_object_start(sb);
+  json_write_string_field(sb, CONTRIBUTE_KEY_RACK, rack_str, &rack_first);
+  const int num_moves = autoplay_results_write_ranked_plays_json(
+      sb, &rack_first, config->game, config->move_list,
+      simming ? config->sim_results : NULL, play_cap, max_plies);
+  // How many were ranked before the cap above. The stored moves are truncated,
+  // so this is the one thing about the analysis they cannot recover.
+  json_write_int_field(sb, CONTRIBUTE_KEY_NUM_MOVES, num_moves, &rack_first);
+  json_write_object_end(sb);
+  return true;
+}
+
+// A task covers a *batch* of racks. One rack per task would spend a
+// claim/submit round trip on each, and the rack space runs to millions -- the
+// per-worker rate limit alone would cap a worker at well under a rack a second.
+// The lexicon and player settings are loaded once and reused across the batch.
+static char *config_contribute_opening_rack(Config *config,
+                                            const JsonValue *request,
+                                            int threads, ContributeState *state,
+                                            ErrorStack *error_stack) {
+  const char *lexicon = NULL;
+  const char *variant = NULL;
+  const char *letter_distribution = NULL;
+  const char *board_layout = NULL;
+  if (!config_contribute_validate_common(request, &lexicon, &variant,
+                                         &letter_distribution, &board_layout,
+                                         error_stack)) {
+    return NULL;
+  }
+
+  const JsonValue *racks = json_object_get(request, CONTRIBUTE_KEY_RACKS);
+  const int rack_count = json_array_length(racks);
+  if (rack_count <= 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        string_duplicate("server sent an opening rack task with no racks"));
+    return NULL;
+  }
+  // Required, as it is for games and leave generation: rack i of the batch is
+  // analysed from seed + i.
+  const uint64_t seed =
+      json_get_uint64_string(request, CONTRIBUTE_KEY_SEED, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  const JsonValue *player = json_object_get(request, CONTRIBUTE_KEY_PLAYER);
+  const char *p1_lexicon =
+      json_get_string_or_null(player, CONTRIBUTE_KEY_PLAYER_LEXICON);
+
+  if (contribute_wants_wordmap(player)) {
+    config_contribute_ensure_wordmap(
+        config, state, contribute_shared_lexicon(lexicon, p1_lexicon),
+        letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  const char *rit_name =
+      contribute_wants_rit(player) ? contribute_rit_name(player) : NULL;
+  if (rit_name) {
+    config_contribute_ensure_rack_info_table(
+        config, state, rit_name, contribute_shared_lexicon(lexicon, p1_lexicon),
+        json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES),
+        letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+
+  // Player 2 gets player 1's leaves as well as its lexicon. A simulation plays
+  // the opponent's replies with player 2's leaves, and a NULL here kept
+  // whichever leaves player 2 last had -- another job's, or the KLV an earlier
+  // leave-generation task fetched -- none of which this task's expected_data
+  // verified.
+  const char *leaves = json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES);
+  config_contribute_load_lexicon_and_variant(
+      config, contribute_shared_lexicon(lexicon, p1_lexicon), variant,
+      letter_distribution, board_layout, p1_lexicon, NULL, leaves, leaves,
+      contribute_wants_wordmap(player), contribute_wants_wordmap(player),
+      rit_name, rit_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  config->num_threads = threads;
+  config->human_readable = false;
+  config_contribute_reset_shared_settings(config);
+  config_contribute_apply_run_settings(config, request, /*states_cutoff=*/true,
+                                       error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  // Both seats get the job's one player: the analysed player on turn, and the
+  // opponent a simulation plays out, whose settings were otherwise whatever an
+  // earlier task left for player 2.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    config_contribute_apply_player_settings(config, player, player_index,
+                                            error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  config_contribute_apply_movegen_margin(config, player, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config_contribute_use_player_settings_for_analysis(config, 0);
+
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot analyze a rack without lexicon"));
+    return NULL;
+  }
+  config_init_game(config);
+
+  // Decided the way autoplay decides it for a player in a game -- by plies --
+  // so a player config means the same thing in both job types.
+  const bool simming = config->p1_sim_plies > 0;
+  if (simming) {
+    const char *win_pct_model =
+        json_get_string_or_null(player, CONTRIBUTE_KEY_WIN_PCT_MODEL);
+    if (win_pct_model) {
+      win_pct_destroy(config->win_pcts);
+      config->win_pcts =
+          win_pct_create(config->data_paths, win_pct_model, error_stack);
+    } else {
+      config_load_win_pcts(config, error_stack);
+    }
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_array_start(sb, CONTRIBUTE_KEY_RACKS, &first);
+
+  for (int i = 0; i < rack_count; i++) {
+    const char *rack_str = json_array_get_string(racks, i);
+    if (!rack_str) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("rack at index %d is not a string", i));
+      string_builder_destroy(sb);
+      return NULL;
+    }
+    if (i > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    if (!config_contribute_analyze_rack(config, rack_str, seed + (uint64_t)i,
+                                        player, simming, sb, error_stack)) {
+      string_builder_destroy(sb);
+      return NULL;
+    }
+  }
+
+  json_write_array_end(sb);
+  json_write_object_end(sb);
+  char *result = string_builder_dump_and_destroy(sb, NULL);
+  return result;
+}
+
+// A leave_generation task is one forced-rack partition of one generation:
+// play up to num_games games, forcing draws from forced_racks whenever the
+// bag runs low, and report every rack that occurred (forced or not) with its
+// count and mean equity. Aggregating that across every task in a generation,
+// and deciding when the generation is done, is entirely the server's job
+// (leave_rack_progress / run_transition in birdtest's leave_gen.rs): the
+// server holds the running per-rack counts, so no single task can tell
+// whether the generation's target has been met overall.
+//
+// The generation's rack target is deliberately not part of the request, and
+// num_games alone ends the task. A game contributes an occurrence for every
+// rack it draws, not only the forced ones, and the server folds all of them
+// into totals no single task can observe; stopping early when this task's own
+// racks looked done would throw away coverage the server counts.
+static char *config_contribute_leave_gen(Config *config,
+                                         const JsonValue *request, int threads,
+                                         ContributeState *state,
+                                         ErrorStack *error_stack) {
+  char *result = NULL;
+  const char *lexicon = NULL;
+  const char *variant = NULL;
+  const char *letter_distribution = NULL;
+  const char *board_layout = NULL;
+  if (!config_contribute_validate_common(request, &lexicon, &variant,
+                                         &letter_distribution, &board_layout,
+                                         error_stack)) {
+    return NULL;
+  }
+
+  const JsonValue *forced_racks_json =
+      json_object_get(request, CONTRIBUTE_KEY_FORCED_RACKS);
+  const int forced_racks_count = json_array_length(forced_racks_json);
+  if (forced_racks_count <= 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        string_duplicate(
+            "server sent a leave_generation task with no forced racks"));
+    return NULL;
+  }
+  const int64_t num_games =
+      json_get_int(request, CONTRIBUTE_KEY_NUM_GAMES, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  if (num_games <= 0) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server asked for a non-positive batch size: %lld",
+                             (long long)num_games));
+    return NULL;
+  }
+  // Required, as it is for games. Every game of the task is seeded from it,
+  // and before the server sent one this read config->seed, which no request
+  // sets: the process start time, a -seed in settings.txt, or the seed of
+  // whichever games task this worker ran last.
+  const uint64_t seed =
+      json_get_uint64_string(request, CONTRIBUTE_KEY_SEED, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config_contribute_reset_shared_settings(config);
+  // The bot plays statically, so there is no cutoff to state.
+  config_contribute_apply_run_settings(config, request,
+                                       /*states_cutoff=*/false, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config->seed = seed;
+  const char *previous_artifact_key =
+      json_get_string_or_null(request, CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY);
+
+  // Leave generation has one bot, not a player1/player2 pair, so its
+  // use_wordmap sits on the request itself rather than on a player object.
+  const bool use_wordmap = contribute_wants_wordmap(request);
+  if (use_wordmap) {
+    config_contribute_ensure_wordmap(config, state, lexicon,
+                                     letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+
+  // The fetched KLV below is written under the existing "lexica" directory
+  // data_filepaths already resolves DATA_FILEPATH_TYPE_KLV/LEAVES to -- the
+  // same directory the shipped lexicon data lives in, so it is guaranteed to
+  // already exist (MAGPIE has no directory-creation utility). A fixed name per
+  // lexicon, overwritten on every task: a contribute run handles one task at a
+  // time, so nothing else is reading or writing it concurrently.
+  //
+  // The name starts with the lexicon's. MAGPIE checks leaves against their
+  // lexicon by inferring a letter distribution from each *name's* prefix
+  // (lexicons_and_leaves_compat), so a bare "birdtest_leavegen_previous" was
+  // refused with "default letter distribution not found" on every
+  // leave_generation task, before a single game was played.
+  char *leaves_name = NULL;
+  if (previous_artifact_key) {
+    ChttpResponse artifact;
+    contribute_fetch_artifact(state, previous_artifact_key, &artifact,
+                              error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+    leaves_name = get_formatted_string("%s_birdtest_previous", lexicon);
+    char *klv_path = data_filepaths_get_writable_filename(
+        config->data_paths, leaves_name, DATA_FILEPATH_TYPE_KLV, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      chttp_response_destroy(&artifact);
+      free(leaves_name);
+      return NULL;
+    }
+    FILE *klv_file = fopen(klv_path, "wbe");
+    bool written = klv_file && fwrite(artifact.body, 1, artifact.body_length,
+                                      klv_file) == artifact.body_length;
+    // A failed close can lose buffered bytes, which is a failed write too.
+    if (klv_file && fclose(klv_file) != 0) {
+      written = false;
+    }
+    if (!written) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("could not write fetched KLV to %s", klv_path));
+    }
+    free(klv_path);
+    chttp_response_destroy(&artifact);
+    if (!error_stack_is_empty(error_stack)) {
+      free(leaves_name);
+      return NULL;
+    }
+  }
+
+  // No rack info table, ever, for leave generation. Every generation plays
+  // with a different KLV -- the one fetched above -- and a table caches leave
+  // values, so a table would have to be rebuilt per generation at 1.9 GB and
+  // several minutes per worker, to replace exactly the values being generated.
+  // The server pins none for this job type for the same reason.
+  config_contribute_load_lexicon_and_variant(
+      config, lexicon, variant, letter_distribution, board_layout, NULL, NULL,
+      leaves_name, leaves_name, use_wordmap, use_wordmap, /*p1_rit_name=*/NULL,
+      /*p2_rit_name=*/NULL, error_stack);
+  free(leaves_name);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  // The leave-generating bot plays statically, on MAGPIE's default static
+  // settings. Nothing in the request states them, so they are reset rather
+  // than inherited: a simming games task earlier in this run would otherwise
+  // leave the bot simulating every move of every leavegen game.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    config_contribute_reset_player_settings(config, player_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot generate leaves without lexicon"));
+    return NULL;
+  }
+  // Leave generation needs one shared KWG/KLV, not per-player ones -- there
+  // is only one "player" concept here, the leave-generating bot.
+  if (!players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KWG) ||
+      !players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KLV)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES,
+        string_duplicate("leave generation requires a single shared lexicon "
+                         "and leaves"));
+    return NULL;
+  }
+
+  // The server's forced racks go straight to autoplay as strings; nothing
+  // is written to or read back from disk.
+  const char **forced_racks =
+      malloc_or_die(sizeof(const char *) * forced_racks_count);
+  for (int i = 0; i < forced_racks_count; i++) {
+    const char *rack_str = json_array_get_string(forced_racks_json, i);
+    if (!rack_str) {
+      free(forced_racks);
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("forced rack at index %d is not a string", i));
+      return NULL;
+    }
+    forced_racks[i] = rack_str;
+  }
+
+  config->num_threads = threads;
+  config->human_readable = false;
+  config->print_on_finish = false;
+  // One generation, ended by num_games alone. A hand-run `leavegen` takes a
+  // comma-separated target per generation and plays until every rack reaches
+  // it; here that target is the server's, so the run is given one no rack can
+  // reach, and leavegen_max_games -- leavegen has no per-generation game cap
+  // of its own -- is what ends it.
+  char *min_rack_targets = get_formatted_string("%d", INT_MAX);
+  config->leavegen_max_games = (uint64_t)num_games;
+  // No per-generation KLV, CSV or report files: the results go back in the
+  // response, and nothing should be written into a contributor's data
+  // directory on every task.
+  config->leavegen_write_files = false;
+  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
+                    min_rack_targets, 0, forced_racks, forced_racks_count,
+                    error_stack);
+  }
+  config->leavegen_write_files = true;
+  free(min_rack_targets);
+  free(forced_racks);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+
+  // Set once the generation ends, whether it ended by reaching the target or
+  // by exhausting num_games -- either way the racks that did occur are the
+  // task's result. NULL means the run never got as far as finishing a
+  // generation at all.
+  const char *leave_results_json =
+      autoplay_results_get_leave_results_json(config->autoplay_results);
+  if (!leave_results_json) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        string_duplicate("leave generation finished without producing any "
+                         "rack occurrences to report"));
+    return NULL;
+  }
+  result = string_duplicate(leave_results_json);
+
+  return result;
+}
+
+// Re-applies a settings file saved by save_config_settings --
+// always exactly one "setoptions ..." line -- without going through
+// execute_command_sync/load_command_sync. Those manage ThreadControl's
+// STARTED/FINISHED state machine, which assumes it is only ever driven from
+// the top-level REPL loop; calling them here, reentrantly, while contribute
+// is itself the async command currently occupying that state machine, trips
+// load_command_sync's own assertion that the state machine is idle before
+// a command starts. config_load_command has no such assumption -- it is the
+// pure parse-and-apply half config_execute_command's exec_func normally
+// follows, and "setoptions"'s own exec_func is a no-op (config_load_command
+// alone already applied everything), so skipping straight to it is exactly
+// as complete as the normal path for this one line shape.
+static void config_restore_settings_file(Config *config,
+                                         const char *settings_filename,
+                                         ErrorStack *error_stack) {
+  char *settings_string = get_string_from_file(settings_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    // Nothing saved (or nothing readable) -- nothing to restore.
+    error_stack_reset(error_stack);
+    return;
+  }
+  StringSplitter *lines = split_string_by_newline(settings_string, true);
+  const int num_lines = string_splitter_get_number_of_items(lines);
+  for (int i = 0; i < num_lines; i++) {
+    config_load_command(config, string_splitter_get_item(lines, i),
+                        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      break;
+    }
+  }
+  string_splitter_destroy(lines);
+  free(settings_string);
+}
+
+void impl_contribute(Config *config, const char *settings_path,
+                     ErrorStack *error_stack) {
+  // Every task mutates config directly (lexicon, per-player settings,
+  // capture options, ...), the same way any other command would, so left
+  // alone it would end this run looking like whatever the last task
+  // happened to configure -- and the REPL's own save-after-every-command
+  // behavior (see save_config_settings's caller in exec.c) would then
+  // persist that into settings.txt. Snapshot the settings file now and
+  // replay it back once contribute is done (below) so a user who runs a
+  // command, then contribute, then another command sees no difference from
+  // never having run contribute at all. Uses its own error stack: a failure
+  // here should not be folded into the contribute loop's own error
+  // reporting, which is about tasks, not local settings-file bookkeeping.
+  ErrorStack *settings_error_stack = error_stack_create();
+  save_config_settings(config, settings_error_stack);
+  if (!error_stack_is_empty(settings_error_stack)) {
+    error_stack_print_and_reset(settings_error_stack);
+  }
+
+  ContributeState *state = NULL;
+  while (!contribute_should_stop(state)) {
+    const char *job_type = NULL;
+    const JsonValue *request = NULL;
+    const contribute_claim_outcome_t outcome = contribute_claim_task(
+        &state, settings_path, config_get_magpie_version(),
+        config_get_data_paths(config), config_get_thread_control(config),
+        &job_type, &request, error_stack);
+    if (outcome == CONTRIBUTE_CLAIM_FAILED ||
+        outcome == CONTRIBUTE_CLAIM_SHUTDOWN) {
+      // A shutdown has already printed why; a failure carries its reason on
+      // the error stack.
+      break;
+    }
+    if (outcome == CONTRIBUTE_CLAIM_NO_WORK ||
+        outcome == CONTRIBUTE_CLAIM_DECLINED) {
+      // Declining is an ordinary outcome: the job is remembered as
+      // unsupported and the next claim lands somewhere else.
+      continue;
+    }
+
+    const int threads = contribute_get_threads(state);
+    char *result_json = NULL;
+    bool fatal = false;
+    if (strings_equal(job_type, "games")) {
+      result_json = config_contribute_games(config, request, false, threads,
+                                            state, error_stack);
+    } else if (strings_equal(job_type, "game_pairs")) {
+      result_json = config_contribute_games(config, request, true, threads,
+                                            state, error_stack);
+    } else if (strings_equal(job_type, "opening_rack")) {
+      result_json = config_contribute_opening_rack(config, request, threads,
+                                                   state, error_stack);
+    } else if (strings_equal(job_type, "leave_generation")) {
+      result_json = config_contribute_leave_gen(config, request, threads, state,
+                                                error_stack);
+    } else {
+      // A job type this build does not recognise means the server is newer
+      // than this MAGPIE for *this job* -- not for every job. A client that
+      // predates the leave_generation executor can still play games all day,
+      // so decline and carry on rather than ending the session. Exit is
+      // reserved for the case where nothing at all is doable, which the server
+      // detects and reports as a shutdown.
+      contribute_decline_task(state, config_get_thread_control(config),
+                              "unknown_job_type", error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        break;
+      }
+      continue;
+    }
+    // A derived file this worker cannot reproduce is a property of this
+    // worker's build, not of the task, and it is not a result: hand the claim
+    // straight back with both hashes so the disagreement is visible in the
+    // admin view, and let the next claim land on another job. Submitting a
+    // failed result instead would hold the slot until the heartbeat lapsed and
+    // would tell the server nothing about which file differed.
+    if (error_stack_top(error_stack) ==
+        ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH) {
+      char *why = error_stack_get_string_and_reset(error_stack);
+      thread_control_print_formatted(config_get_thread_control(config), "%s\n",
+                                     why);
+      free(why);
+      free(result_json);
+      contribute_decline_derived_mismatch(
+          state, config_get_thread_control(config), error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        break;
+      }
+      continue;
+    }
+
+    // execute_leave_gen pushes ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE when
+    // this build cannot run the requested generation; that is a property of
+    // the build rather than of one task, so it stops the run.
+    fatal = fatal || error_stack_top(error_stack) ==
+                         ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE;
+
+    char *error_message = NULL;
+    if (!error_stack_is_empty(error_stack)) {
+      error_message = error_stack_get_string_and_reset(error_stack);
+    }
+    contribute_submit_result(state, config_get_thread_control(config),
+                             result_json, error_message, fatal, error_stack);
+    free(result_json);
+    free(error_message);
+  }
+  contribute_state_destroy(state);
+
+  // Restore whatever was snapshotted above, win, lose, or interrupted --
+  // every exit from the loop above reaches here.
+  config_restore_settings_file(config, config_get_settings_filename(config),
+                               settings_error_stack);
+  if (!error_stack_is_empty(settings_error_stack)) {
+    error_stack_print_and_reset(settings_error_stack);
+  }
+  error_stack_destroy(settings_error_stack);
 }
 
 void string_builder_add_exec_mode_type(StringBuilder *sb,
@@ -7467,14 +9446,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   config_load_bool(config, ARG_TOKEN_PRINT_ON_FINISH, &config->print_on_finish,
                    error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  // Write rack equity csv
-
-  config_load_bool(config, ARG_TOKEN_WRITE_RACK_EQUITY_CSV,
-                   &config->write_rack_equity_csv, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -8490,6 +10461,17 @@ char *str_api_autoplay(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_contribute(Config *config, ErrorStack *error_stack) {
+  impl_contribute(config,
+                  config_get_parg_value(config, ARG_TOKEN_CONTRIBUTE, 0),
+                  error_stack);
+}
+
+char *str_api_contribute(Config *config, ErrorStack *error_stack) {
+  execute_contribute(config, error_stack);
+  return empty_string();
+}
+
 void execute_convert(Config *config, ErrorStack *error_stack) {
   impl_convert(config, error_stack);
 }
@@ -8811,8 +10793,7 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
   // Build the settings string
   StringBuilder *settings_sb = string_builder_create();
   config_add_settings_to_string_builder(config, settings_sb);
-  char *settings_str = string_builder_dump(settings_sb, NULL);
-  string_builder_destroy(settings_sb);
+  char *settings_str = string_builder_dump_and_destroy(settings_sb, NULL);
   analyze_args->config_settings_str = settings_str;
 
   analyze_game(analyze_args, ctx, error_stack);
@@ -8962,8 +10943,7 @@ static void write_tournament_summary(const char *dir_path, char **gcg_files,
 
   append_tournament_averages(sb, summary);
 
-  char *summary_str = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *summary_str = string_builder_dump_and_destroy(sb, NULL);
   ErrorStack *write_error_stack = error_stack_create();
   write_string_to_file(summary_path, "w", summary_str, write_error_stack);
   if (!error_stack_is_empty(write_error_stack)) {
@@ -9166,8 +11146,8 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
         if (error_stack_is_empty(read_error_stack)) {
           StringBuilder *dialog_sb = string_builder_create();
           extract_game_summary_blocks(content, NULL, dialog_sb);
-          summary->dialog_summary = string_builder_dump(dialog_sb, NULL);
-          string_builder_destroy(dialog_sb);
+          summary->dialog_summary =
+              string_builder_dump_and_destroy(dialog_sb, NULL);
         }
         error_stack_destroy(read_error_stack);
         free(content);
@@ -9212,14 +11192,13 @@ char *analyze_summary_to_string(AnalyzeSummary *summary) {
                                        : "\nFinished (all games analyzed)\n");
   if (summary->error_details) {
     string_builder_add_string(summary_sb, "\n=== Errors ===\n");
-    char *error_details_str = string_builder_dump(summary->error_details, NULL);
+    char *error_details_str =
+        string_builder_dump_and_destroy(summary->error_details, NULL);
     string_builder_add_string(summary_sb, error_details_str);
     free(error_details_str);
-    string_builder_destroy(summary->error_details);
     summary->error_details = NULL;
   }
-  char *summary_str = string_builder_dump(summary_sb, NULL);
-  string_builder_destroy(summary_sb);
+  char *summary_str = string_builder_dump_and_destroy(summary_sb, NULL);
   return summary_str;
 }
 
@@ -9240,8 +11219,7 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
   char *grid_str = analyze_summary_to_string(&summary);
   string_builder_add_string(summary_sb, grid_str);
   free(grid_str);
-  char *summary_str = string_builder_dump(summary_sb, NULL);
-  string_builder_destroy(summary_sb);
+  char *summary_str = string_builder_dump_and_destroy(summary_sb, NULL);
   thread_control_print(config->thread_control, summary_str);
   free(summary_str);
   free(summary.dialog_summary);
@@ -9266,8 +11244,7 @@ char *str_api_analyze(Config *config, ErrorStack *error_stack) {
   char *grid_str = analyze_summary_to_string(&summary);
   string_builder_add_string(sb, grid_str);
   free(grid_str);
-  char *result = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
+  char *result = string_builder_dump_and_destroy(sb, NULL);
   return result;
 }
 
@@ -9316,6 +11293,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   cmd(ARG_TOKEN_HELP, "help", 0, 1, help, generic, false);
   cmd(ARG_TOKEN_VERSION, "version", 0, 0, version, generic, false);
+  cmd(ARG_TOKEN_BUILDERS, "builders", 0, 0, builders, generic, false);
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
@@ -9353,8 +11331,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
   cmd(ARG_TOKEN_PEG, "peg", 0, 1, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
-  cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
-  cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 3, leave_gen, generic, false);
+  cmd(ARG_TOKEN_CONVERT, "convert", 2, 5, convert, generic, false);
+  cmd(ARG_TOKEN_CONTRIBUTE, "contribute", 0, 1, contribute, generic, false);
+  cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -9473,7 +11452,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ON_TURN_SCORE_STYLE, "onturnscore", 1, 1);
   arg(ARG_TOKEN_PRETTY, "pretty", 1, 1);
   arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
-  arg(ARG_TOKEN_WRITE_RACK_EQUITY_CSV, "writerackequitycsv", 1, 1);
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
@@ -9509,11 +11487,11 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->exec_mode = EXEC_MODE_ASYNC;
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
-  config->num_plays = 100;
+  config->num_plays = CONFIG_DEFAULT_NUM_PLAYS;
   config->max_num_display_plays = 15;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 5;
-  config->shplies = 2;
+  config->shplies = CONFIG_DEFAULT_SHPLIES;
   config->show_bu = false;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
@@ -9521,6 +11499,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // default; rational opponent; no only-solve / never-prune restrictions.
   config->peg_result.last_completed_stage = -1;
   config->peg_num_stages = 0;
+  config->leavegen_max_games = 0;
+  config->leavegen_write_files = true;
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;
@@ -9528,16 +11508,16 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_out_width = 100;
   config->peg_out_lines = 1;
   config->peg_noprune_str = NULL;
-  config->eq_margin_inference = int_to_equity(5);
-  config->eq_margin_movegen = int_to_equity(5);
-  config->min_play_iterations = 500;
-  config->max_iterations = 1000000000000;
-  config->stop_cond_pct = 99;
-  config->cutoff = convert_user_cutoff_to_cutoff(0.005);
-  config->utility_w_winpct = 1.0;
-  config->utility_w_spread = 0.5;
-  config->utility_spread_scale = 100.0;
-  config->time_limit_seconds = 60;
+  config->eq_margin_inference = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
+  config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
+  config->max_iterations = CONFIG_DEFAULT_MAX_ITERATIONS;
+  config->stop_cond_pct = CONFIG_DEFAULT_STOP_COND_PCT;
+  config->cutoff = convert_user_cutoff_to_cutoff(CONFIG_DEFAULT_USER_CUTOFF);
+  config->utility_w_winpct = CONFIG_DEFAULT_UTILITY_W_WINPCT;
+  config->utility_w_spread = CONFIG_DEFAULT_UTILITY_W_SPREAD;
+  config->utility_spread_scale = CONFIG_DEFAULT_UTILITY_SPREAD_SCALE;
+  config->time_limit_seconds = CONFIG_DEFAULT_TIME_LIMIT_SECONDS;
   config->endgame_time_limit_seconds = 0;
   config->peg_time_limit_seconds = 0;
   config->num_threads = get_num_cores();
@@ -9584,7 +11564,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_heat_map = false;
   config->print_boards = false;
   config->print_on_finish = false;
-  config->write_rack_equity_csv = false;
   config->show_game_with_moves = true;
   config->show_prompt = true;
   config->save_settings = true;
@@ -9639,6 +11618,8 @@ void config_destroy(Config *config) {
   peg_result_destroy(&config->peg_result);
   peg_poll_destroy(config->peg_poll);
   free(config->peg_noprune_str);
+  free(config->p1_rit_name_override);
+  free(config->p2_rit_name_override);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
@@ -9699,6 +11680,7 @@ void config_add_settings_to_string_builder(const Config *config,
     switch (arg_token) {
     case ARG_TOKEN_HELP:
     case ARG_TOKEN_VERSION:
+    case ARG_TOKEN_BUILDERS:
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
@@ -9716,6 +11698,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_NOPRUNE:
     case ARG_TOKEN_PEG_OUTCOMES:
     case ARG_TOKEN_AUTOPLAY:
+    case ARG_TOKEN_CONTRIBUTE:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
     case ARG_TOKEN_CREATE_DATA:
@@ -10253,10 +12236,6 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->print_on_finish);
       break;
-    case ARG_TOKEN_WRITE_RACK_EQUITY_CSV:
-      config_add_bool_setting_to_string_builder(config, sb, arg_token,
-                                                config->write_rack_equity_csv);
-      break;
     case ARG_TOKEN_SHOW_GAME_WITH_MOVES:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->show_game_with_moves);
@@ -10282,4 +12261,15 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     }
   }
+}
+
+void save_config_settings(const Config *config, ErrorStack *error_stack) {
+  if (!config_get_save_settings(config)) {
+    return;
+  }
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  write_string_to_file(config_get_settings_filename(config), "w",
+                       string_builder_peek(sb), error_stack);
+  string_builder_destroy(sb);
 }

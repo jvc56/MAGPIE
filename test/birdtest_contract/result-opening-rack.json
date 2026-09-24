@@ -1,0 +1,219 @@
+{
+  "claim_token": "d7f06c35-99f1-47c6-8d0c-2af12a01e71d",
+  "result": {
+    "racks": [
+      {
+        "rack": "VWWXYYZ",
+        "moves": [
+          {
+            "move": "(exch VWWY)",
+            "score": 0,
+            "equity": 9.482,
+            "iterations": 500,
+            "win_percentage": 46.291316,
+            "blended_utility": 0.480135,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 16.8,
+                "average_score": 28.924
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 0.0,
+                "average_score": 34.732
+              }
+            ]
+          },
+          {
+            "move": "(exch VWWXYY)",
+            "score": 0,
+            "equity": 5.76,
+            "iterations": 500,
+            "win_percentage": 45.949953,
+            "blended_utility": 0.480061,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 16.8,
+                "average_score": 28.924
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 10.4,
+                "average_score": 37.654
+              }
+            ]
+          },
+          {
+            "move": "(exch VWWYY)",
+            "score": 0,
+            "equity": 8.18,
+            "iterations": 500,
+            "win_percentage": 45.859958,
+            "blended_utility": 0.476484,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 16.8,
+                "average_score": 28.924
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 0.6,
+                "average_score": 33.802
+              }
+            ]
+          },
+          {
+            "move": "(exch VWWXY)",
+            "score": 0,
+            "equity": 6.601,
+            "iterations": 500,
+            "win_percentage": 45.430275,
+            "blended_utility": 0.475068,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 16.8,
+                "average_score": 28.924
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 2.6,
+                "average_score": 35.596
+              }
+            ]
+          },
+          {
+            "move": "(exch VWY)",
+            "score": 0,
+            "equity": 5.959,
+            "iterations": 500,
+            "win_percentage": 44.755332,
+            "blended_utility": 0.46851,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 16.8,
+                "average_score": 28.924
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 0.0,
+                "average_score": 33.052
+              }
+            ]
+          }
+        ],
+        "num_moves": 5
+      },
+      {
+        "rack": "MQVVXYY",
+        "moves": [
+          {
+            "move": "(exch MQVVYY)",
+            "score": 0,
+            "equity": 3.664,
+            "iterations": 500,
+            "win_percentage": 44.888467,
+            "blended_utility": 0.472705,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 15.8,
+                "average_score": 26.976
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 7.4,
+                "average_score": 35.25
+              }
+            ]
+          },
+          {
+            "move": "(exch QVVXYY)",
+            "score": 0,
+            "equity": 0.596,
+            "iterations": 500,
+            "win_percentage": 44.647279,
+            "blended_utility": 0.47207,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 15.8,
+                "average_score": 26.976
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 23.8,
+                "average_score": 36.528
+              }
+            ]
+          },
+          {
+            "move": "(exch MQVVY)",
+            "score": 0,
+            "equity": 4.194,
+            "iterations": 500,
+            "win_percentage": 44.72352,
+            "blended_utility": 0.470948,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 15.8,
+                "average_score": 26.976
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 2.0,
+                "average_score": 34.348
+              }
+            ]
+          },
+          {
+            "move": "(exch QVVY)",
+            "score": 0,
+            "equity": 4.214,
+            "iterations": 500,
+            "win_percentage": 44.724954,
+            "blended_utility": 0.470873,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 15.8,
+                "average_score": 26.976
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 0.6,
+                "average_score": 34.242
+              }
+            ]
+          },
+          {
+            "move": "(exch QVVYY)",
+            "score": 0,
+            "equity": 3.61,
+            "iterations": 500,
+            "win_percentage": 44.533577,
+            "blended_utility": 0.469608,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 15.8,
+                "average_score": 26.976
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 4.6,
+                "average_score": 34.316
+              }
+            ]
+          }
+        ],
+        "num_moves": 5
+      }
+    ]
+  }
+}

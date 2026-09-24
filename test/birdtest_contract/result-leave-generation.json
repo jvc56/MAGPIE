@@ -1,0 +1,47 @@
+{
+  "claim_token": "60937680-c4b5-44fd-8803-846e97b282a0",
+  "result": {
+    "racks": [
+      {
+        "rack": "BBBBBBB",
+        "count": 83,
+        "mean": 7.698795
+      },
+      {
+        "rack": "ABBBBBB",
+        "count": 149,
+        "mean": 18.738255
+      },
+      {
+        "rack": "AABBBBB",
+        "count": 195,
+        "mean": 23.779487
+      },
+      {
+        "rack": "AAABBBB",
+        "count": 210,
+        "mean": 23.919048
+      },
+      {
+        "rack": "AAAABBB",
+        "count": 155,
+        "mean": 24.716129
+      },
+      {
+        "rack": "AAAAABB",
+        "count": 128,
+        "mean": 25.671875
+      },
+      {
+        "rack": "AAAAAAB",
+        "count": 98,
+        "mean": 22.316327
+      },
+      {
+        "rack": "AAAAAAA",
+        "count": 60,
+        "mean": 14.205
+      }
+    ]
+  }
+}
