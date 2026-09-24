@@ -3392,6 +3392,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      /*incremental_movegen=*/true,
       /*enable_pv_display=*/true,
       /*soft_time_limit=*/config->endgame_time_limit_seconds,
       /*hard_time_limit=*/config->endgame_time_limit_seconds, config->seed,

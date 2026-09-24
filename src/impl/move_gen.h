@@ -301,6 +301,16 @@ void gen_destroy_cache(void);
 // solving.
 void generate_moves(const MoveGenArgs *args);
 
+// The MOVE_RECORD_ALL_SMALL plays of the lanes whose bit is set in
+// `lane_mask` (bit dir * BOARD_DIM + row_or_col: the BOARD_DIM horizontal
+// rows, then the BOARD_DIM vertical columns), appended to args->move_list in
+// generate_moves' lane order with no pass. lane_end[lane] receives the list
+// count once that lane has been processed, so lane L's plays occupy
+// [lane_end[L - 1], lane_end[L]) (from 0 for L == 0). Serves the endgame's
+// incremental move lists (path_move_lists.h).
+void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
+                                   int *lane_end);
+
 MoveGen *get_movegen(void);
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args);

@@ -3465,6 +3465,44 @@ void gen_shadow_small(MoveGen *gen) {
   anchor_heapify_all(&gen->anchor_heap);
 }
 
+// Every play anchored in lane `row` of the current gen->dir, scanning the
+// anchors in board order.
+static inline __attribute__((always_inline)) void
+gen_record_lane_plays_unordered(MoveGen *gen, int row,
+                                uint32_t kwg_root_node_index,
+                                bool record_small) {
+  const int dir = gen->dir;
+  gen->current_row_index = row;
+  gen->row_squares = board_get_row_cache(gen->board_lanes, row, dir);
+  gen->wit_row_lane =
+      board_get_wit_row_lane(gen->board, row, dir, gen->cross_index);
+  gen->wit_len_lane =
+      board_get_wit_len_lane(gen->board, row, dir, gen->cross_index);
+
+  int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+  for (int col = 0; col < BOARD_DIM; col++) {
+    if (gen_cache_get_is_anchor(gen, col)) {
+      gen->current_anchor_col = col;
+      gen->last_anchor_col = last_anchor_col;
+      gen->anchor_right_extension_set =
+          gen_cache_get_right_extension_set(gen, col);
+      gen->current_anchor_highest_possible_score = EQUITY_MAX_VALUE;
+
+      if (record_small) {
+        recursive_gen_small(gen, col, kwg_root_node_index, col, col,
+                            gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+      } else {
+        recursive_gen(gen, col, kwg_root_node_index, col, col,
+                      gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+      }
+      last_anchor_col = col;
+      if (!gen_cache_is_empty(gen, col)) {
+        last_anchor_col++;
+      }
+    }
+  }
+}
+
 static inline __attribute__((always_inline)) void
 gen_record_scoring_plays_unordered(MoveGen *gen, bool record_small) {
   gen->tiles_played = 0;
@@ -3479,36 +3517,8 @@ gen_record_scoring_plays_unordered(MoveGen *gen, bool record_small) {
       if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0) {
         continue;
       }
-      gen->current_row_index = row;
-      gen->row_squares = board_get_row_cache(gen->board_lanes, row, dir);
-      gen->wit_row_lane =
-          board_get_wit_row_lane(gen->board, row, dir, gen->cross_index);
-      gen->wit_len_lane =
-          board_get_wit_len_lane(gen->board, row, dir, gen->cross_index);
-
-      int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
-      for (int col = 0; col < BOARD_DIM; col++) {
-        if (gen_cache_get_is_anchor(gen, col)) {
-          gen->current_anchor_col = col;
-          gen->last_anchor_col = last_anchor_col;
-          gen->anchor_right_extension_set =
-              gen_cache_get_right_extension_set(gen, col);
-          gen->current_anchor_highest_possible_score = EQUITY_MAX_VALUE;
-
-          if (record_small) {
-            recursive_gen_small(gen, col, kwg_root_node_index, col, col,
-                                gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1,
-                                0);
-          } else {
-            recursive_gen(gen, col, kwg_root_node_index, col, col,
-                          gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
-          }
-          last_anchor_col = col;
-          if (!gen_cache_is_empty(gen, col)) {
-            last_anchor_col++;
-          }
-        }
-      }
+      gen_record_lane_plays_unordered(gen, row, kwg_root_node_index,
+                                      record_small);
     }
   }
 }
@@ -3625,6 +3635,26 @@ void gen_record_pass(MoveGen *gen) {
     }
     // Otherwise small_moves[0] already holds the best scoring play.
     break;
+  }
+}
+
+void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
+                                   int *lane_end) {
+  MoveGen *gen = get_movegen();
+  gen_load_position(gen, args);
+  assert(gen->move_record_type == MOVE_RECORD_ALL_SMALL);
+  gen->tiles_played = 0;
+  const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      const int lane = BOARD_DIM * dir + row;
+      if (((lane_mask >> lane) & 1) != 0 &&
+          gen->row_number_of_anchors_cache[lane] != 0) {
+        gen_record_lane_plays_unordered(gen, row, kwg_root_node_index, true);
+      }
+      lane_end[lane] = gen->move_list->count;
+    }
   }
 }
 
