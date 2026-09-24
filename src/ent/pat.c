@@ -1555,21 +1555,6 @@ static inline MachineLetter pat_effective_letter(const Square *lane, int idx,
   return square_get_letter(&lane[idx]);
 }
 
-typedef struct PATCrossInfo {
-  bool dead;
-  bool hooky;
-  int flex;
-  int scaled_flex;
-  // Sum over admissible letters of unseen count times the letter's
-  // incremental immediate score at this square (see
-  // pat_effective_cross_info), divided by PAT_HOOK_SCORE_SCALE.
-  int score_exposure;
-  // The real cross-set this hook or floater route needs, valid only when
-  // hooky; 0 otherwise. Blank stays at bit 0, same convention as every
-  // other cross/extension set (see pat_set_flex).
-  uint64_t letter_set;
-} PATCrossInfo;
-
 // The hook square's own multipliers and the premium's word multiplier are
 // what a letter placed there actually earns: the hooked word's existing
 // score times the square's word multiplier, plus the letter's value under
@@ -1597,17 +1582,78 @@ static inline int pat_letter_score_exposure(int cross_score, int tile_score,
 // use for that channel. ld and premium_word_multiplier feed
 // score_exposure only; a caller that never reads it may pass NULL and any
 // multiplier.
+static void pat_cross_cache_build_sums(PATCrossCache *cache,
+                                       const uint8_t *unseen_counts,
+                                       const LetterDistribution *ld) {
+  for (int byte_idx = 0; byte_idx < PAT_LETTER_SET_BYTES; byte_idx++) {
+    cache->flex_by_byte[byte_idx][0] = 0;
+    cache->score_by_byte[byte_idx][0] = 0;
+    for (int bits = 1; bits < 256; bits++) {
+      const int lowest = pat_ctz((uint64_t)bits);
+      const int rest = bits & (bits - 1);
+      const int machine_letter = byte_idx * 8 + lowest;
+      int flex = 0;
+      int score = 0;
+      if (machine_letter != BLANK_MACHINE_LETTER &&
+          machine_letter < MAX_ALPHABET_SIZE &&
+          unseen_counts[machine_letter] > 0) {
+        flex = unseen_counts[machine_letter];
+        score = flex * equity_to_int(ld_get_score(ld, machine_letter));
+      }
+      cache->flex_by_byte[byte_idx][bits] =
+          cache->flex_by_byte[byte_idx][rest] + flex;
+      cache->score_by_byte[byte_idx][bits] =
+          cache->score_by_byte[byte_idx][rest] + score;
+    }
+  }
+}
+
+static inline int pat_cross_cache_flex(const PATCrossCache *cache,
+                                       uint64_t letter_set) {
+  int flex = 0;
+  for (int byte_idx = 0; byte_idx < PAT_LETTER_SET_BYTES; byte_idx++) {
+    flex += cache->flex_by_byte[byte_idx][(letter_set >> (8 * byte_idx)) & 255];
+  }
+  return flex;
+}
+
+static inline int pat_cross_cache_score(const PATCrossCache *cache,
+                                        uint64_t letter_set) {
+  int score = 0;
+  for (int byte_idx = 0; byte_idx < PAT_LETTER_SET_BYTES; byte_idx++) {
+    score +=
+        cache->score_by_byte[byte_idx][(letter_set >> (8 * byte_idx)) & 255];
+  }
+  return score;
+}
+
+static inline int pat_cross_cache_index(int dir, int row, int col,
+                                        int premium_word_multiplier,
+                                        bool with_ld) {
+  int multiplier_idx = premium_word_multiplier - 1;
+  if (multiplier_idx < 0) {
+    multiplier_idx = 0;
+  }
+  if (multiplier_idx >= PAT_CROSS_CACHE_MULTIPLIERS) {
+    multiplier_idx = PAT_CROSS_CACHE_MULTIPLIERS - 1;
+  }
+  return (((dir * BOARD_DIM + row) * BOARD_DIM + col) *
+              PAT_CROSS_CACHE_MULTIPLIERS +
+          multiplier_idx) *
+             2 +
+         (with_ld ? 1 : 0);
+}
+
+// cache_read: a position's cache (see PATCrossCache) consulted for squares
+// the overlay leaves alone; cache_write: filled from a baseline (no
+// overlay) walk. Either may be NULL.
 static PATCrossInfo pat_effective_cross_info(
     const Square *lane, int idx, int dir, const PATMoveOverlay *overlay,
     int row, int col, const uint8_t *unseen_counts, double hyper_scale,
-    const LetterDistribution *ld, int premium_word_multiplier) {
-  const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
-  PATCrossInfo info;
-  // Exact created hooks: if a fresh tile sits perpendicular-adjacent,
-  // resolve the whole perpendicular pattern on the GADDAG and score it
-  // like a real hook; an empty set makes the square dead.
-  if (overlay != NULL && overlay->kwg != NULL && ld != NULL) {
-    bool fresh_adjacent = false;
+    const LetterDistribution *ld, int premium_word_multiplier,
+    const PATCrossCache *cache_read, PATCrossCache *cache_write) {
+  bool fresh_adjacent = false;
+  if (overlay != NULL) {
     for (int side = -1; side <= 1; side += 2) {
       const int perp_row =
           (dir == BOARD_HORIZONTAL_DIRECTION) ? row + side : row;
@@ -1620,6 +1666,23 @@ static PATCrossInfo pat_effective_cross_info(
         fresh_adjacent = true;
       }
     }
+    if (!fresh_adjacent && cache_read != NULL) {
+      const int cache_idx = pat_cross_cache_index(
+          dir, row, col, premium_word_multiplier, ld != NULL);
+      if ((cache_read->valid[cache_idx / 64] >> (cache_idx % 64)) & 1 &&
+          cache_read->entries[cache_idx].hyper_scale == hyper_scale) {
+        return cache_read->entries[cache_idx].info;
+      }
+    }
+  }
+  const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
+  // The position's subset sums, when this walk belongs to a context.
+  const PATCrossCache *sums = cache_read ? cache_read : cache_write;
+  PATCrossInfo info;
+  // Exact created hooks: if a fresh tile sits perpendicular-adjacent,
+  // resolve the whole perpendicular pattern on the GADDAG and score it
+  // like a real hook; an empty set makes the square dead.
+  if (overlay != NULL && overlay->kwg != NULL && ld != NULL) {
     if (fresh_adjacent) {
       int cross_score = 0;
       const uint64_t cross_set =
@@ -1627,14 +1690,27 @@ static PATCrossInfo pat_effective_cross_info(
                               overlay, &cross_score);
       info.dead = (cross_set == 0);
       info.hooky = !info.dead && (cross_set != TRIVIAL_CROSS_SET);
-      info.flex = info.hooky ? pat_set_flex(unseen_counts, cross_set) : 0;
-      info.scaled_flex =
-          info.hooky
-              ? pat_set_flex_scaled(unseen_counts, cross_set, hyper_scale)
-              : 0;
+      info.flex = !info.hooky ? 0
+                  : sums      ? pat_cross_cache_flex(sums, cross_set)
+                              : pat_set_flex(unseen_counts, cross_set);
+      info.scaled_flex = info.hooky ? (int)lround(info.flex * hyper_scale) : 0;
       info.letter_set = info.hooky ? cross_set : 0;
       info.score_exposure = 0;
-      if (info.hooky) {
+      if (info.hooky && sums) {
+        const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
+        const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
+        const int word_multiplier = bonus_square_get_word_multiplier(bonus);
+        // The per-letter sum below, factored: every admissible letter
+        // contributes its unseen count times (word_multiplier *
+        // cross_score + letter_multiplier * its score * (word_multiplier
+        // + premium_word_multiplier)).
+        const int64_t exposure =
+            (int64_t)word_multiplier * cross_score * info.flex +
+            (int64_t)letter_multiplier *
+                (word_multiplier + premium_word_multiplier) *
+                pat_cross_cache_score(sums, cross_set);
+        info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
+      } else if (info.hooky) {
         const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
         const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
         const int word_multiplier = bonus_square_get_word_multiplier(bonus);
@@ -1660,17 +1736,25 @@ static PATCrossInfo pat_effective_cross_info(
   info.dead = (base_cross_set == 0);
 
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
-  info.flex = info.hooky ? pat_set_flex(unseen_counts, base_cross_set) : 0;
-  info.scaled_flex =
-      info.hooky
-          ? pat_set_flex_scaled(unseen_counts, base_cross_set, hyper_scale)
-          : 0;
+  info.flex = !info.hooky ? 0
+              : sums      ? pat_cross_cache_flex(sums, base_cross_set)
+                          : pat_set_flex(unseen_counts, base_cross_set);
+  info.scaled_flex = info.hooky ? (int)lround(info.flex * hyper_scale) : 0;
   info.letter_set = info.hooky ? base_cross_set : 0;
   info.score_exposure = 0;
   const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
   const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
   const int word_multiplier = bonus_square_get_word_multiplier(bonus);
-  if (info.hooky && ld != NULL) {
+  if (info.hooky && ld != NULL && sums) {
+    // Factored as in the created-hook case above.
+    const int cross_score = equity_to_int(square_get_cross_score(&lane[idx]));
+    const int64_t exposure =
+        (int64_t)word_multiplier * cross_score * info.flex +
+        (int64_t)letter_multiplier *
+            (word_multiplier + premium_word_multiplier) *
+            pat_cross_cache_score(sums, base_cross_set);
+    info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
+  } else if (info.hooky && ld != NULL) {
     const int cross_score = equity_to_int(square_get_cross_score(&lane[idx]));
     int64_t exposure = 0;
     uint64_t remaining = base_cross_set & ~(uint64_t)1;
@@ -1688,7 +1772,17 @@ static PATCrossInfo pat_effective_cross_info(
     }
     info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
   }
-  if (!overlay || info.dead) {
+  if (!overlay) {
+    if (cache_write != NULL) {
+      const int cache_idx = pat_cross_cache_index(
+          dir, row, col, premium_word_multiplier, ld != NULL);
+      cache_write->entries[cache_idx].info = info;
+      cache_write->entries[cache_idx].hyper_scale = hyper_scale;
+      cache_write->valid[cache_idx / 64] |= (uint64_t)1 << (cache_idx % 64);
+    }
+    return info;
+  }
+  if (info.dead) {
     return info;
   }
   int fresh_flex = -1;
@@ -1762,7 +1856,10 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           const PATMoveOverlay *overlay, int32_t *features,
                           int *extent_lo, int *extent_hi,
                           int opponent_rack_size, uint64_t *hook_letters_out,
-                          bool lm_channels, bool score_channels) {
+                          bool lm_channels, bool score_channels,
+                          const PATCrossCache *cache_read,
+                          PATCrossCache *cache_write, unsigned part_mask,
+                          int32_t *const *side_features) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const double hyper_scale = pat_hyper_scale(unseen_counts, opponent_rack_size);
@@ -1839,7 +1936,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   const PATCrossInfo tws_info = pat_effective_cross_info(
       lane, tws_idx, dir, overlay, pat_unit_row(dir, lane_index, tws_idx),
       pat_unit_col(dir, lane_index, tws_idx), unseen_counts, hyper_scale,
-      hook_score_ld, premium_word_multiplier);
+      hook_score_ld, premium_word_multiplier, cache_read, cache_write);
   if (tws_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -1849,7 +1946,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         square_get_bonus_square(&lane[tws_idx]));
     lm_entries[1][0] = lm_entries[0][0];
   }
-  if (tws_info.hooky) {
+  if (tws_info.hooky && (part_mask & PAT_UNIT_PART_CENTER)) {
     // A one-tile play on the TWS square itself completes a perpendicular
     // word at triple word score: hook access at d = 1.
     features[hook_base] += tws_info.flex;
@@ -1870,6 +1967,12 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
 
   for (int side = -1; side <= 1; side += 2) {
     const int lm_side = (side < 0) ? 0 : 1;
+    if (!(part_mask & (side < 0 ? PAT_UNIT_PART_LOW : PAT_UNIT_PART_HIGH))) {
+      continue;
+    }
+    // Where this side's features go: its own array when the caller keeps
+    // the parts apart, the unit's otherwise.
+    int32_t *side_out = side_features ? side_features[lm_side] : features;
     // Number of empty squares a word covering the span from the current
     // scan position through the TWS square must fill, i.e. the number of
     // tiles the opponent must play. The TWS square itself is the first.
@@ -1920,7 +2023,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           if (!get_is_blanked(run_letter)) {
             tile_score = equity_to_int(ld_get_score(ld, run_letter));
           }
-          features[float_score_base + distance_bin - 1] += tile_score;
+          side_out[float_score_base + distance_bin - 1] += tile_score;
           // What a word through this floater would actually lay down on
           // the way to the triple. The span it must cover is the empties
           // between the two plus both endpoints; a blank contributes
@@ -1939,16 +2042,16 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
               // word. See PATWeights.signed_through.
               if (pat->signed_through) {
                 const int word_end = (side > 0) ? 1 : 0;
-                features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
+                side_out[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
                          1] +=
                     pat->through_score_end[word_end][unblanked][span];
-                features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
+                side_out[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
                          1] +=
                     pat->through_count_end[word_end][unblanked][span];
               } else {
-                features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
+                side_out[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin -
                          1] += pat->through_score[unblanked][span];
-                features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
+                side_out[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin -
                          1] += pat->through_count[unblanked][span];
               }
             }
@@ -1975,10 +2078,10 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                                 : run_letters[run_length - 1 - k];
           }
           const int word_end = (side > 0) ? 1 : 0;
-          features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin - 1] +=
+          side_out[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin - 1] +=
               pat_get_run_through_score(pat, word_end, key, key_len,
                                         word_length);
-          features[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin - 1] +=
+          side_out[PAT_FEATURE_FLOAT_THROUGH_COUNT_START + distance_bin - 1] +=
               pat_get_run_through_count(pat, word_end, key, key_len,
                                         word_length);
         }
@@ -2020,8 +2123,8 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           }
         }
         if (full_channels) {
-          features[PAT_FEATURE_FLOAT_FLEX_START + distance_bin - 1] += run_flex;
-          features[PAT_FEATURE_FLOAT_FLEX_SCALED_START + distance_bin - 1] +=
+          side_out[PAT_FEATURE_FLOAT_FLEX_START + distance_bin - 1] += run_flex;
+          side_out[PAT_FEATURE_FLOAT_FLEX_SCALED_START + distance_bin - 1] +=
               scaled_run_flex;
         }
         if (lm_track && run_flex > 0 &&
@@ -2038,7 +2141,8 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       const PATCrossInfo info = pat_effective_cross_info(
           lane, idx, dir, overlay, square_row, square_col, unseen_counts,
-          hyper_scale, hook_score_ld, premium_word_multiplier);
+          hyper_scale, hook_score_ld, premium_word_multiplier, cache_read,
+          cache_write);
       if (info.dead) {
         break;
       }
@@ -2056,18 +2160,18 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         // A second empty TWS within reach: the triple-triple span from the
         // scanned TWS square through this one.
         if (span_has_floater) {
-          features[PAT_FEATURE_TT_FLOATER] += 1 + span_floater_flex;
+          side_out[PAT_FEATURE_TT_FLOATER] += 1 + span_floater_flex;
         } else if (span_has_hook) {
-          features[PAT_FEATURE_TT_HOOK_ONLY] += 1;
+          side_out[PAT_FEATURE_TT_HOOK_ONLY] += 1;
         }
         break;
       }
       if (info.hooky) {
-        features[hook_base + empties_used - 1] += info.flex;
+        side_out[hook_base + empties_used - 1] += info.flex;
         if (full_channels) {
-          features[PAT_FEATURE_HOOK_SCALED_START + empties_used - 1] +=
+          side_out[PAT_FEATURE_HOOK_SCALED_START + empties_used - 1] +=
               info.scaled_flex;
-          features[PAT_FEATURE_HOOK_SCORE_START + empties_used - 1] +=
+          side_out[PAT_FEATURE_HOOK_SCORE_START + empties_used - 1] +=
               info.score_exposure;
         }
         if (hook_letters_out) {
@@ -2149,8 +2253,9 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
                              int dir, int lane_index, int lo, int hi, int tier,
                              const PATMoveOverlay *overlay, int32_t *features,
                              int *extent_lo, int *extent_hi,
-                             int opponent_rack_size,
-                             uint64_t *hook_letters_out) {
+                             int opponent_rack_size, uint64_t *hook_letters_out,
+                             const PATCrossCache *cache_read,
+                             PATCrossCache *cache_write) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const int tier_base =
@@ -2182,9 +2287,9 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     }
     // Never reads scaled_flex or score_exposure, so hyper_scale, ld and
     // the premium multiplier are don't-cares here.
-    const PATCrossInfo info =
-        pat_effective_cross_info(lane, idx, dir, overlay, square_row,
-                                 square_col, unseen_counts, 1.0, NULL, 2);
+    const PATCrossInfo info = pat_effective_cross_info(
+        lane, idx, dir, overlay, square_row, square_col, unseen_counts, 1.0,
+        NULL, 2, cache_read, cache_write);
     if (info.dead) {
       return;
     }
@@ -2340,11 +2445,13 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true, true);
+                  opponent_rack_size, NULL, true, true, NULL, NULL,
+                  PAT_UNIT_PART_ALL, NULL);
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true, true);
+                  opponent_rack_size, NULL, true, true, NULL, NULL,
+                  PAT_UNIT_PART_ALL, NULL);
   }
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
@@ -2356,7 +2463,8 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
   for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
     pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                      dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                     features, NULL, NULL, opponent_rack_size, NULL);
+                     features, NULL, NULL, opponent_rack_size, NULL, NULL,
+                     NULL);
   }
 }
 
@@ -2387,8 +2495,8 @@ static Equity pat_dot(const PATWeights *pat, const int32_t *features) {
 
 // The same product over only the weighted features; the other terms are
 // zero. Every path that has a context uses this one.
-static Equity pat_dot_ctx(const PATEvalContext *pat_eval_ctx,
-                          const int32_t *features) {
+static int64_t pat_dot_ctx_raw(const PATEvalContext *pat_eval_ctx,
+                               const int32_t *features) {
   const Equity *weights = pat_eval_ctx->weights->weights;
   int64_t acc = 0;
   for (int nonzero_idx = 0; nonzero_idx < pat_eval_ctx->num_nonzero_features;
@@ -2396,7 +2504,12 @@ static Equity pat_dot_ctx(const PATEvalContext *pat_eval_ctx,
     const int feature_index = pat_eval_ctx->nonzero_feature_index[nonzero_idx];
     acc += (int64_t)weights[feature_index] * features[feature_index];
   }
-  return pat_clamp_dot(acc);
+  return acc;
+}
+
+static Equity pat_dot_ctx(const PATEvalContext *pat_eval_ctx,
+                          const int32_t *features) {
+  return pat_clamp_dot(pat_dot_ctx_raw(pat_eval_ctx, features));
 }
 
 // The per-row and per-column unit masks are 64-bit.
@@ -2557,11 +2670,17 @@ pat_eval_utility_adjustment(const PATEvalContext *pat_eval_ctx,
 // walks and the span of lane squares that walk could read. Units 2*i and
 // 2*i+1 are TWS i's horizontal and vertical walks; the units after those are
 // the double-double windows.
+// cache_write is the context's own cross cache when called from the
+// baseline load (which fills it), NULL from a per-move rescan (which only
+// reads it).
 static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                                   int unit_index, const PATMoveOverlay *overlay,
                                   int32_t *features, int *dir_out,
                                   int *lane_out, int *extent_lo, int *extent_hi,
-                                  uint64_t *hook_letters_out) {
+                                  uint64_t *hook_letters_out,
+                                  PATCrossCache *cache_write,
+                                  unsigned part_mask,
+                                  int32_t *const *side_features) {
   const int num_tws_units = pat_eval_ctx->num_tws * 2;
   if (unit_index < num_tws_units) {
     const int tws_idx = unit_index / 2;
@@ -2576,7 +2695,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
         pat_eval_ctx->tws_classes[tws_idx], dir, overlay, features, extent_lo,
         extent_hi, pat_eval_ctx->opponent_rack_size, hook_letters_out,
         (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_LM) != 0,
-        (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_HOOK_SCORE) != 0);
+        (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_HOOK_SCORE) != 0,
+        &pat_eval_ctx->cross_cache, cache_write, part_mask, side_features);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
@@ -2587,7 +2707,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                    pat_eval_ctx->dd_lanes[dd_idx], pat_eval_ctx->dd_los[dd_idx],
                    pat_eval_ctx->dd_his[dd_idx], pat_eval_ctx->dd_tiers[dd_idx],
                    overlay, features, extent_lo, extent_hi,
-                   pat_eval_ctx->opponent_rack_size, hook_letters_out);
+                   pat_eval_ctx->opponent_rack_size, hook_letters_out,
+                   &pat_eval_ctx->cross_cache, cache_write);
 }
 
 // Whether any channel a walk from this premium class can write carries a
@@ -2718,6 +2839,9 @@ static void pat_eval_context_load_units(
   if (!weights) {
     return;
   }
+  // The baseline walks below refill the cross cache for this position.
+  memset(pat_eval_ctx->cross_cache.valid, 0,
+         sizeof(pat_eval_ctx->cross_cache.valid));
   pat_eval_ctx->opponent_rack_size = opponent_rack_size;
   pat_eval_ctx->active_classes_mask = 0;
   for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
@@ -2730,6 +2854,8 @@ static void pat_eval_context_load_units(
   pat_eval_ctx->lanes = lanes;
   pat_compute_unseen_counts(lanes, ld, player_rack,
                             pat_eval_ctx->unseen_counts);
+  pat_cross_cache_build_sums(&pat_eval_ctx->cross_cache,
+                             pat_eval_ctx->unseen_counts, ld);
   pat_eval_ctx->num_tws =
       pat_find_tws(lanes, pat_eval_ctx->tws_rows, pat_eval_ctx->tws_cols,
                    pat_eval_ctx->tws_classes);
@@ -2799,11 +2925,44 @@ static void pat_eval_context_load_units(
     int extent_lo = 0;
     int extent_hi = 0;
     pat_eval_ctx->unit_hook_letters[unit_index] = 0;
+    // A premium unit's parts are kept apart (see PAT_UNIT_PART_CENTER)
+    // unless the combination channels, which pair the two sides, or the
+    // own-asset discount, which needs the whole unit's hook letters, are on.
+    const bool split_parts =
+        unit_index < pat_eval_ctx->num_tws * 2 &&
+        !(pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_LM) &&
+        weights->own_asset_discount == 0.0;
+    int32_t low_features[PAT_NUM_FEATURES];
+    int32_t high_features[PAT_NUM_FEATURES];
+    int32_t *const side_features[2] = {low_features, high_features};
+    if (split_parts) {
+      memset(low_features, 0, sizeof(low_features));
+      memset(high_features, 0, sizeof(high_features));
+    }
     pat_scan_context_unit(pat_eval_ctx, unit_index, NULL, unit_features, &dir,
                           &lane, &extent_lo, &extent_hi,
-                          &pat_eval_ctx->unit_hook_letters[unit_index]);
-    pat_eval_ctx->unit_penalty[unit_index] =
-        pat_dot_ctx(pat_eval_ctx, unit_features);
+                          &pat_eval_ctx->unit_hook_letters[unit_index],
+                          &pat_eval_ctx->cross_cache, PAT_UNIT_PART_ALL,
+                          split_parts ? side_features : NULL);
+    pat_eval_ctx->unit_parts_valid[unit_index] = split_parts;
+    if (split_parts) {
+      int64_t *raw = pat_eval_ctx->unit_part_raw[unit_index];
+      raw[0] = pat_dot_ctx_raw(pat_eval_ctx, unit_features);
+      raw[1] = pat_dot_ctx_raw(pat_eval_ctx, low_features);
+      raw[2] = pat_dot_ctx_raw(pat_eval_ctx, high_features);
+      for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+           feature_index++) {
+        unit_features[feature_index] +=
+            low_features[feature_index] + high_features[feature_index];
+      }
+      // The dot is linear, so the clamped sum of the parts is exactly the
+      // clamped dot of the summed features.
+      pat_eval_ctx->unit_penalty[unit_index] =
+          pat_clamp_dot(raw[0] + raw[1] + raw[2]);
+    } else {
+      pat_eval_ctx->unit_penalty[unit_index] =
+          pat_dot_ctx(pat_eval_ctx, unit_features);
+    }
     // A move affects this unit only when it has a tile on or directly
     // beside the lane (perpendicular halo of one) within the span of
     // squares the baseline walk visited: squares beyond the walk's break
@@ -3112,6 +3271,38 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
          pat_eval_utility_adjustment(pat_eval_ctx, move);
 }
 
+// Which parts (see PAT_UNIT_PART_CENTER) of premium unit unit_index a move
+// spanning rows row_start..row_end and columns col_start..col_end can
+// change: a tile in the lane or its perpendicular halo changes the part on
+// its side of the premium, or the premium's own part when it sits on the
+// premium's line. The unit is already known to be affected.
+static unsigned pat_unit_parts_touched(const PATEvalContext *pat_eval_ctx,
+                                       int unit_index, int row_start,
+                                       int row_end, int col_start,
+                                       int col_end) {
+  const int tws_idx = unit_index / 2;
+  const int dir = unit_index % 2;
+  const int premium_row = pat_eval_ctx->tws_rows[tws_idx];
+  const int premium_col = pat_eval_ctx->tws_cols[tws_idx];
+  // Along-lane span of the move and the premium's lane position.
+  const int along_lo =
+      (dir == BOARD_HORIZONTAL_DIRECTION) ? col_start : row_start;
+  const int along_hi = (dir == BOARD_HORIZONTAL_DIRECTION) ? col_end : row_end;
+  const int premium_along =
+      (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_col : premium_row;
+  unsigned parts = 0;
+  if (along_lo < premium_along) {
+    parts |= PAT_UNIT_PART_LOW;
+  }
+  if (along_hi > premium_along) {
+    parts |= PAT_UNIT_PART_HIGH;
+  }
+  if (along_lo <= premium_along && premium_along <= along_hi) {
+    parts |= PAT_UNIT_PART_CENTER;
+  }
+  return parts;
+}
+
 static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
                                            const Move *move,
                                            const Rack *leave) {
@@ -3190,11 +3381,35 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
         // scoring a candidate against its leave would call every hook
         // uncontested in proportion to how many tiles the move played,
         // which is a penalty on bingos and nothing to do with hooks.
-        pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
-                              overlay_features, &scan_dir, &scan_lane, NULL,
-                              NULL,
-                              discount > 0.0 ? &fresh_hook_letters : NULL);
-        penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
+        const unsigned parts =
+            pat_eval_ctx->unit_parts_valid[unit_index]
+                ? pat_unit_parts_touched(pat_eval_ctx, unit_index, row_start,
+                                         row_end, col_start, col_end)
+                : PAT_UNIT_PART_ALL;
+        if (parts & PAT_UNIT_PART_CENTER) {
+          pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
+                                overlay_features, &scan_dir, &scan_lane, NULL,
+                                NULL,
+                                discount > 0.0 ? &fresh_hook_letters : NULL,
+                                NULL, PAT_UNIT_PART_ALL, NULL);
+          penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
+        } else {
+          // Only the touched sides change; the rest keep their baseline
+          // parts exactly.
+          pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
+                                overlay_features, &scan_dir, &scan_lane, NULL,
+                                NULL, NULL, NULL, parts, NULL);
+          const int64_t *raw = pat_eval_ctx->unit_part_raw[unit_index];
+          int64_t unchanged = raw[0];
+          if (!(parts & PAT_UNIT_PART_LOW)) {
+            unchanged += raw[1];
+          }
+          if (!(parts & PAT_UNIT_PART_HIGH)) {
+            unchanged += raw[2];
+          }
+          penalty = pat_clamp_dot(
+              unchanged + pat_dot_ctx_raw(pat_eval_ctx, overlay_features));
+        }
         // The move's own placement can create or destroy this unit's hook
         // letters (a newly hooked square, or covering one that existed at
         // baseline), so eligibility is re-checked against the fresh,
@@ -3296,7 +3511,8 @@ void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
       int scan_dir = 0;
       int scan_lane = 0;
       pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay, row, &scan_dir,
-                            &scan_lane, NULL, NULL, NULL);
+                            &scan_lane, NULL, NULL, NULL, NULL,
+                            PAT_UNIT_PART_ALL, NULL);
       penalty = pat_dot_ctx(pat_eval_ctx, row);
     } else {
       memcpy(row, pat_eval_ctx->unit_features[unit_index],
@@ -3361,13 +3577,13 @@ void pat_extract_features_combined(const Square *lanes,
       const int tws_idx = unit_index / 2;
       pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                     tws_cols[tws_idx], tws_classes[tws_idx], unit_index % 2,
-                    NULL, row, NULL, NULL, opponent_rack_size, NULL, true,
-                    true);
+                    NULL, row, NULL, NULL, opponent_rack_size, NULL, true, true,
+                    NULL, NULL, PAT_UNIT_PART_ALL, NULL);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                        dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                       row, NULL, NULL, opponent_rack_size, NULL);
+                       row, NULL, NULL, opponent_rack_size, NULL, NULL, NULL);
     }
     const Equity penalty = pat_dot(pat, row);
     if (penalty < worst_penalty) {

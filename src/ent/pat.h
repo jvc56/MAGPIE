@@ -11,6 +11,7 @@
 #include "rack.h"
 #include "win_pct.h"
 #include <math.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -197,6 +198,68 @@ enum {
 // The lanes pointer is only valid while the board is alive, untransposed,
 // and unmutated, which holds for the duration of a move generation call and
 // for a stack-scoped validated-move evaluation.
+// The perpendicular constraint at one empty square as the PAT walks see it
+// (see pat_effective_cross_info in pat.c).
+typedef struct PATCrossInfo {
+  bool dead;
+  bool hooky;
+  int flex;
+  int scaled_flex;
+  // Sum over admissible letters of unseen count times the letter's
+  // incremental immediate score at this square (see
+  // pat_effective_cross_info), divided by PAT_HOOK_SCORE_SCALE.
+  int score_exposure;
+  // The real cross-set this hook or floater route needs, valid only when
+  // hooky; 0 otherwise. Blank stays at bit 0, same convention as every
+  // other cross/extension set (see pat_set_flex).
+  uint64_t letter_set;
+} PATCrossInfo;
+
+// Per-position cache of pat_effective_cross_info for squares a move leaves
+// alone. A square with no fresh tile perpendicular-adjacent reads exactly
+// what it read on the pre-move board, and each candidate's rescan of the
+// units it touches would otherwise recompute every such square along the
+// walk. Filled by the context load's baseline walks and read by the
+// per-move ones; an entry is keyed by direction, square, the premium's word
+// multiplier and whether the score channels were computed, and holds the
+// hyper scale it was computed with, which a reader must match.
+enum {
+  PAT_LETTER_SET_BYTES = (MAX_ALPHABET_SIZE + 7) / 8,
+  PAT_CROSS_CACHE_MULTIPLIERS = 4,
+  PAT_CROSS_CACHE_ENTRIES =
+      2 * BOARD_DIM * BOARD_DIM * PAT_CROSS_CACHE_MULTIPLIERS * 2,
+  PAT_CROSS_CACHE_WORDS = (PAT_CROSS_CACHE_ENTRIES + 63) / 64,
+};
+
+// The three independent parts of a premium unit's walk (see pat_scan_unit):
+// the premium square itself and the walks to either side of it. With the
+// premium-combination channels off and no own-asset discount, a unit's
+// penalty is the sum of its parts' dot products, so a move that touches
+// only one side can rescan only that side.
+enum {
+  PAT_UNIT_PART_CENTER = 1,
+  PAT_UNIT_PART_LOW = 2,
+  PAT_UNIT_PART_HIGH = 4,
+  PAT_UNIT_PART_ALL = 7,
+};
+
+typedef struct PATCrossCacheEntry {
+  PATCrossInfo info;
+  double hyper_scale;
+} PATCrossCacheEntry;
+
+typedef struct PATCrossCache {
+  uint64_t valid[PAT_CROSS_CACHE_WORDS];
+  PATCrossCacheEntry entries[PAT_CROSS_CACHE_ENTRIES];
+  // Per-position subset sums over a letter set, one table per byte of the
+  // set: the unseen count (flexibility) and the unseen count times the
+  // letter's score, so a square's flexibility and score exposure are a
+  // handful of lookups instead of a loop over its letters. Blank (bit 0)
+  // contributes nothing, as in pat_set_flex.
+  int32_t flex_by_byte[PAT_LETTER_SET_BYTES][256];
+  int32_t score_by_byte[PAT_LETTER_SET_BYTES][256];
+} PATCrossCache;
+
 typedef struct PATEvalContext {
   // NULL means the context is disabled and the defense term is zero.
   const PATWeights *weights;
@@ -279,6 +342,13 @@ typedef struct PATEvalContext {
   // <= 0, so the bounds stay valid, and it is a plain array lookup so the
   // shadow hot path pays nothing for it.
   Equity lane_penalty_bound[2][BOARD_DIM];
+  PATCrossCache cross_cache;
+  // Per-unit unclamped dot products of the three walk parts (indexed
+  // center, low side, high side) from the baseline load, valid when
+  // unit_parts_valid (a premium unit, combination channels off, no
+  // own-asset discount). The unit's penalty is their clamped sum.
+  int64_t unit_part_raw[PAT_MAX_SCAN_UNITS][3];
+  bool unit_parts_valid[PAT_MAX_SCAN_UNITS];
   // Utility correction (see PAT_UTILITY_ADJUST_ROW_PREFIX), set per
   // position by pat_eval_context_set_utility; utility_row is NULL (and the
   // other two 0) when the weights carry none or it was not set.
