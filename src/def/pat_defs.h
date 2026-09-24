@@ -253,6 +253,12 @@ enum {
 #define PAT_FIT_SHRINK_ROW_PREFIX "fit_shrink,"
 #define PAT_DEFAULT_FIT_SHRINK false
 #define PAT_GEN_HELDOUT_EVERY 10
+// Training only: when K > 0, patgen labels each observation with the mean
+// best-equity reply score over K opponent racks resampled from the mover's
+// unseen pool (the actual reply is not used), instead of the single reply
+// the game produced. Requires label plies 1. Absent means 0.
+#define PAT_LABEL_RESAMPLE_ROW_PREFIX "label_resample,"
+#define PAT_MAX_LABEL_RESAMPLE 64
 
 // Optional rows: a nonnegative factor applied to the whole defense term,
 // and to every pruning bound on it, by game stage (see

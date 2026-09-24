@@ -610,6 +610,9 @@ typedef struct AutoplayWorker {
   Rack nontarget_known_rack;
   Rack target_known_rack;
   MoveList *move_lists[2];
+  // PAT label_resample: its own list, since a game pair compares both
+  // games' chosen moves (pointers into move_lists) after both have played.
+  MoveList *pat_resample_move_list;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -643,6 +646,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
       move_list_create(ap_args->p1_sim_args.num_plays);
   autoplay_worker->move_lists[1] =
       move_list_create(ap_args->p2_sim_args.num_plays);
+  autoplay_worker->pat_resample_move_list = move_list_create(1);
 
   autoplay_worker->sim_results = NULL;
   autoplay_worker->inference_results = NULL;
@@ -686,6 +690,7 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   error_stack_destroy(autoplay_worker->error_stack);
   move_list_destroy(autoplay_worker->move_lists[0]);
   move_list_destroy(autoplay_worker->move_lists[1]);
+  move_list_destroy(autoplay_worker->pat_resample_move_list);
   free(autoplay_worker);
 }
 
@@ -840,6 +845,12 @@ typedef struct GameRunner {
   // most that many are ever in flight. Observations still unlabeled when
   // the game ends are dropped: their plies do not exist.
   PATPendingObservation pat_obs[PAT_MAX_LABEL_PLIES];
+  // For PATWeights label_resample: each player's leave from their most
+  // recent move. Their current rack is that leave plus a random draw, so
+  // resampling only the draw keeps the opponent's leave selection (a kept
+  // S or blank) that a uniformly resampled rack would lose.
+  Rack pat_last_leave[2];
+  bool pat_has_last_leave[2];
   // For PATWeights.train_overlay: the pre-move context the runtime would
   // build for this decision, and the row extracted from it before the
   // move is played. Allocated only under patgen.
@@ -947,6 +958,8 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   for (int obs_index = 0; obs_index < PAT_MAX_LABEL_PLIES; obs_index++) {
     game_runner->pat_obs[obs_index].valid = false;
   }
+  game_runner->pat_has_last_leave[0] = false;
+  game_runner->pat_has_last_leave[1] = false;
   if (game_runner->shared_data->leavegen_shared_data &&
       // We only force draws if we've played enough games for this
       // generation. This also applies when leavegen's rack list is
@@ -1099,6 +1112,40 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
 }
 
 // Returns the played move
+// PAT label_resample: the mean score of the on-turn player's top-equity
+// reply over num_racks redraws. Each redraw keeps both players' leaves
+// (the mover's from the move just played, the opponent's from their last
+// move, or nothing before their first) and refills both racks from
+// everything else unseen, so only the random draws are averaged away.
+// Seeded from the game and turn so a run is reproducible and the live
+// game's draws are untouched.
+static double pat_resampled_reply_label(const Game *game, int mover_index,
+                                        const Rack *mover_leave,
+                                        const Rack *opponent_leave,
+                                        int num_racks, uint64_t seed,
+                                        MoveList *move_list) {
+  Game *scratch = game_duplicate(game);
+  game_seed(scratch, seed);
+  double total = 0.0;
+  for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+    return_rack_to_bag(scratch, mover_index);
+    return_rack_to_bag(scratch, 1 - mover_index);
+    if (!draw_rack_from_bag(scratch, mover_index, mover_leave) ||
+        (opponent_leave &&
+         !draw_rack_from_bag(scratch, 1 - mover_index, opponent_leave))) {
+      log_fatal("PAT label_resample could not redraw a known leave");
+    }
+    // The opponent drew before the mover's refill, so when the bag runs
+    // short it is the mover who comes up short, never the opponent.
+    draw_to_full_rack(scratch, 1 - mover_index);
+    draw_to_full_rack(scratch, mover_index);
+    const Move *reply = get_top_equity_move(scratch, move_list);
+    total += equity_to_double(move_get_score(reply));
+  }
+  game_destroy(scratch);
+  return total / num_racks;
+}
+
 const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                                   GameRunner *game_runner) {
   if (game_runner_is_game_over(game_runner)) {
@@ -1222,6 +1269,11 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                                        game_runner->pat_overlay_row);
   }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
+  if (pat_gen_shared_data) {
+    rack_copy(&game_runner->pat_last_leave[player_on_turn_index],
+              &rare_rack_or_move_leave);
+    game_runner->pat_has_last_leave[player_on_turn_index] = true;
+  }
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, move, &rare_rack_or_move_leave);
 
@@ -1301,6 +1353,30 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
             rack_get_total_letters(player_get_rack(
                 game_get_player(game, 1 - player_on_turn_index))),
             observation->features);
+      }
+      const int num_resample =
+          pat_get_label_resample(pat_gen_shared_data->pat);
+      if (num_resample > 0) {
+        // The label is complete now; no live ply is waited for.
+        const double label = pat_resampled_reply_label(
+            game, player_on_turn_index, &rare_rack_or_move_leave,
+            game_runner->pat_has_last_leave[1 - player_on_turn_index]
+                ? &game_runner->pat_last_leave[1 - player_on_turn_index]
+                : NULL,
+            num_resample,
+            game_runner->seed ^ (game_runner->game_number * 0x9E3779B97F4A7C15ULL) ^
+                ((uint64_t)game_runner->turn_number << 48) ^
+                ((uint64_t)game_runner->pair_game_number << 56),
+            autoplay_worker->pat_resample_move_list);
+        PATRegression *target =
+            (pat_gen_pair_is_validation(game_runner->game_number))
+                ? &pat_gen_shared_data
+                       ->heldout_regressions[autoplay_worker->worker_index]
+                : &pat_gen_shared_data
+                       ->regressions[autoplay_worker->worker_index];
+        pat_regression_add_observation_double(target, observation->features,
+                                              label);
+        break;
       }
       observation->plies_seen = 0;
       observation->label = 0.0;
