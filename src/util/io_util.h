@@ -265,6 +265,9 @@ typedef enum {
   ERROR_STATUS_HEAT_MAP_UNRECOGNIZED_TYPE,
   // Command API errors
   ERROR_STATUS_CMD_API_UNINITIALIZED,
+  // Appended rather than grouped with the other conversion errors so that
+  // no existing code changes value.
+  ERROR_STATUS_CONVERT_LETTER_DISTRIBUTION_INCOMPATIBLE,
 } error_code_t;
 
 typedef enum {

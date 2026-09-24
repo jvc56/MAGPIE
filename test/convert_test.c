@@ -117,6 +117,22 @@ void test_convert_error(void) {
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_SHORT);
 
+  // Wordmaps and rack info tables are keyed on BitRacks, so a distribution
+  // with more machine letters than a BitRack holds (Polish has 33) is
+  // refused before any input is read.
+  args.data_paths = DEFAULT_TEST_DATA_PATH;
+  args.input_and_output_name = "CSW21_too_short";
+  args.ld_name = "polish";
+  const char *const incompatible_conversions[] = {"text2wordmap",
+                                                  "dawg2wordmap", "klvwmp2rit"};
+  for (int conversion_idx = 0; conversion_idx < 3; conversion_idx++) {
+    args.conversion_type_string = incompatible_conversions[conversion_idx];
+    convert_and_assert_status(
+        &args, conversion_results,
+        ERROR_STATUS_CONVERT_LETTER_DISTRIBUTION_INCOMPATIBLE);
+  }
+  args.ld_name = NULL;
+
   conversion_results_destroy(conversion_results);
   config_destroy(config);
 }

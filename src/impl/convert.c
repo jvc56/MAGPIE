@@ -1,9 +1,11 @@
 #include "convert.h"
 
+#include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/convert_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../ent/bit_rack.h"
 #include "../ent/conversion_results.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/dawg_packed.h"
@@ -329,6 +331,24 @@ void convert_with_names(const LetterDistribution *ld,
                         const char *output_name,
                         ConversionResults *conversion_results, int num_threads,
                         ErrorStack *error_stack) {
+  // WMPs and RITs are keyed on BitRacks, which hold at most
+  // BIT_RACK_MAX_ALPHABET_SIZE letters and a limited count of each. Movegen
+  // never uses these tables for a distribution that does not fit (see
+  // MoveGen.bit_rack_compatible), so building one only produces a large,
+  // unusable file.
+  if ((conversion_type == CONVERT_TEXT2WORDMAP ||
+       conversion_type == CONVERT_DAWG2WORDMAP ||
+       conversion_type == CONVERT_KLVWMP2RIT) &&
+      !bit_rack_is_compatible_with_ld(ld)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_LETTER_DISTRIBUTION_INCOMPATIBLE,
+        get_formatted_string(
+            "cannot build a wordmap or rack info table for letter distribution "
+            "'%s': it does not fit a BitRack (%d machine letters, at most %d "
+            "supported)",
+            ld_get_name(ld), ld_get_size(ld), BIT_RACK_MAX_ALPHABET_SIZE));
+    return;
+  }
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
       (conversion_type == CONVERT_TEXT2KWG) ||
