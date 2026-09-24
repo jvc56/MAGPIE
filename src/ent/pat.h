@@ -60,6 +60,17 @@ bool pat_get_label_square(const PATWeights *pat);
 bool pat_get_signed_weights(const PATWeights *pat);
 const PATWeights *pat_get_vol_model(const PATWeights *pat);
 double pat_get_vol_scale(const PATWeights *pat);
+double pat_get_vol_cap(const PATWeights *pat);
+bool pat_get_vol_expected_utility(const PATWeights *pat);
+double pat_get_vol_intercept(const PATWeights *pat);
+int pat_get_vol_horizon(const PATWeights *pat);
+bool pat_get_vol_ce_relative(const PATWeights *pat);
+bool pat_get_vol_row_fixed(const PATWeights *pat);
+bool pat_get_vol_u_direct(const PATWeights *pat);
+int pat_get_vol_smooth(const PATWeights *pat);
+bool pat_get_vol_const(const PATWeights *pat, double *vol_const,
+                       double *vol_const_slope);
+bool pat_get_vol_ce_equity_center(const PATWeights *pat);
 void pat_set_fit_shrink(PATWeights *pat, bool fit_shrink);
 // tiles is 1..RACK_SIZE; values are milli-equity <= 0 (see
 // PAT_OPENING_TILES_ROW_PREFIX).

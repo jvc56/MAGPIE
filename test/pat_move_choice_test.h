@@ -47,6 +47,10 @@ typedef struct PATMoveChooser {
   // convex (behind: volatility pays).
   const PATWeights *vol_pat;
   double vol_scale;
+  // When has_vol_cap, the volatility adjustment is capped above at
+  // vol_cap points (a bonus, possible only when behind, never exceeds it).
+  bool has_vol_cap;
+  double vol_cap;
   const WinPct *win_pcts;
 } PATMoveChooser;
 

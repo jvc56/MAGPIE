@@ -17,6 +17,7 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/pat_vol.h"
 #include "../src/impl/move_gen.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -170,6 +171,9 @@ enum {
   // Candidates further than this below the top keep their equity: the
   // volatility term is a few points at most.
   PAT_VOL_EQUITY_WINDOW = 25,
+  // Autoplay's window (AUTOPLAY_VOL_EQUITY_WINDOW), for policy files that
+  // carry their own volatility rerank.
+  PAT_VOL_EQUITY_WINDOW_AUTOPLAY = 20,
   // Finite-difference half-width, in points, for the utility curvature;
   // wide enough to smooth the table's integer margin buckets.
   PAT_VOL_KAPPA_STEP = 15,
@@ -253,7 +257,13 @@ static void pat_move_choice_choose(Game *game, int mover_index,
       pat_move_choice_move_equity(move_list_get_move(move_list, 0));
   int chosen = 0;
   const bool scaled = chooser->pat_scale != 0.0 && chooser->pat_scale != 1.0;
-  if (chooser->vol_pat != NULL) {
+  if (chooser->pat != NULL && pat_get_vol_model(chooser->pat) != NULL) {
+    // The policy file carries its own volatility rerank, exactly as
+    // autoplay applies it.
+    chosen = pat_vol_choose(game, move_list, chooser->pat, chooser->win_pcts,
+                            pat_move_choice_vol_ctx(),
+                            PAT_VOL_EQUITY_WINDOW_AUTOPLAY);
+  } else if (chooser->vol_pat != NULL) {
     const Player *mover = game_get_player(game, mover_index);
     const Player *opponent = game_get_player(game, 1 - mover_index);
     const int csi = board_get_cross_set_index(
@@ -288,9 +298,13 @@ static void pat_move_choice_choose(Game *game, int mover_index,
             (bag > drawn ? bag - drawn : 0) + RACK_SIZE;
         const double margin =
             margin_before + equity_to_double(move_get_score(move));
-        adjusted -= chooser->vol_scale * 0.5 *
-                    pat_move_choice_kappa(chooser->win_pcts, margin, unseen) *
-                    sigma2;
+        double adjustment =
+            -chooser->vol_scale * 0.5 *
+            pat_move_choice_kappa(chooser->win_pcts, margin, unseen) * sigma2;
+        if (chooser->has_vol_cap && adjustment > chooser->vol_cap) {
+          adjustment = chooser->vol_cap;
+        }
+        adjusted += adjustment;
       }
       if (i == 0 || adjusted > best_adjusted) {
         best_adjusted = adjusted;
@@ -2340,6 +2354,8 @@ void pat_move_choice_run_decision_spec(const char *spec) {
   // PATMoveChooser.vol_pat).
   char *vol_name = strchr(fields[2], '@');
   double vol_scale = 0.0;
+  bool has_vol_cap = false;
+  double vol_cap = 0.0;
   if (vol_name) {
     *vol_name++ = '\0';
     char *scale_text = strchr(vol_name, '@');
@@ -2347,16 +2363,25 @@ void pat_move_choice_run_decision_spec(const char *spec) {
       log_fatal("patdecide volatility side needs <pat>@<vol>@<scale>");
     }
     *scale_text++ = '\0';
+    char *cap_text = strchr(scale_text, '@');
+    if (cap_text) {
+      *cap_text++ = '\0';
+      has_vol_cap = true;
+      vol_cap = strtod(cap_text, NULL);
+    }
     vol_scale = strtod(scale_text, NULL);
   }
   PATWeights *pat_a = pat_decide_load(config, fields[1]);
   PATWeights *pat_b = pat_decide_load(config, fields[2]);
   PATWeights *vol_pat = vol_name ? pat_decide_load(config, vol_name) : NULL;
-  const PATMoveChooser chooser_a = {.label = fields[1], .pat = pat_a};
+  const PATMoveChooser chooser_a = {
+      .label = fields[1], .pat = pat_a, .win_pcts = win_pcts};
   const PATMoveChooser chooser_b = {.label = fields[2],
                                     .pat = pat_b,
                                     .vol_pat = vol_pat,
                                     .vol_scale = vol_scale,
+                                    .has_vol_cap = has_vol_cap,
+                                    .vol_cap = vol_cap,
                                     .win_pcts = win_pcts};
   Game *game = config_get_game(config);
   MoveList *setup_list = move_list_create(1);

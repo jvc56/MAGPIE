@@ -155,6 +155,20 @@ struct PATWeights {
   char *vol_model_name;
   PATWeights *vol_model;
   double vol_scale;
+  double vol_cap;
+  bool vol_expected_utility;
+  // ce_rel: the term relative to the least volatile candidate; ce_eq:
+  // kappa read at margin + equity instead of margin + score.
+  bool vol_ce_relative;
+  bool vol_ce_equity_center;
+  bool has_vol_const;
+  bool vol_row_fixed;
+  bool vol_u_direct;
+  int vol_smooth;
+  double vol_const;
+  double vol_const_slope;
+  double vol_intercept;
+  int vol_horizon;
   // Per-stage factor on the applied term (see the row prefixes in
   // pat_defs.h); indexed by PAT_STAGE_*.
   double stage_scale[PAT_STAGE_COUNT];
@@ -255,6 +269,41 @@ const PATWeights *pat_get_vol_model(const PATWeights *pat) {
 }
 
 double pat_get_vol_scale(const PATWeights *pat) { return pat->vol_scale; }
+
+double pat_get_vol_cap(const PATWeights *pat) { return pat->vol_cap; }
+
+bool pat_get_vol_expected_utility(const PATWeights *pat) {
+  return pat->vol_expected_utility;
+}
+
+double pat_get_vol_intercept(const PATWeights *pat) {
+  return pat->vol_intercept;
+}
+
+int pat_get_vol_horizon(const PATWeights *pat) { return pat->vol_horizon; }
+
+bool pat_get_vol_const(const PATWeights *pat, double *vol_const,
+                       double *vol_const_slope) {
+  *vol_const = pat->vol_const;
+  *vol_const_slope = pat->vol_const_slope;
+  return pat->has_vol_const;
+}
+
+bool pat_get_vol_row_fixed(const PATWeights *pat) {
+  return pat->vol_row_fixed;
+}
+
+bool pat_get_vol_u_direct(const PATWeights *pat) { return pat->vol_u_direct; }
+
+int pat_get_vol_smooth(const PATWeights *pat) { return pat->vol_smooth; }
+
+bool pat_get_vol_ce_relative(const PATWeights *pat) {
+  return pat->vol_ce_relative;
+}
+
+bool pat_get_vol_ce_equity_center(const PATWeights *pat) {
+  return pat->vol_ce_equity_center;
+}
 
 Equity pat_get_opening_tiles_adjustment(const PATWeights *pat, int tiles) {
   return pat->opening_tiles[tiles];
@@ -518,6 +567,18 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->vol_model_name = NULL;
   pat->vol_model = NULL;
   pat->vol_scale = 1.0;
+  pat->vol_cap = HUGE_VAL;
+  pat->vol_expected_utility = false;
+  pat->vol_ce_relative = false;
+  pat->vol_ce_equity_center = false;
+  pat->has_vol_const = false;
+  pat->vol_row_fixed = false;
+  pat->vol_u_direct = false;
+  pat->vol_smooth = 0;
+  pat->vol_const = 0.0;
+  pat->vol_const_slope = 0.0;
+  pat->vol_intercept = 0.0;
+  pat->vol_horizon = PAT_DEFAULT_VOL_HORIZON;
   for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
     pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
   }
@@ -815,6 +876,77 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       free(pat->vol_model_name);
       pat->vol_model_name =
           string_duplicate(line + strlen(PAT_VOL_MODEL_ROW_PREFIX));
+      continue;
+    }
+    if (has_prefix(PAT_VOL_MODE_ROW_PREFIX, line)) {
+      const char *mode = line + strlen(PAT_VOL_MODE_ROW_PREFIX);
+      pat->vol_ce_relative = false;
+      pat->vol_ce_equity_center = false;
+      pat->vol_u_direct = false;
+      if (strings_equal(mode, "eu")) {
+        pat->vol_expected_utility = true;
+      } else if (strings_equal(mode, "ce")) {
+        pat->vol_expected_utility = false;
+      } else if (strings_equal(mode, "ce_rel")) {
+        pat->vol_expected_utility = false;
+        pat->vol_ce_relative = true;
+      } else if (strings_equal(mode, "ce_eq")) {
+        pat->vol_expected_utility = false;
+        pat->vol_ce_equity_center = true;
+      } else if (strings_equal(mode, "u_direct")) {
+        pat->vol_expected_utility = false;
+        pat->vol_u_direct = true;
+      } else {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a vol_mode other "
+                                 "than ce or eu: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      continue;
+    }
+    if (has_prefix(PAT_VOL_ROW_FIXED_ROW_PREFIX, line)) {
+      pat->vol_row_fixed =
+          string_to_int(line + strlen(PAT_VOL_ROW_FIXED_ROW_PREFIX),
+                        error_stack) == 1;
+      continue;
+    }
+    if (has_prefix(PAT_VOL_SMOOTH_ROW_PREFIX, line)) {
+      pat->vol_smooth =
+          string_to_int(line + strlen(PAT_VOL_SMOOTH_ROW_PREFIX), error_stack);
+      continue;
+    }
+    if (has_prefix(PAT_VOL_CONST_SLOPE_ROW_PREFIX, line)) {
+      pat->vol_const_slope =
+          strtod(line + strlen(PAT_VOL_CONST_SLOPE_ROW_PREFIX), NULL);
+      continue;
+    }
+    if (has_prefix(PAT_VOL_CONST_ROW_PREFIX, line)) {
+      pat->has_vol_const = true;
+      pat->vol_const = strtod(line + strlen(PAT_VOL_CONST_ROW_PREFIX), NULL);
+      continue;
+    }
+    if (has_prefix(PAT_VOL_INTERCEPT_ROW_PREFIX, line)) {
+      pat->vol_intercept =
+          strtod(line + strlen(PAT_VOL_INTERCEPT_ROW_PREFIX), NULL);
+      continue;
+    }
+    if (has_prefix(PAT_VOL_HORIZON_ROW_PREFIX, line)) {
+      pat->vol_horizon =
+          string_to_int(line + strlen(PAT_VOL_HORIZON_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || pat->vol_horizon < 1) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has an invalid "
+                                 "vol_horizon: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      continue;
+    }
+    if (has_prefix(PAT_VOL_CAP_ROW_PREFIX, line)) {
+      pat->vol_cap = strtod(line + strlen(PAT_VOL_CAP_ROW_PREFIX), NULL);
       continue;
     }
     if (has_prefix(PAT_VOL_SCALE_ROW_PREFIX, line)) {

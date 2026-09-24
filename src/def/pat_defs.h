@@ -278,6 +278,27 @@ enum {
 // autoplay.c). Absent means no rerank.
 #define PAT_VOL_MODEL_ROW_PREFIX "vol_model,"
 #define PAT_VOL_SCALE_ROW_PREFIX "vol_scale,"
+// Upper cap, in points, on the volatility adjustment; absent means none.
+#define PAT_VOL_CAP_ROW_PREFIX "vol_cap,"
+// "ce" (default) or "eu"; see pat_vol_choose in src/impl/pat_vol.h.
+#define PAT_VOL_MODE_ROW_PREFIX "vol_mode,"
+// The vol model's fitted intercept (its report's Intercept line), in
+// points squared: the second moment of the swing with every feature zero.
+#define PAT_VOL_INTERCEPT_ROW_PREFIX "vol_intercept,"
+// Plies the vol model's label spans (its patgen -patplies).
+#define PAT_VOL_HORIZON_ROW_PREFIX "vol_horizon,"
+// Diagnostic: when vol_const is present, every candidate's vol term is
+// vol_const + vol_const_slope * bag instead of the vol model's.
+#define PAT_VOL_CONST_ROW_PREFIX "vol_const,"
+// Diagnostic: when 1, the ce modes read kappa on one table row for every
+// candidate (the unseen count after an average draw) instead of the row
+// each move's own draw leads to.
+#define PAT_VOL_ROW_FIXED_ROW_PREFIX "vol_row_fixed,"
+// u_direct: half-width, in points, of the uniform margin average applied
+// to the win table before it is read (0 reads it raw).
+#define PAT_VOL_SMOOTH_ROW_PREFIX "vol_smooth,"
+#define PAT_VOL_CONST_SLOPE_ROW_PREFIX "vol_const_slope,"
+#define PAT_DEFAULT_VOL_HORIZON 4
 
 // Optional rows: a nonnegative factor applied to the whole defense term,
 // and to every pruning bound on it, by game stage (see
