@@ -927,10 +927,14 @@ const Move *get_top_equity_move(Game *game, MoveList *move_list) {
 //
 // record_all keeps every ranked move in move_list (up to its capacity)
 // instead of just the one that gets played, matching how a simming player's
-// SimResults already keeps its whole ranked list. This costs nothing when the
-// caller doesn't need it (move_list_get_move(move_list, 0) is still the move
-// to play either way), so it is off unless something -- currently, position
-// capture -- actually wants the rest of the list.
+// SimResults already keeps its whole ranked list. It is off unless something
+// -- currently, position capture -- actually wants the rest of the list.
+//
+// Recording every move leaves the list a min-heap, whose first element is the
+// *worst* move, so it is sorted best-first before the top move is read: both
+// the move to play and the list the positions recorder reports then come out
+// ranked. Without it, capturing positions made a static player pass on every
+// turn it could and reported its lowest-ranked plays as its analysis.
 const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
                                             bool record_all) {
   const MoveGenArgs args = {.game = game,
@@ -941,6 +945,9 @@ const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list,
                                 UNSET_LEAVE_SIZE};
   generate_moves_for_game_override_record_type(
       &args, record_all ? MOVE_RECORD_ALL : MOVE_RECORD_BEST);
+  if (record_all) {
+    move_list_sort_moves(move_list);
+  }
   return move_list_get_move(move_list, 0);
 }
 
