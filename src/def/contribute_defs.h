@@ -137,6 +137,7 @@ enum {
 #define CONTRIBUTE_KEY_GENERATION "generation"
 #define CONTRIBUTE_KEY_FORCED_RACKS "forced_racks"
 #define CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY "previous_artifact_key"
+#define CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_SHA256 "previous_artifact_sha256"
 // There is deliberately no target_rack_count: the generation's rack target is
 // server-only state (see config_contribute_leave_gen), and a task ends on
 // num_games alone.

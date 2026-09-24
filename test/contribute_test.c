@@ -831,7 +831,8 @@ static void test_a_player_must_state_every_setting(void) {
 
   // A static player states no simulation settings, and needs none.
   const JsonValue *static_player = json_parse(
-      "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
+      "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
       "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
       error_stack);
@@ -842,7 +843,8 @@ static void test_a_player_must_state_every_setting(void) {
 
   // One that leaves its play count to this build is refused.
   const JsonValue *no_plays = json_parse(
-      "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
+      "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": null, \"num_plies_recorded\": 2, "
       "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
       error_stack);
@@ -853,7 +855,8 @@ static void test_a_player_must_state_every_setting(void) {
 
   // So is a simulating player that states only what a static one must.
   const JsonValue *bare_simmer = json_parse(
-      "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
+      "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 2, \"num_plays\": 100, \"num_plies_recorded\": 2, "
       "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
       error_stack);
@@ -862,6 +865,20 @@ static void test_a_player_must_state_every_setting(void) {
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
 
+  // And one that leaves its leaves to whatever is loaded: another job's, or
+  // a leave task's fetched KLV.
+  const JsonValue *no_leaves = json_parse(
+      "{\"lexicon\": \"CSW21\", "
+      "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_apply_player_settings(config, no_leaves, 0, error_stack);
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_reset(error_stack);
+
+  json_destroy(no_leaves);
   json_destroy(bare_simmer);
   json_destroy(no_plays);
   json_destroy(static_player);

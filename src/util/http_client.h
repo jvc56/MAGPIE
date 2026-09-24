@@ -28,9 +28,12 @@ void http_client_set_worker_uuid(HttpClient *client, const char *worker_uuid);
 // `path` is appended to the base URL. `response` must be destroyed by the
 // caller with chttp_response_destroy on success.
 //
-// Retries are applied uniformly: 429 honours Retry-After up to 5 times, 5xx and
-// transport failures back off exponentially (see http_client_backoff_seconds),
-// and other 4xx are returned to the caller untouched. A 2xx or an unretryable
+// Retries are applied uniformly: a 429 waits out its Retry-After (see
+// http_client_rate_limit_wait_seconds), 5xx and transport failures back off
+// exponentially (see http_client_backoff_seconds), both on the same budget of
+// HTTP_CLIENT_MAX_TRANSIENT_RETRIES (without limit for
+// http_client_post_json_persistent, none for http_client_post_json_once), and
+// other 4xx are returned to the caller untouched. A 2xx or an unretryable
 // status is not an error -- callers decide what a given status means for them.
 void http_client_get(HttpClient *client, const char *path,
                      ChttpResponse *response, ErrorStack *error_stack);

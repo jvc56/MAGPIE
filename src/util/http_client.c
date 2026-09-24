@@ -9,7 +9,6 @@
 #include <string.h>
 
 enum {
-  MAX_RATE_LIMIT_RETRIES = 5,
   REQUEST_TIMEOUT_SECONDS = 120,
   MAX_HEADERS = 4,
   // max_transient_retries for a request that never gives up on a server that
@@ -199,9 +198,16 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
     // The worker endpoints are rate limited per identity and a task costs at
     // least two requests, so 429 is reached in normal operation. It is
     // backoff, not an error.
+    // A 429 is waited out on the same budget as a transient failure: without
+    // limit for a claim, about as long for a submission. It had a budget of
+    // its own, five, and exhausting it ended the run on a claim and threw a
+    // finished result away on a submission -- where the server was only
+    // saying "not so fast", which a busy moment says routinely.
     if (response->status_code == 429 &&
-        rate_limit_retries < max_rate_limit_retries) {
-      rate_limit_retries++;
+        may_retry(rate_limit_retries, max_rate_limit_retries)) {
+      if (rate_limit_retries < HTTP_CLIENT_MAX_TRANSIENT_RETRIES) {
+        rate_limit_retries++;
+      }
       const int wait =
           http_client_rate_limit_wait_seconds(response->retry_after_seconds);
       chttp_response_destroy(response);
@@ -227,22 +233,22 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
 void http_client_get(HttpClient *client, const char *path,
                      ChttpResponse *response, ErrorStack *error_stack) {
   perform(client, CHTTP_GET, path, NULL, HTTP_CLIENT_MAX_TRANSIENT_RETRIES,
-          MAX_RATE_LIMIT_RETRIES, response, error_stack);
+          HTTP_CLIENT_MAX_TRANSIENT_RETRIES, response, error_stack);
 }
 
 void http_client_post_json(HttpClient *client, const char *path,
                            const char *body, ChttpResponse *response,
                            ErrorStack *error_stack) {
   perform(client, CHTTP_POST, path, body ? body : "{}",
-          HTTP_CLIENT_MAX_TRANSIENT_RETRIES, MAX_RATE_LIMIT_RETRIES, response,
-          error_stack);
+          HTTP_CLIENT_MAX_TRANSIENT_RETRIES, HTTP_CLIENT_MAX_TRANSIENT_RETRIES,
+          response, error_stack);
 }
 
 void http_client_post_json_persistent(HttpClient *client, const char *path,
                                       const char *body, ChttpResponse *response,
                                       ErrorStack *error_stack) {
   perform(client, CHTTP_POST, path, body ? body : "{}", RETRY_WITHOUT_LIMIT,
-          MAX_RATE_LIMIT_RETRIES, response, error_stack);
+          RETRY_WITHOUT_LIMIT, response, error_stack);
 }
 
 void http_client_post_json_once(HttpClient *client, const char *path,

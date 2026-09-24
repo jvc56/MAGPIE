@@ -983,7 +983,8 @@ char *str_api_fatal(Config *config,
 // its jobs. So the version moves with every change that can alter what a task
 // computes or submits, and the floor moves with it. 0.1.1: a capturing static
 // player no longer plays its worst move (dfc79f1a); a leave task plays the KLV
-// it fetched rather than the one before it; a 429 no longer sleeps for hours.
+// it fetched rather than the one before it, verified against the server's
+// hash; a 429 no longer sleeps for hours, nor ends a run.
 #define MAGPIE_VERSION "0.1.1"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
@@ -7546,6 +7547,12 @@ static void config_contribute_ensure_rack_info_table(
   // One to three minutes and about 2.4 GB of memory, once per (.kwg, .klv2)
   // pair. The heartbeat is already running by the time a task executes, which
   // is why this can take that long without the claim lapsing.
+  //
+  // Any table already loaded goes first. The load would evict a table whose
+  // file changed anyway, but only after this build -- the old 1.9 GB table
+  // and the build's 2.4 GB at once, which is more than many contributors'
+  // machines have.
+  players_data_evict(config->players_data, PLAYERS_DATA_TYPE_RIT);
   contribute_convert(config, "klvwmp2rit", table_name, ld_name, leaves, lexicon,
                      error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7885,6 +7892,9 @@ static void config_contribute_reset_player_settings(Config *config,
 // num_plays is here, not with the simulation keys: an opening-rack analysis
 // sizes its move list from it, simulating or not.
 static const char *const contribute_required_player_keys[] = {
+    // The lexicon and leaves too: absent, the load kept whatever leaves were
+    // loaded already -- another job's, or a leave task's fetched KLV.
+    CONTRIBUTE_KEY_PLAYER_LEXICON,     CONTRIBUTE_KEY_LEAVES,
     CONTRIBUTE_KEY_RECORDER_TYPE,      CONTRIBUTE_KEY_SORT_STRATEGY,
     CONTRIBUTE_KEY_NUM_PLIES,          CONTRIBUTE_KEY_NUM_PLAYS,
     CONTRIBUTE_KEY_NUM_PLIES_RECORDED, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,
@@ -8791,8 +8801,19 @@ static char *config_contribute_leave_gen(Config *config,
     return NULL;
   }
   config->seed = seed;
-  const char *previous_artifact_key =
-      json_get_string_or_null(request, CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY);
+  // Both required: birdtest sends them on every leave task, and a task that
+  // played without its generation's KLV would play whatever this process had
+  // loaded last.
+  const char *previous_artifact_key = json_get_string(
+      request, CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  const char *previous_artifact_sha256 = json_get_string(
+      request, CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_SHA256, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
 
   // Leave generation has one bot, not a player1/player2 pair, so its
   // use_wordmap sits on the request itself rather than on a player object.
@@ -8805,52 +8826,85 @@ static char *config_contribute_leave_gen(Config *config,
     }
   }
 
-  // The fetched KLV below is written under the existing "lexica" directory
-  // data_filepaths already resolves DATA_FILEPATH_TYPE_KLV/LEAVES to -- the
-  // same directory the shipped lexicon data lives in, so it is guaranteed to
-  // already exist (MAGPIE has no directory-creation utility). A fixed name per
-  // lexicon, overwritten on every task: a contribute run handles one task at a
-  // time, so nothing else is reading or writing it concurrently.
+  // The fetched KLV is checked against the hash the server recorded when it
+  // built it -- every other file a task loads is checked by digest, and this
+  // is the one its statistics are computed from -- and written under a name
+  // made from that hash, in the "lexica" directory data_filepaths resolves
+  // DATA_FILEPATH_TYPE_KLV to (the shipped lexicon data is there, so it
+  // exists).
+  //
+  // Named by content, a name always means the same bytes: the load's
+  // name-keyed cache cannot hand a task another generation's leaves, and two
+  // contribute processes sharing a data directory write identical bytes to a
+  // shared name rather than overwriting each other's. It was one fixed name
+  // per lexicon, overwritten every task, which is how both went wrong. Written
+  // to a temporary file and renamed into place, so no reader sees half of it.
+  // One file per generation a worker plays, 3.6 MB for English.
   //
   // The name starts with the lexicon's. MAGPIE checks leaves against their
   // lexicon by inferring a letter distribution from each *name's* prefix
-  // (lexicons_and_leaves_compat), so a bare "birdtest_leavegen_previous" was
-  // refused with "default letter distribution not found" on every
-  // leave_generation task, before a single game was played.
-  char *leaves_name = NULL;
-  if (previous_artifact_key) {
-    ChttpResponse artifact;
-    contribute_fetch_artifact(state, previous_artifact_key, &artifact,
-                              error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return NULL;
-    }
-    leaves_name = get_formatted_string("%s_birdtest_previous", lexicon);
-    char *klv_path = data_filepaths_get_writable_filename(
-        config->data_paths, leaves_name, DATA_FILEPATH_TYPE_KLV, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      chttp_response_destroy(&artifact);
-      free(leaves_name);
-      return NULL;
-    }
-    FILE *klv_file = fopen(klv_path, "wbe");
-    bool written = klv_file && fwrite(artifact.body, 1, artifact.body_length,
-                                      klv_file) == artifact.body_length;
-    // A failed close can lose buffered bytes, which is a failed write too.
-    if (klv_file && fclose(klv_file) != 0) {
-      written = false;
-    }
-    if (!written) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-          get_formatted_string("could not write fetched KLV to %s", klv_path));
-    }
-    free(klv_path);
+  // (lexicons_and_leaves_compat), so a bare name was refused with "default
+  // letter distribution not found" on every leave_generation task.
+  if (string_length(previous_artifact_sha256) != 64 ||
+      !data_filepaths_is_safe_name(previous_artifact_sha256)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string(
+            "server sent an unusable previous_artifact_sha256: '%s'",
+            previous_artifact_sha256));
+    return NULL;
+  }
+  ChttpResponse artifact;
+  contribute_fetch_artifact(state, previous_artifact_key, &artifact,
+                            error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  char *fetched_sha256 = sha256_hash_bytes(artifact.body, artifact.body_length);
+  const bool intact = strings_equal(fetched_sha256, previous_artifact_sha256);
+  free(fetched_sha256);
+  if (!intact) {
     chttp_response_destroy(&artifact);
-    if (!error_stack_is_empty(error_stack)) {
-      free(leaves_name);
-      return NULL;
-    }
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("the KLV fetched from %s does not match the "
+                             "sha256 the server recorded for it",
+                             previous_artifact_key));
+    return NULL;
+  }
+  char *leaves_name = get_formatted_string("%s_birdtest_%.16s", lexicon,
+                                           previous_artifact_sha256);
+  char *klv_path = data_filepaths_get_writable_filename(
+      config->data_paths, leaves_name, DATA_FILEPATH_TYPE_KLV, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    chttp_response_destroy(&artifact);
+    free(leaves_name);
+    return NULL;
+  }
+  char *temp_path =
+      get_formatted_string("%s.%llu.tmp", klv_path, (unsigned long long)seed);
+  FILE *klv_file = fopen(temp_path, "wbe");
+  bool written = klv_file && fwrite(artifact.body, 1, artifact.body_length,
+                                    klv_file) == artifact.body_length;
+  // A failed close can lose buffered bytes, which is a failed write too.
+  if (klv_file && fclose(klv_file) != 0) {
+    written = false;
+  }
+  if (written && rename(temp_path, klv_path) != 0) {
+    written = false;
+  }
+  if (!written) {
+    (void)remove(temp_path);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("could not write fetched KLV to %s", klv_path));
+  }
+  free(temp_path);
+  free(klv_path);
+  chttp_response_destroy(&artifact);
+  if (!error_stack_is_empty(error_stack)) {
+    free(leaves_name);
+    return NULL;
   }
 
   // No rack info table, ever, for leave generation. Every generation plays
@@ -9096,6 +9150,10 @@ void impl_contribute(Config *config, const char *settings_path,
     free(error_message);
   }
   contribute_state_destroy(state);
+  // The table names the last task pinned would otherwise outlive the run: a
+  // later `-rit true` in the same session would load `<lexicon>.<leaves>`
+  // rather than the lexicon's own table.
+  config_contribute_set_rit_names(config, NULL, NULL);
 
   // Restore whatever was snapshotted above, win, lose, or interrupted --
   // every exit from the loop above reaches here.
