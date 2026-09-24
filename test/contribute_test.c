@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <utime.h>
 
 static void test_version_comparison(void) {
@@ -1165,6 +1166,50 @@ static void test_a_rewritten_klv_is_read_again(void) {
   (void)remove(path);
 }
 
+static void touch_file(const char *path, time_t age_seconds) {
+  FILE *file = fopen_or_die(path, "wb");
+  fwrite_or_die("x", 1, 1, file, "temporary test byte");
+  fclose_or_die(file);
+  if (age_seconds > 0) {
+    const time_t then = time(NULL) - age_seconds;
+    // NOLINTNEXTLINE(misc-include-cleaner)
+    struct utimbuf times = {.actime = then, .modtime = then};
+    assert(utime(path, &times) == 0);
+  }
+}
+
+static bool file_exists(const char *path) {
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  struct stat info;
+  return stat(path, &info) == 0;
+}
+
+// A writer killed mid-write leaves its whole temporary behind (a rack info
+// table's is 1.9 GB); the next write of the same file removes it, and nothing
+// that could still be in progress or belongs to another name.
+static void test_an_abandoned_temporary_is_removed(void) {
+  const char *target = "contribute_test_table.rit";
+  const char *abandoned = "contribute_test_table.rit.12345.tmp";
+  const char *in_progress = "contribute_test_table.rit.23456.tmp";
+  const char *not_ours = "contribute_test_table.rit.backup.tmp";
+  const char *other_file = "contribute_test_other.rit.12345.tmp";
+  touch_file(abandoned, 2 * 60 * 60);
+  touch_file(in_progress, 0);
+  touch_file(not_ours, 2 * 60 * 60);
+  touch_file(other_file, 2 * 60 * 60);
+
+  char *temporary = temporary_sibling(target);
+  assert(!file_exists(abandoned));
+  assert(file_exists(in_progress));
+  assert(file_exists(not_ours));
+  assert(file_exists(other_file));
+  free(temporary);
+
+  (void)remove(in_progress);
+  (void)remove(not_ours);
+  (void)remove(other_file);
+}
+
 void test_contribute(void) {
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();
@@ -1183,4 +1228,5 @@ void test_contribute(void) {
   test_capturing_positions_does_not_change_the_games();
   test_player_settings_do_not_leak_between_tasks();
   test_a_rewritten_klv_is_read_again();
+  test_an_abandoned_temporary_is_removed();
 }

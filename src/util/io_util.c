@@ -605,7 +605,61 @@ char *get_file_identity(const char *path) {
       (long)STAT_CTIM(info).tv_nsec);
 }
 
+enum {
+  // A writer touches its temporary file continuously, and the largest (a
+  // rack info table) takes minutes; one untouched this long was abandoned.
+  STALE_TEMPORARY_SECONDS = 60 * 60,
+};
+
+// Whether `entry` is `<base>.<digits>.tmp`: a temporary_sibling of `base`.
+static bool is_temporary_sibling_of(const char *entry, const char *base) {
+  const size_t base_length = strlen(base);
+  if (strncmp(entry, base, base_length) != 0 || entry[base_length] != '.') {
+    return false;
+  }
+  const char *pid = entry + base_length + 1;
+  const char *end = pid;
+  while (isdigit((unsigned char)*end)) {
+    end++;
+  }
+  return end > pid && strcmp(end, ".tmp") == 0;
+}
+
+// Removes the temporaries of writes of `filename` that never finished -- a
+// process killed while writing a 1.9 GB table leaves its whole temporary
+// behind, and nothing else would ever remove it. Best effort: a failure here
+// costs disk, never the write.
+static void remove_stale_temporary_siblings(const char *filename) {
+  const char *slash = strrchr(filename, '/');
+  char *dir =
+      slash ? get_formatted_string("%.*s", (int)(slash - filename), filename)
+            : get_formatted_string("%s", ".");
+  const char *base = slash ? slash + 1 : filename;
+  DIR *listing = opendir(dir[0] ? dir : "/");
+  if (!listing) {
+    free(dir);
+    return;
+  }
+  const time_t now = time(NULL);
+  const struct dirent *entry;
+  while ((entry = readdir(listing)) != NULL) {
+    if (!is_temporary_sibling_of(entry->d_name, base)) {
+      continue;
+    }
+    char *path = get_formatted_string("%s/%s", dir, entry->d_name);
+    struct stat info;
+    if (stat(path, &info) == 0 &&
+        now - info.st_mtime > STALE_TEMPORARY_SECONDS) {
+      (void)remove(path);
+    }
+    free(path);
+  }
+  closedir(listing);
+  free(dir);
+}
+
 char *temporary_sibling(const char *filename) {
+  remove_stale_temporary_siblings(filename);
   return get_formatted_string("%s.%ld.tmp", filename, (long)getpid());
 }
 

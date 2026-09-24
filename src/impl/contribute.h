@@ -164,7 +164,9 @@ void contribute_record_derived_mismatch(ContributeState *state,
 // contribute_record_derived_mismatch collected for it, and forgets those
 // records. Like every other decline this remembers the job as unsupported, so
 // the worker does not spend another three minutes rebuilding a table it has
-// just found it cannot match.
+// just found it cannot match -- except when the mismatch is the server's leave
+// KLV, which the server can put right: then it waits the idle interval and
+// leaves the job claimable.
 void contribute_decline_derived_mismatch(ContributeState *state,
                                          ThreadControl *thread_control,
                                          ErrorStack *error_stack);

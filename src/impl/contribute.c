@@ -190,6 +190,9 @@ struct ContributeState {
   // the claim pins, as JSON objects ready to go into a decline's "missing"
   // array. Cleared by every decline that sends them.
   StringList *derived_mismatches;
+  // Whether one of them is the server's own artifact (the leave KLV) rather
+  // than a file built here; see contribute_decline_derived_mismatch.
+  bool server_artifact_mismatch;
   // Set once the server has told this worker to stop.
   bool shutdown_requested;
   // Set once any claim has been answered by the server, whatever it said.
@@ -473,6 +476,13 @@ void contribute_record_derived_mismatch(ContributeState *state,
   char *entry = string_builder_dump_and_destroy(sb, NULL);
   string_list_add_string(state->derived_mismatches, entry);
   free(entry);
+
+  // The leave KLV is fetched from the server, not built here: a mismatch is
+  // the server's to fix, and nothing on this disk is out of date.
+  if (strings_equal(role, "klv")) {
+    state->server_artifact_mismatch = true;
+    return;
+  }
 
   // Kept for the shutdown summary alongside the input-data gaps, in the same
   // shape, because from a contributor's point of view they are the same
@@ -883,15 +893,36 @@ void contribute_decline_derived_mismatch(ContributeState *state,
         sb, string_list_get_string(state->derived_mismatches, i));
   }
   char *missing_json = string_builder_dump_and_destroy(sb, NULL);
+  const bool server_artifact = state->server_artifact_mismatch;
 
-  thread_control_print_formatted(
-      thread_control,
-      "declining this task: a file built here does not match what the job "
-      "pins\n");
+  if (server_artifact) {
+    thread_control_print_formatted(
+        thread_control,
+        "declining this task: the server's leave file does not match the hash "
+        "it recorded for it; asking again in %d seconds\n",
+        state->client_state->idle_wait_seconds);
+  } else {
+    thread_control_print_formatted(
+        thread_control,
+        "declining this task: a file built here does not match what the job "
+        "pins\n");
+  }
   decline_over_http(state, "derived_mismatch", missing_json, error_stack);
   free(missing_json);
   string_list_destroy(state->derived_mismatches);
   state->derived_mismatches = string_list_create();
+  state->server_artifact_mismatch = false;
+  // A file built here stays wrong for the run, so the job is set aside. The
+  // server's KLV does not: an admin's "Check artifacts" puts it right, and
+  // setting the job aside would end the run of every worker for whom it is
+  // the only active job (the server answers "every active job needs input
+  // data you do not have", which sends the contributor to the wrong fix).
+  // Wait instead, as for an empty queue, and ask again.
+  if (server_artifact) {
+    release_claim(state);
+    ctime_nap(state->client_state->idle_wait_seconds);
+    return;
+  }
   remember_unsupported(state, state->claimed_job_id);
   release_claim(state);
 }

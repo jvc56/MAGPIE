@@ -388,7 +388,9 @@ char *get_file_identity(const char *path);
 
 // A name beside `filename` for writing it in full before renaming it into
 // place -- `<filename>.<pid>.tmp` -- so that no reader, and no other process
-// writing the same file, ever sees half of it. The caller frees.
+// writing the same file, ever sees half of it. Removes the temporaries of
+// earlier writes of `filename` left untouched for an hour -- a killed writer's.
+// The caller frees.
 char *temporary_sibling(const char *filename);
 
 // Renames `temporary` over `filename`, or removes it and pushes an error
