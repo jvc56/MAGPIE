@@ -256,6 +256,11 @@ enum {
 // maximum into every movegen bound (see pat_eval_utility_bound). Absent
 // means 0: no correction, and no table is loaded.
 #define PAT_UTILITY_ADJUST_ROW_PREFIX "utility_adjust,"
+// Training only: fit_fixed_zero,<prefix>|<prefix>|... holds every feature
+// whose name starts with one of the prefixes at zero in the fit, whatever
+// the fit mode, so a model can be trained on a subset of premium classes
+// (their units then drop out at runtime). Absent means none.
+#define PAT_FIT_FIXED_ZERO_ROW_PREFIX "fit_fixed_zero,"
 #define PAT_UTILITY_WIN_PCT_NAME "winpct"
 // Margins beyond this are read at it; kappa has flattened to ~0 there.
 #define PAT_UTILITY_MARGIN_LIMIT 600

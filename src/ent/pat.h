@@ -56,6 +56,7 @@ void pat_set_train_overlay(PATWeights *pat, bool train_overlay);
 bool pat_get_run_through(const PATWeights *pat);
 void pat_set_run_through(PATWeights *pat, bool run_through);
 bool pat_get_fit_shrink(const PATWeights *pat);
+const char *pat_get_fit_fixed_zero(const PATWeights *pat);
 void pat_set_fit_shrink(PATWeights *pat, bool fit_shrink);
 // tiles is 1..RACK_SIZE; values are milli-equity <= 0 (see
 // PAT_OPENING_TILES_ROW_PREFIX).

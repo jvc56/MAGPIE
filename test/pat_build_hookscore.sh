@@ -25,11 +25,16 @@ tables='-wmp true -rit true -ritmmap true -wit true'
 lex=CSW21
 threads=10
 pairs=500000
-awk -v exact="$exact_hooks" '{
+# PAT_FIT_FIXED_ZERO (optional): feature-name prefixes, '|'-separated, held at
+# zero throughout, e.g. "dws_|tls_|dls_|qws_|qls_" for a TWS + double-double
+# model (see PAT_FIT_FIXED_ZERO_ROW_PREFIX).
+fixed_zero="${PAT_FIT_FIXED_ZERO:-}"
+awk -v exact="$exact_hooks" -v fixed_zero="$fixed_zero" '{
   print
   if ($0 == "fit_scaled,0") {
     print "fit_residual,5"
     if (exact == 1) print "exact_created_hooks,1"
+    if (fixed_zero != "") print "fit_fixed_zero," fixed_zero
   }
 }' "$strategy/pat_zero_lexsigned_nofit.pat" > "$strategy/${name}_bootstrap.pat"
 grep -q '^fit_residual,5$' "$strategy/${name}_bootstrap.pat"

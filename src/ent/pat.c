@@ -151,6 +151,8 @@ struct PATWeights {
   // [(unseen - 1) * PAT_UTILITY_WIDTH + margin + PAT_UTILITY_MARGIN_LIMIT]:
   // the correction itself, and its maximum over all margins at or above
   // the index (a move can only add score).
+  // See PAT_FIT_FIXED_ZERO_ROW_PREFIX; owned, NULL when absent.
+  char *fit_fixed_zero;
   double utility_adjust;
   int utility_max_unseen;
   Equity *utility_table;
@@ -235,6 +237,10 @@ void pat_set_train_overlay(PATWeights *pat, bool train_overlay) {
 bool pat_get_run_through(const PATWeights *pat) { return pat->run_through; }
 
 bool pat_get_fit_shrink(const PATWeights *pat) { return pat->fit_shrink; }
+
+const char *pat_get_fit_fixed_zero(const PATWeights *pat) {
+  return pat->fit_fixed_zero;
+}
 
 void pat_set_fit_shrink(PATWeights *pat, bool fit_shrink) {
   pat->fit_shrink = fit_shrink;
@@ -488,6 +494,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
   pat->fit_shrink = PAT_DEFAULT_FIT_SHRINK;
+  pat->fit_fixed_zero = NULL;
   pat->utility_adjust = 0.0;
   pat->utility_max_unseen = 0;
   pat->utility_table = NULL;
@@ -593,6 +600,7 @@ void pat_destroy(PATWeights *pat) {
   }
   free(pat->utility_table);
   free(pat->utility_suffix_max);
+  free(pat->fit_fixed_zero);
   free(pat->name);
   free(pat->run_through_count);
   free(pat->run_through_score);
@@ -866,6 +874,12 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         continue;
       }
     }
+    if (has_prefix(PAT_FIT_FIXED_ZERO_ROW_PREFIX, line)) {
+      free(pat->fit_fixed_zero);
+      pat->fit_fixed_zero =
+          string_duplicate(line + strlen(PAT_FIT_FIXED_ZERO_ROW_PREFIX));
+      continue;
+    }
     if (has_prefix(PAT_UTILITY_ADJUST_ROW_PREFIX, line)) {
       const char *text = line + strlen(PAT_UTILITY_ADJUST_ROW_PREFIX);
       char *end = NULL;
@@ -1040,6 +1054,11 @@ void pat_write(const PATWeights *pat, const char *data_paths,
                                       pat->run_through ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SHRINK_ROW_PREFIX,
                                       pat->fit_shrink ? 1 : 0);
+  if (pat->fit_fixed_zero) {
+    string_builder_add_formatted_string(sb, "%s%s\n",
+                                        PAT_FIT_FIXED_ZERO_ROW_PREFIX,
+                                        pat->fit_fixed_zero);
+  }
   if (pat->utility_adjust > 0.0) {
     string_builder_add_formatted_string(
         sb, "%s%.6f\n", PAT_UTILITY_ADJUST_ROW_PREFIX, pat->utility_adjust);

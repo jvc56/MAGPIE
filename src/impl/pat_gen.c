@@ -330,6 +330,30 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
       }
     }
   }
+  // fit_fixed_zero: features of the excluded classes stay at zero, whatever
+  // the mode above made of them.
+  const char *fixed_zero = pat_get_fit_fixed_zero(pat);
+  if (fixed_zero) {
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      char name[64];
+      pat_feature_name(feature_index, name, sizeof(name));
+      const char *prefix = fixed_zero;
+      while (*prefix) {
+        const char *end = strchr(prefix, '|');
+        const size_t prefix_len = end ? (size_t)(end - prefix) : strlen(prefix);
+        if (prefix_len > 0 && strncmp(name, prefix, prefix_len) == 0) {
+          fixed[feature_index + 1] = true;
+          fixed_value[feature_index + 1] = 0.0;
+          break;
+        }
+        prefix += prefix_len;
+        if (*prefix == '|') {
+          prefix++;
+        }
+      }
+    }
+  }
   double xty[PAT_REGRESSION_DIM];
   memcpy(xty, regression->xty, sizeof(xty));
   // Shrinkage toward the loaded coefficients: the penalty
