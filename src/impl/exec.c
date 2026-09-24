@@ -222,17 +222,6 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
   async_command_control_destroy(acc);
 }
 
-void save_config_settings(const Config *config, ErrorStack *error_stack) {
-  if (!config_get_save_settings(config)) {
-    return;
-  }
-  StringBuilder *sb = string_builder_create();
-  config_add_settings_to_string_builder(config, sb);
-  write_string_to_file(config_get_settings_filename(config), "w",
-                       string_builder_peek(sb), error_stack);
-  string_builder_destroy(sb);
-}
-
 void load_config_settings(Config *config, ErrorStack *error_stack) {
   // if file does not exist, just return
   if (access(config_get_settings_filename(config), F_OK) != 0) {

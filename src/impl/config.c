@@ -64,7 +64,6 @@
 #include "contribute.h"
 #include "convert.h"
 #include "endgame.h"
-#include "exec.h"
 #include "gameplay.h"
 #include "gcg.h"
 #include "get_gcg.h"
@@ -8826,7 +8825,7 @@ static char *config_contribute_leave_gen(Config *config,
   return result;
 }
 
-// Re-applies a settings file saved by save_config_settings (exec.c) --
+// Re-applies a settings file saved by save_config_settings --
 // always exactly one "setoptions ..." line -- without going through
 // execute_command_sync/load_command_sync. Those manage ThreadControl's
 // STARTED/FINISHED state machine, which assumes it is only ever driven from
@@ -12257,4 +12256,15 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     }
   }
+}
+
+void save_config_settings(const Config *config, ErrorStack *error_stack) {
+  if (!config_get_save_settings(config)) {
+    return;
+  }
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  write_string_to_file(config_get_settings_filename(config), "w",
+                       string_builder_peek(sb), error_stack);
+  string_builder_destroy(sb);
 }

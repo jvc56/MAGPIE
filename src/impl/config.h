@@ -196,5 +196,9 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
 // Settings
 void config_add_settings_to_string_builder(const Config *config,
                                            StringBuilder *sb);
+// Writes config's current settings to config_get_settings_filename(config)
+// (settings.txt by default), the same file the REPL loop keeps in sync after
+// every command. No-op if config_get_save_settings(config) is false.
+void save_config_settings(const Config *config, ErrorStack *error_stack);
 
 #endif
