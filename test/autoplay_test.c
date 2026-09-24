@@ -685,7 +685,7 @@ void test_autoplay_pentanomial(void) {
   const char *json =
       autoplay_results_get_json(config_get_autoplay_results(csw_config), true);
   ErrorStack *error_stack = error_stack_create();
-  JsonValue *parsed = json_parse(json, error_stack);
+  const JsonValue *parsed = json_parse(json, error_stack);
   assert(error_stack_is_empty(error_stack));
   const JsonValue *pentanomial = json_object_get(parsed, "pentanomial");
   const int64_t split_pairs = json_array_get_int_or(pentanomial, 2, -1);

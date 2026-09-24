@@ -1623,8 +1623,8 @@ static void captured_play_fill_from_simmed_play(CapturedPlay *play,
 // move-list (equity) order; the ranking lives in the sorted display copies,
 // which carry the same statistics. *sorted says whether the display lock is
 // held and must be released with sim_results_unlock_display_infos.
-static const SimmedPlay *ranked_simmed_play(SimResults *sim_results, int i,
-                                            bool sorted) {
+static const SimmedPlay *ranked_simmed_play(const SimResults *sim_results,
+                                            int i, bool sorted) {
   return sorted ? sim_results_get_display_simmed_play(sim_results, i)
                 : sim_results_get_simmed_play(sim_results, i);
 }

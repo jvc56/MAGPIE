@@ -2,6 +2,8 @@
 
 #include "../compat/sha256/sha256.h"
 #include "io_util.h"
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -14,11 +16,12 @@ enum {
 static char *hex_digest(const uint8_t digest[SHA256_BLOCK_SIZE]) {
   static const char hex[] = "0123456789abcdef";
   char *out = (char *)malloc_or_die(SHA256_BLOCK_SIZE * 2 + 1);
+  char *cursor = out;
   for (int i = 0; i < SHA256_BLOCK_SIZE; i++) {
-    out[i * 2] = hex[(digest[i] >> 4) & 0xf];
-    out[i * 2 + 1] = hex[digest[i] & 0xf];
+    *cursor++ = hex[(digest[i] >> 4) & 0xf];
+    *cursor++ = hex[digest[i] & 0xf];
   }
-  out[SHA256_BLOCK_SIZE * 2] = '\0';
+  *cursor = '\0';
   return out;
 }
 
@@ -32,7 +35,7 @@ char *sha256_hash_bytes(const void *data, size_t length) {
 }
 
 char *sha256_hash_file(const char *path, ErrorStack *error_stack) {
-  FILE *file = fopen(path, "rb");
+  FILE *file = fopen(path, "rbe");
   if (!file) {
     error_stack_push(
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
@@ -49,7 +52,7 @@ char *sha256_hash_file(const char *path, ErrorStack *error_stack) {
   }
   const bool read_failed = ferror(file) != 0;
   free(buffer);
-  fclose(file);
+  (void)fclose(file);
 
   if (read_failed) {
     error_stack_push(

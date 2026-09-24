@@ -1,10 +1,14 @@
 #include "contribute_test.h"
 
+#include "../src/def/config_defs.h"
 #include "../src/def/contribute_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/client_state.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_results.h"
 #include "../src/impl/config.h"
 #include "../src/impl/contribute.h"
 #include "../src/impl/rack_list.h"
@@ -204,10 +208,9 @@ static void test_sha256(void) {
 
   // And the same content through the file path, which streams in chunks.
   const char *path = "contribute_test_hash.bin";
-  FILE *file = fopen(path, "wb");
-  assert(file);
-  fwrite("abc", 1, 3, file);
-  fclose(file);
+  FILE *file = fopen_or_die(path, "wb");
+  fwrite_or_die("abc", 1, 3, file, "hash test bytes");
+  fclose_or_die(file);
 
   ErrorStack *error_stack = error_stack_create();
   char *from_file = sha256_hash_file(path, error_stack);
@@ -232,11 +235,11 @@ static void test_sha256(void) {
 // verification.
 static void test_digest_cache_key_notices_a_same_size_replacement(void) {
   const char *path = "contribute_test_cache_key.bin";
-  FILE *file = fopen(path, "wb");
-  assert(file);
-  fwrite("aaaa", 1, 4, file);
-  fclose(file);
+  FILE *file = fopen_or_die(path, "wb");
+  fwrite_or_die("aaaa", 1, 4, file, "cache key test bytes");
+  fclose_or_die(file);
 
+  // NOLINTNEXTLINE(misc-include-cleaner)
   struct stat before;
   assert(stat(path, &before) == 0);
   char *first = contribute_digest_cache_key(path);
@@ -244,11 +247,12 @@ static void test_digest_cache_key_notices_a_same_size_replacement(void) {
 
   // Replace the contents with different bytes of the same length, then force
   // the modification time back to what it was.
-  file = fopen(path, "wb");
-  assert(file);
-  fwrite("bbbb", 1, 4, file);
-  fclose(file);
+  file = fopen_or_die(path, "wb");
+  fwrite_or_die("bbbb", 1, 4, file, "cache key test bytes");
+  fclose_or_die(file);
+  // NOLINTNEXTLINE(misc-include-cleaner)
   struct utimbuf times = {.actime = before.st_atime,
+                          // NOLINTNEXTLINE(misc-include-cleaner)
                           .modtime = before.st_mtime};
   assert(utime(path, &times) == 0);
 
@@ -386,7 +390,7 @@ static void assert_fixture_is_an_assignment(const JsonValue *fixture,
 
 static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   const JsonValue *request = NULL;
-  JsonValue *games =
+  const JsonValue *games =
       load_task_request_fixture(BIRDTEST_GAMES_FIXTURE, &request);
   const char *const request_keys[] = {
       CONTRIBUTE_KEY_VARIANT,      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
@@ -424,7 +428,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   // single "player" rather than a player pair, so nothing else pins those two
   // names -- a rename on either side would have passed both test suites and
   // broken every opening-rack contributor.
-  JsonValue *opening_rack =
+  const JsonValue *opening_rack =
       load_task_request_fixture(BIRDTEST_OPENING_RACK_FIXTURE, &request);
   const char *const opening_rack_keys[] = {
       CONTRIBUTE_KEY_VARIANT,      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
@@ -447,7 +451,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   assert_fixture_pins_derived_files(opening_rack);
   json_destroy(opening_rack);
 
-  JsonValue *leave =
+  const JsonValue *leave =
       load_task_request_fixture(BIRDTEST_LEAVE_FIXTURE, &request);
   const char *const leave_keys[] = {
       CONTRIBUTE_KEY_LEXICON,
@@ -471,7 +475,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
 
   // A game_pairs task is run by the games executor, told apart only by its
   // job_type, so it needs every key a games request does.
-  JsonValue *pairs =
+  const JsonValue *pairs =
       load_task_request_fixture(BIRDTEST_GAME_PAIRS_FIXTURE, &request);
   assert_fixture_is_an_assignment(pairs, "game_pairs assignment");
   assert_strings_equal(json_get_string_or_null(request, "job_type"),
@@ -490,14 +494,14 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
 
   // The first task a worker with no identity is given carries the identity
   // the server minted for it, which adopt_server_assigned_uuid persists.
-  JsonValue *anon =
+  const JsonValue *anon =
       load_task_request_fixture(BIRDTEST_ANON_UUID_FIXTURE, &request);
   assert_fixture_is_an_assignment(anon, "first assignment");
   assert(json_get_string_or_null(anon, "worker_uuid"));
   json_destroy(anon);
 
   // Everything expected_data_matches reads off the digest list.
-  JsonValue *expected = load_fixture(BIRDTEST_EXPECTED_DATA_FIXTURE);
+  const JsonValue *expected = load_fixture(BIRDTEST_EXPECTED_DATA_FIXTURE);
   assert_strings_equal(json_get_string_or_null(expected, "algorithm"),
                        "sha256");
   const JsonValue *files = json_object_get(expected, "files");
@@ -520,7 +524,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   json_destroy(expected);
 
   // A heartbeat is the claim token and nothing else.
-  JsonValue *heartbeat = load_fixture(BIRDTEST_HEARTBEAT_FIXTURE);
+  const JsonValue *heartbeat = load_fixture(BIRDTEST_HEARTBEAT_FIXTURE);
   assert(json_object_size(heartbeat) == 1);
   assert(json_get_string_or_null(heartbeat, "claim_token"));
   json_destroy(heartbeat);
@@ -596,10 +600,10 @@ static const JsonValue *fixture_result(const JsonValue *fixture) {
 static void assert_result_produces_fixture_keys(const char *fixture_path,
                                                 const char *produced_json) {
   ErrorStack *error_stack = error_stack_create();
-  JsonValue *produced = json_parse(produced_json, error_stack);
+  const JsonValue *produced = json_parse(produced_json, error_stack);
   assert(error_stack_is_empty(error_stack));
   error_stack_destroy(error_stack);
-  JsonValue *fixture = load_fixture(fixture_path);
+  const JsonValue *fixture = load_fixture(fixture_path);
   assert_produces_every_fixture_key(fixture_result(fixture), produced,
                                     fixture_path);
   json_destroy(fixture);
@@ -694,11 +698,11 @@ static void test_capturing_positions_does_not_change_the_games(void) {
   ErrorStack *error_stack = error_stack_create();
 
   load_and_exec_config_or_die(config, "autoplay games 4 -seed 21");
-  JsonValue *plain = json_parse(
+  const JsonValue *plain = json_parse(
       autoplay_results_get_json(config_get_autoplay_results(config), false),
       error_stack);
   load_and_exec_config_or_die(config, "autoplay games,positions 4 -seed 21");
-  JsonValue *captured = json_parse(
+  const JsonValue *captured = json_parse(
       autoplay_results_get_json(config_get_autoplay_results(config), false),
       error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -745,7 +749,7 @@ static void test_capturing_positions_does_not_change_the_games(void) {
 static void test_player_settings_do_not_leak_between_tasks(void) {
   Config *config = config_create_or_die("set -lex CSW21 -plies 5");
   const JsonValue *request = NULL;
-  JsonValue *games =
+  const JsonValue *games =
       load_task_request_fixture(BIRDTEST_GAMES_FIXTURE, &request);
   const JsonValue *simmer = json_object_get(request, CONTRIBUTE_KEY_PLAYER1);
   const JsonValue *static_player =
@@ -789,7 +793,7 @@ static void test_shared_settings_do_not_leak_between_tasks(void) {
 
   // The bingo bonus is then the request's, not this build's default.
   ErrorStack *error_stack = error_stack_create();
-  JsonValue *run =
+  const JsonValue *run =
       json_parse("{\"bingo_bonus\": 40, \"sim_cutoff\": 0.01}", error_stack);
   assert(error_stack_is_empty(error_stack));
   config_contribute_apply_run_settings(config, run, /*states_cutoff=*/true,
@@ -798,7 +802,7 @@ static void test_shared_settings_do_not_leak_between_tasks(void) {
   assert(config_get_bingo_bonus(config) == 40);
 
   // A request that leaves the cutoff to this build is refused...
-  JsonValue *no_cutoff = json_parse("{\"bingo_bonus\": 40}", error_stack);
+  const JsonValue *no_cutoff = json_parse("{\"bingo_bonus\": 40}", error_stack);
   assert(error_stack_is_empty(error_stack));
   config_contribute_apply_run_settings(config, no_cutoff,
                                        /*states_cutoff=*/true, error_stack);
@@ -824,7 +828,7 @@ static void test_a_player_must_state_every_setting(void) {
   ErrorStack *error_stack = error_stack_create();
 
   // A static player states no simulation settings, and needs none.
-  JsonValue *static_player = json_parse(
+  const JsonValue *static_player = json_parse(
       "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
       "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
@@ -835,7 +839,7 @@ static void test_a_player_must_state_every_setting(void) {
   assert(error_stack_is_empty(error_stack));
 
   // One that leaves its play count to this build is refused.
-  JsonValue *no_plays = json_parse(
+  const JsonValue *no_plays = json_parse(
       "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": null, \"num_plies_recorded\": 2, "
       "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
@@ -846,7 +850,7 @@ static void test_a_player_must_state_every_setting(void) {
   error_stack_reset(error_stack);
 
   // So is a simulating player that states only what a static one must.
-  JsonValue *bare_simmer = json_parse(
+  const JsonValue *bare_simmer = json_parse(
       "{\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 2, \"num_plays\": 100, \"num_plies_recorded\": 2, "
       "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
@@ -871,7 +875,7 @@ static void test_opening_rack_analysis_uses_the_players_settings(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -plies 5 -numplays 7 -iterations 99");
   const JsonValue *request = NULL;
-  JsonValue *opening_rack =
+  const JsonValue *opening_rack =
       load_task_request_fixture(BIRDTEST_OPENING_RACK_FIXTURE, &request);
   const JsonValue *player = json_object_get(request, CONTRIBUTE_KEY_PLAYER);
   ErrorStack *error_stack = error_stack_create();
@@ -952,10 +956,10 @@ static void test_a_request_must_state_its_distribution_and_layout(void) {
   const char *letter_distribution = NULL;
   const char *board_layout = NULL;
 
-  JsonValue *stated = json_parse("{\"variant\":\"classic\","
-                                 "\"letter_distribution\":\"english\","
-                                 "\"board_layout\":\"standard15\"}",
-                                 error_stack);
+  const JsonValue *stated = json_parse("{\"variant\":\"classic\","
+                                       "\"letter_distribution\":\"english\","
+                                       "\"board_layout\":\"standard15\"}",
+                                       error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(config_contribute_validate_common(stated, &lexicon, &variant,
                                            &letter_distribution, &board_layout,
@@ -981,7 +985,7 @@ static void test_a_request_must_state_its_distribution_and_layout(void) {
       "\"board_layout\":\"standard15\"}",
   };
   for (size_t i = 0; i < sizeof(incomplete) / sizeof(incomplete[0]); i++) {
-    JsonValue *request = json_parse(incomplete[i], error_stack);
+    const JsonValue *request = json_parse(incomplete[i], error_stack);
     assert(error_stack_is_empty(error_stack));
     assert(!config_contribute_validate_common(request, &lexicon, &variant,
                                               &letter_distribution,
@@ -1015,10 +1019,12 @@ static void test_http_retries_outlast_a_server_deployment(void) {
     }
     total_seconds += wait;
   }
-  assert(HTTP_CLIENT_MAX_BACKOFF_SECONDS <= 60);
   assert(total_seconds >= 600);
-  // Far past the last retry, still capped rather than overflowing.
-  assert(http_client_backoff_seconds(1000) == HTTP_CLIENT_MAX_BACKOFF_SECONDS);
+  // Far past the last retry, still capped rather than overflowing, and the
+  // cap is at most a minute.
+  const int capped = http_client_backoff_seconds(1000);
+  assert(capped == HTTP_CLIENT_MAX_BACKOFF_SECONDS);
+  assert(capped <= 60);
 }
 
 void test_contribute(void) {

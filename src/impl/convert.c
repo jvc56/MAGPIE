@@ -12,6 +12,7 @@
 #include "../ent/klv_csv.h"
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/wmp.h"
 #include "../ent/word_info_table.h"

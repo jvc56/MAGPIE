@@ -7,7 +7,6 @@
 #include "letter_distribution_string.h"
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 void add_blanks(StringBuilder *string_builder, const Rack *rack,
                 const LetterDistribution *ld) {

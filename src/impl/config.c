@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include "../compat/chttp.h"
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
 #include "../def/autoplay_defs.h"
@@ -7269,8 +7270,9 @@ static bool wordmap_is_current(const char *wmp_path, const char *kwg_digest) {
 
 // The SHA-256 of the derived file `name` of type `type`, or NULL if it is not
 // on disk. Never an error: absent is the ordinary first-run case.
-static char *contribute_derived_digest(Config *config, ContributeState *state,
-                                       const char *name, data_filepath_t type) {
+static char *contribute_derived_digest(const Config *config,
+                                       ContributeState *state, const char *name,
+                                       data_filepath_t type) {
   ErrorStack *errors = error_stack_create();
   char *path = data_filepaths_get_readable_filename(config->data_paths, name,
                                                     type, errors);
@@ -7671,13 +7673,14 @@ static void config_contribute_parse_threshold(const char *value,
 static void config_contribute_parse_sampling_rule(const char *value,
                                                   bai_sampling_rule_t *out,
                                                   ErrorStack *error_stack) {
-  if (strings_equal(value, "round_robin")) {
+  // Neither exact name is a prefix of the other rule's CLI spelling, so
+  // testing each rule's two forms together matches what testing the exact
+  // names first did.
+  if (strings_equal(value, "round_robin") ||
+      has_iprefix(value, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
     *out = BAI_SAMPLING_RULE_ROUND_ROBIN;
-  } else if (strings_equal(value, "top_two_ids")) {
-    *out = BAI_SAMPLING_RULE_TOP_TWO_IDS;
-  } else if (has_iprefix(value, BAI_SAMPLING_RULE_ROUND_ROBIN_STRING)) {
-    *out = BAI_SAMPLING_RULE_ROUND_ROBIN;
-  } else if (has_iprefix(value, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
+  } else if (strings_equal(value, "top_two_ids") ||
+             has_iprefix(value, BAI_SAMPLING_RULE_TOP_TWO_IDS_STRING)) {
     *out = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   } else {
     error_stack_push(
@@ -8704,15 +8707,17 @@ static char *config_contribute_leave_gen(Config *config,
       free(leaves_name);
       return NULL;
     }
-    FILE *klv_file = fopen(klv_path, "wb");
-    if (!klv_file || fwrite(artifact.body, 1, artifact.body_length, klv_file) !=
-                         artifact.body_length) {
+    FILE *klv_file = fopen(klv_path, "wbe");
+    bool written = klv_file && fwrite(artifact.body, 1, artifact.body_length,
+                                      klv_file) == artifact.body_length;
+    // A failed close can lose buffered bytes, which is a failed write too.
+    if (klv_file && fclose(klv_file) != 0) {
+      written = false;
+    }
+    if (!written) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
           get_formatted_string("could not write fetched KLV to %s", klv_path));
-    }
-    if (klv_file) {
-      fclose(klv_file);
     }
     free(klv_path);
     chttp_response_destroy(&artifact);

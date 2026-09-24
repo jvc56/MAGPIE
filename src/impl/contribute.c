@@ -4,6 +4,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
+#include "../def/contribute_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../ent/client_state.h"
 #include "../ent/data_filepaths.h"
@@ -644,7 +645,7 @@ static void release_claim(ContributeState *state) {
 
 // Prints what this worker is missing, in full, once -- the client knows it
 // file by file, and the server's message cannot.
-static void print_shutdown(ContributeState *state,
+static void print_shutdown(const ContributeState *state,
                            ThreadControl *thread_control,
                            const JsonValue *shutdown) {
   thread_control_print_formatted(thread_control,
@@ -702,6 +703,7 @@ claim_task_over_http(ContributeState *state, const char *this_magpie_version,
   json_write_object_start(sb);
   json_write_string_field(sb, "magpie_version", this_magpie_version, &first);
   json_write_array_start(sb, "unsupported_jobs", &first);
+  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference): see above.
   const int unsupported_count = string_list_get_count(state->unsupported_jobs);
   for (int i = 0; i < unsupported_count; i++) {
     if (i > 0) {
@@ -938,7 +940,7 @@ submit_result_over_http(HttpClient *client, const char *claim_token,
   contribute_submit_outcome_t outcome = CONTRIBUTE_SUBMIT_ACCEPTED;
   if (response.status_code == 200) {
     ErrorStack *parse_errors = error_stack_create();
-    JsonValue *ack =
+    const JsonValue *ack =
         response.body ? json_parse(response.body, parse_errors) : NULL;
     if (ack && error_stack_is_empty(parse_errors) &&
         !json_get_bool_or(ack, "accepted", true)) {

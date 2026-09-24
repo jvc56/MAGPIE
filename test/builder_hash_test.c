@@ -42,8 +42,10 @@
 // The builder versions those hashes belong to. Bumping a version without
 // updating its hash, or the other way round, is the mistake this catches:
 // a pair that has moved apart is a server and a fleet that disagree.
-#define PINNED_WMP_BUILDER_VERSION 1
-#define PINNED_RIT_BUILDER_VERSION 1
+enum {
+  PINNED_WMP_BUILDER_VERSION = 1,
+  PINNED_RIT_BUILDER_VERSION = 1,
+};
 
 static void assert_built_file_hash(const char *data_paths, const char *name,
                                    data_filepath_t type, const char *expected,
