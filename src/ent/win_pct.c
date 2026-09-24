@@ -32,10 +32,11 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
   if (spread_plus_leftover < wp->min_spread) {
     spread_plus_leftover = wp->min_spread;
   }
+  // The table is measured on a 100-tile distribution; a larger bag (French,
+  // German, Dutch, ...) starts above its last row, where the win curve has
+  // long stopped changing with the unseen count, so read the last row.
   if (game_unseen_tiles > wp->max_tiles_unseen) {
-    log_fatal("cannot get win percentage value for %d unseen tiles when the "
-              "maximum unseen tiles is %d",
-              game_unseen_tiles, wp->max_tiles_unseen);
+    game_unseen_tiles = wp->max_tiles_unseen;
   }
   if (game_unseen_tiles == 0) {
     log_fatal("cannot get win percentage value for 0 unseen tiles when the "
