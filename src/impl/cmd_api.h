@@ -1,32 +1,49 @@
 #ifndef CMD_API_H
 #define CMD_API_H
 
-// A string -> string API for code using magpie as a library.
+// A string -> string API for programs embedding magpie as a library.
 //
-// Callers get a handle to an opaque Magpie struct, and interact with it by
-// passing it a command stirng, and parsing the resulting output.
-// The Magpie struct retains and handles the internal game state, and the
-// caller is responsible for freeing returned strings.
+// Callers get a handle to an opaque Magpie struct and interact with it by
+// passing it command strings and parsing the resulting output. The Magpie
+// struct retains the internal game state between commands, and the caller
+// is responsible for freeing all returned strings with free().
+//
+// Build the embeddable shared library with `make libmagpie`; it produces
+// bin/libmagpie.so (bin/libmagpie.dylib on macOS) exporting only the
+// magpie_* functions declared here.
+//
+// Command output is machine readable by default. Use
+// magpie_run_sync_human_readable to get output formatted for display
+// instead. In either case, an explicit -hr argument in the command string
+// overrides the default for that command only.
 //
 // clang-format off
 // Example usage:
 //    Magpie *mp = magpie_create("./data");
+//    if (magpie_has_error(mp)) { /* handle creation error */ }
 //    cmd_exit_code ret;
 //    ret = magpie_run_sync(mp, "set -lex CSW21");
-//    if (!ret == MAGPIE_SUCCESS) { // handle error }
+//    if (ret != MAGPIE_SUCCESS) { /* handle error */ }
 //    ret = magpie_run_sync(mp, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AQRTUYZ/ 0/0 0");
-//    if (!ret == MAGPIE_SUCCESS) { // handle error }
+//    if (ret != MAGPIE_SUCCESS) { /* handle error */ }
 //    ret = magpie_run_sync(mp, "generate");
 //    if (ret == MAGPIE_SUCCESS) {
-//      char* moves = magpie_get_last_command_output(mp);
+//      char *moves = magpie_get_last_command_output(mp);
 //      // parse and handle the returned move list
+//      free(moves);
 //    } else {
-//      char* error = magpie_get_and_clear_error(mp);
+//      char *error = magpie_get_and_clear_error(mp);
 //      // display or handle error
+//      free(error);
 //    }
+//    magpie_destroy(mp);
 // clang-format on
 
-#include "../util/io_util.h"
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // Opaque struct of magpie internal state
 typedef struct Magpie Magpie;
@@ -37,22 +54,76 @@ typedef enum {
   MAGPIE_DID_NOT_RUN = 2
 } cmd_exit_code;
 
+// Status of the most recent command. Values mirror thread_control_status_t.
+typedef enum {
+  MAGPIE_THREAD_STATUS_UNINITIALIZED = 0,
+  MAGPIE_THREAD_STATUS_STARTED = 1,
+  MAGPIE_THREAD_STATUS_USER_INTERRUPT = 2,
+  MAGPIE_THREAD_STATUS_FINISHED = 3
+} magpie_thread_status;
+
+// Creates a Magpie instance loading data from the ':'-separated paths in
+// data_paths. Never returns NULL; if creation fails, the returned handle
+// carries the error (check with magpie_has_error) and all subsequent
+// commands return MAGPIE_DID_NOT_RUN.
 Magpie *magpie_create(const char *data_paths);
+
+// Like magpie_create, with explicit control over the settings filename
+// (NULL for the default) and whether word map (WMP) files are used for
+// move generation.
+Magpie *magpie_create_with_options(const char *data_paths,
+                                   const char *settings_filename, bool use_wmp);
 
 void magpie_destroy(Magpie *mp);
 
+// Runs a command to completion, storing its output in machine-readable
+// form. Retrieve the output with magpie_get_last_command_output.
 cmd_exit_code magpie_run_sync(Magpie *mp, const char *command);
 
+// Same as magpie_run_sync, but stores output formatted for human display.
+cmd_exit_code magpie_run_sync_human_readable(Magpie *mp, const char *command);
+
+// Starts a command on a background thread and returns immediately. Returns
+// MAGPIE_SUCCESS if the command started, or MAGPIE_DID_NOT_RUN if it could
+// not (parse and data-loading errors are reported synchronously, and only
+// one command may run at a time). While a command is running, only
+// magpie_get_thread_status, magpie_get_last_command_status_message, and
+// magpie_stop_current_command may be called on this handle; call
+// magpie_await before using any other function.
+cmd_exit_code magpie_run_async(Magpie *mp, const char *command);
+
+// Same as magpie_run_async, but stores output formatted for human display.
+cmd_exit_code magpie_run_async_human_readable(Magpie *mp, const char *command);
+
+// Waits for the running async command (if any) to finish and returns the
+// exit code of the most recently completed command.
+cmd_exit_code magpie_await(Magpie *mp);
+
+// Returns true if an error is pending on the error stack.
+bool magpie_has_error(const Magpie *mp);
+
+// Returns the pending error messages (empty string if none) and clears the
+// error stack.
 char *magpie_get_and_clear_error(Magpie *mp);
 
+// Returns the status of the currently executing or most recently finished
+// command; returns an empty string if no command has been loaded.
 char *magpie_get_last_command_status_message(Magpie *mp);
 
 char *magpie_get_last_command_output(const Magpie *mp);
 
-void magpie_stop_current_command(const Magpie *mp);
+// Signals the currently running command to stop.
+void magpie_stop_current_command(Magpie *mp);
 
-// Returns the current thread status as an int:
-//   0 = uninitialized, 1 = started, 2 = user_interrupt, 3 = finished
-int magpie_get_thread_status(const Magpie *mp);
+magpie_thread_status magpie_get_thread_status(const Magpie *mp);
+
+// Frees a string returned by any magpie_* function. Equivalent to free();
+// provided so callers (especially FFI bindings) do not need to share the
+// library's allocator.
+void magpie_free_string(char *str);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -323,9 +323,16 @@ void validate_split_move(const StringSplitter *split_move, const Game *game,
               RACK_SIZE));
       return;
     }
-    // Equity is set later
+    // Equity is set later. row_start/col_start/dir are meaningless for an
+    // exchange, but move_create leaves them as uninitialized malloc'd
+    // memory, and compare_moves_without_equity compares them; zero them so
+    // two independently-parsed exchange moves of the same tiles compare
+    // equal instead of matching on leftover garbage.
     move_set_type(vm->move, GAME_EVENT_EXCHANGE);
     move_set_score(vm->move, 0);
+    move_set_row_start(vm->move, 0);
+    move_set_col_start(vm->move, 0);
+    move_set_dir(vm->move, 0);
   } else {
     // Score and equity are set later for tile placement moves
     move_set_type(vm->move, GAME_EVENT_TILE_PLACEMENT_MOVE);

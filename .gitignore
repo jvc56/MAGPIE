@@ -10,6 +10,7 @@ covhtml
 *.out
 magpie*
 !tui/assets/magpie.ttf
+!examples/magpie.py
 dev/*.txt
 perf*
 .env
@@ -18,6 +19,7 @@ testdata
 versioned-tarballs
 quackle
 *.gcg
+*report.txt
 oprofile_data
 cppcheck_*
 TODO
@@ -36,6 +38,12 @@ venv/
 
 # Compiled libraries
 *.a
+*.so
+*.dylib
+
+# Editor/debugger scratch
+tags
+.gdb_history
 PR_DESCRIPTION.md
 PR_TITLE.txt
 SPEEDUP_NOTES.md

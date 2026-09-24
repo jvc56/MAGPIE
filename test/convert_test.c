@@ -1,18 +1,29 @@
+#include "convert_test.h"
+
 #include "../src/ent/conversion_results.h"
 #include "../src/ent/data_filepaths.h"
+#include "../src/ent/dictionary_word.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
+#include "../src/ent/word_info_table.h"
 #include "../src/impl/config.h"
 #include "../src/impl/convert.h"
+#include "../src/impl/kwg_maker.h"
 #include "../src/util/io_util.h"
+#include "kwg_maker_test.h"
 #include "test_util.h"
+#include "wit_upgrade_test.h"
 #include <assert.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 void convert_and_assert_status(const ConversionArgs *args,
                                ConversionResults *results,
@@ -34,7 +45,7 @@ void test_convert_error(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   ConversionResults *conversion_results = conversion_results_create();
-  ConversionArgs args;
+  ConversionArgs args = {0};
   args.conversion_type_string = NULL;
   args.data_paths = NULL;
   args.input_and_output_name = NULL;
@@ -187,7 +198,131 @@ void test_convert_success(void) {
   error_stack_destroy(error_stack);
 }
 
+// The convert commands must sort: text files carry no ordering guarantee, and
+// unordered input inflates the DAWG and can overrun the tail-merge serializer.
+// This writes a length-ordered list and checks it matches the sorted build.
+void test_convert_unsorted_input(void) {
+  const char *sorted_name = "./testdata/lexica/CSW21_sorted_input.txt";
+  const char *unsorted_name =
+      "./testdata/lexica/CSW21_length_ordered_input.txt";
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(sorted_name, "w", "AA\nAAH\nAB\nABA\nBA\nBAA\nBAH\n",
+                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  // Same words, grouped by length: exactly what a malformed KWG dumps.
+  write_string_to_file(unsorted_name, "w", "AA\nAB\nBA\nAAH\nABA\nBAA\nBAH\n",
+                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+
+  Config *config = config_create_or_die("set -lex CSW21");
+  const char *merge_commands[] = {"convert text2kwg",
+                                  "convert text2kwgtailmerge"};
+  for (size_t merge_idx = 0;
+       merge_idx < sizeof(merge_commands) / sizeof(merge_commands[0]);
+       merge_idx++) {
+    char *sorted_command = get_formatted_string("%s CSW21_sorted_input",
+                                                merge_commands[merge_idx]);
+    char *unsorted_command = get_formatted_string(
+        "%s CSW21_length_ordered_input", merge_commands[merge_idx]);
+    // Before the fix the tail-merge form crashed outright here.
+    load_and_exec_config_or_die(config, sorted_command);
+    load_and_exec_config_or_die(config, unsorted_command);
+    free(sorted_command);
+    free(unsorted_command);
+
+    ErrorStack *load_error_stack = error_stack_create();
+    KWG *from_sorted = kwg_create(DEFAULT_TEST_DATA_PATH, "CSW21_sorted_input",
+                                  load_error_stack);
+    KWG *from_unsorted = kwg_create(
+        DEFAULT_TEST_DATA_PATH, "CSW21_length_ordered_input", load_error_stack);
+    assert(error_stack_is_empty(load_error_stack));
+    error_stack_destroy(load_error_stack);
+
+    assert(kwg_get_number_of_nodes(from_unsorted) ==
+           kwg_get_number_of_nodes(from_sorted));
+
+    DictionaryWordList *sorted_words = dictionary_word_list_create();
+    DictionaryWordList *unsorted_words = dictionary_word_list_create();
+    kwg_write_words(from_sorted, kwg_get_dawg_root_node_index(from_sorted),
+                    sorted_words, NULL);
+    kwg_write_words(from_unsorted, kwg_get_dawg_root_node_index(from_unsorted),
+                    unsorted_words, NULL);
+    assert_word_lists_are_equal(sorted_words, unsorted_words);
+
+    dictionary_word_list_destroy(unsorted_words);
+    dictionary_word_list_destroy(sorted_words);
+    kwg_destroy(from_unsorted);
+    kwg_destroy(from_sorted);
+  }
+  config_destroy(config);
+}
+
+static void test_convert_word_plus_floater(void) {
+  ErrorStack *error_stack = error_stack_create();
+  ConversionResults *results = conversion_results_create();
+  const char *name = "wpf_convert_test";
+  char *text_filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, name, DATA_FILEPATH_TYPE_LEXICON, error_stack);
+  char *wit_filename = data_filepaths_get_writable_filename(
+      DEFAULT_TEST_DATA_PATH, name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  write_string_to_file(text_filename, "w", "AT\nCAT\nTAT\nTATA\nATAT\n",
+                       error_stack);
+  assert(error_stack_is_empty(error_stack));
+  ConversionArgs args = {.conversion_type_string = "text2kwg",
+                         .data_paths = DEFAULT_TEST_DATA_PATH,
+                         .input_and_output_name = name,
+                         .ld_name = "english"};
+  convert_and_assert_status(&args, results, ERROR_STATUS_SUCCESS);
+  args.conversion_type_string = "kwg2wit";
+  convert_and_assert_status(&args, results, ERROR_STATUS_SUCCESS);
+  WordInfoTable *full =
+      word_info_table_create(DEFAULT_TEST_DATA_PATH, name, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(full != NULL);
+  assert(full->word_plus_floater[2] != NULL);
+
+  // Exercise the command parser and replace a damaged old combined table.
+  write_string_to_file(wit_filename, "w", "damaged old WIT", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false -wit false");
+  load_and_exec_config_or_die(config,
+                              "convert kwg2wit wpf_convert_test english");
+  WordInfoTable *rebuilt =
+      word_info_table_create(DEFAULT_TEST_DATA_PATH, name, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(rebuilt != NULL);
+  assert(rebuilt->word_plus_floater[2] != NULL);
+  assert(memcmp(rebuilt->word_plus_floater[2], full->word_plus_floater[2],
+                word_plus_floater_cells_per_key(2) * sizeof(uint32_t)) == 0);
+  config_destroy(config);
+  word_info_table_destroy(rebuilt);
+  word_info_table_destroy(full);
+  conversion_results_destroy(results);
+  free(text_filename);
+  free(wit_filename);
+  const data_filepath_t generated_types[] = {
+      DATA_FILEPATH_TYPE_LEXICON, DATA_FILEPATH_TYPE_KWG,
+      DATA_FILEPATH_TYPE_WORD_INFO_TABLE};
+  for (size_t type_idx = 0;
+       type_idx < sizeof(generated_types) / sizeof(generated_types[0]);
+       type_idx++) {
+    char *filename = data_filepaths_get_readable_filename(
+        DEFAULT_TEST_DATA_PATH, name, generated_types[type_idx], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    const int status = remove(filename);
+    assert(status == 0);
+    free(filename);
+  }
+  error_stack_destroy(error_stack);
+}
+
 void test_convert(void) {
   test_convert_error();
   test_convert_success();
+  test_convert_unsorted_input();
+  test_convert_word_plus_floater();
+  test_wit_upgrade();
 }

@@ -7,6 +7,7 @@
 #include "../ent/sim_args.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
+#include "play_chooser.h"
 #include <stdbool.h>
 
 typedef struct GameStringOptions GameStringOptions;
@@ -14,6 +15,17 @@ typedef struct GameStringOptions GameStringOptions;
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
   int games_before_force_draw_start;
+  // Optional: path to a file listing racks (one per line) that restricts
+  // which racks leavegen's RackList ever selects as rare (see
+  // rack_list_create). Only meaningful with AUTOPLAY_TYPE_LEAVE_GEN. NULL
+  // means every rack is eligible, as leavegen normally expects.
+  const char *force_racks_filename;
+  // Whether each leavegen generation should also dump rack_list's
+  // "<rack>,<count>,<mean>" data to a CSV (see
+  // rack_list_write_rack_equity_csv). Set explicitly by the user rather than
+  // inferred from force_racks_filename, since an unrestricted run could mean
+  // dumping millions of rows.
+  bool write_rack_equity_csv;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;
@@ -29,6 +41,14 @@ typedef struct AutoplayArgs {
   double cutoff;
   SimArgs p1_sim_args;
   SimArgs p2_sim_args;
+  bool use_play_chooser[2];
+  // Total clock for each PlayChooser player. Zero means untimed.
+  double time_control_seconds[2];
+  int overtime_penalty_points;
+  double overtime_period_seconds;
+  // Templates copied into each game runner, which supplies the per-game
+  // timer and seed before constructing its choosers.
+  PlayChooserStrategy play_chooser_strategies[2];
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
@@ -45,5 +65,9 @@ void autoplay_reset_total_sim_iterations(void);
 // trajectory so RIT/BAI variants can be compared over identical positions.
 void autoplay_set_bench_static_move(bool enabled);
 bool autoplay_get_bench_static_move(void);
+
+int autoplay_overtime_penalty_points(double overtime_seconds,
+                                     int points_per_period,
+                                     double period_seconds);
 
 #endif

@@ -54,6 +54,7 @@ int config_get_num_plays(const Config *config);
 int config_get_num_small_plays(const Config *config);
 int config_get_plies(const Config *config);
 int config_get_shplies(const Config *config);
+bool config_get_show_bu(const Config *config);
 int config_get_endgame_plies(const Config *config);
 uint64_t config_get_max_iterations(const Config *config);
 uint64_t config_get_seed(const Config *config);
@@ -61,6 +62,8 @@ double config_get_stop_cond_pct(const Config *config);
 bool config_get_use_game_pairs(const Config *config);
 bool config_get_use_small_plays(const Config *config);
 bool config_get_human_readable(const Config *config);
+void config_set_human_readable(Config *config, bool human_readable);
+bool config_get_show_mistakes(const Config *config);
 bool config_get_show_prompt(const Config *config);
 bool config_get_save_settings(const Config *config);
 bool config_get_fg_required(const Config *config);
@@ -79,6 +82,9 @@ double config_get_p2_utility_spread_scale(const Config *config);
 PlayersData *config_get_players_data(const Config *config);
 LetterDistribution *config_get_ld(const Config *config);
 ThreadControl *config_get_thread_control(const Config *config);
+// Fills peg_args with the peg command's arguments (defaults plus any -peg*
+// settings), leaving the poll and only/protect move sets unset.
+void config_fill_peg_args(Config *config, PegArgs *peg_args);
 exec_mode_t config_get_exec_mode(const Config *config);
 Game *config_get_game(const Config *config);
 GameHistory *config_get_game_history(const Config *config);
@@ -111,7 +117,7 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
-                     ErrorStack *error_stack);
+                     const char *force_racks_filename, ErrorStack *error_stack);
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
                      SimResults *sim_results, int *arm_avoid_prune,
                      int num_arm_avoid_prune, ErrorStack *error_stack);

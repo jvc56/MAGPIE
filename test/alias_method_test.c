@@ -1,3 +1,5 @@
+#include "alias_method_test.h"
+
 #include "../src/ent/alias_method.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"

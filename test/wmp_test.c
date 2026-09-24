@@ -1,3 +1,5 @@
+#include "wmp_test.h"
+
 #include "../src/compat/ctime.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/wmp_defs.h"

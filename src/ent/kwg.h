@@ -4,6 +4,7 @@
 #include "../compat/endian_conv.h"
 #include "../def/kwg_defs.h"
 #include "../util/fileproxy.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
@@ -26,6 +27,18 @@ static inline const char *kwg_get_name(const KWG *kwg) { return kwg->name; }
 
 static inline int kwg_get_number_of_nodes(const KWG *kwg) {
   return kwg->number_of_nodes;
+}
+
+// FNV-1a over the node array. Identifies the exact word graph a derived table
+// was built from, so a table built from a different one fails to pair with
+// it instead of silently misdescribing the words on the board.
+static inline uint64_t kwg_get_hash(const KWG *kwg) {
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  hash = fnv64a_step(hash, (uint64_t)kwg->number_of_nodes);
+  for (int node_idx = 0; node_idx < kwg->number_of_nodes; node_idx++) {
+    hash = fnv64a_step(hash, (uint64_t)kwg->nodes[node_idx]);
+  }
+  return hash;
 }
 
 static inline uint32_t kwg_node(const KWG *kwg, uint32_t node_index) {

@@ -4,7 +4,6 @@
 #include "../def/thread_control_defs.h"
 #include "../ent/transposition_table.h"
 #include "game.h"
-#include "game_history.h"
 #include "move.h"
 #include <stdatomic.h>
 
@@ -14,6 +13,10 @@ enum { MAX_VARIANT_LENGTH = 25 };
 typedef enum {
   ENDGAME_RESULT_BEST,
   ENDGAME_RESULT_DISPLAY,
+  // The caller-specified "actual move" (EndgameArgs.actual_move), computed in
+  // the same solve as ENDGAME_RESULT_BEST. Only valid when
+  // endgame_results_get_actual_move_found returns true.
+  ENDGAME_RESULT_ACTUAL,
 } endgame_result_t;
 
 typedef enum {
@@ -33,6 +36,8 @@ typedef struct PVLine {
 typedef struct EndgameResults EndgameResults;
 
 EndgameResults *endgame_results_create(void);
+EndgameResults *
+endgame_results_duplicate(const EndgameResults *endgame_results);
 void endgame_results_destroy(EndgameResults *endgame_results);
 void endgame_results_reset(EndgameResults *endgame_results);
 bool endgame_results_get_valid_for_current_game_state(
@@ -49,6 +54,8 @@ int endgame_results_get_depth(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
 double
 endgame_results_get_seconds_elapsed(const EndgameResults *endgame_results);
+double endgame_results_get_timer_elapsed_seconds(
+    const EndgameResults *endgame_results);
 void endgame_results_lock(EndgameResults *endgame_results,
                           endgame_result_t type);
 void endgame_results_unlock(EndgameResults *endgame_results,
@@ -57,6 +64,15 @@ void endgame_results_update_display_data(EndgameResults *endgame_results);
 void endgame_results_set_best_pvline(EndgameResults *endgame_results,
                                      const PVLine *pv_line, int value,
                                      int depth);
+// Records the exact value found for EndgameArgs.actual_move, alongside the
+// best move, from the same solve. Called at most once per solve (after all
+// workers join), so unlike endgame_results_set_best_pvline this has no
+// depth-guard against concurrent/older writers.
+void endgame_results_set_actual_pvline(EndgameResults *endgame_results,
+                                       const PVLine *pv_line, int value,
+                                       int depth);
+bool endgame_results_get_actual_move_found(
+    const EndgameResults *endgame_results);
 void endgame_results_set_start_game(EndgameResults *endgame_results,
                                     const Game *game);
 const Game *

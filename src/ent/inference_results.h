@@ -11,6 +11,8 @@
 typedef struct InferenceResults InferenceResults;
 
 InferenceResults *inference_results_create(AliasMethod *alias_method);
+InferenceResults *
+inference_results_duplicate(const InferenceResults *inference_results);
 void inference_results_destroy(InferenceResults *inference_results);
 void inference_results_reset(InferenceResults *results, int leave_list_capacity,
                              int ld_size);

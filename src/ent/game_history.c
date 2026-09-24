@@ -7,7 +7,11 @@
 #include "../ent/equity.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "endgame_results.h"
+#include "inference_results.h"
+#include "move.h"
 #include "rack.h"
+#include "sim_results.h"
 #include "validated_move.h"
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +38,10 @@ struct GameEvent {
   Rack after_event_player_off_turn_rack;
   ValidatedMoves *vms;
   char *note;
+  MoveList *move_list;
+  SimResults *sim_results;
+  InferenceResults *inference_results;
+  EndgameResults *endgame_results;
 };
 
 void game_event_reset(GameEvent *game_event) {
@@ -51,6 +59,14 @@ void game_event_reset(GameEvent *game_event) {
   game_event->vms = NULL;
   free(game_event->note);
   game_event->note = NULL;
+  move_list_destroy(game_event->move_list);
+  game_event->move_list = NULL;
+  sim_results_destroy(game_event->sim_results);
+  game_event->sim_results = NULL;
+  inference_results_destroy(game_event->inference_results);
+  game_event->inference_results = NULL;
+  endgame_results_destroy(game_event->endgame_results);
+  game_event->endgame_results = NULL;
 }
 
 void game_event_swap(GameEvent *ge1, GameEvent *ge2) {
@@ -132,6 +148,44 @@ void game_event_set_vms(GameEvent *event, ValidatedMoves *vms) {
 
 ValidatedMoves *game_event_get_vms(const GameEvent *event) {
   return event->vms;
+}
+
+void game_event_set_move_list(GameEvent *event, MoveList *move_list) {
+  move_list_destroy(event->move_list);
+  event->move_list = move_list;
+}
+
+MoveList *game_event_get_move_list(const GameEvent *event) {
+  return event->move_list;
+}
+
+void game_event_set_sim_results(GameEvent *event, SimResults *sim_results) {
+  sim_results_destroy(event->sim_results);
+  event->sim_results = sim_results;
+}
+
+SimResults *game_event_get_sim_results(const GameEvent *event) {
+  return event->sim_results;
+}
+
+void game_event_set_inference_results(GameEvent *event,
+                                      InferenceResults *inference_results) {
+  inference_results_destroy(event->inference_results);
+  event->inference_results = inference_results;
+}
+
+InferenceResults *game_event_get_inference_results(const GameEvent *event) {
+  return event->inference_results;
+}
+
+void game_event_set_endgame_results(GameEvent *event,
+                                    EndgameResults *endgame_results) {
+  endgame_results_destroy(event->endgame_results);
+  event->endgame_results = endgame_results;
+}
+
+EndgameResults *game_event_get_endgame_results(const GameEvent *event) {
+  return event->endgame_results;
 }
 
 void game_event_set_note(GameEvent *event, const char *note) {
@@ -514,6 +568,12 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
               &ge_orig->after_event_player_off_turn_rack);
     ge_copy->vms = validated_moves_duplicate(ge_orig->vms);
     ge_copy->note = string_duplicate_allow_null(ge_orig->note);
+    ge_copy->move_list = move_list_duplicate(ge_orig->move_list);
+    ge_copy->sim_results = sim_results_duplicate(ge_orig->sim_results);
+    ge_copy->inference_results =
+        inference_results_duplicate(ge_orig->inference_results);
+    ge_copy->endgame_results =
+        endgame_results_duplicate(ge_orig->endgame_results);
   }
   return gh_copy;
 }

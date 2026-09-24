@@ -6,8 +6,12 @@
 #include "../def/game_history_defs.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "endgame_results.h"
+#include "inference_results.h"
 #include "letter_distribution.h"
+#include "move.h"
 #include "rack.h"
+#include "sim_results.h"
 #include "validated_move.h"
 
 #define PLAYER_ONE_DEFAULT_NAME "Player 1"
@@ -41,6 +45,25 @@ Rack *game_event_get_after_event_player_off_turn_rack(GameEvent *event);
 
 void game_event_set_vms(GameEvent *event, ValidatedMoves *vms);
 ValidatedMoves *game_event_get_vms(const GameEvent *event);
+
+// The move_list/sim_results/inference_results/endgame_results generated
+// for the position this event represents, if any were live (and valid)
+// when the event was committed. Each setter takes ownership of (and
+// destroys any previously-set) the given object; pass a fresh duplicate,
+// never a pointer also owned elsewhere (e.g. a live Config field).
+void game_event_set_move_list(GameEvent *event, MoveList *move_list);
+MoveList *game_event_get_move_list(const GameEvent *event);
+
+void game_event_set_sim_results(GameEvent *event, SimResults *sim_results);
+SimResults *game_event_get_sim_results(const GameEvent *event);
+
+void game_event_set_inference_results(GameEvent *event,
+                                      InferenceResults *inference_results);
+InferenceResults *game_event_get_inference_results(const GameEvent *event);
+
+void game_event_set_endgame_results(GameEvent *event,
+                                    EndgameResults *endgame_results);
+EndgameResults *game_event_get_endgame_results(const GameEvent *event);
 
 void game_event_set_note(GameEvent *event, const char *note);
 const char *game_event_get_note(const GameEvent *event);

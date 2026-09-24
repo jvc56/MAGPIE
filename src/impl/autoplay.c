@@ -5,6 +5,7 @@
 #include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
@@ -16,6 +17,7 @@
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/game_timer.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
@@ -35,8 +37,10 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "play_chooser.h"
 #include "rack_list.h"
 #include "simmer.h"
+#include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -64,6 +68,21 @@ void autoplay_reset_total_sim_iterations(void) {
 // variants run through the same sequence of positions.
 static _Atomic bool autoplay_bench_static_move_enabled;
 
+int autoplay_overtime_penalty_points(double overtime_seconds,
+                                     int points_per_period,
+                                     double period_seconds) {
+  if (overtime_seconds <= 0.0 || points_per_period <= 0 ||
+      period_seconds <= 0.0) {
+    return 0;
+  }
+  const double periods = ceil(overtime_seconds / period_seconds);
+  const int max_penalty_points = (int)EQUITY_MAX_DOUBLE;
+  if (periods >= (double)max_penalty_points / (double)points_per_period) {
+    return max_penalty_points;
+  }
+  return (int)periods * points_per_period;
+}
+
 void autoplay_set_bench_static_move(bool enabled) {
   atomic_store_explicit(&autoplay_bench_static_move_enabled, enabled,
                         memory_order_relaxed);
@@ -84,6 +103,10 @@ typedef struct LeavegenSharedData {
   const char *data_paths;
   KLV *klv;
   RackList *rack_list;
+  // Whether each generation should also dump rack_list's
+  // "<rack>,<count>,<mean>" data to a CSV (see rack_list_write_rack_equity_
+  // csv).
+  bool write_rack_equity_csv;
   Checkpoint *postgen_checkpoint;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
@@ -263,6 +286,22 @@ void postgen_prebroadcast_func(void *data) {
     log_fatal("leavegen failed to write result summary to file");
   }
 
+  // When -writerackequitycsv is set, also dump rack_list's
+  // "<rack>,<count>,<mean>" data for every observed rack, so a distributed
+  // caller doesn't have to parse the full per-generation KLV to get results.
+  if (lg_shared_data->write_rack_equity_csv) {
+    char *rack_equity_csv_name =
+        get_formatted_string("%s_rack_equity.csv", report_name_prefix);
+    rack_list_write_rack_equity_csv(lg_shared_data->rack_list,
+                                    lg_shared_data->ld, rack_equity_csv_name,
+                                    error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("leavegen failed to write rack equity results to file");
+    }
+    free(rack_equity_csv_name);
+  }
+
   string_builder_destroy(leave_gen_sb);
   error_stack_destroy(error_stack);
 
@@ -335,12 +374,21 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->inference_results = NULL;
   autoplay_worker->error_stack = NULL;
 
-  // Only allocate sim structs if at least one of the players running a sim.
-  if (ap_args->p1_sim_args.num_plies > 0 ||
-      ap_args->p2_sim_args.num_plies > 0) {
+  const bool any_player_sims =
+      ap_args->p1_sim_args.num_plies > 0 || ap_args->p2_sim_args.num_plies > 0;
+  const bool any_player_uses_play_chooser =
+      ap_args->use_play_chooser[0] || ap_args->use_play_chooser[1];
+  // PlayChooser needs an error stack. The remaining objects are specific to
+  // the legacy autoplay simmer.
+  if (any_player_uses_play_chooser) {
+    autoplay_worker->error_stack = error_stack_create();
+  }
+  if (any_player_sims) {
     autoplay_worker->sim_results = sim_results_create(ap_args->cutoff);
     autoplay_worker->inference_results = inference_results_create(NULL);
-    autoplay_worker->error_stack = error_stack_create();
+    if (autoplay_worker->error_stack == NULL) {
+      autoplay_worker->error_stack = error_stack_create();
+    }
     rack_set_dist_size_and_reset(&autoplay_worker->target_played_tiles,
                                  ld_get_size(ap_args->game_args->ld));
     rack_set_dist_size_and_reset(&autoplay_worker->nontarget_known_rack,
@@ -367,11 +415,16 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
+// forced_racks_filename is optional (NULL/empty for an unrestricted run) and
+// is passed straight through to rack_list_create; see its documentation for
+// what it does. Pushes to error_stack and returns NULL if that file can't be
+// read.
 LeavegenSharedData *leavegen_shared_data_create(
     AutoplayResults *primary_autoplay_results,
     AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
     const char *data_paths, KLV *klv, int number_of_threads, int num_gens,
-    int *min_rack_targets) {
+    int *min_rack_targets, const char *forced_racks_filename,
+    bool write_rack_equity_csv, ErrorStack *error_stack) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->num_gens = num_gens;
@@ -385,19 +438,31 @@ LeavegenSharedData *leavegen_shared_data_create(
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->min_rack_targets = min_rack_targets;
-  shared_data->rack_list = rack_list_create(ld, min_rack_targets[0]);
+  shared_data->rack_list = rack_list_create(ld, min_rack_targets[0],
+                                            forced_racks_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    autoplay_results_destroy(shared_data->gen_autoplay_results);
+    free(shared_data);
+    return NULL;
+  }
+  shared_data->write_rack_equity_csv = write_rack_equity_csv;
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   return shared_data;
 }
 
-// Use NULL for the KLV when not running in leave gen mode.
+// Use NULL for the KLV when not running in leave gen mode. forced_racks_
+// filename and write_rack_equity_csv are only meaningful when klv is
+// non-NULL (see leavegen_shared_data_create); pushes to error_stack and
+// returns NULL on the same conditions that function does.
 AutoplaySharedData *
 autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
                             const uint64_t first_gen_num_games,
                             AutoplayResults *primary_autoplay_results,
                             AutoplayResults **autoplay_results_list, KLV *klv,
-                            int num_gens, int *min_rack_targets) {
+                            int num_gens, int *min_rack_targets,
+                            const char *forced_racks_filename,
+                            ErrorStack *error_stack) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
   shared_data->num_threads = num_autoplay_threads;
   shared_data->print_interval = args->print_interval;
@@ -414,8 +479,13 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
-        args->data_paths, klv, num_autoplay_threads, num_gens,
-        min_rack_targets);
+        args->data_paths, klv, num_autoplay_threads, num_gens, min_rack_targets,
+        forced_racks_filename, args->write_rack_equity_csv, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      prng_destroy(shared_data->prng);
+      free(shared_data);
+      return NULL;
+    }
   }
   return shared_data;
 }
@@ -450,8 +520,19 @@ typedef struct GameRunner {
   // inference
   Game *game_one_move_behind;
   Move previous_move;
+  Move play_chooser_move;
+  PlayChooser *play_choosers[2];
+  GameTimer game_timer;
+  AutoplayGameTiming timing;
   AutoplaySharedData *shared_data;
 } GameRunner;
+
+static void game_runner_destroy_play_choosers(GameRunner *game_runner) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    play_chooser_destroy(game_runner->play_choosers[player_index]);
+    game_runner->play_choosers[player_index] = NULL;
+  }
+}
 
 GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   const AutoplayArgs *args = &autoplay_worker->args;
@@ -464,6 +545,10 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   }
   game_runner->pair_game_number =
       0; // Will be set in game_runner_start if using pairs
+  game_runner->play_choosers[0] = NULL;
+  game_runner->play_choosers[1] = NULL;
+  game_timer_reset(&game_runner->game_timer, 0.0);
+  game_runner->timing = (AutoplayGameTiming){0};
   return game_runner;
 }
 
@@ -471,9 +556,27 @@ void game_runner_destroy(GameRunner *game_runner) {
   if (!game_runner) {
     return;
   }
+  game_runner_destroy_play_choosers(game_runner);
   game_destroy(game_runner->game);
   game_destroy(game_runner->game_one_move_behind);
   free(game_runner);
+}
+
+static void game_runner_create_play_choosers(AutoplayWorker *autoplay_worker,
+                                             GameRunner *game_runner,
+                                             uint64_t seed) {
+  game_runner_destroy_play_choosers(game_runner);
+  const AutoplayArgs *args = &autoplay_worker->args;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (!args->use_play_chooser[player_index]) {
+      continue;
+    }
+    PlayChooserStrategy strategy = args->play_chooser_strategies[player_index];
+    strategy.game_timer = &game_runner->game_timer;
+    strategy.overtime_period_seconds = args->overtime_period_seconds;
+    strategy.seed = seed + (uint64_t)player_index;
+    game_runner->play_choosers[player_index] = play_chooser_create(&strategy);
+  }
 }
 
 void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
@@ -489,6 +592,12 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   autoplay_worker->args.p2_sim_args.seed = iter_output->seed;
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
+  game_timer_reset_for_players(&game_runner->game_timer,
+                               autoplay_worker->args.time_control_seconds[0],
+                               autoplay_worker->args.time_control_seconds[1]);
+  game_runner->timing = (AutoplayGameTiming){0};
+  game_runner_create_play_choosers(autoplay_worker, game_runner,
+                                   iter_output->seed);
   if (game_runner->game_one_move_behind) {
     Game *game_one_move_behind = game_runner->game_one_move_behind;
     game_reset(game_one_move_behind);
@@ -501,7 +610,10 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   game_runner->force_draw = false;
   if (game_runner->shared_data->leavegen_shared_data &&
       // We only force draws if we've played enough games for this
-      // generation.
+      // generation. This also applies when leavegen's rack list is
+      // restricted to a forceracksfile (see rack_list_create): clients
+      // fulfilling requests can just pass 0 if they want forcing
+      // from the start.
       (iter_output->iter_count -
        game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
           (uint64_t)autoplay_worker->args.games_before_force_draw_start) {
@@ -609,11 +721,32 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                       GameRunner *game_runner) {
   const int player_on_turn_index =
       game_get_player_on_turn_index(game_runner->game);
+  PlayChooser *play_chooser = game_runner->play_choosers[player_on_turn_index];
+  if (play_chooser != NULL) {
+    game_timer_start_turn(&game_runner->game_timer, player_on_turn_index);
+    play_chooser_choose_move(play_chooser, game_runner->game,
+                             &game_runner->play_chooser_move,
+                             autoplay_worker->error_stack);
+    game_timer_end_turn(&game_runner->game_timer);
+    if (!error_stack_is_empty(autoplay_worker->error_stack)) {
+      error_stack_print_and_reset(autoplay_worker->error_stack);
+      log_fatal("autoplay PlayChooser failed for player %d on turn %d of "
+                "game number %llu with seed %llu",
+                player_on_turn_index + 1, game_runner->turn_number + 1,
+                (unsigned long long)game_runner->game_number + 1,
+                (unsigned long long)game_runner->seed);
+    }
+    if (autoplay_get_bench_static_move()) {
+      return get_top_equity_move(
+          game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
+    }
+    return &game_runner->play_chooser_move;
+  }
   const SimArgs *sim_args = (player_on_turn_index == 0)
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
-    return get_top_equity_move(
+    return get_top_move_for_player_on_turn(
         game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
   }
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);
@@ -651,8 +784,16 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
 
     const Move *forced_move =
         game_runner_get_best_move(autoplay_worker, game_runner);
-    rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
-                       equity_to_double(move_get_equity(forced_move)));
+    // A forced rack is under no obligation to have a legal play, and a
+    // pass's equity is a sentinel value that can't be recorded, so passes
+    // are skipped entirely here. This is more likely than usual when
+    // lg_shared_data->rack_list is restricted to a forceracksfile (see
+    // rack_list_create), since those racks are picked externally rather
+    // than drawn from the actual remaining tile pool.
+    if (move_get_type(forced_move) != GAME_EVENT_PASS) {
+      rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
+                         equity_to_double(move_get_equity(forced_move)));
+    }
 
     rack_copy(player_rack, &original_rack);
   }
@@ -689,10 +830,12 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     const SimArgs *sim_args = (player_on_turn_index == 0)
                                   ? &autoplay_worker->args.p1_sim_args
                                   : &autoplay_worker->args.p2_sim_args;
-    if (sim_args->num_plies > 0) {
+    if (sim_args->num_plies > 0 &&
+        !autoplay_worker->args.use_play_chooser[player_on_turn_index]) {
       char *sim_str = sim_results_get_string(
           game, autoplay_worker->sim_results, sim_args->max_num_display_plays,
-          sim_args->max_num_display_plies, -1, -1, NULL, 0, false, false, NULL);
+          sim_args->max_num_display_plies, -1, -1, NULL, 0, false, false, false,
+          NULL);
       string_builder_add_string(output, sim_str);
       free(sim_str);
       if (sim_args->use_inference && game_runner->turn_number > 0 &&
@@ -715,6 +858,28 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   move_copy(&game_runner->previous_move, move);
   game_runner->turn_number++;
   return move;
+}
+
+static void game_runner_assess_overtime(AutoplayWorker *autoplay_worker,
+                                        GameRunner *game_runner) {
+  const AutoplayArgs *args = &autoplay_worker->args;
+  game_timer_end_turn(&game_runner->game_timer);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (!args->use_play_chooser[player_index]) {
+      continue;
+    }
+    game_runner->timing.active[player_index] = true;
+    game_runner->timing.seconds_used[player_index] =
+        game_timer_get_seconds_used(&game_runner->game_timer, player_index);
+    game_runner->timing.overtime_seconds[player_index] =
+        game_timer_get_overtime_seconds(&game_runner->game_timer, player_index);
+    const int penalty_points = autoplay_overtime_penalty_points(
+        game_runner->timing.overtime_seconds[player_index],
+        args->overtime_penalty_points, args->overtime_period_seconds);
+    game_runner->timing.penalty_points[player_index] = penalty_points;
+    player_add_to_score(game_get_player(game_runner->game, player_index),
+                        -int_to_equity(penalty_points));
+  }
 }
 
 void print_current_status(AutoplayWorker *autoplay_worker,
@@ -745,9 +910,10 @@ void print_current_status(AutoplayWorker *autoplay_worker,
 
 void autoplay_add_game(AutoplayWorker *autoplay_worker,
                        const GameRunner *game_runner, bool divergent) {
-  autoplay_results_add_game(autoplay_worker->autoplay_results,
-                            game_runner->game, game_runner->turn_number,
-                            divergent, game_runner->seed);
+  autoplay_results_add_game_with_timing(
+      autoplay_worker->autoplay_results, game_runner->game,
+      game_runner->turn_number, divergent, game_runner->seed,
+      &game_runner->timing);
   AutoplayIterCompletedOutput iter_completed_output;
   autoplay_complete_iter(autoplay_worker->shared_data, &iter_completed_output);
   if (iter_completed_output.print_info) {
@@ -794,6 +960,10 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
          compare_moves_without_equity(move1, move2, true) != -1)) {
       games_are_divergent = true;
     }
+  }
+  game_runner_assess_overtime(autoplay_worker, game_runner1);
+  if (game_runner2) {
+    game_runner_assess_overtime(autoplay_worker, game_runner2);
   }
   if (autoplay_worker->args.print_boards) {
     StringBuilder *output = string_builder_create();
@@ -957,7 +1127,15 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack) {
+  valid_autoplay_results_options(autoplay_results, args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
+  autoplay_results_set_play_chooser_config(
+      autoplay_results, args->use_play_chooser, args->time_control_seconds,
+      args->overtime_penalty_points, args->overtime_period_seconds);
   int num_gens = 1;
   int *min_rack_targets = NULL;
   uint64_t first_gen_num_games;
@@ -990,11 +1168,6 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     }
   }
 
-  valid_autoplay_results_options(autoplay_results, args, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
   ThreadControl *thread_control = args->thread_control;
 
   autoplay_results_reset(autoplay_results);
@@ -1015,7 +1188,13 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
       args, autoplay_num_threads, first_gen_num_games, autoplay_results,
-      autoplay_results_list, klv, num_gens, min_rack_targets);
+      autoplay_results_list, klv, num_gens, min_rack_targets,
+      args->force_racks_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(autoplay_results_list);
+    free(min_rack_targets);
+    return;
+  }
 
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (autoplay_num_threads));

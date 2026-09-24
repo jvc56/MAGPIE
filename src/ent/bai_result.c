@@ -29,17 +29,16 @@ BAIResult *bai_result_create(void) {
   return bai_result;
 }
 
-BAIResult *bai_result_duplicate(const BAIResult *src) {
-  if (src == NULL) {
+// Timer is a plain value type (no owned resources), so a struct copy of
+// everything but the mutex is a correct full duplicate.
+BAIResult *bai_result_duplicate(const BAIResult *bai_result) {
+  if (bai_result == NULL) {
     return NULL;
   }
-  BAIResult *dst = malloc_or_die(sizeof(BAIResult));
-  cpthread_mutex_init(&dst->mutex);
-  dst->status = src->status;
-  dst->best_arm = src->best_arm;
-  dst->time_limit_seconds = src->time_limit_seconds;
-  dst->timer = src->timer;
-  return dst;
+  BAIResult *new_bai_result = malloc_or_die(sizeof(BAIResult));
+  *new_bai_result = *bai_result;
+  cpthread_mutex_init(&new_bai_result->mutex);
+  return new_bai_result;
 }
 
 void bai_result_destroy(BAIResult *bai_result) { free(bai_result); }

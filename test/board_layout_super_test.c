@@ -1,3 +1,5 @@
+#include "board_layout_super_test.h"
+
 #include "../src/ent/game.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"

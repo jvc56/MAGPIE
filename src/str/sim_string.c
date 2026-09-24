@@ -1,4 +1,6 @@
 
+#include "sim_string.h"
+
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -84,7 +86,7 @@ bool string_builder_add_sim_stats_with_display_lock(
     StringBuilder *sb, const Game *game, const SimResults *sim_results,
     int max_num_display_plays, int max_num_display_plies, int filter_row,
     int filter_col, const MachineLetter *prefix_mls, int prefix_len,
-    bool exclude_tile_placement_moves, bool use_ucgi_format) {
+    bool exclude_tile_placement_moves, bool use_ucgi_format, bool show_bu) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   const LetterDistribution *ld = game_get_ld(game);
   const Board *board = game_get_board(game);
@@ -116,9 +118,15 @@ bool string_builder_add_sim_stats_with_display_lock(
   const int num_plies = sim_results_get_num_plies(sim_results);
   const int num_display_plies =
       max_num_display_plies < num_plies ? max_num_display_plies : num_plies;
+  // BU (blended utility) is opt-in via show_bu, and is only meaningful when
+  // the sim was run with a nonzero spread weight (otherwise it is identical
+  // to Wp), so it is also omitted in that case even if show_bu is true.
+  const bool display_bu =
+      show_bu && sim_results_get_utility_w_spread(sim_results) > 0.0;
   // UCGI mode adds 2 extra base columns (WpSE, EqSE) and 1 extra per-ply
   // column (PlyN-SD score stdev) between the score mean and bingo columns.
   const int num_cols = MIN_NUM_SIM_RESULT_COLS + (use_ucgi_format ? 2 : 0) +
+                       (display_bu ? 1 : 0) +
                        num_display_plies * (use_ucgi_format ? 3 : 2);
   StringGrid *sg = string_grid_create(num_rows, num_cols, 1);
 
@@ -130,6 +138,9 @@ bool string_builder_add_sim_stats_with_display_lock(
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Lv"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Sc"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Ig"));
+    if (display_bu) {
+      string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("BU"));
+    }
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Wp"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Eq"));
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("StEq"));
@@ -193,6 +204,13 @@ bool string_builder_add_sim_stats_with_display_lock(
       string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("-"));
     }
     curr_col++;
+
+    if (display_bu) {
+      const Stat *utility_stat = simmed_play_get_utility_stat(sp);
+      string_grid_set_cell(
+          sg, curr_row, curr_col++,
+          get_formatted_string("%.2f", stat_get_mean(utility_stat) * 100));
+    }
 
     const Stat *win_pct_stat = simmed_play_get_win_pct_stat(sp);
     string_grid_set_cell(
@@ -340,7 +358,7 @@ void string_builder_add_sim_stats(
     StringBuilder *sb, const Game *game, SimResults *sim_results,
     int max_num_display_plays, int max_num_display_plies, int filter_row,
     int filter_col, const MachineLetter *prefix_mls, int prefix_len,
-    bool exclude_tile_placement_moves, bool use_ucgi_format,
+    bool exclude_tile_placement_moves, bool use_ucgi_format, bool show_bu,
     const char *game_board_string) {
   // Only locks on success
   bool sim_stats_ready =
@@ -354,7 +372,7 @@ void string_builder_add_sim_stats(
     string_builder_add_sim_stats_with_display_lock(
         temp_sb, game, sim_results, max_num_display_plays,
         max_num_display_plies, filter_row, filter_col, prefix_mls, prefix_len,
-        exclude_tile_placement_moves, use_ucgi_format);
+        exclude_tile_placement_moves, use_ucgi_format, show_bu);
     char *sim_str = string_builder_dump(temp_sb, NULL);
     string_builder_destroy(temp_sb);
     string_builder_add_with_board_interleave(sb, sim_str, game_board_string);
@@ -363,7 +381,7 @@ void string_builder_add_sim_stats(
     string_builder_add_sim_stats_with_display_lock(
         sb, game, sim_results, max_num_display_plays, max_num_display_plies,
         filter_row, filter_col, prefix_mls, prefix_len,
-        exclude_tile_placement_moves, use_ucgi_format);
+        exclude_tile_placement_moves, use_ucgi_format, show_bu);
   }
   sim_results_unlock_display_infos(sim_results);
 }
@@ -373,13 +391,14 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
                              int max_num_display_plies, int filter_row,
                              int filter_col, const MachineLetter *prefix_mls,
                              int prefix_len, bool exclude_tile_placement_moves,
-                             bool use_ucgi_format,
+                             bool use_ucgi_format, bool show_bu,
                              const char *game_board_string) {
   StringBuilder *sb = string_builder_create();
-  string_builder_add_sim_stats(
-      sb, game, sim_results, max_num_display_plays, max_num_display_plies,
-      filter_row, filter_col, prefix_mls, prefix_len,
-      exclude_tile_placement_moves, use_ucgi_format, game_board_string);
+  string_builder_add_sim_stats(sb, game, sim_results, max_num_display_plays,
+                               max_num_display_plies, filter_row, filter_col,
+                               prefix_mls, prefix_len,
+                               exclude_tile_placement_moves, use_ucgi_format,
+                               show_bu, game_board_string);
   char *str = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return str;
@@ -388,10 +407,10 @@ char *sim_results_get_string(const Game *game, SimResults *sim_results,
 void sim_results_print(ThreadControl *thread_control, const Game *game,
                        SimResults *sim_results, int max_num_display_plays,
                        int max_num_display_plies, bool use_ucgi_format,
-                       const char *game_board_string) {
+                       bool show_bu, const char *game_board_string) {
   char *sim_stats_string = sim_results_get_string(
       game, sim_results, max_num_display_plays, max_num_display_plies, -1, -1,
-      NULL, 0, false, use_ucgi_format, game_board_string);
+      NULL, 0, false, use_ucgi_format, show_bu, game_board_string);
   thread_control_print(thread_control, sim_stats_string);
   free(sim_stats_string);
 }

@@ -32,6 +32,9 @@ struct SimmedPlay {
   Stat *equity_stat;
   Stat *leftover_stat;
   Stat *win_pct_stat;
+  // Mean of the per-sample blended utility (see sim_utility_blend). Only
+  // meaningful for comparison/display when utility_w_spread > 0.
+  Stat *utility_stat;
   uint64_t similarity_key;
   int play_index_by_sort_type;
   XoshiroPRNG *prng;
@@ -39,6 +42,9 @@ struct SimmedPlay {
   PlyInfo *ply_infos;
   cpthread_mutex_t mutex;
   double cutoff;
+  // Copied from SimResults at the same points cutoff is refreshed. Nonzero
+  // means the BU (blended utility) stat is meaningful for this play.
+  double utility_w_spread;
 };
 
 struct SimResults {
@@ -56,6 +62,10 @@ struct SimResults {
   BAIResult *bai_result;
   bool valid_for_current_game_state;
   double cutoff;
+  // Utility-blend spread weight the last sim ran with (the SimArgs value,
+  // recorded by simulate()). Selects the best-move path in
+  // sim_results_get_best_move; see the comment there.
+  double utility_w_spread;
   uint64_t num_infer_leaves;
 };
 
@@ -94,6 +104,7 @@ SimmedPlay *simmed_play_create(const MoveList *move_list, int num_plies,
   simmed_play->equity_stat = stat_create(true);
   simmed_play->leftover_stat = stat_create(true);
   simmed_play->win_pct_stat = stat_create(true);
+  simmed_play->utility_stat = stat_create(true);
   simmed_play->num_alloc_plies = num_plies;
   simmed_play->ply_infos = malloc_or_die(sizeof(PlyInfo) * num_plies);
   for (int j = 0; j < num_plies; j++) {
@@ -102,6 +113,7 @@ SimmedPlay *simmed_play_create(const MoveList *move_list, int num_plies,
   simmed_play->similarity_key = 0;
   simmed_play->play_index_by_sort_type = i;
   simmed_play->cutoff = cutoff;
+  simmed_play->utility_w_spread = 0.0;
   simmed_play->prng = prng_create(seed);
   cpthread_mutex_init(&simmed_play->mutex);
   return simmed_play;
@@ -115,6 +127,7 @@ SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
   stat_reset(simmed_play->equity_stat);
   stat_reset(simmed_play->leftover_stat);
   stat_reset(simmed_play->win_pct_stat);
+  stat_reset(simmed_play->utility_stat);
   for (int j = 0; j < simmed_play->num_alloc_plies && j < new_num_plies; j++) {
     ply_info_reset(&simmed_play->ply_infos[j], use_heat_map);
   }
@@ -210,12 +223,14 @@ void sim_results_simmed_plays_reset(SimResults *sim_results,
 // - heat_map
 // - num_alloc_plies
 // - cutoff
+// - utility_w_spread
 void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
                       const int num_plies) {
   move_copy(&dst->move, &src->move);
   stat_copy(dst->equity_stat, src->equity_stat);
   stat_copy(dst->leftover_stat, src->leftover_stat);
   stat_copy(dst->win_pct_stat, src->win_pct_stat);
+  stat_copy(dst->utility_stat, src->utility_stat);
   dst->similarity_key = src->similarity_key;
   dst->play_index_by_sort_type = src->play_index_by_sort_type;
   for (int i = 0; i < num_plies; i++) {
@@ -224,6 +239,49 @@ void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
     memcpy(dst->ply_infos[i].ply_info_counts, src->ply_infos[i].ply_info_counts,
            sizeof(dst->ply_infos[i].ply_info_counts));
   }
+}
+
+// A full, independent copy of src, for a buffered SimResults that must
+// support the same reads (and re-sorts/re-renders) as the original
+// without aliasing any of its memory. The mutex is fresh; the PRNG state is
+// copied so a resumed simulation continues the same random stream.
+static SimmedPlay *simmed_play_duplicate(const SimmedPlay *src) {
+  SimmedPlay *dst = malloc_or_die(sizeof(SimmedPlay));
+  move_copy(&dst->move, &src->move);
+  dst->equity_stat = stat_create(true);
+  stat_copy(dst->equity_stat, src->equity_stat);
+  dst->leftover_stat = stat_create(true);
+  stat_copy(dst->leftover_stat, src->leftover_stat);
+  dst->win_pct_stat = stat_create(true);
+  stat_copy(dst->win_pct_stat, src->win_pct_stat);
+  dst->utility_stat = stat_create(true);
+  stat_copy(dst->utility_stat, src->utility_stat);
+  dst->similarity_key = src->similarity_key;
+  dst->play_index_by_sort_type = src->play_index_by_sort_type;
+  dst->num_alloc_plies = src->num_alloc_plies;
+  dst->ply_infos = malloc_or_die(sizeof(PlyInfo) * src->num_alloc_plies);
+  for (int i = 0; i < src->num_alloc_plies; i++) {
+    dst->ply_infos[i].score_stat = stat_create(true);
+    stat_copy(dst->ply_infos[i].score_stat, src->ply_infos[i].score_stat);
+    dst->ply_infos[i].bingo_stat = stat_create(true);
+    stat_copy(dst->ply_infos[i].bingo_stat, src->ply_infos[i].bingo_stat);
+    if (src->ply_infos[i].heat_map) {
+      dst->ply_infos[i].heat_map = heat_map_create();
+      // HeatMap is a plain value type (fixed-size arrays, no owned
+      // pointers), so a struct copy is a correct full duplicate.
+      *dst->ply_infos[i].heat_map = *src->ply_infos[i].heat_map;
+    } else {
+      dst->ply_infos[i].heat_map = NULL;
+    }
+    memcpy(dst->ply_infos[i].ply_info_counts, src->ply_infos[i].ply_info_counts,
+           sizeof(dst->ply_infos[i].ply_info_counts));
+  }
+  dst->cutoff = src->cutoff;
+  dst->utility_w_spread = src->utility_w_spread;
+  dst->prng = prng_create(0);
+  prng_copy(dst->prng, src->prng);
+  cpthread_mutex_init(&dst->mutex);
+  return dst;
 }
 
 void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_alloc_sps) {
@@ -240,6 +298,7 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_alloc_sps) {
     stat_destroy(simmed_plays[i]->equity_stat);
     stat_destroy(simmed_plays[i]->leftover_stat);
     stat_destroy(simmed_plays[i]->win_pct_stat);
+    stat_destroy(simmed_plays[i]->utility_stat);
     prng_destroy(simmed_plays[i]->prng);
     free(simmed_plays[i]);
   }
@@ -296,89 +355,66 @@ SimResults *sim_results_create(const double cutoff) {
   sim_results->bai_result = bai_result_create();
   sim_results->valid_for_current_game_state = false;
   sim_results->cutoff = cutoff;
+  sim_results->utility_w_spread = 0.0;
   sim_results->num_infer_leaves = 0;
   rack_set_dist_size_and_reset(&sim_results->rack, 0);
   rack_set_dist_size_and_reset(&sim_results->known_opp_rack, 0);
   return sim_results;
 }
 
-// Deep-clone one SimmedPlay. Allocates fresh Stat / PRNG / heat
-// map / mutex; copies every field. `src->ply_infos` is sized
-// `src->num_alloc_plies`; the clone matches.
-static SimmedPlay *simmed_play_duplicate(const SimmedPlay *src) {
-  SimmedPlay *dst = malloc_or_die(sizeof(SimmedPlay));
-  move_copy(&dst->move, &src->move);
-  dst->equity_stat = stat_create(true);
-  stat_copy(dst->equity_stat, src->equity_stat);
-  dst->leftover_stat = stat_create(true);
-  stat_copy(dst->leftover_stat, src->leftover_stat);
-  dst->win_pct_stat = stat_create(true);
-  stat_copy(dst->win_pct_stat, src->win_pct_stat);
-  dst->similarity_key = src->similarity_key;
-  dst->play_index_by_sort_type = src->play_index_by_sort_type;
-  dst->cutoff = src->cutoff;
-  dst->num_alloc_plies = src->num_alloc_plies;
-  dst->ply_infos =
-      malloc_or_die(sizeof(PlyInfo) * (size_t)src->num_alloc_plies);
-  for (int j = 0; j < src->num_alloc_plies; j++) {
-    PlyInfo *dpi = &dst->ply_infos[j];
-    const PlyInfo *spi = &src->ply_infos[j];
-    dpi->score_stat = stat_create(true);
-    stat_copy(dpi->score_stat, spi->score_stat);
-    dpi->bingo_stat = stat_create(true);
-    stat_copy(dpi->bingo_stat, spi->bingo_stat);
-    dpi->heat_map = heat_map_duplicate(spi->heat_map);
-    memcpy(dpi->ply_info_counts, spi->ply_info_counts,
-           sizeof(dpi->ply_info_counts));
-  }
-  // PRNG: allocate with arbitrary seed, then copy state across so
-  // both streams produce the same next output. Resumption picks up
-  // exactly where the source left off.
-  dst->prng = prng_create(0);
-  prng_copy(dst->prng, src->prng);
-  cpthread_mutex_init(&dst->mutex);
-  return dst;
-}
-
-SimResults *sim_results_duplicate(SimResults *src) {
-  if (src == NULL) {
+// A full, independent deep copy: every SimmedPlay (and its stats/heat
+// maps), the BAI result, and the racks are duplicated rather than
+// shared, so the result can be read, re-sorted, and displayed exactly
+// like a SimResults that just finished simulating, without aliasing any
+// memory owned by src. Only the mutexes and each SimmedPlay's PRNG are
+// freshly created rather than copied. Each SimmedPlay's PRNG state is
+// copied so the TUI can resume the analysis from the duplicate. The source
+// is locked while it is read, since it may still be live.
+SimResults *sim_results_duplicate(SimResults *sim_results) {
+  if (!sim_results) {
     return NULL;
   }
-  SimResults *dst = malloc_or_die(sizeof(SimResults));
-  cpthread_mutex_init(&dst->simmed_plays_mutex);
-  cpthread_mutex_init(&dst->display_mutex);
-  // Snapshot the display side so sort-order matches the live
-  // table; lock both arrays while we copy them out.
-  cpthread_mutex_lock(&src->simmed_plays_mutex);
-  cpthread_mutex_lock(&src->display_mutex);
-  dst->num_simmed_plays = src->num_simmed_plays;
-  dst->num_alloc_simmed_plays = src->num_alloc_simmed_plays;
-  dst->num_plies = src->num_plies;
-  atomic_init(&dst->iteration_count, atomic_load(&src->iteration_count));
-  atomic_init(&dst->node_count, atomic_load(&src->node_count));
-  dst->valid_for_current_game_state = src->valid_for_current_game_state;
-  dst->cutoff = src->cutoff;
-  dst->num_infer_leaves = src->num_infer_leaves;
-  dst->rack = src->rack;
-  dst->known_opp_rack = src->known_opp_rack;
-  dst->bai_result = bai_result_duplicate(src->bai_result);
-  if (src->num_alloc_simmed_plays > 0 && src->simmed_plays != NULL) {
-    dst->simmed_plays = malloc_or_die(sizeof(SimmedPlay *) *
-                                      (size_t)src->num_alloc_simmed_plays);
-    dst->display_simmed_plays = malloc_or_die(
-        sizeof(SimmedPlay *) * (size_t)src->num_alloc_simmed_plays);
-    for (int i = 0; i < src->num_alloc_simmed_plays; i++) {
-      dst->simmed_plays[i] = simmed_play_duplicate(src->simmed_plays[i]);
-      dst->display_simmed_plays[i] =
-          simmed_play_duplicate(src->display_simmed_plays[i]);
+  SimResults *new_sim_results = malloc_or_die(sizeof(SimResults));
+  new_sim_results->num_simmed_plays = sim_results->num_simmed_plays;
+  new_sim_results->num_alloc_simmed_plays = sim_results->num_alloc_simmed_plays;
+  new_sim_results->num_plies = sim_results->num_plies;
+  atomic_init(&new_sim_results->node_count,
+              atomic_load(&sim_results->node_count));
+  atomic_init(&new_sim_results->iteration_count,
+              atomic_load(&sim_results->iteration_count));
+  cpthread_mutex_init(&new_sim_results->simmed_plays_mutex);
+  cpthread_mutex_init(&new_sim_results->display_mutex);
+  cpthread_mutex_lock(&sim_results->simmed_plays_mutex);
+  cpthread_mutex_lock(&sim_results->display_mutex);
+  new_sim_results->simmed_plays = NULL;
+  if (sim_results->simmed_plays) {
+    new_sim_results->simmed_plays = malloc_or_die(
+        sizeof(SimmedPlay *) * sim_results->num_alloc_simmed_plays);
+    for (int i = 0; i < sim_results->num_alloc_simmed_plays; i++) {
+      new_sim_results->simmed_plays[i] =
+          simmed_play_duplicate(sim_results->simmed_plays[i]);
     }
-  } else {
-    dst->simmed_plays = NULL;
-    dst->display_simmed_plays = NULL;
   }
-  cpthread_mutex_unlock(&src->display_mutex);
-  cpthread_mutex_unlock(&src->simmed_plays_mutex);
-  return dst;
+  new_sim_results->display_simmed_plays = NULL;
+  if (sim_results->display_simmed_plays) {
+    new_sim_results->display_simmed_plays = malloc_or_die(
+        sizeof(SimmedPlay *) * sim_results->num_alloc_simmed_plays);
+    for (int i = 0; i < sim_results->num_alloc_simmed_plays; i++) {
+      new_sim_results->display_simmed_plays[i] =
+          simmed_play_duplicate(sim_results->display_simmed_plays[i]);
+    }
+  }
+  new_sim_results->rack = sim_results->rack;
+  new_sim_results->known_opp_rack = sim_results->known_opp_rack;
+  new_sim_results->bai_result = bai_result_duplicate(sim_results->bai_result);
+  new_sim_results->valid_for_current_game_state =
+      sim_results->valid_for_current_game_state;
+  new_sim_results->cutoff = sim_results->cutoff;
+  new_sim_results->utility_w_spread = sim_results->utility_w_spread;
+  new_sim_results->num_infer_leaves = sim_results->num_infer_leaves;
+  cpthread_mutex_unlock(&sim_results->display_mutex);
+  cpthread_mutex_unlock(&sim_results->simmed_plays_mutex);
+  return new_sim_results;
 }
 
 const Move *simmed_play_get_move(const SimmedPlay *simmed_play) {
@@ -411,6 +447,14 @@ const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
 
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
+}
+
+const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play) {
+  return simmed_play->utility_stat;
+}
+
+bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play) {
+  return simmed_play->utility_w_spread > 0.0;
 }
 
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play) {
@@ -488,6 +532,18 @@ void sim_results_set_cutoff(SimResults *sim_results, double cutoff) {
   sim_results->cutoff = cutoff;
 }
 
+void sim_results_set_utility_w_spread(SimResults *sim_results,
+                                      double utility_w_spread) {
+  sim_results->utility_w_spread = utility_w_spread;
+  for (int i = 0; i < sim_results->num_simmed_plays; i++) {
+    sim_results->simmed_plays[i]->utility_w_spread = utility_w_spread;
+  }
+}
+
+double sim_results_get_utility_w_spread(const SimResults *sim_results) {
+  return sim_results->utility_w_spread;
+}
+
 uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results) {
   return sim_results->num_infer_leaves;
 }
@@ -544,6 +600,12 @@ void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
 
 int round_to_nearest_int(double a) {
   return (int)(a + 0.5 - (a < 0)); // truncated to 55
+}
+
+void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility) {
+  cpthread_mutex_lock(&simmed_play->mutex);
+  stat_push(simmed_play->utility_stat, utility, 1);
+  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
@@ -603,9 +665,46 @@ void sim_results_update_display_simmed_play(const SimResults *sim_results,
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
+// When simming stuck tile endgames, a pass will sim equivalently to the
+// best greedy sequence because the sim assumes that after passing the
+// greedy sequence will begin, so a pass now versus later makes no
+// difference. However, the other player will also do this and pass as well.
+// The simmed endgame does not take into account the six pass rule, and so
+// the game will end in a six pass. To avoid this, if a pass is tied with
+// the best play, prefer to not pass.
+static int compare_simmed_plays_pass_tiebreak(const SimmedPlay *play_a,
+                                              const SimmedPlay *play_b) {
+  const bool play_a_is_pass =
+      move_get_type(simmed_play_get_move(play_a)) == GAME_EVENT_PASS;
+  const bool play_b_is_pass =
+      move_get_type(simmed_play_get_move(play_b)) == GAME_EVENT_PASS;
+  if (!play_a_is_pass && play_b_is_pass) {
+    return -1;
+  }
+  if (play_a_is_pass && !play_b_is_pass) {
+    return 1;
+  }
+  return 0;
+}
+
 int compare_simmed_plays(const void *a, const void *b) {
   const SimmedPlay *play_a = *(SimmedPlay *const *)a;
   const SimmedPlay *play_b = *(SimmedPlay *const *)b;
+
+  // With a nonzero spread weight, BAI selects the arm with the highest mean
+  // blended utility (BU); rank the display the same way so the sort order
+  // matches sim_results_get_best_move's choice.
+  if (play_a->utility_w_spread > 0.0) {
+    const double utility_mean_a = stat_get_mean(play_a->utility_stat);
+    const double utility_mean_b = stat_get_mean(play_b->utility_stat);
+    if (utility_mean_a > utility_mean_b) {
+      return -1;
+    }
+    if (utility_mean_a < utility_mean_b) {
+      return 1;
+    }
+    return compare_simmed_plays_pass_tiebreak(play_a, play_b);
+  }
 
   const double win_pct_mean_a = stat_get_mean(play_a->win_pct_stat);
   const double win_pct_mean_b = stat_get_mean(play_b->win_pct_stat);
@@ -621,24 +720,7 @@ int compare_simmed_plays(const void *a, const void *b) {
     if (equity_mean_a < equity_mean_b) {
       return 1;
     }
-    // When simming stuck tile endgames, a pass will sim equivalently to the
-    // best greedy sequence because the sim assumes that after passing the
-    // greedy sequence will begin, so a pass now versus later makes no
-    // difference. However, the other player will also do this and pass as well.
-    // The simmed endgame does not take into account the six pass rule, and so
-    // the game will end in a six pass. To avoid this, if a pass is tied with
-    // the best play, prefer to not pass.
-    const bool play_a_is_pass =
-        move_get_type(simmed_play_get_move(play_a)) == GAME_EVENT_PASS;
-    const game_event_t play_b_is_pass =
-        move_get_type(simmed_play_get_move(play_b)) == GAME_EVENT_PASS;
-    if (!play_a_is_pass && play_b_is_pass) {
-      return -1;
-    }
-    if (play_a_is_pass && !play_b_is_pass) {
-      return 1;
-    }
-    return 0;
+    return compare_simmed_plays_pass_tiebreak(play_a, play_b);
   }
 
   if (win_pct_mean_a > win_pct_mean_b) {
@@ -664,6 +746,8 @@ bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results) {
   for (int i = 0; i < number_of_simmed_plays; i++) {
     sim_results_update_display_simmed_play(sim_results, i);
     sim_results->display_simmed_plays[i]->cutoff = sim_results->cutoff;
+    sim_results->display_simmed_plays[i]->utility_w_spread =
+        sim_results->utility_w_spread;
   }
 
   qsort(sim_results->display_simmed_plays, number_of_simmed_plays,
@@ -708,6 +792,14 @@ bool sim_results_plays_are_similar(const SimResults *sim_results,
   return sim_results_simmed_plays_are_similar_internal(sim_results, sp1, sp2);
 }
 
+// Index of the best play under compare_simmed_plays, which is also the order
+// the display is sorted in. With a nonzero spread weight that comparator ranks
+// by mean blended utility -- the same quantity BAI maximizes when it picks its
+// best arm -- so there is no need to consult the BAI result separately. With a
+// ZERO spread weight the sample utility is the raw 0/0.5/1 win outcome, which
+// loses its gradient whenever win% saturates (decided games: every arm's mean
+// is ~0 or ~1) or ties exactly; the comparator's win%-within-cutoff tiebreak on
+// mean equity recovers spread at no win% cost.
 // Not thread safe, assumes the sim is finished.
 int sim_results_get_best_move_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
@@ -729,18 +821,29 @@ int sim_results_get_best_move_index(const SimResults *sim_results) {
 
 // Not thread safe, assumes the sim is finished.
 const Move *sim_results_get_best_move(const SimResults *sim_results) {
-  // Prefer BAI's chosen arm: that's the one with highest mean *utility*
-  // (which the simmer blends from wpct + sigmoid(spread) when -uspread is
-  // non-zero). Falling through to sim_results_get_best_move_index would
-  // re-rank by raw win_pct_stat, ignoring the utility blend entirely.
-  int best_play_idx =
-      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
-  if (best_play_idx < 0) {
-    best_play_idx = sim_results_get_best_move_index(sim_results);
-  }
+  const int best_play_idx = sim_results_get_best_move_index(sim_results);
   if (best_play_idx < 0) {
     return NULL;
   }
   return simmed_play_get_move(
       sim_results_get_simmed_play(sim_results, best_play_idx));
+}
+
+// Mean utility (win%+spread blend in [0, 1]) of the sim's best play, using the
+// same best-play selection as sim_results_get_best_move. Not thread safe,
+// assumes the sim is finished. Returns 0 if there are no plays.
+double sim_results_get_best_move_utility(const SimResults *sim_results) {
+  const int best_play_idx = sim_results_get_best_move_index(sim_results);
+  if (best_play_idx < 0) {
+    return 0.0;
+  }
+  const SimmedPlay *best_play =
+      sim_results_get_simmed_play(sim_results, best_play_idx);
+  // utility_stat is only recorded on the utility path (the hot pure-win% path
+  // skips it). With a zero spread weight the utility IS the win% -- read it
+  // from win_pct_stat rather than the empty utility_stat, which would report 0.
+  if (sim_results->utility_w_spread == 0.0) {
+    return stat_get_mean(simmed_play_get_win_pct_stat(best_play));
+  }
+  return stat_get_mean(simmed_play_get_utility_stat(best_play));
 }

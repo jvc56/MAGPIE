@@ -2,6 +2,7 @@
 
 #include "../def/cpthread_defs.h"
 #include <assert.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
@@ -575,8 +576,40 @@ bool path_is_directory(const char *path) {
   return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
 }
 
+enum {
+  FILENAME_SORT_DIGIT_BUFFER_SIZE = 256,
+};
+
+// Strips every non-digit character from filename and parses the remaining
+// digits as a single base-10 number (0 if there are none). Digits beyond
+// FILENAME_SORT_DIGIT_BUFFER_SIZE - 1 are dropped.
+static unsigned long long extract_digits_as_number(const char *filename) {
+  char digits[FILENAME_SORT_DIGIT_BUFFER_SIZE];
+  size_t digit_count = 0;
+  for (const char *ch = filename;
+       *ch != '\0' && digit_count < sizeof(digits) - 1; ch++) {
+    if (isdigit((unsigned char)*ch)) {
+      digits[digit_count++] = *ch;
+    }
+  }
+  digits[digit_count] = '\0';
+  if (digit_count == 0) {
+    return 0;
+  }
+  return strtoull(digits, NULL, 10);
+}
+
+// Sorts ascending by the number formed from each filename's digit
+// characters (non-digits removed); ties fall back to alphabetical order.
 static int compare_filenames_for_sort(const void *a, const void *b) {
-  return strcmp(*(const char *const *)a, *(const char *const *)b);
+  const char *name_a = *(const char *const *)a;
+  const char *name_b = *(const char *const *)b;
+  const unsigned long long num_a = extract_digits_as_number(name_a);
+  const unsigned long long num_b = extract_digits_as_number(name_b);
+  if (num_a != num_b) {
+    return (num_a < num_b) ? -1 : 1;
+  }
+  return strcmp(name_a, name_b);
 }
 
 char **get_files_in_directory(const char *dir_path, const char *suffix,

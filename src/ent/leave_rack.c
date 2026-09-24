@@ -84,6 +84,25 @@ LeaveRackList *leave_rack_list_create(int capacity) {
   return lrl;
 }
 
+LeaveRackList *leave_rack_list_duplicate(const LeaveRackList *lrl) {
+  if (!lrl) {
+    return NULL;
+  }
+  LeaveRackList *new_lrl = malloc_or_die(sizeof(LeaveRackList));
+  new_lrl->count = lrl->count;
+  new_lrl->capacity = lrl->capacity;
+  new_lrl->max_all_time_capacity = lrl->max_all_time_capacity;
+  new_lrl->spare_leave_rack = leave_rack_create();
+  *new_lrl->spare_leave_rack = *lrl->spare_leave_rack;
+  new_lrl->leave_racks =
+      malloc_or_die(leave_rack_get_alloc_size(lrl->max_all_time_capacity));
+  for (int i = 0; i < lrl->max_all_time_capacity + 1; i++) {
+    new_lrl->leave_racks[i] = leave_rack_create();
+    *new_lrl->leave_racks[i] = *lrl->leave_racks[i];
+  }
+  return new_lrl;
+}
+
 void leave_rack_list_destroy(LeaveRackList *lrl) {
   if (!lrl) {
     return;

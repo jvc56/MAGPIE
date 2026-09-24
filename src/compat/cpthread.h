@@ -107,7 +107,7 @@ static inline void cpthread_create_with_stack(pthread_t *newthread,
   }
   // attr is a value type with no embedded allocations on the platforms we
   // target; destroying it releases any attr-internal state and is required by
-  // POSIX (this is an attr object, not a mutex/cond — see CLAUDE.md).
+  // POSIX (this is an attr object, not a mutex/cond — see AGENTS.md).
   pthread_attr_destroy(&attr);
 }
 

@@ -15,7 +15,10 @@
 // Unified pre-endgame (PEG) solver
 //
 // Solves positions with PEG_MIN_BAG..PEG_MAX_BAG tiles in the bag; larger
-// positions are midgame and are rejected.
+// positions are midgame and are rejected, unless every candidate move is
+// guaranteed to empty the bag (see peg_solve's bag-emptying-guarantee
+// exception, reachable only via a caller-supplied only_moves set), in which
+// case a bag up to RACK_SIZE is also accepted.
 //
 // The solver ranks candidate moves by their win% (and spread) over every way
 // the bag could be drawn, in a cascade of progressively-deeper stages:
@@ -81,13 +84,17 @@ typedef enum {
 typedef void (*PegOnStageStart)(int stage_idx, int k_cands, int inner_d,
                                 int emptier_plies, void *user_data);
 
-// Fired when a candidate finishes. reordered is true when the candidate slotted
-// in above the bottom of the live ranking (so the displayed order changed and
-// the whole list should be redrawn); false when it sorted to the bottom (the
-// new worst), so a streaming view can just append its one row.
+// Fired when a candidate finishes. completed_ns is its absolute monotonic-clock
+// completion timestamp (ctimer_monotonic_ns-compatible), including in the
+// scenario-parallel path where callbacks are delivered after the stage's work
+// barrier. reordered is true when the candidate slotted in above the bottom of
+// the live ranking (so the displayed order changed and the whole list should be
+// redrawn); false when it sorted to the bottom (the new worst), so a streaming
+// view can just append its one row.
 typedef void (*PegOnCandDone)(int stage_idx, int cand_rank, const Move *cand,
                               double win_pct, double mean_spread, int scen_done,
-                              bool reordered, void *user_data);
+                              int64_t completed_ns, bool reordered,
+                              void *user_data);
 
 typedef void (*PegOnScenarioDone)(int stage_idx, int cand_rank,
                                   int scenario_idx, int32_t mover_total,
@@ -100,7 +107,11 @@ typedef struct PegPoll PegPoll;
 
 typedef struct PegArgs {
   // Required: PEG position to analyze. Must have bag size in [PEG_MIN_BAG,
-  // PEG_MAX_BAG]. Caller retains ownership.
+  // PEG_MAX_BAG], except bag sizes up to RACK_SIZE are also accepted when
+  // only_moves is non-empty and every move in it is guaranteed to empty the
+  // bag (see peg_move_empties_bag); this exception can only be satisfied via
+  // only_moves; the full root move list always includes a pass, which never
+  // empties the bag. Caller retains ownership.
   const Game *game;
 
   // Required: thread control for movegen / endgame coordination.
@@ -120,6 +131,14 @@ typedef struct PegArgs {
   // Lets the caller cap depth below the full cascade. <= 0 is treated as "run
   // all stages".
   int max_stage;
+
+  // Run only the greedy seed (stage 0): rank the full candidate field by the
+  // greedy-playout win% and skip the halving stages' exact endgame refinement.
+  // A fast, bounded, deterministic evaluation -- full scenario enumeration and
+  // a deterministic playout, with no open-ended deep endgame solves -- at the
+  // cost of the endgame-exact fidelity the halving stages add. Overrides
+  // max_stage and stage_top_k. Default false.
+  bool greedy_seed_only;
 
   // Optional per-stage candidate counts for the halving stages (stage 1
   // onward), overriding the built-in default schedule. NULL = use the default.
@@ -234,6 +253,60 @@ typedef struct PegArgs {
   // concurrently via peg_poll_read. The caller owns the PegPoll.
   PegPoll *poll;
 } PegArgs;
+
+// Fills every PegArgs field from an explicit argument, so that adding a field
+// to the struct breaks each call site until it is considered. That is the whole
+// point of the parameter count: prefer this to assigning the struct directly,
+// and add a parameter here rather than a default when a field is added.
+// (sim_args_fill deliberately does not go this far; see the note there.) The
+// tests build PegArgs literals instead, opting out of that check knowingly.
+static inline void
+peg_args_fill(const Game *game, ThreadControl *thread_control,
+              const int num_threads, const double time_budget_seconds,
+              const int max_stage, const bool greedy_seed_only,
+              const int *stage_top_k, const int num_stages,
+              const int inner_top_k, const PegOppModel opp_model,
+              const int scenario_stride, const bool nested_enabled,
+              const int nested_cand_cap, const int *nested_cand_caps,
+              const int nested_n_cand_caps, const int nested_stride,
+              const int nested_emptier_ply_cap, const int nested_max_depth,
+              const MachineLetter *eval_bag_order, const int eval_bag_order_len,
+              const Move *const *only_moves, const int n_only_moves,
+              const Move *const *protect_moves, const int n_protect_moves,
+              const bool include_per_scenario, PegOnStageStart on_stage_start,
+              PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
+              void *user_data, PegPoll *poll, PegArgs *peg_args) {
+  peg_args->game = game;
+  peg_args->thread_control = thread_control;
+  peg_args->num_threads = num_threads;
+  peg_args->time_budget_seconds = time_budget_seconds;
+  peg_args->max_stage = max_stage;
+  peg_args->greedy_seed_only = greedy_seed_only;
+  peg_args->stage_top_k = stage_top_k;
+  peg_args->num_stages = num_stages;
+  peg_args->inner_top_k = inner_top_k;
+  peg_args->opp_model = opp_model;
+  peg_args->scenario_stride = scenario_stride;
+  peg_args->nested_enabled = nested_enabled;
+  peg_args->nested_cand_cap = nested_cand_cap;
+  peg_args->nested_cand_caps = nested_cand_caps;
+  peg_args->nested_n_cand_caps = nested_n_cand_caps;
+  peg_args->nested_stride = nested_stride;
+  peg_args->nested_emptier_ply_cap = nested_emptier_ply_cap;
+  peg_args->nested_max_depth = nested_max_depth;
+  peg_args->eval_bag_order = eval_bag_order;
+  peg_args->eval_bag_order_len = eval_bag_order_len;
+  peg_args->only_moves = only_moves;
+  peg_args->n_only_moves = n_only_moves;
+  peg_args->protect_moves = protect_moves;
+  peg_args->n_protect_moves = n_protect_moves;
+  peg_args->include_per_scenario = include_per_scenario;
+  peg_args->on_stage_start = on_stage_start;
+  peg_args->on_cand_done = on_cand_done;
+  peg_args->on_scenario_done = on_scenario_done;
+  peg_args->user_data = user_data;
+  peg_args->poll = poll;
+}
 
 // ----- Stage progress snapshot ------------------------------------------
 
@@ -425,6 +498,22 @@ void peg_poll_set_outcomes(PegPoll *poll, const PegCandOutcomes *src, int n);
 void peg_poll_copy_outcomes(PegPoll *poll, PegCandOutcomes **out, int *n_out);
 // Free an array of PegCandOutcomes (each rows[] then the array).
 void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n);
+
+// The effective PEG bag size for `game`: the real remaining bag tiles plus
+// any opponent tiles unknown to the mover (see peg.c for the derivation).
+// Exposed so a caller that pre-filters candidate moves (e.g. the pegonly
+// "empty" positional value) can match exactly the bag size peg_solve itself
+// will compute, rather than the raw (unadjusted) bag_get_letters count.
+int peg_compute_bag_size(const Game *game);
+
+// True when playing `move` is guaranteed to empty a bag of `bag_size` tiles:
+// a tile placement that plays at least bag_size tiles draws the whole bag on
+// replenishment. A pass never touches the bag, and an exchange draws
+// replacements but then returns the exchanged tiles to the bag, so neither
+// ever empties it regardless of tiles played. Exposed so a caller filtering
+// candidate moves (e.g. the pegonly "empty" positional value) uses the same
+// predicate peg_solve itself checks.
+bool peg_move_empties_bag(const Move *move, int bag_size);
 
 // ----- Entry points -----------------------------------------------------
 

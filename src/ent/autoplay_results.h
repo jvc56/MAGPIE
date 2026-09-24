@@ -18,6 +18,13 @@ typedef enum {
 
 typedef struct AutoplayResults AutoplayResults;
 
+typedef struct AutoplayGameTiming {
+  bool active[2];
+  double seconds_used[2];
+  double overtime_seconds[2];
+  int penalty_points[2];
+} AutoplayGameTiming;
+
 AutoplayResults *autoplay_results_create(void);
 AutoplayResults *
 autoplay_results_create_empty_copy(const AutoplayResults *orig);
@@ -32,6 +39,10 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);
+void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
+                                           const Game *game, int turns,
+                                           bool divergent, uint64_t seed,
+                                           const AutoplayGameTiming *timing);
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary);
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
@@ -54,6 +65,10 @@ uint64_t autoplay_results_build_option(autoplay_recorder_t recorder_type);
 uint64_t autoplay_results_get_options(const AutoplayResults *autoplay_results);
 void autoplay_results_set_players_data(AutoplayResults *autoplay_results,
                                        const PlayersData *players_data);
+void autoplay_results_set_play_chooser_config(
+    AutoplayResults *autoplay_results, const bool active[2],
+    const double time_control_seconds[2], int overtime_penalty_points,
+    double overtime_period_seconds);
 void autoplay_results_set_status_data(AutoplayResults *autoplay_results,
                                       AutoplayResults **results_list,
                                       int results_list_size, bool finished,

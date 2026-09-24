@@ -1,3 +1,5 @@
+#include "wmp_maker_test.h"
+
 #include "../src/def/board_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"

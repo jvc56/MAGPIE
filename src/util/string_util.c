@@ -3,6 +3,7 @@
 #include "io_util.h"
 #include <assert.h>
 #include <ctype.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -860,6 +861,43 @@ double string_to_double(const char *str, ErrorStack *error_stack) {
                              str_copy));
     result = 0;
   }
+  return result;
+}
+
+int string_to_int_prefix(const char *str, const char **end,
+                         ErrorStack *error_stack) {
+  const char *str_copy = str;
+  str = str + strspn(str, STRING_CONV_ACCEPT_CHARS);
+  errno = 0;
+  char *endptr;
+  long result = strtol(str, &endptr, 10);
+  if (endptr == str || errno == ERANGE) {
+    error_stack_push(error_stack, ERROR_STATUS_STRING_TO_INT_CONVERSION_FAILED,
+                     get_formatted_string(
+                         "string to int conversion failed for '%s'", str_copy));
+    result = 0;
+    endptr = (char *)str;
+  }
+  *end = endptr;
+  return (int)result;
+}
+
+double string_to_double_prefix(const char *str, const char **end,
+                               ErrorStack *error_stack) {
+  const char *str_copy = str;
+  const char *trimmed_str = str + strspn(str, STRING_CONV_ACCEPT_CHARS);
+  errno = 0;
+  char *endptr;
+  double result = strtod(trimmed_str, &endptr);
+  if (endptr == trimmed_str || errno == ERANGE) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_STRING_TO_DOUBLE_CONVERSION_FAILED,
+        get_formatted_string("string to decimal conversion failed for '%s'",
+                             str_copy));
+    result = 0;
+    endptr = (char *)trimmed_str;
+  }
+  *end = endptr;
   return result;
 }
 

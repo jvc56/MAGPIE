@@ -9,7 +9,7 @@ fi
 echo "$CLANG_TIDY_EXEC version:"
 $CLANG_TIDY_EXEC --version
 
-SEARCH_DIRECTORIES="src/ test/ cmd/"
+SEARCH_DIRECTORIES="src/ test/ cmd/ tools/"
 EXCLUDED_FILES="linenoise.c"
 CLANG_TIDY_CHECKS="*,
                   -readability-magic-numbers,
