@@ -192,6 +192,33 @@ static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
   return num_mls;
 }
 
+// Like rack_set_to_string, for a rack that cannot hold a designated blank --
+// undrawn tiles, as a rack equity row or a forced rack names them. A
+// lower-case letter is a designated blank to ld_str_to_mls, whose machine
+// letter lies past the end of the rack's counts: rack_set_to_string would
+// count it there, outside the rack. Here it makes the whole string -1, with
+// the rack left empty, as any other malformed string is.
+static inline int rack_set_to_string_undesignated(const LetterDistribution *ld,
+                                                  Rack *rack,
+                                                  const char *rack_string) {
+  rack->dist_size = ld_get_size(ld);
+  rack_reset(rack);
+  MachineLetter mls[MAX_RACK_SIZE];
+  char *normalized_rack_string = rack_string_alias_dot_to_blank(rack_string);
+  const int num_mls =
+      ld_str_to_mls(ld, normalized_rack_string, false, mls, MAX_RACK_SIZE);
+  free(normalized_rack_string);
+  for (int i = 0; i < num_mls; i++) {
+    if (mls[i] >= ld_get_size(ld)) {
+      return -1;
+    }
+  }
+  for (int i = 0; i < num_mls; i++) {
+    rack_add_letter(rack, mls[i]);
+  }
+  return num_mls;
+}
+
 static inline int rack_set_to_string_unblanked(const LetterDistribution *ld,
                                                Rack *rack,
                                                const char *rack_string) {

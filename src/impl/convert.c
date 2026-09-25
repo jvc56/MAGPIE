@@ -132,7 +132,7 @@ static void convert_rack_equity_to_klv(const LetterDistribution *ld,
                                rows + 1, csv_filename));
       break;
     }
-    rack_set_to_string(ld, &rack, rack_str);
+    rack_set_to_string_undesignated(ld, &rack, rack_str);
     const uint64_t count = string_to_uint64(count_str, error_stack);
     const double equity_sum =
         error_stack_is_empty(error_stack)
