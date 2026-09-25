@@ -79,7 +79,7 @@ static void analysis_fit_move(char *move, int max_width) {
 // Compacts every "(exch ABCD)" to "-ABCD" in place: the verbose form
 // takes too much horizontal room and the short form is unambiguous
 // next to placement moves like "7F JUTE". Returns the widest rendered
-// move across all `count` rows afterwards.
+// move among the valid rows afterwards (invalid rows aren't drawn).
 static int analysis_compact_exchanges(AnalysisRow *rows, int count) {
   int max_width = 0;
   for (int i = 0; i < count; i++) {
@@ -103,7 +103,7 @@ static int analysis_compact_exchanges(AnalysisRow *rows, int count) {
       }
     }
     const int move_width = analysis_move_width(s);
-    if (move_width > max_width) {
+    if (rows[i].valid && move_width > max_width) {
       max_width = move_width;
     }
   }
