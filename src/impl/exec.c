@@ -308,10 +308,6 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
     }
     if (error_stack_is_empty(error_stack)) {
       save_config_settings(config, error_stack);
-    } else {
-      // The skip belongs to this command's save: a command that failed has
-      // none, and left set it would swallow the next command's.
-      config_clear_skip_next_settings_save(config);
     }
     error_stack_print_and_reset(error_stack);
   }

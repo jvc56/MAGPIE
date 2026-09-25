@@ -1347,115 +1347,46 @@ static void test_the_claim_body_matches_the_claim_fixture(void) {
   (void)remove(path);
 }
 
-// contribute puts the settings file back byte for byte, and the REPL's save
-// after it is skipped once. Rebuilt from the session instead, a replay that
-// failed -- a snapshot taken before any lexicon was loaded still says
-// `-w1 true`, replayed over a task's lexicon whose wordmap the worker lacks --
-// saved the task's lexicon and `-w1 true`, and every later start of magpie
-// failed loading that wordmap before running anything.
-static void test_contribute_puts_the_settings_file_back(void) {
+// contribute's tasks run in a config of their own. The caller's session and
+// the settings file the REPL saves from it stay as they were: a task's
+// lexicon and derived-file flags -- a wordmap or word info table this machine
+// lacks -- never reach them, so there is nothing to snapshot or undo. (Undone
+// by replaying a snapshot, a replay that failed part way left the session
+// unable to load and, one save later, the task's lexicon in settings.txt.)
+static void test_contribute_runs_in_a_config_of_its_own(void) {
   Config *config = config_create_default_test();
-  load_and_exec_config_or_die(config, "set -savesettings true");
-  const char *settings = config_get_settings_filename(config);
+  load_and_exec_config_or_die(config, "set -lex CSW21 -numplays 7");
+  StringBuilder *before = string_builder_create();
+  config_add_settings_to_string_builder(config, before);
   ErrorStack *error_stack = error_stack_create();
 
-  char *snapshot = config_contribute_snapshot_settings(config, error_stack);
+  Config *task_config = config_create_for_contribute(config, error_stack);
   assert(error_stack_is_empty(error_stack));
-  assert(snapshot);
+  assert(task_config);
+  assert(config_get_thread_control(task_config) ==
+         config_get_thread_control(config));
+  assert(!config_get_save_settings(task_config));
+  // What a task does: another lexicon, with every derived file asked for
+  // and none of them on this machine for it.
+  load_and_exec_config_or_die(
+      task_config, "set -lex OSPS49 -wmp false -rit false -numplays 3");
+  config_destroy_for_contribute(task_config);
 
-  // What a task does to the session.
-  load_and_exec_config_or_die(config, "set -lex CSW21 -wmp true -numplays 3");
+  StringBuilder *after = string_builder_create();
+  config_add_settings_to_string_builder(config, after);
+  assert(
+      strings_equal(string_builder_peek(before), string_builder_peek(after)));
+  // And the caller's session still loads.
+  load_and_exec_config_or_die(config, "set -numplays 8");
 
-  config_contribute_restore_settings(config, snapshot, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  char *restored = get_string_from_file_or_die(settings);
-  assert(strings_equal(restored, snapshot));
-
-  // The REPL saves after every command; after contribute, that once is
-  // skipped...
-  save_config_settings(config, error_stack);
-  char *after_save = get_string_from_file_or_die(settings);
-  assert(strings_equal(after_save, snapshot));
-  // ...and only that once.
-  delete_file(settings);
-  save_config_settings(config, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  char *next = get_string_from_file_or_die(settings);
-  assert(next[0] != '\0');
-
-  // A command that failed is not saved, and drops the skip with it: left
-  // set, it swallowed the next command's save.
-  config_contribute_restore_settings(config, snapshot, error_stack);
-  config_clear_skip_next_settings_save(config);
-  delete_file(settings);
-  save_config_settings(config, error_stack);
-  char *after_failure = get_string_from_file_or_die(settings);
-  assert(after_failure[0] != '\0');
-  free(after_failure);
-
-  delete_file(settings);
-  free(next);
-  free(after_save);
-  free(restored);
-  free(snapshot);
-  error_stack_destroy(error_stack);
-  config_destroy(config);
-}
-
-// With settings not being saved there is no snapshot, and the file on disk --
-// an older session's -- is not replayed: replayed, it turned saving back on,
-// and the REPL then saved the task's lexicon over it after all.
-static void test_contribute_leaves_an_unsaved_session_unsaved(void) {
-  Config *config = config_create_default_test();
-  const char *settings = config_get_settings_filename(config);
-  const char *older = "setoptions -savesettings true -numplays 9\n";
-  ErrorStack *error_stack = error_stack_create();
-  write_string_to_file(settings, "w", older, error_stack);
-  assert(error_stack_is_empty(error_stack));
-
-  char *snapshot = config_contribute_snapshot_settings(config, error_stack);
-  assert(snapshot == NULL);
-  config_contribute_restore_settings(config, snapshot, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(!config_get_save_settings(config));
-  save_config_settings(config, error_stack);
-  char *after = get_string_from_file_or_die(settings);
-  assert(strings_equal(after, older));
-
-  delete_file(settings);
-  free(after);
-  error_stack_destroy(error_stack);
-  config_destroy(config);
-}
-
-// A snapshot that cannot be replayed in full -- one taken before any lexicon
-// was loaded still says `-w1 true`, replayed over a task's lexicon whose
-// wordmap this machine lacks -- leaves a session that still loads. It held the
-// lexicon with the flag on, and every later command failed loading the
-// wordmap.
-static void test_a_session_loads_after_contribute(void) {
-  Config *config = config_create_default_test();
-  load_and_exec_config_or_die(config, "set -savesettings true");
-  const char *settings = config_get_settings_filename(config);
-  ErrorStack *error_stack = error_stack_create();
-
-  // The task's lexicon, which has no wordmap here, used without one.
-  load_and_exec_config_or_die(config, "set -lex OSPS49 -wmp false -rit false");
-  config_contribute_restore_settings(config, "setoptions -w1 true -w2 true\n",
-                                     error_stack);
-  assert(error_stack_is_empty(error_stack));
-  // Would die loading OSPS49.wmp if the flag had been left on.
-  load_and_exec_config_or_die(config, "set -numplays 7");
-
-  delete_file(settings);
+  string_builder_destroy(after);
+  string_builder_destroy(before);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
 
 void test_contribute(void) {
-  test_contribute_puts_the_settings_file_back();
-  test_contribute_leaves_an_unsaved_session_unsaved();
-  test_a_session_loads_after_contribute();
+  test_contribute_runs_in_a_config_of_its_own();
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();
   test_lexical_flags_are_set_before_the_load();

@@ -200,16 +200,11 @@ void config_add_settings_to_string_builder(const Config *config,
 // (settings.txt by default), the same file the REPL loop keeps in sync after
 // every command. No-op if config_get_save_settings(config) is false.
 void save_config_settings(Config *config, ErrorStack *error_stack);
-// contribute's settings-file bookkeeping, exposed for its tests: the file's
-// bytes as the run began (NULL when settings are not saved), and putting them
-// back -- the file byte for byte, the session as best it can be, and the
-// REPL's next save skipped.
-char *config_contribute_snapshot_settings(Config *config,
-                                          ErrorStack *error_stack);
-void config_contribute_restore_settings(Config *config, const char *snapshot,
-                                        ErrorStack *error_stack);
-// Drops a pending skip of the REPL's after-command save (see above), for a
-// command that ended in an error and so is not saved.
-void config_clear_skip_next_settings_save(Config *config);
+// The Config contribute's tasks run in, sharing the caller's thread control
+// and never saving settings, so the caller's session and settings file are
+// left as they were; and its destruction, which leaves the thread control to
+// the caller.
+Config *config_create_for_contribute(Config *parent, ErrorStack *error_stack);
+void config_destroy_for_contribute(Config *task_config);
 
 #endif

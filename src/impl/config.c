@@ -415,10 +415,6 @@ struct Config {
   bool show_game_with_moves;
   bool show_prompt;
   bool save_settings;
-  // Set when a command has put the settings file back exactly as it was
-  // (contribute does): the save the REPL makes after every command would
-  // otherwise write this session's state over it. Consumed by that save.
-  bool skip_next_settings_save;
   bool use_mmap_for_rit;
   // The names to load each player's rack info table under, in place of that
   // player's lexicon name. Set only on the contribute path; NULL everywhere
@@ -9157,110 +9153,47 @@ static char *config_contribute_leave_gen(Config *config,
   return result;
 }
 
-// Re-applies a settings file saved by save_config_settings --
-// always exactly one "setoptions ..." line -- without going through
-// execute_command_sync/load_command_sync. Those manage ThreadControl's
-// STARTED/FINISHED state machine, which assumes it is only ever driven from
-// the top-level REPL loop; calling them here, reentrantly, while contribute
-// is itself the async command currently occupying that state machine, trips
-// load_command_sync's own assertion that the state machine is idle before
-// a command starts. config_load_command has no such assumption -- it is the
-// pure parse-and-apply half config_execute_command's exec_func normally
-// follows, and "setoptions"'s own exec_func is a no-op (config_load_command
-// alone already applied everything), so skipping straight to it is exactly
-// as complete as the normal path for this one line shape.
-static void config_replay_settings(Config *config, const char *settings,
-                                   ErrorStack *error_stack) {
-  StringSplitter *lines = split_string_by_newline(settings, true);
-  const int num_lines = string_splitter_get_number_of_items(lines);
-  for (int i = 0; i < num_lines; i++) {
-    config_load_command(config, string_splitter_get_item(lines, i),
-                        error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      break;
-    }
-  }
-  string_splitter_destroy(lines);
-}
-
-char *config_contribute_snapshot_settings(Config *config,
-                                          ErrorStack *error_stack) {
-  if (!config_get_save_settings(config)) {
+// The Config contribute's tasks run in: not the caller's. Every task mutates
+// its config (lexicon, per-player settings, derived-file flags, capture
+// options), and run in the caller's own, the REPL's save after the command
+// wrote the last task's lexicon and flags into settings.txt -- or, restored
+// from a snapshot, a replay that failed part way left a session holding a
+// task's lexicon with a wordmap or word info table this machine lacks, and
+// every later command failed. A config of its own leaves the caller's session
+// and its settings file exactly as they were, with nothing to undo. It shares
+// the caller's thread control, so `stop` and the output reach it; it never
+// saves settings.
+Config *config_create_for_contribute(Config *parent, ErrorStack *error_stack) {
+  const ConfigArgs args = {.data_paths = parent->data_paths,
+                           .settings_filename = parent->settings_filename,
+                           .use_wmp = false};
+  Config *task_config = config_create(&args, error_stack);
+  if (!task_config) {
     return NULL;
   }
-  save_config_settings(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  char *snapshot =
-      get_string_from_file(config_get_settings_filename(config), error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    free(snapshot);
-    return NULL;
-  }
-  return snapshot;
+  task_config->save_settings = false;
+  thread_control_destroy(task_config->thread_control);
+  task_config->thread_control = parent->thread_control;
+  return task_config;
 }
 
-void config_clear_skip_next_settings_save(Config *config) {
-  config->skip_next_settings_save = false;
-}
-
-void config_contribute_restore_settings(Config *config, const char *snapshot,
-                                        ErrorStack *error_stack) {
-  // The snapshot, not the file, is replayed into this session: with settings
-  // not being saved there is no snapshot, and the file on disk -- an older
-  // session's -- turned saving back on when replayed, so the REPL then saved
-  // the task's lexicon over it after all.
-  bool loads = false;
-  if (snapshot) {
-    config_replay_settings(config, snapshot, error_stack);
-    loads = error_stack_is_empty(error_stack);
-    error_stack_reset(error_stack);
-  }
-  if (!loads) {
-    // No snapshot, or one that could not be replayed in full: a snapshot
-    // taken before any lexicon was loaded names none but says `-w1 true`,
-    // and replayed over a task's lexicon whose wordmap the worker lacks it
-    // failed part way. The session then held that lexicon with the flag on,
-    // and every later command -- another contribute included -- failed
-    // loading the wordmap. Derived files off, the session loads again; the
-    // file is not saved from it (the REPL's save is skipped below, or
-    // settings are not being saved at all).
-    config_load_command(
-        config, "setoptions -w1 false -w2 false -rit1 false -rit2 false",
-        error_stack);
-    error_stack_reset(error_stack);
-  }
-  if (!snapshot) {
+void config_destroy_for_contribute(Config *task_config) {
+  if (!task_config) {
     return;
   }
-  // The file itself goes back byte for byte, and the REPL's save after this
-  // command is skipped. Rebuilt from the session, as it was, a failed replay
-  // saved the last task's lexicon and `-w1 true` into it, and every later
-  // start of magpie failed loading that wordmap before running anything.
-  write_string_to_file(config_get_settings_filename(config), "w", snapshot,
-                       error_stack);
-  config->skip_next_settings_save = true;
+  // The caller's, not this config's to free.
+  task_config->thread_control = NULL;
+  config_destroy(task_config);
 }
 
 void impl_contribute(Config *config, const char *settings_path,
                      ErrorStack *error_stack) {
-  // Every task mutates config directly (lexicon, per-player settings,
-  // capture options, ...), the same way any other command would, so left
-  // alone it would end this run looking like whatever the last task
-  // happened to configure -- and the REPL's own save-after-every-command
-  // behavior (see save_config_settings's caller in exec.c) would then
-  // persist that into settings.txt. Snapshot the settings file now and
-  // replay it back once contribute is done (below) so a user who runs a
-  // command, then contribute, then another command sees no difference from
-  // never having run contribute at all. Uses its own error stack: a failure
-  // here should not be folded into the contribute loop's own error
-  // reporting, which is about tasks, not local settings-file bookkeeping.
-  ErrorStack *settings_error_stack = error_stack_create();
-  char *settings_snapshot =
-      config_contribute_snapshot_settings(config, settings_error_stack);
-  if (!error_stack_is_empty(settings_error_stack)) {
-    error_stack_print_and_reset(settings_error_stack);
+  // The tasks run in a config of their own (config_create_for_contribute):
+  // the caller's session, and the settings file the REPL saves from it,
+  // stay exactly as they were.
+  Config *task_config = config_create_for_contribute(config, error_stack);
+  if (!task_config) {
+    return;
   }
 
   ContributeState *state = NULL;
@@ -9289,17 +9222,17 @@ void impl_contribute(Config *config, const char *settings_path,
     const int threads = contribute_get_threads(state);
     char *result_json = NULL;
     if (strings_equal(job_type, "games")) {
-      result_json = config_contribute_games(config, request, false, threads,
-                                            state, error_stack);
+      result_json = config_contribute_games(task_config, request, false,
+                                            threads, state, error_stack);
     } else if (strings_equal(job_type, "game_pairs")) {
-      result_json = config_contribute_games(config, request, true, threads,
+      result_json = config_contribute_games(task_config, request, true, threads,
                                             state, error_stack);
     } else if (strings_equal(job_type, "opening_rack")) {
-      result_json = config_contribute_opening_rack(config, request, threads,
-                                                   state, error_stack);
+      result_json = config_contribute_opening_rack(task_config, request,
+                                                   threads, state, error_stack);
     } else if (strings_equal(job_type, "leave_generation")) {
-      result_json = config_contribute_leave_gen(config, request, threads, state,
-                                                error_stack);
+      result_json = config_contribute_leave_gen(task_config, request, threads,
+                                                state, error_stack);
     } else {
       // A job type this build does not recognise means the server is newer
       // than this MAGPIE for *this job* -- not for every job. A client that
@@ -9367,20 +9300,7 @@ void impl_contribute(Config *config, const char *settings_path,
     error_stack_reset(error_stack);
   }
   contribute_state_destroy(state);
-  // The table names the last task pinned would otherwise outlive the run: a
-  // later `-rit true` in the same session would load `<lexicon>.<leaves>`
-  // rather than the lexicon's own table.
-  config_contribute_set_rit_names(config, NULL, NULL);
-
-  // Restore whatever was snapshotted above, win, lose, or interrupted --
-  // every exit from the loop above reaches here.
-  config_contribute_restore_settings(config, settings_snapshot,
-                                     settings_error_stack);
-  if (!error_stack_is_empty(settings_error_stack)) {
-    error_stack_print_and_reset(settings_error_stack);
-  }
-  free(settings_snapshot);
-  error_stack_destroy(settings_error_stack);
+  config_destroy_for_contribute(task_config);
 }
 
 void string_builder_add_exec_mode_type(StringBuilder *sb,
@@ -11969,7 +11889,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->show_game_with_moves = true;
   config->show_prompt = true;
   config->save_settings = true;
-  config->skip_next_settings_save = false;
   config->autosave_gcg = true;
   config->fg_required = true;
   config->loaded_settings = true;
@@ -12674,10 +12593,6 @@ void config_add_settings_to_string_builder(const Config *config,
 }
 
 void save_config_settings(Config *config, ErrorStack *error_stack) {
-  if (config->skip_next_settings_save) {
-    config->skip_next_settings_save = false;
-    return;
-  }
   if (!config_get_save_settings(config)) {
     return;
   }
