@@ -93,6 +93,200 @@ static void render_init_error(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, (int)plane_rows - 2, 4, "Press any key to exit.");
 }
 
+// Draws the open modal (if any) over the rendered game.
+static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
+                                 const TuiGameState *state, TuiUiState *ui,
+                                 const TuiSession *session) {
+  if (ui->modal == TUI_MODAL_MAIN_MENU) {
+    tui_game_render_menu(std_plane, theme, ui->main_menu_focus);
+  } else if (ui->modal == TUI_MODAL_SETTINGS) {
+    const char *current_lexicon = session->to_save.lexicon_set
+                                      ? session->to_save.lexicon
+                                      : session->chosen_lexicon;
+    const bool current_load_rit = session->to_save.load_rit_set
+                                      ? session->to_save.load_rit
+                                      : session->initial_load_rit;
+    tui_game_render_settings(
+        std_plane, theme, ui->settings_focus, state->board_scale,
+        state->antialias, state->score_subscripts, state->border_thickness,
+        session->pixel_supported, session->font_available,
+        state->premium_labels, state->blank_uppercase, state->rack_sort,
+        current_lexicon, current_load_rit);
+  } else if (ui->modal == TUI_MODAL_TIME_PICKER) {
+    tui_game_render_time_picker(std_plane, theme, ui->time_focus);
+  } else if (ui->modal == TUI_MODAL_LEXICON_PICKER &&
+             ui->lexicon_list != NULL) {
+    tui_game_render_lexicon_picker(std_plane, theme, ui->lexicon_list,
+                                   ui->lexicon_focus);
+  } else if (ui->modal == TUI_MODAL_QUIT_CONFIRM) {
+    tui_game_render_quit_confirm(std_plane, theme, ui->quit_confirm_focus);
+  } else if (ui->modal == TUI_MODAL_STARTUP_MENU) {
+    tui_game_render_startup_menu(std_plane, theme, ui->startup_menu_focus);
+  } else if (ui->modal == TUI_MODAL_WATCH_SETUP) {
+    // Render from the modal's own local copy of lexicon + time
+    // so adjusters preview against the in-modal value, not the
+    // live session value.
+    if (ui->lexicon_list == NULL) {
+      ui->lexicon_list = tui_lexicon_list_load();
+    }
+    char lang_buf[32] = "(unknown)";
+    if (ui->lexicon_list != NULL) {
+      const int idx =
+          tui_lexicon_list_find(ui->lexicon_list, ui->watch_setup_lexicon);
+      if (idx >= 0) {
+        tui_lexicon_list_language_name(ui->lexicon_list, idx, lang_buf,
+                                       sizeof(lang_buf));
+      }
+    }
+    tui_game_render_watch_setup(
+        std_plane, theme, ui->watch_setup_focus, ui->watch_setup_time, lang_buf,
+        ui->watch_setup_lexicon, state->sim_plies, state->sim_candidates);
+  } else if (ui->modal == TUI_MODAL_LOAD_POSITION) {
+    tui_game_render_load_position(std_plane, theme, ui->load_position_buf,
+                                  ui->load_position_cursor,
+                                  ui->load_position_error);
+  } else if (ui->modal == TUI_MODAL_LOAD_GAME) {
+    tui_game_render_load_game(std_plane, theme, ui->load_game_buf,
+                              ui->load_game_cursor, ui->load_game_error);
+  } else if (ui->modal == TUI_MODAL_ANNOTATE_SETUP) {
+    tui_game_render_annotate_setup(
+        std_plane, theme, ui->annotate_setup_focus, ui->annotate_setup_lexicon,
+        ui->annotate_setup_p1_name, ui->annotate_setup_p2_name,
+        ui->annotate_setup_name_cursor);
+  } else if (ui->modal == TUI_MODAL_PLAY_SETUP) {
+    if (ui->lexicon_list == NULL) {
+      ui->lexicon_list = tui_lexicon_list_load();
+    }
+    char play_lang_buf[32] = "(unknown)";
+    if (ui->lexicon_list != NULL) {
+      const int idx =
+          tui_lexicon_list_find(ui->lexicon_list, ui->watch_setup_lexicon);
+      if (idx >= 0) {
+        tui_lexicon_list_language_name(ui->lexicon_list, idx, play_lang_buf,
+                                       sizeof(play_lang_buf));
+      }
+    }
+    tui_game_render_play_setup(
+        std_plane, theme, ui->play_setup_focus, ui->play_setup_human_name,
+        ui->play_setup_computer_name, ui->play_setup_first_move,
+        ui->play_setup_name_cursor, ui->watch_setup_time,
+        ui->play_setup_overtime_rule, ui->play_setup_overtime_cap,
+        ui->play_setup_penalty_rate, ui->play_setup_challenge_rule,
+        ui->play_setup_challenge_penalty, play_lang_buf,
+        ui->watch_setup_lexicon, state->sim_plies, state->sim_candidates);
+  }
+}
+
+// Emits the composed frame with notcurses_render and records its timing
+// for the debug overlay: full render time from render_begin (with the
+// mutex wait lock_us), and keypress-to-pixels latency when input dirtied
+// the frame. MAGPIE_FPS_DEBUG=1 also logs a per-frame perf trace.
+static void emit_frame_and_record_stats(struct notcurses *nc,
+                                        struct timespec render_begin,
+                                        long lock_us,
+                                        struct timespec input_dirty_ts,
+                                        bool *input_dirty_pending) {
+  // Time the UI thread's full render path so the debug overlay
+  // can surface the worst-case frame in the last second. Captures
+  // notcurses_render too, where the Kitty graphics emit lives.
+  struct timespec frame_start;
+  clock_gettime(CLOCK_MONOTONIC, &frame_start);
+  notcurses_render(nc);
+  struct timespec frame_end;
+  clock_gettime(CLOCK_MONOTONIC, &frame_end);
+  // Full render time (compose + blit + emit) drives the fps readout.
+  const long frame_us =
+      (long)(frame_end.tv_sec - render_begin.tv_sec) * 1000000L +
+      (long)(frame_end.tv_nsec - render_begin.tv_nsec) / 1000L;
+  // notcurses_render (graphics emit) time, for the perf trace only.
+  const long emit_us =
+      (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000L +
+      (long)(frame_end.tv_nsec - frame_start.tv_nsec) / 1000L;
+  tui_debug_record_frame_us(frame_us);
+  // Keypress-to-pixels latency: from when input first dirtied this
+  // frame to when its render finished. -1 when this render wasn't
+  // triggered by input (e.g. a clock tick).
+  long input_lag_us = -1;
+  if (*input_dirty_pending) {
+    input_lag_us = (long)(frame_end.tv_sec - input_dirty_ts.tv_sec) * 1000000L +
+                   (long)(frame_end.tv_nsec - input_dirty_ts.tv_nsec) / 1000L;
+    *input_dirty_pending = false;
+  }
+  // Publish the latest measured keypress latency to the status bar.
+  // Only update on input-triggered frames so the last value persists
+  // (clock-tick frames carry no latency and would otherwise blank it).
+  if (input_lag_us >= 0) {
+    tui_debug_set_input_lag_us(input_lag_us);
+  }
+  // Snapshot notcurses' sprixel emission counters so the debug
+  // overlay can show whether re-emits happen on idle frames.
+  {
+    ncstats *st = notcurses_stats_alloc(nc);
+    if (st != NULL) {
+      notcurses_stats(nc, st);
+      tui_debug_record_sprixel_stats(st->sprixelemissions, st->sprixelelisions);
+      // Opt-in perf trace (MAGPIE_FPS_DEBUG=1) — logged to
+      // /tmp/magpie_stderr.log. For each rendered frame: notcurses_render
+      // wall time, sprixels emitted vs elided this frame (high emit = the
+      // board planes are NOT eliding), and board tile blits this frame.
+      if (getenv("MAGPIE_FPS_DEBUG") != NULL) {
+        static uint64_t dbg_emit;
+        static uint64_t dbg_elide;
+        static unsigned long dbg_rack;
+        static unsigned long dbg_rasters;
+        const unsigned long cur_rack = tui_debug_rack_blits();
+        const unsigned long cur_rasters = tui_debug_glyph_rasters();
+        fprintf(stderr,
+                "[fps] full_us=%ld lock_us=%ld emit_us=%ld emit+=%llu "
+                "elide+=%llu blits=%d rack+=%lu rast+=%lu inv=%lu "
+                "input_lag_us=%ld\n",
+                frame_us, lock_us, emit_us,
+                (unsigned long long)(st->sprixelemissions - dbg_emit),
+                (unsigned long long)(st->sprixelelisions - dbg_elide),
+                tui_debug_last_tile_blits(), cur_rack - dbg_rack,
+                cur_rasters - dbg_rasters, tui_debug_tile_invalidations(),
+                input_lag_us);
+        dbg_rack = cur_rack;
+        dbg_rasters = cur_rasters;
+        dbg_emit = st->sprixelemissions;
+        dbg_elide = st->sprixelelisions;
+      }
+      free(st);
+    }
+  }
+}
+
+// Sleeps until *next_frame_deadline and advances it one frame, pacing
+// the loop at a steady 60fps.
+static void wait_for_frame_deadline(struct timespec *next_frame_deadline) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  const long remaining_ns =
+      (long)(next_frame_deadline->tv_sec - now.tv_sec) * 1000000000L +
+      (long)(next_frame_deadline->tv_nsec - now.tv_nsec);
+  if (remaining_ns > 0) {
+    // On schedule — sleep the rest of the budget and advance the
+    // deadline from where it was, so we hit a consistent 60fps.
+    struct timespec sleep_ts = {.tv_sec = remaining_ns / 1000000000L,
+                                .tv_nsec = remaining_ns % 1000000000L};
+    nanosleep(&sleep_ts, NULL);
+    next_frame_deadline->tv_nsec += FRAME_NS;
+  } else {
+    // Last render exceeded FRAME_NS (typical when a bot play
+    // invalidates the pixel-composite cache). Don't try to catch up
+    // — re-anchor the deadline at now + FRAME_NS so subsequent
+    // frames are paced from this late-but-current point. Otherwise
+    // we'd sprint a few unthrottled frames until we caught up,
+    // showing up as 200+fps spikes in the EMA on every move.
+    *next_frame_deadline = now;
+    next_frame_deadline->tv_nsec += FRAME_NS;
+  }
+  if (next_frame_deadline->tv_nsec >= 1000000000L) {
+    next_frame_deadline->tv_sec += next_frame_deadline->tv_nsec / 1000000000L;
+    next_frame_deadline->tv_nsec %= 1000000000L;
+  }
+}
+
 int main(int argc, char *argv[]) {
   TuiSession session = {0};
   session.args = parse_args(argc, argv);
@@ -427,34 +621,7 @@ int main(int argc, char *argv[]) {
   uint64_t rendered_version = ~(uint64_t)0;
   long rendered_wall_sec = -1;
   while (ui.running) {
-    {
-      struct timespec now;
-      clock_gettime(CLOCK_MONOTONIC, &now);
-      const long remaining_ns =
-          (long)(next_frame_deadline.tv_sec - now.tv_sec) * 1000000000L +
-          (long)(next_frame_deadline.tv_nsec - now.tv_nsec);
-      if (remaining_ns > 0) {
-        // On schedule — sleep the rest of the budget and advance the
-        // deadline from where it was, so we hit a consistent 60fps.
-        struct timespec sleep_ts = {.tv_sec = remaining_ns / 1000000000L,
-                                    .tv_nsec = remaining_ns % 1000000000L};
-        nanosleep(&sleep_ts, NULL);
-        next_frame_deadline.tv_nsec += FRAME_NS;
-      } else {
-        // Last render exceeded FRAME_NS (typical when a bot play
-        // invalidates the pixel-composite cache). Don't try to catch up
-        // — re-anchor the deadline at now + FRAME_NS so subsequent
-        // frames are paced from this late-but-current point. Otherwise
-        // we'd sprint a few unthrottled frames until we caught up,
-        // showing up as 200+fps spikes in the EMA on every move.
-        next_frame_deadline = now;
-        next_frame_deadline.tv_nsec += FRAME_NS;
-      }
-      if (next_frame_deadline.tv_nsec >= 1000000000L) {
-        next_frame_deadline.tv_sec += next_frame_deadline.tv_nsec / 1000000000L;
-        next_frame_deadline.tv_nsec %= 1000000000L;
-      }
-    }
+    wait_for_frame_deadline(&next_frame_deadline);
     // Live-preview parse for the Load-position modal. The buffer
     // dirty flag is set by edits inside the modal's input handler;
     // we run the parse here (once per frame, regardless of how
@@ -513,157 +680,9 @@ int main(int argc, char *argv[]) {
       tui_game_render(std_plane, theme, &game_state, session.chosen_time,
                       ui.modal);
       pthread_mutex_unlock(&game_state.mutex);
-      if (ui.modal == TUI_MODAL_MAIN_MENU) {
-        tui_game_render_menu(std_plane, theme, ui.main_menu_focus);
-      } else if (ui.modal == TUI_MODAL_SETTINGS) {
-        const char *current_lexicon = session.to_save.lexicon_set
-                                          ? session.to_save.lexicon
-                                          : session.chosen_lexicon;
-        const bool current_load_rit = session.to_save.load_rit_set
-                                          ? session.to_save.load_rit
-                                          : session.initial_load_rit;
-        tui_game_render_settings(
-            std_plane, theme, ui.settings_focus, game_state.board_scale,
-            game_state.antialias, game_state.score_subscripts,
-            game_state.border_thickness, session.pixel_supported,
-            session.font_available, game_state.premium_labels,
-            game_state.blank_uppercase, game_state.rack_sort, current_lexicon,
-            current_load_rit);
-      } else if (ui.modal == TUI_MODAL_TIME_PICKER) {
-        tui_game_render_time_picker(std_plane, theme, ui.time_focus);
-      } else if (ui.modal == TUI_MODAL_LEXICON_PICKER &&
-                 ui.lexicon_list != NULL) {
-        tui_game_render_lexicon_picker(std_plane, theme, ui.lexicon_list,
-                                       ui.lexicon_focus);
-      } else if (ui.modal == TUI_MODAL_QUIT_CONFIRM) {
-        tui_game_render_quit_confirm(std_plane, theme, ui.quit_confirm_focus);
-      } else if (ui.modal == TUI_MODAL_STARTUP_MENU) {
-        tui_game_render_startup_menu(std_plane, theme, ui.startup_menu_focus);
-      } else if (ui.modal == TUI_MODAL_WATCH_SETUP) {
-        // Render from the modal's own local copy of lexicon + time
-        // so adjusters preview against the in-modal value, not the
-        // live session value.
-        if (ui.lexicon_list == NULL) {
-          ui.lexicon_list = tui_lexicon_list_load();
-        }
-        char lang_buf[32] = "(unknown)";
-        if (ui.lexicon_list != NULL) {
-          const int idx =
-              tui_lexicon_list_find(ui.lexicon_list, ui.watch_setup_lexicon);
-          if (idx >= 0) {
-            tui_lexicon_list_language_name(ui.lexicon_list, idx, lang_buf,
-                                           sizeof(lang_buf));
-          }
-        }
-        tui_game_render_watch_setup(
-            std_plane, theme, ui.watch_setup_focus, ui.watch_setup_time,
-            lang_buf, ui.watch_setup_lexicon, game_state.sim_plies,
-            game_state.sim_candidates);
-      } else if (ui.modal == TUI_MODAL_LOAD_POSITION) {
-        tui_game_render_load_position(std_plane, theme, ui.load_position_buf,
-                                      ui.load_position_cursor,
-                                      ui.load_position_error);
-      } else if (ui.modal == TUI_MODAL_LOAD_GAME) {
-        tui_game_render_load_game(std_plane, theme, ui.load_game_buf,
-                                  ui.load_game_cursor, ui.load_game_error);
-      } else if (ui.modal == TUI_MODAL_ANNOTATE_SETUP) {
-        tui_game_render_annotate_setup(
-            std_plane, theme, ui.annotate_setup_focus,
-            ui.annotate_setup_lexicon, ui.annotate_setup_p1_name,
-            ui.annotate_setup_p2_name, ui.annotate_setup_name_cursor);
-      } else if (ui.modal == TUI_MODAL_PLAY_SETUP) {
-        if (ui.lexicon_list == NULL) {
-          ui.lexicon_list = tui_lexicon_list_load();
-        }
-        char play_lang_buf[32] = "(unknown)";
-        if (ui.lexicon_list != NULL) {
-          const int idx =
-              tui_lexicon_list_find(ui.lexicon_list, ui.watch_setup_lexicon);
-          if (idx >= 0) {
-            tui_lexicon_list_language_name(ui.lexicon_list, idx, play_lang_buf,
-                                           sizeof(play_lang_buf));
-          }
-        }
-        tui_game_render_play_setup(
-            std_plane, theme, ui.play_setup_focus, ui.play_setup_human_name,
-            ui.play_setup_computer_name, ui.play_setup_first_move,
-            ui.play_setup_name_cursor, ui.watch_setup_time,
-            ui.play_setup_overtime_rule, ui.play_setup_overtime_cap,
-            ui.play_setup_penalty_rate, ui.play_setup_challenge_rule,
-            ui.play_setup_challenge_penalty, play_lang_buf,
-            ui.watch_setup_lexicon, game_state.sim_plies,
-            game_state.sim_candidates);
-      }
-      // Time the UI thread's full render path so the debug overlay
-      // can surface the worst-case frame in the last second. Captures
-      // notcurses_render too, where the Kitty graphics emit lives.
-      struct timespec frame_start;
-      clock_gettime(CLOCK_MONOTONIC, &frame_start);
-      notcurses_render(nc);
-      struct timespec frame_end;
-      clock_gettime(CLOCK_MONOTONIC, &frame_end);
-      // Full render time (compose + blit + emit) drives the fps readout.
-      const long frame_us =
-          (long)(frame_end.tv_sec - render_begin.tv_sec) * 1000000L +
-          (long)(frame_end.tv_nsec - render_begin.tv_nsec) / 1000L;
-      // notcurses_render (graphics emit) time, for the perf trace only.
-      const long emit_us =
-          (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000L +
-          (long)(frame_end.tv_nsec - frame_start.tv_nsec) / 1000L;
-      tui_debug_record_frame_us(frame_us);
-      // Keypress-to-pixels latency: from when input first dirtied this
-      // frame to when its render finished. -1 when this render wasn't
-      // triggered by input (e.g. a clock tick).
-      long input_lag_us = -1;
-      if (input_dirty_pending) {
-        input_lag_us =
-            (long)(frame_end.tv_sec - input_dirty_ts.tv_sec) * 1000000L +
-            (long)(frame_end.tv_nsec - input_dirty_ts.tv_nsec) / 1000L;
-        input_dirty_pending = false;
-      }
-      // Publish the latest measured keypress latency to the status bar.
-      // Only update on input-triggered frames so the last value persists
-      // (clock-tick frames carry no latency and would otherwise blank it).
-      if (input_lag_us >= 0) {
-        tui_debug_set_input_lag_us(input_lag_us);
-      }
-      // Snapshot notcurses' sprixel emission counters so the debug
-      // overlay can show whether re-emits happen on idle frames.
-      {
-        ncstats *st = notcurses_stats_alloc(nc);
-        if (st != NULL) {
-          notcurses_stats(nc, st);
-          tui_debug_record_sprixel_stats(st->sprixelemissions,
-                                         st->sprixelelisions);
-          // Opt-in perf trace (MAGPIE_FPS_DEBUG=1) — logged to
-          // /tmp/magpie_stderr.log. For each rendered frame: notcurses_render
-          // wall time, sprixels emitted vs elided this frame (high emit = the
-          // board planes are NOT eliding), and board tile blits this frame.
-          if (getenv("MAGPIE_FPS_DEBUG") != NULL) {
-            static uint64_t dbg_emit;
-            static uint64_t dbg_elide;
-            static unsigned long dbg_rack;
-            static unsigned long dbg_rasters;
-            const unsigned long cur_rack = tui_debug_rack_blits();
-            const unsigned long cur_rasters = tui_debug_glyph_rasters();
-            fprintf(stderr,
-                    "[fps] full_us=%ld lock_us=%ld emit_us=%ld emit+=%llu "
-                    "elide+=%llu blits=%d rack+=%lu rast+=%lu inv=%lu "
-                    "input_lag_us=%ld\n",
-                    frame_us, lock_us, emit_us,
-                    (unsigned long long)(st->sprixelemissions - dbg_emit),
-                    (unsigned long long)(st->sprixelelisions - dbg_elide),
-                    tui_debug_last_tile_blits(), cur_rack - dbg_rack,
-                    cur_rasters - dbg_rasters, tui_debug_tile_invalidations(),
-                    input_lag_us);
-            dbg_rack = cur_rack;
-            dbg_rasters = cur_rasters;
-            dbg_emit = st->sprixelemissions;
-            dbg_elide = st->sprixelelisions;
-          }
-          free(st);
-        }
-      }
+      render_modal_overlay(std_plane, theme, &game_state, &ui, &session);
+      emit_frame_and_record_stats(nc, render_begin, lock_us, input_dirty_ts,
+                                  &input_dirty_pending);
       rendered_version = cur_render_version;
       rendered_wall_sec = render_now.tv_sec;
       ui.frame_dirty = false;
