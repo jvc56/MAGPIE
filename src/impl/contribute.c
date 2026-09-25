@@ -6,6 +6,7 @@
 #include "../compat/memory_info.h"
 #include "../def/contribute_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/client_state.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/thread_control.h"
@@ -669,6 +670,12 @@ ContributeState *contribute_state_create(const char *settings_path,
     // unresponsive is one they turn off.
     const int cores = get_num_cores();
     state->threads = cores > 1 ? cores - 1 : 1;
+  }
+  // The CLI's -threads cap, which contribute.txt's value never passes
+  // through. Past it, move generation's pool of per-thread generators runs
+  // out and the process exits on its first task.
+  if (state->threads > MAX_THREADS) {
+    state->threads = MAX_THREADS;
   }
   state->http_client =
       http_client_create(client_state->server_url, client_state->api_key,

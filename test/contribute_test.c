@@ -8,6 +8,7 @@
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
@@ -1385,7 +1386,37 @@ static void test_contribute_runs_in_a_config_of_its_own(void) {
   config_destroy(config);
 }
 
+// A simulating player ranks every play up to its num_plays, whatever its
+// recorder -- as autoplay's simulating player does. The case this pins: an
+// opening-rack job's simulating player with a `best` recorder (birdtest takes
+// it with num_plays_recorded 1) generated one candidate, so the "simulation"
+// reported the static top play for every rack.
+static void test_a_simulating_rack_analysis_ranks_every_play(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -numplays 8 -r1 best");
+  ErrorStack *error_stack = error_stack_create();
+
+  // Static: the recorder's one best play is the answer.
+  assert(config_contribute_generate_for_rack(config, "AEGINRV", 1, false,
+                                             error_stack));
+  assert(move_list_get_count(config_get_move_list(config)) == 1);
+
+  // Simulating: every candidate, up to num_plays.
+  assert(config_contribute_generate_for_rack(config, "AEGINRV", 1, true,
+                                             error_stack));
+  assert(error_stack_is_empty(error_stack));
+  assert(move_list_get_count(config_get_move_list(config)) == 8);
+
+  // An unusable rack is refused either way.
+  assert(
+      !config_contribute_generate_for_rack(config, "", 1, true, error_stack));
+  assert(!error_stack_is_empty(error_stack));
+
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_contribute(void) {
+  test_a_simulating_rack_analysis_ranks_every_play();
   test_contribute_runs_in_a_config_of_its_own();
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();

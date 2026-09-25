@@ -8599,21 +8599,10 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       autoplay_results_get_json(config->autoplay_results, game_pairs));
 }
 
-// Analyzes one opening rack onto an already-open JSON array, returning false
-// and pushing onto the stack on failure. Always the empty board: an opening
-// rack is by definition the start of the game, so the request sends just the
-// racks to analyze rather than full positions.
-//
-// `seed` is the seed the server states for this rack: the task's seed plus the
-// rack's index in the batch, which is its index in the job's rack space. The
-// executor used to derive one from the rack's letters, which was the same on
-// every machine but not the server's to choose; every task now states a seed,
-// this one included, so what a simulation samples is a function of the task.
-static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
-                                           uint64_t seed,
-                                           const JsonValue *player,
-                                           bool simming, StringBuilder *sb,
-                                           ErrorStack *error_stack) {
+bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
+                                         uint64_t seed, bool simming,
+                                         ErrorStack *error_stack) {
+  config_init_game(config);
   game_reset(config->game);
   config_reset_move_list_and_invalidate_sim_results(config);
   config->seed = seed;
@@ -8633,8 +8622,42 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
   // Simulating needs a move list to simulate over; the CLI's "simulate"
   // command relies on the user already having run "generate", but a task
   // request has no such prior step to reuse.
-  impl_move_gen(config, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
+  if (!simming) {
+    impl_move_gen(config, error_stack);
+    return error_stack_is_empty(error_stack);
+  }
+  // A simulating player's candidates are every play, best first, up to its
+  // num_plays -- whatever its recorder says, as for autoplay's simulating
+  // player (get_top_simming_move). Generated with the player's own recorder,
+  // a `best` one (birdtest accepts it with num_plays_recorded 1) kept a
+  // single candidate, and the "simulation" reported the static top play.
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot generate moves without lexicon"));
+    return false;
+  }
+  config_init_game(config);
+  impl_move_gen_override_record_type(config, MOVE_RECORD_ALL);
+  return true;
+}
+
+// Analyzes one opening rack onto an already-open JSON array, returning false
+// and pushing onto the stack on failure. Always the empty board: an opening
+// rack is by definition the start of the game, so the request sends just the
+// racks to analyze rather than full positions.
+//
+// `seed` is the seed the server states for this rack: the task's seed plus the
+// rack's index in the batch, which is its index in the job's rack space. The
+// executor used to derive one from the rack's letters, which was the same on
+// every machine but not the server's to choose; every task now states a seed,
+// this one included, so what a simulation samples is a function of the task.
+static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
+                                           uint64_t seed,
+                                           const JsonValue *player,
+                                           bool simming, StringBuilder *sb,
+                                           ErrorStack *error_stack) {
+  if (!config_contribute_generate_for_rack(config, rack_str, seed, simming,
+                                           error_stack)) {
     return false;
   }
   if (simming) {
@@ -9172,6 +9195,9 @@ Config *config_create_for_contribute(Config *parent, ErrorStack *error_stack) {
     return NULL;
   }
   task_config->save_settings = false;
+  // How this machine reads a rack info table, not what a task computes: a
+  // contributor who asked for -ritmmap has too little memory to read one in.
+  task_config->use_mmap_for_rit = parent->use_mmap_for_rit;
   thread_control_destroy(task_config->thread_control);
   task_config->thread_control = parent->thread_control;
   return task_config;

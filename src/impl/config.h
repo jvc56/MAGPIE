@@ -82,6 +82,14 @@ bool config_contribute_validate_common(const JsonValue *request,
 // Copies one player's simulation settings into the run-wide ones that
 // impl_move_gen and impl_sim read. The opening-rack executor analyses through
 // those entry points, which ignore the per-player settings a request applies.
+// The first half of analysing one opening rack: the empty board, the rack
+// drawn, and the moves to rank generated -- every play up to num_plays for a
+// simulating player, whatever its recorder. False, with the error pushed, on
+// an unusable rack.
+bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
+                                         uint64_t seed, bool simming,
+                                         ErrorStack *error_stack);
+
 void config_contribute_use_player_settings_for_analysis(Config *config,
                                                         int player_index);
 
