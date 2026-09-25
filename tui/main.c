@@ -287,6 +287,173 @@ static void wait_for_frame_deadline(struct timespec *next_frame_deadline) {
   }
 }
 
+// Recognizes the terminal's focus-in / focus-out reports (ESC [ I and
+// ESC [ O), toggling mouse reporting to match, and buffers a bare Esc
+// until it's known not to start one. Returns true when the key was
+// consumed.
+static bool filter_focus_sequence(struct notcurses *nc, TuiUiState *ui,
+                                  uint32_t key, const ncinput *input,
+                                  bool synthesized_esc,
+                                  unsigned mice_eventmask) {
+  // Focus-event detection. We buffer ESC and ESC '[' silently
+  // (the existing handlers never reach them while the sequence
+  // is still in flight). On the third byte, either we
+  // complete a focus event (CSI I / CSI O) — disable/enable
+  // mouse mode and consume — or the sequence breaks and the
+  // current byte falls through to normal handling. The
+  // previously-buffered ESC/'[' are dropped; an Esc alone
+  // followed in the same burst by an arbitrary key isn't a
+  // pattern any of our modals expect.
+  //
+  // synthesized_esc skips this — that Esc came from our own
+  // re-injection and is already known to be a real keypress;
+  // re-buffering it would just deadlock.
+  if (!synthesized_esc && ui->focus_state == 0 && key == NCKEY_ESC &&
+      input->evtype != NCTYPE_RELEASE) {
+    ui->focus_state = 1;
+    return true;
+  }
+  if (ui->focus_state == 1) {
+    if (key == '[') {
+      ui->focus_state = 2;
+      return true;
+    }
+    // Mismatch — treat the buffered ESC as a real Esc by
+    // re-injecting it next iteration, then fall through with
+    // the current key.
+    ui->focus_pending_esc = true;
+    ui->focus_state = 0;
+    // Fall through; current key handled normally below.
+  } else if (ui->focus_state == 2) {
+    if (key == 'I' || key == 'O') {
+      const bool focus_in = (key == 'I');
+      if (focus_in && !ui->mouse_enabled) {
+        notcurses_mice_enable(nc, mice_eventmask);
+        ui->mouse_enabled = true;
+      } else if (!focus_in && ui->mouse_enabled) {
+        notcurses_mice_disable(nc);
+        ui->mouse_enabled = false;
+      }
+      ui->focus_state = 0;
+      return true;
+    }
+    // Mismatch on the third byte. Drop the buffered '['
+    // and synthesize the original Esc on the next pass.
+    ui->focus_pending_esc = true;
+    ui->focus_state = 0;
+    // Fall through.
+  }
+  return false;
+}
+
+// Routes one key or mouse event to the first handler that claims it:
+// the cell editor, the mouse router, resize, each modal, then the game.
+static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
+                           TuiGameState *state, TuiUiState *ui,
+                           TuiSession *session, uint32_t key, ncinput input) {
+  if (input.evtype == NCTYPE_RELEASE) {
+    // A scrollbar drag ends on any release event regardless of
+    // where the cursor is — the user may have let go anywhere
+    // on the screen.
+    if (state->analysis_scrollbar_dragging) {
+      pthread_mutex_lock(&state->mutex);
+      state->analysis_scrollbar_dragging = false;
+      pthread_mutex_unlock(&state->mutex);
+    }
+    return;
+  }
+
+  // ── Annotation cell editor ────────────────────────────────────
+  // Two independent edit fields per pending entry: MOVE (row 1
+  // "8H POND") and RACK (row 2 "AEINRT"). edit_field selects
+  // which buffer is taking keystrokes; the other buffer keeps
+  // its content so clicking between rows preserves work in
+  // progress.
+  // Mouse events fall through to the panel-router / click
+  // handler below even while a field is being edited — that's
+  // how clicking on the other row of the same entry switches
+  // fields, and how clicking on a different panel deselects
+  // the field.
+  const bool is_mouse_event =
+      key == NCKEY_BUTTON1 || key == NCKEY_BUTTON2 || key == NCKEY_BUTTON3 ||
+      key == NCKEY_BUTTON4 || key == NCKEY_BUTTON5 || key == NCKEY_BUTTON6 ||
+      key == NCKEY_BUTTON7 || key == NCKEY_BUTTON8 || key == NCKEY_BUTTON9 ||
+      key == NCKEY_BUTTON10 || key == NCKEY_BUTTON11 || key == NCKEY_MOTION;
+  if (ui->modal == TUI_MODAL_NONE && state->edit_history_idx >= 0 &&
+      !is_mouse_event) {
+    if (tui_input_cell_editor(state, key, input)) {
+      return;
+    }
+  }
+
+  if (tui_input_mouse(state, std_plane, ui->modal, key, input)) {
+    return;
+  }
+  if (key == NCKEY_RESIZE) {
+    unsigned new_rows = 0;
+    unsigned new_cols = 0;
+    notcurses_refresh(nc, &new_rows, &new_cols);
+    ncplane_resize_simple(std_plane, new_rows, new_cols);
+    // A font-size change is delivered as a resize and shifts every
+    // cached pixel composite to the wrong size. Drop all child planes
+    // so the next render rebuilds them at the new cell-pixel ratio.
+    tui_game_render_reset_grids();
+    return;
+  }
+
+  if (tui_input_load_position(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_load_game(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_watch_setup(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_annotate_setup(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_play_setup(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_startup_menu(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_main_menu(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_settings(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_time_picker(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_lexicon_picker(state, ui, session, key, input)) {
+    return;
+  }
+
+  if (tui_input_quit_confirm(state, ui, session, key, input)) {
+    return;
+  }
+
+  // When the History cursor sits on a pending entry and the
+  // user hasn't opened the editor yet, Tab / Enter / → / ↓ all
+  // drop into the move cell. Up / Left stay reserved for
+  // entry-to-entry navigation. This is the keyboard mirror of
+  // the click-to-edit path — annotation users shouldn't need
+  // the mouse to start typing the next field.
+  tui_input_game(state, ui, session, key, input);
+}
+
 int main(int argc, char *argv[]) {
   TuiSession session = {0};
   session.args = parse_args(argc, argv);
@@ -757,159 +924,11 @@ int main(int argc, char *argv[]) {
         clock_gettime(CLOCK_MONOTONIC, &input_dirty_ts);
         input_dirty_pending = true;
       }
-      // Focus-event detection. We buffer ESC and ESC '[' silently
-      // (the existing handlers never reach them while the sequence
-      // is still in flight). On the third byte, either we
-      // complete a focus event (CSI I / CSI O) — disable/enable
-      // mouse mode and consume — or the sequence breaks and the
-      // current byte falls through to normal handling. The
-      // previously-buffered ESC/'[' are dropped; an Esc alone
-      // followed in the same burst by an arbitrary key isn't a
-      // pattern any of our modals expect.
-      //
-      // synthesized_esc skips this — that Esc came from our own
-      // re-injection and is already known to be a real keypress;
-      // re-buffering it would just deadlock.
-      if (!synthesized_esc && ui.focus_state == 0 && key == NCKEY_ESC &&
-          input.evtype != NCTYPE_RELEASE) {
-        ui.focus_state = 1;
+      if (filter_focus_sequence(nc, &ui, key, &input, synthesized_esc,
+                                mice_eventmask)) {
         continue;
       }
-      if (ui.focus_state == 1) {
-        if (key == '[') {
-          ui.focus_state = 2;
-          continue;
-        }
-        // Mismatch — treat the buffered ESC as a real Esc by
-        // re-injecting it next iteration, then fall through with
-        // the current key.
-        ui.focus_pending_esc = true;
-        ui.focus_state = 0;
-        // Fall through; current key handled normally below.
-      } else if (ui.focus_state == 2) {
-        if (key == 'I' || key == 'O') {
-          const bool focus_in = (key == 'I');
-          if (focus_in && !ui.mouse_enabled) {
-            notcurses_mice_enable(nc, mice_eventmask);
-            ui.mouse_enabled = true;
-          } else if (!focus_in && ui.mouse_enabled) {
-            notcurses_mice_disable(nc);
-            ui.mouse_enabled = false;
-          }
-          ui.focus_state = 0;
-          continue;
-        }
-        // Mismatch on the third byte. Drop the buffered '['
-        // and synthesize the original Esc on the next pass.
-        ui.focus_pending_esc = true;
-        ui.focus_state = 0;
-        // Fall through.
-      }
-      if (input.evtype == NCTYPE_RELEASE) {
-        // A scrollbar drag ends on any release event regardless of
-        // where the cursor is — the user may have let go anywhere
-        // on the screen.
-        if (game_state.analysis_scrollbar_dragging) {
-          pthread_mutex_lock(&game_state.mutex);
-          game_state.analysis_scrollbar_dragging = false;
-          pthread_mutex_unlock(&game_state.mutex);
-        }
-        continue;
-      }
-
-      // ── Annotation cell editor ────────────────────────────────────
-      // Two independent edit fields per pending entry: MOVE (row 1
-      // "8H POND") and RACK (row 2 "AEINRT"). edit_field selects
-      // which buffer is taking keystrokes; the other buffer keeps
-      // its content so clicking between rows preserves work in
-      // progress.
-      // Mouse events fall through to the panel-router / click
-      // handler below even while a field is being edited — that's
-      // how clicking on the other row of the same entry switches
-      // fields, and how clicking on a different panel deselects
-      // the field.
-      const bool is_mouse_event =
-          key == NCKEY_BUTTON1 || key == NCKEY_BUTTON2 ||
-          key == NCKEY_BUTTON3 || key == NCKEY_BUTTON4 ||
-          key == NCKEY_BUTTON5 || key == NCKEY_BUTTON6 ||
-          key == NCKEY_BUTTON7 || key == NCKEY_BUTTON8 ||
-          key == NCKEY_BUTTON9 || key == NCKEY_BUTTON10 ||
-          key == NCKEY_BUTTON11 || key == NCKEY_MOTION;
-      if (ui.modal == TUI_MODAL_NONE && game_state.edit_history_idx >= 0 &&
-          !is_mouse_event) {
-        if (tui_input_cell_editor(&game_state, key, input)) {
-          continue;
-        }
-      }
-
-      if (tui_input_mouse(&game_state, std_plane, ui.modal, key, input)) {
-        continue;
-      }
-      if (key == NCKEY_RESIZE) {
-        unsigned new_rows = 0;
-        unsigned new_cols = 0;
-        notcurses_refresh(nc, &new_rows, &new_cols);
-        ncplane_resize_simple(std_plane, new_rows, new_cols);
-        // A font-size change is delivered as a resize and shifts every
-        // cached pixel composite to the wrong size. Drop all child planes
-        // so the next render rebuilds them at the new cell-pixel ratio.
-        tui_game_render_reset_grids();
-        continue;
-      }
-
-      if (tui_input_load_position(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_load_game(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_watch_setup(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_annotate_setup(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_play_setup(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_startup_menu(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_main_menu(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_settings(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_time_picker(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_lexicon_picker(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      if (tui_input_quit_confirm(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
-
-      // When the History cursor sits on a pending entry and the
-      // user hasn't opened the editor yet, Tab / Enter / → / ↓ all
-      // drop into the move cell. Up / Left stay reserved for
-      // entry-to-entry navigation. This is the keyboard mirror of
-      // the click-to-edit path — annotation users shouldn't need
-      // the mouse to start typing the next field.
-      if (tui_input_game(&game_state, &ui, &session, key, input)) {
-        continue;
-      }
+      dispatch_input(nc, std_plane, &game_state, &ui, &session, key, input);
     } while (ui.running);
 
     // If this frame's input drain dirtied the frame, render it ASAP instead
