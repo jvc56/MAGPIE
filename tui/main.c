@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -1181,8 +1182,18 @@ int main(int argc, char *argv[]) {
         } else {
           snprintf(path, sizeof(path), "%s", start);
         }
-        FILE *fp = fopen(path, "rb");
-        if (fp == NULL) {
+        // A path typed character by character passes through directory
+        // prefixes ("/", "/Users", ...). fopen succeeds on a directory and
+        // reads nothing, so reject anything that isn't a regular file.
+        struct stat path_stat;
+        const bool not_regular_file =
+            stat(path, &path_stat) == 0 && !S_ISREG(path_stat.st_mode);
+        FILE *fp = not_regular_file ? NULL : fopen(path, "rb");
+        if (not_regular_file) {
+          snprintf(load_game_error, sizeof(load_game_error), "%s is not a file",
+                   path);
+          resolve_ok = false;
+        } else if (fp == NULL) {
           snprintf(load_game_error, sizeof(load_game_error), "Cannot open %s",
                    path);
           resolve_ok = false;
@@ -1247,6 +1258,13 @@ int main(int argc, char *argv[]) {
           if (tokens < 4) {
             gcg_payload[line_start] = '\0';
           }
+        }
+        // The GCG parser treats input with no lines as a fatal error, so
+        // never hand it an empty payload (an empty file, or text that was
+        // only the trailing rack hint).
+        if (gcg_payload[0] == '\0') {
+          snprintf(load_game_error, sizeof(load_game_error), "Empty GCG");
+          resolve_ok = false;
         }
       }
       if (resolve_ok) {
