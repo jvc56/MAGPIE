@@ -24,6 +24,7 @@
 #include "mach_compat.h"
 #include "pixel_compose.h"
 #include "render_common.h"
+#include "render_hit_test.h"
 #include "render_layout.h"
 #include "render_view.h"
 #include "theme.h"
@@ -449,87 +450,6 @@ static BlitCache board_pixel_cache;
 static BlitCache rack_pixel_cache;
 static BlitCache label_pixel_cache;
 
-// Per-entry hit-test rectangles, populated by render_history_panel
-// on every frame so mouse clicks can locate which turn the user
-// tapped. Sized to TUI_HISTORY_MAX so a fully-populated history
-// panel can still be hit-tested without truncation.
-typedef struct {
-  int top_row;    // first screen row of entry, inclusive
-  int bottom_row; // last screen row of entry, inclusive
-  int left_col;   // first column, inclusive
-  int right_col;  // last column, inclusive
-  int idx;        // history entry index
-  // Leave-column hit-test rect. The leave glyph sits on the move
-  // row (top_row), right-aligned just inside the score column.
-  // Click X in [leave_left, leave_right] on top_row → leave field.
-  // -1 in leave_left means "no leave column rendered for this
-  // entry" (e.g., spinner / divider rows).
-  int leave_left;
-  int leave_right;
-} HistoryRowMap;
-
-static HistoryRowMap history_row_map[TUI_HISTORY_MAX];
-static int history_row_map_count;
-
-// Per-row hit-test rectangles for the Analysis panel. The cap
-// matches ANALYSIS_ROW_CAP (max candidates shown). Same idea as
-// the history rect map: filled during the analysis render so
-// mouse clicks can be mapped back to a candidate row.
-typedef struct {
-  int top_row;
-  int bottom_row;
-  int left_col;
-  int right_col;
-  // Screen column where the "move" text column begins. Clicks at
-  // x < move_left_col land on the rank column; x >= move_left_col
-  // land on the move column. Lets the click handler decide which
-  // TuiAnalysisColumn to switch the cursor to.
-  int move_left_col;
-  int idx;
-} AnalysisRowMap;
-static AnalysisRowMap analysis_row_map[ANALYSIS_ROW_CAP];
-static int analysis_row_map_count;
-static int analysis_panel_top;
-static int analysis_panel_bottom;
-static int analysis_panel_left;
-static int analysis_panel_right;
-// Bounding box of the History panel as a whole — used by
-// tui_history_cursor_at to detect clicks on the title / chrome
-// (between entries) and snap the cursor back to -1 (the [4>]
-// label). Refreshed every frame alongside the row map.
-static int history_panel_top;
-static int history_panel_bottom;
-static int history_panel_left;
-static int history_panel_right;
-
-// Per-frame hit-test data for the currently-open modal (when one
-// is open and routed through render_modal_ex). All coordinates
-// are absolute screen rows/cols. invalidated when no modal
-// renders this frame.
-enum { MODAL_MAX_ITEMS = 16 };
-typedef struct {
-  int top;        // screen row of modal interior top (item rows)
-  int left;       // screen col of modal interior left (clickable area)
-  int right;      // screen col of modal interior right
-  int item_count; // number of items rendered
-  bool disabled[MODAL_MAX_ITEMS];
-  // Per-row chevron screen columns: where the ◀ and ▶ glyphs sit
-  // on rows that include them (focused settings/watch-setup
-  // rows). -1 when the row has no chevron. Lets click handlers
-  // detect "user clicked the left/right chevron to adjust" vs.
-  // "user clicked the row to focus."
-  int left_chev_col[MODAL_MAX_ITEMS];
-  int right_chev_col[MODAL_MAX_ITEMS];
-  // Modal outer bounding box, used to differentiate "click inside
-  // modal but not on an item" from "click outside modal."
-  int outer_top;
-  int outer_bottom;
-  int outer_left;
-  int outer_right;
-  bool valid;
-} ModalHitMap;
-static ModalHitMap modal_hit_map;
-
 static void invalidate_blit_caches(void) {
   board_pixel_cache.valid = false;
   rack_pixel_cache.valid = false;
@@ -562,212 +482,6 @@ static void invalidate_grid_planes(void) {
 }
 
 void tui_game_render_reset_grids(void) { invalidate_grid_planes(); }
-
-// Map a cell coordinate to the panel beneath it. Mirrors the layout
-// compute_layout produces for the same state. Returns one of the
-// TUI_FOCUS_* values, or -1 when the click misses every panel.
-int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
-                      int x) {
-  if (plane == NULL || state == NULL || y < 0 || x < 0) {
-    return -1;
-  }
-  // Pick the user's preferred scale the same way tui_game_render
-  // does so the recomputed layout matches what's actually on screen.
-  struct notcurses *render_nc = ncplane_notcurses(plane);
-  const bool pixel_ok = render_nc != NULL && notcurses_canpixel(render_nc);
-  const int user_pref =
-      (state->board_scale >= 2 && pixel_ok && state->glyph_cache != NULL) ? 2
-                                                                          : 1;
-  const Layout L = compute_layout(plane, user_pref, state);
-  if (L.scale < 0) {
-    return -1;
-  }
-  // Command bar and status bar — clicks on either focus [0].
-  if (y == L.command_bar_row || y == L.status_row) {
-    return TUI_FOCUS_NONE;
-  }
-  // Right column is the pills+history assembly (treated as one
-  // component) or the separate panels in 3-column mode. The
-  // combined_pills_history bool decides.
-  if (x >= L.right_col_left && x <= L.right_col_right) {
-    if (L.combined_pills_history) {
-      if (y >= L.pill1_top && y <= L.history_bottom) {
-        return TUI_FOCUS_HISTORY;
-      }
-    } else {
-      if (L.has_analysis && y >= L.analysis_top && y <= L.analysis_bottom &&
-          x >= L.analysis_left && x <= L.analysis_right) {
-        return TUI_FOCUS_ANALYSIS;
-      }
-      if (y >= L.history_top && y <= L.history_bottom) {
-        return TUI_FOCUS_HISTORY;
-      }
-    }
-  }
-  // Three-column analysis lives even further right (separate from
-  // the history column).
-  if (L.has_analysis && y >= L.analysis_top && y <= L.analysis_bottom &&
-      x >= L.analysis_left && x <= L.analysis_right) {
-    return TUI_FOCUS_ANALYSIS;
-  }
-  // Left column: board (top), rack, bag stacked vertically.
-  if (x >= 0 && x < L.board_width) {
-    if (y <= L.board_bottom_row + 1) {
-      return TUI_FOCUS_BOARD;
-    }
-    if (y >= L.rack_top && y <= L.rack_bottom) {
-      return TUI_FOCUS_RACK;
-    }
-    if (y >= L.bag_top && y <= L.bag_bottom) {
-      return TUI_FOCUS_BAG;
-    }
-  }
-  return -1;
-}
-
-bool tui_board_cell_at(struct ncplane *plane, const TuiGameState *state, int y,
-                       int x, int *out_row, int *out_col) {
-  if (plane == NULL || state == NULL || y < 0 || x < 0) {
-    return false;
-  }
-  // Recompute the on-screen layout the same way tui_game_panel_at does
-  // so the inverse cell mapping matches the rendered geometry.
-  struct notcurses *render_nc = ncplane_notcurses(plane);
-  const bool pixel_ok = render_nc != NULL && notcurses_canpixel(render_nc);
-  const int user_pref =
-      (state->board_scale >= 2 && pixel_ok && state->glyph_cache != NULL) ? 2
-                                                                          : 1;
-  const Layout L = compute_layout(plane, user_pref, state);
-  if (L.scale < 0) {
-    return false;
-  }
-  const int rel_y = y - CELL_ROW_BASE;
-  const int rel_x = x - CELL_COL_BASE;
-  if (rel_y < 0 || rel_x < 0) {
-    return false;
-  }
-  // board_cell_w / board_cell_h already encode the active scale (2/1 cols
-  // and 2/1 rows per cell), so integer division collapses any sub-cell
-  // click to the cell it lands in for both 1x and 2x.
-  const int row = rel_y / L.board_cell_h;
-  const int col = rel_x / L.board_cell_w;
-  if (row < 0 || row >= BOARD_DIM || col < 0 || col >= BOARD_DIM) {
-    return false;
-  }
-  *out_row = row;
-  *out_col = col;
-  return true;
-}
-
-int tui_analysis_cursor_at(int y, int x) {
-  return tui_analysis_cursor_column_at(y, x, NULL);
-}
-
-int tui_analysis_cursor_column_at(int y, int x, TuiAnalysisColumn *out_column) {
-  if (y < analysis_panel_top || y > analysis_panel_bottom ||
-      x < analysis_panel_left || x > analysis_panel_right) {
-    return -2;
-  }
-  for (int i = 0; i < analysis_row_map_count; i++) {
-    const AnalysisRowMap *m = &analysis_row_map[i];
-    if (y >= m->top_row && y <= m->bottom_row && x >= m->left_col &&
-        x <= m->right_col) {
-      if (out_column != NULL) {
-        *out_column = (x >= m->move_left_col) ? TUI_ANALYSIS_COLUMN_MOVE
-                                              : TUI_ANALYSIS_COLUMN_RANK;
-      }
-      return m->idx;
-    }
-  }
-  return -1;
-}
-
-int tui_modal_item_at(int y, int x) {
-  if (!modal_hit_map.valid) {
-    return -2;
-  }
-  // Outside the modal entirely (including the shadow column/row).
-  if (y < modal_hit_map.outer_top || y > modal_hit_map.outer_bottom ||
-      x < modal_hit_map.outer_left || x > modal_hit_map.outer_right) {
-    return -2;
-  }
-  // Inside the modal but on the chrome (top/bottom border, side
-  // columns). The clickable item rectangle runs from
-  // (top, left) to (top + item_count - 1, right) inclusive.
-  if (y < modal_hit_map.top ||
-      y >= modal_hit_map.top + modal_hit_map.item_count ||
-      x < modal_hit_map.left || x > modal_hit_map.right) {
-    return -1;
-  }
-  const int idx = y - modal_hit_map.top;
-  if (idx < 0 || idx >= modal_hit_map.item_count) {
-    return -1;
-  }
-  // Disabled items count as chrome — clicks are absorbed but not
-  // activated.
-  if (modal_hit_map.disabled[idx]) {
-    return -1;
-  }
-  return idx;
-}
-
-TuiModalChevron tui_modal_chevron_at(int y, int x) {
-  const int idx = tui_modal_item_at(y, x);
-  if (idx < 0) {
-    return TUI_MODAL_CHEVRON_NONE;
-  }
-  // The chevron column was recorded as the screen col of the
-  // glyph cell itself. Accept that exact col as a hit.
-  if (modal_hit_map.left_chev_col[idx] >= 0 &&
-      x == modal_hit_map.left_chev_col[idx]) {
-    return TUI_MODAL_CHEVRON_LEFT;
-  }
-  if (modal_hit_map.right_chev_col[idx] >= 0 &&
-      x == modal_hit_map.right_chev_col[idx]) {
-    return TUI_MODAL_CHEVRON_RIGHT;
-  }
-  return TUI_MODAL_CHEVRON_NONE;
-}
-
-int tui_history_cursor_at(int y, int x) {
-  return tui_history_cursor_field_at(y, x, NULL);
-}
-
-int tui_history_cursor_field_at(int y, int x, int *out_field) {
-  // Outside the History panel entirely.
-  if (y < history_panel_top || y > history_panel_bottom ||
-      x < history_panel_left || x > history_panel_right) {
-    return -2;
-  }
-  // Inside the panel — see whether the point falls on one of the
-  // per-entry rectangles populated during the last render.
-  for (int i = 0; i < history_row_map_count; i++) {
-    const HistoryRowMap *m = &history_row_map[i];
-    if (y >= m->top_row && y <= m->bottom_row && x >= m->left_col &&
-        x <= m->right_col) {
-      if (out_field != NULL) {
-        // Row offset within the entry, with a special "leave"
-        // sentinel for clicks landing in the right-anchored leave
-        // column on the top row:
-        //   0 = move text (top row, left of leave zone)
-        //   1 = rack (second row)
-        //   2 = leave (top row, inside the leave hit zone)
-        //   3+ = end-bonus extension, unchanged
-        const int dy = y - m->top_row;
-        if (dy == 0 && m->leave_left >= 0 && x >= m->leave_left &&
-            x <= m->leave_right) {
-          *out_field = 2;
-        } else {
-          *out_field = dy;
-        }
-      }
-      return m->idx;
-    }
-  }
-  // Inside the panel but not on any entry — title / chrome / blank
-  // space. Caller snaps the cursor back to -1 (the [4>] label).
-  return -1;
-}
 
 // Public accessor for the cached modal plane, shared across all modal
 // renderers (menu / settings / time picker / lexicon picker). Creates
@@ -3388,6 +3102,7 @@ static int render_history_error_row(struct ncplane *plane, const Theme *theme,
 
 static void render_history_panel(struct ncplane *plane, const Theme *theme,
                                  const TuiGameState *state, const Layout *L) {
+  TuiHitMaps *hit = tui_hit_maps();
   const int width = L->right_col_right - L->right_col_left + 1;
   const int height = L->history_bottom - L->history_top + 1;
   if (height < 3) {
@@ -3398,11 +3113,11 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   // the whole panel so a click on the chrome (or the title row in
   // combined mode) still resolves to "in history, but not on an
   // entry" and snaps the cursor to the [4>] label.
-  history_row_map_count = 0;
-  history_panel_top = L->history_top;
-  history_panel_bottom = L->history_bottom;
-  history_panel_left = L->right_col_left;
-  history_panel_right = L->right_col_right;
+  hit->history_row_map_count = 0;
+  hit->history_panel_top = L->history_top;
+  hit->history_panel_bottom = L->history_bottom;
+  hit->history_panel_left = L->right_col_left;
+  hit->history_panel_right = L->right_col_right;
   if (!L->combined_pills_history) {
     // badge_secondary = true when focus is on a sub-element (an
     // entry row) so the chevron moves off the label and onto the
@@ -3492,9 +3207,9 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
         render_history_error_row(plane, theme, e, row + entry_rows - err_rows,
                                  interior_left, interior_right);
       }
-      if (history_row_map_count <
-          (int)(sizeof(history_row_map) / sizeof(history_row_map[0]))) {
-        HistoryRowMap *m = &history_row_map[history_row_map_count++];
+      if (hit->history_row_map_count < (int)(sizeof(hit->history_row_map) /
+                                             sizeof(hit->history_row_map[0]))) {
+        HistoryRowMap *m = &hit->history_row_map[hit->history_row_map_count++];
         m->top_row = row;
         m->bottom_row = row + entry_rows - 1;
         m->left_col = interior_left;
@@ -3607,9 +3322,9 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
       }
       row_right += rows;
     }
-    if (history_row_map_count <
-        (int)(sizeof(history_row_map) / sizeof(history_row_map[0]))) {
-      HistoryRowMap *m = &history_row_map[history_row_map_count++];
+    if (hit->history_row_map_count <
+        (int)(sizeof(hit->history_row_map) / sizeof(hit->history_row_map[0]))) {
+      HistoryRowMap *m = &hit->history_row_map[hit->history_row_map_count++];
       m->top_row = row_top;
       m->bottom_row = row_top + rows - 1;
       m->left_col = col_left;
@@ -3650,6 +3365,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
                                  AnalysisRow *rows, int visible, int primary_w,
                                  int secondary_w, int primary_secondary_gap,
                                  bool primary_bold, int title_end_col) {
+  TuiHitMaps *hit = tui_hit_maps();
   const int interior_left = L->analysis_left + 1;
   const int interior_right_full = L->analysis_right - 1;
   // Reserve the rightmost interior cell for the scrollbar whenever
@@ -3666,11 +3382,11 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int interior_bottom = L->analysis_bottom - 1;
   // Reset per-frame hit-test map + panel bounds so mouse clicks
   // and arrow-key navigation can target individual analysis rows.
-  analysis_row_map_count = 0;
-  analysis_panel_top = L->analysis_top;
-  analysis_panel_bottom = L->analysis_bottom;
-  analysis_panel_left = L->analysis_left;
-  analysis_panel_right = L->analysis_right;
+  hit->analysis_row_map_count = 0;
+  hit->analysis_panel_top = L->analysis_top;
+  hit->analysis_panel_bottom = L->analysis_bottom;
+  hit->analysis_panel_left = L->analysis_left;
+  hit->analysis_panel_right = L->analysis_right;
   // Reserve a column-header strip; either on the panel's top border
   // (sharing the row with the title, when there's room) or on the
   // first interior row. The on-border placement is preferred since
@@ -4560,9 +4276,9 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       ncplane_putstr_yx(plane, row, interior_left, rank_str);
     }
     // Record the row's screen rectangle for click-to-cursor.
-    if (analysis_row_map_count <
-        (int)(sizeof(analysis_row_map) / sizeof(analysis_row_map[0]))) {
-      AnalysisRowMap *m = &analysis_row_map[analysis_row_map_count++];
+    if (hit->analysis_row_map_count < (int)(sizeof(hit->analysis_row_map) /
+                                            sizeof(hit->analysis_row_map[0]))) {
+      AnalysisRowMap *m = &hit->analysis_row_map[hit->analysis_row_map_count++];
       m->top_row = row;
       m->bottom_row = row;
       m->left_col = interior_left;
@@ -4690,7 +4406,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   }
   if (state != NULL) {
     atomic_store(&((TuiGameState *)state)->analysis_visible_rows,
-                 analysis_row_map_count);
+                 hit->analysis_row_map_count);
   }
 
   // Scrollbar — right edge of the panel interior. Renders a track
@@ -5665,13 +5381,14 @@ static void render_too_small(struct ncplane *plane, const Theme *theme) {
 void tui_game_render(struct ncplane *plane, const Theme *theme,
                      const TuiGameState *state, int time_per_side_seconds,
                      TuiModalState modal) {
+  TuiHitMaps *hit = tui_hit_maps();
   if (plane == NULL || theme == NULL || state == NULL || state->game == NULL) {
     return;
   }
 
   // Invalidate modal hit-test data at the start of each frame.
   // render_modal_ex will set it valid again if a modal renders.
-  modal_hit_map.valid = false;
+  hit->modal_hit_map.valid = false;
 
   // Force a defensive full repaint whenever the plane's dimensions have
   // changed since the previous render — not only when *this* call did the
@@ -6096,6 +5813,7 @@ static void render_modal_ex(struct ncplane *plane, const Theme *theme,
                             const int *cursor_cols, const int *zone_starts,
                             const int *zone_widths, int item_count, int focus,
                             int width) {
+  TuiHitMaps *hit = tui_hit_maps();
   unsigned plane_rows = 0;
   unsigned plane_cols = 0;
   ncplane_dim_yx(plane, &plane_rows, &plane_cols);
@@ -6119,20 +5837,20 @@ static void render_modal_ex(struct ncplane *plane, const Theme *theme,
   // rows [top+1 .. top+item_count] within columns [left+1 .. left+width-2]
   // (the 1-cell border on each side is non-clickable chrome). The
   // shadow row/col are not part of the clickable surface.
-  modal_hit_map.valid = true;
-  modal_hit_map.outer_top = top;
-  modal_hit_map.outer_bottom = top + height - 1;
-  modal_hit_map.outer_left = left;
-  modal_hit_map.outer_right = left + width - 1;
-  modal_hit_map.top = top + 1; // first item row
-  modal_hit_map.left = left + 1;
-  modal_hit_map.right = left + width - 2;
-  modal_hit_map.item_count =
+  hit->modal_hit_map.valid = true;
+  hit->modal_hit_map.outer_top = top;
+  hit->modal_hit_map.outer_bottom = top + height - 1;
+  hit->modal_hit_map.outer_left = left;
+  hit->modal_hit_map.outer_right = left + width - 1;
+  hit->modal_hit_map.top = top + 1; // first item row
+  hit->modal_hit_map.left = left + 1;
+  hit->modal_hit_map.right = left + width - 2;
+  hit->modal_hit_map.item_count =
       item_count < MODAL_MAX_ITEMS ? item_count : MODAL_MAX_ITEMS;
-  for (int i = 0; i < modal_hit_map.item_count; i++) {
-    modal_hit_map.disabled[i] = disabled != NULL && disabled[i];
-    modal_hit_map.left_chev_col[i] = -1;
-    modal_hit_map.right_chev_col[i] = -1;
+  for (int i = 0; i < hit->modal_hit_map.item_count; i++) {
+    hit->modal_hit_map.disabled[i] = disabled != NULL && disabled[i];
+    hit->modal_hit_map.left_chev_col[i] = -1;
+    hit->modal_hit_map.right_chev_col[i] = -1;
     // Scan the item text for ◀ (E2 97 80) and ▶ (E2 96 B6).
     // Each chevron occupies 1 display column. Item text renders
     // starting at modal-interior col 3, so the screen column is
@@ -6142,11 +5860,11 @@ static void render_modal_ex(struct ncplane *plane, const Theme *theme,
       int disp = 0;
       while (*s != '\0') {
         if (s[0] == 0xe2 && s[1] == 0x97 && s[2] == 0x80) {
-          modal_hit_map.left_chev_col[i] = left + 3 + disp;
+          hit->modal_hit_map.left_chev_col[i] = left + 3 + disp;
           s += 3;
           disp++;
         } else if (s[0] == 0xe2 && s[1] == 0x96 && s[2] == 0xb6) {
-          modal_hit_map.right_chev_col[i] = left + 3 + disp;
+          hit->modal_hit_map.right_chev_col[i] = left + 3 + disp;
           s += 3;
           disp++;
         } else if (s[0] >= 0x80) {

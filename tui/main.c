@@ -22,6 +22,7 @@
 #include "move_entry.h"
 #include "onboarding.h"
 #include "render_common.h"
+#include "render_hit_test.h"
 #include "theme.h"
 #include "time_picker.h"
 #include <execinfo.h>
