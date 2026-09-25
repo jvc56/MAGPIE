@@ -27,10 +27,11 @@
 // changed and the format did not have to.
 //
 // So when this test fails, the builder's output has changed. The fix is to
-// bump WMP_BUILDER_VERSION or RIT_BUILDER_VERSION in src/def/builder_defs.h
-// *and* update the hash here. Updating the hash alone leaves every server in
-// the world publishing old hashes under a builder name that no longer produces
-// them, and every worker declining every job with `derived_mismatch`.
+// bump WMP_BUILDER_VERSION, RIT_BUILDER_VERSION or KLV_BUILDER_VERSION in
+// src/def/builder_defs.h *and* update the hash here. Updating the hash alone
+// leaves every server in the world publishing old hashes under a builder name
+// that no longer produces them, and every worker declining every job with
+// `derived_mismatch`.
 //
 // Built from testdata/lexica/CSW21_ab.{kwg,klv2} against
 // testdata/letterdistributions/english_ab.csv.
@@ -39,12 +40,25 @@
 #define PINNED_RIT_SHA256                                                      \
   "b064d7729ba9117890595bdaa72e005314955b36f2377c97e5eb25a705211037"
 
+// The KLV builders: `createdata klv` (every leave zero, a leave-generation
+// job's generation 0) and `convert rackequity2klv` (each later generation, from
+// the per-rack aggregates), both for english_ab, over the rack equity file
+// write_every_full_rack writes. birdtest's "Check artifacts" rebuilds a KLV and
+// says "built by a different builder" rather than "differs" only if a change in
+// these bytes came with a KLV_BUILDER_VERSION bump. Both go through
+// klv_create_empty, and so through the KWG maker, which is still changing.
+#define PINNED_ZERO_KLV_SHA256                                                 \
+  "f03b53ebd8524a3e2af31d036b664cfd7efecb53e0c48c48ad67cef704bacd59"
+#define PINNED_RACK_EQUITY_KLV_SHA256                                          \
+  "db18f990affd0179946247075fa3621915ac33aabb8a8c3c512a8b210462d354"
+
 // The builder versions those hashes belong to. Bumping a version without
 // updating its hash, or the other way round, is the mistake this catches:
 // a pair that has moved apart is a server and a fleet that disagree.
 enum {
   PINNED_WMP_BUILDER_VERSION = 1,
   PINNED_RIT_BUILDER_VERSION = 1,
+  PINNED_KLV_BUILDER_VERSION = 1,
 };
 
 static void assert_built_file_hash(const char *data_paths, const char *name,
@@ -157,6 +171,75 @@ static void test_derived_builders_match_their_pinned_hashes(void) {
   config_destroy(config);
 }
 
+// english_ab draws only A and B, so its full racks are the eight
+// A^k B^(7-k). Each gets k + 1 occurrences and a mean equity of 8k - 20, both
+// exact in binary, so the file and what is parsed from it are the same on
+// every platform.
+static void write_every_full_rack(const char *data_paths, const char *name) {
+  ErrorStack *error_stack = error_stack_create();
+  char *path = data_filepaths_get_writable_filename(
+      data_paths, name, DATA_FILEPATH_TYPE_LEAVES, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("no writable path for %s", name);
+  }
+  FILE *stream = fopen(path, "w");
+  if (!stream) {
+    log_fatal("could not write %s", path);
+  }
+  for (int a = 0; a <= RACK_SIZE; a++) {
+    char rack[RACK_SIZE + 1];
+    for (int i = 0; i < RACK_SIZE; i++) {
+      rack[i] = i < a ? 'A' : 'B';
+    }
+    rack[RACK_SIZE] = '\0';
+    const int count = a + 1;
+    fprintf(stream, "%s,%d,%d\n", rack, count, (8 * a - 20) * count);
+  }
+  fclose(stream);
+  free(path);
+  error_stack_destroy(error_stack);
+}
+
+static void delete_data_file(const char *data_paths, const char *name,
+                             data_filepath_t type) {
+  ErrorStack *error_stack = error_stack_create();
+  char *path =
+      data_filepaths_get_readable_filename(data_paths, name, type, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    delete_file(path);
+  }
+  free(path);
+  error_stack_destroy(error_stack);
+}
+
+// The KLV builders against their pinned hashes, run through the commands
+// birdtest's server runs, so that a changed argument breaks this too.
+static void test_klv_builders_match_their_pinned_hashes(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21_ab -ld english_ab -wmp false -rit false");
+  const char *data_paths = config_get_data_paths(config);
+
+  load_and_exec_config_or_die(config,
+                              "createdata klv builderhash_zero english_ab");
+  assert_built_file_hash(data_paths, "builderhash_zero", DATA_FILEPATH_TYPE_KLV,
+                         PINNED_ZERO_KLV_SHA256, "KLV", KLV_BUILDER_VERSION,
+                         PINNED_KLV_BUILDER_VERSION);
+
+  write_every_full_rack(data_paths, "builderhash_racks");
+  load_and_exec_config_or_die(
+      config, "convert rackequity2klv builderhash_racks english_ab -threads 1");
+  assert_built_file_hash(data_paths, "builderhash_racks",
+                         DATA_FILEPATH_TYPE_KLV, PINNED_RACK_EQUITY_KLV_SHA256,
+                         "KLV", KLV_BUILDER_VERSION,
+                         PINNED_KLV_BUILDER_VERSION);
+
+  delete_data_file(data_paths, "builderhash_zero", DATA_FILEPATH_TYPE_KLV);
+  delete_data_file(data_paths, "builderhash_racks", DATA_FILEPATH_TYPE_KLV);
+  delete_data_file(data_paths, "builderhash_racks", DATA_FILEPATH_TYPE_LEAVES);
+  config_destroy(config);
+}
+
 // Two builds from the same inputs produce the same bytes, whatever the thread
 // count.
 //
@@ -205,5 +288,6 @@ static void test_a_builder_does_not_depend_on_thread_count(void) {
 
 void test_builder_hash(void) {
   test_derived_builders_match_their_pinned_hashes();
+  test_klv_builders_match_their_pinned_hashes();
   test_a_builder_does_not_depend_on_thread_count();
 }
