@@ -5,6 +5,7 @@
 #include "game_render.h"
 #include "game_state.h"
 #include "lexicon_picker.h"
+#include "list_nav.h"
 #include "render_hit_test.h"
 #include "render_modals.h"
 #include "time_picker.h"
@@ -14,6 +15,7 @@
 #include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -77,43 +79,16 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
     tui_play_setup_enabled_rows(ui->play_setup_overtime_rule,
                                 ui->watch_setup_time,
                                 ui->play_setup_challenge_rule, ps_enabled);
-    if (key == NCKEY_UP || key == NCKEY_DOWN) {
-      const int delta = key == NCKEY_UP ? -1 : 1;
-      int next = ui->play_setup_focus + delta;
-      while (next >= 0 && next < TUI_PLAY_SETUP_ITEM_COUNT &&
-             !ps_enabled[next]) {
-        next += delta;
-      }
-      if (next < 0 || next >= TUI_PLAY_SETUP_ITEM_COUNT) {
-        next = ui->play_setup_focus; // no enabled row that way — stay put
-      }
-      ui->play_setup_focus = next;
-      if (next == TUI_PLAY_SETUP_HUMAN_NAME) {
+    // Home/End move the caret on the name rows, so they only jump rows
+    // elsewhere.
+    const int nav = tui_list_nav(
+        key, &input, ui->play_setup_focus, TUI_PLAY_SETUP_ITEM_COUNT,
+        ps_enabled, focus_name ? TUI_LIST_NAV_ARROWS : TUI_LIST_NAV_HOME_END);
+    if (nav >= 0) {
+      ui->play_setup_focus = nav;
+      if (nav == TUI_PLAY_SETUP_HUMAN_NAME) {
         ui->play_setup_name_cursor = (int)strlen(ui->play_setup_human_name);
-      } else if (next == TUI_PLAY_SETUP_COMPUTER_NAME) {
-        ui->play_setup_name_cursor = (int)strlen(ui->play_setup_computer_name);
-      }
-      return true;
-    }
-    if (key == NCKEY_TAB) {
-      const bool shift = ncinput_shift_p(&input);
-      int next = ui->play_setup_focus;
-      for (int step = 0; step < TUI_PLAY_SETUP_ITEM_COUNT; step++) {
-        next += shift ? -1 : 1;
-        if (next < 0) {
-          next = TUI_PLAY_SETUP_ITEM_COUNT - 1;
-        }
-        if (next >= TUI_PLAY_SETUP_ITEM_COUNT) {
-          next = 0;
-        }
-        if (ps_enabled[next]) {
-          break;
-        }
-      }
-      ui->play_setup_focus = next;
-      if (next == TUI_PLAY_SETUP_HUMAN_NAME) {
-        ui->play_setup_name_cursor = (int)strlen(ui->play_setup_human_name);
-      } else if (next == TUI_PLAY_SETUP_COMPUTER_NAME) {
+      } else if (nav == TUI_PLAY_SETUP_COMPUTER_NAME) {
         ui->play_setup_name_cursor = (int)strlen(ui->play_setup_computer_name);
       }
       return true;
@@ -438,46 +413,17 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
       ui->modal = TUI_MODAL_STARTUP_MENU;
       return true;
     }
-    if (key == NCKEY_UP || key == NCKEY_DOWN) {
-      const int delta = key == NCKEY_UP ? -1 : 1;
-      int next = ui->annotate_setup_focus + delta;
-      if (next < 0) {
-        next = 0;
-      }
-      if (next >= TUI_ANNOTATE_SETUP_ITEM_COUNT) {
-        next = TUI_ANNOTATE_SETUP_ITEM_COUNT - 1;
-      }
-      ui->annotate_setup_focus = next;
-      if (next == TUI_ANNOTATE_SETUP_P1_NAME) {
+    // Home/End move the caret on the name rows, so they only jump rows
+    // elsewhere.
+    const int nav = tui_list_nav(
+        key, &input, ui->annotate_setup_focus, TUI_ANNOTATE_SETUP_ITEM_COUNT,
+        NULL, focus_name ? TUI_LIST_NAV_ARROWS : TUI_LIST_NAV_HOME_END);
+    if (nav >= 0) {
+      ui->annotate_setup_focus = nav;
+      if (nav == TUI_ANNOTATE_SETUP_P1_NAME) {
         ui->annotate_setup_name_cursor =
             (int)strlen(ui->annotate_setup_p1_name);
-      } else if (next == TUI_ANNOTATE_SETUP_P2_NAME) {
-        ui->annotate_setup_name_cursor =
-            (int)strlen(ui->annotate_setup_p2_name);
-      }
-      return true;
-    }
-    // Tab / Shift-Tab cycles between the two name fields —
-    // shortcuts for the common annotator workflow of entering
-    // both nicknames in sequence. From a non-name row Tab
-    // jumps to P1 (or P2 with Shift), so the first Tab from
-    // the default Start focus drops you directly into a name
-    // edit.
-    if (key == NCKEY_TAB) {
-      const bool shift = ncinput_shift_p(&input);
-      int next;
-      if (ui->annotate_setup_focus == TUI_ANNOTATE_SETUP_P1_NAME) {
-        next = TUI_ANNOTATE_SETUP_P2_NAME;
-      } else if (ui->annotate_setup_focus == TUI_ANNOTATE_SETUP_P2_NAME) {
-        next = TUI_ANNOTATE_SETUP_P1_NAME;
-      } else {
-        next = shift ? TUI_ANNOTATE_SETUP_P2_NAME : TUI_ANNOTATE_SETUP_P1_NAME;
-      }
-      ui->annotate_setup_focus = next;
-      if (next == TUI_ANNOTATE_SETUP_P1_NAME) {
-        ui->annotate_setup_name_cursor =
-            (int)strlen(ui->annotate_setup_p1_name);
-      } else {
+      } else if (nav == TUI_ANNOTATE_SETUP_P2_NAME) {
         ui->annotate_setup_name_cursor =
             (int)strlen(ui->annotate_setup_p2_name);
       }
@@ -666,24 +612,17 @@ bool tui_input_watch_setup(TuiGameState *state, TuiUiState *ui,
         return true;
       }
     }
-    const bool key_up = key == NCKEY_UP || key == 'k' || key == 'K';
-    const bool key_down = key == NCKEY_DOWN || key == 'j' || key == 'J';
     const bool key_left = key == NCKEY_LEFT || key == 'h' || key == 'H';
     const bool key_right = key == NCKEY_RIGHT || key == 'l' || key == 'L';
     if (key == NCKEY_ESC) {
       ui->modal = TUI_MODAL_STARTUP_MENU;
       return true;
     }
-    if (key_up) {
-      if (ui->watch_setup_focus > 0) {
-        ui->watch_setup_focus--;
-      }
-      return true;
-    }
-    if (key_down) {
-      if (ui->watch_setup_focus < TUI_WATCH_SETUP_ITEM_COUNT - 1) {
-        ui->watch_setup_focus++;
-      }
+    const int nav = tui_list_nav(key, &input, ui->watch_setup_focus,
+                                 TUI_WATCH_SETUP_ITEM_COUNT, NULL,
+                                 TUI_LIST_NAV_HOME_END | TUI_LIST_NAV_VI);
+    if (nav >= 0) {
+      ui->watch_setup_focus = nav;
       return true;
     }
     if (key_left || key_right) {
