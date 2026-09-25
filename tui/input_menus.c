@@ -3,7 +3,6 @@
 #include "bot_worker.h"
 #include "config.h"
 #include "game_state.h"
-#include "lexicon_picker.h"
 #include "list_nav.h"
 #include "render_hit_test.h"
 #include "time_picker.h"
@@ -54,50 +53,6 @@ bool tui_input_quit_confirm(TuiGameState *state, TuiUiState *ui,
       } else {
         ui->modal = ui->quit_confirm_return;
       }
-    }
-    return true;
-  }
-  return false;
-}
-
-// Lexicon picker modal keys.
-// Returns true when the key was consumed.
-bool tui_input_lexicon_picker(TuiGameState *state, TuiUiState *ui,
-                              TuiSession *session, uint32_t key,
-                              ncinput input) {
-  (void)input;
-  if (ui->modal == TUI_MODAL_LEXICON_PICKER) {
-    const int n = tui_lexicon_list_count(ui->lexicon_list);
-    if (key == NCKEY_ESC) {
-      ui->modal = TUI_MODAL_SETTINGS;
-    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-      if (ui->lexicon_focus > 0) {
-        ui->lexicon_focus--;
-      }
-    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-      if (ui->lexicon_focus < n - 1) {
-        ui->lexicon_focus++;
-      }
-    } else if (key == NCKEY_HOME || key == 'g') {
-      ui->lexicon_focus = 0;
-    } else if (key == NCKEY_END || key == 'G') {
-      ui->lexicon_focus = n - 1;
-    } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-      char picked[TUI_LEXICON_NAME_MAX] = {0};
-      if (tui_lexicon_list_name(ui->lexicon_list, ui->lexicon_focus, picked,
-                                sizeof(picked))) {
-        (void)snprintf(session->to_save.lexicon,
-                       sizeof(session->to_save.lexicon), "%s", picked);
-        session->to_save.lexicon_set = true;
-        pthread_mutex_lock(&state->mutex);
-        (void)snprintf(state->pending_lexicon, sizeof(state->pending_lexicon),
-                       "%s", picked);
-        pthread_mutex_unlock(&state->mutex);
-        if (!session->args.no_config) {
-          tui_config_save(&session->to_save);
-        }
-      }
-      ui->modal = TUI_MODAL_SETTINGS;
     }
     return true;
   }
