@@ -54,6 +54,9 @@ enum {
   // The watchdog polls bot_stop while the engine is running and signals
   // the thread_control if a quit is requested.
   WATCHDOG_POLL_NS = 50 * 1000 * 1000L,
+  // Grace past a bot sim's budget before the watchdog interrupts it. BAI
+  // normally stops itself at the budget; this is the backstop.
+  SIM_DEADLINE_GRACE_MS = 1000,
 };
 
 static void copy_str(char *dst, size_t dst_size, const char *src) {
@@ -420,17 +423,30 @@ static double compute_budget_sec(const TuiGameState *state, int player_idx) {
 
 // Watchdog: spins while the engine is running and translates a
 // bot_stop request into a thread_control USER_INTERRUPT so the engine
-// can bail out early.
+// can bail out early. With deadline_sec > 0 it also interrupts the
+// engine once that many seconds have passed, so a bot turn can never
+// run unbounded even if the engine's own time limit fails to stop it.
 typedef struct {
   ThreadControl *tc;
   _Atomic bool *bot_stop;
   _Atomic bool finished;
+  double deadline_sec;
 } Watchdog;
+
+static double seconds_since(const struct timespec *start) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (double)(now.tv_sec - start->tv_sec) +
+         (double)(now.tv_nsec - start->tv_nsec) / 1e9;
+}
 
 static void *watchdog_main(void *arg) {
   Watchdog *w = (Watchdog *)arg;
+  struct timespec start;
+  clock_gettime(CLOCK_MONOTONIC, &start);
   while (!atomic_load(&w->finished)) {
-    if (atomic_load(w->bot_stop)) {
+    if (atomic_load(w->bot_stop) ||
+        (w->deadline_sec > 0 && seconds_since(&start) >= w->deadline_sec)) {
       thread_control_set_status(w->tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
       break;
     }
@@ -520,7 +536,11 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   ThreadControl *tc = thread_control_create();
   thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
 
-  Watchdog wd = {.tc = tc, .bot_stop = &state->bot_stop, .finished = false};
+  Watchdog wd = {.tc = tc,
+                 .bot_stop = &state->bot_stop,
+                 .finished = false,
+                 .deadline_sec =
+                     budget_sec + (double)SIM_DEADLINE_GRACE_MS / 1000.0};
   pthread_t wd_thread;
   const bool wd_started =
       (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
@@ -558,7 +578,9 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   args.bai_options.threshold = BAI_THRESHOLD_NONE;
   args.bai_options.sample_limit = (uint64_t)1e15;
   args.bai_options.sample_minimum = 1;
-  args.bai_options.time_limit_seconds = (uint64_t)budget_sec;
+  // BAI takes fractional seconds; truncating to whole seconds turned any
+  // budget under 1s into 0, which BAI treats as no time limit at all.
+  args.bai_options.time_limit_seconds = budget_sec;
   args.bai_options.num_threads = num_threads;
   args.bai_options.cutoff = 0.005;
   args.bai_options.parent_worker_thread_index = 0;
