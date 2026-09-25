@@ -1,6 +1,7 @@
 #include "pat.h"
 
 #include "../def/board_defs.h"
+#include "../def/config_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
@@ -146,17 +147,20 @@ struct PATWeights {
   bool run_through;
   // See PAT_FIT_SHRINK_ROW_PREFIX.
   bool fit_shrink;
-  // See PAT_UTILITY_ADJUST_ROW_PREFIX. The tables are built at load when
-  // utility_adjust is nonzero and NULL otherwise, indexed
-  // [(unseen - 1) * PAT_UTILITY_WIDTH + margin + PAT_UTILITY_MARGIN_LIMIT]:
-  // the correction itself, and its maximum over all margins at or above
-  // the index (a move can only add score).
   // See PAT_FIT_FIXED_ZERO_ROW_PREFIX; owned, NULL when absent.
   char *fit_fixed_zero;
+  // See PAT_UTILITY_ADJUST_ROW_PREFIX. The tables are built from a win
+  // percentage table by pat_prepare_utility (or pat_set_utility_adjust)
+  // when utility_adjust is nonzero and are NULL otherwise, indexed
+  // [bag * PAT_UTILITY_WIDTH + margin + PAT_UTILITY_MARGIN_LIMIT] by the
+  // bag after the move: the correction itself, and its maximum over all
+  // margins at or above the index (a move can only add score).
+  // utility_win_pct_name (owned) names the table they came from.
   double utility_adjust;
-  int utility_max_unseen;
+  int utility_max_bag;
   Equity *utility_table;
   Equity *utility_suffix_max;
+  char *utility_win_pct_name;
   // Per-stage factor on the applied term (see the row prefixes in
   // pat_defs.h); indexed by PAT_STAGE_*.
   double stage_scale[PAT_STAGE_COUNT];
@@ -496,8 +500,9 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->fit_shrink = PAT_DEFAULT_FIT_SHRINK;
   pat->fit_fixed_zero = NULL;
   pat->utility_adjust = 0.0;
-  pat->utility_max_unseen = 0;
+  pat->utility_max_bag = 0;
   pat->utility_table = NULL;
+  pat->utility_win_pct_name = NULL;
   pat->utility_suffix_max = NULL;
   for (int stage = 0; stage < PAT_STAGE_COUNT; stage++) {
     pat->stage_scale[stage] = PAT_DEFAULT_STAGE_SCALE;
@@ -516,11 +521,12 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
 enum { PAT_UTILITY_WIDTH = 2 * PAT_UTILITY_MARGIN_LIMIT + 1 };
 
 // The default sim utility (win 1.0, spread 0.5, scale 100; see
-// sim_utility_blend) of the mover at margin with unseen tiles left and the
-// opponent on turn.
+// sim_utility_blend) of the mover at margin with bag tiles left after the
+// move and the opponent on turn, both racks full.
 static double pat_utility_mover_value(const WinPct *win_pcts, int margin,
-                                      unsigned int unseen) {
-  const double win = 1.0 - win_pct_get(win_pcts, -margin, unseen);
+                                      unsigned int bag) {
+  const double win =
+      1.0 - win_pct_get(win_pcts, -margin, bag, RACK_SIZE, RACK_SIZE);
   const double scaled_spread = margin / 100.0;
   const double spread_sigmoid =
       scaled_spread >= 0.0 ? 1.0 / (1.0 + exp(-scaled_spread))
@@ -528,25 +534,36 @@ static double pat_utility_mover_value(const WinPct *win_pcts, int margin,
   return (2.0 / 3.0) * win + (1.0 / 3.0) * spread_sigmoid;
 }
 
+static void pat_clear_utility_tables(PATWeights *pat) {
+  free(pat->utility_table);
+  free(pat->utility_suffix_max);
+  free(pat->utility_win_pct_name);
+  pat->utility_table = NULL;
+  pat->utility_suffix_max = NULL;
+  pat->utility_win_pct_name = NULL;
+  pat->utility_max_bag = 0;
+}
+
 static void pat_build_utility_tables(PATWeights *pat, const WinPct *win_pcts) {
-  const int max_unseen = (int)win_pct_get_max_tiles_unseen(win_pcts);
-  const size_t size = (size_t)max_unseen * PAT_UTILITY_WIDTH;
-  pat->utility_max_unseen = max_unseen;
+  pat_clear_utility_tables(pat);
+  const int max_bag = (int)win_pct_get_max_bag(win_pcts);
+  const size_t size = (size_t)(max_bag + 1) * PAT_UTILITY_WIDTH;
+  pat->utility_max_bag = max_bag;
   pat->utility_table = malloc_or_die(sizeof(Equity) * size);
   pat->utility_suffix_max = malloc_or_die(sizeof(Equity) * size);
+  pat->utility_win_pct_name = string_duplicate(win_pct_get_name(win_pcts));
   const int step = PAT_UTILITY_KAPPA_STEP;
-  for (int unseen = 1; unseen <= max_unseen; unseen++) {
-    Equity *row = pat->utility_table + (size_t)(unseen - 1) * PAT_UTILITY_WIDTH;
-    Equity *suffix =
-        pat->utility_suffix_max + (size_t)(unseen - 1) * PAT_UTILITY_WIDTH;
+  for (int bag = 0; bag <= max_bag; bag++) {
+    Equity *row = pat->utility_table + (size_t)bag * PAT_UTILITY_WIDTH;
+    Equity *suffix = pat->utility_suffix_max + (size_t)bag * PAT_UTILITY_WIDTH;
     for (int offset = 0; offset < PAT_UTILITY_WIDTH; offset++) {
       const int margin = offset - PAT_UTILITY_MARGIN_LIMIT;
       const double lower =
-          pat_utility_mover_value(win_pcts, margin - step, (unsigned)unseen);
+          pat_utility_mover_value(win_pcts, margin - step, (unsigned)bag);
       const double middle =
-          pat_utility_mover_value(win_pcts, margin, (unsigned)unseen);
+          pat_utility_mover_value(win_pcts, margin, (unsigned)bag);
       const double upper =
-          pat_utility_mover_value(win_pcts, margin + step, (unsigned)unseen);
+          pat_utility_mover_value(win_pcts, margin + step, (unsigned)bag);
       const double slope = (upper - lower) / (2.0 * step);
       const double curvature = (upper - 2.0 * middle + lower) / (step * step);
       const double kappa = slope > 0.0 ? -curvature / slope : 0.0;
@@ -562,14 +579,15 @@ static void pat_build_utility_tables(PATWeights *pat, const WinPct *win_pcts) {
   }
 }
 
-// Row and column of the tables for a move to unseen from margin.
-static inline size_t pat_utility_index(const PATWeights *pat, int unseen,
+// Row and column of the tables for a move leaving bag tiles in the bag from
+// margin.
+static inline size_t pat_utility_index(const PATWeights *pat, int bag,
                                        int margin) {
-  if (unseen < 1) {
-    unseen = 1;
+  if (bag < 0) {
+    bag = 0;
   }
-  if (unseen > pat->utility_max_unseen) {
-    unseen = pat->utility_max_unseen;
+  if (bag > pat->utility_max_bag) {
+    bag = pat->utility_max_bag;
   }
   if (margin < -PAT_UTILITY_MARGIN_LIMIT) {
     margin = -PAT_UTILITY_MARGIN_LIMIT;
@@ -577,29 +595,51 @@ static inline size_t pat_utility_index(const PATWeights *pat, int unseen,
   if (margin > PAT_UTILITY_MARGIN_LIMIT) {
     margin = PAT_UTILITY_MARGIN_LIMIT;
   }
-  return (size_t)(unseen - 1) * PAT_UTILITY_WIDTH +
+  return (size_t)bag * PAT_UTILITY_WIDTH +
          (size_t)(margin + PAT_UTILITY_MARGIN_LIMIT);
 }
 
 void pat_set_utility_adjust(PATWeights *pat, double utility_adjust,
                             const WinPct *win_pcts) {
-  free(pat->utility_table);
-  free(pat->utility_suffix_max);
-  pat->utility_table = NULL;
-  pat->utility_suffix_max = NULL;
-  pat->utility_max_unseen = 0;
+  pat_clear_utility_tables(pat);
   pat->utility_adjust = utility_adjust;
   if (utility_adjust > 0.0) {
     pat_build_utility_tables(pat, win_pcts);
   }
 }
 
+void pat_prepare_utility(PATWeights *pat, const char *data_paths,
+                         const LetterDistribution *ld,
+                         ErrorStack *error_stack) {
+  if (pat->utility_adjust <= 0.0) {
+    return;
+  }
+  char *win_pct_name =
+      get_formatted_string("%s%s", DEFAULT_WIN_PCT_PREFIX, ld_get_name(ld));
+  if (pat->utility_table != NULL &&
+      strings_equal(pat->utility_win_pct_name, win_pct_name)) {
+    free(win_pct_name);
+    return;
+  }
+  WinPct *win_pcts = win_pct_create(data_paths, win_pct_name, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    pat_build_utility_tables(pat, win_pcts);
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_PAT_UTILITY_WIN_PCT,
+        get_formatted_string("PAT '%s' has a utility correction, which needs "
+                             "win percentage table '%s'",
+                             pat->name, win_pct_name));
+  }
+  win_pct_destroy(win_pcts);
+  free(win_pct_name);
+}
+
 void pat_destroy(PATWeights *pat) {
   if (!pat) {
     return;
   }
-  free(pat->utility_table);
-  free(pat->utility_suffix_max);
+  pat_clear_utility_tables(pat);
   free(pat->fit_fixed_zero);
   free(pat->name);
   free(pat->run_through_count);
@@ -999,14 +1039,6 @@ PATWeights *pat_create(const char *data_paths, const char *pat_name,
       if (error_stack_is_empty(error_stack)) {
         pat = pat_create_zeroed(pat_name);
         pat_parse_contents(pat, pat_name, split_contents, error_stack);
-        if (error_stack_is_empty(error_stack) && pat->utility_adjust > 0.0) {
-          WinPct *win_pcts =
-              win_pct_create(data_paths, PAT_UTILITY_WIN_PCT_NAME, error_stack);
-          if (error_stack_is_empty(error_stack)) {
-            pat_build_utility_tables(pat, win_pcts);
-          }
-          win_pct_destroy(win_pcts);
-        }
       }
       string_splitter_destroy(split_contents);
     }
@@ -1055,9 +1087,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SHRINK_ROW_PREFIX,
                                       pat->fit_shrink ? 1 : 0);
   if (pat->fit_fixed_zero) {
-    string_builder_add_formatted_string(sb, "%s%s\n",
-                                        PAT_FIT_FIXED_ZERO_ROW_PREFIX,
-                                        pat->fit_fixed_zero);
+    string_builder_add_formatted_string(
+        sb, "%s%s\n", PAT_FIT_FIXED_ZERO_ROW_PREFIX, pat->fit_fixed_zero);
   }
   if (pat->utility_adjust > 0.0) {
     string_builder_add_formatted_string(
@@ -2535,16 +2566,16 @@ void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
   pat_eval_ctx->utility_bag = bag;
   pat_eval_ctx->utility_row = weights->utility_table;
   pat_eval_ctx->utility_non_placement =
-      weights
-          ->utility_table[pat_utility_index(weights, bag + RACK_SIZE, margin)];
+      weights->utility_table[pat_utility_index(weights, bag, margin)];
   // Every move adds a nonnegative score and draws 0 to RACK_SIZE tiles, so
   // the largest correction any move can get is the largest suffix maximum
-  // from the current margin over those unseen counts.
+  // from the current margin over those bag sizes.
   Equity bound = pat_eval_ctx->utility_non_placement;
   for (int drawn = 0; drawn <= RACK_SIZE; drawn++) {
-    const int unseen = (bag > drawn ? bag - drawn : 0) + RACK_SIZE;
+    const int bag_after = bag > drawn ? bag - drawn : 0;
     const Equity suffix_max =
-        weights->utility_suffix_max[pat_utility_index(weights, unseen, margin)];
+        weights
+            ->utility_suffix_max[pat_utility_index(weights, bag_after, margin)];
     if (suffix_max > bound) {
       bound = suffix_max;
     }
@@ -2565,11 +2596,11 @@ pat_eval_utility_adjustment(const PATEvalContext *pat_eval_ctx,
   }
   const int bag = pat_eval_ctx->utility_bag;
   const int drawn = move_get_tiles_played(move);
-  const int unseen = (bag > drawn ? bag - drawn : 0) + RACK_SIZE;
+  const int bag_after = bag > drawn ? bag - drawn : 0;
   const int margin =
       pat_eval_ctx->utility_margin + equity_to_int(move_get_score(move));
-  return pat_eval_ctx
-      ->utility_row[pat_utility_index(pat_eval_ctx->weights, unseen, margin)];
+  return pat_eval_ctx->utility_row[pat_utility_index(pat_eval_ctx->weights,
+                                                     bag_after, margin)];
 }
 
 // Scans one of the context's units into `features`, reporting the lane it

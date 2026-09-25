@@ -109,7 +109,7 @@ The correction costs about 3% on top of X.
 make magpie BUILD=no_pgo_release
 { cat data/strategy/hookscore_x.pat; echo "utility_adjust,350"; } > data/strategy/px_xutil350.pat
 ./bin/magpie autoplay games 1000000 -pat hookscore_x -lex CSW21 -gp true -threads 10 \
-  -wmp true -rit true -ritmmap true -wit true -winpct winpct -seed 97200004 \
+  -wmp true -rit true -ritmmap true -wit true -seed 97200004 \
   -pat1 px_xutil350 -pat2 hookscore_x
 ```
 

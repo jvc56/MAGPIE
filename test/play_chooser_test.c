@@ -1,7 +1,6 @@
 #include "play_chooser_test.h"
 
 #include "../src/compat/ctime.h"
-#include "../src/def/config_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/peg_defs.h"
@@ -386,7 +385,7 @@ static void test_keep_phony_for_triple_triple(void) {
   game_timer_reset(&game_timer, 24.0);
   game_timer_start_turn(&game_timer, 1);
   WinPct *win_pcts =
-      win_pct_create(DEFAULT_TEST_DATA_PATH, DEFAULT_WIN_PCT, error_stack);
+      win_pct_create(DEFAULT_TEST_DATA_PATH, "winpct_english", error_stack);
   assert(error_stack_is_empty(error_stack));
   const PlayChooserStrategy sim_strategy = {
       .pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM,
@@ -863,7 +862,7 @@ static void test_challenge_stage_combinations(void) {
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
   ErrorStack *error_stack = error_stack_create();
   WinPct *win_pcts =
-      win_pct_create(DEFAULT_TEST_DATA_PATH, DEFAULT_WIN_PCT, error_stack);
+      win_pct_create(DEFAULT_TEST_DATA_PATH, "winpct_english", error_stack);
   assert(error_stack_is_empty(error_stack));
 
   const PlayChooserStrategy strategy = {

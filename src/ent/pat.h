@@ -368,6 +368,12 @@ void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
 // builds its tables from win_pcts; 0 removes it.
 void pat_set_utility_adjust(PATWeights *pat, double utility_adjust,
                             const WinPct *win_pcts);
+// Builds the utility correction's tables (see PAT_UTILITY_ADJUST_ROW_PREFIX)
+// from the letter distribution's win percentage table, winpct_<ld>, unless
+// they already come from it. A no-op without a correction. Call it with
+// pat_prepare_hook_flex whenever the weights are used with a distribution.
+void pat_prepare_utility(PATWeights *pat, const char *data_paths,
+                         const LetterDistribution *ld, ErrorStack *error_stack);
 void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
                                   int bag);
 void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg);

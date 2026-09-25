@@ -504,7 +504,7 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
-      /*inference_args=*/NULL, &sim_args);
+      /*use_margin_forecast=*/false, /*inference_args=*/NULL, &sim_args);
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).
@@ -579,6 +579,7 @@ static bool play_chooser_run_endgame(
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      /*incremental_movegen=*/true,
       /*enable_pv_display=*/false, /*soft_time_limit=*/budget_seconds * 0.9,
       /*hard_time_limit=*/budget_seconds, strategy->seed,
       /*skip_word_pruning=*/false, shared_tt, /*max_workers=*/0,

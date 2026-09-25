@@ -1652,7 +1652,7 @@ static void test_pat_opening_and_hook_flex(void) {
 static void pat_path_parity_run(double utility_adjust) {
   const char *set_cmd =
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
-      "-winpct winpct ";
+      "-winpct winpct_english ";
   Config *config_wmp = config_create_or_die(set_cmd);
   load_and_exec_config_or_die(config_wmp, "set -wmp true");
   Config *config_no_wmp = config_create_or_die(set_cmd);

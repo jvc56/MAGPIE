@@ -175,6 +175,7 @@ typedef enum {
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
+  ARG_TOKEN_SIM_MARGIN_FORECAST,
   ARG_TOKEN_USE_HEAT_MAP,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
@@ -240,6 +241,8 @@ typedef enum {
   ARG_TOKEN_PAT_COMBINE_GAMMA,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
+  ARG_TOKEN_P1_SIM_MARGIN_FORECAST,
+  ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
   ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
@@ -336,6 +339,9 @@ struct Config {
   WinPct *win_pcts;
   // See ARG_TOKEN_P2_WIN_PCT; NULL means player 2 uses win_pcts too.
   WinPct *p2_win_pcts;
+  // The table named by -winpct, owned; NULL means the default for the
+  // current letter distribution (see config_win_pct_target_name).
+  char *win_pct_explicit_name;
   BoardLayout *board_layout;
   LetterDistribution *ld;
   PlayersData *players_data;
@@ -417,6 +423,7 @@ struct Config {
   bool show_mistakes;
   bool use_small_plays;
   bool sim_with_inference;
+  bool sim_margin_forecast;
   bool use_heat_map;
   bool print_boards;
   bool print_on_finish;
@@ -438,6 +445,8 @@ struct Config {
   double pat_combine_gamma;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
+  bool p1_sim_margin_forecast;
+  bool p2_sim_margin_forecast;
   // Set when the most recent sim ran inference internally and it completed
   // (not interrupted). Separate from inference_results's own valid flag,
   // which a sim-driven inference deliberately does not set so that an
@@ -1251,13 +1260,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "kwg2wit CSW24";
       examples[2] = "text2wordmap NWL20";
       examples[3] = "kwg2witifneeded CSW24";
+      examples[4] = "winpct CSW24_winpct_record CSW24_winpct";
       text =
           "Runs the convert command for the specified type with the given "
           "input and output name, using different file extensions. The letter "
           "distribution defaults to the lexicon's distribution. kwg2wit reads "
           "the KWG and creates ordinary and positional word-info tables. "
           "kwg2witifneeded preserves a current matching table and otherwise "
-          "rebuilds it before use.";
+          "rebuilds it before use. winpct takes a recorded win percentage "
+          "table (autoplay winpct) and an output table name in place of the "
+          "letter distribution, chooses smoothing by cross-validating the "
+          "record's two independent samples, and writes the smoothed table.";
       break;
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
@@ -1731,15 +1744,18 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_WIN_PCT:
       usages[0] = "<win_percentage>";
-      examples[0] = "winpct";
-      text = "Specifies which win percentage file to use for simulations.";
+      examples[0] = "winpct_english";
+      examples[1] = "default";
+      text = "Specifies which win percentage table to use for simulations. "
+             "Without it, or with default, the table is winpct_ followed by "
+             "the letter distribution's name, e.g. winpct_french.";
       break;
     case ARG_TOKEN_P2_WIN_PCT:
       usages[0] = "<win_percentage>";
-      examples[0] = "winpct";
-      text = "Experimental: a win percentage file for player 2's "
-             "simulations only (player 1 keeps winpct), to compare tables "
-             "head to head.";
+      examples[0] = "winpct_english";
+      text = "Experimental: a win percentage table for player 2's "
+             "simulations only (player 1 keeps the table -winpct selects), "
+             "to compare tables head to head.";
       break;
     case ARG_TOKEN_PLIES:
       usages[0] = "<plies>";
@@ -1974,6 +1990,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "false";
       text = "Specifies whether or not to run and use the inference result "
              "when simulating.";
+      break;
+    case ARG_TOKEN_SIM_MARGIN_FORECAST:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether simulations project each nonterminal "
+             "horizon's spread to the end of the game with the win "
+             "percentage table's expected swing for that bag and rack "
+             "state. The projection feeds the equity and the spread term "
+             "of the utility blend.";
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
@@ -2284,6 +2310,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether to use inference during simulation for player "
              "1 or 2 during autoplay.";
       break;
+    case ARG_TOKEN_P1_SIM_MARGIN_FORECAST:
+    case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
+      usages[0] = "<true_or_false>";
+      text = "Specifies whether simulation projects the final margin (see "
+             "smargin) for player 1 or 2 during autoplay.";
+      break;
     case ARG_TOKEN_P1_TIME_LIMIT:
     case ARG_TOKEN_P2_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
@@ -2477,34 +2509,38 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Player Options (alphabetical by name)
     static const arg_token_t player_opts[] = {
-        ARG_TOKEN_BINGO_BONUS,         /* bb */
-        ARG_TOKEN_BOARD_LAYOUT,        /* bdn */
-        ARG_TOKEN_CHALLENGE_BONUS,     /* cb */
-        ARG_TOKEN_P1_LEAVES,           /* k1 */
-        ARG_TOKEN_P2_LEAVES,           /* k2 */
-        ARG_TOKEN_P1_LEXICON,          /* l1 */
-        ARG_TOKEN_P2_LEXICON,          /* l2 */
-        ARG_TOKEN_LETTER_DISTRIBUTION, /* ld */
-        ARG_TOKEN_LEAVES,              /* leaves */
-        ARG_TOKEN_LEXICON,             /* lex */
-        ARG_TOKEN_P1_MOVE_RECORD_TYPE, /* r1 */
-        ARG_TOKEN_P2_MOVE_RECORD_TYPE, /* r2 */
-        ARG_TOKEN_USE_RIT,             /* rit */
-        ARG_TOKEN_P1_USE_RIT,          /* rit1 */
-        ARG_TOKEN_P2_USE_RIT,          /* rit2 */
-        ARG_TOKEN_USE_MMAP_FOR_RIT,    /* ritmmap */
-        ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
-        ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
-        ARG_TOKEN_PAT,                 /* pat */
-        ARG_TOKEN_P1_PAT,              /* pat1 */
-        ARG_TOKEN_P2_PAT,              /* pat2 */
-        ARG_TOKEN_GAME_VARIANT,        /* var */
-        ARG_TOKEN_P1_USE_WMP,          /* w1 */
-        ARG_TOKEN_P2_USE_WMP,          /* w2 */
-        ARG_TOKEN_USE_WIT,             /* wit */
-        ARG_TOKEN_P1_USE_WIT,          /* wit1 */
-        ARG_TOKEN_P2_USE_WIT,          /* wit2 */
-        ARG_TOKEN_USE_WMP,             /* wmp */
+        ARG_TOKEN_BINGO_BONUS,            /* bb */
+        ARG_TOKEN_BOARD_LAYOUT,           /* bdn */
+        ARG_TOKEN_CHALLENGE_BONUS,        /* cb */
+        ARG_TOKEN_P1_LEAVES,              /* k1 */
+        ARG_TOKEN_P2_LEAVES,              /* k2 */
+        ARG_TOKEN_P1_LEXICON,             /* l1 */
+        ARG_TOKEN_P2_LEXICON,             /* l2 */
+        ARG_TOKEN_LETTER_DISTRIBUTION,    /* ld */
+        ARG_TOKEN_LEAVES,                 /* leaves */
+        ARG_TOKEN_LEXICON,                /* lex */
+        ARG_TOKEN_P1_MOVE_RECORD_TYPE,    /* r1 */
+        ARG_TOKEN_P2_MOVE_RECORD_TYPE,    /* r2 */
+        ARG_TOKEN_USE_RIT,                /* rit */
+        ARG_TOKEN_P1_USE_RIT,             /* rit1 */
+        ARG_TOKEN_P2_USE_RIT,             /* rit2 */
+        ARG_TOKEN_USE_MMAP_FOR_RIT,       /* ritmmap */
+        ARG_TOKEN_P1_MOVE_SORT_TYPE,      /* s1 */
+        ARG_TOKEN_P2_MOVE_SORT_TYPE,      /* s2 */
+        ARG_TOKEN_PAT,                    /* pat */
+        ARG_TOKEN_P1_PAT,                 /* pat1 */
+        ARG_TOKEN_P2_PAT,                 /* pat2 */
+        ARG_TOKEN_P1_PAT_CLASSES,         /* patclasses1 */
+        ARG_TOKEN_P2_PAT_CLASSES,         /* patclasses2 */
+        ARG_TOKEN_P1_ROLLOUT_DISABLE_PAT, /* rolloutdisablepat1 */
+        ARG_TOKEN_P2_ROLLOUT_DISABLE_PAT, /* rolloutdisablepat2 */
+        ARG_TOKEN_GAME_VARIANT,           /* var */
+        ARG_TOKEN_P1_USE_WMP,             /* w1 */
+        ARG_TOKEN_P2_USE_WMP,             /* w2 */
+        ARG_TOKEN_USE_WIT,                /* wit */
+        ARG_TOKEN_P1_USE_WIT,             /* wit1 */
+        ARG_TOKEN_P2_USE_WIT,             /* wit2 */
+        ARG_TOKEN_USE_WMP,                /* wmp */
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
@@ -2548,6 +2584,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
         ARG_TOKEN_STOP_COND_PCT,           /* scondition */
         ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
+        ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
         ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
@@ -2556,6 +2593,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PAT_COMBINE_GAMMA,       /* patgamma */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
         ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
+        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
+        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
         ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
         ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
         ARG_TOKEN_P1_THRESHOLD,            /* th1 */
@@ -3092,27 +3131,86 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, config->time_limit_seconds,
       config->sampling_rule, config->cutoff, config->utility_w_winpct,
-      config->utility_w_spread, config->utility_spread_scale, &inference_args,
-      sim_args);
+      config->utility_w_spread, config->utility_spread_scale,
+      config->sim_margin_forecast, &inference_args, sim_args);
 }
 
-void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
-  if (config->win_pcts == NULL) {
-    const char *win_pct_name =
-        config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
-    if (win_pct_name == NULL) {
-      win_pct_name = DEFAULT_WIN_PCT;
-    }
+// The win percentage table the config should use: the one named by
+// -winpct, else DEFAULT_WIN_PCT_PREFIX plus the letter distribution's
+// name. NULL when neither is known yet. Caller owns the result.
+static char *config_win_pct_target_name(const Config *config) {
+  if (config->win_pct_explicit_name) {
+    return string_duplicate(config->win_pct_explicit_name);
+  }
+  if (config->ld) {
+    return get_formatted_string("%s%s", DEFAULT_WIN_PCT_PREFIX,
+                                ld_get_name(config->ld));
+  }
+  return NULL;
+}
+
+// A game starts with every tile but the two racks in the bag, and every win
+// percentage lookup (a simulation horizon, PAT's utility) happens at or below
+// that, so a table covering smaller bags would fail mid-game. Checked
+// whenever a table is loaded or the letter distribution changes, before
+// anything reads the table.
+static void config_check_win_pct_coverage(const Config *config,
+                                          ErrorStack *error_stack) {
+  if (!config->win_pcts || !config->ld) {
+    return;
+  }
+  const int needed = ld_get_total_tiles(config->ld) - 2 * RACK_SIZE;
+  const int covered = (int)win_pct_get_max_bag(config->win_pcts);
+  if (covered < needed) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL,
+        get_formatted_string(
+            "win percentage table '%s' covers bags of up to %d tiles, but "
+            "letter distribution '%s' starts with %d in the bag (%d tiles, "
+            "rack size %d)",
+            win_pct_get_name(config->win_pcts), covered,
+            ld_get_name(config->ld), needed, ld_get_total_tiles(config->ld),
+            RACK_SIZE));
+  }
+}
+
+// Loads (or reloads) the table config_win_pct_target_name names when it
+// differs from the loaded one, then checks its coverage.
+static void config_ensure_win_pcts(Config *config, ErrorStack *error_stack) {
+  char *target_name = config_win_pct_target_name(config);
+  if (target_name == NULL) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+        string_duplicate("no win percentage table: set -winpct or a letter "
+                         "distribution"));
+    return;
+  }
+  if (config->win_pcts == NULL ||
+      !strings_equal(win_pct_get_name(config->win_pcts), target_name)) {
+    win_pct_destroy(config->win_pcts);
     config->win_pcts =
-        win_pct_create(config->data_paths, win_pct_name, error_stack);
+        win_pct_create(config->data_paths, target_name, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
-          string_duplicate(
-              "encountered an error loading the win percentage file"));
+          config->win_pct_explicit_name
+              ? get_formatted_string("could not load win percentage table '%s'",
+                                     target_name)
+              : get_formatted_string(
+                    "could not load win percentage table '%s', the default "
+                    "for letter distribution '%s'; name another with "
+                    "-winpct",
+                    target_name, ld_get_name(config->ld)));
+      free(target_name);
       return;
     }
   }
+  free(target_name);
+  config_check_win_pct_coverage(config, error_stack);
+}
+
+void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
+  config_ensure_win_pcts(config, error_stack);
 }
 
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
@@ -3437,6 +3535,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      /*incremental_movegen=*/true,
       /*enable_pv_display=*/true,
       /*soft_time_limit=*/config->endgame_time_limit_seconds,
       /*hard_time_limit=*/config->endgame_time_limit_seconds, config->seed,
@@ -3914,14 +4013,14 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
       config->p1_utility_w_winpct, config->p1_utility_w_spread,
-      config->p1_utility_spread_scale, &p1_inference_args,
-      &autoplay_args->p1_sim_args);
+      config->p1_utility_spread_scale, config->p1_sim_margin_forecast,
+      &p1_inference_args, &autoplay_args->p1_sim_args);
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
       /*known_opp_rack=*/NULL,
-      config->p2_win_pcts ? config->p2_win_pcts : config->win_pcts, /*inference_results=*/NULL,
-      config->thread_control,
+      config->p2_win_pcts ? config->p2_win_pcts : config->win_pcts,
+      /*inference_results=*/NULL, config->thread_control,
       /*game=*/NULL, config->p2_sim_with_inference, /*use_heat_map=*/false,
       /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
       config->p2_num_plays, config->shplies,
@@ -3929,8 +4028,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
-      config->p2_utility_spread_scale, &p2_inference_args,
-      &autoplay_args->p2_sim_args);
+      config->p2_utility_spread_scale, config->p2_sim_margin_forecast,
+      &p2_inference_args, &autoplay_args->p2_sim_args);
 
   // Not part of sim_args_fill (see its own comment); set by hand.
   autoplay_args->p1_sim_args.rollout_disable_pat =
@@ -4038,7 +4137,13 @@ void config_convert(const Config *config, ConversionResults *results,
 }
 
 void impl_convert(Config *config, ErrorStack *error_stack) {
+  conversion_results_set_report(config->conversion_results, NULL);
   config_convert(config, config->conversion_results, error_stack);
+  const char *report =
+      conversion_results_get_report(config->conversion_results);
+  if (report != NULL) {
+    thread_control_print(config->thread_control, report);
+  }
 }
 
 // Leave Gen
@@ -4139,6 +4244,11 @@ void impl_pat_gen(Config *config, ErrorStack *error_stack) {
   }
   pat_prepare_hook_flex(pat, players_data_get_kwg(config->players_data, 0),
                         config_get_ld(config));
+  pat_prepare_utility(pat, config->data_paths, config_get_ld(config),
+                      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   autoplay_results_set_options(config->autoplay_results, "games", error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7634,6 +7744,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_SIM_MARGIN_FORECAST,
+                   &config->sim_margin_forecast, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Use heatmaps
 
   config_load_bool(config, ARG_TOKEN_USE_HEAT_MAP, &config->use_heat_map,
@@ -8170,6 +8286,21 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  if (config_get_parg_value(config, ARG_TOKEN_SIM_MARGIN_FORECAST, 0) != NULL) {
+    config->p1_sim_margin_forecast = config->sim_margin_forecast;
+    config->p2_sim_margin_forecast = config->sim_margin_forecast;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_SIM_MARGIN_FORECAST,
+                   &config->p1_sim_margin_forecast, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
+                   &config->p2_sim_margin_forecast, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   if (config_get_parg_value(config, ARG_TOKEN_TIME_LIMIT, 0) != NULL) {
     config->p1_time_limit_seconds = config->time_limit_seconds;
     config->p2_time_limit_seconds = config->time_limit_seconds;
@@ -8433,20 +8564,37 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   // Update the game history
   update_game_history_with_config(config);
 
-  // Set win pct - load if explicitly specified and either not loaded yet
-  // or if name changed. Lazy loading happens in impl_sim when needed for
-  // simulations that don't specify a win_pct explicitly.
+  // Set win pct. An explicit -winpct is loaded and checked now. A default
+  // table stays lazy (loaded and checked by config_load_win_pcts on first
+  // use); one already loaded is dropped when a lexicon or distribution
+  // change makes it the wrong default or too small, so it is reloaded, and
+  // checked, only if something needs it.
   const char *new_win_pct_name =
       config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
-  if (new_win_pct_name != NULL &&
-      (config->win_pcts == NULL ||
-       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name))) {
-    win_pct_destroy(config->win_pcts);
-    config->win_pcts =
-        win_pct_create(config->data_paths, new_win_pct_name, error_stack);
+  if (new_win_pct_name != NULL) {
+    free(config->win_pct_explicit_name);
+    config->win_pct_explicit_name =
+        strings_equal(new_win_pct_name, DEFAULT_WIN_PCT_ARG)
+            ? NULL
+            : string_duplicate(new_win_pct_name);
+  }
+  if (config->win_pct_explicit_name != NULL) {
+    config_ensure_win_pcts(config, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+  } else if (config->win_pcts != NULL) {
+    char *target_name = config_win_pct_target_name(config);
+    ErrorStack *coverage_errors = error_stack_create();
+    config_check_win_pct_coverage(config, coverage_errors);
+    if (target_name == NULL ||
+        !strings_equal(win_pct_get_name(config->win_pcts), target_name) ||
+        !error_stack_is_empty(coverage_errors)) {
+      win_pct_destroy(config->win_pcts);
+      config->win_pcts = NULL;
+    }
+    error_stack_destroy(coverage_errors);
+    free(target_name);
   }
   const char *new_p2_win_pct_name =
       config_get_parg_value(config, ARG_TOKEN_P2_WIN_PCT, 0);
@@ -8564,6 +8712,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
             player_pat,
             players_data_get_kwg(config->players_data, player_index),
             config->ld);
+        pat_prepare_utility(player_pat, config->data_paths, config->ld,
+                            error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
       }
     }
   }
@@ -9654,6 +9807,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   // win_pcts is loaded lazily on first use (simulation, etc.)
   config->win_pcts = NULL;
+  config->win_pct_explicit_name = NULL;
 
   // Command parsed from string input
 #define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
@@ -9777,6 +9931,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
+  arg(ARG_TOKEN_SIM_MARGIN_FORECAST, "smargin", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -9813,6 +9968,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PAT_COMBINE_GAMMA, "patgamma", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_MARGIN_FORECAST, "sm1", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_MARGIN_FORECAST, "sm2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_P1_PLAY_CHOOSER_TIME, "pc1", 1, 1);
@@ -9916,6 +10073,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->sim_with_inference = true;
   config->pat_label_plies = 1;
   config->pat_combine_gamma = PAT_TRAINING_COMBINE_GAMMA;
+  config->sim_margin_forecast = false;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
   config->p1_rollout_disable_pat = false;
@@ -9930,6 +10088,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_min_play_iterations = config->min_play_iterations;
   config->p1_sim_with_inference = config->sim_with_inference;
   config->p2_sim_with_inference = config->sim_with_inference;
+  config->p1_sim_margin_forecast = config->sim_margin_forecast;
+  config->p2_sim_margin_forecast = config->sim_margin_forecast;
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
   config->p1_play_chooser_time_ms = -1.0;
@@ -9992,6 +10152,7 @@ void config_destroy(Config *config) {
   }
   win_pct_destroy(config->win_pcts);
   win_pct_destroy(config->p2_win_pcts);
+  free(config->win_pct_explicit_name);
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
@@ -10302,10 +10463,12 @@ void config_add_settings_to_string_builder(const Config *config,
           sb, players_data_get_move_record_type(config->players_data, 1));
       break;
     case ARG_TOKEN_WIN_PCT:
-      config_add_string_setting_to_string_builder(
-          config, sb, arg_token,
-          config->win_pcts ? win_pct_get_name(config->win_pcts)
-                           : DEFAULT_WIN_PCT);
+      // Only a table named with -winpct is saved; the per-distribution
+      // default follows the lexicon.
+      if (config->win_pct_explicit_name) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token, config->win_pct_explicit_name);
+      }
       break;
     case ARG_TOKEN_P2_WIN_PCT:
       // Experimental and deliberately not saved: a stale second table in
@@ -10503,6 +10666,18 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->p2_sim_with_inference);
+      break;
+    case ARG_TOKEN_SIM_MARGIN_FORECAST:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->sim_margin_forecast);
+      break;
+    case ARG_TOKEN_P1_SIM_MARGIN_FORECAST:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_sim_margin_forecast);
+      break;
+    case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_sim_margin_forecast);
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

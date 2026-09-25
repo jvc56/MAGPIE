@@ -71,7 +71,7 @@ log "candidate: $strategy/$name.pat"
 
 log "validation vs $incumbent ($validate_pairs pairs)"
 mg autoplay games $validate_pairs -lex "$lex" -leaves "$leaves" -gp true -threads $threads \
-  -seed "$validate_seed" $tables -winpct winpct -pat "$incumbent" -pat1 "$name" -pat2 "$incumbent" \
+  -seed "$validate_seed" $tables -pat "$incumbent" -pat1 "$name" -pat2 "$incumbent" \
   > "$log_dir/validate.txt" 2>&1
 log "validation: $(grep -m1 'mirrored pair' "$log_dir/validate.txt")"
 rm -f "$strategy/${name}_bootstrap.pat" "$strategy/${name}_v3_runres.pat"

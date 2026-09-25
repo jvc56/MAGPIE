@@ -36,9 +36,9 @@
 // The table for a lexicon is measured under that lexicon's base file --
 // one WITHOUT an opening table, or the gap would be measured against a
 // static equity that already carries it -- with
-// "patopeningsim:<lexicon>:<pat>[:<racks>]"; the ready-to-paste rows are
-// printed at the end. The plain "patopeningsim" runs the defaults below
-// (the measurement pat_dls_champion_v5's table came from).
+// "patopeningsim:<lexicon>:<pat>[:<racks>[:<leaves>[:<ld>]]]"; the
+// ready-to-paste rows are printed at the end. The plain "patopeningsim" runs
+// the defaults below (the measurement pat_dls_champion_v5's table came from).
 #define PAT_OPENING_SIM_NUM_RACKS 1000
 #define PAT_OPENING_SIM_NUM_PLAYS 12
 #define PAT_OPENING_SIM_PLIES 4
@@ -74,7 +74,7 @@ static int opening_best_index(const OpeningRack *rack, const double *table) {
 }
 
 void pat_opening_sim_run(const char *lexicon, const char *pat_name,
-                         int max_racks, const char *leaves) {
+                         int max_racks, const char *leaves, const char *ld) {
   // The speed-only tables when the lexicon has them (they change no
   // move choice); asking for a missing one is an error, so check first.
   char *wmp_path = get_formatted_string("./data/lexica/%s.wmp", lexicon);
@@ -91,11 +91,14 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
   free(wit_path);
   char *leaves_arg = leaves ? get_formatted_string("-leaves %s", leaves)
                             : string_duplicate("");
+  // A distribution other than the lexicon's default (e.g. english_super on
+  // the 21x21 board) comes before the leaves it goes with.
+  char *ld_arg = ld ? get_formatted_string("-ld %s", ld) : string_duplicate("");
   char *set_cmd = get_formatted_string(
-      "set -lex %s %s -wmp %s %s %s -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex %s %s %s -wmp %s %s %s -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays %d -plies %d -threads %d -iter %d -sr rr -scond none "
       "-threshold none -pat %s",
-      lexicon, leaves_arg, have_wmp ? "true" : "false",
+      lexicon, ld_arg, leaves_arg, have_wmp ? "true" : "false",
       have_rit ? "-rit true -ritmmap true" : "", have_wit ? "-wit true" : "",
       PAT_OPENING_SIM_NUM_PLAYS, PAT_OPENING_SIM_PLIES, PAT_OPENING_SIM_THREADS,
       PAT_OPENING_SIM_NUM_PLAYS * PAT_OPENING_SIM_ITERATIONS_PER_PLAY,
@@ -105,6 +108,7 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
   Config *config = config_create_or_die(set_cmd);
   free(set_cmd);
   free(leaves_arg);
+  free(ld_arg);
   // The empty board for this build's dimension.
   StringBuilder *cgp_sb = string_builder_create();
   string_builder_add_string(cgp_sb, "cgp ");
@@ -306,18 +310,18 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
 
 void test_pat_opening_sim(void) {
   pat_opening_sim_run(PAT_OPENING_SIM_LEXICON, PAT_OPENING_SIM_PAT,
-                      PAT_OPENING_SIM_NUM_RACKS, NULL);
+                      PAT_OPENING_SIM_NUM_RACKS, NULL, NULL);
 }
 
-// "<lexicon>:<pat>[:<racks>[:<leaves>]]"
+// "<lexicon>:<pat>[:<racks>[:<leaves>[:<letter_distribution>]]]"
 void pat_opening_sim_run_spec(const char *spec) {
   StringSplitter *fields = split_string(spec, ':', true);
   const int num_fields = string_splitter_get_number_of_items(fields);
-  if (num_fields < 2 || num_fields > 4) {
-    log_fatal(
-        "patopeningsim spec must be <lexicon>:<pat>[:<racks>[:<leaves>]], "
-        "got '%s'",
-        spec);
+  if (num_fields < 2 || num_fields > 5) {
+    log_fatal("patopeningsim spec must be "
+              "<lexicon>:<pat>[:<racks>[:<leaves>[:<letter_distribution>]]], "
+              "got '%s'",
+              spec);
   }
   const int racks = (num_fields >= 3)
                         ? atoi(string_splitter_get_item(fields, 2))
@@ -327,6 +331,7 @@ void pat_opening_sim_run_spec(const char *spec) {
   }
   pat_opening_sim_run(
       string_splitter_get_item(fields, 0), string_splitter_get_item(fields, 1),
-      racks, (num_fields == 4) ? string_splitter_get_item(fields, 3) : NULL);
+      racks, (num_fields >= 4) ? string_splitter_get_item(fields, 3) : NULL,
+      (num_fields == 5) ? string_splitter_get_item(fields, 4) : NULL);
   string_splitter_destroy(fields);
 }

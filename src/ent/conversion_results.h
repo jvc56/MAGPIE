@@ -12,5 +12,8 @@ void conversion_results_set_number_of_strings(ConversionResults *results,
                                               int number_of_strings);
 void conversion_results_set_number_of_nodes(ConversionResults *results,
                                             int number_of_nodes);
+// A report for the user, or NULL. Takes ownership of report.
+const char *conversion_results_get_report(const ConversionResults *results);
+void conversion_results_set_report(ConversionResults *results, char *report);
 
 #endif

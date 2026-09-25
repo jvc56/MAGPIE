@@ -85,6 +85,11 @@ static PATWeights *pat_hyperscale_load(Config *config, const char *name) {
   const Game *game = config_get_game(config);
   pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
                         game_get_ld(game));
+  error_stack = error_stack_create();
+  pat_prepare_utility(pat, config_get_data_paths(config), game_get_ld(game),
+                      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
   return pat;
 }
 

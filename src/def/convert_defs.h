@@ -26,6 +26,8 @@ typedef enum {
   CONVERT_KLVWMP2RIT,
   CONVERT_KWG2WIT,
   CONVERT_KWG2WIT_IF_NEEDED,
+  // Smooths a recorded win percentage table into a new one.
+  CONVERT_WINPCT,
   CONVERT_UNKNOWN,
 } conversion_type_t;
 

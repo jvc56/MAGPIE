@@ -9,7 +9,7 @@
   - magpie_wasm.mjs - Emscripten module (copied from magpie build)
   - magpie_wasm.wasm - WASM binary (copied from magpie build)
   - wasm-worker.js - Application worker (from wasmentry/wasm-worker.js)
-  - Plus data files: winpct.csv, english.csv, layouts/standard15.txt
+  - Plus data files: winpct_english.csv, english.csv, layouts/standard15.txt
 
   TypeScript source goes in liwords-ui/src/magpie/ - the API layer that wraps the worker with a typed
    interface.

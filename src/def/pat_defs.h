@@ -247,7 +247,8 @@ enum {
 // > 0), every move whose PAT term is applied also gets
 //   0.5 * V * kappa(margin + score, unseen after the move)
 // where kappa = -U''/U' of the default win/spread utility (win 1.0, spread
-// 0.5, scale 100) read off the PAT_UTILITY_WIN_PCT_NAME table with the
+// 0.5, scale 100) read off the letter distribution's win percentage table
+// (DEFAULT_WIN_PCT_PREFIX plus its name, see pat_prepare_utility) with the
 // opponent on turn, and margin is the mover's lead before the move. It
 // reweights banked points against the rest of equity by margin, and tile
 // turnover by margin and stage: points and turnover are worth more where
@@ -261,7 +262,6 @@ enum {
 // the fit mode, so a model can be trained on a subset of premium classes
 // (their units then drop out at runtime). Absent means none.
 #define PAT_FIT_FIXED_ZERO_ROW_PREFIX "fit_fixed_zero,"
-#define PAT_UTILITY_WIN_PCT_NAME "winpct"
 // Margins beyond this are read at it; kappa has flattened to ~0 there.
 #define PAT_UTILITY_MARGIN_LIMIT 600
 // Finite-difference half-width, in points, for kappa: wide enough to

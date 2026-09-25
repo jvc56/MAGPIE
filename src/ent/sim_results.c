@@ -606,7 +606,9 @@ void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility) {
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
-                                    int game_unseen_tiles, bool plies_are_odd) {
+                                    int bag_tiles, int on_turn_rack_tiles,
+                                    int off_turn_rack_tiles,
+                                    bool plies_are_odd) {
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
     // the game ended; use the actual result.
@@ -626,7 +628,9 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
     if (!plies_are_odd) {
       spread_plus_leftover = -spread_plus_leftover;
     }
-    wpct = (double)win_pct_get(wp, spread_plus_leftover, game_unseen_tiles);
+    wpct = (double)win_pct_get(
+        wp, spread_plus_leftover, (unsigned int)bag_tiles,
+        (unsigned int)on_turn_rack_tiles, (unsigned int)off_turn_rack_tiles);
     if (!plies_are_odd) {
       // see above comment regarding flipping win%
       wpct = 1.0 - wpct;

@@ -52,6 +52,7 @@
 #include "pat_overlap_pilot_test.h"
 #include "pat_rollout_value_test.h"
 #include "pat_test.h"
+#include "path_move_lists_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -152,6 +153,9 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"pat", test_pat},
+    {"winpctcoverage", test_win_pct_coverage},
+    {"winpctstate", test_win_pct_state},
+    {"winpctrecord", test_win_pct_record},
     {"endgame", test_endgame},
     {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},
@@ -169,6 +173,8 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"pathmovelists", test_path_move_lists},
+    {"egincremental", test_incremental_movegen_identical},
     {"pegspeedbench1", test_peg_speed_bench_1},
     {"pegspeedbench2", test_peg_speed_bench_2},
     {"positionloaded", test_position_lengths_loaded},

@@ -889,6 +889,14 @@ pat_move_choice_chooser_from_spec(Config *config, const char *spec,
   error_stack_destroy(error_stack);
   pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
                         game_get_ld(game));
+  error_stack = error_stack_create();
+  pat_prepare_utility(pat, config_get_data_paths(config), game_get_ld(game),
+                      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("could not prepare PAT file '%s'", spec);
+  }
+  error_stack_destroy(error_stack);
   chooser.pat = pat;
   *owned_out = pat;
   return chooser;
