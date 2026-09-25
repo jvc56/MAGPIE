@@ -553,7 +553,7 @@ static void format_setup_text_row(char *out, size_t out_size, int content_w,
   if (value != NULL && zone_width > 0 && zone_start >= 0) {
     const int max_chars = zone_width - 1; // leave a trailing cell for the
                                           // end-of-text caret
-    for (int i = 0; value[i] != '\0' && i < max_chars &&
+    for (int i = 0; i < max_chars && value[i] != '\0' &&
                     (size_t)(zone_start + i) < out_size - 1;
          i++) {
       out[zone_start + i] = value[i];
@@ -784,7 +784,7 @@ static void render_load_text_modal(struct ncplane *plane, const Theme *theme,
     }
   }
   // Cursor at end-of-buffer case.
-  if (buf == NULL || cursor >= (int)(buf != NULL ? strlen(buf) : 0)) {
+  if (buf == NULL || cursor >= (int)strlen(buf)) {
     cursor_row = row_in;
     cursor_col = col_in;
   }
@@ -826,7 +826,7 @@ void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
   // pre-format into per-row buffers and pass pointers into items[].
   enum { ROW_BUF = 40 };
   static char buf[8][ROW_BUF];
-  const char *items[8];
+  const char *items[8] = {0};
   const int rows = n < 8 ? n : 8;
   for (int i = 0; i < rows; i++) {
     snprintf(buf[i], ROW_BUF, "%-12s %s", tui_time_picker_preset_label(i),

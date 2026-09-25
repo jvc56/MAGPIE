@@ -30,8 +30,8 @@ static bool history_entry_keyboard_editable(const TuiGameState *state,
 // Game-screen keys when no modal or cell editor is open: panel focus
 // (0-5, Tab), Esc menu, CGP copy, board / Analysis / History navigation,
 // and the command bar with its slash commands. Returns true when consumed.
-bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
-                    uint32_t key, ncinput input) {
+bool tui_input_game(TuiGameState *state, TuiUiState *ui,
+                    const TuiSession *session, uint32_t key, ncinput input) {
   if (ui->modal == TUI_MODAL_NONE && state->edit_history_idx < 0 &&
       state->focused_panel == TUI_FOCUS_HISTORY && state->history_cursor >= 0 &&
       state->history_cursor < state->history_count &&

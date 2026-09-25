@@ -631,10 +631,12 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   int *pcur = field_move ? &state->edit_move_cursor
                          : (field_leave ? &state->edit_leave_cursor
                                         : &state->edit_rack_cursor);
-  const size_t buf_cap = field_move
-                             ? sizeof(state->edit_move_buf)
-                             : (field_leave ? sizeof(state->edit_leave_buf)
-                                            : sizeof(state->edit_rack_buf));
+  size_t buf_cap = sizeof(state->edit_rack_buf);
+  if (field_move) {
+    buf_cap = sizeof(state->edit_move_buf);
+  } else if (field_leave) {
+    buf_cap = sizeof(state->edit_leave_buf);
+  }
 
   // ── Board move-entry sub-mode ───────────────────────────────
   // When a board anchor is active, keystrokes drive the on-board
@@ -845,5 +847,4 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   (void)idx;
   (void)buf;
   return true;
-  return false;
 }

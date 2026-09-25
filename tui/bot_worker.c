@@ -300,7 +300,7 @@ static void finalize_history(TuiGameState *state, int idx, const Move *move,
   // The renderer (render_move_styled) already special-cases a leading
   // "-" so it renders non-bold like the legacy "(exch ...)" group.
   if (strncmp(entry->move_str, "(exch ", 6) == 0) {
-    char *close_paren = strchr(entry->move_str, ')');
+    const char *close_paren = strchr(entry->move_str, ')');
     if (close_paren != NULL) {
       const int letters_len = (int)(close_paren - (entry->move_str + 6));
       char tmp[sizeof(entry->move_str)];
@@ -794,6 +794,7 @@ static bool run_endgame_on(TuiGameState *state, const Game *position,
   // search uses topk_values[MAX_ENDGAME_DISPLAY_PVS], so that's the
   // hard ceiling.
   int top_k = SIM_CANDIDATES;
+  // cppcheck-suppress knownConditionTrueFalse ; guards a constant change
   if (top_k > MAX_ENDGAME_DISPLAY_PVS) {
     top_k = MAX_ENDGAME_DISPLAY_PVS;
   }
@@ -872,7 +873,7 @@ static bool run_endgame_on(TuiGameState *state, const Game *position,
       endgame_results_get_status(results) == ENDGAME_RESULT_STATUS_FINISHED;
   endgame_results_lock(results, ENDGAME_RESULT_DISPLAY);
   const int num_pvs = endgame_results_get_num_pvs(results);
-  PVLine *multi = endgame_results_get_multi_pvs(results);
+  const PVLine *multi = endgame_results_get_multi_pvs(results);
   endgame_snapshot_from_pvs(
       state, multi, num_pvs,
       endgame_results_get_depth(results, ENDGAME_RESULT_BEST), initial_spread,
@@ -1346,7 +1347,7 @@ static void set_analysis_notice(TuiGameState *state, const char *message) {
 // built from. The resume path only consumes the count and the rack —
 // sampling reads moves from the SimmedPlays themselves — but the
 // plays are real so the engine's compatibility checks hold.
-static MoveList *move_list_from_sim_results(SimResults *results) {
+static MoveList *move_list_from_sim_results(const SimResults *results) {
   const int num_plays = sim_results_get_number_of_plays(results);
   if (num_plays <= 0) {
     return NULL;
@@ -1601,7 +1602,7 @@ bool tui_analysis_worker_start(TuiGameState *state, int turn_idx) {
     set_analysis_notice(state, "park the History cursor on a turn to resume");
     return false;
   }
-  TuiHistoryEntry *entry = &state->history[turn_idx];
+  const TuiHistoryEntry *entry = &state->history[turn_idx];
   if (entry->pending || !entry->analysis_snapshot.valid) {
     set_analysis_notice(state, "no saved analysis for this turn");
     return false;

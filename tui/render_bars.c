@@ -178,7 +178,6 @@ void render_pending_bar(struct ncplane *plane, const Theme *theme,
         "%s RIT %s \xe2\x86\x92 %s", any ? "," : "",
         state->active_load_rit ? "on" : "off",
         state->pending_load_rit ? "on" : "off");
-    any = true;
   }
   snprintf(buf + written,
            sizeof(buf) > (size_t)written ? sizeof(buf) - (size_t)written : 0,
@@ -465,6 +464,7 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
     }
   }
 #endif
+  // cppcheck-suppress knownConditionTrueFalse ; set only on some platforms
   if (resident_bytes > 0) {
     // Pick the largest unit that keeps the number compact and the
     // precision sane: GB always shows 1 decimal; MB shows 2/1/0

@@ -199,7 +199,7 @@ static bool scan_lexica_dir(const char *dir_path, LexiconList *list) {
   if (dir == NULL) {
     return false;
   }
-  struct dirent *entry;
+  const struct dirent *entry;
   while ((entry = readdir(dir)) != NULL && list->count < LEXICON_LIST_MAX) {
     if (!ends_with_kwg(entry->d_name)) {
       continue;

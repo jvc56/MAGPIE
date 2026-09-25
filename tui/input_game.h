@@ -10,7 +10,7 @@
 // Game-screen keys when no modal or cell editor is open: panel focus
 // (0-5, Tab), Esc menu, CGP copy, board / Analysis / History navigation,
 // and the command bar with its slash commands. Returns true when consumed.
-bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
-                    uint32_t key, ncinput input);
+bool tui_input_game(TuiGameState *state, TuiUiState *ui,
+                    const TuiSession *session, uint32_t key, ncinput input);
 
 #endif

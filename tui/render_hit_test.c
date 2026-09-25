@@ -138,9 +138,6 @@ int tui_modal_item_at(int y, int x) {
     return -1;
   }
   const int idx = y - hit_maps.modal_hit_map.top;
-  if (idx < 0 || idx >= hit_maps.modal_hit_map.item_count) {
-    return -1;
-  }
   // Disabled items count as chrome — clicks are absorbed but not
   // activated.
   if (hit_maps.modal_hit_map.disabled[idx]) {

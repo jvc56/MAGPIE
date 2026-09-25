@@ -411,7 +411,6 @@ Layout compute_layout(struct ncplane *plane, int user_scale,
     if (bag_empty) {
       // The empty-bag divider only needs one row.
       bag_height = 1;
-      L.bag_bottom = L.bag_top;
     } else {
       const int interior_width = L.board_width - 2;
       const int chars = bag_unseen_chars(state);

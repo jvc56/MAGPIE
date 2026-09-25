@@ -243,7 +243,8 @@ bool tui_input_main_menu(TuiGameState *state, TuiUiState *ui,
 // Startup menu modal keys.
 // Returns true when the key was consumed.
 bool tui_input_startup_menu(TuiGameState *state, TuiUiState *ui,
-                            TuiSession *session, uint32_t key, ncinput input) {
+                            const TuiSession *session, uint32_t key,
+                            ncinput input) {
   (void)state;
   if (ui->modal == TUI_MODAL_STARTUP_MENU) {
     // Helper: which menu items are currently selectable. Only

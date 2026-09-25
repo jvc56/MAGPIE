@@ -85,7 +85,7 @@ static int analysis_compact_exchanges(AnalysisRow *rows, int count) {
   for (int i = 0; i < count; i++) {
     char *s = rows[i].move;
     if (strncmp(s, "(exch ", 6) == 0) {
-      char *close_paren = strchr(s, ')');
+      const char *close_paren = strchr(s, ')');
       if (close_paren != NULL) {
         const int letters_len = (int)(close_paren - (s + 6));
         char tmp[80];
@@ -321,8 +321,8 @@ static void render_analysis_rows_compact(struct ncplane *plane,
   // border row first (sharing with the title) — if the title is
   // too long for that, fall back to the first interior row and
   // shift the data rows down by one.
-  int compact_header_row = -1;
   {
+    int compact_header_row = -1;
     const char *win_label = "win%";
     const int win_label_len = (int)strlen(win_label);
     const int win_label_col = interior_right - win_label_len + 1;
@@ -490,8 +490,7 @@ static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
     // Right portion: true inverted band — dark text on the
     // dim_fg-colored band, matching how header_bg / header_fg
     // chrome bars elsewhere read.
-    const int band_left =
-        headers_fit_on_border ? leftmost_header_col : leftmost_header_col;
+    const int band_left = leftmost_header_col;
     theme_apply_fg(plane, theme->bg);
     theme_apply_bg(plane, theme->dim_fg);
     for (int c = band_left; c <= columns->interior_right; c++) {

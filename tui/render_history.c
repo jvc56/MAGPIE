@@ -62,7 +62,7 @@ static int wrap_error_lines(const char *text, int width, char lines[][128],
     }
     int taken = 0;
     int last_space = -1;
-    while (p[taken] != '\0' && taken < width) {
+    while (taken < width && p[taken] != '\0') {
       if (p[taken] == ' ') {
         last_space = taken;
       }
@@ -1073,7 +1073,7 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
       ncplane_putstr_yx(plane, row2, total_col, total_str);
       ncplane_set_styles(plane, 0);
     }
-  } else if (e->pending && !editing && e->move_str[0] != '\0') {
+  } else if (!editing && e->move_str[0] != '\0') {
     // Pending row with a committed move — show the cumulative
     // total the same way a finalized row does. Sum prior same-
     // player committed scores and add this entry's score.

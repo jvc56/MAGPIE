@@ -52,8 +52,10 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
     char *name_buf = focus_human
                          ? ui->play_setup_human_name
                          : (focus_comp ? ui->play_setup_computer_name : NULL);
-    const size_t name_cap = focus_human ? sizeof(ui->play_setup_human_name)
-                                        : sizeof(ui->play_setup_computer_name);
+    size_t name_cap = sizeof(ui->play_setup_computer_name);
+    if (focus_human) {
+      name_cap = sizeof(ui->play_setup_human_name);
+    }
 
     if (key == NCKEY_ESC) {
       ui->modal = TUI_MODAL_STARTUP_MENU;
@@ -416,8 +418,10 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
     const bool focus_name = focus_p1 || focus_p2;
     char *name_buf = focus_p1 ? ui->annotate_setup_p1_name
                               : (focus_p2 ? ui->annotate_setup_p2_name : NULL);
-    const size_t name_cap = focus_p1 ? sizeof(ui->annotate_setup_p1_name)
-                                     : sizeof(ui->annotate_setup_p2_name);
+    size_t name_cap = sizeof(ui->annotate_setup_p2_name);
+    if (focus_p1) {
+      name_cap = sizeof(ui->annotate_setup_p1_name);
+    }
 
     if (key == NCKEY_ESC) {
       ui->modal = TUI_MODAL_STARTUP_MENU;

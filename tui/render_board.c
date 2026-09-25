@@ -704,7 +704,7 @@ void render_board(struct ncplane *plane, const Theme *theme,
         const int screen_row = CELL_ROW_BASE + row;
         const int screen_col = CELL_COL_BASE + col * L->board_cell_w;
         if (halfwidth) {
-          const char *ascii = (ml == 0) ? "?" : state->ld->ld_ml_to_hl[ml];
+          const char *ascii = state->ld->ld_ml_to_hl[ml];
           ncplane_putstr_yx(plane, screen_row, screen_col,
                             ascii[0] != '\0' ? ascii : " ");
         } else {
@@ -712,7 +712,7 @@ void render_board(struct ncplane *plane, const Theme *theme,
           if (fullwidth[0] != '\0') {
             ncplane_putstr_yx(plane, screen_row, screen_col, fullwidth);
           } else {
-            const char *ascii = (ml == 0) ? "?" : state->ld->ld_ml_to_hl[ml];
+            const char *ascii = state->ld->ld_ml_to_hl[ml];
             ncplane_putstr_yx(plane, screen_row, screen_col, " ");
             ncplane_putstr(plane, ascii);
           }

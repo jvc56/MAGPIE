@@ -3,6 +3,7 @@
 #include "../src/ent/board.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/gcg.h"
+#include "../src/util/io_util.h"
 #include "bot_worker.h"
 #include "gcg_import.h"
 #include "tui_text_edit.h"
@@ -299,14 +300,14 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
           fclose(fp);
           resolve_ok = false;
         } else {
-          gcg_payload = malloc((size_t)fsize + 1);
+          gcg_payload = malloc_or_die((size_t)fsize + 1);
           size_t n = fread(gcg_payload, 1, (size_t)fsize, fp);
           fclose(fp);
           gcg_payload[n] = '\0';
         }
       }
     } else {
-      gcg_payload = malloc(wlen + 1);
+      gcg_payload = malloc_or_die(wlen + 1);
       memcpy(gcg_payload, start, wlen);
       gcg_payload[wlen] = '\0';
     }

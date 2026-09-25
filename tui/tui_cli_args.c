@@ -26,6 +26,7 @@ void print_usage(void) {
       "Subsequent runs reuse those settings unless --reconfigure is passed.\n",
       stderr);
 }
+// cppcheck-suppress constParameter ; matches main's argv type
 CliArgs parse_args(int argc, char *argv[]) {
   CliArgs args = {
       .theme_arg = NULL,

@@ -72,7 +72,7 @@ static bool resolve_default_lexicon(char *out_lexicon, size_t out_size,
     if (dir == NULL) {
       continue;
     }
-    struct dirent *entry;
+    const struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
       const size_t name_len = strlen(entry->d_name);
       if (name_len <= 4 || strcmp(entry->d_name + name_len - 4, ".kwg") != 0) {

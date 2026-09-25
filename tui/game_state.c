@@ -616,7 +616,7 @@ static void sync_player_rack_to_editor(TuiGameState *state) {
     return;
   }
   const int player_idx = state->history[state->edit_history_idx].player_idx;
-  Player *player = game_get_player(state->game, player_idx);
+  const Player *player = game_get_player(state->game, player_idx);
   if (player == NULL) {
     return;
   }
@@ -630,9 +630,9 @@ static void sync_player_rack_to_editor(TuiGameState *state) {
   // "KAM" on a turn carrying "ERST" forward gives "AEKMRST"; the leave then
   // recomputes back to "ERST"). The effective-rack helper below computes the
   // identical combination for the engine rack.
-  char carryover_combined[32];
   if (!state->edit_rack_user_modified &&
       state->edit_rack_carryover[0] != '\0') {
+    char carryover_combined[32];
     int oi = 0;
     for (const char *p = state->edit_rack_carryover;
          *p != '\0' && oi < (int)sizeof(carryover_combined) - 1; p++) {
@@ -766,8 +766,9 @@ static bool build_partial_preview_move(const TuiGameState *state,
 // Move into `*capture_move` so the renderer can ghost it on the
 // board as the user types. Returns score on success, -1 if the
 // engine rejected the move (off-board, doesn't connect, etc.).
-static int score_canonical_move(TuiGameState *state, const char *canonical,
-                                int player_idx, Move *capture_move) {
+static int score_canonical_move(const TuiGameState *state,
+                                const char *canonical, int player_idx,
+                                Move *capture_move) {
   if (state->game == NULL || canonical[0] == '\0') {
     return -1;
   }
@@ -1282,7 +1283,7 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     // reject moves whose tiles aren't held, surfacing as
     // "rack missing X" — exactly the validation the annotator
     // wants.
-    Player *player = game_get_player(state->game, e->player_idx);
+    const Player *player = game_get_player(state->game, e->player_idx);
     if (player == NULL) {
       if (record_errors) {
         snprintf(e->error_str, sizeof(e->error_str),
@@ -1304,7 +1305,7 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     // leave, per letter.
     int prev_leave[MACHINE_LETTER_MAX_VALUE];
     memset(prev_leave, 0, sizeof(prev_leave));
-    for (int ml = 0; ml < ld_size && ml < MACHINE_LETTER_MAX_VALUE; ml++) {
+    for (int ml = 0; ml < ld_size && ml < MAX_ALPHABET_SIZE; ml++) {
       prev_leave[ml] = (int)rack_get_letter(rack, (MachineLetter)ml);
     }
     if (e->rack_str[0] != '\0') {
@@ -1321,7 +1322,7 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     bool bag_overrun = false;
     char overrun_msg[192];
     int omi = 0;
-    for (int ml = 0; ml < ld_size && ml < MACHINE_LETTER_MAX_VALUE; ml++) {
+    for (int ml = 0; ml < ld_size && ml < MAX_ALPHABET_SIZE; ml++) {
       const int have = (int)rack_get_letter(rack, (MachineLetter)ml);
       int newly = have - prev_leave[ml];
       if (newly < 0) {

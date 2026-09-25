@@ -83,7 +83,7 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
   // ── Pass 1: text fields ─────────────────────────────────────
   for (int evi = 0; evi < num_events && state->history_count < TUI_HISTORY_MAX;
        evi++) {
-    GameEvent *event = game_history_get_event(history, evi);
+    const GameEvent *event = game_history_get_event(history, evi);
     const game_event_t etype = game_event_get_type(event);
     if (etype == GAME_EVENT_PHONY_TILES_RETURNED && state->history_count > 0) {
       // A withdrawn phony ("--" in GCG) folds into the play's own entry,
@@ -375,7 +375,7 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
     // field (more reliable than the engine's mid-replay
     // game state, which can have stale or empty racks
     // depending on which sub-step we stopped at).
-    GameEvent *event = game_history_get_event(history, meta->engine_idx);
+    const GameEvent *event = game_history_get_event(history, meta->engine_idx);
     const Rack *evt_rack = game_event_get_const_rack(event);
     if (evt_rack != NULL && !rack_is_empty(evt_rack)) {
       entry->rack_before = rack_duplicate(evt_rack);
@@ -384,7 +384,7 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
     // the rack the opponent had at THEIR next move (they
     // hadn't drawn anything between the two turns).
     for (int next = meta->engine_idx + 1; next < num_events; next++) {
-      GameEvent *nev = game_history_get_event(history, next);
+      const GameEvent *nev = game_history_get_event(history, next);
       if (game_event_get_player_index(nev) == (1 - meta->player_idx)) {
         const Rack *nrack = game_event_get_const_rack(nev);
         if (nrack != NULL && !rack_is_empty(nrack)) {

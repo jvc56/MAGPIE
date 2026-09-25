@@ -114,6 +114,8 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
   // Left mouse click → focus the panel under the cursor. Only
   // NCKEY_BUTTON1 (left-button press) for now; scroll wheel and
   // right-click are reserved for future per-panel interactions.
+  // cppcheck-suppress duplicateCondition ; the scrollbar block returns when it
+  // acts
   if (key == NCKEY_BUTTON1 && modal == TUI_MODAL_NONE) {
     const int hit = tui_game_panel_at(std_plane, state, input.y, input.x);
     if (hit >= 0) {
