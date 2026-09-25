@@ -114,7 +114,7 @@ static void init_ui_state(TuiUiState *ui, const TuiConfig *loaded) {
   // it). When the user opens it via Esc → New game we want Esc to
   // step back to the main menu.
   ui->startup_menu_return = TUI_MODAL_NONE;
-  // Watch-setup modal: row focus, pre-set to "Start game" so Enter
+  // Watch-setup modal: row focus, pre-set to "Start" so Enter
   // on first open kicks off the bot game with the displayed
   // defaults (time / lexicon / sim params).
   ui->watch_setup_focus = TUI_WATCH_SETUP_START;
