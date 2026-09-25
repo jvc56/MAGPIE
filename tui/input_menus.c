@@ -1,0 +1,419 @@
+#include "input_menus.h"
+
+#include "bot_worker.h"
+#include "render_hit_test.h"
+#include "time_picker.h"
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <string.h>
+
+// Quit-confirm modal keys.
+// Returns true when the key was consumed.
+bool tui_input_quit_confirm(TuiGameState *state, TuiUiState *ui,
+                            TuiSession *session, uint32_t key, ncinput input) {
+  (void)state;
+  (void)session;
+  if (ui->modal == TUI_MODAL_QUIT_CONFIRM) {
+    // Y / N shortcuts trigger their action regardless of focus.
+    // Enter confirms whatever's focused (default No, the safer
+    // option). Esc / N returns to whichever modal opened the
+    // confirm (main menu when launched via Quit there, or NONE
+    // when launched via the command-bar Q).
+    if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
+      const int hit = tui_modal_item_at(input.y, input.x);
+      if (hit >= 0 && hit < 2) {
+        ui->quit_confirm_focus = hit;
+        key = NCKEY_ENTER;
+      } else {
+        return true;
+      }
+    }
+    if (key == NCKEY_ESC) {
+      ui->modal = ui->quit_confirm_return;
+    } else if (key == 'y' || key == 'Y') {
+      ui->running = false;
+    } else if (key == 'n' || key == 'N') {
+      ui->modal = ui->quit_confirm_return;
+    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+      if (ui->quit_confirm_focus > 0) {
+        ui->quit_confirm_focus--;
+      }
+    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+      if (ui->quit_confirm_focus < 1) {
+        ui->quit_confirm_focus++;
+      }
+    } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+      if (ui->quit_confirm_focus == 1) {
+        ui->running = false;
+      } else {
+        ui->modal = ui->quit_confirm_return;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+// Lexicon picker modal keys.
+// Returns true when the key was consumed.
+bool tui_input_lexicon_picker(TuiGameState *state, TuiUiState *ui,
+                              TuiSession *session, uint32_t key,
+                              ncinput input) {
+  (void)input;
+  if (ui->modal == TUI_MODAL_LEXICON_PICKER) {
+    const int n = tui_lexicon_list_count(ui->lexicon_list);
+    if (key == NCKEY_ESC) {
+      ui->modal = TUI_MODAL_SETTINGS;
+    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+      if (ui->lexicon_focus > 0) {
+        ui->lexicon_focus--;
+      }
+    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+      if (ui->lexicon_focus < n - 1) {
+        ui->lexicon_focus++;
+      }
+    } else if (key == NCKEY_HOME || key == 'g') {
+      ui->lexicon_focus = 0;
+    } else if (key == NCKEY_END || key == 'G') {
+      ui->lexicon_focus = n - 1;
+    } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+      char picked[TUI_LEXICON_NAME_MAX] = {0};
+      if (tui_lexicon_list_name(ui->lexicon_list, ui->lexicon_focus, picked,
+                                sizeof(picked))) {
+        snprintf(session->to_save.lexicon, sizeof(session->to_save.lexicon),
+                 "%s", picked);
+        session->to_save.lexicon_set = true;
+        pthread_mutex_lock(&state->mutex);
+        snprintf(state->pending_lexicon, sizeof(state->pending_lexicon), "%s",
+                 picked);
+        pthread_mutex_unlock(&state->mutex);
+        if (!session->args.no_config) {
+          tui_config_save(&session->to_save);
+        }
+      }
+      ui->modal = TUI_MODAL_SETTINGS;
+    }
+    return true;
+  }
+  return false;
+}
+
+// Time picker modal keys (starts a new Watch game on Enter).
+// Returns true when the key was consumed.
+bool tui_input_time_picker(TuiGameState *state, TuiUiState *ui,
+                           TuiSession *session, uint32_t key, ncinput input) {
+  if (ui->modal == TUI_MODAL_TIME_PICKER) {
+    const int preset_count = tui_time_picker_preset_count();
+    if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
+      const int hit = tui_modal_item_at(input.y, input.x);
+      if (hit >= 0 && hit < preset_count) {
+        ui->time_focus = hit;
+        key = NCKEY_ENTER;
+      } else {
+        return true;
+      }
+    }
+    if (key == NCKEY_ESC) {
+      ui->modal = ui->time_picker_return;
+    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+      if (ui->time_focus > 0) {
+        ui->time_focus--;
+      }
+    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+      if (ui->time_focus < preset_count - 1) {
+        ui->time_focus++;
+      }
+    } else if (key >= '1' && key <= (uint32_t)('0' + preset_count)) {
+      ui->time_focus = (int)(key - '1');
+    } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+      const int new_time = tui_time_picker_preset_seconds(ui->time_focus);
+      if (new_time > 0) {
+        // Stop the bot only when one is actually running. At first
+        // launch the bot is idle (waiting on the startup menu), so
+        // the pthread_join would block forever on a never-started
+        // thread.
+        // The analysis-resume worker reads history entries and the
+        // endgame ctx — stop it before any reset / reconfigure.
+        tui_analysis_worker_stop_and_join(state);
+        if (state->bot_started) {
+          atomic_store(&state->bot_stop, true);
+          pthread_join(state->bot_thread, NULL);
+          state->bot_started = false;
+          atomic_store(&state->bot_stop, false);
+        }
+        session->chosen_time = new_time;
+        if (!session->args.no_config) {
+          session->to_save.time_per_side_seconds = new_time;
+          session->to_save.time_per_side_set = true;
+          tui_config_save(&session->to_save);
+        }
+        // Pending lexicon / RIT changes that need a full re-init?
+        // If so, tear down the state and re-init with the new
+        // settings (loading fresh tables). Otherwise the fast in-
+        // place reset is enough.
+        const bool needs_reinit =
+            strcmp(state->pending_lexicon, state->active_lexicon) != 0 ||
+            state->pending_load_rit != state->active_load_rit;
+        if (needs_reinit) {
+          char new_lexicon[TUI_LEXICON_NAME_MAX];
+          snprintf(new_lexicon, sizeof(new_lexicon), "%s",
+                   state->pending_lexicon);
+          const bool new_load_rit = state->pending_load_rit;
+          tui_game_state_destroy(state);
+          char reinit_error[256] = {0};
+          if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
+                                   new_load_rit, state, reinit_error,
+                                   sizeof(reinit_error))) {
+            // Re-init failed; fall back to the previously active
+            // settings so the user isn't left without a playable
+            // game. We've already torn the state down, so we have
+            // to retry with the old values.
+            if (!tui_game_state_init(session->chosen_lexicon,
+                                     (uint64_t)time(NULL),
+                                     session->initial_load_rit, state,
+                                     reinit_error, sizeof(reinit_error))) {
+              ui->running = false;
+              ui->modal = TUI_MODAL_NONE;
+              return true;
+            }
+          } else {
+            snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
+                     "%s", new_lexicon);
+          }
+          tui_game_state_set_time_per_side(state, new_time);
+        } else {
+          pthread_mutex_lock(&state->mutex);
+          tui_game_state_set_time_per_side(state, new_time);
+          tui_game_state_reset_game(state, (uint64_t)time(NULL));
+          pthread_mutex_unlock(&state->mutex);
+        }
+        pthread_mutex_lock(&state->mutex);
+        state->app_mode = TUI_APP_MODE_WATCH;
+        pthread_mutex_unlock(&state->mutex);
+        tui_bot_worker_start(state);
+      }
+      ui->modal = TUI_MODAL_NONE;
+    }
+    return true;
+  }
+  return false;
+}
+
+// Main menu (Esc) modal keys.
+// Returns true when the key was consumed.
+bool tui_input_main_menu(TuiGameState *state, TuiUiState *ui,
+                         TuiSession *session, uint32_t key, ncinput input) {
+  (void)state;
+  (void)session;
+  if (ui->modal == TUI_MODAL_MAIN_MENU) {
+    if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
+      const int hit = tui_modal_item_at(input.y, input.x);
+      if (hit >= 0) {
+        ui->main_menu_focus = hit;
+        key = NCKEY_ENTER;
+      } else {
+        return true;
+      }
+    }
+    if (key == NCKEY_ESC) {
+      ui->modal = TUI_MODAL_NONE;
+    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+      if (ui->main_menu_focus > 0) {
+        ui->main_menu_focus--;
+      }
+    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+      if (ui->main_menu_focus < TUI_MENU_ITEM_COUNT - 1) {
+        ui->main_menu_focus++;
+      }
+    } else if (key == 'n' || key == 'N') {
+      // Mnemonic shortcuts trigger the action immediately, matching
+      // the hint shown to the right of each item in the modal. They
+      // skip focus-then-Enter so the menu behaves like a launcher.
+      // New game now routes through the startup menu so the user
+      // can pick load/annotate modes alongside watch.
+      ui->modal = TUI_MODAL_STARTUP_MENU;
+      ui->startup_menu_focus = TUI_STARTUP_WATCH;
+      ui->startup_menu_return = TUI_MODAL_MAIN_MENU;
+    } else if (key == 's' || key == 'S') {
+      ui->modal = TUI_MODAL_SETTINGS;
+      ui->settings_focus = 0;
+      ui->settings_return = TUI_MODAL_MAIN_MENU;
+    } else if (key == 'q' || key == 'Q') {
+      ui->modal = TUI_MODAL_QUIT_CONFIRM;
+      ui->quit_confirm_focus = 0;
+      ui->quit_confirm_return = TUI_MODAL_MAIN_MENU;
+    } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+      if (ui->main_menu_focus == TUI_MENU_NEW_GAME) {
+        // Pivot to the startup menu so the user can pick what
+        // KIND of new game (watch / load / annotate / vs-cpu) —
+        // Watch from there opens the time picker and ends up
+        // doing what this branch used to do directly.
+        ui->modal = TUI_MODAL_STARTUP_MENU;
+        ui->startup_menu_focus = TUI_STARTUP_WATCH;
+        ui->startup_menu_return = TUI_MODAL_MAIN_MENU;
+      } else if (ui->main_menu_focus == TUI_MENU_SETTINGS) {
+        ui->modal = TUI_MODAL_SETTINGS;
+        ui->settings_focus = 0;
+        ui->settings_return = TUI_MODAL_MAIN_MENU;
+      } else if (ui->main_menu_focus == TUI_MENU_QUIT) {
+        ui->modal = TUI_MODAL_QUIT_CONFIRM;
+        ui->quit_confirm_focus = 0;
+        ui->quit_confirm_return = TUI_MODAL_MAIN_MENU;
+      } else if (ui->main_menu_focus == TUI_MENU_BACK) {
+        ui->modal = TUI_MODAL_NONE;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+// Startup menu modal keys.
+// Returns true when the key was consumed.
+bool tui_input_startup_menu(TuiGameState *state, TuiUiState *ui,
+                            TuiSession *session, uint32_t key, ncinput input) {
+  (void)state;
+  if (ui->modal == TUI_MODAL_STARTUP_MENU) {
+    // Helper: which menu items are currently selectable. Only
+    // "Watch computer play" is wired up; others render dimmed
+    // and the cursor skips past them. Keep this aligned with
+    // the disabled mask inside tui_game_render_startup_menu.
+    bool su_enabled[TUI_STARTUP_ITEM_COUNT];
+    su_enabled[TUI_STARTUP_WATCH] = true;
+    su_enabled[TUI_STARTUP_LOAD_POSITION] = true;
+    su_enabled[TUI_STARTUP_LOAD_GAME] = true;
+    su_enabled[TUI_STARTUP_ANNOTATE] = true;
+    su_enabled[TUI_STARTUP_PLAY_VS_COMPUTER] = true;
+    if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
+      const int hit = tui_modal_item_at(input.y, input.x);
+      if (hit >= 0 && hit < TUI_STARTUP_ITEM_COUNT && su_enabled[hit]) {
+        ui->startup_menu_focus = hit;
+        key = NCKEY_ENTER;
+      } else {
+        return true;
+      }
+    }
+    if (key == NCKEY_ESC) {
+      // Esc returns to whichever modal opened the startup menu.
+      // First-launch: TUI_MODAL_NONE (dismisses to the bot game
+      // already running underneath). Esc → New game: returns to
+      // TUI_MODAL_MAIN_MENU so the user can pick Settings/Quit.
+      ui->modal = ui->startup_menu_return;
+    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+      for (int i = ui->startup_menu_focus - 1; i >= 0; i--) {
+        if (su_enabled[i]) {
+          ui->startup_menu_focus = i;
+          break;
+        }
+      }
+    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+      for (int i = ui->startup_menu_focus + 1; i < TUI_STARTUP_ITEM_COUNT;
+           i++) {
+        if (su_enabled[i]) {
+          ui->startup_menu_focus = i;
+          break;
+        }
+      }
+    } else if (key == 'w' || key == 'W') {
+      // Mnemonic shortcut: open the Watch setup modal. The setup
+      // modal handles starting the game once the user confirms.
+      ui->modal = TUI_MODAL_WATCH_SETUP;
+      snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon), "%s",
+               session->chosen_lexicon);
+      ui->watch_setup_time = session->chosen_time;
+    } else if (key == 'p' || key == 'P') {
+      ui->modal = TUI_MODAL_LOAD_POSITION;
+      ui->load_position_buf[0] = '\0';
+      ui->load_position_len = 0;
+      ui->load_position_cursor = 0;
+      ui->load_position_parse_ok = false;
+      ui->load_position_dirty = false;
+      ui->load_position_error[0] = '\0';
+    } else if (key == 'g' || key == 'G') {
+      ui->modal = TUI_MODAL_LOAD_GAME;
+      ui->load_game_buf[0] = '\0';
+      ui->load_game_len = 0;
+      ui->load_game_cursor = 0;
+      ui->load_game_parse_ok = false;
+      ui->load_game_dirty = false;
+      ui->load_game_error[0] = '\0';
+    } else if (key == 'a' || key == 'A') {
+      ui->modal = TUI_MODAL_ANNOTATE_SETUP;
+      snprintf(ui->annotate_setup_lexicon, sizeof(ui->annotate_setup_lexicon),
+               "%s", session->chosen_lexicon);
+      snprintf(ui->annotate_setup_p1_name, sizeof(ui->annotate_setup_p1_name),
+               "Player 1");
+      snprintf(ui->annotate_setup_p2_name, sizeof(ui->annotate_setup_p2_name),
+               "Player 2");
+      ui->annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
+      ui->annotate_setup_name_cursor = (int)strlen(ui->annotate_setup_p1_name);
+    } else if (key == 'c' || key == 'C') {
+      ui->modal = TUI_MODAL_PLAY_SETUP;
+      ui->play_setup_focus = TUI_PLAY_SETUP_START;
+      snprintf(ui->play_setup_human_name, sizeof(ui->play_setup_human_name),
+               "You");
+      snprintf(ui->play_setup_computer_name,
+               sizeof(ui->play_setup_computer_name), "Computer");
+      ui->play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+      ui->play_setup_name_cursor = 0;
+      snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon), "%s",
+               session->chosen_lexicon);
+      ui->watch_setup_time = session->chosen_time;
+    } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+      if (ui->startup_menu_focus == TUI_STARTUP_WATCH) {
+        ui->modal = TUI_MODAL_WATCH_SETUP;
+        snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon), "%s",
+                 session->chosen_lexicon);
+        ui->watch_setup_time = session->chosen_time;
+      } else if (ui->startup_menu_focus == TUI_STARTUP_LOAD_POSITION) {
+        ui->modal = TUI_MODAL_LOAD_POSITION;
+        ui->load_position_buf[0] = '\0';
+        ui->load_position_len = 0;
+        ui->load_position_cursor = 0;
+        ui->load_position_parse_ok = false;
+        ui->load_position_dirty = false;
+        ui->load_position_error[0] = '\0';
+      } else if (ui->startup_menu_focus == TUI_STARTUP_LOAD_GAME) {
+        ui->modal = TUI_MODAL_LOAD_GAME;
+        ui->load_game_buf[0] = '\0';
+        ui->load_game_len = 0;
+        ui->load_game_cursor = 0;
+        ui->load_game_parse_ok = false;
+        ui->load_game_dirty = false;
+        ui->load_game_error[0] = '\0';
+      } else if (ui->startup_menu_focus == TUI_STARTUP_ANNOTATE) {
+        ui->modal = TUI_MODAL_ANNOTATE_SETUP;
+        snprintf(ui->annotate_setup_lexicon, sizeof(ui->annotate_setup_lexicon),
+                 "%s", session->chosen_lexicon);
+        snprintf(ui->annotate_setup_p1_name, sizeof(ui->annotate_setup_p1_name),
+                 "Player 1");
+        snprintf(ui->annotate_setup_p2_name, sizeof(ui->annotate_setup_p2_name),
+                 "Player 2");
+        ui->annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
+        ui->annotate_setup_name_cursor =
+            (int)strlen(ui->annotate_setup_p1_name);
+      } else if (ui->startup_menu_focus == TUI_STARTUP_PLAY_VS_COMPUTER) {
+        // Single play-vs-computer setup modal: names, who moves
+        // first, time, lexicon, and sim (computer-strength) params.
+        // Reuses watch_setup_time / watch_setup_lexicon as the scratch
+        // copies for the time / lexicon adjusters.
+        ui->modal = TUI_MODAL_PLAY_SETUP;
+        ui->play_setup_focus = TUI_PLAY_SETUP_START;
+        snprintf(ui->play_setup_human_name, sizeof(ui->play_setup_human_name),
+                 "You");
+        snprintf(ui->play_setup_computer_name,
+                 sizeof(ui->play_setup_computer_name), "Computer");
+        ui->play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+        ui->play_setup_name_cursor = 0;
+        snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon), "%s",
+                 session->chosen_lexicon);
+        ui->watch_setup_time = session->chosen_time;
+      }
+      // Disabled items are no-op for now. As each mode ships,
+      // add its branch here and flip su_enabled[i] true above.
+    }
+    return true;
+  }
+  return false;
+}
