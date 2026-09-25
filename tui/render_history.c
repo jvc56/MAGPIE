@@ -178,26 +178,11 @@ static void render_clock_event_entry(struct ncplane *plane, const Theme *theme,
   }
 }
 
-// Draws row 1 of the entry being edited: the tinted selection bar with
-// its move and leave input zones, the score, and the text cursor.
-static void render_history_move_editor(
-    struct ncplane *plane, const Theme *theme, const TuiGameState *state,
-    int row, int interior_left, int interior_right, const ThemeRgb player_fg,
-    const ThemeRgb player_dim_fg, const char *prefix) {
-  // Annotation editor — modal-text-edit style. The row when
-  // selected for editing gets a "selection bar" background
-  // tinted toward the player's accent at a grey-level
-  // brightness (max channel pinned to ~50, low saturation).
-  // Editable text-input rectangles sit on pure black inside
-  // the bar, mirroring the modal's "row_bg + dark zone"
-  // pattern so the visual language stays consistent.
-  //
-  // Layout:  "1> [move zone (black)] [leave (black)]    +score"
-  const int base_col = interior_left + (int)strlen(prefix);
-  // Tint the row bg toward player_fg. Scale so the brightest
-  // channel hits 50, then floor each channel at 24 so even the
-  // dimmer channels stay visible enough to read as "tinted
-  // grey" rather than "pure black with one bright channel".
+// Background for the selection bar of the entry being edited: the
+// player's accent scaled so its brightest channel hits 50, with each
+// channel floored at 24 so the dimmer channels still read as "tinted
+// grey" rather than "pure black with one bright channel".
+static ThemeRgb history_edit_row_bg(ThemeRgb player_fg) {
   int max_ch = player_fg.r;
   if (player_fg.g > max_ch) {
     max_ch = player_fg.g;
@@ -225,6 +210,26 @@ static void render_history_move_editor(
     row_bg.g = (uint8_t)gg;
     row_bg.b = (uint8_t)bb;
   }
+  return row_bg;
+}
+
+// Draws row 1 of the entry being edited: the tinted selection bar with
+// its move and leave input zones, the score, and the text cursor.
+static void render_history_move_editor(
+    struct ncplane *plane, const Theme *theme, const TuiGameState *state,
+    int row, int interior_left, int interior_right, const ThemeRgb player_fg,
+    const ThemeRgb player_dim_fg, const char *prefix) {
+  // Annotation editor — modal-text-edit style. The row when
+  // selected for editing gets a "selection bar" background
+  // tinted toward the player's accent at a grey-level
+  // brightness (max channel pinned to ~50, low saturation).
+  // Editable text-input rectangles sit on pure black inside
+  // the bar, mirroring the modal's "row_bg + dark zone"
+  // pattern so the visual language stays consistent.
+  //
+  // Layout:  "1> [move zone (black)] [leave (black)]    +score"
+  const int base_col = interior_left + (int)strlen(prefix);
+  const ThemeRgb row_bg = history_edit_row_bg(player_fg);
   const ThemeRgb zone_bg = {0, 0, 0};
   const ThemeRgb white_bg = {255, 255, 255};
   // 4-cell strip at the right edge holds "+100" — same as
@@ -407,35 +412,8 @@ static void render_history_rack_editor(
     format_clock(e->clock_at_start, clock_str, sizeof(clock_str));
     rack_col += (int)strlen(clock_str) + 1;
   }
-  // Same player-tinted row bg as row 1 — computed inline so
-  // both rows share the exact same hue and brightness floor.
-  int max_ch_r2 = player_fg.r;
-  if (player_fg.g > max_ch_r2) {
-    max_ch_r2 = player_fg.g;
-  }
-  if (player_fg.b > max_ch_r2) {
-    max_ch_r2 = player_fg.b;
-  }
-  ThemeRgb row_bg = {38, 38, 38};
-  if (max_ch_r2 > 0) {
-    const int target_max = 50;
-    const int floor_ch = 24;
-    int rr = (player_fg.r * target_max + max_ch_r2 / 2) / max_ch_r2;
-    int gg = (player_fg.g * target_max + max_ch_r2 / 2) / max_ch_r2;
-    int bb = (player_fg.b * target_max + max_ch_r2 / 2) / max_ch_r2;
-    if (rr < floor_ch) {
-      rr = floor_ch;
-    }
-    if (gg < floor_ch) {
-      gg = floor_ch;
-    }
-    if (bb < floor_ch) {
-      bb = floor_ch;
-    }
-    row_bg.r = (uint8_t)rr;
-    row_bg.g = (uint8_t)gg;
-    row_bg.b = (uint8_t)bb;
-  }
+  // Same player-tinted row bg as row 1.
+  ThemeRgb row_bg = history_edit_row_bg(player_fg);
   // Play-vs-computer: the rack row is a read-only display of the
   // human's full rack, not an editable field. Paint the whole row
   // black so it reads as "not editable" (vs the player-tinted
