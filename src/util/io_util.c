@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -611,7 +612,8 @@ enum {
   STALE_TEMPORARY_SECONDS = 60 * 60,
 };
 
-// Whether `entry` is `<base>.<digits>.tmp`: a temporary_sibling of `base`.
+// Whether `entry` is `<base>.<pid>-<n>.tmp` (or `<base>.<pid>.tmp`, the
+// earlier form): a temporary_sibling of `base`.
 static bool is_temporary_sibling_of(const char *entry, const char *base) {
   const size_t base_length = strlen(base);
   if (strncmp(entry, base, base_length) != 0 || entry[base_length] != '.') {
@@ -619,7 +621,7 @@ static bool is_temporary_sibling_of(const char *entry, const char *base) {
   }
   const char *pid = entry + base_length + 1;
   const char *end = pid;
-  while (isdigit((unsigned char)*end)) {
+  while (isdigit((unsigned char)*end) || *end == '-') {
     end++;
   }
   return end > pid && strcmp(end, ".tmp") == 0;
@@ -660,7 +662,15 @@ static void remove_stale_temporary_siblings(const char *filename) {
 
 char *temporary_sibling(const char *filename) {
   remove_stale_temporary_siblings(filename);
-  return get_formatted_string("%s.%ld.tmp", filename, (long)getpid());
+  // The process id and a per-process counter: unique within a machine's PID
+  // space. Two containers sharing a data volume can both be PID 1, so
+  // writers open the name exclusively (fopen_exclusive) and a clash fails
+  // rather than truncating the other's file.
+  static atomic_uint_least64_t counter = 0;
+  const unsigned long long sequence =
+      (unsigned long long)atomic_fetch_add(&counter, 1);
+  return get_formatted_string("%s.%ld-%llu.tmp", filename, (long)getpid(),
+                              sequence);
 }
 
 void rename_into_place(const char *temporary, const char *filename,

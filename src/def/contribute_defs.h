@@ -20,6 +20,11 @@ enum {
   HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS = 60,
 };
 
+// The longest a worker waits between claims while the server's leave KLV is
+// missing or does not match its recorded hash (the wait doubles from the idle
+// interval up to this); see contribute_decline_derived_mismatch.
+enum { CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS = 600 };
+
 // Task request fields, read in config.c's config_contribute_* functions.
 #define CONTRIBUTE_KEY_LEXICON "lexicon"
 #define CONTRIBUTE_KEY_VARIANT "variant"

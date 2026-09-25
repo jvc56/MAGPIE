@@ -1189,17 +1189,24 @@ static bool file_exists(const char *path) {
 // that could still be in progress or belongs to another name.
 static void test_an_abandoned_temporary_is_removed(void) {
   const char *target = "contribute_test_table.rit";
-  const char *abandoned = "contribute_test_table.rit.12345.tmp";
+  const char *abandoned = "contribute_test_table.rit.12345-0.tmp";
+  const char *abandoned_old_form = "contribute_test_table.rit.12345.tmp";
   const char *in_progress = "contribute_test_table.rit.23456.tmp";
   const char *not_ours = "contribute_test_table.rit.backup.tmp";
   const char *other_file = "contribute_test_other.rit.12345.tmp";
   touch_file(abandoned, 2 * 60 * 60);
+  touch_file(abandoned_old_form, 2 * 60 * 60);
   touch_file(in_progress, 0);
   touch_file(not_ours, 2 * 60 * 60);
   touch_file(other_file, 2 * 60 * 60);
 
   char *temporary = temporary_sibling(target);
   assert(!file_exists(abandoned));
+  assert(!file_exists(abandoned_old_form));
+  // Two writes in one process get two names.
+  char *second = temporary_sibling(target);
+  assert(!strings_equal(temporary, second));
+  free(second);
   assert(file_exists(in_progress));
   assert(file_exists(not_ours));
   assert(file_exists(other_file));

@@ -197,8 +197,22 @@ int contribute_get_threads(const ContributeState *state);
 // caller with chttp_response_destroy on success; the body may be binary
 // (KLV), so it is length-delimited rather than NUL-terminated text.
 void contribute_fetch_artifact(ContributeState *state, const char *key,
-                               ChttpResponse *response,
+                               ChttpResponse *response, bool *not_found,
                                ErrorStack *error_stack);
+
+// Whether the server KLV `key` was already found not to be `expected` this
+// run (a claim naming the same pair is declined without fetching it again);
+// if so, *actual is what was found, or NULL for a missing object.
+bool contribute_artifact_known_bad(const ContributeState *state,
+                                   const char *key, const char *expected,
+                                   const char **actual);
+
+// A server KLV verified: forgets the known-bad one and the wait.
+void contribute_artifact_verified(ContributeState *state);
+
+// Whether the user asked the running command to stop (the REPL's `stop`, the
+// API's stop call).
+bool contribute_interrupted(ThreadControl *thread_control);
 
 void contribute_state_destroy(ContributeState *state);
 

@@ -193,6 +193,15 @@ struct ContributeState {
   // Whether one of them is the server's own artifact (the leave KLV) rather
   // than a file built here; see contribute_decline_derived_mismatch.
   bool server_artifact_mismatch;
+  // The last server KLV found not to be what the claim said -- its key, the
+  // hash the claim expected, and what was fetched (NULL: not found) -- so a
+  // claim naming the same pair is declined without fetching it again, and
+  // how long the worker now waits between such claims (doubling to ten
+  // minutes). Cleared when a KLV verifies.
+  char *bad_artifact_key;
+  char *bad_artifact_expected;
+  char *bad_artifact_actual;
+  int bad_artifact_wait_seconds;
   // Set once the server has told this worker to stop.
   bool shutdown_requested;
   // Set once any claim has been answered by the server, whatever it said.
@@ -481,6 +490,20 @@ void contribute_record_derived_mismatch(ContributeState *state,
   // the server's to fix, and nothing on this disk is out of date.
   if (strings_equal(role, "klv")) {
     state->server_artifact_mismatch = true;
+    if (!state->bad_artifact_key ||
+        !strings_equal(state->bad_artifact_key, name) ||
+        !strings_equal(state->bad_artifact_expected, expected)) {
+      // A different artifact, or a new hash for this one: whatever was wrong
+      // before is not what is wrong now, so the wait starts short again.
+      state->bad_artifact_wait_seconds = 0;
+    }
+    free(state->bad_artifact_key);
+    free(state->bad_artifact_expected);
+    char *previous_actual = state->bad_artifact_actual;
+    state->bad_artifact_key = string_duplicate(name);
+    state->bad_artifact_expected = string_duplicate(expected);
+    state->bad_artifact_actual = string_duplicate_allow_null(actual);
+    free(previous_actual);
     return;
   }
 
@@ -590,6 +613,19 @@ static ContributeState *contribute_state_create(const char *settings_path,
       thread_control, "contributing to %s as %s (%d threads)\n",
       client_state->server_url, identity_description, state->threads);
   return state;
+}
+
+bool contribute_interrupted(ThreadControl *thread_control) {
+  return thread_control && thread_control_get_status(thread_control) ==
+                               THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
+// Sleeps `seconds`, a second at a time, returning early on a stop request:
+// a REPL `stop` during a wait of minutes otherwise went unanswered.
+static void nap_unless_interrupted(ThreadControl *thread_control, int seconds) {
+  for (int i = 0; i < seconds && !contribute_interrupted(thread_control); i++) {
+    ctime_nap(1.0);
+  }
 }
 
 // Remembers a job this worker cannot run, so the server stops offering it.
@@ -788,7 +824,8 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
     return outcome;
   }
   if (outcome == CONTRIBUTE_CLAIM_NO_WORK) {
-    ctime_nap(state->client_state->idle_wait_seconds);
+    nap_unless_interrupted(thread_control,
+                           state->client_state->idle_wait_seconds);
     return outcome;
   }
 
@@ -894,13 +931,24 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   }
   char *missing_json = string_builder_dump_and_destroy(sb, NULL);
   const bool server_artifact = state->server_artifact_mismatch;
-
+  int wait_seconds = 0;
   if (server_artifact) {
+    // Doubling from the idle interval to ten minutes: every retry is a claim,
+    // a decline and (unless this pair is already known bad) a download of
+    // the KLV, from every leave worker, until an admin puts the object right.
+    const int idle = state->client_state->idle_wait_seconds;
+    wait_seconds = state->bad_artifact_wait_seconds <= 0
+                       ? (idle > 0 ? idle : 1)
+                       : state->bad_artifact_wait_seconds * 2;
+    if (wait_seconds > CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS) {
+      wait_seconds = CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS;
+    }
+    state->bad_artifact_wait_seconds = wait_seconds;
     thread_control_print_formatted(
         thread_control,
-        "declining this task: the server's leave file does not match the hash "
-        "it recorded for it; asking again in %d seconds\n",
-        state->client_state->idle_wait_seconds);
+        "declining this task: the server's leave file is missing or does not "
+        "match the hash it recorded for it; asking again in %d seconds\n",
+        wait_seconds);
   } else {
     thread_control_print_formatted(
         thread_control,
@@ -917,14 +965,36 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   // setting the job aside would end the run of every worker for whom it is
   // the only active job (the server answers "every active job needs input
   // data you do not have", which sends the contributor to the wrong fix).
-  // Wait instead, as for an empty queue, and ask again.
+  // Wait instead, and ask again.
   if (server_artifact) {
     release_claim(state);
-    ctime_nap(state->client_state->idle_wait_seconds);
+    nap_unless_interrupted(thread_control, wait_seconds);
     return;
   }
   remember_unsupported(state, state->claimed_job_id);
   release_claim(state);
+}
+
+bool contribute_artifact_known_bad(const ContributeState *state,
+                                   const char *key, const char *expected,
+                                   const char **actual) {
+  if (!state->bad_artifact_key || !key || !expected ||
+      !strings_equal(state->bad_artifact_key, key) ||
+      !strings_equal(state->bad_artifact_expected, expected)) {
+    return false;
+  }
+  *actual = state->bad_artifact_actual;
+  return true;
+}
+
+void contribute_artifact_verified(ContributeState *state) {
+  free(state->bad_artifact_key);
+  free(state->bad_artifact_expected);
+  free(state->bad_artifact_actual);
+  state->bad_artifact_key = NULL;
+  state->bad_artifact_expected = NULL;
+  state->bad_artifact_actual = NULL;
+  state->bad_artifact_wait_seconds = 0;
 }
 
 typedef enum {
@@ -1128,8 +1198,9 @@ static bool contribute_is_safe_artifact_key(const char *key) {
 }
 
 void contribute_fetch_artifact(ContributeState *state, const char *key,
-                               ChttpResponse *response,
+                               ChttpResponse *response, bool *not_found,
                                ErrorStack *error_stack) {
+  *not_found = false;
   if (!contribute_is_safe_artifact_key(key)) {
     error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
                      get_formatted_string("server sent an unusable artifact "
@@ -1144,6 +1215,11 @@ void contribute_fetch_artifact(ContributeState *state, const char *key,
     return;
   }
   if (response->status_code != 200) {
+    // A 404 is the server saying the object is gone -- RUNBOOK §3's "missing
+    // object", until an admin rebuilds it -- which the caller declines like
+    // a KLV that fails its hash. Anything else is an error (a 5xx has
+    // already been retried).
+    *not_found = response->status_code == 404;
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string("fetching artifact '%s' failed with HTTP %ld", key,
@@ -1157,6 +1233,9 @@ void contribute_state_destroy(ContributeState *state) {
     return;
   }
   free(state->last_failure);
+  free(state->bad_artifact_key);
+  free(state->bad_artifact_expected);
+  free(state->bad_artifact_actual);
   free(state->claim_token);
   free(state->claimed_job_id);
   string_list_destroy(state->unsupported_jobs);

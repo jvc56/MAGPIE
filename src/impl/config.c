@@ -432,6 +432,10 @@ struct Config {
   // was read from, as of the last contribute load; NULL for data that load
   // did not read or could not stat. See config_contribute_evict_changed_data.
   char *contribute_loaded_identities[NUMBER_OF_DATA][2];
+  // The same for the letter distribution and the board layout, which are
+  // cached by name as well (config_contribute_reload_changed_ld_and_layout).
+  char *contribute_ld_identity;
+  char *contribute_layout_identity;
   bool autosave_gcg;
   bool fg_required;
   bool loaded_settings;
@@ -7632,6 +7636,81 @@ static char *contribute_current_identity(const Config *config,
   return identity;
 }
 
+// The identity of the file `name` of `type` resolves to now, or NULL.
+static char *contribute_file_identity(const Config *config, const char *name,
+                                      data_filepath_t type) {
+  if (!name) {
+    return NULL;
+  }
+  ErrorStack *path_errors = error_stack_create();
+  char *path = data_filepaths_get_readable_filename(config->data_paths, name,
+                                                    type, path_errors);
+  char *identity = NULL;
+  if (error_stack_is_empty(path_errors)) {
+    identity = get_file_identity(path);
+  }
+  error_stack_destroy(path_errors);
+  free(path);
+  return identity;
+}
+
+// The letter distribution and the board layout are loaded again only when
+// their *name* changes, like the players' data below -- so a distribution or
+// layout file replaced on disk mid-run (download_data.sh, a new tarball) was
+// verified by digest against the job's pin and then never read: the one in
+// memory was played. Each is small; one whose file is not the file this path
+// last read is read again. Called after the load, which has read any whose
+// name changed.
+static void
+config_contribute_reload_changed_ld_and_layout(Config *config,
+                                               ErrorStack *error_stack) {
+  // A game made with the distribution the load just replaced (by name) holds
+  // a pointer to it; the CLI's load drops such a game, and so does this.
+  if (config->ld_changed && config->game) {
+    game_destroy(config->game);
+    config->game = NULL;
+  }
+  const char *layout_name = board_layout_get_name(config->board_layout);
+  char *layout_identity =
+      contribute_file_identity(config, layout_name, DATA_FILEPATH_TYPE_LAYOUT);
+  if (!layout_identity || !config->contribute_layout_identity ||
+      !strings_equal(layout_identity, config->contribute_layout_identity)) {
+    char *name = string_duplicate(layout_name);
+    board_layout_load(config->board_layout, config->data_paths, name,
+                      error_stack);
+    free(name);
+    config_invalidate_everything(config, false);
+  }
+  free(config->contribute_layout_identity);
+  config->contribute_layout_identity = layout_identity;
+  if (!error_stack_is_empty(error_stack) || !config->ld) {
+    return;
+  }
+
+  char *ld_name = to_lower_case(ld_get_name(config->ld));
+  char *ld_identity =
+      contribute_file_identity(config, ld_name, DATA_FILEPATH_TYPE_LD);
+  if (!ld_identity || !config->contribute_ld_identity ||
+      !strings_equal(ld_identity, config->contribute_ld_identity)) {
+    LetterDistribution *fresh =
+        ld_create(config->data_paths, ld_get_name(config->ld), error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      if (config->game) {
+        game_destroy(config->game);
+        config->game = NULL;
+      }
+      ld_destroy(config->ld);
+      config->ld = fresh;
+      config->ld_changed = true;
+      autoplay_results_set_ld(config->autoplay_results, config->ld);
+      config_invalidate_everything(config, false);
+    }
+  }
+  free(ld_name);
+  free(config->contribute_ld_identity);
+  config->contribute_ld_identity = ld_identity;
+}
+
 // Players' lexical data is cached in memory by *name*: a load that finds a
 // KWG, KLV, wordmap or rack info table of the requested name already loaded
 // keeps it and never opens the file. What a task has verified, though, is the
@@ -7777,6 +7856,9 @@ void config_contribute_load_lexicon_and_variant(
       /*p1_use_wit_has_value=*/false, /*p2_use_wit_has_value=*/false,
       /*disable_rit=*/false, /*is_loading_game_history=*/false, error_stack);
   free(default_ld);
+  if (error_stack_is_empty(error_stack)) {
+    config_contribute_reload_changed_ld_and_layout(config, error_stack);
+  }
   config_contribute_record_loaded_data(config);
 }
 
@@ -8854,15 +8936,44 @@ static char *config_contribute_leave_gen(Config *config,
             previous_artifact_sha256));
     return NULL;
   }
+  // Already found missing or wrong this run, and the claim still says the
+  // same: declined without downloading it again (see
+  // contribute_decline_derived_mismatch, which also waits longer each time).
+  const char *known_actual = NULL;
+  if (contribute_artifact_known_bad(state, previous_artifact_key,
+                                    previous_artifact_sha256, &known_actual)) {
+    contribute_record_derived_mismatch(state, "klv", previous_artifact_key,
+                                       previous_artifact_sha256, known_actual);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+        get_formatted_string("the KLV at %s was already found not to match "
+                             "the sha256 the server recorded for it",
+                             previous_artifact_key));
+    return NULL;
+  }
   ChttpResponse artifact;
+  bool artifact_missing = false;
   contribute_fetch_artifact(state, previous_artifact_key, &artifact,
-                            error_stack);
+                            &artifact_missing, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    // A missing object is the server's to fix, as a mismatched one is: a
+    // failure would count toward the five that end the run, on every leave
+    // worker at once.
+    if (artifact_missing) {
+      error_stack_reset(error_stack);
+      contribute_record_derived_mismatch(state, "klv", previous_artifact_key,
+                                         previous_artifact_sha256, NULL);
+      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+                       get_formatted_string("the server has no KLV at %s",
+                                            previous_artifact_key));
+    }
     return NULL;
   }
   char *fetched_sha256 = sha256_hash_bytes(artifact.body, artifact.body_length);
   const bool intact = strings_equal(fetched_sha256, previous_artifact_sha256);
-  if (!intact) {
+  if (intact) {
+    contribute_artifact_verified(state);
+  } else {
     // Declined as a derived-file mismatch rather than failed: the fault is
     // the server's artifact, not this worker, so the job is set aside for
     // the run -- and a failure would count toward the five that stop it,
@@ -8892,7 +9003,7 @@ static char *config_contribute_leave_gen(Config *config,
   // Per process: two processes playing the same reissued task would share a
   // name made from the task.
   char *temp_path = temporary_sibling(klv_path);
-  FILE *klv_file = fopen(temp_path, "wbe");
+  FILE *klv_file = fopen(temp_path, "wbxe");
   bool written = klv_file && fwrite(artifact.body, 1, artifact.body_length,
                                     klv_file) == artifact.body_length;
   // A failed close can lose buffered bytes, which is a failed write too.
@@ -8989,6 +9100,10 @@ static char *config_contribute_leave_gen(Config *config,
   // directory on every task.
   config->leavegen_write_files = false;
   autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  // Cleared first: nothing else resets it between runs, so a run that ended
+  // without reaching its generation's end would have returned the previous
+  // task's racks under this task's claim.
+  autoplay_results_set_leave_results_json(config->autoplay_results, NULL);
   if (error_stack_is_empty(error_stack)) {
     config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                     min_rack_targets, 0, forced_racks, forced_racks_count,
@@ -9073,7 +9188,9 @@ void impl_contribute(Config *config, const char *settings_path,
   }
 
   ContributeState *state = NULL;
-  while (!contribute_should_stop(state)) {
+  ThreadControl *thread_control = config_get_thread_control(config);
+  while (!contribute_should_stop(state) &&
+         !contribute_interrupted(thread_control)) {
     const char *job_type = NULL;
     const JsonValue *request = NULL;
     const contribute_claim_outcome_t outcome = contribute_claim_task(
@@ -9095,7 +9212,6 @@ void impl_contribute(Config *config, const char *settings_path,
 
     const int threads = contribute_get_threads(state);
     char *result_json = NULL;
-    bool fatal = false;
     if (strings_equal(job_type, "games")) {
       result_json = config_contribute_games(config, request, false, threads,
                                             state, error_stack);
@@ -9122,6 +9238,22 @@ void impl_contribute(Config *config, const char *settings_path,
       }
       continue;
     }
+    // A stop request (the REPL's `stop`, the API's) cuts a running task
+    // short -- autoplay starts no more games, simulations end early -- and
+    // what comes back is not the task the server asked for: a short batch of
+    // games, racks ranked on truncated simulations. Hand the claim back
+    // rather than submit it, and stop. (It counts as nothing: the task did
+    // not fail.)
+    if (contribute_interrupted(thread_control)) {
+      free(result_json);
+      error_stack_reset(error_stack);
+      thread_control_print_formatted(
+          thread_control, "stopped: handing the task back unfinished\n");
+      contribute_decline_task(state, thread_control, "task_failed",
+                              error_stack);
+      break;
+    }
+
     // A derived file this worker cannot reproduce is a property of this
     // worker's build, not of the task, and it is not a result: hand the claim
     // straight back with both hashes so the disagreement is visible in the
@@ -9143,18 +9275,13 @@ void impl_contribute(Config *config, const char *settings_path,
       continue;
     }
 
-    // execute_leave_gen pushes ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE when
-    // this build cannot run the requested generation; that is a property of
-    // the build rather than of one task, so it stops the run.
-    fatal = fatal || error_stack_top(error_stack) ==
-                         ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE;
-
     char *error_message = NULL;
     if (!error_stack_is_empty(error_stack)) {
       error_message = error_stack_get_string_and_reset(error_stack);
     }
     contribute_submit_result(state, config_get_thread_control(config),
-                             result_json, error_message, fatal, error_stack);
+                             result_json, error_message, /*fatal=*/false,
+                             error_stack);
     free(result_json);
     free(error_message);
   }
@@ -11818,6 +11945,8 @@ void config_destroy(Config *config) {
       free(config->contribute_loaded_identities[type][player_index]);
     }
   }
+  free(config->contribute_ld_identity);
+  free(config->contribute_layout_identity);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);

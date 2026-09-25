@@ -495,7 +495,7 @@ static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
   // and minutes to write, and a contributor's second process (or a loader
   // hashing it) must never see a half-written one under the real name.
   char *temporary = temporary_sibling(filename);
-  FILE *stream = fopen_safe(temporary, "wb", error_stack);
+  FILE *stream = fopen_safe(temporary, "wbx", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     free(temporary);
     return;

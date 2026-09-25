@@ -669,7 +669,7 @@ static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
                                      ErrorStack *error_stack) {
   // Beside the final name, then renamed: see rack_info_table_write_to_file.
   char *temporary = temporary_sibling(filename);
-  FILE *stream = fopen_safe(temporary, "wb", error_stack);
+  FILE *stream = fopen_safe(temporary, "wbx", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     free(temporary);
     return;
