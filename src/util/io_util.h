@@ -265,6 +265,8 @@ typedef enum {
   ERROR_STATUS_HEAT_MAP_UNRECOGNIZED_TYPE,
   // Command API errors
   ERROR_STATUS_CMD_API_UNINITIALIZED,
+  // Appended rather than grouped so that no existing code changes value.
+  ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL,
 } error_code_t;
 
 typedef enum {

@@ -50,6 +50,10 @@ int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
 WinPct *config_get_win_pcts(const Config *config);
+// Loads the win percentage table the config uses (see -winpct and
+// DEFAULT_WIN_PCT_PREFIX) when it is not loaded yet, and checks that it
+// covers the letter distribution's bag (ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL).
+void config_load_win_pcts(Config *config, ErrorStack *error_stack);
 int config_get_num_plays(const Config *config);
 int config_get_num_small_plays(const Config *config);
 int config_get_plies(const Config *config);

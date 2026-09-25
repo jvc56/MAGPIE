@@ -14,6 +14,10 @@ enum {
 #define EMPTY_RACK_STRING "-"
 #define DEFAULT_DATA_PATHS "./data"
 #define DEFAULT_WIN_PCT "winpct"
+// A distribution-specific table, named DEFAULT_WIN_PCT_PREFIX followed by
+// the letter distribution's name (e.g. winpct_french), is the default when
+// one exists; DEFAULT_WIN_PCT otherwise.
+#define DEFAULT_WIN_PCT_PREFIX "winpct_"
 #define COMMAND_FINISHED_KEYWORD "finished"
 #define COMMAND_RUNNING_KEYWORD "running"
 

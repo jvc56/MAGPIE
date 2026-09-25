@@ -313,6 +313,9 @@ struct Config {
   double p1_utility_spread_scale;
   double p2_utility_spread_scale;
   WinPct *win_pcts;
+  // The table named by -winpct, owned; NULL means the default for the
+  // current letter distribution (see config_win_pct_target_name).
+  char *win_pct_explicit_name;
   BoardLayout *board_layout;
   LetterDistribution *ld;
   PlayersData *players_data;
@@ -2970,16 +2973,66 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       sim_args);
 }
 
-void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
-  if (config->win_pcts == NULL) {
-    const char *win_pct_name =
-        config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
-    if (win_pct_name == NULL) {
-      win_pct_name = DEFAULT_WIN_PCT;
+// The win percentage table the config should use: the one named by
+// -winpct, else DEFAULT_WIN_PCT_PREFIX plus the letter distribution's name
+// when that file exists, else DEFAULT_WIN_PCT. Caller owns the result.
+static char *config_win_pct_target_name(const Config *config) {
+  if (config->win_pct_explicit_name) {
+    return string_duplicate(config->win_pct_explicit_name);
+  }
+  if (config->ld) {
+    char *ld_specific_name = get_formatted_string(
+        "%s%s", DEFAULT_WIN_PCT_PREFIX, ld_get_name(config->ld));
+    ErrorStack *lookup_errors = error_stack_create();
+    char *filename = data_filepaths_get_readable_filename(
+        config->data_paths, ld_specific_name, DATA_FILEPATH_TYPE_WIN_PCT,
+        lookup_errors);
+    const bool found = error_stack_is_empty(lookup_errors);
+    free(filename);
+    error_stack_destroy(lookup_errors);
+    if (found) {
+      return ld_specific_name;
     }
+    free(ld_specific_name);
+  }
+  return string_duplicate(DEFAULT_WIN_PCT);
+}
+
+// Every win percentage lookup (a player at the opening, a simulation
+// horizon) asks for at most the whole bag plus the opponent's rack, i.e.
+// every tile but the player's own rack, so a table with fewer rows would
+// fail mid-game. Checked whenever a table is loaded or the letter
+// distribution changes, before anything reads the table.
+static void config_check_win_pct_coverage(const Config *config,
+                                          ErrorStack *error_stack) {
+  if (!config->win_pcts || !config->ld) {
+    return;
+  }
+  const int needed = ld_get_total_tiles(config->ld) - RACK_SIZE;
+  const int covered = (int)win_pct_get_max_tiles_unseen(config->win_pcts);
+  if (covered < needed) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL,
+        get_formatted_string(
+            "win percentage table '%s' covers %d unseen tiles, but letter "
+            "distribution '%s' needs %d (%d tiles, rack size %d)",
+            win_pct_get_name(config->win_pcts), covered,
+            ld_get_name(config->ld), needed, ld_get_total_tiles(config->ld),
+            RACK_SIZE));
+  }
+}
+
+// Loads (or reloads) the table config_win_pct_target_name names when it
+// differs from the loaded one, then checks its coverage.
+static void config_ensure_win_pcts(Config *config, ErrorStack *error_stack) {
+  char *target_name = config_win_pct_target_name(config);
+  if (config->win_pcts == NULL ||
+      !strings_equal(win_pct_get_name(config->win_pcts), target_name)) {
+    win_pct_destroy(config->win_pcts);
     config->win_pcts =
-        win_pct_create(config->data_paths, win_pct_name, error_stack);
+        win_pct_create(config->data_paths, target_name, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      free(target_name);
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
           string_duplicate(
@@ -2987,6 +3040,12 @@ void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
+  free(target_name);
+  config_check_win_pct_coverage(config, error_stack);
+}
+
+void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
+  config_ensure_win_pcts(config, error_stack);
 }
 
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
@@ -8210,20 +8269,33 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   // Update the game history
   update_game_history_with_config(config);
 
-  // Set win pct - load if explicitly specified and either not loaded yet
-  // or if name changed. Lazy loading happens in impl_sim when needed for
-  // simulations that don't specify a win_pct explicitly.
+  // Set win pct. An explicit -winpct is loaded and checked now. A default
+  // table stays lazy (loaded and checked by config_load_win_pcts on first
+  // use); one already loaded is dropped when a lexicon or distribution
+  // change makes it the wrong default or too small, so it is reloaded, and
+  // checked, only if something needs it.
   const char *new_win_pct_name =
       config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
-  if (new_win_pct_name != NULL &&
-      (config->win_pcts == NULL ||
-       !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name))) {
-    win_pct_destroy(config->win_pcts);
-    config->win_pcts =
-        win_pct_create(config->data_paths, new_win_pct_name, error_stack);
+  if (new_win_pct_name != NULL) {
+    free(config->win_pct_explicit_name);
+    config->win_pct_explicit_name = string_duplicate(new_win_pct_name);
+  }
+  if (config->win_pct_explicit_name != NULL) {
+    config_ensure_win_pcts(config, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+  } else if (config->win_pcts != NULL) {
+    char *target_name = config_win_pct_target_name(config);
+    ErrorStack *coverage_errors = error_stack_create();
+    config_check_win_pct_coverage(config, coverage_errors);
+    if (!strings_equal(win_pct_get_name(config->win_pcts), target_name) ||
+        !error_stack_is_empty(coverage_errors)) {
+      win_pct_destroy(config->win_pcts);
+      config->win_pcts = NULL;
+    }
+    error_stack_destroy(coverage_errors);
+    free(target_name);
   }
 }
 
@@ -9303,6 +9375,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   // win_pcts is loaded lazily on first use (simulation, etc.)
   config->win_pcts = NULL;
+  config->win_pct_explicit_name = NULL;
 
   // Command parsed from string input
 #define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
@@ -9623,6 +9696,7 @@ void config_destroy(Config *config) {
     parsed_arg_destroy(config->pargs[i]);
   }
   win_pct_destroy(config->win_pcts);
+  free(config->win_pct_explicit_name);
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);

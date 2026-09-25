@@ -142,6 +142,7 @@ static TestEntry test_table[] = {
     {"wmpmaker", test_wmp_maker},
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
+    {"winpctcoverage", test_win_pct_coverage},
     {"endgame", test_endgame},
     {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},
