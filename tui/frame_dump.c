@@ -4,6 +4,8 @@
 #include "theme.h"
 #include <notcurses/notcurses.h>
 #include <stdatomic.h>
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -229,6 +231,62 @@ static void blend_glyph(uint8_t *frame, int frame_w, int frame_h, int gx,
   }
 }
 
+// The pass render_plane_cells is drawing. Backgrounds all go down
+// before any glyph so a two-cell-wide glyph isn't painted over by its
+// continuation cell's background.
+typedef enum {
+  CELL_PASS_BACKGROUND,
+  CELL_PASS_GLYPHS,
+} CellPass;
+
+// Draws one cell's background or glyph at pixel (left, top). The 1x
+// board and rack draw tiles as fullwidth forms (U+FF01..FF5E), two cells
+// wide, and notcurses reports the same EGC for both cells: those are
+// drawn once, as the ASCII equivalent centered on both cells. Returns
+// true when the cell was wide, so the caller skips its continuation.
+static bool render_cell(uint8_t *frame, int frame_w, int frame_h,
+                        const char *egc, uint16_t style, uint64_t channels,
+                        int left, int top, unsigned celldimx, unsigned celldimy,
+                        int baseline_off, const Theme *theme,
+                        TuiGlyphCache *cache, CellPass pass) {
+  uint32_t codepoint = utf8_first_codepoint(egc);
+  const bool wide = codepoint >= 0xFF01 && codepoint <= 0xFF5E;
+  if (wide) {
+    codepoint -= 0xFEE0;
+  }
+  const int cells = wide ? 2 : 1;
+  if (pass == CELL_PASS_BACKGROUND) {
+    if (!ncchannels_bg_default_p(channels)) {
+      unsigned br = 0;
+      unsigned bgc = 0;
+      unsigned bb = 0;
+      ncchannels_bg_rgb8(channels, &br, &bgc, &bb);
+      fill_rect(frame, frame_w, frame_h, left, top, (int)celldimx * cells,
+                (int)celldimy, br, bgc, bb);
+    }
+    return wide;
+  }
+  if (codepoint == 0 || codepoint == ' ') {
+    return wide;
+  }
+  unsigned fr = theme->fg.r;
+  unsigned fg = theme->fg.g;
+  unsigned fb = theme->fg.b;
+  if (!ncchannels_fg_default_p(channels)) {
+    ncchannels_fg_rgb8(channels, &fr, &fg, &fb);
+  }
+  const TuiGlyph *glyph = (style & NCSTYLE_BOLD)
+                              ? tui_glyph_cache_get_bold(cache, codepoint)
+                              : tui_glyph_cache_get(cache, codepoint);
+  if (glyph != NULL) {
+    const int shift = wide ? (int)celldimx / 2 : 0;
+    const int gx = left + shift + glyph->bearing_x;
+    const int gy = top + baseline_off - glyph->bearing_y;
+    blend_glyph(frame, frame_w, frame_h, gx, gy, glyph, fr, fg, fb);
+  }
+  return wide;
+}
+
 // Rasterize one plane's cell-text content into the frame. `cache` is sized
 // to the cell. `baseline_off` is the pixel offset from a cell's top to the
 // glyph baseline.
@@ -242,44 +300,27 @@ static void render_plane_cells(uint8_t *frame, int frame_w, int frame_h,
   int abs_y = 0;
   int abs_x = 0;
   ncplane_abs_yx(plane, &abs_y, &abs_x);
-  for (unsigned cy = 0; cy < rows; cy++) {
-    for (unsigned cx = 0; cx < cols; cx++) {
-      uint16_t style = 0;
-      uint64_t channels = 0;
-      char *egc = ncplane_at_yx(plane, (int)cy, (int)cx, &style, &channels);
-      if (egc == NULL) {
-        continue;
-      }
-      const int left = (abs_x + (int)cx) * (int)celldimx;
-      const int top = (abs_y + (int)cy) * (int)celldimy;
-
-      if (!ncchannels_bg_default_p(channels)) {
-        unsigned br = 0;
-        unsigned bgc = 0;
-        unsigned bb = 0;
-        ncchannels_bg_rgb8(channels, &br, &bgc, &bb);
-        fill_rect(frame, frame_w, frame_h, left, top, (int)celldimx,
-                  (int)celldimy, br, bgc, bb);
-      }
-
-      const uint32_t codepoint = utf8_first_codepoint(egc);
-      if (codepoint != 0 && codepoint != ' ') {
-        unsigned fr = theme->fg.r;
-        unsigned fg = theme->fg.g;
-        unsigned fb = theme->fg.b;
-        if (!ncchannels_fg_default_p(channels)) {
-          ncchannels_fg_rgb8(channels, &fr, &fg, &fb);
+  const CellPass passes[] = {CELL_PASS_BACKGROUND, CELL_PASS_GLYPHS};
+  for (size_t pass_idx = 0; pass_idx < sizeof(passes) / sizeof(passes[0]);
+       pass_idx++) {
+    for (unsigned cy = 0; cy < rows; cy++) {
+      for (unsigned cx = 0; cx < cols; cx++) {
+        uint16_t style = 0;
+        uint64_t channels = 0;
+        char *egc = ncplane_at_yx(plane, (int)cy, (int)cx, &style, &channels);
+        if (egc == NULL) {
+          continue;
         }
-        const TuiGlyph *glyph = (style & NCSTYLE_BOLD)
-                                    ? tui_glyph_cache_get_bold(cache, codepoint)
-                                    : tui_glyph_cache_get(cache, codepoint);
-        if (glyph != NULL) {
-          const int gx = left + glyph->bearing_x;
-          const int gy = top + baseline_off - glyph->bearing_y;
-          blend_glyph(frame, frame_w, frame_h, gx, gy, glyph, fr, fg, fb);
+        const bool wide =
+            render_cell(frame, frame_w, frame_h, egc, style, channels,
+                        (abs_x + (int)cx) * (int)celldimx,
+                        (abs_y + (int)cy) * (int)celldimy, celldimx, celldimy,
+                        baseline_off, theme, cache, passes[pass_idx]);
+        free(egc);
+        if (wide) {
+          cx++;
         }
       }
-      free(egc);
     }
   }
 }
