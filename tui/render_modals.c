@@ -522,7 +522,7 @@ void tui_game_render_watch_setup(struct ncplane *plane, const Theme *theme,
   (void)snprintf(cands_str, sizeof(cands_str), "%d", sim_candidates);
   format_setup_row(buf[TUI_WATCH_SETUP_SIM_CANDIDATES], ROW_BUF, CONTENT_W,
                    "Sim candidates", cands_str, focus_cands);
-  (void)snprintf(buf[TUI_WATCH_SETUP_START], ROW_BUF, "Start game");
+  (void)snprintf(buf[TUI_WATCH_SETUP_START], ROW_BUF, "Start");
   for (int i = 0; i < TUI_WATCH_SETUP_ITEM_COUNT; i++) {
     items[i] = buf[i];
   }
@@ -1072,7 +1072,7 @@ void tui_game_render_play_setup(
   if (focus_comp) {
     cursor_cols[TUI_PLAY_SETUP_COMPUTER_NAME] = NAME_ZONE_START + name_edit_pos;
   }
-  render_modal_ex(plane, theme, "Play vs computer", items, /*shortcuts=*/NULL,
+  render_modal_ex(plane, theme, "Play setup", items, /*shortcuts=*/NULL,
                   disabled, cursor_cols, zone_starts, zone_widths,
                   TUI_PLAY_SETUP_ITEM_COUNT, focus, MODAL_WIDTH);
 }
