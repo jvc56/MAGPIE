@@ -1282,6 +1282,61 @@ static void test_a_set_aside_job_is_left_out_of_claims_for_a_while(void) {
   (void)remove(path);
 }
 
+// The wait-or-exit decision on a shutdown, against birdtest's own shutdown
+// fixtures: a data shutdown answering a claim that named a set-aside job is
+// waited out; a version shutdown never is; and nothing is waited out for a
+// claim that named none. A reason renamed on either side fails here rather
+// than sending every worker away with the wrong advice.
+static void test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job(void) {
+  const struct {
+    const char *path;
+    bool waits;
+  } cases[] = {
+      {"test/birdtest_contract/shutdown-data-out-of-date.json", true},
+      {"test/birdtest_contract/shutdown-both.json", true},
+      {"test/birdtest_contract/shutdown-magpie-too-old.json", false},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    JsonValue *fixture = load_fixture(cases[i].path);
+    const JsonValue *shutdown = json_object_get(fixture, "shutdown");
+    assert(shutdown);
+    assert(contribute_shutdown_waits_for_deferral(shutdown, true) ==
+           cases[i].waits);
+    assert(!contribute_shutdown_waits_for_deferral(shutdown, false));
+    json_destroy(fixture);
+  }
+}
+
+// The claim body has the shape of birdtest's claim-request fixture: the same
+// keys, a version string and a list of ids.
+static void test_the_claim_body_matches_the_claim_fixture(void) {
+  const char *path = "contribute_test_claim_settings.txt";
+  write_settings_file(path, "server https://birdtest.example\n");
+  ErrorStack *error_stack = error_stack_create();
+  ThreadControl *thread_control = thread_control_create();
+  ContributeState *state =
+      contribute_state_create(path, thread_control, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  (void)contribute_defer_job(state, "4c7b64ad-8e5e-4db7-aeb0-afc44ee1ebf5");
+  char *body = contribute_claim_body(state, "1.4.0");
+  JsonValue *ours = json_parse(body, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  JsonValue *fixture =
+      load_fixture("test/birdtest_contract/claim-request.json");
+  const JsonValue *jobs = json_object_get(ours, "unsupported_jobs");
+  assert(json_array_length(jobs) ==
+         json_array_length(json_object_get(fixture, "unsupported_jobs")));
+  assert_strings_equal(json_get_string_or_null(ours, "magpie_version"),
+                       json_get_string_or_null(fixture, "magpie_version"));
+  json_destroy(fixture);
+  json_destroy(ours);
+  free(body);
+  contribute_state_destroy(state);
+  thread_control_destroy(thread_control);
+  error_stack_destroy(error_stack);
+  (void)remove(path);
+}
+
 void test_contribute(void) {
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();
@@ -1303,4 +1358,6 @@ void test_contribute(void) {
   test_an_abandoned_temporary_is_removed();
   test_a_runs_state_starts_clean();
   test_a_set_aside_job_is_left_out_of_claims_for_a_while();
+  test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job();
+  test_the_claim_body_matches_the_claim_fixture();
 }

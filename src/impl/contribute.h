@@ -220,6 +220,12 @@ void contribute_state_destroy(ContributeState *state);
 char *contribute_claim_body(ContributeState *state,
                             const char *this_magpie_version);
 
+// Whether a shutdown is waited out rather than obeyed: a data shutdown
+// (`data_out_of_date`, `both`) answering a claim that named a set-aside job.
+// A version shutdown is always obeyed. Exposed for tests.
+bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
+                                            bool claim_named_deferred);
+
 // Sets a job aside, for twice as long as last time (from the idle interval to
 // CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS); returns the interval. Exposed
 // for tests.

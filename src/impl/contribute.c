@@ -578,10 +578,22 @@ static DeferredJob *find_deferral(ContributeState *state, const char *job_id) {
 
 // Sets `job_id` aside, for twice as long as last time (from the idle interval
 // up to CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS). Returns the interval.
+bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
+                                            bool claim_named_deferred) {
+  // Only a shutdown about data: one about this build's version
+  // (`magpie_too_old`) has nothing to do with the jobs set aside, and is
+  // obeyed at once.
+  const char *reason = json_get_string_or_null(shutdown, "reason");
+  return claim_named_deferred && reason &&
+         (strings_equal(reason, "data_out_of_date") ||
+          strings_equal(reason, "both"));
+}
+
 int contribute_defer_job(ContributeState *state, const char *job_id) {
   const int idle_wait = state->client_state->idle_wait_seconds;
   if (!job_id) {
-    // A claim without a job id cannot be set aside by id; wait instead.
+    // A claim without a job id cannot be set aside by id: the caller waits
+    // the interval instead (birdtest always sends one).
     return idle_wait > 0 ? idle_wait : 1;
   }
   DeferredJob *deferred = find_deferral(state, job_id);
@@ -935,23 +947,18 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
   // (a server KLV that was missing or wrong): the server cannot tell those
   // from jobs this worker cannot run at all. Wait for the first to come back
   // rather than end the run over a condition an admin is expected to fix.
-  // Only a shutdown about data: one about this build's version
-  // (`magpie_too_old`) has nothing to do with the jobs set aside, and is
-  // obeyed at once.
-  const char *shutdown_reason =
-      shutdown ? json_get_string_or_null(shutdown, "reason") : NULL;
-  const bool about_data =
-      shutdown_reason && (strings_equal(shutdown_reason, "data_out_of_date") ||
-                          strings_equal(shutdown_reason, "both"));
-  if (shutdown && about_data && state->claim_named_deferred) {
+  if (shutdown && contribute_shutdown_waits_for_deferral(
+                      shutdown, state->claim_named_deferred)) {
     json_destroy(state->assignment);
     state->assignment = NULL;
     const int deferral_left = seconds_until_a_deferral_ends(state);
-    thread_control_print_formatted(
-        thread_control,
-        "nothing to do but jobs set aside; asking again in %d seconds\n",
-        deferral_left);
-    nap_unless_interrupted(thread_control, deferral_left);
+    if (deferral_left > 0) {
+      thread_control_print_formatted(
+          thread_control,
+          "nothing to do but jobs set aside; asking again in %d seconds\n",
+          deferral_left);
+      nap_unless_interrupted(thread_control, deferral_left);
+    }
     return CONTRIBUTE_CLAIM_NO_WORK;
   }
   if (shutdown) {
@@ -1052,13 +1059,14 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   }
   char *missing_json = string_builder_dump_and_destroy(sb, NULL);
   const bool server_artifact = state->server_artifact_mismatch;
+  int wait_seconds = 0;
   if (server_artifact) {
-    const int wait_seconds = contribute_defer_job(state, state->claimed_job_id);
+    wait_seconds = contribute_defer_job(state, state->claimed_job_id);
     thread_control_print_formatted(
         thread_control,
         "declining this task: the server's leave file is missing or does not "
-        "match the hash it recorded for it; setting the job aside for %d "
-        "seconds\n",
+        "match the hash it recorded for it; %s %d seconds\n",
+        state->claimed_job_id ? "setting the job aside for" : "waiting",
         wait_seconds);
   } else {
     thread_control_print_formatted(
@@ -1079,10 +1087,15 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   // with the server's "every active job needs input data you do not have"
   // sending the contributor to the wrong fix; and napping the whole worker,
   // as it next did, idled it for every other job too.
+  const bool unnamed = state->claimed_job_id == NULL;
   if (!server_artifact) {
     remember_unsupported(state, state->claimed_job_id);
   }
   release_claim(state);
+  if (server_artifact && unnamed) {
+    // Nothing to set aside by id; wait instead, or the same task comes back.
+    nap_unless_interrupted(thread_control, wait_seconds);
+  }
 }
 
 typedef enum {
