@@ -37,12 +37,15 @@ C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809
 
 # The TUI also needs the notcurses and FreeType headers. Their umbrella
 # headers (notcurses/notcurses.h, FT_FREETYPE_H) are the supported entry
-# points, so include-cleaner ignores those libraries' internal headers.
+# points, so include-cleaner ignores those libraries' internal headers,
+# along with glibc's and the kernel's internal ones (bits/, asm/), which
+# it can't always attribute to the public header (CLOCK_MONOTONIC and
+# <time.h>, for one).
 # Without the headers tui/ is skipped, unless MAGPIE_TIDY_REQUIRE_TUI is
 # set (as in CI), which makes that an error.
 TUI_DIRECTORY="tui/"
 TUI_COMPILER_FLAGS=""
-TUI_TIDY_CONFIG="{CheckOptions: {misc-include-cleaner.IgnoreHeaders: 'notcurses/.*;freetype/.*;ft2build.h;zconf.h;zlib.h'}}"
+TUI_TIDY_CONFIG="{CheckOptions: {misc-include-cleaner.IgnoreHeaders: 'notcurses/.*;freetype/.*;ft2build.h;zconf.h;zlib.h;bits/.*;asm/.*;asm-generic/.*'}}"
 if [ -d "$TUI_DIRECTORY" ]; then
     if pkg-config --exists notcurses-core freetype2 2>/dev/null; then
         TUI_COMPILER_FLAGS="$C_COMPILER_FLAGS $(pkg-config --cflags notcurses-core freetype2)"
@@ -91,17 +94,17 @@ find $SEARCH_DIRECTORIES -name "*.c" -print0 | grep -zv "$EXCLUDE_PATTERN" | \
         OUTPUT_FILE="$RESULT_DIR/$SAFE_NAME"
         echo "Analyzing: $C_FILE"
         FILE_FLAGS="$C_COMPILER_FLAGS"
-        FILE_CONFIG="{}"
+        set --
         case "$C_FILE" in
             "$TUI_DIRECTORY"*)
                 FILE_FLAGS="$TUI_COMPILER_FLAGS"
-                FILE_CONFIG="$TUI_TIDY_CONFIG"
+                set -- --config="$TUI_TIDY_CONFIG"
                 ;;
         esac
         $CLANG_TIDY_EXEC "$C_FILE" \
             --header-filter="$CLANG_TIDY_EXCLUDE_HEADER_FILTER" \
             -checks="$CLANG_TIDY_CHECKS" \
-            --config="$FILE_CONFIG" \
+            "$@" \
             -- $FILE_FLAGS > "$OUTPUT_FILE" 2>&1
         TIDY_EXIT=$?
         if [ $TIDY_EXIT -ne 0 ]; then
