@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "game_state.h"
+#include "list_nav.h"
 #include "render_hit_test.h"
 #include "render_modals.h"
 #include "tui_ui_state.h"
@@ -87,22 +88,6 @@ static void settings_adjust(TuiGameState *state, const TuiUiState *ui,
   }
 }
 
-// Moves Settings focus one row in `dir`, skipping dimmed rows; stays put
-// at either end.
-static void settings_move_focus(const TuiGameState *state, TuiUiState *ui,
-                                const TuiSession *session, int dir) {
-  bool enabled[TUI_SETTINGS_ITEM_COUNT];
-  tui_settings_enabled_rows(state->board_scale, session->pixel_supported,
-                            session->font_available, enabled);
-  for (int idx = ui->settings_focus + dir;
-       idx >= 0 && idx < TUI_SETTINGS_ITEM_COUNT; idx += dir) {
-    if (enabled[idx]) {
-      ui->settings_focus = idx;
-      return;
-    }
-  }
-}
-
 // Settings modal keys.
 // Returns true when the key was consumed.
 bool tui_input_settings(TuiGameState *state, TuiUiState *ui,
@@ -134,14 +119,15 @@ bool tui_input_settings(TuiGameState *state, TuiUiState *ui,
   bool enabled[TUI_SETTINGS_ITEM_COUNT];
   tui_settings_enabled_rows(state->board_scale, session->pixel_supported,
                             session->font_available, enabled);
-  if (key == NCKEY_ESC) {
+  const int nav =
+      tui_list_nav(key, &input, ui->settings_focus, TUI_SETTINGS_ITEM_COUNT,
+                   enabled, TUI_LIST_NAV_HOME_END | TUI_LIST_NAV_VI);
+  if (nav >= 0) {
+    ui->settings_focus = nav;
+  } else if (key == NCKEY_ESC) {
     // Esc returns to whichever modal opened Settings: the main menu, or
     // no modal when opened from the command bar.
     ui->modal = ui->settings_return;
-  } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-    settings_move_focus(state, ui, session, -1);
-  } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-    settings_move_focus(state, ui, session, 1);
   } else if (key == NCKEY_LEFT || key == 'h' || key == 'H' ||
              key == NCKEY_RIGHT || key == 'l' || key == 'L') {
     if (enabled[ui->settings_focus]) {
