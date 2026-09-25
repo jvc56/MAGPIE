@@ -8,6 +8,7 @@
 #include "render_common.h"
 #include "render_layout.h"
 #include "theme.h"
+#include "tui_history_edit.h"
 #include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
 #include <stdatomic.h>
@@ -641,6 +642,16 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
     hint = " Enter load \xc2\xb7 Esc cancel ";
     break;
   case TUI_MODAL_NONE:
+    // History focused and browsing (not editing): the arrows walk the
+    // turns and Enter opens the selected one, when it can be edited.
+    if (!state->slash_active && state->focused_panel == TUI_FOCUS_HISTORY &&
+        state->edit_history_idx < 0) {
+      hint = tui_history_entry_editable(state, state->history_cursor)
+                 ? " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter edit "
+                   "\xc2\xb7 Esc menu "
+                 : " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Esc menu ";
+    }
+    break;
   default:
     break;
   }
