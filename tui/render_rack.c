@@ -17,6 +17,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+// ── Rack panel ────────────────────────────────────────────────────────────
+//
+// Rack tiles scale alongside the board: at scale=2 we composite an RGBA
+// strip via FreeType (same path as the board); at scale=1 we use
+// fullwidth Unicode glyphs in cells; at scale=0 we collapse to single
+// ASCII chars. The panel box gains one row at scale=2 so the 2-row
+// tiles fit.
+
 // Per-tile state for the rack panel. Same idea as the board tile
 // cache: one small pixel plane per rack slot, re-blit only when
 // the letter at that slot changes. RACK_SIZE = 7 in standard
