@@ -815,7 +815,7 @@ static void render_analysis_row(struct ncplane *plane, const Theme *theme,
 // view_h list rows: a thumb sized view_h/total_rows with 1/8-row edges,
 // and publishes its geometry for the input handlers' hit tests.
 static void render_analysis_scrollbar(struct ncplane *plane, const Theme *theme,
-                                      const TuiGameState *state,
+                                      TuiGameState *state,
                                       const AnalysisColumns *columns,
                                       int total_rows, int list_top, int view_h,
                                       int scroll_offset) {
@@ -921,12 +921,11 @@ static void render_analysis_scrollbar(struct ncplane *plane, const Theme *theme,
   }
   // Publish geometry so main.c's input handlers can hit-test
   // mouse clicks against the scrollbar.
-  TuiGameState *mut = (TuiGameState *)state;
-  atomic_store(&mut->analysis_scrollbar_top, track_top);
-  atomic_store(&mut->analysis_scrollbar_bottom, track_bottom);
-  atomic_store(&mut->analysis_scrollbar_col, scrollbar_col);
-  atomic_store(&mut->analysis_scrollbar_total, total_rows);
-  atomic_store(&mut->analysis_scrollbar_view, view_h);
+  atomic_store(&state->analysis_scrollbar_top, track_top);
+  atomic_store(&state->analysis_scrollbar_bottom, track_bottom);
+  atomic_store(&state->analysis_scrollbar_col, scrollbar_col);
+  atomic_store(&state->analysis_scrollbar_total, total_rows);
+  atomic_store(&state->analysis_scrollbar_view, view_h);
 }
 
 // Render the ranked candidates given a pre-populated row array.
@@ -935,7 +934,7 @@ static void render_analysis_scrollbar(struct ncplane *plane, const Theme *theme,
 // the primary string renders in bold (true for win%, false for W/T/L
 // which already pop visually).
 static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
-                                 const TuiGameState *state, const Layout *L,
+                                 TuiGameState *state, const Layout *L,
                                  AnalysisRow *rows, int visible, int primary_w,
                                  int secondary_w, int primary_secondary_gap,
                                  bool primary_bold, int title_end_col) {
@@ -1187,7 +1186,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     scroll_offset = 0;
   }
   if (state != NULL) {
-    ((TuiGameState *)state)->analysis_scroll_offset = scroll_offset;
+    state->analysis_scroll_offset = scroll_offset;
   }
   // Docking: only when the cursor is in MOVE column AND the
   // anchored move's rank sits outside the currently-scrolled
@@ -1245,8 +1244,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     row++;
   }
   if (state != NULL) {
-    atomic_store(&((TuiGameState *)state)->analysis_visible_rows,
-                 hit->analysis_row_map_count);
+    atomic_store(&state->analysis_visible_rows, hit->analysis_row_map_count);
   }
 
   // Scrollbar — right edge of the panel interior. Renders a track
@@ -1260,13 +1258,12 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   } else if (state != NULL) {
     // Hidden scrollbar — publish zero so input handlers know not
     // to try to hit-test against stale geometry.
-    TuiGameState *mut = (TuiGameState *)state;
-    atomic_store(&mut->analysis_scrollbar_total, 0);
-    atomic_store(&mut->analysis_scrollbar_view, 0);
+    atomic_store(&state->analysis_scrollbar_total, 0);
+    atomic_store(&state->analysis_scrollbar_view, 0);
   }
 }
 void render_analysis_panel(struct ncplane *plane, const Theme *theme,
-                           const TuiGameState *state, const Layout *L) {
+                           TuiGameState *state, const Layout *L) {
   if (!L->has_analysis) {
     return;
   }
@@ -1306,11 +1303,10 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
                                : (bag_empty && state->endgame_snapshot.valid &&
                                   state->endgame_snapshot.num_entries > 0);
   const bool use_peg =
-      snap != NULL
-          ? snap->is_peg
-          : (!use_endgame && tui_position_in_peg_range(src_game) &&
-             state->peg_poll != NULL &&
-             atomic_load(&((TuiGameState *)state)->peg_results_turn_idx) >= 0);
+      snap != NULL ? snap->is_peg
+                   : (!use_endgame && tui_position_in_peg_range(src_game) &&
+                      state->peg_poll != NULL &&
+                      atomic_load(&state->peg_results_turn_idx) >= 0);
 
   // Title varies by mode.
   char title[64];
@@ -1328,8 +1324,7 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       }
     } else {
       const TuiPegLiveMeta *meta = &state->peg_live_meta;
-      const bool searching =
-          atomic_load(&((TuiGameState *)state)->peg_results_active);
+      const bool searching = atomic_load(&state->peg_results_active);
       if (meta->valid && searching && meta->field_size > 0) {
         // Fidelity 0 is the greedy seed stage — label it instead of
         // showing a meaningless "0p".
@@ -1357,7 +1352,7 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       nodes = snap->endgame_nodes;
     } else {
       const int snap_depth = state->endgame_snapshot.depth;
-      searching = atomic_load(&((TuiGameState *)state)->endgame_results_active);
+      searching = atomic_load(&state->endgame_results_active);
       // Compact "Endgame (d7/123K)" — depth on the left, total nodes
       // searched on the right (humanized the same way Sim humanizes
       // sample counts). During an active search, prefer the live
@@ -1402,8 +1397,7 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       snprintf(title, sizeof(title), "Sim");
     }
   } else if (state->sim_results != NULL) {
-    const int sim_turn_idx_title =
-        atomic_load(&((TuiGameState *)state)->sim_results_turn_idx);
+    const int sim_turn_idx_title = atomic_load(&state->sim_results_turn_idx);
     const int plies = sim_results_get_num_plies(state->sim_results);
     const uint64_t iters = sim_results_get_iteration_count(state->sim_results);
     if (sim_turn_idx_title >= 0 && plies > 0 && iters > 0) {
@@ -1436,8 +1430,7 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   // (annotation start, game load, etc.) flip it to -1, after
   // which we should treat the panel as empty even if the
   // ply/iteration counters are still non-zero from a prior run.
-  const int sim_turn_idx =
-      atomic_load(&((TuiGameState *)state)->sim_results_turn_idx);
+  const int sim_turn_idx = atomic_load(&state->sim_results_turn_idx);
   const bool sim_has_data =
       sim_turn_idx >= 0 && state->sim_results != NULL &&
       sim_results_get_num_plies(state->sim_results) > 0 &&

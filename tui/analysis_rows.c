@@ -323,8 +323,7 @@ static int fill_analysis_rows_from_peg(const TuiGameState *state,
 // re-sort). Picks source the same way render_analysis_panel
 // does: saved snapshot when the History cursor sits on a
 // committed entry, otherwise live sim or endgame results.
-void populate_frame_analysis_rows(const TuiGameState *cstate) {
-  TuiGameState *state = (TuiGameState *)cstate;
+void populate_frame_analysis_rows(TuiGameState *state) {
   if (state == NULL) {
     return;
   }
@@ -453,10 +452,9 @@ void tui_capture_analysis_snapshot(const TuiGameState *state,
       src_game != NULL && bag_get_letters(game_get_bag(src_game)) == 0;
   const bool use_endgame = bag_empty && state->endgame_snapshot.valid &&
                            state->endgame_snapshot.num_entries > 0;
-  const bool use_peg =
-      !use_endgame && tui_position_in_peg_range(src_game) &&
-      state->peg_poll != NULL &&
-      atomic_load(&((TuiGameState *)state)->peg_results_turn_idx) >= 0;
+  const bool use_peg = !use_endgame && tui_position_in_peg_range(src_game) &&
+                       state->peg_poll != NULL &&
+                       atomic_load(&state->peg_results_turn_idx) >= 0;
   if (use_endgame) {
     out->is_sim = false;
     out->num_rows =

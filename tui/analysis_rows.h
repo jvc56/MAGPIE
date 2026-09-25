@@ -6,7 +6,7 @@
 #include <stdbool.h>
 
 const Game *analysis_source_game(const TuiGameState *state);
-void populate_frame_analysis_rows(const TuiGameState *cstate);
+void populate_frame_analysis_rows(TuiGameState *state);
 bool resume_active_for_cursor(const TuiGameState *state);
 // Populate a snapshot of the Analysis-panel contents for the
 // currently-active sim or endgame solve. Called by the bot worker

@@ -8,6 +8,6 @@
 #include <stdbool.h>
 
 void render_analysis_panel(struct ncplane *plane, const Theme *theme,
-                           const TuiGameState *state, const Layout *L);
+                           TuiGameState *state, const Layout *L);
 
 #endif

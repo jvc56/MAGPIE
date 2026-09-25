@@ -110,7 +110,7 @@ static void invalidate_grid_planes(void) {
 void tui_game_render_reset_grids(void) { invalidate_grid_planes(); }
 
 void tui_game_render(struct ncplane *plane, const Theme *theme,
-                     const TuiGameState *state, int time_per_side_seconds,
+                     TuiGameState *state, int time_per_side_seconds,
                      TuiModalState modal) {
   TuiGridPlanes *planes = tui_grid_planes();
   TuiHitMaps *hit = tui_hit_maps();

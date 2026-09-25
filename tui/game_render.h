@@ -11,9 +11,11 @@
 struct Game;
 struct LetterDistribution;
 
-// Draws the full game frame, with `modal` (if any) on top.
+// Draws the full game frame, with `modal` (if any) on top. Also records
+// this frame's analysis rows, scroll offset, and scrollbar geometry in
+// `state` for the input handlers, so the caller must hold state->mutex.
 void tui_game_render(struct ncplane *plane, const Theme *theme,
-                     const TuiGameState *state, int time_per_side_seconds,
+                     TuiGameState *state, int time_per_side_seconds,
                      TuiModalState modal);
 
 // Destroy any cached pixel-grid child planes (board, rack, both pills,
