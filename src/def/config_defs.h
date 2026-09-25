@@ -13,7 +13,11 @@ enum {
 #define DEFAULT_GAME_VARIANT GAME_VARIANT_CLASSIC
 #define EMPTY_RACK_STRING "-"
 #define DEFAULT_DATA_PATHS "./data"
-#define DEFAULT_WIN_PCT "winpct"
+// Without -winpct, the win percentage table is DEFAULT_WIN_PCT_PREFIX
+// followed by the letter distribution's name (e.g. winpct_french).
+#define DEFAULT_WIN_PCT_PREFIX "winpct_"
+// Given to -winpct, returns to that per-distribution default.
+#define DEFAULT_WIN_PCT_ARG "default"
 #define COMMAND_FINISHED_KEYWORD "finished"
 #define COMMAND_RUNNING_KEYWORD "running"
 

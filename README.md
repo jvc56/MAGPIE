@@ -313,7 +313,18 @@ This directory contains the following file types:
 
 ### strategy
 
-This directory contains win percentage lookup tables used in Monte Carlo simulations.
+This directory contains win percentage tables used in Monte Carlo simulations, one per letter distribution, named `winpct_<letter_distribution>.csv` (for example `winpct_english.csv`, `winpct_french.csv`, `winpct_english_super.csv`). Simulations use the table for the current letter distribution unless the `winpct` setting names another; `set -winpct default` returns to the distribution's table. A table must cover the distribution's bag, so for example the English table cannot be used with a 102-tile French bag.
+
+Each table is keyed by the game state (the number of tiles in the bag and on each rack) and records, for every state, how the on-turn player's spread changed by the end of self-play games. That gives both the chance of winning from any spread and the expected final margin, which the `smargin` setting can use to project simulation results to the end of the game.
+
+To make a table, record self-play games with the `winpct` autoplay recorder, which writes `<lexicon>_winpct_record.csv` and adds to it on later runs, then smooth the record into a table with the `winpct` convert command:
+
+```
+magpie> autoplay winpct 1000000 -lex CSW24 -threads 8
+magpie> convert winpct CSW24_winpct_record winpct_english
+```
+
+The recorder splits games into two independent samples, and `convert winpct` chooses how much to smooth by predicting each sample from the other; it prints that comparison.
 
 ## Examples
 

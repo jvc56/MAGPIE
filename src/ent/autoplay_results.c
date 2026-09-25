@@ -1,6 +1,7 @@
 #include "autoplay_results.h"
 
 #include "../compat/cpthread.h"
+#include "../def/board_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
 #include "../def/klv_defs.h"
@@ -23,6 +24,7 @@
 #include "players_data.h"
 #include "rack.h"
 #include "stats.h"
+#include "win_pct_counts.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -797,74 +799,49 @@ void fj_data_consolidate(Recorder **recorders, int num_recorders,
 
 // Win percentage recorder functions
 enum {
-  WIN_PCT_MAX_SPREAD = 500,
-  // Use x2 the max spread to account for positive and negative spread
-  // Use +1 to account for the tie
-  WIN_PCT_NUM_COLUMNS = ((WIN_PCT_MAX_SPREAD * 2) + 1),
-  WIN_PCT_MAX_NUM_TURNS = 100,
+  // The widest future swing the win percentage recorder tracks. On 15x15 no
+  // swing from any position exceeded 500 in 10M self-play games; 21x21
+  // (super) games run about twice as long and swing up to 0.56% past 500
+  // but none past 1000 in 20K games, so their tables are wider.
+  WIN_PCT_MAX_SPREAD = BOARD_DIM >= 21 ? 1000 : 500,
+  WIN_PCT_MAX_NUM_TURNS = BOARD_DIM >= 21 ? 300 : 100,
 };
 
 typedef struct WinPctTurnSnapshot {
   int score_diff;
-  int num_tiles_remaining;
+  int cell;
   int player_index;
 } WinPctTurnSnapshot;
 
 typedef struct WinPctData {
-  int num_rows;
-  uint64_t *total_games;
-  // Wins are worth 2 and ties are worth 1 to avoid floating point arithmetic
-  uint64_t **wins;
+  WinPctCounts *counts;
   int turn_snapshot_index;
   WinPctTurnSnapshot turn_snapshots[WIN_PCT_MAX_NUM_TURNS];
 } WinPctData;
 
-void win_pct_data_reset_turn_snapshots(WinPctData *win_pct_data) {
-  win_pct_data->turn_snapshot_index = 0;
-}
-
-void win_pct_data_reset_total_and_wins(WinPctData *win_pct_data) {
-  memset(win_pct_data->total_games, 0,
-         sizeof(uint64_t) * win_pct_data->num_rows);
-  for (int i = 0; i < win_pct_data->num_rows; i++) {
-    memset(win_pct_data->wins[i], 0, sizeof(uint64_t) * WIN_PCT_NUM_COLUMNS);
-  }
-}
-
 void win_pct_data_reset(Recorder *recorder) {
   WinPctData *win_pct_data = (WinPctData *)recorder->data;
-  win_pct_data_reset_turn_snapshots(win_pct_data);
-  win_pct_data_reset_total_and_wins(win_pct_data);
+  win_pct_data->turn_snapshot_index = 0;
+  win_pct_counts_reset(win_pct_data->counts);
 }
 
 void win_pct_data_create(Recorder *recorder) {
   WinPctData *win_pct_data = malloc_or_die(sizeof(WinPctData));
   const int ld_total_tiles = ld_get_total_tiles(recorder->recorder_context->ld);
-  win_pct_data->num_rows = ld_total_tiles - RACK_SIZE;
-  if (win_pct_data->num_rows < 0) {
-    log_fatal("cannot record winning percentages when the rack size (%d) is "
-              "greater than the bag size (%d)",
-              RACK_SIZE, ld_total_tiles);
+  const int max_bag = ld_total_tiles - 2 * RACK_SIZE;
+  if (max_bag < 1) {
+    log_fatal("cannot record winning percentages when two racks (%d tiles) "
+              "use up the bag (%d tiles)",
+              2 * RACK_SIZE, ld_total_tiles);
   }
-  win_pct_data->total_games =
-      calloc_or_die(win_pct_data->num_rows, sizeof(uint64_t));
-  win_pct_data->wins =
-      malloc_or_die(win_pct_data->num_rows * sizeof(uint64_t *));
-  for (int i = 0; i < win_pct_data->num_rows; i++) {
-    win_pct_data->wins[i] =
-        calloc_or_die(WIN_PCT_NUM_COLUMNS, sizeof(uint64_t));
-  }
-  win_pct_data_reset_turn_snapshots(win_pct_data);
+  win_pct_data->counts = win_pct_counts_create(max_bag, WIN_PCT_MAX_SPREAD);
+  win_pct_data->turn_snapshot_index = 0;
   recorder->data = win_pct_data;
 }
 
 void win_pct_data_destroy(Recorder *recorder) {
   WinPctData *win_pct_data = (WinPctData *)recorder->data;
-  free(win_pct_data->total_games);
-  for (int i = 0; i < win_pct_data->num_rows; i++) {
-    free(win_pct_data->wins[i]);
-  }
-  free(win_pct_data->wins);
+  win_pct_counts_destroy(win_pct_data->counts);
   free(win_pct_data);
 }
 
@@ -879,20 +856,19 @@ void win_pct_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   const int player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, player_index);
   const Player *opponent = game_get_player(game, 1 - player_index);
-  const int spread =
-      equity_to_int(player_get_score(player) - player_get_score(opponent));
-  const int num_tiles_remaining =
-      bag_get_letters(game_get_bag(game)) +
-      rack_get_total_letters(player_get_rack(opponent));
-  if (num_tiles_remaining > win_pct_data->num_rows || num_tiles_remaining < 1) {
-    log_fatal(
-        "invalid number of tiles remaining in win percentage recorder: %d",
-        num_tiles_remaining);
+  const int bag_tiles = bag_get_letters(game_get_bag(game));
+  if (bag_tiles > win_pct_counts_get_max_bag(win_pct_data->counts)) {
+    log_fatal("invalid number of tiles in the bag in win percentage "
+              "recorder: %d",
+              bag_tiles);
   }
   WinPctTurnSnapshot *turn_snapshot =
       &win_pct_data->turn_snapshots[win_pct_data->turn_snapshot_index];
-  turn_snapshot->score_diff = spread;
-  turn_snapshot->num_tiles_remaining = num_tiles_remaining;
+  turn_snapshot->score_diff =
+      equity_to_int(player_get_score(player) - player_get_score(opponent));
+  turn_snapshot->cell = win_pct_get_cell_index(
+      bag_tiles, rack_get_total_letters(player_get_rack(player)),
+      rack_get_total_letters(player_get_rack(opponent)));
   turn_snapshot->player_index = player_index;
   win_pct_data->turn_snapshot_index++;
 }
@@ -900,52 +876,33 @@ void win_pct_data_add_move(Recorder *recorder, const RecorderArgs *args) {
 void win_pct_data_add_game(Recorder *recorder, const RecorderArgs *args) {
   WinPctData *win_pct_data = (WinPctData *)recorder->data;
   const Game *game = args->game;
-  const int end_turn_snapshot_index = win_pct_data->turn_snapshot_index;
   const int final_game_spread =
       equity_to_int(player_get_score(game_get_player(game, 0)) -
                     player_get_score(game_get_player(game, 1)));
-  for (int current_turn_snapshot_index = 0;
-       current_turn_snapshot_index < end_turn_snapshot_index;
-       current_turn_snapshot_index++) {
+  // Each game has its own random seed, so this splits games into independent
+  // samples.
+  const int sample = (int)(args->seed % WIN_PCT_NUM_SAMPLES);
+  for (int snapshot_idx = 0; snapshot_idx < win_pct_data->turn_snapshot_index;
+       snapshot_idx++) {
     const WinPctTurnSnapshot *turn_snapshot =
-        &win_pct_data->turn_snapshots[current_turn_snapshot_index];
-    const int score_diff = turn_snapshot->score_diff;
-    const int num_tiles_remaining = turn_snapshot->num_tiles_remaining;
-    const int player_index = turn_snapshot->player_index;
-    int player_on_turn_final_game_spread = final_game_spread;
-    // The final_game_spread is always from the perspective of player 0, but the
-    // snapshot score difference is from the perspective of the player on turn.
-    // So if the snapshot is from player 1, we need to negate the final game
-    // spread so that the final game spread is from the perspective of the
-    // player on turn.
-    if (player_index == 1) {
-      player_on_turn_final_game_spread = -final_game_spread;
-    }
-    const int final_score_diff = player_on_turn_final_game_spread - score_diff;
-    const int row_index = num_tiles_remaining - 1;
-    int start_col_index = WIN_PCT_MAX_SPREAD - final_score_diff;
-    if (start_col_index < 0) {
-      start_col_index = -1;
-    }
-    win_pct_data->total_games[row_index]++;
-    if (start_col_index >= 0 && start_col_index < WIN_PCT_NUM_COLUMNS) {
-      // Increment the wins value for the tie by 1 since ties are worth 1
-      win_pct_data->wins[row_index][start_col_index]++;
-    }
-    // All score differences greater than player_on_turn_final_game_spread
-    // would have resulted in a win for the player on turn, so increment all
-    // of these spreads by the win value of 2
-    for (int i = start_col_index + 1; i < WIN_PCT_NUM_COLUMNS; i++) {
-      win_pct_data->wins[row_index][i] += 2;
-    }
+        &win_pct_data->turn_snapshots[snapshot_idx];
+    // final_game_spread is from player 0's perspective and the snapshot's
+    // score difference from the on-turn player's.
+    const int on_turn_final_game_spread = turn_snapshot->player_index == 0
+                                              ? final_game_spread
+                                              : -final_game_spread;
+    win_pct_counts_add_swing(win_pct_data->counts, sample, turn_snapshot->cell,
+                             on_turn_final_game_spread -
+                                 turn_snapshot->score_diff);
   }
-  win_pct_data_reset_turn_snapshots(win_pct_data);
+  win_pct_data->turn_snapshot_index = 0;
 }
 
 void win_pct_data_consolidate(Recorder **recorder_list, int list_size,
                               Recorder *primary_recorder) {
   WinPctData *primary_win_pct_data = (WinPctData *)primary_recorder->data;
-  win_pct_data_reset_total_and_wins(primary_win_pct_data);
+  WinPctCounts *primary_counts = primary_win_pct_data->counts;
+  win_pct_counts_reset(primary_counts);
 
   char *win_pct_name = get_formatted_string(
       "%s_winpct_record", players_data_get_data_name(
@@ -966,88 +923,36 @@ void win_pct_data_consolidate(Recorder **recorder_list, int list_size,
   if (access(win_pct_filename, F_OK) == 0) {
     char *win_pct_file_string =
         get_string_from_file(win_pct_filename, error_stack);
+    WinPctCounts *existing_counts = NULL;
+    if (error_stack_is_empty(error_stack)) {
+      existing_counts = win_pct_counts_create_from_string(
+          win_pct_file_string, win_pct_filename, error_stack);
+    }
     if (!error_stack_is_empty(error_stack)) {
       error_stack_print_and_reset(error_stack);
       log_fatal("error reading win percentage file: %s", win_pct_filename);
     }
-    StringSplitter *win_pct_file_lines =
-        split_string_by_newline(win_pct_file_string, false);
-    const int num_win_pct_file_lines =
-        string_splitter_get_number_of_items(win_pct_file_lines);
-
-    if (num_win_pct_file_lines != primary_win_pct_data->num_rows) {
-      log_fatal(
-          "number of win percentage file lines (%d) does not match the number "
-          "of rows in the win percentage data (%d) in file '%s'",
-          num_win_pct_file_lines, primary_win_pct_data->num_rows,
-          win_pct_filename);
+    if (!win_pct_counts_have_same_shape(existing_counts, primary_counts)) {
+      log_fatal("win percentage file '%s' has maximum bag %d and maximum "
+                "spread %d, but this recorder uses %d and %d",
+                win_pct_filename, win_pct_counts_get_max_bag(existing_counts),
+                win_pct_counts_get_max_spread(existing_counts),
+                win_pct_counts_get_max_bag(primary_counts),
+                win_pct_counts_get_max_spread(primary_counts));
     }
-
-    for (int i = 0; i < num_win_pct_file_lines; i++) {
-      const char *win_pct_line =
-          string_splitter_get_item(win_pct_file_lines, i);
-      StringSplitter *win_pct_columns =
-          split_string_by_whitespace(win_pct_line, true);
-      const int num_win_pct_columns =
-          string_splitter_get_number_of_items(win_pct_columns);
-      if (num_win_pct_columns != WIN_PCT_NUM_COLUMNS + 1) {
-        log_fatal(
-            "number of win percentage file columns (%d) does not match the "
-            "required number of columns (%d) in file '%s'",
-            num_win_pct_columns, WIN_PCT_NUM_COLUMNS + 1, win_pct_filename);
-      }
-      const char *total_game_str = string_splitter_get_item(win_pct_columns, 0);
-      const uint64_t total_games =
-          string_to_uint64(total_game_str, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        log_fatal("failed to convert '%s' to an integer in win percentage "
-                  "file '%s'",
-                  total_game_str, win_pct_filename);
-      }
-      primary_win_pct_data->total_games[i] = total_games;
-      for (int j = 0; j < WIN_PCT_NUM_COLUMNS; j++) {
-        const char *total_win_str =
-            string_splitter_get_item(win_pct_columns, j + 1);
-        const uint64_t total_wins =
-            string_to_uint64(total_win_str, error_stack);
-        if (!error_stack_is_empty(error_stack)) {
-          log_fatal("failed to convert '%s' to an integer in win percentage "
-                    "file '%s'",
-                    total_win_str, win_pct_filename);
-        }
-        primary_win_pct_data->wins[i][j] = total_wins;
-      }
-      string_splitter_destroy(win_pct_columns);
-    }
-    string_splitter_destroy(win_pct_file_lines);
+    win_pct_counts_add(primary_counts, existing_counts);
+    win_pct_counts_destroy(existing_counts);
     free(win_pct_file_string);
   }
 
-  for (int i = 0; i < list_size; i++) {
-    WinPctData *win_pct_data = (WinPctData *)recorder_list[i]->data;
-    for (int j = 0; j < win_pct_data->num_rows; j++) {
-      primary_win_pct_data->total_games[j] += win_pct_data->total_games[j];
-      for (int k = 0; k < WIN_PCT_NUM_COLUMNS; k++) {
-        primary_win_pct_data->wins[j][k] += win_pct_data->wins[j][k];
-      }
-    }
+  for (int recorder_idx = 0; recorder_idx < list_size; recorder_idx++) {
+    const WinPctData *win_pct_data =
+        (WinPctData *)recorder_list[recorder_idx]->data;
+    win_pct_counts_add(primary_counts, win_pct_data->counts);
   }
 
-  StringBuilder *win_pct_sb = string_builder_create();
-  for (int i = 0; i < primary_win_pct_data->num_rows; i++) {
-    string_builder_add_formatted_string(win_pct_sb, "%lu ",
-                                        primary_win_pct_data->total_games[i]);
-    for (int j = 0; j < WIN_PCT_NUM_COLUMNS; j++) {
-      string_builder_add_formatted_string(win_pct_sb, "%lu ",
-                                          primary_win_pct_data->wins[i][j]);
-    }
-    if (i < primary_win_pct_data->num_rows - 1) {
-      string_builder_add_string(win_pct_sb, "\n");
-    }
-  }
-
-  write_string_to_file(win_pct_filename, "w", string_builder_peek(win_pct_sb),
-                       error_stack);
+  char *win_pct_string = win_pct_counts_get_string(primary_counts);
+  write_string_to_file(win_pct_filename, "w", win_pct_string, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -1055,7 +960,7 @@ void win_pct_data_consolidate(Recorder **recorder_list, int list_size,
   }
 
   error_stack_destroy(error_stack);
-  string_builder_destroy(win_pct_sb);
+  free(win_pct_string);
   free(win_pct_filename);
   free(win_pct_name);
 }

@@ -13,6 +13,7 @@
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack_info_table.h"
+#include "../ent/win_pct_counts.h"
 #include "../ent/wmp.h"
 #include "../ent/word_info_table.h"
 #include "../util/fileproxy.h"
@@ -20,6 +21,7 @@
 #include "../util/string_util.h"
 #include "kwg_maker.h"
 #include "rack_info_table_maker.h"
+#include "win_pct_smoother.h"
 #include "wmp_maker.h"
 #include "word_info_table_maker.h"
 #include "word_plus_floater_maker.h"
@@ -463,6 +465,55 @@ void convert_with_names(const LetterDistribution *ld,
   }
 }
 
+static void convert_win_pct(const char *data_paths, const char *input_name,
+                            const char *output_name,
+                            ConversionResults *conversion_results,
+                            ErrorStack *error_stack) {
+  if (output_name == NULL) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+        string_duplicate("the winpct conversion needs an output table name: "
+                         "convert winpct <recorded table> <output table>"));
+    return;
+  }
+  char *input_filename = data_filepaths_get_readable_filename(
+      data_paths, input_name, DATA_FILEPATH_TYPE_WIN_PCT, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(input_filename);
+    return;
+  }
+  char *contents = get_string_from_file(input_filename, error_stack);
+  WinPctCounts *counts = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    counts = win_pct_counts_create_from_string(contents, input_filename,
+                                               error_stack);
+  }
+  free(contents);
+  free(input_filename);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  StringBuilder *report = string_builder_create();
+  WinPctCounts *smoothed = win_pct_smooth(counts, report, error_stack);
+  win_pct_counts_destroy(counts);
+  char *output_filename = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    output_filename = data_filepaths_get_writable_filename(
+        data_paths, output_name, DATA_FILEPATH_TYPE_WIN_PCT, error_stack);
+  }
+  if (error_stack_is_empty(error_stack)) {
+    char *smoothed_string = win_pct_counts_get_string(smoothed);
+    write_string_to_file(output_filename, "w", smoothed_string, error_stack);
+    free(smoothed_string);
+    string_builder_add_formatted_string(report, "wrote %s\n", output_filename);
+  }
+  free(output_filename);
+  win_pct_counts_destroy(smoothed);
+  conversion_results_set_report(conversion_results,
+                                string_builder_dump(report, NULL));
+  string_builder_destroy(report);
+}
+
 conversion_type_t
 get_conversion_type_from_string(const char *conversion_type_string) {
   conversion_type_t conversion_type = CONVERT_UNKNOWN;
@@ -496,6 +547,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_KWG2WIT;
   } else if (strings_equal(conversion_type_string, "kwg2witifneeded")) {
     conversion_type = CONVERT_KWG2WIT_IF_NEEDED;
+  } else if (strings_equal(conversion_type_string, "winpct")) {
+    conversion_type = CONVERT_WINPCT;
   }
   return conversion_type;
 }
@@ -517,6 +570,14 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
   if (args->input_and_output_name == NULL) {
     error_stack_push(error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
                      get_formatted_string("input file name is missing"));
+    return;
+  }
+
+  if (conversion_type == CONVERT_WINPCT) {
+    // The third argument, a letter distribution for the other conversions,
+    // names the output table.
+    convert_win_pct(args->data_paths, args->input_and_output_name,
+                    args->ld_name, conversion_results, error_stack);
     return;
   }
 
