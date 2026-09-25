@@ -189,18 +189,15 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
   if (ui->modal == TUI_MODAL_MAIN_MENU) {
     tui_game_render_menu(std_plane, theme, ui->main_menu_focus);
   } else if (ui->modal == TUI_MODAL_SETTINGS) {
-    const char *current_lexicon = session->to_save.lexicon_set
-                                      ? session->to_save.lexicon
-                                      : session->chosen_lexicon;
     const bool current_load_rit = session->to_save.load_rit_set
                                       ? session->to_save.load_rit
                                       : session->initial_load_rit;
-    tui_game_render_settings(
-        std_plane, theme, ui->settings_focus, state->board_scale,
-        state->antialias, state->score_subscripts, state->border_thickness,
-        session->pixel_supported, session->font_available,
-        state->premium_labels, state->blank_uppercase, state->rack_sort,
-        current_lexicon, current_load_rit);
+    tui_game_render_settings(std_plane, theme, ui->settings_focus,
+                             state->board_scale, state->antialias,
+                             state->score_subscripts, state->border_thickness,
+                             session->pixel_supported, session->font_available,
+                             state->premium_labels, state->blank_uppercase,
+                             state->rack_sort, current_load_rit);
   } else if (ui->modal == TUI_MODAL_TIME_PICKER) {
     tui_game_render_time_picker(std_plane, theme, ui->time_focus);
   } else if (ui->modal == TUI_MODAL_LEXICON_PICKER &&

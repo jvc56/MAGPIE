@@ -88,13 +88,18 @@ void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
 // TTF loaded. `premium_labels` selects the TW/tw/none labeling style
 // for premium squares. `blank_uppercase` controls whether played blanks
 // render uppercase (with blank_tile_fg) or lowercase (with tile_fg).
-void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
-                              int focus, int board_scale, bool antialias,
-                              TuiScoreSubscripts score_subscripts,
-                              int border_thickness, bool pixel_supported,
-                              bool font_available,
-                              TuiPremiumLabels premium_labels,
-                              bool blank_uppercase, TuiRackSort rack_sort,
-                              const char *lexicon, bool load_rit);
+void tui_game_render_settings(
+    struct ncplane *plane, const Theme *theme, int focus, int board_scale,
+    bool antialias, TuiScoreSubscripts score_subscripts, int border_thickness,
+    bool pixel_supported, bool font_available, TuiPremiumLabels premium_labels,
+    bool blank_uppercase, TuiRackSort rack_sort, bool load_rit);
+
+// Which Settings rows are adjustable: Scale needs pixel graphics and
+// the bundled font, and Antialias / Subscript / Border apply only while
+// the board renders at 2x. Disabled rows render dimmed and are skipped
+// by cursor navigation / clicks, as in the setup dialogs.
+void tui_settings_enabled_rows(int board_scale, bool pixel_supported,
+                               bool font_available,
+                               bool out_enabled[TUI_SETTINGS_ITEM_COUNT]);
 
 #endif
