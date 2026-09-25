@@ -1243,6 +1243,26 @@ static void test_a_runs_state_starts_clean(void) {
   (void)remove(path);
 }
 
+// contribute.txt's thread count is capped where a task can still get a move
+// generator on every thread it runs: at N threads a simulated game per thread
+// simulates on N more, and past move generation's pool magpie exits on the
+// task. 512, the CLI's cap, was not enough.
+static void test_a_runs_threads_are_capped(void) {
+  assert(2 * CONTRIBUTE_MAX_THREADS + 1 <= MAX_THREADS);
+  const char *path = "contribute_test_threads_settings.txt";
+  write_settings_file(path, "server https://birdtest.example\nthreads 5000\n");
+  ErrorStack *error_stack = error_stack_create();
+  ThreadControl *thread_control = thread_control_create();
+  ContributeState *state =
+      contribute_state_create(path, thread_control, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(contribute_get_threads(state) == CONTRIBUTE_MAX_THREADS);
+  contribute_state_destroy(state);
+  thread_control_destroy(thread_control);
+  error_stack_destroy(error_stack);
+  (void)remove(path);
+}
+
 // A job whose server KLV is missing or wrong is set aside for a doubling
 // interval, named in the claim's unsupported list meanwhile (after the jobs
 // set aside for good), and the claim says it named one -- which is what lets
@@ -1437,6 +1457,7 @@ void test_contribute(void) {
   test_a_rewritten_klv_is_read_again();
   test_an_abandoned_temporary_is_removed();
   test_a_runs_state_starts_clean();
+  test_a_runs_threads_are_capped();
   test_a_set_aside_job_is_left_out_of_claims_for_a_while();
   test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job();
   test_the_claim_body_matches_the_claim_fixture();

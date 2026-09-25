@@ -1,6 +1,8 @@
 #ifndef CONTRIBUTE_DEFS_H
 #define CONTRIBUTE_DEFS_H
 
+#include "thread_control_defs.h"
+
 // JSON key names for what MAGPIE exchanges with the birdtest server as a
 // contribute worker -- both the task requests it reads and the result
 // payloads it submits. These keys are part of the wire contract between the
@@ -24,6 +26,12 @@ enum {
 // missing or does not match its recorded hash (the wait doubles from the idle
 // interval up to this); see contribute_decline_derived_mismatch.
 enum { CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS = 600 };
+
+// The most threads a task runs on. Move generation keeps a pool of MAX_THREADS
+// per-thread generators, and a task at N threads can hold 2N+1 of them: a
+// simulated game per thread, each simulating on N more, plus the contribute
+// thread's own. Past the pool, magpie exits on the task.
+enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 
 // Task request fields, read in config.c's config_contribute_* functions.
 #define CONTRIBUTE_KEY_LEXICON "lexicon"
