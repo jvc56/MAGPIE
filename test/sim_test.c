@@ -13,6 +13,7 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
@@ -1282,6 +1283,86 @@ void test_sim_show_bu(void) {
   config_destroy(config);
 }
 
+// Fills args exactly as config_simulate does, but with resume_results set so
+// the sim accumulates onto sim_results instead of resetting it.
+static void simulate_resuming(const Config *config, SimResults *sim_results) {
+  const int ld_size = ld_get_size(config_get_ld(config));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &sim_args);
+  // As in config_simulate: the test position has no prior move to infer from.
+  sim_args.use_inference = false;
+  sim_args.resume_results = true;
+  ErrorStack *error_stack = error_stack_create();
+  simulate_without_ctx(&sim_args, sim_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+}
+
+static void assert_simmed_plays_identical(const SimResults *sim_results_a,
+                                          const SimResults *sim_results_b) {
+  const int num_plays = sim_results_get_number_of_plays(sim_results_a);
+  assert(num_plays == sim_results_get_number_of_plays(sim_results_b));
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *play_a =
+        sim_results_get_simmed_play(sim_results_a, play_idx);
+    const SimmedPlay *play_b =
+        sim_results_get_simmed_play(sim_results_b, play_idx);
+    const Stat *equity_a = simmed_play_get_equity_stat(play_a);
+    const Stat *equity_b = simmed_play_get_equity_stat(play_b);
+    assert(stat_get_num_samples(equity_a) == stat_get_num_samples(equity_b));
+    assert(within_epsilon(stat_get_mean(equity_a), stat_get_mean(equity_b)));
+    assert(within_epsilon(stat_get_mean(simmed_play_get_win_pct_stat(play_a)),
+                          stat_get_mean(simmed_play_get_win_pct_stat(play_b))));
+  }
+}
+
+// A resumed sim continues accumulating onto the existing samples, and a
+// duplicated SimResults resumes exactly as the original would: the duplicate
+// copies each play's PRNG state rather than reseeding it.
+void test_sim_resume(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 8 -plies "
+                           "2 -threads 1 -iter 200 -scond none -seed 10");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  SimResults *sim_results = config_get_sim_results(config);
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  const uint64_t first_run_iterations =
+      sim_results_get_iteration_count(sim_results);
+  assert(first_run_iterations > 0);
+
+  SimResults *duplicate = sim_results_duplicate(sim_results);
+  assert(sim_results_get_iteration_count(duplicate) == first_run_iterations);
+  assert_simmed_plays_identical(sim_results, duplicate);
+
+  simulate_resuming(config, sim_results);
+  assert(sim_results_get_iteration_count(sim_results) > first_run_iterations);
+
+  simulate_resuming(config, duplicate);
+  assert(sim_results_get_iteration_count(duplicate) ==
+         sim_results_get_iteration_count(sim_results));
+  assert_simmed_plays_identical(sim_results, duplicate);
+
+  // Without resume_results the sim starts over as before.
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  assert(sim_results_get_iteration_count(sim_results) == first_run_iterations);
+
+  sim_results_destroy(duplicate);
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -1313,5 +1394,6 @@ void test_sim(void) {
     test_snoprune_with_opp_rack_and_mixed_coords();
     test_snoprune_exchange_and_pass();
     test_sim_avoid_prune_errors();
+    test_sim_resume();
   }
 }

@@ -243,9 +243,8 @@ void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
 
 // A full, independent copy of src, for a buffered SimResults that must
 // support the same reads (and re-sorts/re-renders) as the original
-// without aliasing any of its memory. The PRNG and mutex are the only
-// exceptions: like simmed_play_copy, a fresh PRNG/mutex is used, since
-// the duplicate is never used to continue an active simulation.
+// without aliasing any of its memory. The mutex is fresh; the PRNG state is
+// copied so a resumed simulation continues the same random stream.
 static SimmedPlay *simmed_play_duplicate(const SimmedPlay *src) {
   SimmedPlay *dst = malloc_or_die(sizeof(SimmedPlay));
   move_copy(&dst->move, &src->move);
@@ -280,6 +279,7 @@ static SimmedPlay *simmed_play_duplicate(const SimmedPlay *src) {
   dst->cutoff = src->cutoff;
   dst->utility_w_spread = src->utility_w_spread;
   dst->prng = prng_create(0);
+  prng_copy(dst->prng, src->prng);
   cpthread_mutex_init(&dst->mutex);
   return dst;
 }
@@ -367,9 +367,10 @@ SimResults *sim_results_create(const double cutoff) {
 // shared, so the result can be read, re-sorted, and displayed exactly
 // like a SimResults that just finished simulating, without aliasing any
 // memory owned by src. Only the mutexes and each SimmedPlay's PRNG are
-// freshly created rather than copied, matching simmed_play_copy's
-// contract, since the duplicate is never used to continue simulating.
-SimResults *sim_results_duplicate(const SimResults *sim_results) {
+// freshly created rather than copied. Each SimmedPlay's PRNG state is
+// copied so the TUI can resume the analysis from the duplicate. The source
+// is locked while it is read, since it may still be live.
+SimResults *sim_results_duplicate(SimResults *sim_results) {
   if (!sim_results) {
     return NULL;
   }
@@ -383,6 +384,8 @@ SimResults *sim_results_duplicate(const SimResults *sim_results) {
               atomic_load(&sim_results->iteration_count));
   cpthread_mutex_init(&new_sim_results->simmed_plays_mutex);
   cpthread_mutex_init(&new_sim_results->display_mutex);
+  cpthread_mutex_lock(&sim_results->simmed_plays_mutex);
+  cpthread_mutex_lock(&sim_results->display_mutex);
   new_sim_results->simmed_plays = NULL;
   if (sim_results->simmed_plays) {
     new_sim_results->simmed_plays = malloc_or_die(
@@ -409,6 +412,8 @@ SimResults *sim_results_duplicate(const SimResults *sim_results) {
   new_sim_results->cutoff = sim_results->cutoff;
   new_sim_results->utility_w_spread = sim_results->utility_w_spread;
   new_sim_results->num_infer_leaves = sim_results->num_infer_leaves;
+  cpthread_mutex_unlock(&sim_results->display_mutex);
+  cpthread_mutex_unlock(&sim_results->simmed_plays_mutex);
   return new_sim_results;
 }
 
