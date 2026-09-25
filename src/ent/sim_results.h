@@ -53,7 +53,11 @@ void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility);
 typedef struct SimResults SimResults;
 
 SimResults *sim_results_create(const double cutoff);
-SimResults *sim_results_duplicate(const SimResults *sim_results);
+// Allocate a new SimResults whose state mirrors sim_results. Every Stat,
+// PRNG state, heat map, BAIResult, and SimmedPlay is independently owned by
+// the duplicate; mutexes are fresh. The TUI saves one per game turn so the
+// analysis can later be resumed onto the prior samples.
+SimResults *sim_results_duplicate(SimResults *sim_results);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_plies, uint64_t seed, bool use_heat_map);
 void sim_results_destroy(SimResults *sim_results);

@@ -15,6 +15,8 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/players_data.h"
+#include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
@@ -122,6 +124,11 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
                      const char *force_racks_filename, ErrorStack *error_stack);
+void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
+                          Rack *target_played_tiles,
+                          Rack *nontarget_known_tiles,
+                          Rack *target_known_inference_tiles,
+                          SimArgs *sim_args);
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
                      SimResults *sim_results, int *arm_avoid_prune,
                      int num_arm_avoid_prune, ErrorStack *error_stack);

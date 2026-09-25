@@ -1403,12 +1403,29 @@ void test_success_trailing_overtime_penalty(GameHistory *game_history) {
   config_destroy(config);
 }
 
+// gcg_parser_create reports an empty or whitespace-only GCG as an error
+// rather than failing, for callers that don't go through
+// config_parse_gcg_string's own check.
+static void test_parser_create_empty(GameHistory *game_history) {
+  const char *const empty_gcgs[] = {"", "  ", "\n\n", " \r\n\t\n"};
+  const int num_gcgs = (int)(sizeof(empty_gcgs) / sizeof(empty_gcgs[0]));
+  for (int gcg_idx = 0; gcg_idx < num_gcgs; gcg_idx++) {
+    ErrorStack *error_stack = error_stack_create();
+    GCGParser *gcg_parser =
+        gcg_parser_create(empty_gcgs[gcg_idx], game_history, NULL, error_stack);
+    assert(error_stack_top(error_stack) == ERROR_STATUS_GCG_PARSE_GCG_EMPTY);
+    gcg_parser_destroy(gcg_parser);
+    error_stack_destroy(error_stack);
+  }
+}
+
 void test_gcg(void) {
   // Use the same game_history for all tests to thoroughly test the
   // game_history_reset function
   GameHistory *game_history = game_history_create();
   test_game_history(game_history);
   test_error_cases(game_history);
+  test_parser_create_empty(game_history);
   test_parse_special_char(game_history);
   test_parse_special_utf8_no_header(game_history);
   test_parse_special_utf8_with_header(game_history);
