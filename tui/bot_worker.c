@@ -28,6 +28,7 @@
 #include "../src/util/string_util.h"
 #include "game_render.h"
 #include "game_state.h"
+#include "pixel_compose.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -1682,8 +1683,6 @@ void tui_analysis_worker_stop_and_join(TuiGameState *state) {
   state->analysis_started = false;
   atomic_store(&state->analysis_stop, false);
 }
-
-void *tui_pixel_worker_main(void *arg);
 
 void tui_pixel_worker_start(TuiGameState *state) {
   if (state == NULL || state->pixel_started) {
