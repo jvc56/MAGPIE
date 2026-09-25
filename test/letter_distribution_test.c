@@ -326,11 +326,12 @@ static void test_a_distribution_past_the_alphabet_limit_is_refused(void) {
   fclose(stream);
 
   LetterDistribution *ld = ld_create(data_path, "toomanyletters", error_stack);
+  // Removed before asserting, so a failure does not leave it in testdata.
+  delete_file(path);
+  free(path);
   assert(ld == NULL);
   assert(error_stack_top(error_stack) == ERROR_STATUS_LD_INVALID_ROW);
 
-  delete_file(path);
-  free(path);
   error_stack_destroy(error_stack);
 }
 

@@ -138,8 +138,7 @@ static void convert_rack_equity_to_klv(const LetterDistribution *ld,
           get_formatted_string("line %d of rack equity csv file '%s': rack "
                                "equity rows must name full racks of %d tiles "
                                "drawable from this letter distribution, and "
-                               "'%s' has a letter it does not have (or a "
-                               "lower-case one)",
+                               "'%s' does not parse as a rack of its letters",
                                rows + 1, csv_filename, (RACK_SIZE), rack_str));
       break;
     }
