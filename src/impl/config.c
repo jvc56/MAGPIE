@@ -147,6 +147,7 @@ typedef enum {
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
+  ARG_TOKEN_P2_WIN_PCT,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_SHPLIES,
   ARG_TOKEN_SHOW_BU,
@@ -333,6 +334,8 @@ struct Config {
   double p1_utility_spread_scale;
   double p2_utility_spread_scale;
   WinPct *win_pcts;
+  // See ARG_TOKEN_P2_WIN_PCT; NULL means player 2 uses win_pcts too.
+  WinPct *p2_win_pcts;
   BoardLayout *board_layout;
   LetterDistribution *ld;
   PlayersData *players_data;
@@ -1731,6 +1734,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "winpct";
       text = "Specifies which win percentage file to use for simulations.";
       break;
+    case ARG_TOKEN_P2_WIN_PCT:
+      usages[0] = "<win_percentage>";
+      examples[0] = "winpct";
+      text = "Experimental: a win percentage file for player 2's "
+             "simulations only (player 1 keeps winpct), to compare tables "
+             "head to head.";
+      break;
     case ARG_TOKEN_PLIES:
       usages[0] = "<plies>";
       examples[0] = "2";
@@ -2567,6 +2577,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
         ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
         ARG_TOKEN_WIN_PCT,                 /* winpct */
+        ARG_TOKEN_P2_WIN_PCT,              /* winpct2 */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -3908,7 +3919,8 @@ void config_fill_autoplay_args(const Config *config,
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
-      /*known_opp_rack=*/NULL, config->win_pcts, /*inference_results=*/NULL,
+      /*known_opp_rack=*/NULL,
+      config->p2_win_pcts ? config->p2_win_pcts : config->win_pcts, /*inference_results=*/NULL,
       config->thread_control,
       /*game=*/NULL, config->p2_sim_with_inference, /*use_heat_map=*/false,
       /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
@@ -8436,6 +8448,19 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
+  const char *new_p2_win_pct_name =
+      config_get_parg_value(config, ARG_TOKEN_P2_WIN_PCT, 0);
+  if (new_p2_win_pct_name != NULL &&
+      (config->p2_win_pcts == NULL ||
+       !strings_equal(win_pct_get_name(config->p2_win_pcts),
+                      new_p2_win_pct_name))) {
+    win_pct_destroy(config->p2_win_pcts);
+    config->p2_win_pcts =
+        win_pct_create(config->data_paths, new_p2_win_pct_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
 
   // Set the PAT weights - opt-in and per-player. The "pat1" and
   // "pat2" args override the "pat" arg; "none" unloads. Unlike leaves, an
@@ -9724,6 +9749,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
+  arg(ARG_TOKEN_P2_WIN_PCT, "winpct2", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_SHOW_BU, "showbu", 1, 1);
@@ -9965,6 +9991,7 @@ void config_destroy(Config *config) {
     parsed_arg_destroy(config->pargs[i]);
   }
   win_pct_destroy(config->win_pcts);
+  win_pct_destroy(config->p2_win_pcts);
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
@@ -10279,6 +10306,10 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           config->win_pcts ? win_pct_get_name(config->win_pcts)
                            : DEFAULT_WIN_PCT);
+      break;
+    case ARG_TOKEN_P2_WIN_PCT:
+      // Experimental and deliberately not saved: a stale second table in
+      // settings.txt would silently change later runs.
       break;
     case ARG_TOKEN_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

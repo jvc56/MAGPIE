@@ -693,6 +693,9 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
 
+  // A reused simmer serves whichever player's args arrive (autoplay keeps
+  // one per worker), so their win percentage table must be refreshed too.
+  simmer->win_pcts = sim_args->win_pcts;
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
