@@ -384,11 +384,6 @@ static void render_modal(struct ncplane *plane, const Theme *theme,
                   /*cursor_cols=*/NULL, /*zone_starts=*/NULL,
                   /*zone_widths=*/NULL, item_count, focus, width);
 }
-// Forward declaration so tui_game_render_watch_setup can format
-// adjustable rows using the same arrow-marker convention as the
-// Settings modal. Defined a few hundred lines below.
-static void format_setting_row(char *out, size_t out_size, const char *label,
-                               const char *value, bool focused);
 void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
                           int focus) {
   if (plane == NULL || theme == NULL) {
@@ -1081,19 +1076,6 @@ void tui_game_render_play_setup(
                   disabled, cursor_cols, zone_starts, zone_widths,
                   TUI_PLAY_SETUP_ITEM_COUNT, focus, MODAL_WIDTH);
 }
-// Helper for an arrow-adjusted Settings row. Renders
-//   "<label>   ◀ <value> ▶"   when focused
-//   "<label>   <value>"       when not focused
-// `value` may be a fixed string (e.g., "lowercase") or numeric.
-static void format_setting_row(char *out, size_t out_size, const char *label,
-                               const char *value, bool focused) {
-  if (focused) {
-    (void)snprintf(out, out_size, "%-13s\xe2\x97\x80 %s \xe2\x96\xb6", label,
-                   value);
-  } else {
-    (void)snprintf(out, out_size, "%-13s%s", label, value);
-  }
-}
 static const char *premium_labels_value(TuiPremiumLabels labels) {
   switch (labels) {
   case TUI_PREMIUM_LABELS_LOWERCASE:
@@ -1140,163 +1122,107 @@ static const char *rack_sort_value(TuiRackSort sort) {
     return "alpha+?";
   }
 }
-void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
-                              int focus, int board_scale, bool antialias,
-                              TuiScoreSubscripts score_subscripts,
-                              int border_thickness, bool pixel_supported,
-                              bool font_available,
-                              TuiPremiumLabels premium_labels,
-                              bool blank_uppercase, TuiRackSort rack_sort,
-                              const char *lexicon, bool load_rit) {
+void tui_settings_enabled_rows(int board_scale, bool pixel_supported,
+                               bool font_available,
+                               bool out_enabled[TUI_SETTINGS_ITEM_COUNT]) {
+  const bool scale_available = pixel_supported && font_available;
+  const bool effective_2x = scale_available && board_scale >= 2;
+  for (int item_idx = 0; item_idx < TUI_SETTINGS_ITEM_COUNT; item_idx++) {
+    out_enabled[item_idx] = true;
+  }
+  out_enabled[TUI_SETTINGS_SCALE] = scale_available;
+  out_enabled[TUI_SETTINGS_AA] = effective_2x;
+  out_enabled[TUI_SETTINGS_SUBSCRIPTS] = effective_2x;
+  out_enabled[TUI_SETTINGS_BORDER] = effective_2x;
+}
+
+void tui_game_render_settings(
+    struct ncplane *plane, const Theme *theme, int focus, int board_scale,
+    bool antialias, TuiScoreSubscripts score_subscripts, int border_thickness,
+    bool pixel_supported, bool font_available, TuiPremiumLabels premium_labels,
+    bool blank_uppercase, TuiRackSort rack_sort, bool load_rit) {
   if (plane == NULL || theme == NULL) {
     return;
   }
-  // Lexicon row has been removed — lexicon is set only via the
-  // New Game / Watch setup flow. Keep the param for signature
-  // stability with existing callers.
-  (void)lexicon;
-
-  // Scale row. 2x needs both pixel graphics and a loaded font; if
-  // either is missing, the row reports unavailable and arrow keys
-  // become no-ops at this focus. Even when 2x is supported the
-  // terminal may currently be too small to fit 2x cells — in that
-  // case we still show the preference (the user may want to set 2x
-  // and resize) but flag that it can't render right now.
-  char scale_label[96];
+  // Same layout as the setup dialogs: label left, value right-aligned,
+  // ◀ ▶ around the focused value, unavailable rows dimmed.
+  enum { MODAL_WIDTH = 56, CONTENT_W = MODAL_WIDTH - 4, ROW_BUF = 96 };
+  static char buf[TUI_SETTINGS_ITEM_COUNT][ROW_BUF];
+  const char *items[TUI_SETTINGS_ITEM_COUNT];
+  bool enabled[TUI_SETTINGS_ITEM_COUNT];
+  bool disabled[TUI_SETTINGS_ITEM_COUNT];
+  tui_settings_enabled_rows(board_scale, pixel_supported, font_available,
+                            enabled);
   const bool scale_available = pixel_supported && font_available;
+  // Why a 2x-only row is unavailable: the terminal can't do 2x at all,
+  // or the board is at 1x.
+  const char *unavailable_2x = scale_available ? "n/a at 1x" : "unsupported";
+
+  // Scale. Even when 2x is supported the terminal may be too small to
+  // fit 2x cells; the setting stays editable (so the user can step back
+  // to 1x without resizing first) and the value says why the board is
+  // still at 1x.
+  char scale_value[32];
   if (!scale_available) {
-    (void)snprintf(scale_label, sizeof(scale_label),
-                   "Scale        unsupported here");
+    (void)snprintf(scale_value, sizeof(scale_value), "unsupported");
   } else {
     unsigned plane_rows = 0;
     unsigned plane_cols = 0;
     ncplane_dim_yx(plane, &plane_rows, &plane_cols);
     const bool layout_fits_2x =
         compute_effective_scale(2, plane_cols, plane_rows) >= 2;
-    char value_buf[32];
     if (board_scale >= 2 && !layout_fits_2x) {
-      // The setting stays editable so the user can step back to 1x
-      // without resizing first, but the value spells out why the
-      // board is still rendering as 1x.
-      (void)snprintf(value_buf, sizeof(value_buf), "2x \xc2\xb7 too small");
+      (void)snprintf(scale_value, sizeof(scale_value), "2x (too small)");
     } else {
-      (void)snprintf(value_buf, sizeof(value_buf), "%dx", board_scale);
+      (void)snprintf(scale_value, sizeof(scale_value), "%dx", board_scale);
     }
-    format_setting_row(scale_label, sizeof(scale_label), "Scale", value_buf,
-                       focus == TUI_SETTINGS_SCALE);
   }
-
-  // Antialiasing row — only meaningful when 2x is engaged.
-  char aa_label[96];
-  if (!scale_available || board_scale < 2) {
-    (void)snprintf(aa_label, sizeof(aa_label), "Antialias    n/a at 1x");
+  char border_value[16];
+  if (border_thickness <= 0) {
+    (void)snprintf(border_value, sizeof(border_value), "off");
   } else {
-    format_setting_row(aa_label, sizeof(aa_label), "Antialias",
-                       antialias ? "on" : "off", focus == TUI_SETTINGS_AA);
+    (void)snprintf(border_value, sizeof(border_value), "%dpx",
+                   border_thickness);
   }
-
-  // Score subscripts row — also 2x-only.
-  char sub_label[96];
-  if (!scale_available || board_scale < 2) {
-    (void)snprintf(sub_label, sizeof(sub_label), "Subscript    n/a at 1x");
-  } else {
-    format_setting_row(sub_label, sizeof(sub_label), "Subscript",
-                       score_subscripts_value(score_subscripts),
-                       focus == TUI_SETTINGS_SUBSCRIPTS);
-  }
-
-  // Border row.
-  char border_label[96];
-  if (!pixel_supported) {
-    (void)snprintf(border_label, sizeof(border_label),
-                   "Border       unsupported here");
-  } else {
-    char value_buf[16];
-    if (border_thickness <= 0) {
-      (void)snprintf(value_buf, sizeof(value_buf), "off");
+  const char *values[TUI_SETTINGS_ITEM_COUNT] = {
+      [TUI_SETTINGS_SCALE] = scale_value,
+      [TUI_SETTINGS_AA] = antialias ? "on" : "off",
+      [TUI_SETTINGS_SUBSCRIPTS] = score_subscripts_value(score_subscripts),
+      [TUI_SETTINGS_BORDER] = border_value,
+      [TUI_SETTINGS_PREMIUM] = premium_labels_value(premium_labels),
+      [TUI_SETTINGS_BLANKS] = blank_uppercase ? "uppercase" : "lowercase",
+      [TUI_SETTINGS_RACK_SORT] = rack_sort_value(rack_sort),
+      [TUI_SETTINGS_RIT] = load_rit ? "on" : "off",
+  };
+  const char *labels[TUI_SETTINGS_ITEM_COUNT] = {
+      [TUI_SETTINGS_SCALE] = "Scale",
+      [TUI_SETTINGS_AA] = "Antialias",
+      [TUI_SETTINGS_SUBSCRIPTS] = "Subscripts",
+      [TUI_SETTINGS_BORDER] = "Border",
+      [TUI_SETTINGS_PREMIUM] = "Premium labels",
+      [TUI_SETTINGS_BLANKS] = "Blanks",
+      [TUI_SETTINGS_RACK_SORT] = "Rack sort",
+      [TUI_SETTINGS_RIT] = "RIT",
+  };
+  for (int item_idx = 0; item_idx < TUI_SETTINGS_ITEM_COUNT; item_idx++) {
+    disabled[item_idx] = !enabled[item_idx];
+    if (item_idx == TUI_SETTINGS_BACK) {
+      (void)snprintf(buf[item_idx], ROW_BUF, "Back");
     } else {
-      (void)snprintf(value_buf, sizeof(value_buf), "%dpx", border_thickness);
+      const bool is_2x_only = item_idx == TUI_SETTINGS_AA ||
+                              item_idx == TUI_SETTINGS_SUBSCRIPTS ||
+                              item_idx == TUI_SETTINGS_BORDER;
+      const char *value = values[item_idx];
+      if (is_2x_only && !enabled[item_idx]) {
+        value = unavailable_2x;
+      }
+      format_setup_row(buf[item_idx], ROW_BUF, CONTENT_W, labels[item_idx],
+                       value, focus == item_idx && enabled[item_idx]);
     }
-    format_setting_row(border_label, sizeof(border_label), "Border", value_buf,
-                       focus == TUI_SETTINGS_BORDER);
+    items[item_idx] = buf[item_idx];
   }
-
-  // Premium label row.
-  char premium_label[96];
-  format_setting_row(premium_label, sizeof(premium_label), "Premium",
-                     premium_labels_value(premium_labels),
-                     focus == TUI_SETTINGS_PREMIUM);
-
-  // Blanks row.
-  char blanks_label[96];
-  format_setting_row(blanks_label, sizeof(blanks_label), "Blanks",
-                     blank_uppercase ? "uppercase" : "lowercase",
-                     focus == TUI_SETTINGS_BLANKS);
-
-  // Rack-sort row.
-  char rack_sort_label[96];
-  format_setting_row(rack_sort_label, sizeof(rack_sort_label), "Rack sort",
-                     rack_sort_value(rack_sort),
-                     focus == TUI_SETTINGS_RACK_SORT);
-
-  // RIT row. Plain on/off arrow toggle like Antialias.
-  char rit_label[96];
-  format_setting_row(rit_label, sizeof(rit_label), "RIT",
-                     load_rit ? "on" : "off", focus == TUI_SETTINGS_RIT);
-
-  // Antialias / Subscript / Border are only meaningful at 2x — hide
-  // them entirely when the board isn't rendering at 2x rather than
-  // showing greyed "n/a at 1x" placeholders. settings_visible() in
-  // main.c mirrors this so arrow-key navigation skips them.
-  const bool effective_2x = scale_available && board_scale >= 2;
-  const char *items[TUI_SETTINGS_ITEM_COUNT];
-  int n = 0;
-  int display_focus = 0;
-  // Walk enum order; append a row if visible, and translate the
-  // caller's enum-valued focus into the corresponding display index.
-  for (int idx = 0; idx < TUI_SETTINGS_ITEM_COUNT; idx++) {
-    const bool is_2x_only =
-        (idx == TUI_SETTINGS_AA || idx == TUI_SETTINGS_SUBSCRIPTS ||
-         idx == TUI_SETTINGS_BORDER);
-    if (is_2x_only && !effective_2x) {
-      continue;
-    }
-    const char *label = NULL;
-    switch (idx) {
-    case TUI_SETTINGS_SCALE:
-      label = scale_label;
-      break;
-    case TUI_SETTINGS_AA:
-      label = aa_label;
-      break;
-    case TUI_SETTINGS_SUBSCRIPTS:
-      label = sub_label;
-      break;
-    case TUI_SETTINGS_BORDER:
-      label = border_label;
-      break;
-    case TUI_SETTINGS_PREMIUM:
-      label = premium_label;
-      break;
-    case TUI_SETTINGS_BLANKS:
-      label = blanks_label;
-      break;
-    case TUI_SETTINGS_RACK_SORT:
-      label = rack_sort_label;
-      break;
-    case TUI_SETTINGS_RIT:
-      label = rit_label;
-      break;
-    case TUI_SETTINGS_BACK:
-      label = "Back";
-      break;
-    default:
-      continue;
-    }
-    if (idx == focus) {
-      display_focus = n;
-    }
-    items[n++] = label;
-  }
-  render_modal(plane, theme, "Settings", items, NULL, n, display_focus, 40);
+  render_modal_ex(plane, theme, "Settings", items, /*shortcuts=*/NULL, disabled,
+                  /*cursor_cols=*/NULL, /*zone_starts=*/NULL,
+                  /*zone_widths=*/NULL, TUI_SETTINGS_ITEM_COUNT, focus,
+                  MODAL_WIDTH);
 }
