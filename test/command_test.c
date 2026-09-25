@@ -522,9 +522,10 @@ void test_exec_async_command(void) {
   FILE *input_reader = fopen_or_die(test_input_filename, "r");
   command_test_set_stream_in(input_reader);
 
-  ProcessArgs *process_args =
-      process_args_create("set -mode async -printonfinish true", "autoplay", 1,
-                          "unrecognized async command");
+  // Input comes from a FIFO rather than a terminal, so a command sent
+  // while another runs is queued rather than rejected.
+  ProcessArgs *process_args = process_args_create(
+      "set -mode async -printonfinish true", "autoplay", 0, "");
 
   cpthread_t cmd_execution_thread;
   cpthread_create(&cmd_execution_thread, test_process_command_async,
@@ -546,7 +547,8 @@ void test_exec_async_command(void) {
       "autoplay game 10000000 -lex CSW21 -s1 equity -s2 equity  -gp false\n");
   fflush_or_die(input_writer);
   // Try to immediately start another command while the previous one
-  // is still running. This should give a warning.
+  // is still running. From a FIFO this is queued and runs after the stop
+  // below.
   fprintf_or_die(
       input_writer,
       "autoplay game 1 -lex CSW21 -s1 equity -s2 equity -gp false\n");
@@ -570,6 +572,44 @@ void test_exec_async_command(void) {
   block_for_process_command(process_args, 5);
 
   fclose_or_die(input_writer);
+  fclose_or_die(input_reader);
+  delete_fifo(test_input_filename);
+  process_args_destroy(process_args);
+  free(test_input_filename);
+  command_test_reset_stream_in();
+}
+
+// A script fed from a file (not a terminal) in async mode: lines that
+// arrive while a command runs are queued and run in order, not dropped
+// as unrecognized async commands.
+void test_exec_async_script(void) {
+  char *test_input_filename = get_test_filename("input");
+
+  // Reset the contents of input
+  unlink(test_input_filename);
+
+  FILE *input_writer = fopen_or_die(test_input_filename, "w+");
+  FILE *input_reader = fopen_or_die(test_input_filename, "r");
+  command_test_set_stream_in(input_reader);
+
+  ProcessArgs *process_args = process_args_create(
+      "set -mode async -printonfinish true -lex CSW21 -s1 equity -s2 equity "
+      "-r1 best -r2 best -numplays 1 -threads 1 -gp false",
+      "Games Played: 3", 0, "");
+
+  cpthread_t cmd_execution_thread;
+  cpthread_create(&cmd_execution_thread, test_process_command_async,
+                  process_args);
+  cpthread_detach(cmd_execution_thread);
+
+  write_to_stream(input_writer, "autoplay games 50\n");
+  write_to_stream(input_writer, "autoplay games 3\n");
+  write_to_stream(input_writer, TERMINATE_KEYWORD "\n");
+  fclose_or_die(input_writer);
+
+  // Wait for magpie to quit
+  block_for_process_command(process_args, 60);
+
   fclose_or_die(input_reader);
   delete_fifo(test_input_filename);
   process_args_destroy(process_args);
@@ -733,6 +773,7 @@ void test_command(void) {
   test_exec_single_command();
   test_command_execution();
   test_exec_async_command();
+  test_exec_async_script();
   test_exec_sync_command();
   test_exec_quit_aliases();
   test_save_settings();
