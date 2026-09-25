@@ -148,8 +148,8 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       const MachineLetter glyph_ml =
           render_uppercase ? get_unblanked_machine_letter(ml) : ml;
       const int owner = board_get_square_owner(board, row, col);
-      const ThemeRgb tile_fg = owner == 1 ? theme->tile2_fg : theme->tile1_fg;
-      const ThemeRgb tile_bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
+      const ThemeRgb tile_fg = theme_tile_fg(theme, owner);
+      const ThemeRgb tile_bg = theme_tile_bg(theme, owner);
       theme_apply_fg(plane, is_blank ? theme->blank_tile_fg : tile_fg);
       theme_apply_bg(plane, tile_bg);
       if (halfwidth) {
@@ -381,7 +381,7 @@ render_board_text_bg(struct ncplane *plane, const Theme *theme,
         glyph_fullwidth = (cell_w != 1);
       } else {
         const int owner = board_get_square_owner(board, row, col);
-        const ThemeRgb tile_bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
+        const ThemeRgb tile_bg = theme_tile_bg(theme, owner);
         fg = tile_bg;
         bg = tile_bg;
         glyph = (cell_w == 1) ? " " : "\xe3\x80\x80"; // U+3000

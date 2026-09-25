@@ -400,9 +400,8 @@ uint8_t *compose_tile_pixels(MachineLetter ml, int owner, bool blank_uppercase,
     bg = muted;
     fg = is_blank ? theme->blank_tile_fg : hue;
   } else {
-    bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
-    fg = is_blank ? theme->blank_tile_fg
-                  : (owner == 1 ? theme->tile2_fg : theme->tile1_fg);
+    bg = theme_tile_bg(theme, owner);
+    fg = is_blank ? theme->blank_tile_fg : theme_tile_fg(theme, owner);
   }
   fill_tile_rect(buf, tile_w, 0, 0, tile_w, tile_h, bg);
 

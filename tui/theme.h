@@ -49,6 +49,10 @@ typedef struct {
   ThemeRgb tile1_bg;
   ThemeRgb tile2_fg;
   ThemeRgb tile2_bg;
+  // Tiles with no recorded player (a position loaded from CGP): a very
+  // desaturated blue-gray that reads as neither player's color.
+  ThemeRgb tile_neutral_fg;
+  ThemeRgb tile_neutral_bg;
   ThemeRgb blank_tile_fg; // fg for played-blank tiles, distinct from tileN_fg
   ThemeRgb rack_tile1_fg;
   ThemeRgb rack_tile1_bg;
@@ -122,6 +126,11 @@ const Theme *theme_get_by_id(const char *id);
 ThemeName theme_auto_detect(const struct notcurses *nc);
 
 void theme_apply_fg(struct ncplane *plane, ThemeRgb color);
+
+// A placed tile's colors by owner: player 0, player 1, or (any other
+// value, e.g. BOARD_OWNER_UNKNOWN) the neutral tile colors.
+ThemeRgb theme_tile_fg(const Theme *theme, int owner);
+ThemeRgb theme_tile_bg(const Theme *theme, int owner);
 void theme_apply_bg(struct ncplane *plane, ThemeRgb color);
 
 // Sets the plane's base cell to the theme's body fg/bg so that

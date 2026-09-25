@@ -31,6 +31,8 @@ static const Theme themes[THEME_COUNT] =
                 .tile1_bg = {30, 50, 35},
                 .tile2_fg = {230, 194, 130},
                 .tile2_bg = {50, 42, 30},
+                .tile_neutral_fg = {190, 196, 206},
+                .tile_neutral_bg = {40, 43, 48},
                 .blank_tile_fg = {170, 170, 170},
                 .rack_tile1_fg = {130, 230, 160},
                 .rack_tile1_bg = {30, 50, 35},
@@ -86,6 +88,8 @@ static const Theme themes[THEME_COUNT] =
                 .tile1_bg = {240, 220, 180},
                 .tile2_fg = {64, 36, 12},
                 .tile2_bg = {238, 206, 150},
+                .tile_neutral_fg = {24, 24, 24},
+                .tile_neutral_bg = {220, 224, 230},
                 .blank_tile_fg = {180, 60, 60},
                 .rack_tile1_fg = {24, 24, 24},
                 .rack_tile1_bg = {240, 220, 180},
@@ -136,6 +140,8 @@ static const Theme themes[THEME_COUNT] =
                 .tile1_bg = {60, 50, 40},
                 .tile2_fg = {200, 170, 110},
                 .tile2_bg = {55, 45, 30},
+                .tile_neutral_fg = {176, 179, 185},
+                .tile_neutral_bg = {48, 50, 54},
                 .blank_tile_fg = {220, 130, 130},
                 .rack_tile1_fg = {180, 180, 180},
                 .rack_tile1_bg = {60, 50, 40},
@@ -186,6 +192,8 @@ static const Theme themes[THEME_COUNT] =
                 .tile1_bg = {255, 255, 255},
                 .tile2_fg = {0, 0, 0},
                 .tile2_bg = {255, 220, 80},
+                .tile_neutral_fg = {0, 0, 0},
+                .tile_neutral_bg = {200, 204, 212},
                 .blank_tile_fg = {200, 0, 0},
                 .rack_tile1_fg = {0, 0, 0},
                 .rack_tile1_bg = {255, 255, 255},
@@ -267,4 +275,24 @@ void theme_apply_base(struct ncplane *plane, const Theme *theme) {
   ncchannels_set_fg_rgb8(&channels, theme->fg.r, theme->fg.g, theme->fg.b);
   ncchannels_set_bg_rgb8(&channels, theme->bg.r, theme->bg.g, theme->bg.b);
   ncplane_set_base(plane, " ", 0, channels);
+}
+
+ThemeRgb theme_tile_fg(const Theme *theme, int owner) {
+  if (owner == 0) {
+    return theme->tile1_fg;
+  }
+  if (owner == 1) {
+    return theme->tile2_fg;
+  }
+  return theme->tile_neutral_fg;
+}
+
+ThemeRgb theme_tile_bg(const Theme *theme, int owner) {
+  if (owner == 0) {
+    return theme->tile1_bg;
+  }
+  if (owner == 1) {
+    return theme->tile2_bg;
+  }
+  return theme->tile_neutral_bg;
 }

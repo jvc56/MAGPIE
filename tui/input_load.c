@@ -1,5 +1,6 @@
 #include "input_load.h"
 
+#include "../src/ent/board.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/gcg.h"
 #include "bot_worker.h"
@@ -523,6 +524,10 @@ void tui_load_position_live_parse(TuiGameState *state, TuiUiState *ui) {
       game_load_cgp(state->game, cgp_payload, err);
       const bool ok = error_stack_is_empty(err);
       if (ok) {
+        // A CGP doesn't say who played which tile; clear the owners
+        // the previous game left so these tiles draw in the neutral
+        // color rather than an arbitrary player's.
+        board_clear_square_owners(game_get_board(state->game));
         // On success, reset per-turn history / cursors so the
         // panels reflect a fresh starting state for the loaded
         // position.

@@ -27,13 +27,16 @@ typedef struct Square {
   // anchor, is_cross_word, and player_idx pack into a single byte
   // so adding owner tracking didn't grow Square past 32 bytes.
   // player_idx is the player who placed the tile (0 or 1); only
-  // meaningful when letter != ALPHABET_EMPTY_SQUARE_MARKER, and
-  // only updated by callers that explicitly want to track it
-  // (sim/endgame board copies leave it as-is).
+  // meaningful when letter != ALPHABET_EMPTY_SQUARE_MARKER and
+  // owner_known is set, and only updated by callers that explicitly
+  // want to track it (sim/endgame board copies leave it as-is).
+  // owner_known is clear for tiles whose player isn't recorded, such
+  // as a position loaded from CGP.
   uint8_t anchor : 1;
   uint8_t is_cross_word : 1;
   uint8_t player_idx : 1;
-  uint8_t _pad : 5;
+  uint8_t owner_known : 1;
+  uint8_t _pad : 4;
 } Square;
 
 typedef struct Board {
@@ -228,14 +231,32 @@ static inline void board_set_square_owner(Board *b, int row, int col,
                                           int player_idx) {
   for (int ci = 0; ci < 2; ci++) {
     for (int dir = 0; dir < 2; dir++) {
-      board_get_writable_square(b, row, col, dir, ci)->player_idx =
-          (uint8_t)(player_idx & 1);
+      Square *square = board_get_writable_square(b, row, col, dir, ci);
+      square->player_idx = (uint8_t)(player_idx & 1);
+      square->owner_known = 1;
     }
   }
 }
 
+// The player who placed the tile at (row, col), or BOARD_OWNER_UNKNOWN
+// when that isn't recorded.
 static inline int board_get_square_owner(const Board *b, int row, int col) {
-  return board_get_readonly_square(b, row, col, 0, 0)->player_idx;
+  const Square *square = board_get_readonly_square(b, row, col, 0, 0);
+  return square->owner_known ? square->player_idx : BOARD_OWNER_UNKNOWN;
+}
+
+// Forgets every square's owner, e.g. after loading a position whose
+// tiles have no recorded player.
+static inline void board_clear_square_owners(Board *b) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      for (int ci = 0; ci < 2; ci++) {
+        for (int dir = 0; dir < 2; dir++) {
+          board_get_writable_square(b, row, col, dir, ci)->owner_known = 0;
+        }
+      }
+    }
+  }
 }
 
 static inline void board_set_letter(Board *b, int row, int col,
