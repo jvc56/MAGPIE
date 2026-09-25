@@ -32,6 +32,9 @@ BAIResult *bai_result_create(void) {
 // Timer is a plain value type (no owned resources), so a struct copy of
 // everything but the mutex is a correct full duplicate.
 BAIResult *bai_result_duplicate(const BAIResult *bai_result) {
+  if (bai_result == NULL) {
+    return NULL;
+  }
   BAIResult *new_bai_result = malloc_or_die(sizeof(BAIResult));
   *new_bai_result = *bai_result;
   cpthread_mutex_init(&new_bai_result->mutex);
