@@ -95,8 +95,8 @@ void tui_copy_position_cgp(TuiGameState *gs) {
       }
     }
   }
-  snprintf(gs->notice_buf, sizeof(gs->notice_buf), "Copied CGP%s",
-           conceal ? " (computer rack hidden)" : "");
+  (void)snprintf(gs->notice_buf, sizeof(gs->notice_buf), "Copied CGP%s",
+                 conceal ? " (computer rack hidden)" : "");
   clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
   gs->notice_expires_at.tv_sec += 2;
   pthread_mutex_unlock(&gs->mutex);

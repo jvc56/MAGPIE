@@ -176,9 +176,9 @@ void render_player_pill(struct ncplane *plane, const Theme *theme,
   theme_apply_fg(plane, player_accent);
   char name[32];
   if (state->player_names[player_idx][0] != '\0') {
-    snprintf(name, sizeof(name), "%s", state->player_names[player_idx]);
+    (void)snprintf(name, sizeof(name), "%s", state->player_names[player_idx]);
   } else {
-    snprintf(name, sizeof(name), "P%d", player_idx + 1);
+    (void)snprintf(name, sizeof(name), "P%d", player_idx + 1);
   }
   int name_w = (int)strlen(name);
   if (name_w > MAX_NAME_W) {
@@ -192,8 +192,8 @@ void render_player_pill(struct ncplane *plane, const Theme *theme,
   // it's whatever this player had going into the cursored turn.
   (void)player;
   char score_str[16];
-  snprintf(score_str, sizeof(score_str), "%d",
-           pick_render_score(state, player_idx));
+  (void)snprintf(score_str, sizeof(score_str), "%d",
+                 pick_render_score(state, player_idx));
   // Clocks are only meaningful for live Watch games. In CGP / load
   // mode the bot worker isn't running and the displayed times
   // don't reflect any real time control, so we hide them and

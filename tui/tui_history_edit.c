@@ -3,7 +3,6 @@
 #include "game_state.h"
 #include <stdbool.h>
 #include <stdio.h>
-#include <string.h>
 
 // Persist the current edit buffers (move / rack / leave) into the
 // entry the editor is focused on. ALWAYS saves — valid or not —
@@ -30,8 +29,8 @@ static void tui_commit_edit_to_entry(TuiGameState *gs) {
     // text (so it survives the blur and revalidation can flag it),
     // or clear + revert to pending when the move field is empty.
     if (gs->edit_move_len > 0) {
-      snprintf(e->move_str, sizeof(e->move_str), "%.*s", gs->edit_move_len,
-               gs->edit_move_buf);
+      (void)snprintf(e->move_str, sizeof(e->move_str), "%.*s",
+                     gs->edit_move_len, gs->edit_move_buf);
       e->pending = false;
     } else {
       e->move_str[0] = '\0';
@@ -41,16 +40,17 @@ static void tui_commit_edit_to_entry(TuiGameState *gs) {
     break;
   }
   if (gs->edit_rack_len > 0) {
-    snprintf(e->rack_str, sizeof(e->rack_str), "%.*s", gs->edit_rack_len,
-             gs->edit_rack_buf);
+    (void)snprintf(e->rack_str, sizeof(e->rack_str), "%.*s", gs->edit_rack_len,
+                   gs->edit_rack_buf);
   } else {
     e->rack_str[0] = '\0';
   }
   if (gs->edit_leave_len > 0) {
-    snprintf(e->leave_str, sizeof(e->leave_str), "%.*s", gs->edit_leave_len,
-             gs->edit_leave_buf);
+    (void)snprintf(e->leave_str, sizeof(e->leave_str), "%.*s",
+                   gs->edit_leave_len, gs->edit_leave_buf);
   } else if (gs->edit_move_leave[0] != '\0') {
-    snprintf(e->leave_str, sizeof(e->leave_str), "%s", gs->edit_move_leave);
+    (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                   gs->edit_move_leave);
   } else {
     e->leave_str[0] = '\0';
   }

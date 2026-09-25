@@ -128,8 +128,8 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
         StringBuilder *rack_sb = string_builder_create();
         string_builder_add_rack(rack_sb, end_rack, game_get_ld(state->game),
                                 false);
-        snprintf(went_out->end_rack_str, sizeof(went_out->end_rack_str), "%s",
-                 string_builder_peek(rack_sb));
+        (void)snprintf(went_out->end_rack_str, sizeof(went_out->end_rack_str),
+                       "%s", string_builder_peek(rack_sb));
         string_builder_destroy(rack_sb);
       }
       continue;
@@ -190,7 +190,8 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
       // lowercase — render_move_styled handles the
       // bold/dim distinction.
       if (strncmp(cgp_move, "ex ", 3) == 0) {
-        snprintf(entry->move_str, sizeof(entry->move_str), "-%s", cgp_move + 3);
+        (void)snprintf(entry->move_str, sizeof(entry->move_str), "-%s",
+                       cgp_move + 3);
       } else if (strncmp(cgp_move, "(exch ", 6) == 0) {
         const char *close_paren = strchr(cgp_move, ')');
         if (close_paren != NULL) {
@@ -201,9 +202,10 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
           const int copy = letters_len < cap ? letters_len : cap;
           memcpy(tmp + 1, cgp_move + 6, (size_t)copy);
           tmp[1 + copy] = '\0';
-          snprintf(entry->move_str, sizeof(entry->move_str), "%s", tmp);
+          (void)snprintf(entry->move_str, sizeof(entry->move_str), "%s", tmp);
         } else {
-          snprintf(entry->move_str, sizeof(entry->move_str), "%s", cgp_move);
+          (void)snprintf(entry->move_str, sizeof(entry->move_str), "%s",
+                         cgp_move);
         }
       } else {
         const char *m = cgp_move;
@@ -239,7 +241,7 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
           meta->col = col;
           meta->dir = dir;
           meta->has_position = true;
-          snprintf(meta->word, sizeof(meta->word), "%s", m + 1);
+          (void)snprintf(meta->word, sizeof(meta->word), "%s", m + 1);
 
           char buf[80];
           const size_t prefix_len = (size_t)(m - cgp_move) + 1;
@@ -270,12 +272,14 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
               }
             }
             buf[out] = '\0';
-            snprintf(entry->move_str, sizeof(entry->move_str), "%s", buf);
+            (void)snprintf(entry->move_str, sizeof(entry->move_str), "%s", buf);
           } else {
-            snprintf(entry->move_str, sizeof(entry->move_str), "%s", cgp_move);
+            (void)snprintf(entry->move_str, sizeof(entry->move_str), "%s",
+                           cgp_move);
           }
         } else {
-          snprintf(entry->move_str, sizeof(entry->move_str), "%s", cgp_move);
+          (void)snprintf(entry->move_str, sizeof(entry->move_str), "%s",
+                         cgp_move);
         }
       }
     }
@@ -284,7 +288,8 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
       string_builder_add_rack(rsb, rack, state->ld, false);
       char *rack_dump = string_builder_dump(rsb, NULL);
       if (rack_dump != NULL) {
-        snprintf(entry->rack_str, sizeof(entry->rack_str), "%s", rack_dump);
+        (void)snprintf(entry->rack_str, sizeof(entry->rack_str), "%s",
+                       rack_dump);
         free(rack_dump);
       }
       string_builder_destroy(rsb);
@@ -343,8 +348,8 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
         string_builder_add_rack(lsb, leave, state->ld, false);
         char *leave_dump = string_builder_dump(lsb, NULL);
         if (leave_dump != NULL) {
-          snprintf(entry->leave_str, sizeof(entry->leave_str), "%s",
-                   leave_dump);
+          (void)snprintf(entry->leave_str, sizeof(entry->leave_str), "%s",
+                         leave_dump);
           free(leave_dump);
         }
         string_builder_destroy(lsb);

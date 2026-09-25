@@ -249,9 +249,9 @@ Layout compute_layout(struct ncplane *plane, int user_scale,
       for (int idx = 0; idx < state->history_count; idx++) {
         const TuiHistoryEntry *e = &state->history[idx];
         char prefix[8];
-        snprintf(prefix, sizeof(prefix), "%d. ", idx + 1);
+        (void)snprintf(prefix, sizeof(prefix), "%d. ", idx + 1);
         char delta[16];
-        snprintf(delta, sizeof(delta), "+%d", e->score);
+        (void)snprintf(delta, sizeof(delta), "+%d", e->score);
         // Row 1 width: "N. <move>" + 1-col gap + "+<score>".
         const int row1 = (int)strlen(prefix) + (int)strlen(e->move_str) + 1 +
                          (int)strlen(delta);
@@ -261,7 +261,7 @@ Layout compute_layout(struct ncplane *plane, int user_scale,
         // Row 2 width: indent (== prefix len) + clock(4-5) + space +
         // rack(up to 7) + 1 gap + running total.
         char total[16];
-        snprintf(total, sizeof(total), "%d", e->total_after);
+        (void)snprintf(total, sizeof(total), "%d", e->total_after);
         const int rack_len = e->rack_str[0] ? (int)strlen(e->rack_str) : 1;
         const int clock_len = 5; // worst case "99:59"
         const int row2 = (int)strlen(prefix) + clock_len + 1 + rack_len + 1 +

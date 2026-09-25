@@ -460,7 +460,7 @@ uint8_t *compose_tile_pixels(MachineLetter ml, int owner, bool blank_uppercase,
 
   if (show_subscript) {
     char digits[8];
-    snprintf(digits, sizeof(digits), "%d", tile_score);
+    (void)snprintf(digits, sizeof(digits), "%d", tile_score);
     const int margin_x = (int)((double)tile_w * 0.12);
     const int margin_y = (int)((double)tile_h * 0.16);
     const int digit_bottom = tile_h - margin_y;
@@ -615,7 +615,7 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
                                 (tile_score != 0);
     if (show_subscript) {
       char digits[8];
-      snprintf(digits, sizeof(digits), "%d", tile_score);
+      (void)snprintf(digits, sizeof(digits), "%d", tile_score);
       const int margin_x = (int)((double)tw * 0.12);
       const int margin_y = (int)((double)th * 0.16);
       const int digit_bottom = th - margin_y;

@@ -146,7 +146,7 @@ static bool load_text_modal_keys(TuiGameState *state, TuiUiState *ui, char *buf,
   if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
     if ((*cursor) > 0) {
       memmove(&buf[(*cursor) - 1], &buf[(*cursor)],
-              (size_t)((*len) - (*cursor) + 1));
+              (size_t)((*len) - (*cursor)) + 1);
       (*cursor)--;
       (*len)--;
       (*dirty) = true;
@@ -179,7 +179,7 @@ static bool load_text_modal_keys(TuiGameState *state, TuiUiState *ui, char *buf,
   if (key >= 0x20 && key < 0x7f) {
     if ((*len) + 1 < buf_size) {
       memmove(&buf[(*cursor) + 1], &buf[(*cursor)],
-              (size_t)((*len) - (*cursor) + 1));
+              (size_t)((*len) - (*cursor)) + 1);
       buf[(*cursor)] = (char)key;
       (*cursor)++;
       (*len)++;
@@ -228,7 +228,7 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
     // GCGs can be several KB; we keep this on the stack but
     // sized to the modal buffer.
     static char working[sizeof(ui->load_game_buf)];
-    snprintf(working, sizeof(working), "%s", ui->load_game_buf);
+    (void)snprintf(working, sizeof(working), "%s", ui->load_game_buf);
     char *start = working;
     while (*start == ' ' || *start == '\t' || *start == '\n' ||
            *start == '\r') {
@@ -275,13 +275,13 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
       if (start[0] == '~' && (start[1] == '/' || start[1] == '\0')) {
         const char *home = getenv("HOME");
         if (home != NULL) {
-          snprintf(path, sizeof(path), "%s%s", home,
-                   start[1] == '\0' ? "" : start + 1);
+          (void)snprintf(path, sizeof(path), "%s%s", home,
+                         start[1] == '\0' ? "" : start + 1);
         } else {
-          snprintf(path, sizeof(path), "%s", start);
+          (void)snprintf(path, sizeof(path), "%s", start);
         }
       } else {
-        snprintf(path, sizeof(path), "%s", start);
+        (void)snprintf(path, sizeof(path), "%s", start);
       }
       // A path typed character by character passes through directory
       // prefixes ("/", "/Users", ...). fopen succeeds on a directory and
@@ -291,12 +291,12 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
           stat(path, &path_stat) == 0 && !S_ISREG(path_stat.st_mode);
       FILE *fp = not_regular_file ? NULL : fopen(path, "rbe");
       if (not_regular_file) {
-        snprintf(ui->load_game_error, sizeof(ui->load_game_error),
-                 "%s is not a file", path);
+        (void)snprintf(ui->load_game_error, sizeof(ui->load_game_error),
+                       "%s is not a file", path);
         resolve_ok = false;
       } else if (fp == NULL) {
-        snprintf(ui->load_game_error, sizeof(ui->load_game_error),
-                 "Cannot open %s", path);
+        (void)snprintf(ui->load_game_error, sizeof(ui->load_game_error),
+                       "Cannot open %s", path);
         resolve_ok = false;
       } else {
         (void)fseek(fp, 0, SEEK_END);
@@ -305,8 +305,8 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
         if (fsize < 0 || fsize > (long)(1 << 20)) {
           // Cap at 1 MiB — anything bigger is almost certainly
           // not a real GCG.
-          snprintf(ui->load_game_error, sizeof(ui->load_game_error),
-                   "%s is too large", path);
+          (void)snprintf(ui->load_game_error, sizeof(ui->load_game_error),
+                         "%s is too large", path);
           (void)fclose(fp);
           resolve_ok = false;
         } else {
@@ -363,7 +363,8 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
       // never hand it an empty payload (an empty file, or text that was
       // only the trailing rack hint).
       if (gcg_payload[0] == '\0') {
-        snprintf(ui->load_game_error, sizeof(ui->load_game_error), "Empty GCG");
+        (void)snprintf(ui->load_game_error, sizeof(ui->load_game_error),
+                       "Empty GCG");
         resolve_ok = false;
       }
     }
@@ -423,8 +424,8 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
         for (int p = 0; p < 2; p++) {
           const char *pname = game_history_player_get_name(history, p);
           if (pname != NULL) {
-            snprintf(state->player_names[p], sizeof(state->player_names[p]),
-                     "%s", pname);
+            (void)snprintf(state->player_names[p],
+                           sizeof(state->player_names[p]), "%s", pname);
           } else {
             state->player_names[p][0] = '\0';
           }
@@ -436,8 +437,8 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
         ui->load_game_parse_ok = true;
       } else {
         char *msg = error_stack_get_string_and_reset(err);
-        snprintf(ui->load_game_error, sizeof(ui->load_game_error), "%s",
-                 msg != NULL ? msg : "Parse error");
+        (void)snprintf(ui->load_game_error, sizeof(ui->load_game_error), "%s",
+                       msg != NULL ? msg : "Parse error");
         free(msg);
         ui->load_game_parse_ok = false;
       }
@@ -459,7 +460,7 @@ void tui_load_position_live_parse(TuiGameState *state, TuiUiState *ui) {
   if (ui->modal == TUI_MODAL_LOAD_POSITION && ui->load_position_dirty) {
     ui->load_position_dirty = false;
     char working[2048];
-    snprintf(working, sizeof(working), "%s", ui->load_position_buf);
+    (void)snprintf(working, sizeof(working), "%s", ui->load_position_buf);
     // Strip leading + trailing whitespace.
     char *start = working;
     while (*start == ' ' || *start == '\t' || *start == '\n' ||
@@ -505,18 +506,18 @@ void tui_load_position_live_parse(TuiGameState *state, TuiUiState *ui) {
       if (start[0] == '~' && (start[1] == '/' || start[1] == '\0')) {
         const char *home = getenv("HOME");
         if (home != NULL) {
-          snprintf(path, sizeof(path), "%s%s", home,
-                   start[1] == '\0' ? "" : start + 1);
+          (void)snprintf(path, sizeof(path), "%s%s", home,
+                         start[1] == '\0' ? "" : start + 1);
         } else {
-          snprintf(path, sizeof(path), "%s", start);
+          (void)snprintf(path, sizeof(path), "%s", start);
         }
       } else {
-        snprintf(path, sizeof(path), "%s", start);
+        (void)snprintf(path, sizeof(path), "%s", start);
       }
       FILE *fp = fopen(path, "rbe");
       if (fp == NULL) {
-        snprintf(ui->load_position_error, sizeof(ui->load_position_error),
-                 "Cannot open %s", path);
+        (void)snprintf(ui->load_position_error, sizeof(ui->load_position_error),
+                       "Cannot open %s", path);
         resolve_ok = false;
       } else {
         size_t n = fread(cgp_payload, 1, sizeof(cgp_payload) - 1, fp);
@@ -524,7 +525,7 @@ void tui_load_position_live_parse(TuiGameState *state, TuiUiState *ui) {
         cgp_payload[n] = '\0';
       }
     } else {
-      snprintf(cgp_payload, sizeof(cgp_payload), "%s", start);
+      (void)snprintf(cgp_payload, sizeof(cgp_payload), "%s", start);
     }
     if (resolve_ok) {
       // Stop the bot if a previous load started one (currently
@@ -569,8 +570,8 @@ void tui_load_position_live_parse(TuiGameState *state, TuiUiState *ui) {
         ui->load_position_parse_ok = true;
       } else {
         char *msg = error_stack_get_string_and_reset(err);
-        snprintf(ui->load_position_error, sizeof(ui->load_position_error), "%s",
-                 msg != NULL ? msg : "Parse error");
+        (void)snprintf(ui->load_position_error, sizeof(ui->load_position_error),
+                       "%s", msg != NULL ? msg : "Parse error");
         free(msg);
         ui->load_position_parse_ok = false;
       }

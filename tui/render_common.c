@@ -195,17 +195,17 @@ void draw_box_styled_ex(struct ncplane *plane, const Theme *theme, int top_row,
       //    moves with the cursor onto a sub-element row.
       //  - unfocused: dim "[N]" hint.
       if (focused && !badge_secondary) {
-        snprintf(buf, sizeof(buf), "[%d>", hotkey);
+        (void)snprintf(buf, sizeof(buf), "[%d>", hotkey);
         theme_apply_fg(plane, theme->bg);
         theme_apply_bg(plane, theme->fg);
         ncplane_set_styles(plane, NCSTYLE_BOLD);
       } else if (focused) {
-        snprintf(buf, sizeof(buf), "[%d]", hotkey);
+        (void)snprintf(buf, sizeof(buf), "[%d]", hotkey);
         theme_apply_fg(plane, theme->fg);
         theme_apply_bg(plane, border_bg);
         ncplane_set_styles(plane, NCSTYLE_BOLD);
       } else {
-        snprintf(buf, sizeof(buf), "[%d]", hotkey);
+        (void)snprintf(buf, sizeof(buf), "[%d]", hotkey);
         theme_apply_fg(plane, theme->modal_shortcut_fg);
         theme_apply_bg(plane, border_bg);
       }
@@ -240,7 +240,8 @@ void format_clock(int seconds, char *buf, size_t buf_size) {
   const int magnitude = negative ? -seconds : seconds;
   const int minutes = magnitude / 60;
   const int secs = magnitude % 60;
-  snprintf(buf, buf_size, "%s%d:%02d", negative ? "-" : "", minutes, secs);
+  (void)snprintf(buf, buf_size, "%s%d:%02d", negative ? "-" : "", minutes,
+                 secs);
 }
 // Reorder an alphagram-style string (e.g. "AEHIIRV" or "?AAEIN") so
 // it reads in the user's chosen rack-sort order. Used for the
@@ -505,14 +506,14 @@ void render_move_styled(struct ncplane *plane, int row, int col,
 // roll smoothly rather than in big jumps.
 void format_count_compact(uint64_t n, char *buf, size_t bufsz) {
   if (n >= 1000000000000ULL) {
-    snprintf(buf, bufsz, "%.2fT", (double)n / 1e12);
+    (void)snprintf(buf, bufsz, "%.2fT", (double)n / 1e12);
   } else if (n >= 1000000000ULL) {
-    snprintf(buf, bufsz, "%.2fB", (double)n / 1e9);
+    (void)snprintf(buf, bufsz, "%.2fB", (double)n / 1e9);
   } else if (n >= 1000000ULL) {
-    snprintf(buf, bufsz, "%.2fM", (double)n / 1e6);
+    (void)snprintf(buf, bufsz, "%.2fM", (double)n / 1e6);
   } else if (n >= 10000ULL) {
-    snprintf(buf, bufsz, "%lluK", (unsigned long long)(n / 1000ULL));
+    (void)snprintf(buf, bufsz, "%lluK", n / 1000ULL);
   } else {
-    snprintf(buf, bufsz, "%llu", (unsigned long long)n);
+    (void)snprintf(buf, bufsz, "%llu", (unsigned long long)n);
   }
 }

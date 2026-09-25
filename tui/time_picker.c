@@ -77,9 +77,9 @@ static void render_picker(struct ncplane *plane, const Theme *theme,
 
   theme_apply_fg(plane, theme->dim_fg);
   char hint[96];
-  snprintf(hint, sizeof(hint),
-           "↑/↓ or j/k navigate   1–%d jump   Enter confirm   Esc cancel",
-           PRESET_COUNT);
+  (void)snprintf(hint, sizeof(hint),
+                 "↑/↓ or j/k navigate   1–%d jump   Enter confirm   Esc cancel",
+                 PRESET_COUNT);
   ncplane_putstr_yx(plane, (int)plane_rows - 2, 4, hint);
 }
 

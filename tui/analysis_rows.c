@@ -87,13 +87,15 @@ static int fill_analysis_rows_from_sim(const TuiGameState *state,
     // preserves the leading-space pad that the leave column relies
     // on for its 1-col visual gap from the win%.
     if (win_pct >= 99.95) {
-      snprintf(rows[i].primary, sizeof(rows[i].primary), "  100%%");
+      (void)snprintf(rows[i].primary, sizeof(rows[i].primary), "  100%%");
     } else {
-      snprintf(rows[i].primary, sizeof(rows[i].primary), "%5.1f%%", win_pct);
+      (void)snprintf(rows[i].primary, sizeof(rows[i].primary), "%5.1f%%",
+                     win_pct);
     }
-    snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+6.1f", eq_pts);
+    (void)snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+6.1f",
+                   eq_pts);
     const int play_score = equity_to_int(move_get_score(move));
-    snprintf(rows[i].score, sizeof(rows[i].score), "%d", play_score);
+    (void)snprintf(rows[i].score, sizeof(rows[i].score), "%d", play_score);
     rows[i].score_value = play_score;
     rows[i].primary_value = win_pct;
     rows[i].secondary_value = eq_pts;
@@ -171,7 +173,7 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
     // already conveys win/loss, and the W/L being a single char
     // got eaten by the leave column visually.
     rows[i].primary[0] = '\0';
-    snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+d", value);
+    (void)snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+d", value);
 
     StringBuilder *sb = string_builder_create();
     string_builder_add_move(sb, snap->board, move, state->ld, false);
@@ -271,16 +273,17 @@ static int fill_analysis_rows_from_peg(const TuiGameState *state,
     const Move *move = &cand->move;
     const double win_pct = cand->win_pct * 100.0;
     if (win_pct >= 99.95) {
-      snprintf(rows[row_idx].primary, sizeof(rows[row_idx].primary), "  100%%");
+      (void)snprintf(rows[row_idx].primary, sizeof(rows[row_idx].primary),
+                     "  100%%");
     } else {
-      snprintf(rows[row_idx].primary, sizeof(rows[row_idx].primary), "%5.1f%%",
-               win_pct);
+      (void)snprintf(rows[row_idx].primary, sizeof(rows[row_idx].primary),
+                     "%5.1f%%", win_pct);
     }
-    snprintf(rows[row_idx].secondary, sizeof(rows[row_idx].secondary), "%+6.1f",
-             cand->mean_spread);
+    (void)snprintf(rows[row_idx].secondary, sizeof(rows[row_idx].secondary),
+                   "%+6.1f", cand->mean_spread);
     const int play_score = equity_to_int(move_get_score(move));
-    snprintf(rows[row_idx].score, sizeof(rows[row_idx].score), "%d",
-             play_score);
+    (void)snprintf(rows[row_idx].score, sizeof(rows[row_idx].score), "%d",
+                   play_score);
     rows[row_idx].score_value = play_score;
     rows[row_idx].primary_value = win_pct;
     rows[row_idx].secondary_value = cand->mean_spread;
@@ -430,9 +433,9 @@ void populate_frame_analysis_rows(TuiGameState *state) {
     if (!e->pending && e->move_str[0] != '\0') {
       AnalysisRow *row = &state->last_rendered_analysis_rows[0];
       memset(row, 0, sizeof(*row));
-      snprintf(row->move, sizeof(row->move), "%s", e->move_str);
-      snprintf(row->leave, sizeof(row->leave), "%s", e->leave_str);
-      snprintf(row->score, sizeof(row->score), "%d", e->score);
+      (void)snprintf(row->move, sizeof(row->move), "%s", e->move_str);
+      (void)snprintf(row->leave, sizeof(row->leave), "%s", e->leave_str);
+      (void)snprintf(row->score, sizeof(row->score), "%d", e->score);
       row->score_value = e->score;
       row->candidate_player_idx = e->player_idx;
       row->valid = true;

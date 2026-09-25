@@ -4,7 +4,7 @@
 #include "../src/ent/sim_results.h"
 #include "../src/impl/endgame.h"
 #include "game_state.h"
-#include "mach_compat.h" // IWYU pragma: keep
+#include "mach_compat.h"
 #include "render_common.h"
 #include "render_layout.h"
 #include "theme.h"
@@ -67,9 +67,8 @@ void tui_debug_record_frame_us(long frame_us) {
   if (frame_us > max_in_window) {
     max_in_window = frame_us;
   }
-  const long since_start_ms =
-      (long)(now.tv_sec - window_start.tv_sec) * 1000L +
-      (now.tv_nsec - window_start.tv_nsec) / 1000000L;
+  const long since_start_ms = (long)(now.tv_sec - window_start.tv_sec) * 1000L +
+                              (now.tv_nsec - window_start.tv_nsec) / 1000000L;
   if (since_start_ms >= 1000) {
     atomic_store(&g_max_frame_us, max_in_window);
     max_in_window = 0;
@@ -183,9 +182,10 @@ void render_pending_bar(struct ncplane *plane, const Theme *theme,
         state->active_load_rit ? "on" : "off",
         state->pending_load_rit ? "on" : "off");
   }
-  snprintf(buf + written,
-           sizeof(buf) > (size_t)written ? sizeof(buf) - (size_t)written : 0,
-           " \xc2\xb7 restart to apply");
+  (void)snprintf(buf + written,
+                 sizeof(buf) > (size_t)written ? sizeof(buf) - (size_t)written
+                                               : 0,
+                 " \xc2\xb7 restart to apply");
   ncplane_putstr_yx(plane, row, 0, buf);
 }
 // Command bar: always-on row directly above the status bar. Hosts
@@ -245,7 +245,8 @@ void render_command_palette(struct ncplane *plane, const Theme *theme,
   if (n_match == 0) {
     // Single-line "No commands match" message.
     char buf[128];
-    snprintf(buf, sizeof(buf), " No commands match \"/%s\"", state->slash_buf);
+    (void)snprintf(buf, sizeof(buf), " No commands match \"/%s\"",
+                   state->slash_buf);
     theme_apply_fg(plane, theme->dim_fg);
     theme_apply_bg(plane, theme->bg);
     ncplane_set_styles(plane, 0);
@@ -492,19 +493,19 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
         decimals = 2;
       }
     }
-    snprintf(mem_str, sizeof(mem_str), " \xc2\xb7 %.*f%s mem", decimals, val,
-             unit);
+    (void)snprintf(mem_str, sizeof(mem_str), " \xc2\xb7 %.*f%s mem", decimals,
+                   val, unit);
   }
   char dim_str[48];
   unsigned cdy_now = 0;
   unsigned cdx_now = 0;
   ncplane_pixel_geom(plane, NULL, NULL, &cdy_now, &cdx_now, NULL, NULL);
   if (cdy_now > 0 && cdx_now > 0) {
-    snprintf(dim_str, sizeof(dim_str), " \xc2\xb7 %ux%u (%ux%u)", L->plane_cols,
-             L->plane_rows, cdx_now, cdy_now);
+    (void)snprintf(dim_str, sizeof(dim_str), " \xc2\xb7 %ux%u (%ux%u)",
+                   L->plane_cols, L->plane_rows, cdx_now, cdy_now);
   } else {
-    snprintf(dim_str, sizeof(dim_str), " \xc2\xb7 %ux%u", L->plane_cols,
-             L->plane_rows);
+    (void)snprintf(dim_str, sizeof(dim_str), " \xc2\xb7 %ux%u", L->plane_cols,
+                   L->plane_rows);
   }
   // FPS is normally hidden — only surfaces when we're off the 60Hz
   // target (under 55 or over 70). When shown it gets bold + error_fg
@@ -514,10 +515,10 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   const int fps_int = (int)(fps + 0.5);
   const bool show_fps = fps > 0.0 && (fps_int < 55 || fps_int > 70);
   char left_buf[192];
-  snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s",
-           language_for_lexicon(state->lexicon), state->lexicon);
+  (void)snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s",
+                 language_for_lexicon(state->lexicon), state->lexicon);
   char right_buf[64];
-  snprintf(right_buf, sizeof(right_buf), "%s%s", mem_str, dim_str);
+  (void)snprintf(right_buf, sizeof(right_buf), "%s%s", mem_str, dim_str);
   // NPS: only shown while the bot is computing. Sim mode reports
   // iters*(plies+1); endgame reports the per-worker atomic sum.
   // measure_nps EMA-smooths the per-frame delta so the readout is
@@ -545,7 +546,7 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, row, 0, left_buf);
   if (show_fps) {
     char fps_buf[24];
-    snprintf(fps_buf, sizeof(fps_buf), " \xc2\xb7 %d fps", fps_int);
+    (void)snprintf(fps_buf, sizeof(fps_buf), " \xc2\xb7 %d fps", fps_int);
     theme_apply_fg(plane, theme->error_fg);
     theme_apply_bg(plane, theme->dim_fg);
     ncplane_set_styles(plane, NCSTYLE_BOLD);
@@ -559,7 +560,7 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
     char nps_str[16];
     format_count_compact((uint64_t)(nps + 0.5), nps_str, sizeof(nps_str));
     char nps_buf[32];
-    snprintf(nps_buf, sizeof(nps_buf), " \xc2\xb7 %s nps", nps_str);
+    (void)snprintf(nps_buf, sizeof(nps_buf), " \xc2\xb7 %s nps", nps_str);
     ncplane_putstr(plane, nps_buf);
   }
   // Keypress-to-pixels latency (the time from a keystroke dirtying a
@@ -567,8 +568,8 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   const long input_lag_us = atomic_load(&g_input_lag_us);
   if (input_lag_us >= 0) {
     char lag_buf[32];
-    snprintf(lag_buf, sizeof(lag_buf), " \xc2\xb7 %ld ms lag",
-             (input_lag_us + 500) / 1000);
+    (void)snprintf(lag_buf, sizeof(lag_buf), " \xc2\xb7 %ld ms lag",
+                   (input_lag_us + 500) / 1000);
     ncplane_putstr(plane, lag_buf);
   }
   // Transient notice (e.g. "Copied CGP"). Expires via notice_expires_at;
@@ -584,8 +585,8 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
          notice_now.tv_nsec < state->notice_expires_at.tv_nsec);
     if (notice_live) {
       char notice_seg[80];
-      snprintf(notice_seg, sizeof(notice_seg), " \xc2\xb7 %s",
-               state->notice_buf);
+      (void)snprintf(notice_seg, sizeof(notice_seg), " \xc2\xb7 %s",
+                     state->notice_buf);
       ncplane_set_styles(plane, NCSTYLE_BOLD);
       ncplane_putstr(plane, notice_seg);
       ncplane_set_styles(plane, 0);

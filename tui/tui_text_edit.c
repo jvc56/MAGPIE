@@ -53,7 +53,7 @@ bool tui_text_readline_key(uint32_t key, char *buf, int *cursor, int *len,
       end++;
     }
     if (end > *cursor) {
-      memmove(&buf[*cursor], &buf[end], (size_t)(*len - end + 1));
+      memmove(&buf[*cursor], &buf[end], (size_t)(*len - end) + 1);
       *len -= (end - *cursor);
       *dirty = true;
     }
@@ -66,7 +66,7 @@ bool tui_text_readline_key(uint32_t key, char *buf, int *cursor, int *len,
     }
     if (beg < *cursor) {
       const int drop = *cursor - beg;
-      memmove(&buf[beg], &buf[*cursor], (size_t)(*len - *cursor + 1));
+      memmove(&buf[beg], &buf[*cursor], (size_t)(*len - *cursor) + 1);
       *len -= drop;
       *cursor = beg;
       *dirty = true;
@@ -85,7 +85,7 @@ bool tui_text_readline_key(uint32_t key, char *buf, int *cursor, int *len,
       beg--;
     }
     if (beg < end) {
-      memmove(&buf[beg], &buf[end], (size_t)(*len - end + 1));
+      memmove(&buf[beg], &buf[end], (size_t)(*len - end) + 1);
       *len -= (end - beg);
       *cursor = beg;
       *dirty = true;

@@ -18,7 +18,8 @@ bool tui_reinit_game_state_if_needed(TuiGameState *state, TuiSession *session,
     return true;
   }
   char new_lexicon[TUI_LEXICON_NAME_MAX];
-  snprintf(new_lexicon, sizeof(new_lexicon), "%s", state->pending_lexicon);
+  (void)snprintf(new_lexicon, sizeof(new_lexicon), "%s",
+                 state->pending_lexicon);
   const bool new_load_rit = state->pending_load_rit;
   const int saved_sim_plies = state->sim_plies;
   const int saved_sim_candidates = state->sim_candidates;
@@ -32,8 +33,8 @@ bool tui_reinit_game_state_if_needed(TuiGameState *state, TuiSession *session,
       return false;
     }
   } else {
-    snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon), "%s",
-             new_lexicon);
+    (void)snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
+                   "%s", new_lexicon);
   }
   state->sim_plies = saved_sim_plies;
   state->sim_candidates = saved_sim_candidates;

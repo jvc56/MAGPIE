@@ -23,7 +23,6 @@
 #include "tui_crash.h"
 #include "tui_ui_state.h"
 #include "tui_ui_types.h"
-#include <fcntl.h>
 #include <locale.h>
 #include <notcurses/notcurses.h>
 #include <pthread.h>
@@ -129,10 +128,10 @@ static void init_ui_state(TuiUiState *ui, const TuiConfig *loaded) {
   // the focused row / name caret. Defaults focus to Start so a quick
   // Enter launches with the defaults.
   ui->play_setup_focus = TUI_PLAY_SETUP_START;
-  snprintf(ui->play_setup_human_name, sizeof(ui->play_setup_human_name), "%s",
-           "You");
-  snprintf(ui->play_setup_computer_name, sizeof(ui->play_setup_computer_name),
-           "%s", "Computer");
+  (void)snprintf(ui->play_setup_human_name, sizeof(ui->play_setup_human_name),
+                 "%s", "You");
+  (void)snprintf(ui->play_setup_computer_name,
+                 sizeof(ui->play_setup_computer_name), "%s", "Computer");
   ui->play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
   ui->play_setup_name_cursor = 0;
   // Overtime rule + penalty rate scratch. Seeded from the config (or

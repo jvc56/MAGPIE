@@ -433,9 +433,9 @@ void tui_game_render_startup_menu(struct ncplane *plane, const Theme *theme,
   };
   for (int i = 0; i < TUI_STARTUP_ITEM_COUNT; i++) {
     if (item_disabled[i]) {
-      snprintf(buf[i], ROW_BUF, "%s (coming soon)", labels[i]);
+      (void)snprintf(buf[i], ROW_BUF, "%s (coming soon)", labels[i]);
     } else {
-      snprintf(buf[i], ROW_BUF, "%s", labels[i]);
+      (void)snprintf(buf[i], ROW_BUF, "%s", labels[i]);
     }
     items[i] = buf[i];
     shortcuts[i] = item_disabled[i] ? NULL : shortcut_chars[i];
@@ -466,10 +466,10 @@ static void format_setup_row(char *out, size_t out_size, int content_w,
     pad = 1;
   }
   if (focused) {
-    snprintf(out, out_size, "%s%*s\xe2\x97\x80 %s \xe2\x96\xb6", label, pad, "",
-             value);
+    (void)snprintf(out, out_size, "%s%*s\xe2\x97\x80 %s \xe2\x96\xb6", label,
+                   pad, "", value);
   } else {
-    snprintf(out, out_size, "%s%*s%s", label, pad, "", value);
+    (void)snprintf(out, out_size, "%s%*s%s", label, pad, "", value);
   }
 }
 void tui_game_render_watch_setup(struct ncplane *plane, const Theme *theme,
@@ -489,13 +489,13 @@ void tui_game_render_watch_setup(struct ncplane *plane, const Theme *theme,
           : NULL;
   char time_value[24];
   if (time_label != NULL) {
-    snprintf(time_value, sizeof(time_value), "%s", time_label);
+    (void)snprintf(time_value, sizeof(time_value), "%s", time_label);
   } else if (time_seconds <= 0) {
-    snprintf(time_value, sizeof(time_value), "untimed");
+    (void)snprintf(time_value, sizeof(time_value), "untimed");
   } else if (time_seconds % 60 == 0) {
-    snprintf(time_value, sizeof(time_value), "%d min", time_seconds / 60);
+    (void)snprintf(time_value, sizeof(time_value), "%d min", time_seconds / 60);
   } else {
-    snprintf(time_value, sizeof(time_value), "%ds", time_seconds);
+    (void)snprintf(time_value, sizeof(time_value), "%ds", time_seconds);
   }
 
   // Modal width chosen to comfortably fit the widest row. "Sim
@@ -520,14 +520,14 @@ void tui_game_render_watch_setup(struct ncplane *plane, const Theme *theme,
                    lexicon != NULL && lexicon[0] != '\0' ? lexicon : "(none)",
                    focus_lex);
   char plies_str[8];
-  snprintf(plies_str, sizeof(plies_str), "%d", sim_plies);
+  (void)snprintf(plies_str, sizeof(plies_str), "%d", sim_plies);
   format_setup_row(buf[TUI_WATCH_SETUP_SIM_PLIES], ROW_BUF, CONTENT_W,
                    "Sim plies", plies_str, focus_plies);
   char cands_str[8];
-  snprintf(cands_str, sizeof(cands_str), "%d", sim_candidates);
+  (void)snprintf(cands_str, sizeof(cands_str), "%d", sim_candidates);
   format_setup_row(buf[TUI_WATCH_SETUP_SIM_CANDIDATES], ROW_BUF, CONTENT_W,
                    "Sim candidates", cands_str, focus_cands);
-  snprintf(buf[TUI_WATCH_SETUP_START], ROW_BUF, "Start game");
+  (void)snprintf(buf[TUI_WATCH_SETUP_START], ROW_BUF, "Start game");
   for (int i = 0; i < TUI_WATCH_SETUP_ITEM_COUNT; i++) {
     items[i] = buf[i];
   }
@@ -612,7 +612,7 @@ void tui_game_render_annotate_setup(struct ncplane *plane, const Theme *theme,
   format_setup_text_row(buf[TUI_ANNOTATE_SETUP_P2_NAME], ROW_BUF, CONTENT_W,
                         NAME_ZONE_W, "Player 2",
                         p2_name != NULL ? p2_name : "");
-  snprintf(buf[TUI_ANNOTATE_SETUP_START], ROW_BUF, "Start");
+  (void)snprintf(buf[TUI_ANNOTATE_SETUP_START], ROW_BUF, "Start");
   for (int i = 0; i < TUI_ANNOTATE_SETUP_ITEM_COUNT; i++) {
     items[i] = buf[i];
     cursor_cols[i] = -1;
@@ -822,7 +822,7 @@ static void render_load_text_modal(struct ncplane *plane, const Theme *theme,
     theme_apply_fg(mp, theme->error_fg);
     theme_apply_bg(mp, theme->modal_bg);
     char trunc[96];
-    snprintf(trunc, sizeof(trunc), "%.*s", interior_w, error);
+    (void)snprintf(trunc, sizeof(trunc), "%.*s", interior_w, error);
     ncplane_putstr_yx(mp, err_row, INTERIOR_LEFT, trunc);
   }
 }
@@ -840,8 +840,8 @@ void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
   const char *items[8] = {0};
   const int rows = n < 8 ? n : 8;
   for (int i = 0; i < rows; i++) {
-    snprintf(buf[i], ROW_BUF, "%-12s %s", tui_time_picker_preset_label(i),
-             tui_time_picker_preset_blurb(i));
+    (void)snprintf(buf[i], ROW_BUF, "%-12s %s", tui_time_picker_preset_label(i),
+                   tui_time_picker_preset_blurb(i));
     items[i] = buf[i];
   }
   render_modal(plane, theme, "Time control", items, NULL, rows, focus, 28);
@@ -985,13 +985,13 @@ void tui_game_render_play_setup(
           : NULL;
   char time_value[24];
   if (time_label != NULL) {
-    snprintf(time_value, sizeof(time_value), "%s", time_label);
+    (void)snprintf(time_value, sizeof(time_value), "%s", time_label);
   } else if (time_seconds <= 0) {
-    snprintf(time_value, sizeof(time_value), "untimed");
+    (void)snprintf(time_value, sizeof(time_value), "untimed");
   } else if (time_seconds % 60 == 0) {
-    snprintf(time_value, sizeof(time_value), "%d min", time_seconds / 60);
+    (void)snprintf(time_value, sizeof(time_value), "%d min", time_seconds / 60);
   } else {
-    snprintf(time_value, sizeof(time_value), "%ds", time_seconds);
+    (void)snprintf(time_value, sizeof(time_value), "%ds", time_seconds);
   }
   format_setup_row(buf[TUI_PLAY_SETUP_TIME], ROW_BUF, CONTENT_W, "Time",
                    time_value, focus == TUI_PLAY_SETUP_TIME);
@@ -1009,9 +1009,10 @@ void tui_game_render_play_setup(
   // columns short.
   char cap_value[24];
   if (enabled[TUI_PLAY_SETUP_OVERTIME_CAP]) {
-    snprintf(cap_value, sizeof(cap_value), "%d min", overtime_cap_minutes);
+    (void)snprintf(cap_value, sizeof(cap_value), "%d min",
+                   overtime_cap_minutes);
   } else {
-    snprintf(cap_value, sizeof(cap_value), "n/a");
+    (void)snprintf(cap_value, sizeof(cap_value), "n/a");
   }
   format_setup_row(buf[TUI_PLAY_SETUP_OVERTIME_CAP], ROW_BUF, CONTENT_W,
                    "Overtime cap", cap_value,
@@ -1051,15 +1052,15 @@ void tui_game_render_play_setup(
                    lexicon != NULL && lexicon[0] != '\0' ? lexicon : "(none)",
                    focus == TUI_PLAY_SETUP_LEXICON);
   char plies_str[8];
-  snprintf(plies_str, sizeof(plies_str), "%d", sim_plies);
+  (void)snprintf(plies_str, sizeof(plies_str), "%d", sim_plies);
   format_setup_row(buf[TUI_PLAY_SETUP_SIM_PLIES], ROW_BUF, CONTENT_W,
                    "Sim plies", plies_str, focus == TUI_PLAY_SETUP_SIM_PLIES);
   char cands_str[8];
-  snprintf(cands_str, sizeof(cands_str), "%d", sim_candidates);
+  (void)snprintf(cands_str, sizeof(cands_str), "%d", sim_candidates);
   format_setup_row(buf[TUI_PLAY_SETUP_SIM_CANDIDATES], ROW_BUF, CONTENT_W,
                    "Sim candidates", cands_str,
                    focus == TUI_PLAY_SETUP_SIM_CANDIDATES);
-  snprintf(buf[TUI_PLAY_SETUP_START], ROW_BUF, "Start");
+  (void)snprintf(buf[TUI_PLAY_SETUP_START], ROW_BUF, "Start");
   for (int i = 0; i < TUI_PLAY_SETUP_ITEM_COUNT; i++) {
     items[i] = buf[i];
     cursor_cols[i] = -1;
@@ -1087,9 +1088,10 @@ void tui_game_render_play_setup(
 static void format_setting_row(char *out, size_t out_size, const char *label,
                                const char *value, bool focused) {
   if (focused) {
-    snprintf(out, out_size, "%-13s\xe2\x97\x80 %s \xe2\x96\xb6", label, value);
+    (void)snprintf(out, out_size, "%-13s\xe2\x97\x80 %s \xe2\x96\xb6", label,
+                   value);
   } else {
-    snprintf(out, out_size, "%-13s%s", label, value);
+    (void)snprintf(out, out_size, "%-13s%s", label, value);
   }
 }
 static const char *premium_labels_value(TuiPremiumLabels labels) {
@@ -1163,7 +1165,8 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
   char scale_label[96];
   const bool scale_available = pixel_supported && font_available;
   if (!scale_available) {
-    snprintf(scale_label, sizeof(scale_label), "Scale        unsupported here");
+    (void)snprintf(scale_label, sizeof(scale_label),
+                   "Scale        unsupported here");
   } else {
     unsigned plane_rows = 0;
     unsigned plane_cols = 0;
@@ -1175,9 +1178,9 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
       // The setting stays editable so the user can step back to 1x
       // without resizing first, but the value spells out why the
       // board is still rendering as 1x.
-      snprintf(value_buf, sizeof(value_buf), "2x \xc2\xb7 too small");
+      (void)snprintf(value_buf, sizeof(value_buf), "2x \xc2\xb7 too small");
     } else {
-      snprintf(value_buf, sizeof(value_buf), "%dx", board_scale);
+      (void)snprintf(value_buf, sizeof(value_buf), "%dx", board_scale);
     }
     format_setting_row(scale_label, sizeof(scale_label), "Scale", value_buf,
                        focus == TUI_SETTINGS_SCALE);
@@ -1186,7 +1189,7 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
   // Antialiasing row — only meaningful when 2x is engaged.
   char aa_label[96];
   if (!scale_available || board_scale < 2) {
-    snprintf(aa_label, sizeof(aa_label), "Antialias    n/a at 1x");
+    (void)snprintf(aa_label, sizeof(aa_label), "Antialias    n/a at 1x");
   } else {
     format_setting_row(aa_label, sizeof(aa_label), "Antialias",
                        antialias ? "on" : "off", focus == TUI_SETTINGS_AA);
@@ -1195,7 +1198,7 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
   // Score subscripts row — also 2x-only.
   char sub_label[96];
   if (!scale_available || board_scale < 2) {
-    snprintf(sub_label, sizeof(sub_label), "Subscript    n/a at 1x");
+    (void)snprintf(sub_label, sizeof(sub_label), "Subscript    n/a at 1x");
   } else {
     format_setting_row(sub_label, sizeof(sub_label), "Subscript",
                        score_subscripts_value(score_subscripts),
@@ -1205,14 +1208,14 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
   // Border row.
   char border_label[96];
   if (!pixel_supported) {
-    snprintf(border_label, sizeof(border_label),
-             "Border       unsupported here");
+    (void)snprintf(border_label, sizeof(border_label),
+                   "Border       unsupported here");
   } else {
     char value_buf[16];
     if (border_thickness <= 0) {
-      snprintf(value_buf, sizeof(value_buf), "off");
+      (void)snprintf(value_buf, sizeof(value_buf), "off");
     } else {
-      snprintf(value_buf, sizeof(value_buf), "%dpx", border_thickness);
+      (void)snprintf(value_buf, sizeof(value_buf), "%dpx", border_thickness);
     }
     format_setting_row(border_label, sizeof(border_label), "Border", value_buf,
                        focus == TUI_SETTINGS_BORDER);

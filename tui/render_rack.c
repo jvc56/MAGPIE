@@ -291,7 +291,8 @@ void render_rack_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
   char title[32];
-  snprintf(title, sizeof(title), "Rack (%d)", rack_get_total_letters(rack));
+  (void)snprintf(title, sizeof(title), "Rack (%d)",
+                 rack_get_total_letters(rack));
   draw_box_styled(plane, theme, L->rack_top, 0, box_height, L->board_width,
                   title, TUI_FOCUS_RACK, rack_focused);
   const LetterDistribution *ld = state->ld;

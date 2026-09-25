@@ -58,7 +58,7 @@ static bool resolve_default_lexicon(char *out_lexicon, size_t out_size,
                                     const char **out_data_paths) {
   const char *probe = find_data_paths("CSW21");
   if (probe != NULL) {
-    snprintf(out_lexicon, out_size, "CSW21");
+    (void)snprintf(out_lexicon, out_size, "CSW21");
     *out_data_paths = probe;
     return true;
   }

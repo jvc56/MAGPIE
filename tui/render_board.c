@@ -539,7 +539,7 @@ static void render_board_labels_pixel(struct ncplane *plane, const Theme *theme,
     const int inter_digit_gap = (int)((double)cdy * 0.05);
     for (int row = 0; row < BOARD_DIM; row++) {
       char label[4];
-      snprintf(label, sizeof(label), "%2d", row + 1);
+      (void)snprintf(label, sizeof(label), "%2d", row + 1);
       const int cell_top = row * L->board_cell_h * icdy;
       const int cell_h_px = L->board_cell_h * icdy;
       // Center a 1-row-tall label box vertically in the 2-row cell.
@@ -607,8 +607,8 @@ static void render_board_box(struct ncplane *plane, const Theme *theme,
                              const TuiGameState *state, const Layout *L) {
   const int height = L->board_bottom_row + 2; // top border .. bottom border
   char title[32];
-  snprintf(title, sizeof(title), "Board (%d)",
-           board_tile_count(pick_render_board(state)));
+  (void)snprintf(title, sizeof(title), "Board (%d)",
+                 board_tile_count(pick_render_board(state)));
   const bool focused = state->focused_panel == TUI_FOCUS_BOARD;
   draw_box_styled(plane, theme, 0, 0, height, L->board_width, title,
                   TUI_FOCUS_BOARD, focused);
@@ -674,7 +674,7 @@ void render_board(struct ncplane *plane, const Theme *theme,
     theme_apply_fg(plane, theme->dim_fg);
     theme_apply_bg(plane, theme->bg);
     char label[4];
-    snprintf(label, sizeof(label), "%2d", row + 1);
+    (void)snprintf(label, sizeof(label), "%2d", row + 1);
     ncplane_putstr_yx(plane, CELL_ROW_BASE + row, ROW_LABEL_COL, label);
   }
   const Board *brd = pick_render_board(state);

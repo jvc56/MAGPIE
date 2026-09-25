@@ -70,7 +70,7 @@ static void copy_error(ErrorStack *err, char *buf, size_t buf_size) {
   buf[0] = '\0';
   char *msg = error_stack_get_string_and_reset(err);
   if (msg != NULL) {
-    snprintf(buf, buf_size, "%s", msg);
+    (void)snprintf(buf, buf_size, "%s", msg);
     free(msg);
   }
 }
@@ -97,11 +97,11 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   // Snapshot of the settings we're locking in for this session. The
   // pending-change line above the status bar compares these to the
   // live config to decide what "(restart to apply)" should surface.
-  snprintf(out_state->active_lexicon, sizeof(out_state->active_lexicon), "%s",
-           lexicon);
+  (void)snprintf(out_state->active_lexicon, sizeof(out_state->active_lexicon),
+                 "%s", lexicon);
   out_state->active_load_rit = load_rit;
-  snprintf(out_state->pending_lexicon, sizeof(out_state->pending_lexicon), "%s",
-           lexicon);
+  (void)snprintf(out_state->pending_lexicon, sizeof(out_state->pending_lexicon),
+                 "%s", lexicon);
   out_state->pending_load_rit = load_rit;
   if (error_message != NULL && error_message_size > 0) {
     error_message[0] = '\0';
@@ -109,10 +109,10 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
 
   const char *data_paths = find_data_paths(lexicon);
   if (data_paths == NULL) {
-    snprintf(error_message, error_message_size,
-             "lexicon '%s' not found under data/lexica (run "
-             "./download_data.sh from the repo root)",
-             lexicon);
+    (void)snprintf(error_message, error_message_size,
+                   "lexicon '%s' not found under data/lexica (run "
+                   "./download_data.sh from the repo root)",
+                   lexicon);
     return false;
   }
   out_state->data_paths = data_paths;
@@ -215,7 +215,8 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   };
   out_state->game = game_create(&args);
   if (out_state->game == NULL) {
-    snprintf(error_message, error_message_size, "game_create returned NULL");
+    (void)snprintf(error_message, error_message_size,
+                   "game_create returned NULL");
     return init_failed(err, out_state);
   }
 
@@ -588,16 +589,17 @@ size_t tui_game_state_effective_editor_rack(const TuiGameState *state,
     if (oi > 1) {
       qsort(combined, (size_t)oi, 1, char_cmp);
     }
-    snprintf(out, out_size, "%s", combined);
+    (void)snprintf(out, out_size, "%s", combined);
   } else if (state->edit_rack_len > 0 && state->edit_rack_valid &&
              (state->edit_rack_user_modified ||
               state->edit_move_inferred_rack[0] == '\0')) {
     // Steps 2 and 4: a valid buffer wins when user-typed, or when
     // there's no inferred rack to fall back on.
-    snprintf(out, out_size, "%.*s", state->edit_rack_len, state->edit_rack_buf);
+    (void)snprintf(out, out_size, "%.*s", state->edit_rack_len,
+                   state->edit_rack_buf);
     from_buffer = true;
   } else if (state->edit_move_inferred_rack[0] != '\0') {
-    snprintf(out, out_size, "%s", state->edit_move_inferred_rack);
+    (void)snprintf(out, out_size, "%s", state->edit_move_inferred_rack);
   }
   if (out_from_buffer != NULL) {
     *out_from_buffer = from_buffer;
@@ -653,8 +655,8 @@ static void sync_player_rack_to_editor(TuiGameState *state) {
     if (oi > 1) {
       qsort(carryover_combined, (size_t)oi, 1, char_cmp);
     }
-    snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-             carryover_combined);
+    (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                   carryover_combined);
     state->edit_rack_len = (int)strlen(state->edit_rack_buf);
     state->edit_rack_cursor = state->edit_rack_len;
   }
@@ -817,7 +819,7 @@ void tui_game_state_seed_edit_move(TuiGameState *state, const char *move_str) {
 void tui_game_state_edit_move_display(const TuiGameState *state, char *out,
                                       size_t out_size) {
   if (strncmp(state->edit_move_canonical, "ex ", 3) == 0) {
-    snprintf(out, out_size, "-%s", state->edit_move_canonical + 3);
+    (void)snprintf(out, out_size, "-%s", state->edit_move_canonical + 3);
     return;
   }
   if (state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT &&
@@ -826,11 +828,11 @@ void tui_game_state_edit_move_display(const TuiGameState *state, char *out,
     StringBuilder *sb = string_builder_create();
     string_builder_add_move(sb, game_get_board(state->game),
                             state->edit_preview_move, state->ld, false);
-    snprintf(out, out_size, "%s", string_builder_peek(sb));
+    (void)snprintf(out, out_size, "%s", string_builder_peek(sb));
     string_builder_destroy(sb);
     return;
   }
-  snprintf(out, out_size, "%s", state->edit_move_canonical);
+  (void)snprintf(out, out_size, "%s", state->edit_move_canonical);
 }
 
 // Parses the MOVE edit buffer into edit_move_kind / canonical / score /
@@ -912,10 +914,12 @@ static void parse_edit_move_buffer(TuiGameState *state) {
     }
     state->edit_move_kind = TUI_EDIT_MOVE_KIND_EXCHANGE;
     // Canonical form for the engine: "ex <tiles>".
-    snprintf(state->edit_move_canonical, sizeof(state->edit_move_canonical),
-             "ex %.*s", tiles_len, tiles);
-    snprintf(state->edit_move_inferred_rack,
-             sizeof(state->edit_move_inferred_rack), "%.*s", tiles_len, tiles);
+    (void)snprintf(state->edit_move_canonical,
+                   sizeof(state->edit_move_canonical), "ex %.*s", tiles_len,
+                   tiles);
+    (void)snprintf(state->edit_move_inferred_rack,
+                   sizeof(state->edit_move_inferred_rack), "%.*s", tiles_len,
+                   tiles);
     sync_player_rack_to_editor(state);
     state->edit_move_score =
         score_canonical_move(state, state->edit_move_canonical,
@@ -932,8 +936,8 @@ static void parse_edit_move_buffer(TuiGameState *state) {
   // ── Pass ──────────────────────────────────────────────────
   if (is_iequal(t1, t1_len, "pass") && t2_len == 0) {
     state->edit_move_kind = TUI_EDIT_MOVE_KIND_PASS;
-    snprintf(state->edit_move_canonical, sizeof(state->edit_move_canonical),
-             "pass");
+    (void)snprintf(state->edit_move_canonical,
+                   sizeof(state->edit_move_canonical), "pass");
     state->edit_move_score = 0;
     sync_player_rack_to_editor(state);
     return;
@@ -969,10 +973,11 @@ static void parse_edit_move_buffer(TuiGameState *state) {
         }
       }
       state->edit_move_kind = TUI_EDIT_MOVE_KIND_EXCHANGE;
-      snprintf(state->edit_move_canonical, sizeof(state->edit_move_canonical),
-               "ex %.*s", t2_len, t2);
-      snprintf(state->edit_move_inferred_rack,
-               sizeof(state->edit_move_inferred_rack), "%.*s", t2_len, t2);
+      (void)snprintf(state->edit_move_canonical,
+                     sizeof(state->edit_move_canonical), "ex %.*s", t2_len, t2);
+      (void)snprintf(state->edit_move_inferred_rack,
+                     sizeof(state->edit_move_inferred_rack), "%.*s", t2_len,
+                     t2);
       sync_player_rack_to_editor(state);
       state->edit_move_score = score_canonical_move(
           state, state->edit_move_canonical,
@@ -1047,8 +1052,9 @@ static void parse_edit_move_buffer(TuiGameState *state) {
       }
     }
     state->edit_move_kind = TUI_EDIT_MOVE_KIND_PLACEMENT;
-    snprintf(state->edit_move_canonical, sizeof(state->edit_move_canonical),
-             "%.*s %.*s", t1_len, t1, t2_len, t2);
+    (void)snprintf(state->edit_move_canonical,
+                   sizeof(state->edit_move_canonical), "%.*s %.*s", t1_len, t1,
+                   t2_len, t2);
     infer_rack_from_word(t2, t2_len, state->edit_move_inferred_rack,
                          sizeof(state->edit_move_inferred_rack));
     sync_player_rack_to_editor(state);
@@ -1161,13 +1167,13 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
              state->edit_rack_valid && state->edit_rack_len > 0 &&
              state->edit_move_inferred_rack[0] != '\0') {
     char rack_buf[24];
-    snprintf(rack_buf, sizeof(rack_buf), "%.*s", state->edit_rack_len,
-             state->edit_rack_buf);
+    (void)snprintf(rack_buf, sizeof(rack_buf), "%.*s", state->edit_rack_len,
+                   state->edit_rack_buf);
     char leave_buf[16];
     if (compute_leave(rack_buf, state->edit_move_inferred_rack, leave_buf,
                       sizeof(leave_buf))) {
-      snprintf(state->edit_move_leave, sizeof(state->edit_move_leave), "%s",
-               leave_buf);
+      (void)snprintf(state->edit_move_leave, sizeof(state->edit_move_leave),
+                     "%s", leave_buf);
     }
   }
   // Re-sync the rack panel: the rack buffer might override the
@@ -1237,19 +1243,19 @@ static void canonicalize_history_move(const char *display, char *out,
     return;
   }
   if (strcmp(display, "pass") == 0) {
-    snprintf(out, out_cap, "pass");
+    (void)snprintf(out, out_cap, "pass");
     return;
   }
   if (display[0] == '-') {
-    snprintf(out, out_cap, "ex %s", display + 1);
+    (void)snprintf(out, out_cap, "ex %s", display + 1);
     return;
   }
   if (strncmp(display, "ex ", 3) == 0) {
-    snprintf(out, out_cap, "%s", display);
+    (void)snprintf(out, out_cap, "%s", display);
     return;
   }
   if (strncmp(display, "(exch ", 6) == 0) {
-    snprintf(out, out_cap, "ex %s", display + 6);
+    (void)snprintf(out, out_cap, "ex %s", display + 6);
     char *paren = strchr(out, ')');
     if (paren != NULL) {
       *paren = '\0';
@@ -1304,16 +1310,16 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     const Player *player = game_get_player(state->game, e->player_idx);
     if (player == NULL) {
       if (record_errors) {
-        snprintf(e->error_str, sizeof(e->error_str),
-                 "internal: player_idx %d out of range", e->player_idx);
+        (void)snprintf(e->error_str, sizeof(e->error_str),
+                       "internal: player_idx %d out of range", e->player_idx);
       }
       break;
     }
     Rack *rack = player_get_rack(player);
     if (rack == NULL) {
       if (record_errors) {
-        snprintf(e->error_str, sizeof(e->error_str),
-                 "internal: player has no rack");
+        (void)snprintf(e->error_str, sizeof(e->error_str),
+                       "internal: player has no rack");
       }
       break;
     }
@@ -1394,7 +1400,7 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     }
     if (bag_overrun) {
       if (record_errors) {
-        snprintf(e->error_str, sizeof(e->error_str), "%s", overrun_msg);
+        (void)snprintf(e->error_str, sizeof(e->error_str), "%s", overrun_msg);
       }
       break;
     }
@@ -1403,13 +1409,13 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     // board and rack as they were, which is a pass.
     char canonical[64];
     if (e->challenged_off) {
-      snprintf(canonical, sizeof(canonical), "pass");
+      (void)snprintf(canonical, sizeof(canonical), "pass");
     } else {
       canonicalize_history_move(e->move_str, canonical, sizeof(canonical));
     }
     if (canonical[0] == '\0') {
       if (record_errors) {
-        snprintf(e->error_str, sizeof(e->error_str), "no move specified");
+        (void)snprintf(e->error_str, sizeof(e->error_str), "no move specified");
       }
       break;
     }
@@ -1436,10 +1442,10 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
           if (L > 0 && err_msg[L - 1] == '\n') {
             err_msg[L - 1] = '\0';
           }
-          snprintf(e->error_str, sizeof(e->error_str), "%s", err_msg);
+          (void)snprintf(e->error_str, sizeof(e->error_str), "%s", err_msg);
         } else {
-          snprintf(e->error_str, sizeof(e->error_str), "invalid move: %s",
-                   canonical);
+          (void)snprintf(e->error_str, sizeof(e->error_str), "invalid move: %s",
+                         canonical);
         }
         if (err_msg != NULL) {
           free(err_msg);

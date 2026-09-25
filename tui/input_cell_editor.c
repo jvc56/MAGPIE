@@ -104,8 +104,8 @@ static bool cell_editor_step_turn(TuiGameState *state, uint32_t key) {
     tui_commit_edit_and_revalidate(state);
     TuiHistoryEntry *e = &state->history[target];
     tui_game_state_seed_edit_move(state, e->move_str);
-    snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-             e->rack_str);
+    (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                   e->rack_str);
     state->edit_rack_len = (int)strlen(state->edit_rack_buf);
     state->edit_rack_cursor = state->edit_rack_len;
     // Treat a non-empty stored rack as user-authored so the
@@ -147,8 +147,8 @@ static bool cell_editor_back_to_move(TuiGameState *state, int idx) {
     raw[n_raw] = '\0';
     tui_format_alphagram_for_sort(raw, state->ld, state->rack_sort, sorted_rack,
                                   sizeof(sorted_rack));
-    snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-             sorted_rack);
+    (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                   sorted_rack);
     state->edit_rack_len = (int)strlen(state->edit_rack_buf);
     state->edit_rack_cursor = state->edit_rack_len;
   }
@@ -164,10 +164,11 @@ static bool cell_editor_back_to_move(TuiGameState *state, int idx) {
     // auto-derived edit_move_leave. Otherwise fall back to
     // the auto-derived value.
     if (state->edit_leave_len > 0) {
-      snprintf(e->leave_str, sizeof(e->leave_str), "%s", state->edit_leave_buf);
+      (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                     state->edit_leave_buf);
     } else if (state->edit_move_leave[0] != '\0') {
-      snprintf(e->leave_str, sizeof(e->leave_str), "%s",
-               state->edit_move_leave);
+      (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                     state->edit_move_leave);
     }
   }
   state->edit_field = TUI_EDIT_FIELD_MOVE;
@@ -216,9 +217,9 @@ static bool cell_editor_advance_to_rack(TuiGameState *state, int idx) {
           tui_format_alphagram_for_sort(state->edit_move_inferred_rack,
                                         state->ld, state->rack_sort, sorted,
                                         sizeof(sorted));
-          snprintf(e->rack_str, sizeof(e->rack_str), "%s", sorted);
-          snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-                   sorted);
+          (void)snprintf(e->rack_str, sizeof(e->rack_str), "%s", sorted);
+          (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf),
+                         "%s", sorted);
           state->edit_rack_len = (int)strlen(state->edit_rack_buf);
           state->edit_rack_cursor = state->edit_rack_len;
         } else {
@@ -230,11 +231,11 @@ static bool cell_editor_advance_to_rack(TuiGameState *state, int idx) {
         e->leave_str[0] = '\0';
         state->edit_move_leave[0] = '\0';
       } else if (state->edit_leave_len > 0) {
-        snprintf(e->leave_str, sizeof(e->leave_str), "%s",
-                 state->edit_leave_buf);
+        (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                       state->edit_leave_buf);
       } else if (state->edit_move_leave[0] != '\0') {
-        snprintf(e->leave_str, sizeof(e->leave_str), "%s",
-                 state->edit_move_leave);
+        (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                       state->edit_move_leave);
       } else {
         e->leave_str[0] = '\0';
       }
@@ -255,8 +256,8 @@ static bool cell_editor_advance_to_rack(TuiGameState *state, int idx) {
     tui_format_alphagram_for_sort(state->edit_move_inferred_rack, state->ld,
                                   state->rack_sort, sorted_seed,
                                   sizeof(sorted_seed));
-    snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-             sorted_seed);
+    (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                   sorted_seed);
     state->edit_rack_len = (int)strlen(state->edit_rack_buf);
     state->edit_rack_cursor = state->edit_rack_len;
     // Auto-seed from inferred — the user hasn't taken
@@ -301,18 +302,18 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
                                          sizeof(e->move_str));
         if (e->rack_str[0] == '\0' &&
             state->edit_move_inferred_rack[0] != '\0') {
-          snprintf(e->rack_str, sizeof(e->rack_str), "%s",
-                   state->edit_move_inferred_rack);
+          (void)snprintf(e->rack_str, sizeof(e->rack_str), "%s",
+                         state->edit_move_inferred_rack);
         }
         // Always re-sync the score on commit (see the
         // earlier commit branch's note).
         e->score = state->edit_move_score >= 0 ? state->edit_move_score : 0;
         if (state->edit_leave_len > 0) {
-          snprintf(e->leave_str, sizeof(e->leave_str), "%s",
-                   state->edit_leave_buf);
+          (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                         state->edit_leave_buf);
         } else if (state->edit_move_leave[0] != '\0') {
-          snprintf(e->leave_str, sizeof(e->leave_str), "%s",
-                   state->edit_move_leave);
+          (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                         state->edit_move_leave);
         } else {
           e->leave_str[0] = '\0';
         }
@@ -344,8 +345,8 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
         raw[n_raw] = '\0';
         tui_format_alphagram_for_sort(raw, state->ld, state->rack_sort,
                                       sorted_rack, sizeof(sorted_rack));
-        snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-                 sorted_rack);
+        (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                       sorted_rack);
         state->edit_rack_len = (int)strlen(state->edit_rack_buf);
         state->edit_rack_cursor = state->edit_rack_len;
       }
@@ -360,11 +361,11 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
       // Stamp the leave. User-typed buffer (via click+type
       // in LEAVE) overrides the parser's auto-derived value.
       if (state->edit_leave_len > 0) {
-        snprintf(e->leave_str, sizeof(e->leave_str), "%s",
-                 state->edit_leave_buf);
+        (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                       state->edit_leave_buf);
       } else if (state->edit_move_leave[0] != '\0') {
-        snprintf(e->leave_str, sizeof(e->leave_str), "%s",
-                 state->edit_move_leave);
+        (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                       state->edit_move_leave);
       }
     }
   }
@@ -463,8 +464,8 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
         // turn: load its stored move / rack so re-committing
         // a middle turn doesn't blank the turn after it.
         tui_game_state_seed_edit_move(state, dest->move_str);
-        snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-                 dest->rack_str);
+        (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                       dest->rack_str);
         state->edit_rack_len = (int)strlen(state->edit_rack_buf);
         state->edit_rack_cursor = state->edit_rack_len;
         state->edit_rack_user_modified = dest->rack_str[0] != '\0';
@@ -487,10 +488,11 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
             continue;
           }
           if (pe->leave_str[0] != '\0') {
-            snprintf(state->edit_rack_carryover,
-                     sizeof(state->edit_rack_carryover), "%s", pe->leave_str);
-            snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-                     pe->leave_str);
+            (void)snprintf(state->edit_rack_carryover,
+                           sizeof(state->edit_rack_carryover), "%s",
+                           pe->leave_str);
+            (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf),
+                           "%s", pe->leave_str);
             state->edit_rack_len = (int)strlen(state->edit_rack_buf);
             state->edit_rack_cursor = state->edit_rack_len;
           }
@@ -601,7 +603,7 @@ static bool cell_editor_type_char(TuiGameState *state, uint32_t key,
       // Default: case-fold lowercase up to uppercase.
       ch = (char)(ch - 'a' + 'A');
     }
-    memmove(&buf[*pcur + 1], &buf[*pcur], (size_t)(*plen - *pcur + 1));
+    memmove(&buf[*pcur + 1], &buf[*pcur], (size_t)(*plen - *pcur) + 1);
     buf[*pcur] = ch;
     (*pcur)++;
     (*plen)++;
@@ -825,7 +827,7 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
     pthread_mutex_lock(&state->mutex);
     if (*pcur > 0) {
-      memmove(&buf[*pcur - 1], &buf[*pcur], (size_t)(*plen - *pcur + 1));
+      memmove(&buf[*pcur - 1], &buf[*pcur], (size_t)(*plen - *pcur) + 1);
       (*pcur)--;
       (*plen)--;
       if (!field_move) {

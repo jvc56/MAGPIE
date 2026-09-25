@@ -208,13 +208,13 @@ static void analysis_compact_primary(const char *primary, char *buf,
     if (int_pct < 0) {
       int_pct = 0;
     }
-    snprintf(buf, buf_size, "%d%%", int_pct);
+    (void)snprintf(buf, buf_size, "%d%%", int_pct);
   } else {
     const char *src = primary;
     while (*src == ' ') {
       src++;
     }
-    snprintf(buf, buf_size, "%s", src);
+    (void)snprintf(buf, buf_size, "%s", src);
   }
 }
 
@@ -316,8 +316,8 @@ static void render_analysis_rows_compact(struct ncplane *plane,
   const bool compact_show_leave = (level >= 3);
   char rfmt[8];
   if (level >= 1) {
-    snprintf(rfmt, sizeof(rfmt), level == 1 ? "%%%dd." : "%%%dd. ",
-             rank_digits);
+    (void)snprintf(rfmt, sizeof(rfmt), level == 1 ? "%%%dd." : "%%%dd. ",
+                   rank_digits);
   }
 
   // Compact mode also gets a "win%" header. Try the panel's top
@@ -381,7 +381,7 @@ static void render_analysis_rows_compact(struct ncplane *plane,
 
     if (level >= 1) {
       char rstr[8];
-      snprintf(rstr, sizeof(rstr), rfmt, i + 1);
+      (void)snprintf(rstr, sizeof(rstr), rfmt, i + 1);
       theme_apply_fg(plane, theme->dim_fg);
       ncplane_putstr_yx(plane, row, interior_left, rstr);
     }
@@ -526,7 +526,7 @@ static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
   if (columns->show_avgs) {
     for (int ply = 0; ply < columns->max_ply_count; ply++) {
       char hdr[8];
-      snprintf(hdr, sizeof(hdr), "avg%d", ply + 1);
+      (void)snprintf(hdr, sizeof(hdr), "avg%d", ply + 1);
       const int col =
           columns->avg_left_edge + ply * (AVG_COL_W + AVG_GAP_W) + AVG_GAP_W;
       ncplane_putstr_yx(plane, header_row, col, hdr);
@@ -562,7 +562,7 @@ static void render_analysis_row(struct ncplane *plane, const Theme *theme,
                                 const AnalysisBests *bests,
                                 int effective_cursor, int data_i) {
   char rank_str[8];
-  snprintf(rank_str, sizeof(rank_str), rank_fmt, data_i + 1);
+  (void)snprintf(rank_str, sizeof(rank_str), rank_fmt, data_i + 1);
 
   // Leave column placement is decided globally (show_leaves):
   // either every row shows its own leave at leave_right_edge, or
@@ -755,9 +755,9 @@ static void render_analysis_row(struct ncplane *plane, const Theme *theme,
       char buf[16];
       const double v = rows[data_i].ply_avg[ply];
       if (v >= 100.0 || v <= -10.0) {
-        snprintf(buf, sizeof(buf), "%*.0f", AVG_COL_W, v);
+        (void)snprintf(buf, sizeof(buf), "%*.0f", AVG_COL_W, v);
       } else {
-        snprintf(buf, sizeof(buf), "%*.1f", AVG_COL_W, v);
+        (void)snprintf(buf, sizeof(buf), "%*.1f", AVG_COL_W, v);
       }
       const bool is_best = ply < MAX_ANALYSIS_PLIES &&
                            bests->any_ply_avg[ply] &&
@@ -975,7 +975,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     }
   }
   char rank_fmt[8];
-  snprintf(rank_fmt, sizeof(rank_fmt), "%%%dd. ", rank_digits);
+  (void)snprintf(rank_fmt, sizeof(rank_fmt), "%%%dd. ", rank_digits);
   const int rank_w = rank_digits + 2; // digits + ". "
   const int move_col = interior_left + rank_w;
 
@@ -1319,10 +1319,10 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     // snapshot the rows came from.
     if (snap != NULL) {
       if (snap->peg_fidelity > 0) {
-        snprintf(title, sizeof(title), "PEG (%dp%s)", snap->peg_fidelity,
-                 snap->peg_done ? "" : " partial");
+        (void)snprintf(title, sizeof(title), "PEG (%dp%s)", snap->peg_fidelity,
+                       snap->peg_done ? "" : " partial");
       } else {
-        snprintf(title, sizeof(title), "PEG");
+        (void)snprintf(title, sizeof(title), "PEG");
       }
     } else {
       const TuiPegLiveMeta *meta = &state->peg_live_meta;
@@ -1331,18 +1331,18 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
         // Fidelity 0 is the greedy seed stage — label it instead of
         // showing a meaningless "0p".
         if (meta->fidelity > 0) {
-          snprintf(title, sizeof(title), "PEG (%dp %d/%d)", meta->fidelity,
-                   meta->cands_done, meta->field_size);
+          (void)snprintf(title, sizeof(title), "PEG (%dp %d/%d)",
+                         meta->fidelity, meta->cands_done, meta->field_size);
         } else {
-          snprintf(title, sizeof(title), "PEG (seed %d/%d)", meta->cands_done,
-                   meta->field_size);
+          (void)snprintf(title, sizeof(title), "PEG (seed %d/%d)",
+                         meta->cands_done, meta->field_size);
         }
       } else if (meta->valid && meta->fidelity > 0) {
-        snprintf(title, sizeof(title), "PEG (%dp)", meta->fidelity);
+        (void)snprintf(title, sizeof(title), "PEG (%dp)", meta->fidelity);
       } else if (searching) {
-        snprintf(title, sizeof(title), "PEG (starting\xe2\x80\xa6)");
+        (void)snprintf(title, sizeof(title), "PEG (starting\xe2\x80\xa6)");
       } else {
-        snprintf(title, sizeof(title), "PEG");
+        (void)snprintf(title, sizeof(title), "PEG");
       }
     }
   } else if (use_endgame) {
@@ -1380,23 +1380,23 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       format_count_compact(nodes, nodes_str, sizeof(nodes_str));
     }
     if (depth_to_show > 0 && nodes_str[0] != '\0') {
-      snprintf(title, sizeof(title), "Endgame (d%d/%s)", depth_to_show,
-               nodes_str);
+      (void)snprintf(title, sizeof(title), "Endgame (d%d/%s)", depth_to_show,
+                     nodes_str);
     } else if (depth_to_show > 0) {
-      snprintf(title, sizeof(title), "Endgame (d%d)", depth_to_show);
+      (void)snprintf(title, sizeof(title), "Endgame (d%d)", depth_to_show);
     } else if (searching) {
-      snprintf(title, sizeof(title), "Endgame (starting\xe2\x80\xa6)");
+      (void)snprintf(title, sizeof(title), "Endgame (starting\xe2\x80\xa6)");
     } else {
-      snprintf(title, sizeof(title), "Endgame");
+      (void)snprintf(title, sizeof(title), "Endgame");
     }
   } else if (snap != NULL) {
     if (snap->sim_plies > 0 && snap->sim_iterations > 0) {
       char nodes_str[16];
       format_count_compact(snap->sim_nodes, nodes_str, sizeof(nodes_str));
-      snprintf(title, sizeof(title), "Sim (%dp/%s)", snap->sim_plies,
-               nodes_str);
+      (void)snprintf(title, sizeof(title), "Sim (%dp/%s)", snap->sim_plies,
+                     nodes_str);
     } else {
-      snprintf(title, sizeof(title), "Sim");
+      (void)snprintf(title, sizeof(title), "Sim");
     }
   } else if (state->sim_results != NULL) {
     const int sim_turn_idx_title = atomic_load(&state->sim_results_turn_idx);
@@ -1409,16 +1409,16 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       const uint64_t nodes = iters * (uint64_t)(plies + 1);
       char nodes_str[16];
       format_count_compact(nodes, nodes_str, sizeof(nodes_str));
-      snprintf(title, sizeof(title), "Sim (%dp/%s)", plies, nodes_str);
+      (void)snprintf(title, sizeof(title), "Sim (%dp/%s)", plies, nodes_str);
     } else {
       // sim_results exists but no real sim ran (e.g. loaded GCG
       // viewer or post-reset state). The panel is in fallback
       // "just-the-played-move" mode, so it's a Plays log rather
       // than analysis output.
-      snprintf(title, sizeof(title), "Plays");
+      (void)snprintf(title, sizeof(title), "Plays");
     }
   } else {
-    snprintf(title, sizeof(title), "Plays");
+    (void)snprintf(title, sizeof(title), "Plays");
   }
   // play_only_fallback: not a saved snapshot, not endgame, not an
   // active sim — we're showing just the played move (or "(no

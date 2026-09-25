@@ -223,13 +223,15 @@ static bool scan_lexica_dir(const char *dir_path, LexiconList *list) {
     // pulling in <sys/stat.h>; both files are small headers so the
     // cost is negligible and lexica/ is small anyway.
     char side_path[512];
-    snprintf(side_path, sizeof(side_path), "%s/%s.wmp", dir_path, out->name);
+    (void)snprintf(side_path, sizeof(side_path), "%s/%s.wmp", dir_path,
+                   out->name);
     FILE *f = fopen(side_path, "rbe");
     out->has_wmp = (f != NULL);
     if (f != NULL) {
       (void)fclose(f);
     }
-    snprintf(side_path, sizeof(side_path), "%s/%s.rit", dir_path, out->name);
+    (void)snprintf(side_path, sizeof(side_path), "%s/%s.rit", dir_path,
+                   out->name);
     f = fopen(side_path, "rbe");
     out->has_rit = (f != NULL);
     if (f != NULL) {
@@ -338,7 +340,7 @@ static void render_picker(struct ncplane *plane, const Theme *theme,
         format_with_commas(list->entries[idx].word_count, count_str,
                            sizeof(count_str));
         char count_line[32];
-        snprintf(count_line, sizeof(count_line), "%9s words", count_str);
+        (void)snprintf(count_line, sizeof(count_line), "%9s words", count_str);
         const int count_col = 18;
         theme_apply_fg(plane, theme->dim_fg);
         ncplane_putstr_yx(plane, screen_row, count_col, count_line);
@@ -587,7 +589,7 @@ bool tui_lexicon_list_name(const LexiconList *list, int idx, char *out_buf,
       out_buf_size == 0) {
     return false;
   }
-  snprintf(out_buf, out_buf_size, "%s", list->entries[idx].name);
+  (void)snprintf(out_buf, out_buf_size, "%s", list->entries[idx].name);
   return true;
 }
 
@@ -597,7 +599,8 @@ bool tui_lexicon_list_language_name(const LexiconList *list, int idx,
       out_buf_size == 0) {
     return false;
   }
-  snprintf(out_buf, out_buf_size, "%s", lang_label(list->entries[idx].lang));
+  (void)snprintf(out_buf, out_buf_size, "%s",
+                 lang_label(list->entries[idx].lang));
   return true;
 }
 
@@ -791,7 +794,7 @@ void tui_game_render_lexicon_picker(struct ncplane *plane, const Theme *theme,
       format_with_commas(list->entries[idx].word_count, count_str,
                          sizeof(count_str));
       char count_line[32];
-      snprintf(count_line, sizeof(count_line), "%9s words", count_str);
+      (void)snprintf(count_line, sizeof(count_line), "%9s words", count_str);
       ncplane_putstr_yx(mp, row, 12, count_line);
     }
     // WMP / RIT flags — colored variants outside the focus-bar bg.

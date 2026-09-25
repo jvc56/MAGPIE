@@ -8,7 +8,6 @@
 #include "render_layout.h"
 #include "theme.h"
 #include "tui_ui_types.h"
-#include <ctype.h>
 #include <notcurses/notcurses.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -142,7 +141,7 @@ static void render_clock_event_entry(struct ncplane *plane, const Theme *theme,
   if (show_adjustment) {
     theme_apply_fg(plane, player_fg);
     char delta_str[16];
-    snprintf(delta_str, sizeof(delta_str), "%d", e->score); // negative
+    (void)snprintf(delta_str, sizeof(delta_str), "%d", e->score); // negative
     const int delta_len = (int)strlen(delta_str);
     const int delta_col = interior_right - delta_len + 1;
     if (delta_col > interior_left + (int)strlen(prefix)) {
@@ -161,13 +160,13 @@ static void render_clock_event_entry(struct ncplane *plane, const Theme *theme,
     char clock_str[16];
     format_clock(e->clock_at_end, clock_str, sizeof(clock_str));
     char left_line[32];
-    snprintf(left_line, sizeof(left_line), "%*s%s", (int)strlen(prefix), "",
-             clock_str);
+    (void)snprintf(left_line, sizeof(left_line), "%*s%s", (int)strlen(prefix),
+                   "", clock_str);
     ncplane_putstr_yx(plane, row2, interior_left, left_line);
   }
   if (show_adjustment) {
     char total_str[16];
-    snprintf(total_str, sizeof(total_str), "%d", e->total_after);
+    (void)snprintf(total_str, sizeof(total_str), "%d", e->total_after);
     const int total_len = (int)strlen(total_str);
     const int total_col = interior_right - total_len + 1;
     ncplane_set_styles(plane, NCSTYLE_BOLD);
@@ -369,7 +368,7 @@ static void render_history_move_editor(
   // bg (not on the input black) — matches committed-row geometry.
   if (state->edit_move_score >= 0) {
     char score_str[8];
-    snprintf(score_str, sizeof(score_str), "+%d", state->edit_move_score);
+    (void)snprintf(score_str, sizeof(score_str), "+%d", state->edit_move_score);
     const int score_len = (int)strlen(score_str);
     const int score_col = score_col_right - score_len + 1;
     theme_apply_fg(plane, player_fg);
@@ -533,11 +532,11 @@ static void render_history_challenged_rows(
   theme_apply_bg(plane, theme->bg);
   theme_apply_fg(plane, theme->error_fg);
   char challenge_left[32];
-  snprintf(challenge_left, sizeof(challenge_left), "%*schallenged off",
-           (int)strlen(prefix), "");
+  (void)snprintf(challenge_left, sizeof(challenge_left), "%*schallenged off",
+                 (int)strlen(prefix), "");
   ncplane_putstr_yx(plane, challenge_row, interior_left, challenge_left);
   char delta_chal_str[16];
-  snprintf(delta_chal_str, sizeof(delta_chal_str), "%d", -e->score);
+  (void)snprintf(delta_chal_str, sizeof(delta_chal_str), "%d", -e->score);
   const int delta_chal_len = (int)strlen(delta_chal_str);
   const int delta_chal_col = interior_right - delta_chal_len + 1;
   if (delta_chal_col > interior_left + (int)strlen(challenge_left)) {
@@ -552,8 +551,8 @@ static void render_history_challenged_rows(
   const int resolve_row = row + 3;
   theme_apply_fg(plane, player_dim_fg);
   char corrected_str[16];
-  snprintf(corrected_str, sizeof(corrected_str), "%d",
-           e->total_after - e->score);
+  (void)snprintf(corrected_str, sizeof(corrected_str), "%d",
+                 e->total_after - e->score);
   const int corrected_len = (int)strlen(corrected_str);
   const int corrected_col = interior_right - corrected_len + 1;
   ncplane_set_styles(plane, NCSTYLE_BOLD);
@@ -586,17 +585,17 @@ static void render_history_end_bonus_rows(
       format_alphagram_for_sort(e->end_rack_str, ld, rack_sort, sorted_end,
                                 sizeof(sorted_end));
     } else {
-      snprintf(sorted_end, sizeof(sorted_end), "%s", e->end_rack_str);
+      (void)snprintf(sorted_end, sizeof(sorted_end), "%s", e->end_rack_str);
     }
-    snprintf(bonus_left, sizeof(bonus_left), "    (%s)", sorted_end);
+    (void)snprintf(bonus_left, sizeof(bonus_left), "    (%s)", sorted_end);
   } else {
-    snprintf(bonus_left, sizeof(bonus_left), "    ");
+    (void)snprintf(bonus_left, sizeof(bonus_left), "    ");
   }
   theme_apply_fg(plane, opponent_fg);
   ncplane_putstr_yx(plane, row3, interior_left, bonus_left);
 
   char delta3_str[16];
-  snprintf(delta3_str, sizeof(delta3_str), "+%d", e->end_bonus);
+  (void)snprintf(delta3_str, sizeof(delta3_str), "+%d", e->end_bonus);
   const int delta3_len = (int)strlen(delta3_str);
   const int delta3_col = interior_right - delta3_len + 1;
   if (delta3_col > interior_left + (int)strlen(bonus_left)) {
@@ -619,15 +618,16 @@ static void render_history_end_bonus_rows(
     char end_clock_str[16];
     format_clock(e->clock_at_end, end_clock_str, sizeof(end_clock_str));
     char end_line[32];
-    snprintf(end_line, sizeof(end_line), "%*s%s", (int)strlen(prefix), "",
-             end_clock_str);
+    (void)snprintf(end_line, sizeof(end_line), "%*s%s", (int)strlen(prefix), "",
+                   end_clock_str);
     theme_apply_fg(plane, player_fg);
     ncplane_putstr_yx(plane, row4, interior_left, end_line);
   }
 
   theme_apply_fg(plane, player_dim_fg);
   char total4_str[16];
-  snprintf(total4_str, sizeof(total4_str), "%d", e->total_after + e->end_bonus);
+  (void)snprintf(total4_str, sizeof(total4_str), "%d",
+                 e->total_after + e->end_bonus);
   const int total4_len = (int)strlen(total4_str);
   const int total4_col = interior_right - total4_len + 1;
   ncplane_set_styles(plane, NCSTYLE_BOLD);
@@ -673,7 +673,7 @@ render_history_played_move(struct ncplane *plane, const Theme *theme,
   }
 
   char delta_str[16];
-  snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
+  (void)snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
   const int delta_len = (int)strlen(delta_str);
   const int delta_col = interior_right - delta_len + 1;
   if (delta_col > interior_left + (int)strlen(prefix)) {
@@ -764,7 +764,7 @@ static void render_history_committed_move(
                      e->move_str, /*hide_parens=*/true,
                      /*hide_playthrough_parens=*/false);
   char delta_str[16];
-  snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
+  (void)snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
   const int delta_len = (int)strlen(delta_str);
   const int delta_col = interior_right - delta_len + 1;
   if (delta_col > interior_left + (int)strlen(prefix)) {
@@ -965,8 +965,8 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   // turns 1-25 renders single-digit numbers with one leading space
   // (`" 1. "`), keeping every period on the same column.
   char prefix[8];
-  snprintf(prefix, sizeof(prefix), "%*d. ", rank_digits > 0 ? rank_digits : 1,
-           idx + 1);
+  (void)snprintf(prefix, sizeof(prefix), "%*d. ",
+                 rank_digits > 0 ? rank_digits : 1, idx + 1);
   if (cursor_here) {
     render_history_cursor_prefix(plane, theme, row, interior_left,
                                  history_focused, editing, player_fg, prefix);
@@ -1042,11 +1042,11 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   if (clocks_active) {
     char clock_str[16];
     format_clock(e->clock_at_start, clock_str, sizeof(clock_str));
-    snprintf(left_line, sizeof(left_line), "%*s%s %s", (int)strlen(prefix), "",
-             clock_str, rack_disp);
+    (void)snprintf(left_line, sizeof(left_line), "%*s%s %s",
+                   (int)strlen(prefix), "", clock_str, rack_disp);
   } else {
-    snprintf(left_line, sizeof(left_line), "%*s%s", (int)strlen(prefix), "",
-             rack_disp);
+    (void)snprintf(left_line, sizeof(left_line), "%*s%s", (int)strlen(prefix),
+                   "", rack_disp);
   }
   ncplane_putstr_yx(plane, row2, interior_left, left_line);
 
@@ -1066,7 +1066,7 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
 
   if (!e->pending) {
     char total_str[16];
-    snprintf(total_str, sizeof(total_str), "%d", e->total_after);
+    (void)snprintf(total_str, sizeof(total_str), "%d", e->total_after);
     const int total_len = (int)strlen(total_str);
     const int total_col = interior_right - total_len + 1;
     if (total_col > interior_left + (int)strlen(left_line)) {
@@ -1081,7 +1081,7 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     const int total_before =
         history_player_total_before(state, idx, e->player_idx);
     char total_str[16];
-    snprintf(total_str, sizeof(total_str), "%d", total_before + e->score);
+    (void)snprintf(total_str, sizeof(total_str), "%d", total_before + e->score);
     const int total_len = (int)strlen(total_str);
     const int total_col = interior_right - total_len + 1;
     if (total_col > interior_left + (int)strlen(left_line)) {
@@ -1099,8 +1099,8 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     const int total_before =
         history_player_total_before(state, idx, e->player_idx);
     char total_str[16];
-    snprintf(total_str, sizeof(total_str), "%d",
-             total_before + state->edit_move_score);
+    (void)snprintf(total_str, sizeof(total_str), "%d",
+                   total_before + state->edit_move_score);
     const int total_len = (int)strlen(total_str);
     const int total_col = interior_right - total_len + 1;
     theme_apply_fg(plane, player_dim_fg);

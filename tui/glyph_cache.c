@@ -39,7 +39,7 @@ bool tui_glyph_cache_resolve_font_path(char *out, size_t out_size) {
 
   const char *env = getenv("MAGPIE_TUI_FONT");
   if (env != NULL && env[0] != '\0' && access(env, R_OK) == 0) {
-    snprintf(out, out_size, "%s", env);
+    (void)snprintf(out, out_size, "%s", env);
     return true;
   }
 
@@ -55,7 +55,7 @@ bool tui_glyph_cache_resolve_font_path(char *out, size_t out_size) {
        idx < sizeof(bundled_candidates) / sizeof(bundled_candidates[0]);
        idx++) {
     if (access(bundled_candidates[idx], R_OK) == 0) {
-      snprintf(out, out_size, "%s", bundled_candidates[idx]);
+      (void)snprintf(out, out_size, "%s", bundled_candidates[idx]);
       return true;
     }
   }

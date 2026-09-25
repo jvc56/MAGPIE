@@ -186,8 +186,8 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
           char namebuf[TUI_LEXICON_NAME_MAX];
           if (next != cur && tui_lexicon_list_name(ui->lexicon_list, next,
                                                    namebuf, sizeof(namebuf))) {
-            snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon),
-                     "%s", namebuf);
+            (void)snprintf(ui->watch_setup_lexicon,
+                           sizeof(ui->watch_setup_lexicon), "%s", namebuf);
           }
         }
       } else if (ui->play_setup_focus == TUI_PLAY_SETUP_LEXICON) {
@@ -205,8 +205,8 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
           char namebuf[TUI_LEXICON_NAME_MAX];
           if (next != cur && tui_lexicon_list_name(ui->lexicon_list, next,
                                                    namebuf, sizeof(namebuf))) {
-            snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon),
-                     "%s", namebuf);
+            (void)snprintf(ui->watch_setup_lexicon,
+                           sizeof(ui->watch_setup_lexicon), "%s", namebuf);
           }
         }
       } else if (ui->play_setup_focus == TUI_PLAY_SETUP_SIM_PLIES) {
@@ -260,7 +260,7 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
         if (ui->play_setup_name_cursor > 0) {
           memmove(name_buf + ui->play_setup_name_cursor - 1,
                   name_buf + ui->play_setup_name_cursor,
-                  (size_t)(len - ui->play_setup_name_cursor + 1));
+                  (size_t)(len - ui->play_setup_name_cursor) + 1);
           ui->play_setup_name_cursor--;
         }
         return true;
@@ -276,7 +276,7 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
       if (key >= 0x20 && key < 0x7f && len + 1 < (int)name_cap) {
         memmove(name_buf + ui->play_setup_name_cursor + 1,
                 name_buf + ui->play_setup_name_cursor,
-                (size_t)(len - ui->play_setup_name_cursor + 1));
+                (size_t)(len - ui->play_setup_name_cursor) + 1);
         name_buf[ui->play_setup_name_cursor] = (char)key;
         ui->play_setup_name_cursor++;
         return true;
@@ -317,11 +317,11 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
                            : "Computer";
       // Commit the modal's scratch time / lexicon into the session.
       session->chosen_time = ui->watch_setup_time;
-      snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon), "%s",
-               ui->watch_setup_lexicon);
+      (void)snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
+                     "%s", ui->watch_setup_lexicon);
       pthread_mutex_lock(&state->mutex);
-      snprintf(state->pending_lexicon, sizeof(state->pending_lexicon), "%s",
-               ui->watch_setup_lexicon);
+      (void)snprintf(state->pending_lexicon, sizeof(state->pending_lexicon),
+                     "%s", ui->watch_setup_lexicon);
       pthread_mutex_unlock(&state->mutex);
       // Stop any running bot before reconfiguring the game.
       tui_stop_workers(state);
@@ -360,10 +360,10 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
       tui_game_state_reset_game(state, (uint64_t)time(NULL));
       state->app_mode = TUI_APP_MODE_PLAY_VS_COMPUTER;
       state->human_player_idx = human_idx;
-      snprintf(state->player_names[human_idx],
-               sizeof(state->player_names[human_idx]), "%s", hn);
-      snprintf(state->player_names[1 - human_idx],
-               sizeof(state->player_names[1 - human_idx]), "%s", cn);
+      (void)snprintf(state->player_names[human_idx],
+                     sizeof(state->player_names[human_idx]), "%s", hn);
+      (void)snprintf(state->player_names[1 - human_idx],
+                     sizeof(state->player_names[1 - human_idx]), "%s", cn);
       state->history_cursor = -1;
       state->focused_panel = TUI_FOCUS_BOARD;
       pthread_mutex_unlock(&state->mutex);
@@ -500,8 +500,8 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
         char namebuf[TUI_LEXICON_NAME_MAX];
         if (next != cur && tui_lexicon_list_name(ui->lexicon_list, next,
                                                  namebuf, sizeof(namebuf))) {
-          snprintf(ui->annotate_setup_lexicon,
-                   sizeof(ui->annotate_setup_lexicon), "%s", namebuf);
+          (void)snprintf(ui->annotate_setup_lexicon,
+                         sizeof(ui->annotate_setup_lexicon), "%s", namebuf);
         }
       }
       return true;
@@ -532,7 +532,7 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
         if (ui->annotate_setup_name_cursor > 0) {
           memmove(name_buf + ui->annotate_setup_name_cursor - 1,
                   name_buf + ui->annotate_setup_name_cursor,
-                  (size_t)(len - ui->annotate_setup_name_cursor + 1));
+                  (size_t)(len - ui->annotate_setup_name_cursor) + 1);
           ui->annotate_setup_name_cursor--;
         }
         return true;
@@ -548,7 +548,7 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
       if (key >= 0x20 && key < 0x7f && len + 1 < (int)name_cap) {
         memmove(name_buf + ui->annotate_setup_name_cursor + 1,
                 name_buf + ui->annotate_setup_name_cursor,
-                (size_t)(len - ui->annotate_setup_name_cursor + 1));
+                (size_t)(len - ui->annotate_setup_name_cursor) + 1);
         name_buf[ui->annotate_setup_name_cursor] = (char)key;
         ui->annotate_setup_name_cursor++;
         return true;
@@ -574,11 +574,11 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
       // pending entry for P1, drop into annotation mode (no
       // bot started).
       tui_stop_workers(state);
-      snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon), "%s",
-               ui->annotate_setup_lexicon);
+      (void)snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
+                     "%s", ui->annotate_setup_lexicon);
       pthread_mutex_lock(&state->mutex);
-      snprintf(state->pending_lexicon, sizeof(state->pending_lexicon), "%s",
-               ui->annotate_setup_lexicon);
+      (void)snprintf(state->pending_lexicon, sizeof(state->pending_lexicon),
+                     "%s", ui->annotate_setup_lexicon);
       pthread_mutex_unlock(&state->mutex);
       if (!session->args.no_config) {
         strncpy(session->to_save.lexicon, session->chosen_lexicon,
@@ -603,10 +603,10 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
       // game so the next render rebuilds them fresh against the
       // empty annotation board.
       tui_game_render_reset_grids();
-      snprintf(state->player_names[0], sizeof(state->player_names[0]), "%s",
-               ui->annotate_setup_p1_name);
-      snprintf(state->player_names[1], sizeof(state->player_names[1]), "%s",
-               ui->annotate_setup_p2_name);
+      (void)snprintf(state->player_names[0], sizeof(state->player_names[0]),
+                     "%s", ui->annotate_setup_p1_name);
+      (void)snprintf(state->player_names[1], sizeof(state->player_names[1]),
+                     "%s", ui->annotate_setup_p2_name);
       // Seed history with one pending entry for P1 so the
       // History panel reads "1." waiting for input. Rack is
       // NULL because the annotator will fill it in later.
@@ -719,8 +719,8 @@ bool tui_input_watch_setup(TuiGameState *state, TuiUiState *ui,
           char buf[TUI_LEXICON_NAME_MAX];
           if (next != cur &&
               tui_lexicon_list_name(ui->lexicon_list, next, buf, sizeof(buf))) {
-            snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon),
-                     "%s", buf);
+            (void)snprintf(ui->watch_setup_lexicon,
+                           sizeof(ui->watch_setup_lexicon), "%s", buf);
           }
         }
       } else if (ui->watch_setup_focus == TUI_WATCH_SETUP_LEXICON) {
@@ -743,8 +743,8 @@ bool tui_input_watch_setup(TuiGameState *state, TuiUiState *ui,
           char buf[TUI_LEXICON_NAME_MAX];
           if (next != cur &&
               tui_lexicon_list_name(ui->lexicon_list, next, buf, sizeof(buf))) {
-            snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon),
-                     "%s", buf);
+            (void)snprintf(ui->watch_setup_lexicon,
+                           sizeof(ui->watch_setup_lexicon), "%s", buf);
           }
         }
       } else if (ui->watch_setup_focus == TUI_WATCH_SETUP_SIM_PLIES) {
@@ -779,11 +779,11 @@ bool tui_input_watch_setup(TuiGameState *state, TuiUiState *ui,
         // only watch_setup_lexicon / watch_setup_time, so an
         // Esc cancel leaves the underlying session untouched.
         session->chosen_time = ui->watch_setup_time;
-        snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon), "%s",
-                 ui->watch_setup_lexicon);
+        (void)snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
+                       "%s", ui->watch_setup_lexicon);
         pthread_mutex_lock(&state->mutex);
-        snprintf(state->pending_lexicon, sizeof(state->pending_lexicon), "%s",
-                 ui->watch_setup_lexicon);
+        (void)snprintf(state->pending_lexicon, sizeof(state->pending_lexicon),
+                       "%s", ui->watch_setup_lexicon);
         pthread_mutex_unlock(&state->mutex);
 
         // Replicate the time-picker confirm path: stop any bot

@@ -1078,8 +1078,8 @@ static void *bot_thread_main(void *arg) {
         if (state->player_names[player_idx][0] != '\0') {
           loser_name = state->player_names[player_idx];
         }
-        snprintf(state->notice_buf, sizeof(state->notice_buf),
-                 "%s lost on time", loser_name);
+        (void)snprintf(state->notice_buf, sizeof(state->notice_buf),
+                       "%s lost on time", loser_name);
         clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
         state->notice_expires_at.tv_sec += 6;
         state->history_cursor = state->history_count - 1;
@@ -1342,7 +1342,7 @@ void tui_bot_worker_start(TuiGameState *state) {
 
 // Status-bar notice helper. Caller must hold state->mutex.
 static void set_analysis_notice(TuiGameState *state, const char *message) {
-  snprintf(state->notice_buf, sizeof(state->notice_buf), "%s", message);
+  (void)snprintf(state->notice_buf, sizeof(state->notice_buf), "%s", message);
   clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
   state->notice_expires_at.tv_sec += 3;
   atomic_fetch_add(&state->render_version, 1);
@@ -1452,8 +1452,9 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   state->sim_results = live_results;
   atomic_store(&state->sim_results_turn_idx, prev_turn_idx);
   char done_notice[64];
-  snprintf(done_notice, sizeof(done_notice), "sim paused - %llu iterations",
-           (unsigned long long)sim_results_get_iteration_count(results));
+  (void)snprintf(done_notice, sizeof(done_notice),
+                 "sim paused - %llu iterations",
+                 (unsigned long long)sim_results_get_iteration_count(results));
   set_analysis_notice(state, done_notice);
   pthread_mutex_unlock(&state->mutex);
 

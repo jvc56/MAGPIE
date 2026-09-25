@@ -88,12 +88,12 @@ bool tui_input_lexicon_picker(TuiGameState *state, TuiUiState *ui,
       char picked[TUI_LEXICON_NAME_MAX] = {0};
       if (tui_lexicon_list_name(ui->lexicon_list, ui->lexicon_focus, picked,
                                 sizeof(picked))) {
-        snprintf(session->to_save.lexicon, sizeof(session->to_save.lexicon),
-                 "%s", picked);
+        (void)snprintf(session->to_save.lexicon,
+                       sizeof(session->to_save.lexicon), "%s", picked);
         session->to_save.lexicon_set = true;
         pthread_mutex_lock(&state->mutex);
-        snprintf(state->pending_lexicon, sizeof(state->pending_lexicon), "%s",
-                 picked);
+        (void)snprintf(state->pending_lexicon, sizeof(state->pending_lexicon),
+                       "%s", picked);
         pthread_mutex_unlock(&state->mutex);
         if (!session->args.no_config) {
           tui_config_save(&session->to_save);
@@ -297,8 +297,8 @@ bool tui_input_startup_menu(TuiGameState *state, TuiUiState *ui,
       // Mnemonic shortcut: open the Watch setup modal. The setup
       // modal handles starting the game once the user confirms.
       ui->modal = TUI_MODAL_WATCH_SETUP;
-      snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon), "%s",
-               session->chosen_lexicon);
+      (void)snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon),
+                     "%s", session->chosen_lexicon);
       ui->watch_setup_time = session->chosen_time;
     } else if (key == 'p' || key == 'P') {
       ui->modal = TUI_MODAL_LOAD_POSITION;
@@ -318,31 +318,32 @@ bool tui_input_startup_menu(TuiGameState *state, TuiUiState *ui,
       ui->load_game_error[0] = '\0';
     } else if (key == 'a' || key == 'A') {
       ui->modal = TUI_MODAL_ANNOTATE_SETUP;
-      snprintf(ui->annotate_setup_lexicon, sizeof(ui->annotate_setup_lexicon),
-               "%s", session->chosen_lexicon);
-      snprintf(ui->annotate_setup_p1_name, sizeof(ui->annotate_setup_p1_name),
-               "Player 1");
-      snprintf(ui->annotate_setup_p2_name, sizeof(ui->annotate_setup_p2_name),
-               "Player 2");
+      (void)snprintf(ui->annotate_setup_lexicon,
+                     sizeof(ui->annotate_setup_lexicon), "%s",
+                     session->chosen_lexicon);
+      (void)snprintf(ui->annotate_setup_p1_name,
+                     sizeof(ui->annotate_setup_p1_name), "Player 1");
+      (void)snprintf(ui->annotate_setup_p2_name,
+                     sizeof(ui->annotate_setup_p2_name), "Player 2");
       ui->annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
       ui->annotate_setup_name_cursor = (int)strlen(ui->annotate_setup_p1_name);
     } else if (key == 'c' || key == 'C') {
       ui->modal = TUI_MODAL_PLAY_SETUP;
       ui->play_setup_focus = TUI_PLAY_SETUP_START;
-      snprintf(ui->play_setup_human_name, sizeof(ui->play_setup_human_name),
-               "You");
-      snprintf(ui->play_setup_computer_name,
-               sizeof(ui->play_setup_computer_name), "Computer");
+      (void)snprintf(ui->play_setup_human_name,
+                     sizeof(ui->play_setup_human_name), "You");
+      (void)snprintf(ui->play_setup_computer_name,
+                     sizeof(ui->play_setup_computer_name), "Computer");
       ui->play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
       ui->play_setup_name_cursor = 0;
-      snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon), "%s",
-               session->chosen_lexicon);
+      (void)snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon),
+                     "%s", session->chosen_lexicon);
       ui->watch_setup_time = session->chosen_time;
     } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
       if (ui->startup_menu_focus == TUI_STARTUP_WATCH) {
         ui->modal = TUI_MODAL_WATCH_SETUP;
-        snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon), "%s",
-                 session->chosen_lexicon);
+        (void)snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon),
+                       "%s", session->chosen_lexicon);
         ui->watch_setup_time = session->chosen_time;
       } else if (ui->startup_menu_focus == TUI_STARTUP_LOAD_POSITION) {
         ui->modal = TUI_MODAL_LOAD_POSITION;
@@ -362,12 +363,13 @@ bool tui_input_startup_menu(TuiGameState *state, TuiUiState *ui,
         ui->load_game_error[0] = '\0';
       } else if (ui->startup_menu_focus == TUI_STARTUP_ANNOTATE) {
         ui->modal = TUI_MODAL_ANNOTATE_SETUP;
-        snprintf(ui->annotate_setup_lexicon, sizeof(ui->annotate_setup_lexicon),
-                 "%s", session->chosen_lexicon);
-        snprintf(ui->annotate_setup_p1_name, sizeof(ui->annotate_setup_p1_name),
-                 "Player 1");
-        snprintf(ui->annotate_setup_p2_name, sizeof(ui->annotate_setup_p2_name),
-                 "Player 2");
+        (void)snprintf(ui->annotate_setup_lexicon,
+                       sizeof(ui->annotate_setup_lexicon), "%s",
+                       session->chosen_lexicon);
+        (void)snprintf(ui->annotate_setup_p1_name,
+                       sizeof(ui->annotate_setup_p1_name), "Player 1");
+        (void)snprintf(ui->annotate_setup_p2_name,
+                       sizeof(ui->annotate_setup_p2_name), "Player 2");
         ui->annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
         ui->annotate_setup_name_cursor =
             (int)strlen(ui->annotate_setup_p1_name);
@@ -378,14 +380,14 @@ bool tui_input_startup_menu(TuiGameState *state, TuiUiState *ui,
         // copies for the time / lexicon adjusters.
         ui->modal = TUI_MODAL_PLAY_SETUP;
         ui->play_setup_focus = TUI_PLAY_SETUP_START;
-        snprintf(ui->play_setup_human_name, sizeof(ui->play_setup_human_name),
-                 "You");
-        snprintf(ui->play_setup_computer_name,
-                 sizeof(ui->play_setup_computer_name), "Computer");
+        (void)snprintf(ui->play_setup_human_name,
+                       sizeof(ui->play_setup_human_name), "You");
+        (void)snprintf(ui->play_setup_computer_name,
+                       sizeof(ui->play_setup_computer_name), "Computer");
         ui->play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
         ui->play_setup_name_cursor = 0;
-        snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon), "%s",
-                 session->chosen_lexicon);
+        (void)snprintf(ui->watch_setup_lexicon, sizeof(ui->watch_setup_lexicon),
+                       "%s", session->chosen_lexicon);
         ui->watch_setup_time = session->chosen_time;
       }
       // Disabled items are no-op for now. As each mode ships,

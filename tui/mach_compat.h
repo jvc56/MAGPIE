@@ -1,6 +1,8 @@
 #ifndef TUI_MACH_COMPAT_H
 #define TUI_MACH_COMPAT_H
 
+// IWYU pragma: always_keep
+
 // Thin wrapper so the conditional <mach/mach.h> include doesn't sit
 // inside game_render.c's main include block — format.py rejects
 // preprocessor conditionals between the first and last include. On

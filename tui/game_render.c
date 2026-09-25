@@ -24,7 +24,6 @@
 #include "theme.h"
 #include "tui_resize.h"
 #include "tui_ui_types.h"
-#include <ctype.h>
 #include <limits.h>
 #include <notcurses/notcurses.h>
 #include <stdint.h>

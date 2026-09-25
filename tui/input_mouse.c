@@ -192,8 +192,8 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
               e = &state->history[target];
             }
             tui_game_state_seed_edit_move(state, e->move_str);
-            snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-                     e->rack_str);
+            (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf),
+                           "%s", e->rack_str);
             state->edit_rack_len = (int)strlen(state->edit_rack_buf);
             state->edit_rack_cursor = state->edit_rack_len;
             // Committed rack reads as user-authored so it doesn't
@@ -202,8 +202,8 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
             state->edit_rack_user_modified = e->rack_str[0] != '\0';
             // Leave buffer tracks the entry's stored leave so
             // clicking into a different turn shows its leave.
-            snprintf(state->edit_leave_buf, sizeof(state->edit_leave_buf), "%s",
-                     e->leave_str);
+            (void)snprintf(state->edit_leave_buf, sizeof(state->edit_leave_buf),
+                           "%s", e->leave_str);
             state->edit_leave_len = (int)strlen(state->edit_leave_buf);
             state->edit_leave_cursor = state->edit_leave_len;
             // Drop stale carryover from a previously-edited turn.
@@ -260,9 +260,9 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
           state->analysis_cursor_column = clicked_col;
           if (clicked_col == TUI_ANALYSIS_COLUMN_MOVE && target >= 0 &&
               target < state->last_rendered_analysis_row_count) {
-            snprintf(state->analysis_anchored_move,
-                     sizeof(state->analysis_anchored_move), "%s",
-                     state->last_rendered_analysis_rows[target].move);
+            (void)snprintf(state->analysis_anchored_move,
+                           sizeof(state->analysis_anchored_move), "%s",
+                           state->last_rendered_analysis_rows[target].move);
           } else {
             state->analysis_anchored_move[0] = '\0';
           }

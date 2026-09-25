@@ -41,12 +41,12 @@ static void render_bag_divider(struct ncplane *plane, const Theme *theme,
     if (hotkey > 0) {
       char buf[8];
       if (focused) {
-        snprintf(buf, sizeof(buf), "[%d>", hotkey);
+        (void)snprintf(buf, sizeof(buf), "[%d>", hotkey);
         theme_apply_fg(plane, theme->bg);
         theme_apply_bg(plane, theme->fg);
         ncplane_set_styles(plane, NCSTYLE_BOLD);
       } else {
-        snprintf(buf, sizeof(buf), "[%d]", hotkey);
+        (void)snprintf(buf, sizeof(buf), "[%d]", hotkey);
         theme_apply_fg(plane, theme->modal_shortcut_fg);
         theme_apply_bg(plane, border_bg);
       }
@@ -121,7 +121,7 @@ void render_bag_panel(struct ncplane *plane, const Theme *theme,
   }
 
   char title[32];
-  snprintf(title, sizeof(title), "Bag (%d)", bag_count);
+  (void)snprintf(title, sizeof(title), "Bag (%d)", bag_count);
 
   // Empty bag: skip the box, the tile listing, and the tally line.
   // The endgame UI doesn't need any of that — opponent's tiles are
@@ -308,8 +308,8 @@ void render_bag_panel(struct ncplane *plane, const Theme *theme,
       snprintf(tally_long, sizeof(tally_long),
                "%d vowels \xc2\xb7 %d consonants", vowels, consonants);
   const int long_cols = long_bytes - 1;
-  snprintf(tally_short, sizeof(tally_short), "%d vows/%d cons", vowels,
-           consonants);
+  (void)snprintf(tally_short, sizeof(tally_short), "%d vows/%d cons", vowels,
+                 consonants);
   const char *tally = (long_cols <= interior_width) ? tally_long : tally_short;
   theme_apply_fg(plane, theme->dim_fg);
   ncplane_putstr_yx(plane, L->bag_bottom - 1, interior_left, tally);

@@ -55,8 +55,8 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       tui_game_state_seed_edit_move(state, e->move_str);
     }
     if (state->edit_rack_len == 0) {
-      snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-               e->rack_str);
+      (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                     e->rack_str);
       state->edit_rack_len = (int)strlen(state->edit_rack_buf);
       state->edit_rack_cursor = state->edit_rack_len;
       // Committed rack text on the entry is treated as
@@ -202,9 +202,9 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       if (state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_MOVE) {
         const int idx = state->analysis_cursor;
         if (idx >= 0 && idx < state->last_rendered_analysis_row_count) {
-          snprintf(state->analysis_anchored_move,
-                   sizeof(state->analysis_anchored_move), "%s",
-                   state->last_rendered_analysis_rows[idx].move);
+          (void)snprintf(state->analysis_anchored_move,
+                         sizeof(state->analysis_anchored_move), "%s",
+                         state->last_rendered_analysis_rows[idx].move);
         } else {
           state->analysis_anchored_move[0] = '\0';
         }
@@ -219,9 +219,9 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       // text so the cursor will follow it as the sim reorders.
       const int idx = state->analysis_cursor;
       if (idx >= 0 && idx < state->last_rendered_analysis_row_count) {
-        snprintf(state->analysis_anchored_move,
-                 sizeof(state->analysis_anchored_move), "%s",
-                 state->last_rendered_analysis_rows[idx].move);
+        (void)snprintf(state->analysis_anchored_move,
+                       sizeof(state->analysis_anchored_move), "%s",
+                       state->last_rendered_analysis_rows[idx].move);
         state->analysis_cursor_column = TUI_ANALYSIS_COLUMN_MOVE;
       }
     }
@@ -273,8 +273,8 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       // N> → N.MOVE
       TuiHistoryEntry *e = &state->history[state->history_cursor];
       tui_game_state_seed_edit_move(state, e->move_str);
-      snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-               e->rack_str);
+      (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                     e->rack_str);
       state->edit_rack_len = (int)strlen(state->edit_rack_buf);
       state->edit_rack_cursor = state->edit_rack_len;
       state->edit_rack_user_modified = e->rack_str[0] != '\0';
@@ -289,8 +289,8 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       const int target = state->history_cursor - 1;
       TuiHistoryEntry *e = &state->history[target];
       tui_game_state_seed_edit_move(state, e->move_str);
-      snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-               e->rack_str);
+      (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
+                     e->rack_str);
       state->edit_rack_len = (int)strlen(state->edit_rack_buf);
       state->edit_rack_cursor = state->edit_rack_len;
       state->edit_rack_user_modified = e->rack_str[0] != '\0';
@@ -369,7 +369,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
           // Remove the char before the cursor.
           memmove(state->slash_buf + state->slash_cursor - 1,
                   state->slash_buf + state->slash_cursor,
-                  (size_t)(state->slash_len - state->slash_cursor + 1));
+                  (size_t)(state->slash_len - state->slash_cursor) + 1);
           state->slash_len--;
           state->slash_cursor--;
         } else if (state->slash_len == 0) {
@@ -395,7 +395,8 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
         }
         if (n_match == 1 && match != NULL) {
           pthread_mutex_lock(&state->mutex);
-          snprintf(state->slash_buf, sizeof(state->slash_buf), "%s", match);
+          (void)snprintf(state->slash_buf, sizeof(state->slash_buf), "%s",
+                         match);
           state->slash_len = (int)strlen(match);
           state->slash_cursor = state->slash_len;
           pthread_mutex_unlock(&state->mutex);
@@ -405,7 +406,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
         // unique prefix match if user pressed Enter without
         // completing first.
         char cmd[64];
-        snprintf(cmd, sizeof(cmd), "%s", state->slash_buf);
+        (void)snprintf(cmd, sizeof(cmd), "%s", state->slash_buf);
         if (strcmp(cmd, "new") == 0 || strcmp(cmd, "n") == 0) {
           ui->modal = TUI_MODAL_TIME_PICKER;
           ui->time_focus = tui_time_picker_closest_index(session->chosen_time);
@@ -483,7 +484,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
         if (state->slash_len < (int)sizeof(state->slash_buf) - 1) {
           memmove(state->slash_buf + state->slash_cursor + 1,
                   state->slash_buf + state->slash_cursor,
-                  (size_t)(state->slash_len - state->slash_cursor + 1));
+                  (size_t)(state->slash_len - state->slash_cursor) + 1);
           state->slash_buf[state->slash_cursor] = ch;
           state->slash_len++;
           state->slash_cursor++;

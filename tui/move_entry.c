@@ -299,9 +299,9 @@ static void tui_board_builder_coord_token(const TuiGameState *gs, char *out,
   const int row1 = gs->board_anchor_row + 1;
   const char col_letter = (char)('A' + gs->board_anchor_col);
   if (board_is_dir_vertical(gs->board_dir)) {
-    snprintf(out, out_cap, "%c%d", col_letter, row1);
+    (void)snprintf(out, out_cap, "%c%d", col_letter, row1);
   } else {
-    snprintf(out, out_cap, "%d%c", row1, col_letter);
+    (void)snprintf(out, out_cap, "%d%c", row1, col_letter);
   }
 }
 
@@ -312,7 +312,7 @@ static void tui_board_builder_extract_word(const TuiGameState *gs, char *out,
   out[0] = '\0';
   const char *space = strchr(gs->edit_move_buf, ' ');
   if (space != NULL && space[1] != '\0') {
-    snprintf(out, out_cap, "%s", space + 1);
+    (void)snprintf(out, out_cap, "%s", space + 1);
   }
 }
 
@@ -394,10 +394,10 @@ void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col, int dir) {
   }
   leading[li] = '\0';
   if (li > 0) {
-    snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s %s", coord,
-             leading);
+    (void)snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s %s", coord,
+                   leading);
   } else {
-    snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s", coord);
+    (void)snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s", coord);
   }
   gs->edit_move_len = (int)strlen(gs->edit_move_buf);
   gs->edit_move_cursor = gs->edit_move_len;
@@ -652,7 +652,7 @@ static void format_history_move(const TuiGameState *gs, const Move *move,
   StringBuilder *sb = string_builder_create();
   string_builder_add_move(sb, brd, &display_move, gs->ld, false);
   char *dump = string_builder_dump(sb, NULL);
-  snprintf(out, out_size, "%s", dump);
+  (void)snprintf(out, out_size, "%s", dump);
   free(dump);
   string_builder_destroy(sb);
 }
@@ -719,7 +719,7 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
     if (num_invalid > 0) {
       phony = true;
       char *dump = string_builder_dump(wsb, NULL);
-      snprintf(invalid_words, sizeof(invalid_words), "%s", dump);
+      (void)snprintf(invalid_words, sizeof(invalid_words), "%s", dump);
       free(dump);
     }
     string_builder_destroy(wsb);
@@ -728,8 +728,8 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   if (phony && gs->challenge_rule == UI_CHALLENGE_VOID) {
     // VOID: invalid plays never reach the board. Reject the commit
     // and leave the editor open for a do-over.
-    snprintf(gs->notice_buf, sizeof(gs->notice_buf), "not valid: %s",
-             invalid_words);
+    (void)snprintf(gs->notice_buf, sizeof(gs->notice_buf), "not valid: %s",
+                   invalid_words);
     clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
     gs->notice_expires_at.tv_sec += 3;
     atomic_fetch_add(&gs->render_version, 1);
@@ -758,13 +758,13 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
     tui_tag_move_owners(game_get_board(gs->game), gs->edit_preview_move,
                         player_idx);
   }
-  snprintf(e->move_str, sizeof(e->move_str), "%s", display_move);
+  (void)snprintf(e->move_str, sizeof(e->move_str), "%s", display_move);
   e->score = gs->edit_move_score;
   if (!phony) {
     StringBuilder *sb = string_builder_create();
     string_builder_add_rack(sb, &leave, gs->ld, false);
     char *dump = string_builder_dump(sb, NULL);
-    snprintf(e->leave_str, sizeof(e->leave_str), "%s", dump);
+    (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s", dump);
     free(dump);
     string_builder_destroy(sb);
   }
@@ -780,7 +780,7 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
       StringBuilder *sb = string_builder_create();
       string_builder_add_rack(sb, opp, gs->ld, false);
       char *dump = string_builder_dump(sb, NULL);
-      snprintf(e->end_rack_str, sizeof(e->end_rack_str), "%s", dump);
+      (void)snprintf(e->end_rack_str, sizeof(e->end_rack_str), "%s", dump);
       free(dump);
       string_builder_destroy(sb);
     }
@@ -808,8 +808,8 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   e->clock_at_end =
       gs->time_per_side_seconds - (int)gs->seconds_used[player_idx];
   if (phony) {
-    snprintf(gs->notice_buf, sizeof(gs->notice_buf),
-             "challenged off (%s) - turn lost", invalid_words);
+    (void)snprintf(gs->notice_buf, sizeof(gs->notice_buf),
+                   "challenged off (%s) - turn lost", invalid_words);
     clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
     gs->notice_expires_at.tv_sec += 4;
   }
@@ -867,11 +867,12 @@ void tui_board_entry_submit(TuiGameState *gs) {
   // Seed the rack from the move's played tiles when the annotator
   // hasn't typed a fuller rack — matches the cell editor's behavior.
   if (e->rack_str[0] == '\0' && gs->edit_move_inferred_rack[0] != '\0') {
-    snprintf(e->rack_str, sizeof(e->rack_str), "%s",
-             gs->edit_move_inferred_rack);
+    (void)snprintf(e->rack_str, sizeof(e->rack_str), "%s",
+                   gs->edit_move_inferred_rack);
   }
   if (gs->edit_move_leave[0] != '\0') {
-    snprintf(e->leave_str, sizeof(e->leave_str), "%s", gs->edit_move_leave);
+    (void)snprintf(e->leave_str, sizeof(e->leave_str), "%s",
+                   gs->edit_move_leave);
   }
   e->pending = false;
   e->total_after =
