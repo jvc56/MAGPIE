@@ -10,7 +10,6 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,115 +18,85 @@ void assert_win_pct_get(const float actual, const double expected) {
   assert(within_epsilon(actual, expected));
 }
 
-// Looks up a table keyed by unseen tiles with a state that has that many
-// tiles unseen to the on-turn player.
-static float get_by_unseen(const WinPct *win_pct, int spread,
-                           unsigned int unseen) {
-  const unsigned int bag_tiles = unseen > RACK_SIZE ? unseen - RACK_SIZE : 0;
-  return win_pct_get(win_pct, spread, bag_tiles, RACK_SIZE, unseen - bag_tiles);
+static const WinPct *load_config_win_pcts_or_die(Config *config) {
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return config_get_win_pcts(config);
 }
 
 void test_win_pct(void) {
+  // Without -winpct the table is the letter distribution's.
   Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1 "
-      "-winpct winpct");
-  const WinPct *win_pct = config_get_win_pcts(config);
-  // Test "corners"
-  assert_win_pct_get(get_by_unseen(win_pct, -600, 1), 0.0);
-  assert_win_pct_get(get_by_unseen(win_pct, -500, 1), 0.0);
-  assert_win_pct_get(get_by_unseen(win_pct, -600, 93),
-                     9644 / (double)((uint64_t)2932802774 * 2));
-  assert_win_pct_get(get_by_unseen(win_pct, -500, 93),
-                     9644 / (double)((uint64_t)2932802774 * 2));
-  assert_win_pct_get(get_by_unseen(win_pct, 600, 1), 1.0);
-  assert_win_pct_get(get_by_unseen(win_pct, 500, 1), 1.0);
-  assert_win_pct_get(get_by_unseen(win_pct, 600, 93),
-                     5865602560 / (double)((uint64_t)2932802774 * 2));
-  assert_win_pct_get(get_by_unseen(win_pct, 500, 93),
-                     5865602560 / (double)((uint64_t)2932802774 * 2));
-  // Test various other cases
-  assert_win_pct_get(get_by_unseen(win_pct, -490, 78),
-                     1504 / (double)((uint64_t)526840707 * 2));
-  assert_win_pct_get(get_by_unseen(win_pct, -490, 91),
-                     198 / (double)((uint64_t)88159945 * 2));
-  assert_win_pct_get(get_by_unseen(win_pct, -490, 92),
-                     198 / (double)((uint64_t)88159945 * 2));
-  assert_win_pct_get(get_by_unseen(win_pct, 0, 93),
-                     3267384562 / (double)((uint64_t)2932802774 * 2));
-  assert_win_pct_get(get_by_unseen(win_pct, -200, 93),
-                     180395057 / (double)((uint64_t)2932802774 * 2));
-  assert_win_pct_get(get_by_unseen(win_pct, 250, 93),
-                     5842108920 / (double)((uint64_t)2932802774 * 2));
-  config_destroy(config);
-}
+      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  const WinPct *win_pct = load_config_win_pcts_or_die(config);
+  assert(strings_equal(win_pct_get_name(win_pct), "winpct_english"));
+  assert(win_pct_get_max_bag(win_pct) == 86);
 
-// Writes testdata/strategy/<name>.csv: the rows of testdata's winpct.csv
-// with its last row repeated until the table has num_rows rows.
-static void write_padded_win_pct(const char *name, int num_rows) {
-  FILE *in = fopen("./testdata/strategy/winpct.csv", "r");
-  assert(in);
-  char *path = get_formatted_string("./testdata/strategy/%s.csv", name);
-  FILE *out = fopen(path, "w");
-  assert(out);
-  free(path);
-  static char line[1 << 16];
-  static char last[1 << 16];
-  int rows = 0;
-  while (fgets(line, sizeof(line), in)) {
-    if (line[0] == '\n' || line[0] == '\0') {
-      continue;
-    }
-    fputs(line, out);
-    if (line[strlen(line) - 1] != '\n') {
-      fputc('\n', out);
-    }
-    snprintf(last, sizeof(last), "%s", line);
-    rows++;
+  // At the opening (86 in the bag, both racks full) the player on turn is
+  // slightly favored and expects to outscore the opponent from here, and a
+  // lead of 500 is decided either way.
+  const double opening_tied = win_pct_get(win_pct, 0, 86, RACK_SIZE, RACK_SIZE);
+  assert(opening_tied > 0.5 && opening_tied < 0.6);
+  assert(win_pct_get(win_pct, 500, 86, RACK_SIZE, RACK_SIZE) > 0.99);
+  assert(win_pct_get(win_pct, -500, 86, RACK_SIZE, RACK_SIZE) < 0.01);
+  const Equity opening_swing =
+      win_pct_get_expected_swing(win_pct, 86, RACK_SIZE, RACK_SIZE);
+  assert(opening_swing > 0 && opening_swing < int_to_equity(40));
+  // Win percentages never fall as the lead grows.
+  for (int spread = -499; spread <= 500; spread++) {
+    assert(win_pct_get(win_pct, spread, 86, RACK_SIZE, RACK_SIZE) >=
+           win_pct_get(win_pct, spread - 1, 86, RACK_SIZE, RACK_SIZE));
   }
-  fclose(in);
-  for (; rows < num_rows; rows++) {
-    fputs(last, out);
-    if (last[strlen(last) - 1] != '\n') {
-      fputc('\n', out);
-    }
-  }
-  fclose(out);
+  // With the bag empty, one tile against a full rack all but guarantees
+  // going out first, which is worth more than tempo at the opening.
+  assert(win_pct_get_expected_swing(win_pct, 0, 1, RACK_SIZE) > opening_swing);
+  assert(win_pct_get(win_pct, 0, 0, 1, RACK_SIZE) > opening_tied);
+
+  // -winpct names another table and default returns to the distribution's.
+  load_and_exec_config_or_die(config, "set -winpct winpct_french");
+  win_pct = load_config_win_pcts_or_die(config);
+  assert(strings_equal(win_pct_get_name(win_pct), "winpct_french"));
+  load_and_exec_config_or_die(config, "set -winpct default");
+  win_pct = load_config_win_pcts_or_die(config);
+  assert(strings_equal(win_pct_get_name(win_pct), "winpct_english"));
+  config_destroy(config);
 }
 
 void test_win_pct_coverage(void) {
   // An explicitly chosen table is kept across a lexicon change, and a
-  // 102-tile bag (95 unseen at most) outgrows the 93-row English table.
+  // 102-tile bag (88 tiles in the bag at the start) outgrows the English
+  // table, which covers bags of up to 86.
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1 "
-      "-winpct winpct");
+      "-winpct winpct_english");
   assert_config_exec_status(config, "set -lex FRA20",
                             ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL);
   config_destroy(config);
 
-  // Without -winpct the table stays lazy at set time and is checked when
-  // it is first needed.
+  // The default follows the distribution: loaded lazily when first needed,
+  // and swapped when the lexicon changes.
   config = config_create_or_die(
       "set -lex FRA20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
-  ErrorStack *error_stack = error_stack_create();
-  config_load_win_pcts(config, error_stack);
-  assert(error_stack_top(error_stack) == ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL);
-  error_stack_destroy(error_stack);
+  const WinPct *win_pct = load_config_win_pcts_or_die(config);
+  assert(strings_equal(win_pct_get_name(win_pct), "winpct_french"));
+  assert(win_pct_get_max_bag(win_pct) == 88);
+  load_and_exec_config_or_die(config, "set -lex CSW21");
+  win_pct = load_config_win_pcts_or_die(config);
+  assert(strings_equal(win_pct_get_name(win_pct), "winpct_english"));
   config_destroy(config);
 
-  // A table named for the distribution is the default when it exists, and
-  // one with enough rows passes.
-  write_padded_win_pct("winpct_french", 95);
+  // A distribution without a table of its own has no default.
   config = config_create_or_die(
-      "set -lex FRA20 -s1 score -s2 score -r1 all -r2 all -numplays 1");
-  error_stack = error_stack_create();
+      "set -lex CSW21_ab -ld english_ab -wmp false -s1 score -s2 score -r1 "
+      "all -r2 all -numplays 1");
+  ErrorStack *error_stack = error_stack_create();
   config_load_win_pcts(config, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(strings_equal(win_pct_get_name(config_get_win_pcts(config)),
-                       "winpct_french"));
-  assert(win_pct_get_max_tiles_unseen(config_get_win_pcts(config)) == 95);
+  assert(error_stack_top(error_stack) ==
+         ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR);
   error_stack_destroy(error_stack);
   config_destroy(config);
-  remove("./testdata/strategy/winpct_french.csv");
 }
 
 enum {
@@ -148,7 +117,7 @@ static void write_counts(const WinPctCounts *counts, const char *name) {
 
 static void remove_counts(const char *name) {
   char *path = get_formatted_string("./testdata/strategy/%s.csv", name);
-  remove(path);
+  (void)remove(path);
   free(path);
 }
 
@@ -188,9 +157,7 @@ void test_win_pct_state(void) {
   win_pct_counts_destroy(reread);
 
   WinPct *win_pct = load_win_pct_or_die("winpct_state_test");
-  assert(win_pct_has_expected_swing(win_pct));
-  assert(win_pct_get_max_tiles_unseen(win_pct) ==
-         STATE_TEST_MAX_BAG + RACK_SIZE);
+  assert(win_pct_get_max_bag(win_pct) == STATE_TEST_MAX_BAG);
   // Ahead by 10 with swings -10, 10, 30, 600: one tie and three wins.
   assert_win_pct_get(win_pct_get(win_pct, 10, 50, RACK_SIZE, RACK_SIZE),
                      3.5 / 4);
@@ -251,15 +218,8 @@ void test_win_pct_state(void) {
   load_and_exec_config_or_die(
       config, "convert winpct winpct_state_test winpct_state_test_smoothed");
   WinPct *smoothed_win_pct = load_win_pct_or_die("winpct_state_test_smoothed");
-  assert(win_pct_has_expected_swing(smoothed_win_pct));
+  assert(win_pct_get_max_bag(smoothed_win_pct) == STATE_TEST_MAX_BAG);
   win_pct_destroy(smoothed_win_pct);
-  // The margin forecast needs a table keyed by game state.
-  assert_config_exec_status(config, "set -winpct winpct -smargin true",
-                            ERROR_STATUS_SUCCESS);
-  error_stack = error_stack_create();
-  config_load_win_pcts(config, error_stack);
-  assert(error_stack_top(error_stack) == ERROR_STATUS_CONFIG_WIN_PCT_NO_MARGIN);
-  error_stack_destroy(error_stack);
   config_destroy(config);
 
   win_pct_counts_destroy(counts);

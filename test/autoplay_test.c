@@ -306,14 +306,14 @@ void test_autoplay_sort_type_divergence(void) {
 void test_autoplay_win_pct_record(void) {
   // The recorder adds to an existing record, so start from none and leave
   // none behind (see also test_win_pct_record).
-  remove("./testdata/strategy/CSW21_winpct_record.csv");
+  (void)remove("./testdata/strategy/CSW21_winpct_record.csv");
   Config *csw_config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
                            "all -numplays 1  -gp false -threads 1");
   load_and_exec_config_or_die(csw_config,
                               "autoplay winpct 50 -seed 50 -wb 1000000 ");
   config_destroy(csw_config);
-  remove("./testdata/strategy/CSW21_winpct_record.csv");
+  (void)remove("./testdata/strategy/CSW21_winpct_record.csv");
 }
 
 void test_autoplay_leaves_record(void) {

@@ -1655,8 +1655,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_WIN_PCT:
       usages[0] = "<win_percentage>";
-      examples[0] = "winpct";
-      text = "Specifies which win percentage file to use for simulations.";
+      examples[0] = "winpct_english";
+      examples[1] = "default";
+      text = "Specifies which win percentage table to use for simulations. "
+             "Without it, or with default, the table is winpct_ followed by "
+             "the letter distribution's name, e.g. winpct_french.";
       break;
     case ARG_TOKEN_PLIES:
       usages[0] = "<plies>";
@@ -1891,8 +1894,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "horizon's spread to the end of the game with the win "
              "percentage table's expected swing for that bag and rack "
              "state. The projection feeds the equity and the spread term "
-             "of the utility blend. Requires a win percentage table keyed "
-             "by game state.";
+             "of the utility blend.";
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
@@ -3004,48 +3006,38 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
 }
 
 // The win percentage table the config should use: the one named by
-// -winpct, else DEFAULT_WIN_PCT_PREFIX plus the letter distribution's name
-// when that file exists, else DEFAULT_WIN_PCT. Caller owns the result.
+// -winpct, else DEFAULT_WIN_PCT_PREFIX plus the letter distribution's
+// name. NULL when neither is known yet. Caller owns the result.
 static char *config_win_pct_target_name(const Config *config) {
   if (config->win_pct_explicit_name) {
     return string_duplicate(config->win_pct_explicit_name);
   }
   if (config->ld) {
-    char *ld_specific_name = get_formatted_string(
-        "%s%s", DEFAULT_WIN_PCT_PREFIX, ld_get_name(config->ld));
-    ErrorStack *lookup_errors = error_stack_create();
-    char *filename = data_filepaths_get_readable_filename(
-        config->data_paths, ld_specific_name, DATA_FILEPATH_TYPE_WIN_PCT,
-        lookup_errors);
-    const bool found = error_stack_is_empty(lookup_errors);
-    free(filename);
-    error_stack_destroy(lookup_errors);
-    if (found) {
-      return ld_specific_name;
-    }
-    free(ld_specific_name);
+    return get_formatted_string("%s%s", DEFAULT_WIN_PCT_PREFIX,
+                                ld_get_name(config->ld));
   }
-  return string_duplicate(DEFAULT_WIN_PCT);
+  return NULL;
 }
 
-// Every win percentage lookup (a player at the opening, a simulation
-// horizon) asks for at most the whole bag plus the opponent's rack, i.e.
-// every tile but the player's own rack, so a table with fewer rows would
-// fail mid-game. Checked whenever a table is loaded or the letter
-// distribution changes, before anything reads the table.
+// A game starts with every tile but the two racks in the bag, and every win
+// percentage lookup (a simulation horizon, PAT's utility) happens at or below
+// that, so a table covering smaller bags would fail mid-game. Checked
+// whenever a table is loaded or the letter distribution changes, before
+// anything reads the table.
 static void config_check_win_pct_coverage(const Config *config,
                                           ErrorStack *error_stack) {
   if (!config->win_pcts || !config->ld) {
     return;
   }
-  const int needed = ld_get_total_tiles(config->ld) - RACK_SIZE;
-  const int covered = (int)win_pct_get_max_tiles_unseen(config->win_pcts);
+  const int needed = ld_get_total_tiles(config->ld) - 2 * RACK_SIZE;
+  const int covered = (int)win_pct_get_max_bag(config->win_pcts);
   if (covered < needed) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL,
         get_formatted_string(
-            "win percentage table '%s' covers %d unseen tiles, but letter "
-            "distribution '%s' needs %d (%d tiles, rack size %d)",
+            "win percentage table '%s' covers bags of up to %d tiles, but "
+            "letter distribution '%s' starts with %d in the bag (%d tiles, "
+            "rack size %d)",
             win_pct_get_name(config->win_pcts), covered,
             ld_get_name(config->ld), needed, ld_get_total_tiles(config->ld),
             RACK_SIZE));
@@ -3056,17 +3048,30 @@ static void config_check_win_pct_coverage(const Config *config,
 // differs from the loaded one, then checks its coverage.
 static void config_ensure_win_pcts(Config *config, ErrorStack *error_stack) {
   char *target_name = config_win_pct_target_name(config);
+  if (target_name == NULL) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+        string_duplicate("no win percentage table: set -winpct or a letter "
+                         "distribution"));
+    return;
+  }
   if (config->win_pcts == NULL ||
       !strings_equal(win_pct_get_name(config->win_pcts), target_name)) {
     win_pct_destroy(config->win_pcts);
     config->win_pcts =
         win_pct_create(config->data_paths, target_name, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      free(target_name);
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
-          string_duplicate(
-              "encountered an error loading the win percentage file"));
+          config->win_pct_explicit_name
+              ? get_formatted_string("could not load win percentage table '%s'",
+                                     target_name)
+              : get_formatted_string(
+                    "could not load win percentage table '%s', the default "
+                    "for letter distribution '%s'; name another with "
+                    "-winpct",
+                    target_name, ld_get_name(config->ld)));
+      free(target_name);
       return;
     }
   }
@@ -3076,21 +3081,6 @@ static void config_ensure_win_pcts(Config *config, ErrorStack *error_stack) {
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
   config_ensure_win_pcts(config, error_stack);
-  if (!error_stack_is_empty(error_stack) || config->win_pcts == NULL) {
-    return;
-  }
-  const bool margin_forecast_requested = config->sim_margin_forecast ||
-                                         config->p1_sim_margin_forecast ||
-                                         config->p2_sim_margin_forecast;
-  if (margin_forecast_requested &&
-      !win_pct_has_expected_swing(config->win_pcts)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_WIN_PCT_NO_MARGIN,
-        get_formatted_string(
-            "the simulation margin forecast needs a win percentage table "
-            "keyed by game state, but '%s' is keyed by unseen tiles",
-            win_pct_get_name(config->win_pcts)));
-  }
 }
 
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
@@ -8350,7 +8340,10 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
   if (new_win_pct_name != NULL) {
     free(config->win_pct_explicit_name);
-    config->win_pct_explicit_name = string_duplicate(new_win_pct_name);
+    config->win_pct_explicit_name =
+        strings_equal(new_win_pct_name, DEFAULT_WIN_PCT_ARG)
+            ? NULL
+            : string_duplicate(new_win_pct_name);
   }
   if (config->win_pct_explicit_name != NULL) {
     config_ensure_win_pcts(config, error_stack);
@@ -8361,7 +8354,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     char *target_name = config_win_pct_target_name(config);
     ErrorStack *coverage_errors = error_stack_create();
     config_check_win_pct_coverage(config, coverage_errors);
-    if (!strings_equal(win_pct_get_name(config->win_pcts), target_name) ||
+    if (target_name == NULL ||
+        !strings_equal(win_pct_get_name(config->win_pcts), target_name) ||
         !error_stack_is_empty(coverage_errors)) {
       win_pct_destroy(config->win_pcts);
       config->win_pcts = NULL;
@@ -10031,10 +10025,12 @@ void config_add_settings_to_string_builder(const Config *config,
           sb, players_data_get_move_record_type(config->players_data, 1));
       break;
     case ARG_TOKEN_WIN_PCT:
-      config_add_string_setting_to_string_builder(
-          config, sb, arg_token,
-          config->win_pcts ? win_pct_get_name(config->win_pcts)
-                           : DEFAULT_WIN_PCT);
+      // Only a table named with -winpct is saved; the per-distribution
+      // default follows the lexicon.
+      if (config->win_pct_explicit_name) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token, config->win_pct_explicit_name);
+      }
       break;
     case ARG_TOKEN_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

@@ -40,7 +40,7 @@ typedef struct SimArgs {
   double utility_spread_scale;
   // Whether a nonterminal sim horizon's spread is projected to the end of the
   // game with the win percentage table's expected swing for that state (see
-  // rv_sim_sample). Requires a table keyed by game state.
+  // rv_sim_sample).
   bool use_margin_forecast;
 } SimArgs;
 

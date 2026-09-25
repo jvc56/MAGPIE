@@ -100,10 +100,12 @@ static void smooth_bag_empty_row(const WinPctCounts *src, int src_sample,
   }
   const int on_turn_rack_tiles = cell / RACK_SIZE + 1;
   const int off_turn_rack_tiles = cell % RACK_SIZE + 1;
-  const int neighbor_offsets[WIN_PCT_SMOOTH_NUM_NEIGHBORS][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+  const int neighbor_offsets[WIN_PCT_SMOOTH_NUM_NEIGHBORS][2] = {
+      {-1, 0}, {1, 0}, {0, -1}, {0, 1}};
   const int row_length = win_pct_counts_get_row_length(src);
   double *prior = calloc_or_die(row_length, sizeof(double));
-  for (int neighbor_idx = 0; neighbor_idx < WIN_PCT_SMOOTH_NUM_NEIGHBORS; neighbor_idx++) {
+  for (int neighbor_idx = 0; neighbor_idx < WIN_PCT_SMOOTH_NUM_NEIGHBORS;
+       neighbor_idx++) {
     const int neighbor_on =
         on_turn_rack_tiles + neighbor_offsets[neighbor_idx][0];
     const int neighbor_off =

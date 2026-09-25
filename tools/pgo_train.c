@@ -3,6 +3,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/win_pct.h"
@@ -10,6 +11,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/play_chooser.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
@@ -183,7 +185,11 @@ static void train_games(pgo_mode_t mode, const Config *config, int num_games,
   const bool needs_win_pcts = mode == PGO_MODE_SIM;
   WinPct *win_pcts = NULL;
   if (needs_win_pcts) {
-    win_pcts = win_pct_create(data_paths, DEFAULT_WIN_PCT, error_stack);
+    // The per-distribution default, as the config would load it.
+    char *win_pct_name = get_formatted_string(
+        "%s%s", DEFAULT_WIN_PCT_PREFIX, ld_get_name(config_get_ld(config)));
+    win_pcts = win_pct_create(data_paths, win_pct_name, error_stack);
+    free(win_pct_name);
     exit_on_error(error_stack, "loading win percentages");
   }
 

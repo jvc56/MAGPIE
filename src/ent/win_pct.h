@@ -11,18 +11,13 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
                        ErrorStack *error_stack);
 void win_pct_destroy(WinPct *wp);
 const char *win_pct_get_name(const WinPct *wp);
-// The most unseen tiles the table has a row for.
-unsigned int win_pct_get_max_tiles_unseen(const WinPct *wp);
+// The largest bag size the table covers.
+unsigned int win_pct_get_max_bag(const WinPct *wp);
 // The on-turn player's chance of winning when ahead by spread_plus_leftover,
-// given the tiles in the bag and on each rack. Tables in the original format
-// are keyed only by the tiles unseen to the on-turn player (bag plus the
-// off-turn rack).
+// given the tiles in the bag and on each rack (see win_pct_counts.h).
 float win_pct_get(const WinPct *wp, int spread_plus_leftover,
                   unsigned int bag_tiles, unsigned int on_turn_rack_tiles,
                   unsigned int off_turn_rack_tiles);
-// Whether the table predicts the final margin; only tables keyed by game state
-// (see win_pct_counts.h) do.
-bool win_pct_has_expected_swing(const WinPct *wp);
 // The expected change in the on-turn player's spread from this state to the
 // end of the game.
 Equity win_pct_get_expected_swing(const WinPct *wp, unsigned int bag_tiles,

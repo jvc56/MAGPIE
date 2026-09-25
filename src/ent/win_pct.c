@@ -1,6 +1,5 @@
 #include "win_pct.h"
 
-#include "../def/rack_defs.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -8,48 +7,28 @@
 #include "equity.h"
 #include "win_pct_counts.h"
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 struct WinPct {
   char *name;
-  // One row per unseen count (original format) or per game state (see
-  // win_pct_counts.h).
+  // One row per game state (see win_pct_counts.h).
   float **win_pcts;
   int num_rows;
-  // NULL for the original format.
   Equity *expected_swings;
-  // Zero for the original format.
   unsigned int max_bag;
   int min_spread;
   int max_spread;
   int number_of_spreads;
-  unsigned int max_tiles_unseen;
 };
 
 const char *win_pct_get_name(const WinPct *wp) { return wp->name; }
 
-unsigned int win_pct_get_max_tiles_unseen(const WinPct *wp) {
-  return wp->max_tiles_unseen;
-}
+unsigned int win_pct_get_max_bag(const WinPct *wp) { return wp->max_bag; }
 
 static int win_pct_get_row_index(const WinPct *wp, unsigned int bag_tiles,
                                  unsigned int on_turn_rack_tiles,
                                  unsigned int off_turn_rack_tiles) {
-  if (wp->expected_swings == NULL) {
-    const unsigned int game_unseen_tiles = bag_tiles + off_turn_rack_tiles;
-    if (game_unseen_tiles > wp->max_tiles_unseen) {
-      log_fatal("cannot get win percentage value for %d unseen tiles when the "
-                "maximum unseen tiles is %d",
-                game_unseen_tiles, wp->max_tiles_unseen);
-    }
-    if (game_unseen_tiles == 0) {
-      log_fatal("cannot get win percentage value for 0 unseen tiles when the "
-                "minimum unseen tiles is 1");
-    }
-    return (int)game_unseen_tiles - 1;
-  }
   if (bag_tiles > wp->max_bag) {
     log_fatal("cannot get win percentage value for %d tiles in the bag when "
               "the maximum is %d",
@@ -73,18 +52,9 @@ float win_pct_get(const WinPct *wp, int spread_plus_leftover,
   return wp->win_pcts[row_index][wp->max_spread + spread_plus_leftover];
 }
 
-bool win_pct_has_expected_swing(const WinPct *wp) {
-  return wp->expected_swings != NULL;
-}
-
 Equity win_pct_get_expected_swing(const WinPct *wp, unsigned int bag_tiles,
                                   unsigned int on_turn_rack_tiles,
                                   unsigned int off_turn_rack_tiles) {
-  if (wp->expected_swings == NULL) {
-    log_fatal("win percentage table '%s' does not predict the final margin",
-              wp->name);
-    return 0;
-  }
   return wp->expected_swings[win_pct_get_row_index(
       wp, bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles)];
 }
@@ -147,7 +117,6 @@ static void win_pct_create_from_counts(const char *win_pct_name,
   }
 
   wp->max_bag = (unsigned int)max_bag;
-  wp->max_tiles_unseen = (unsigned int)(max_bag + RACK_SIZE);
   wp->max_spread = win_pct_counts_get_max_spread(counts);
   wp->min_spread = -wp->max_spread;
   wp->number_of_spreads = 2 * wp->max_spread + 1;
@@ -192,123 +161,6 @@ static void win_pct_create_from_counts(const char *win_pct_name,
   wp->name = string_duplicate(win_pct_name);
 }
 
-void win_pct_create_internal(const char *win_pct_name,
-                             const char *win_pct_filename, WinPct *wp,
-                             const StringSplitter *split_win_pct_contents,
-                             ErrorStack *error_stack) {
-  wp->max_tiles_unseen =
-      string_splitter_get_number_of_items(split_win_pct_contents);
-
-  if (wp->max_tiles_unseen < 1) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_WIN_PCT_NO_DATA_FOUND,
-        get_formatted_string("no data found in win percentage file: %s\n",
-                             win_pct_filename));
-    return;
-  }
-
-  // Allocate memory for the 2D array
-  wp->num_rows = (int)wp->max_tiles_unseen;
-  float **array =
-      (float **)calloc_or_die(wp->max_tiles_unseen, sizeof(float *));
-
-  // Read data lines
-  StringSplitter *split_tiles_remaining_row = NULL;
-  int prev_nonzero_total_games_index = -1;
-  for (unsigned int tiles_unseen_index = 0;
-       tiles_unseen_index < wp->max_tiles_unseen; tiles_unseen_index++) {
-    split_tiles_remaining_row = split_string_by_whitespace(
-        string_splitter_get_item(split_win_pct_contents,
-                                 (int)tiles_unseen_index),
-        true);
-    int num_spreads_in_row =
-        string_splitter_get_number_of_items(split_tiles_remaining_row) - 1;
-
-    if (tiles_unseen_index == 0) {
-      if (num_spreads_in_row % 2 != 1) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_WIN_PCT_INVALID_NUMBER_OF_COLUMNS,
-            get_formatted_string("invalid number of columns in '%s' at line %d "
-                                 "(expected odd number)",
-                                 win_pct_name, tiles_unseen_index + 1));
-        break;
-      }
-      wp->max_spread = num_spreads_in_row / 2;
-      wp->min_spread = -wp->max_spread;
-      wp->number_of_spreads = num_spreads_in_row;
-      for (unsigned int j = 0; j < wp->max_tiles_unseen; j++) {
-        array[j] =
-            (float *)malloc_or_die(wp->number_of_spreads * sizeof(float));
-      }
-    } else if (num_spreads_in_row != wp->number_of_spreads) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_WIN_PCT_INVALID_NUMBER_OF_COLUMNS,
-          get_formatted_string("inconsistent number of columns in '%s' at line "
-                               "%d (found %d but expected %d)",
-                               win_pct_name, tiles_unseen_index + 1,
-                               num_spreads_in_row, wp->number_of_spreads));
-      break;
-    }
-
-    uint64_t total_games_for_tiles_remaining = string_to_uint64(
-        string_splitter_get_item(split_tiles_remaining_row, 0), error_stack);
-
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_WIN_PCT_INVALID_TOTAL_GAMES,
-          get_formatted_string(
-              "invalid total games '%s' for %d tiles remaining in win "
-              "percentage file",
-              string_splitter_get_item(split_tiles_remaining_row, 0),
-              tiles_unseen_index + 1));
-      break;
-    }
-
-    if (total_games_for_tiles_remaining == 0) {
-      if (prev_nonzero_total_games_index < 0) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_WIN_PCT_INVALID_TOTAL_GAMES,
-            get_formatted_string(
-                "cannot have zero total games (for %d tiles remaining) when "
-                "all previous totals are also zero",
-                tiles_unseen_index + 1));
-        break;
-      }
-      memcpy(array[tiles_unseen_index], array[prev_nonzero_total_games_index],
-             num_spreads_in_row * sizeof(float));
-    } else {
-      for (int spread_index = 0; spread_index < num_spreads_in_row;
-           spread_index++) {
-        // Use +1 to ignore the total games column
-        const uint64_t total_win_score =
-            string_to_uint64(string_splitter_get_item(split_tiles_remaining_row,
-                                                      spread_index + 1),
-                             error_stack);
-        if (!error_stack_is_empty(error_stack)) {
-          error_stack_push(
-              error_stack, ERROR_STATUS_WIN_PCT_INVALID_TOTAL_WINS,
-              get_formatted_string(
-                  "invalid total wins score '%s' for %d tiles remaining in win "
-                  "percentage file",
-                  string_splitter_get_item(split_tiles_remaining_row, 0),
-                  tiles_unseen_index + 1));
-          break;
-        }
-        array[tiles_unseen_index][spread_index] =
-            (float)total_win_score /
-            (float)(total_games_for_tiles_remaining * 2);
-      }
-      prev_nonzero_total_games_index = (int)tiles_unseen_index;
-    }
-    string_splitter_destroy(split_tiles_remaining_row);
-    split_tiles_remaining_row = NULL;
-  }
-  string_splitter_destroy(split_tiles_remaining_row);
-  wp->win_pcts = array;
-  wp->name = string_duplicate(win_pct_name);
-}
-
-// Function to free the memory allocated for the 2D array
 void win_pct_destroy(WinPct *wp) {
   if (!wp) {
     return;
@@ -332,26 +184,17 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
   if (error_stack_is_empty(error_stack)) {
     char *file_contents =
         fileproxy_get_string_from_filename(win_pct_filename, error_stack);
-    if (error_stack_is_empty(error_stack) &&
-        win_pct_counts_string_has_header(file_contents)) {
-      WinPctCounts *counts = win_pct_counts_create_from_string(
-          file_contents, win_pct_filename, error_stack);
-      if (error_stack_is_empty(error_stack)) {
-        wp = calloc_or_die(1, sizeof(WinPct));
-        win_pct_create_from_counts(win_pct_name, win_pct_filename, wp, counts,
-                                   error_stack);
-      }
-      win_pct_counts_destroy(counts);
-    } else if (error_stack_is_empty(error_stack)) {
-      StringSplitter *split_win_pct_contents =
-          split_string_by_newline(file_contents, error_stack);
-      if (error_stack_is_empty(error_stack)) {
-        wp = calloc_or_die(1, sizeof(WinPct));
-        win_pct_create_internal(win_pct_name, win_pct_filename, wp,
-                                split_win_pct_contents, error_stack);
-      }
-      string_splitter_destroy(split_win_pct_contents);
+    WinPctCounts *counts = NULL;
+    if (error_stack_is_empty(error_stack)) {
+      counts = win_pct_counts_create_from_string(file_contents,
+                                                 win_pct_filename, error_stack);
     }
+    if (error_stack_is_empty(error_stack)) {
+      wp = calloc_or_die(1, sizeof(WinPct));
+      win_pct_create_from_counts(win_pct_name, win_pct_filename, wp, counts,
+                                 error_stack);
+    }
+    win_pct_counts_destroy(counts);
     free(file_contents);
   }
   free(win_pct_filename);
