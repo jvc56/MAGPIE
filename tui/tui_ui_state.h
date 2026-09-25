@@ -60,7 +60,6 @@ typedef struct {
   int quit_confirm_focus;
   TuiModalState quit_confirm_return;
   LexiconList *lexicon_list;
-  int lexicon_focus;
   bool frame_dirty;
 } TuiUiState;
 
