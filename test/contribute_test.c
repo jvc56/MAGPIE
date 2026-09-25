@@ -1307,8 +1307,9 @@ static void test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job(void) {
   }
 }
 
-// The claim body has the shape of birdtest's claim-request fixture: the same
-// keys, a version string and a list of ids.
+// The claim body has the shape of birdtest's claim-request fixture: built
+// from the fixture's own version and ids, it has the same keys and the same
+// values.
 static void test_the_claim_body_matches_the_claim_fixture(void) {
   const char *path = "contribute_test_claim_settings.txt";
   write_settings_file(path, "server https://birdtest.example\n");
@@ -1317,17 +1318,26 @@ static void test_the_claim_body_matches_the_claim_fixture(void) {
   ContributeState *state =
       contribute_state_create(path, thread_control, error_stack);
   assert(error_stack_is_empty(error_stack));
-  (void)contribute_defer_job(state, "4c7b64ad-8e5e-4db7-aeb0-afc44ee1ebf5");
-  char *body = contribute_claim_body(state, "1.4.0");
-  JsonValue *ours = json_parse(body, error_stack);
-  assert(error_stack_is_empty(error_stack));
   JsonValue *fixture =
       load_fixture("test/birdtest_contract/claim-request.json");
-  const JsonValue *jobs = json_object_get(ours, "unsupported_jobs");
-  assert(json_array_length(jobs) ==
-         json_array_length(json_object_get(fixture, "unsupported_jobs")));
+  const JsonValue *fixture_jobs = json_object_get(fixture, "unsupported_jobs");
+  const int job_count = json_array_length(fixture_jobs);
+  for (int i = 0; i < job_count; i++) {
+    (void)contribute_defer_job(state, json_array_get_string(fixture_jobs, i));
+  }
+  char *body = contribute_claim_body(
+      state, json_get_string_or_null(fixture, "magpie_version"));
+  JsonValue *ours = json_parse(body, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(json_object_size(ours) == json_object_size(fixture));
   assert_strings_equal(json_get_string_or_null(ours, "magpie_version"),
                        json_get_string_or_null(fixture, "magpie_version"));
+  const JsonValue *jobs = json_object_get(ours, "unsupported_jobs");
+  assert(json_array_length(jobs) == job_count);
+  for (int i = 0; i < job_count; i++) {
+    assert_strings_equal(json_array_get_string(jobs, i),
+                         json_array_get_string(fixture_jobs, i));
+  }
   json_destroy(fixture);
   json_destroy(ours);
   free(body);

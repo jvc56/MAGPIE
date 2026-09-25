@@ -10,8 +10,6 @@
 #include <sys/time.h>
 #include <time.h>
 
-#include "../util/io_util.h"
-
 typedef struct timespec TimeSpec;
 
 // Not thread safe

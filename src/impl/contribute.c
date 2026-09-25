@@ -576,8 +576,6 @@ static DeferredJob *find_deferral(ContributeState *state, const char *job_id) {
   return NULL;
 }
 
-// Sets `job_id` aside, for twice as long as last time (from the idle interval
-// up to CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS). Returns the interval.
 bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
                                             bool claim_named_deferred) {
   // Only a shutdown about data: one about this build's version
@@ -589,12 +587,14 @@ bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
           strings_equal(reason, "both"));
 }
 
+// Sets `job_id` aside, for twice as long as last time (from the idle interval
+// up to CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS). Returns the interval.
 int contribute_defer_job(ContributeState *state, const char *job_id) {
-  const int idle_wait = state->client_state->idle_wait_seconds;
+  const int idle = state->client_state->idle_wait_seconds;
   if (!job_id) {
     // A claim without a job id cannot be set aside by id: the caller waits
     // the interval instead (birdtest always sends one).
-    return idle_wait > 0 ? idle_wait : 1;
+    return idle > 0 ? idle : 1;
   }
   DeferredJob *deferred = find_deferral(state, job_id);
   if (!deferred) {
@@ -609,7 +609,6 @@ int contribute_defer_job(ContributeState *state, const char *job_id) {
     deferred->job_id = string_duplicate(job_id);
     deferred->wait_seconds = 0;
   }
-  const int idle = state->client_state->idle_wait_seconds;
   int wait = deferred->wait_seconds <= 0 ? (idle > 0 ? idle : 1)
                                          : deferred->wait_seconds * 2;
   if (wait > CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS) {
