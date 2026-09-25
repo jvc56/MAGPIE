@@ -36,7 +36,7 @@
 // lower rows. Selective bold marks the position and played-tile letters
 // in the move, plus the running totals on the right.
 
-enum { HISTORY_ERROR_MAX_LINES = 6 };
+enum { HISTORY_ERROR_MAX_LINES = 6, SPINNER_FRAMES = 10 };
 // Greedy word-wrap of plain ASCII `text` into `width`-column
 // lines, written into `lines` (each row up to 127 chars + NUL).
 // Returns the line count (capped at max_lines). Breaks at spaces
@@ -637,6 +637,175 @@ static void render_history_end_bonus_rows(
   ncplane_set_styles(plane, 0);
 }
 
+// Row 1 of a finalized entry: the move (masked for a concealed exchange),
+// its score, and the leave.
+static void
+render_history_played_move(struct ncplane *plane, const Theme *theme,
+                           const TuiHistoryEntry *e, int row, int interior_left,
+                           int interior_right, int leave_col_w,
+                           const LetterDistribution *ld, TuiRackSort rack_sort,
+                           bool conceal_tiles, const ThemeRgb player_fg,
+                           const ThemeRgb player_dim_fg, const char *prefix) {
+  // All paren groups in the engine's move notation are playthrough
+  // (the lowercase-inside-parens case is a playthrough blank, not a
+  // newly-played blank — newly-played blanks render as lowercase
+  // letters with no parens). Drop them all and render the content
+  // non-bold so playthrough tiles read as background context.
+  if (conceal_tiles && e->move_str[0] == '-') {
+    // Concealed exchange: hide which tiles were swapped, showing one
+    // dot per tile (the count matches the rack-concealment style).
+    char masked[48];
+    int p = 0;
+    masked[p++] = '-';
+    for (int i = 1; e->move_str[i] != '\0' && p + 4 < (int)sizeof(masked);
+         i++) {
+      masked[p++] = '\xe2';
+      masked[p++] = '\x80';
+      masked[p++] = '\xa2'; // U+2022 BULLET
+    }
+    masked[p] = '\0';
+    theme_apply_fg(plane, player_fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_set_styles(plane, 0);
+    ncplane_putstr_yx(plane, row, interior_left + (int)strlen(prefix), masked);
+  } else {
+    render_move_styled(plane, row, interior_left + (int)strlen(prefix),
+                       e->move_str, /*hide_parens=*/true,
+                       /*hide_playthrough_parens=*/false);
+  }
+
+  char delta_str[16];
+  snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
+  const int delta_len = (int)strlen(delta_str);
+  const int delta_col = interior_right - delta_len + 1;
+  if (delta_col > interior_left + (int)strlen(prefix)) {
+    ncplane_putstr_yx(plane, row, delta_col, delta_str);
+  }
+
+  // Leave column. Right edge anchored to (interior_right - 4) so a
+  // 2-digit delta (`+24`, the common case) sits with a 1-cell gap
+  // (`ADLMT +24`) and a 3-digit delta (`+185`) lands flush against
+  // the leave (`·+185`). For unusually long deltas (4+ chars) we
+  // clamp so the leave never overlaps the delta string. Color is
+  // the muted player-accent (same family as line 2) so the leave
+  // reads as belonging to that player.
+  if (leave_col_w > 0) {
+    const bool empty = e->leave_str[0] == '\0';
+    char sorted_leave[24];
+    if (!empty && ld != NULL) {
+      format_alphagram_for_sort(e->leave_str, ld, rack_sort, sorted_leave,
+                                sizeof(sorted_leave));
+    } else {
+      sorted_leave[0] = '\0';
+    }
+    const char *leave_text =
+        (empty || conceal_tiles) ? "\xc2\xb7" : sorted_leave;
+    // Visual width: "·" (U+00B7) is 2 bytes but renders as 1 cell.
+    // strlen would over-shift the right-alignment by a column.
+    const int leave_w = empty ? 1 : (int)strlen(leave_text);
+    int leave_right_edge = interior_right - 4;
+    if (leave_right_edge >= delta_col) {
+      leave_right_edge = delta_col - 1;
+    }
+    const int leave_col = leave_right_edge - leave_w + 1;
+    if (leave_col > interior_left + (int)strlen(prefix)) {
+      theme_apply_fg(plane, player_dim_fg);
+      ncplane_set_styles(plane, 0);
+      ncplane_putstr_yx(plane, row, leave_col, leave_text);
+    }
+  }
+}
+
+// Row 1 of a turn the bot is still computing: a braille spinner where the
+// move will go.
+static void render_history_bot_spinner(struct ncplane *plane,
+                                       const TuiGameState *state,
+                                       const TuiHistoryEntry *e,
+                                       bool clocks_active) {
+  // Bot is still computing this turn — show a braille spinner where
+  // the move notation will go and leave the +score column blank.
+  // 10-frame cycle at ~80ms per frame derives from CLOCK_MONOTONIC
+  // so the animation runs even when the renderer is otherwise idle.
+  //
+  // Skip the spinner in CGP / non-bot mode: no one is "thinking,"
+  // and showing a perpetual spinner reads as the app being busy.
+  // Also skip it on the human's own pending turn in play-vs-computer —
+  // it's the human's move to make, not the bot computing.
+  const bool human_pending = state != NULL &&
+                             state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+                             e->player_idx == state->human_player_idx;
+  if (clocks_active && !human_pending) {
+    static const char *const spinner_frames[] = {
+        "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
+        "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
+        "\xe2\xa0\x87", "\xe2\xa0\x8f",
+    };
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    const uint64_t ms =
+        (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+    const int frame = (int)((ms / 80) % SPINNER_FRAMES);
+    ncplane_putstr(plane, spinner_frames[frame]);
+  }
+}
+
+// Row 1 of a pending annotation row whose move has been committed: the
+// move, score, and leave, drawn as a finalized entry would be.
+static void render_history_committed_move(
+    struct ncplane *plane, const Theme *theme, const TuiHistoryEntry *e,
+    int row, int interior_left, int interior_right,
+    const LetterDistribution *ld, TuiRackSort rack_sort, bool conceal_tiles,
+    const ThemeRgb player_fg, const ThemeRgb player_dim_fg,
+    const char *prefix) {
+  // Annotation in progress: the user has committed a move
+  // into this still-pending row (via Enter on the move field).
+  // Render the move text + leave + "+score" the same way a
+  // finalized entry would, so closing the editor doesn't make
+  // the committed text disappear.
+  render_move_styled(plane, row, interior_left + (int)strlen(prefix),
+                     e->move_str, /*hide_parens=*/true,
+                     /*hide_playthrough_parens=*/false);
+  char delta_str[16];
+  snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
+  const int delta_len = (int)strlen(delta_str);
+  const int delta_col = interior_right - delta_len + 1;
+  if (delta_col > interior_left + (int)strlen(prefix)) {
+    theme_apply_fg(plane, player_fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, row, delta_col, delta_str);
+    ncplane_set_styles(plane, 0);
+  }
+  // Leave column — same right-anchored geometry committed
+  // turns use (4 cells right of interior_right for the delta,
+  // then leave snug to its left). Empty leave shows the "·"
+  // bingo glyph; otherwise the alphagrammed leave.
+  {
+    const bool empty = e->leave_str[0] == '\0';
+    char sorted_leave[24];
+    if (!empty && ld != NULL) {
+      format_alphagram_for_sort(e->leave_str, ld, rack_sort, sorted_leave,
+                                sizeof(sorted_leave));
+    } else {
+      sorted_leave[0] = '\0';
+    }
+    const char *leave_text =
+        (empty || conceal_tiles) ? "\xc2\xb7" : sorted_leave;
+    const int leave_w = empty ? 1 : (int)strlen(leave_text);
+    int leave_right_edge = interior_right - 4;
+    if (leave_right_edge >= delta_col) {
+      leave_right_edge = delta_col - 1;
+    }
+    const int leave_col = leave_right_edge - leave_w + 1;
+    if (leave_col > interior_left + (int)strlen(prefix)) {
+      theme_apply_fg(plane, player_dim_fg);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_set_styles(plane, 0);
+      ncplane_putstr_yx(plane, row, leave_col, leave_text);
+    }
+  }
+}
+
 static void
 render_history_entry(struct ncplane *plane, const Theme *theme,
                      const TuiGameState *state, const TuiHistoryEntry *e,
@@ -788,150 +957,15 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
                                interior_right, player_fg, player_dim_fg,
                                prefix);
   } else if (e->pending && e->move_str[0] != '\0') {
-    // Annotation in progress: the user has committed a move
-    // into this still-pending row (via Enter on the move field).
-    // Render the move text + leave + "+score" the same way a
-    // finalized entry would, so closing the editor doesn't make
-    // the committed text disappear.
-    render_move_styled(plane, row, interior_left + (int)strlen(prefix),
-                       e->move_str, /*hide_parens=*/true,
-                       /*hide_playthrough_parens=*/false);
-    char delta_str[16];
-    snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
-    const int delta_len = (int)strlen(delta_str);
-    const int delta_col = interior_right - delta_len + 1;
-    if (delta_col > interior_left + (int)strlen(prefix)) {
-      theme_apply_fg(plane, player_fg);
-      theme_apply_bg(plane, theme->bg);
-      ncplane_set_styles(plane, NCSTYLE_BOLD);
-      ncplane_putstr_yx(plane, row, delta_col, delta_str);
-      ncplane_set_styles(plane, 0);
-    }
-    // Leave column — same right-anchored geometry committed
-    // turns use (4 cells right of interior_right for the delta,
-    // then leave snug to its left). Empty leave shows the "·"
-    // bingo glyph; otherwise the alphagrammed leave.
-    {
-      const bool empty = e->leave_str[0] == '\0';
-      char sorted_leave[24];
-      if (!empty && ld != NULL) {
-        format_alphagram_for_sort(e->leave_str, ld, rack_sort, sorted_leave,
-                                  sizeof(sorted_leave));
-      } else {
-        sorted_leave[0] = '\0';
-      }
-      const char *leave_text =
-          (empty || conceal_tiles) ? "\xc2\xb7" : sorted_leave;
-      const int leave_w = empty ? 1 : (int)strlen(leave_text);
-      int leave_right_edge = interior_right - 4;
-      if (leave_right_edge >= delta_col) {
-        leave_right_edge = delta_col - 1;
-      }
-      const int leave_col = leave_right_edge - leave_w + 1;
-      if (leave_col > interior_left + (int)strlen(prefix)) {
-        theme_apply_fg(plane, player_dim_fg);
-        theme_apply_bg(plane, theme->bg);
-        ncplane_set_styles(plane, 0);
-        ncplane_putstr_yx(plane, row, leave_col, leave_text);
-      }
-    }
+    render_history_committed_move(plane, theme, e, row, interior_left,
+                                  interior_right, ld, rack_sort, conceal_tiles,
+                                  player_fg, player_dim_fg, prefix);
   } else if (e->pending) {
-    // Bot is still computing this turn — show a braille spinner where
-    // the move notation will go and leave the +score column blank.
-    // 10-frame cycle at ~80ms per frame derives from CLOCK_MONOTONIC
-    // so the animation runs even when the renderer is otherwise idle.
-    //
-    // Skip the spinner in CGP / non-bot mode: no one is "thinking,"
-    // and showing a perpetual spinner reads as the app being busy.
-    // Also skip it on the human's own pending turn in play-vs-computer —
-    // it's the human's move to make, not the bot computing.
-    const bool human_pending =
-        state != NULL && state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
-        e->player_idx == state->human_player_idx;
-    if (clocks_active && !human_pending) {
-      static const char *const spinner_frames[] = {
-          "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
-          "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
-          "\xe2\xa0\x87", "\xe2\xa0\x8f",
-      };
-      enum { SPINNER_FRAMES = 10 };
-      struct timespec ts;
-      clock_gettime(CLOCK_MONOTONIC, &ts);
-      const uint64_t ms =
-          (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
-      const int frame = (int)((ms / 80) % SPINNER_FRAMES);
-      ncplane_putstr(plane, spinner_frames[frame]);
-    }
+    render_history_bot_spinner(plane, state, e, clocks_active);
   } else {
-    // All paren groups in the engine's move notation are playthrough
-    // (the lowercase-inside-parens case is a playthrough blank, not a
-    // newly-played blank — newly-played blanks render as lowercase
-    // letters with no parens). Drop them all and render the content
-    // non-bold so playthrough tiles read as background context.
-    if (conceal_tiles && e->move_str[0] == '-') {
-      // Concealed exchange: hide which tiles were swapped, showing one
-      // dot per tile (the count matches the rack-concealment style).
-      char masked[48];
-      int p = 0;
-      masked[p++] = '-';
-      for (int i = 1; e->move_str[i] != '\0' && p + 4 < (int)sizeof(masked);
-           i++) {
-        masked[p++] = '\xe2';
-        masked[p++] = '\x80';
-        masked[p++] = '\xa2'; // U+2022 BULLET
-      }
-      masked[p] = '\0';
-      theme_apply_fg(plane, player_fg);
-      theme_apply_bg(plane, theme->bg);
-      ncplane_set_styles(plane, 0);
-      ncplane_putstr_yx(plane, row, interior_left + (int)strlen(prefix),
-                        masked);
-    } else {
-      render_move_styled(plane, row, interior_left + (int)strlen(prefix),
-                         e->move_str, /*hide_parens=*/true,
-                         /*hide_playthrough_parens=*/false);
-    }
-
-    char delta_str[16];
-    snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
-    const int delta_len = (int)strlen(delta_str);
-    const int delta_col = interior_right - delta_len + 1;
-    if (delta_col > interior_left + (int)strlen(prefix)) {
-      ncplane_putstr_yx(plane, row, delta_col, delta_str);
-    }
-
-    // Leave column. Right edge anchored to (interior_right - 4) so a
-    // 2-digit delta (`+24`, the common case) sits with a 1-cell gap
-    // (`ADLMT +24`) and a 3-digit delta (`+185`) lands flush against
-    // the leave (`·+185`). For unusually long deltas (4+ chars) we
-    // clamp so the leave never overlaps the delta string. Color is
-    // the muted player-accent (same family as line 2) so the leave
-    // reads as belonging to that player.
-    if (leave_col_w > 0) {
-      const bool empty = e->leave_str[0] == '\0';
-      char sorted_leave[24];
-      if (!empty && ld != NULL) {
-        format_alphagram_for_sort(e->leave_str, ld, rack_sort, sorted_leave,
-                                  sizeof(sorted_leave));
-      } else {
-        sorted_leave[0] = '\0';
-      }
-      const char *leave_text =
-          (empty || conceal_tiles) ? "\xc2\xb7" : sorted_leave;
-      // Visual width: "·" (U+00B7) is 2 bytes but renders as 1 cell.
-      // strlen would over-shift the right-alignment by a column.
-      const int leave_w = empty ? 1 : (int)strlen(leave_text);
-      int leave_right_edge = interior_right - 4;
-      if (leave_right_edge >= delta_col) {
-        leave_right_edge = delta_col - 1;
-      }
-      const int leave_col = leave_right_edge - leave_w + 1;
-      if (leave_col > interior_left + (int)strlen(prefix)) {
-        theme_apply_fg(plane, player_dim_fg);
-        ncplane_set_styles(plane, 0);
-        ncplane_putstr_yx(plane, row, leave_col, leave_text);
-      }
-    }
+    render_history_played_move(plane, theme, e, row, interior_left,
+                               interior_right, leave_col_w, ld, rack_sort,
+                               conceal_tiles, player_fg, player_dim_fg, prefix);
   }
   ncplane_set_styles(plane, 0);
   theme_apply_fg(plane, player_fg);
