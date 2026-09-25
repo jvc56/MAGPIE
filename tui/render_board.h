@@ -14,9 +14,6 @@
 void render_board_invalidate_tile_planes(void);
 void render_board(struct ncplane *plane, const Theme *theme,
                   const TuiGameState *state, const Layout *L);
-void render_board_grid_overlay(struct ncplane *parent, const Theme *theme,
-                               const Layout *L, int thickness,
-                               uint64_t render_version);
 int tui_debug_last_tile_blits(void);
 unsigned long tui_debug_tile_invalidations(void);
 // Render just the board cells (no row/col labels) at (top, left). Each

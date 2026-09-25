@@ -284,7 +284,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
   // Grid lines are baked into each per-tile pixel buffer now (see
   // compose_tile_pixels); no separate overlay plane needed.
-  // Tried layering render_board_grid_overlay on top to give
+  // An overlay plane (since removed) was tried on top to give
   // premium squares the same right/bottom inset, but the overlay
   // plane's transparent regions don't pass through to the
   // per-tile sprixels underneath (terminal sprixel stacking
@@ -292,7 +292,6 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   // entirely. Premium-square gridding would need a different
   // approach — e.g., per-premium pixel planes that bake in the
   // border the same way tiles do.
-  (void)render_board_grid_overlay;
 
   // Annotation editor: when the user's typed play validates, draw
   // a Unicode directional cursor on the next square past the

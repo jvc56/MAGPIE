@@ -282,10 +282,7 @@ int main(int argc, char *argv[]) {
   }
   // Bot worker stays idle at launch — the startup menu picks the
   // game mode, and the time picker that follows ("Watch computer
-  // play") is what actually fires off the first game. The pixel
-  // worker is plumbing for rendering, unrelated to game-state, so
-  // it can start right away.
-  tui_pixel_worker_start(&game_state);
+  // play") is what actually fires off the first game.
 
   // Modal state: which (if any) modal is open. Drives keyboard routing
   // and the status-bar control hints.

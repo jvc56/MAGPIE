@@ -1643,16 +1643,6 @@ void tui_analysis_worker_stop_and_join(TuiGameState *state) {
   atomic_store(&state->analysis_stop, false);
 }
 
-void tui_pixel_worker_start(TuiGameState *state) {
-  if (state == NULL || state->pixel_started) {
-    return;
-  }
-  if (pthread_create(&state->pixel_thread, NULL, tui_pixel_worker_main,
-                     state) == 0) {
-    state->pixel_started = true;
-  }
-}
-
 void tui_stop_workers(TuiGameState *state) {
   tui_analysis_worker_stop_and_join(state);
   if (state->bot_started) {

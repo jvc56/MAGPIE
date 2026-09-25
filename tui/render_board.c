@@ -31,7 +31,7 @@ static const char *const fullwidth_col_labels[] = {
     "\xef\xbc\xb9", "\xef\xbc\xba",
 };
 // Debug instrumentation. Three counters surfaced in the top-right
-// overlay while we tune the pixel-worker pipeline:
+// overlay while tuning the 2x pixel pipeline:
 //   lat — end-to-end microseconds from a History-cursor change to
 //         the corresponding pixel-board blit landing on screen.
 //   blit — microseconds the UI thread last spent inside
@@ -123,9 +123,8 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
                                TuiPremiumLabels premium_labels,
                                int border_thickness, int cell_w, int top,
                                int left) {
-  // Borders are delivered separately by a pixel-graphics overlay plane
-  // at scale < 2 (render_board_grid_overlay, called from
-  // tui_game_render). Don't approximate them with NCSTYLE_UNDERLINE —
+  // Text-mode cells get no cell borders. Don't approximate them with
+  // NCSTYLE_UNDERLINE —
   // the underline reads as part of the glyph on fullwidth tiles and
   // the user vetoed that look.
   (void)border_thickness;
@@ -408,86 +407,6 @@ render_board_text_bg(struct ncplane *plane, const Theme *theme,
       }
     }
   }
-}
-// Pixel-graphics grid overlay for the cell-text modes (scale 0 / 1).
-// 2x bakes its grid into the same RGBA buffer that holds the tiles;
-// 0x and 1x have their tiles in std plane cells, so the grid lives in
-// a separate transparent-base pixel plane stacked on top — same look
-// the 2x composite delivers, just delivered through a child plane.
-void render_board_grid_overlay(struct ncplane *parent, const Theme *theme,
-                               const Layout *L, int thickness,
-                               uint64_t render_version) {
-  TuiGridPlanes *planes = tui_grid_planes();
-  struct notcurses *nc = ncplane_notcurses(parent);
-  if (nc == NULL || !notcurses_canpixel(nc) || thickness <= 0) {
-    return;
-  }
-  struct ncplane *p = acquire_grid_plane(
-      &planes->board, parent, "board_grid_overlay", CELL_ROW_BASE,
-      CELL_COL_BASE, BOARD_DIM * L->board_cell_h, BOARD_DIM * L->board_cell_w);
-  if (p == NULL) {
-    return;
-  }
-  // Don't force a z-order. The grid plane was created (via
-  // acquire_grid_plane) on the first frame this function ran;
-  // by ncplane_create semantics it sat at the top of the pile
-  // then. Per-tile planes are created later by render_board_pixel,
-  // landing above the grid plane in z-order — so tile sprixels
-  // naturally cover the grid plane where tiles exist, and the
-  // grid sprixel shows in empty / premium cells where no tile
-  // plane sits on top. Calling move_top would re-block tiles;
-  // calling move_bottom sinks the plane below std and the
-  // pixel content stops rendering.
-  unsigned pxy = 0, pxx = 0, cdy = 0, cdx = 0, mby = 0, mbx = 0;
-  ncplane_pixel_geom(p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
-  if (cdy == 0 || cdx == 0) {
-    return;
-  }
-  // Cache: key off cell dims + scale + thickness. The grid overlay's
-  // pixels are a pure function of those, NOT of render_version — so a
-  // bot move shouldn't force a re-blit. Kitty graphics treats each
-  // blit as delete+create, and the brief gap can flash on screen.
-  // Shared board_pixel_cache because grid_planes.board is reused for
-  // either the 2x composite or this 1x/0x overlay; the scale field
-  // (param_a) discriminates between modes when switching back.
-  (void)render_version;
-  if (board_pixel_cache.valid && board_pixel_cache.cdy == cdy &&
-      board_pixel_cache.cdx == cdx && board_pixel_cache.param_a == L->scale &&
-      board_pixel_cache.param_b == thickness) {
-    return;
-  }
-  const int tile_w = (int)cdx * L->board_cell_w;
-  const int tile_h = (int)cdy * L->board_cell_h;
-  const int buf_w = tile_w * BOARD_DIM;
-  const int buf_h = tile_h * BOARD_DIM;
-  if (buf_w <= 0 || buf_h <= 0) {
-    return;
-  }
-  // calloc gives us alpha=0 everywhere by default; overlay_grid_lines
-  // only writes opaque theme->bg pixels along the bottom + right edges
-  // of each tile. Cells underneath show through the alpha=0 regions.
-  uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
-  if (buf == NULL) {
-    return;
-  }
-  overlay_grid_lines(buf, buf_w, buf_h, BOARD_DIM, BOARD_DIM, tile_h, tile_w,
-                     thickness, theme->bg);
-
-  struct ncvisual_options vopts = {0};
-  vopts.n = p;
-  vopts.blitter = NCBLIT_PIXEL;
-  vopts.leny = (unsigned)buf_h;
-  vopts.lenx = (unsigned)buf_w;
-  ncblit_rgba(buf, buf_w * 4, &vopts);
-  tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx, (int)vopts.leny);
-  free(buf);
-
-  board_pixel_cache.valid = true;
-  board_pixel_cache.version = 0; // unused for the overlay path
-  board_pixel_cache.cdy = cdy;
-  board_pixel_cache.cdx = cdx;
-  board_pixel_cache.param_a = L->scale;
-  board_pixel_cache.param_b = thickness;
 }
 // 2x mode coordinate labels (Ａ-Ｏ above the board, 1-15 to its left).
 // Drawn as pixels so a single-cell-tall glyph can be vertically

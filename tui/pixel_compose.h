@@ -42,6 +42,5 @@ void fill_tile_rect(uint8_t *buf, int buf_w, int tx, int ty, int tile_w,
 void overlay_grid_lines(uint8_t *buf, int buf_w, int buf_h, int tiles_y,
                         int tiles_x, int tile_h_px, int tile_w_px,
                         int thickness, ThemeRgb color);
-void *tui_pixel_worker_main(void *arg);
 
 #endif
