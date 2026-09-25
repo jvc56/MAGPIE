@@ -93,6 +93,119 @@ static void render_init_error(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, (int)plane_rows - 2, 4, "Press any key to exit.");
 }
 
+// Initial UI state at launch: the startup menu is open, each modal's
+// focus and scratch fields hold their defaults, and the play-setup
+// rules are seeded from the loaded config.
+static void init_ui_state(TuiUiState *ui, const TuiConfig *loaded) {
+  // Modal state: which (if any) modal is open. Drives keyboard routing
+  // and the status-bar control hints.
+  ui->running = true;
+
+  // Focus-event detection state. The terminal sends CSI I on
+  // focus-in and CSI O on focus-out when DEC mode 1004 is on
+  // (which we enabled above). Notcurses doesn't surface focus
+  // events directly — it replays the bytes through the input
+  // queue as ESC, '[', 'I' or 'O'. This 3-state machine watches
+  // for that pattern. `focus_pending_esc` is set when the
+  // sequence aborted with just an ESC buffered, so the next
+  // drain pass can deliver a real Esc keypress that the modal
+  // handlers expect. Mouse mode is auto-disabled on focus-out
+  // and re-enabled on focus-in so the macOS screenshot UI
+  // doesn't fight the terminal for cursor capture.
+  ui->focus_state = 0; // 0 = normal, 1 = saw ESC, 2 = saw ESC '['
+  ui->focus_pending_esc = false;
+  // First-launch experience: show the startup menu before any game
+  // gets played. Picking "Watch computer play" routes through the
+  // time picker and resumes the bot-vs-bot flow that used to be
+  // the default. Other modes (load position, load game, annotate,
+  // play vs computer) are dimmed in the menu until wired.
+  ui->modal = TUI_MODAL_STARTUP_MENU;
+  ui->startup_menu_focus = TUI_STARTUP_WATCH;
+  ui->main_menu_focus = 0;
+  ui->settings_focus = 0;
+  // Where to return when Esc is pressed inside the Settings modal.
+  // Reached from the main menu → return to the menu so the user can
+  // pick another entry. Reached from the command-bar S → return to
+  // no modal, since that's where the user was.
+  ui->settings_return = TUI_MODAL_MAIN_MENU;
+  ui->time_focus = 0;
+  // Where Esc inside the time picker should return to. Reached
+  // from the main menu's New Game → MAIN_MENU; reached via the
+  // command bar's N / /new → NONE.
+  ui->time_picker_return = TUI_MODAL_MAIN_MENU;
+  // Where Esc inside the startup menu should return to. At app
+  // launch there's no prior modal to return to (Esc just dismisses
+  // it). When the user opens it via Esc → New game we want Esc to
+  // step back to the main menu.
+  ui->startup_menu_return = TUI_MODAL_NONE;
+  // Watch-setup modal: row focus, pre-set to "Start game" so Enter
+  // on first open kicks off the bot game with the displayed
+  // defaults (time / lexicon / sim params).
+  ui->watch_setup_focus = TUI_WATCH_SETUP_START;
+  // Watch setup runs on its own copy of the lexicon + time control
+  // so adjusters can preview without mutating the live session
+  // settings. Initialized when the modal opens; committed to
+  // chosen_lexicon / chosen_time only when the user hits "Start
+  // game". Esc closes the modal and the locals are abandoned.
+  ui->watch_setup_time = 0;
+  // Play-vs-computer setup: editable player names, who moves first, and
+  // the focused row / name caret. Defaults focus to Start so a quick
+  // Enter launches with the defaults.
+  ui->play_setup_focus = TUI_PLAY_SETUP_START;
+  snprintf(ui->play_setup_human_name, sizeof(ui->play_setup_human_name), "%s",
+           "You");
+  snprintf(ui->play_setup_computer_name, sizeof(ui->play_setup_computer_name),
+           "%s", "Computer");
+  ui->play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+  ui->play_setup_name_cursor = 0;
+  // Overtime rule + penalty rate scratch. Seeded from the config (or
+  // its defaults when the file / keys are missing) and persisted on
+  // Start; survives across modal opens within the session.
+  ui->play_setup_overtime_rule = loaded->overtime_rule;
+  ui->play_setup_overtime_cap = loaded->overtime_cap_minutes;
+  ui->play_setup_penalty_rate = loaded->time_penalty_rate;
+  ui->play_setup_challenge_rule = loaded->challenge_rule;
+  ui->play_setup_challenge_penalty = loaded->challenge_penalty;
+  // Annotate setup: lexicon (◀/▶ cycled, language-scoped) plus
+  // two free-form player names. Same modal-local pattern as
+  // Watch setup — commits to the session only on Start.
+  ui->annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
+  // Caret position within the currently-focused name field, in
+  // bytes. Bounded by the name's strlen(); shared between P1 and
+  // P2 because only one name row is focused at a time.
+  ui->annotate_setup_name_cursor = 0;
+  // Load-position modal state. Buffer holds the user-entered text
+  // (raw CGP or a dragged file path); cursor is the byte offset
+  // of the insertion point. The position is parsed live whenever
+  // the buffer changes — `dirty` triggers a parse at the top of
+  // the next frame; `parse_ok` records the last parse result so
+  // Enter can fire only when the CGP is loadable. `error_msg`
+  // displays the last parse / file error inside the modal until
+  // the next edit clears it.
+  ui->load_position_len = 0;
+  ui->load_position_cursor = 0;
+  ui->load_position_dirty = false;
+  ui->load_position_parse_ok = false;
+  // Load-game modal state. Mirrors the load-position modal but
+  // holds a multi-line GCG game record. GCGs are typically much
+  // bigger than CGPs (a 25-turn record can run several KB), so
+  // the buffer is correspondingly larger.
+  ui->load_game_len = 0;
+  ui->load_game_cursor = 0;
+  ui->load_game_dirty = false;
+  ui->load_game_parse_ok = false;
+  // Quit-confirmation modal: focus tracks Yes/No (0 = No, 1 = Yes),
+  // default No since it's the safer option. quit_confirm_return is
+  // the modal to return to when the user picks No / hits Esc; the
+  // caller (main menu Q or command-bar Q) sets this before opening.
+  ui->quit_confirm_focus = 0;
+  ui->quit_confirm_return = TUI_MODAL_NONE;
+  // Modal-style lexicon picker state. Lazily allocated when the user
+  // enters the modal; destroyed before exit.
+  ui->lexicon_list = NULL;
+  ui->lexicon_focus = 0;
+}
+
 // Draws the open modal (if any) over the rendered game.
 static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
                                  const TuiGameState *state, TuiUiState *ui,
@@ -645,34 +758,11 @@ int main(int argc, char *argv[]) {
   // game mode, and the time picker that follows ("Watch computer
   // play") is what actually fires off the first game.
 
-  // Modal state: which (if any) modal is open. Drives keyboard routing
-  // and the status-bar control hints.
-  ui.running = true;
-
-  // Focus-event detection state. The terminal sends CSI I on
-  // focus-in and CSI O on focus-out when DEC mode 1004 is on
-  // (which we enabled above). Notcurses doesn't surface focus
-  // events directly — it replays the bytes through the input
-  // queue as ESC, '[', 'I' or 'O'. This 3-state machine watches
-  // for that pattern. `focus_pending_esc` is set when the
-  // sequence aborted with just an ESC buffered, so the next
-  // drain pass can deliver a real Esc keypress that the modal
-  // handlers expect. Mouse mode is auto-disabled on focus-out
-  // and re-enabled on focus-in so the macOS screenshot UI
-  // doesn't fight the terminal for cursor capture.
-  ui.focus_state = 0; // 0 = normal, 1 = saw ESC, 2 = saw ESC '['
-  ui.focus_pending_esc = false;
-  // First-launch experience: show the startup menu before any game
-  // gets played. Picking "Watch computer play" routes through the
-  // time picker and resumes the bot-vs-bot flow that used to be
-  // the default. Other modes (load position, load game, annotate,
-  // play vs computer) are dimmed in the menu until wired.
-  //
-  // --watch on the command line skips the menu and starts a fresh
-  // watch game using the saved (or default) settings. Useful for
-  // debugging — reattaching with lldb on each crash without having
-  // to click through the menu first.
-  ui.modal = TUI_MODAL_STARTUP_MENU;
+  init_ui_state(&ui, &loaded);
+  // --watch on the command line skips the startup menu and starts a
+  // fresh watch game using the saved (or default) settings. Useful for
+  // debugging — reattaching with lldb on each crash without having to
+  // click through the menu first.
   if (session.args.watch) {
     pthread_mutex_lock(&game_state.mutex);
     tui_game_state_set_time_per_side(&game_state, session.chosen_time);
@@ -681,90 +771,6 @@ int main(int argc, char *argv[]) {
     tui_bot_worker_start(&game_state);
     ui.modal = TUI_MODAL_NONE;
   }
-  ui.startup_menu_focus = TUI_STARTUP_WATCH;
-  ui.main_menu_focus = 0;
-  ui.settings_focus = 0;
-  // Where to return when Esc is pressed inside the Settings modal.
-  // Reached from the main menu → return to the menu so the user can
-  // pick another entry. Reached from the command-bar S → return to
-  // no modal, since that's where the user was.
-  ui.settings_return = TUI_MODAL_MAIN_MENU;
-  ui.time_focus = 0;
-  // Where Esc inside the time picker should return to. Reached
-  // from the main menu's New Game → MAIN_MENU; reached via the
-  // command bar's N / /new → NONE.
-  ui.time_picker_return = TUI_MODAL_MAIN_MENU;
-  // Where Esc inside the startup menu should return to. At app
-  // launch there's no prior modal to return to (Esc just dismisses
-  // it). When the user opens it via Esc → New game we want Esc to
-  // step back to the main menu.
-  ui.startup_menu_return = TUI_MODAL_NONE;
-  // Watch-setup modal: row focus, pre-set to "Start game" so Enter
-  // on first open kicks off the bot game with the displayed
-  // defaults (time / lexicon / sim params).
-  ui.watch_setup_focus = TUI_WATCH_SETUP_START;
-  // Watch setup runs on its own copy of the lexicon + time control
-  // so adjusters can preview without mutating the live session
-  // settings. Initialized when the modal opens; committed to
-  // chosen_lexicon / chosen_time only when the user hits "Start
-  // game". Esc closes the modal and the locals are abandoned.
-  ui.watch_setup_time = 0;
-  // Play-vs-computer setup: editable player names, who moves first, and
-  // the focused row / name caret. Defaults focus to Start so a quick
-  // Enter launches with the defaults.
-  ui.play_setup_focus = TUI_PLAY_SETUP_START;
-  snprintf(ui.play_setup_human_name, sizeof(ui.play_setup_human_name), "%s",
-           "You");
-  snprintf(ui.play_setup_computer_name, sizeof(ui.play_setup_computer_name),
-           "%s", "Computer");
-  ui.play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
-  ui.play_setup_name_cursor = 0;
-  // Overtime rule + penalty rate scratch. Seeded from the config (or
-  // its defaults when the file / keys are missing) and persisted on
-  // Start; survives across modal opens within the session.
-  ui.play_setup_overtime_rule = loaded.overtime_rule;
-  ui.play_setup_overtime_cap = loaded.overtime_cap_minutes;
-  ui.play_setup_penalty_rate = loaded.time_penalty_rate;
-  ui.play_setup_challenge_rule = loaded.challenge_rule;
-  ui.play_setup_challenge_penalty = loaded.challenge_penalty;
-  // Annotate setup: lexicon (◀/▶ cycled, language-scoped) plus
-  // two free-form player names. Same modal-local pattern as
-  // Watch setup — commits to the session only on Start.
-  ui.annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
-  // Caret position within the currently-focused name field, in
-  // bytes. Bounded by the name's strlen(); shared between P1 and
-  // P2 because only one name row is focused at a time.
-  ui.annotate_setup_name_cursor = 0;
-  // Load-position modal state. Buffer holds the user-entered text
-  // (raw CGP or a dragged file path); cursor is the byte offset
-  // of the insertion point. The position is parsed live whenever
-  // the buffer changes — `dirty` triggers a parse at the top of
-  // the next frame; `parse_ok` records the last parse result so
-  // Enter can fire only when the CGP is loadable. `error_msg`
-  // displays the last parse / file error inside the modal until
-  // the next edit clears it.
-  ui.load_position_len = 0;
-  ui.load_position_cursor = 0;
-  ui.load_position_dirty = false;
-  ui.load_position_parse_ok = false;
-  // Load-game modal state. Mirrors the load-position modal but
-  // holds a multi-line GCG game record. GCGs are typically much
-  // bigger than CGPs (a 25-turn record can run several KB), so
-  // the buffer is correspondingly larger.
-  ui.load_game_len = 0;
-  ui.load_game_cursor = 0;
-  ui.load_game_dirty = false;
-  ui.load_game_parse_ok = false;
-  // Quit-confirmation modal: focus tracks Yes/No (0 = No, 1 = Yes),
-  // default No since it's the safer option. quit_confirm_return is
-  // the modal to return to when the user picks No / hits Esc; the
-  // caller (main menu Q or command-bar Q) sets this before opening.
-  ui.quit_confirm_focus = 0;
-  ui.quit_confirm_return = TUI_MODAL_NONE;
-  // Modal-style lexicon picker state. Lazily allocated when the user
-  // enters the modal; destroyed before exit.
-  ui.lexicon_list = NULL;
-  ui.lexicon_focus = 0;
   // Frame-pacing anchor: at the top of every iteration we sleep until
   // next_frame_deadline, then advance the deadline by FRAME_NS. Sitting
   // at the top means the various `continue` paths below can't bypass
