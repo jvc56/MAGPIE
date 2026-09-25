@@ -286,7 +286,7 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
       // A path typed character by character passes through directory
       // prefixes ("/", "/Users", ...). fopen succeeds on a directory and
       // reads nothing, so reject anything that isn't a regular file.
-      struct stat path_stat;
+      struct stat path_stat; // NOLINT(misc-include-cleaner)
       const bool not_regular_file =
           stat(path, &path_stat) == 0 && !S_ISREG(path_stat.st_mode);
       FILE *fp = not_regular_file ? NULL : fopen(path, "rbe");
