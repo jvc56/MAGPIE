@@ -1318,6 +1318,27 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     }
     if (e->rack_str[0] != '\0') {
       rack_set_to_string(state->ld, rack, e->rack_str);
+      // The player still holds their previous leave. Some GCGs record
+      // only the tiles played, so a rack missing part of the leave is
+      // topped up with it; otherwise those tiles would count as drawn
+      // again and trip the bag check below. A rack that can't hold the
+      // leave as well is left as recorded.
+      int missing_total = 0;
+      for (int ml = 0; ml < ld_size && ml < MAX_ALPHABET_SIZE; ml++) {
+        const int have = (int)rack_get_letter(rack, (MachineLetter)ml);
+        if (prev_leave[ml] > have) {
+          missing_total += prev_leave[ml] - have;
+        }
+      }
+      if (missing_total > 0 &&
+          rack_get_total_letters(rack) + missing_total <= RACK_SIZE) {
+        for (int ml = 0; ml < ld_size && ml < MAX_ALPHABET_SIZE; ml++) {
+          for (int have = (int)rack_get_letter(rack, (MachineLetter)ml);
+               have < prev_leave[ml]; have++) {
+            rack_add_letter(rack, (MachineLetter)ml);
+          }
+        }
+      }
     } else {
       rack->dist_size = ld_get_size(state->ld);
       rack_reset(rack);
@@ -1426,7 +1447,43 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     // Move validated successfully. Apply on the engine and tag
     // tile owners for placement moves so the board renderer paints
     // each placed tile in its player's color.
+    // An exchange refills the rack from the bag, but the record's next
+    // rack for this player says what they actually drew. Keep only the
+    // tiles they held on to (this rack minus the exchanged tiles) and
+    // return the refill, so the next turn sees the true leave, and
+    // count the exchanged tiles as back in the bag.
+    int exchange_leave[MAX_ALPHABET_SIZE];
+    const bool is_exchange = move_get_type(applied_move) == GAME_EVENT_EXCHANGE;
+    if (is_exchange) {
+      for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+        exchange_leave[ml] =
+            ml < ld_size ? (int)rack_get_letter(rack, (MachineLetter)ml) : 0;
+      }
+      for (int tile_idx = 0; tile_idx < move_get_tiles_played(applied_move);
+           tile_idx++) {
+        const MachineLetter ml = move_get_tile(applied_move, tile_idx);
+        if (ml < MAX_ALPHABET_SIZE && exchange_leave[ml] > 0) {
+          exchange_leave[ml]--;
+        }
+        // Exchanged tiles go back in the bag, so they can be drawn again.
+        if (ml < MACHINE_LETTER_MAX_VALUE && drawn[ml] > 0) {
+          drawn[ml]--;
+        }
+      }
+    }
     play_move_without_drawing_tiles(applied_move, state->game);
+    if (is_exchange) {
+      Bag *bag = game_get_bag(state->game);
+      const int draw_idx =
+          game_get_player_draw_index(state->game, e->player_idx);
+      for (int ml = 0; ml < ld_size && ml < MAX_ALPHABET_SIZE; ml++) {
+        while ((int)rack_get_letter(rack, (MachineLetter)ml) >
+               exchange_leave[ml]) {
+          rack_take_letter(rack, (MachineLetter)ml);
+          bag_add_letter(bag, (MachineLetter)ml, draw_idx);
+        }
+      }
+    }
     if (move_get_type(applied_move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       const int dir = move_get_dir(applied_move);
       int r = move_get_row_start(applied_move);
