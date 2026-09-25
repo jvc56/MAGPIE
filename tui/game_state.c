@@ -71,6 +71,14 @@ static void copy_error(ErrorStack *err, char *buf, size_t buf_size) {
   }
 }
 
+// Releases what tui_game_state_init has set up so far after a load
+// failure. Always returns false, for `return init_failed(...)`.
+static bool init_failed(ErrorStack *err, TuiGameState *state) {
+  error_stack_destroy(err);
+  tui_game_state_destroy(state);
+  return false;
+}
+
 bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
                          TuiGameState *out_state, char *error_message,
                          size_t error_message_size) {
@@ -110,13 +118,13 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   char *ld_name = ld_get_default_name_from_lexicon_name(lexicon, err);
   if (!error_stack_is_empty(err)) {
     copy_error(err, error_message, error_message_size);
-    goto fail;
+    return init_failed(err, out_state);
   }
   out_state->ld = ld_create(data_paths, ld_name, err);
   free(ld_name);
   if (!error_stack_is_empty(err)) {
     copy_error(err, error_message, error_message_size);
-    goto fail;
+    return init_failed(err, out_state);
   }
 
   out_state->players_data = players_data_create(false);
@@ -124,14 +132,14 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
                    lexicon, lexicon, false, err);
   if (!error_stack_is_empty(err)) {
     copy_error(err, error_message, error_message_size);
-    goto fail;
+    return init_failed(err, out_state);
   }
   // Load KLV for static-eval leave valuation. Same name as the lexicon.
   players_data_set(out_state->players_data, PLAYERS_DATA_TYPE_KLV, data_paths,
                    lexicon, lexicon, false, err);
   if (!error_stack_is_empty(err)) {
     copy_error(err, error_message, error_message_size);
-    goto fail;
+    return init_failed(err, out_state);
   }
   // Load WMP for the faster wordmap-backed movegen. Best-effort: if
   // the bundled lexicon doesn't ship a .wmp the engine still runs on
@@ -162,7 +170,7 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   out_state->board_layout = board_layout_create_default(data_paths, err);
   if (!error_stack_is_empty(err)) {
     copy_error(err, error_message, error_message_size);
-    goto fail;
+    return init_failed(err, out_state);
   }
 
   // Win-percentage file is needed by the simulator. Failure to load is
@@ -204,7 +212,7 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   out_state->game = game_create(&args);
   if (out_state->game == NULL) {
     snprintf(error_message, error_message_size, "game_create returned NULL");
-    goto fail;
+    return init_failed(err, out_state);
   }
 
   // Racks intentionally start empty so the startup menu sees the
@@ -287,11 +295,6 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
 
   error_stack_destroy(err);
   return true;
-
-fail:
-  error_stack_destroy(err);
-  tui_game_state_destroy(out_state);
-  return false;
 }
 
 void tui_game_state_set_time_per_side(TuiGameState *state, int seconds) {
@@ -820,27 +823,9 @@ void tui_game_state_edit_move_display(const TuiGameState *state, char *out,
   snprintf(out, out_size, "%s", state->edit_move_canonical);
 }
 
-void tui_game_state_parse_edit_buf(TuiGameState *state) {
-  if (state == NULL) {
-    return;
-  }
-  // Position the engine board at the START of the turn being
-  // edited, so score_canonical_move validates against the board
-  // the player faced — NOT the post-game board (which already has
-  // this turn's tiles, causing self-collisions and red text on a
-  // perfectly legal committed move). Cached by turn index so we
-  // only replay when switching turns, not on every keystroke.
-  // Play-vs-computer edits the live current turn only, and the engine
-  // is already positioned there with the real bag-drawn racks. Seeking
-  // (which replays committed history and rebuilds racks from text, with
-  // no bag draws) would desync the human's rack and the bag — so skip
-  // it entirely in that mode. Annotation still seeks so validation sees
-  // the board the edited player faced rather than the post-game board.
-  if (state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
-      state->edit_history_idx >= 0 &&
-      state->engine_positioned_for_turn != state->edit_history_idx) {
-    tui_game_state_seek_engine_to_turn(state, state->edit_history_idx);
-  }
+// Parses the MOVE edit buffer into edit_move_kind / canonical / score /
+// inferred rack / preview, syncing the player's rack to the editor.
+static void parse_edit_move_buffer(TuiGameState *state) {
   // ── Move buffer ──────────────────────────────────────────────
   // Reset derived fields up front so an early-return leaves
   // consistent state.
@@ -881,7 +866,7 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
   if (t1_len == 0) {
     // Empty buffer or pure whitespace.
     sync_player_rack_to_editor(state);
-    goto parse_rack;
+    return;
   }
 
   const char *t1 = buf + t1_s;
@@ -893,7 +878,7 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
     // are well-formed rack chars (A-Z or '?'), capped at 7.
     if (t1_len == 1 && t2_len == 0) {
       state->edit_move_kind = TUI_EDIT_MOVE_KIND_PARTIAL;
-      goto parse_rack;
+      return;
     }
     const char *tiles = t1 + 1;
     int tiles_len = t1_len - 1;
@@ -906,13 +891,13 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
     if (tiles_len > 7) {
       state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
       state->edit_move_valid = false;
-      goto parse_rack;
+      return;
     }
     for (int j = 0; j < tiles_len; j++) {
       if (!tok_is_rack_char(tiles[j])) {
         state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
         state->edit_move_valid = false;
-        goto parse_rack;
+        return;
       }
     }
     state->edit_move_kind = TUI_EDIT_MOVE_KIND_EXCHANGE;
@@ -931,7 +916,7 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
       // Treat that as invalid so the row colors red.
       state->edit_move_valid = false;
     }
-    goto parse_rack;
+    return;
   }
 
   // ── Pass ──────────────────────────────────────────────────
@@ -941,7 +926,7 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
              "pass");
     state->edit_move_score = 0;
     sync_player_rack_to_editor(state);
-    goto parse_rack;
+    return;
   }
 
   // ── Exchange word: any prefix of "exchange" ──────────────
@@ -957,20 +942,20 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
       // partial exchange.
       if (has_trailing_space) {
         state->edit_move_kind = TUI_EDIT_MOVE_KIND_PARTIAL;
-        goto parse_rack;
+        return;
       }
       // Fall through to the word-only / coord branches below.
     } else {
       if (t2_len > 7) {
         state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
         state->edit_move_valid = false;
-        goto parse_rack;
+        return;
       }
       for (int j = 0; j < t2_len; j++) {
         if (!tok_is_rack_char(t2[j])) {
           state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
           state->edit_move_valid = false;
-          goto parse_rack;
+          return;
         }
       }
       state->edit_move_kind = TUI_EDIT_MOVE_KIND_EXCHANGE;
@@ -986,7 +971,7 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
       if (state->edit_move_score < 0) {
         state->edit_move_valid = false;
       }
-      goto parse_rack;
+      return;
     }
   }
 
@@ -1041,14 +1026,14 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
           state->edit_preview_move_valid = true;
         }
       }
-      goto parse_rack;
+      return;
     }
     // Word token must be all word-chars.
     for (int j = 0; j < t2_len; j++) {
       if (!tok_is_word_char(t2[j])) {
         state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
         state->edit_move_valid = false;
-        goto parse_rack;
+        return;
       }
     }
     state->edit_move_kind = TUI_EDIT_MOVE_KIND_PLACEMENT;
@@ -1092,7 +1077,7 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
                            sizeof(state->edit_move_inferred_rack));
       sync_player_rack_to_editor(state);
     }
-    goto parse_rack;
+    return;
   }
 
   // ── Bare word (no coord): "JUNKY" ────────────────────────
@@ -1104,15 +1089,38 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
     infer_rack_from_word(t1, t1_len, state->edit_move_inferred_rack,
                          sizeof(state->edit_move_inferred_rack));
     sync_player_rack_to_editor(state);
-    goto parse_rack;
+    return;
   }
 
   // Anything else is malformed.
   state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
   state->edit_move_valid = false;
   sync_player_rack_to_editor(state);
+}
 
-parse_rack:
+void tui_game_state_parse_edit_buf(TuiGameState *state) {
+  if (state == NULL) {
+    return;
+  }
+  // Position the engine board at the START of the turn being
+  // edited, so score_canonical_move validates against the board
+  // the player faced — NOT the post-game board (which already has
+  // this turn's tiles, causing self-collisions and red text on a
+  // perfectly legal committed move). Cached by turn index so we
+  // only replay when switching turns, not on every keystroke.
+  // Play-vs-computer edits the live current turn only, and the engine
+  // is already positioned there with the real bag-drawn racks. Seeking
+  // (which replays committed history and rebuilds racks from text, with
+  // no bag draws) would desync the human's rack and the bag — so skip
+  // it entirely in that mode. Annotation still seeks so validation sees
+  // the board the edited player faced rather than the post-game board.
+  if (state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
+      state->edit_history_idx >= 0 &&
+      state->engine_positioned_for_turn != state->edit_history_idx) {
+    tui_game_state_seek_engine_to_turn(state, state->edit_history_idx);
+  }
+  parse_edit_move_buffer(state);
+
   // ── Rack buffer: 1..7 chars of A-Z or ? ──────────────────
   {
     bool ok = state->edit_rack_len <= 7;

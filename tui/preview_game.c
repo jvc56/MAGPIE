@@ -127,6 +127,14 @@ static void play_out_max_score(TuiPreviewGame *pg) {
   move_list_destroy(move_list);
 }
 
+// Releases what the preview has set up so far after a load failure.
+// Always returns false, for `return preview_init_failed(...)`.
+static bool preview_init_failed(ErrorStack *err, TuiPreviewGame *pg) {
+  error_stack_destroy(err);
+  tui_preview_game_destroy(pg);
+  return false;
+}
+
 bool tui_preview_game_init(TuiPreviewGame *out_pg) {
   memset(out_pg, 0, sizeof(*out_pg));
 
@@ -140,19 +148,19 @@ bool tui_preview_game_init(TuiPreviewGame *out_pg) {
 
   char *ld_name = ld_get_default_name_from_lexicon_name(lexicon, err);
   if (!error_stack_is_empty(err)) {
-    goto fail;
+    return preview_init_failed(err, out_pg);
   }
   out_pg->ld = ld_create(data_paths, ld_name, err);
   free(ld_name);
   if (!error_stack_is_empty(err)) {
-    goto fail;
+    return preview_init_failed(err, out_pg);
   }
 
   out_pg->players_data = players_data_create(false);
   players_data_set(out_pg->players_data, PLAYERS_DATA_TYPE_KWG, data_paths,
                    lexicon, lexicon, false, err);
   if (!error_stack_is_empty(err)) {
-    goto fail;
+    return preview_init_failed(err, out_pg);
   }
   // KLV is required by move_gen even when sorting purely by score (the
   // generator still consults the leave value to break ties); load the
@@ -160,7 +168,7 @@ bool tui_preview_game_init(TuiPreviewGame *out_pg) {
   players_data_set(out_pg->players_data, PLAYERS_DATA_TYPE_KLV, data_paths,
                    lexicon, lexicon, false, err);
   if (!error_stack_is_empty(err)) {
-    goto fail;
+    return preview_init_failed(err, out_pg);
   }
   players_data_set_move_sort_type(out_pg->players_data, 0, MOVE_SORT_SCORE);
   players_data_set_move_sort_type(out_pg->players_data, 1, MOVE_SORT_SCORE);
@@ -169,7 +177,7 @@ bool tui_preview_game_init(TuiPreviewGame *out_pg) {
 
   out_pg->board_layout = board_layout_create_default(data_paths, err);
   if (!error_stack_is_empty(err)) {
-    goto fail;
+    return preview_init_failed(err, out_pg);
   }
 
   // Fixed seed: the preview should stay visually stable across renders
@@ -185,18 +193,13 @@ bool tui_preview_game_init(TuiPreviewGame *out_pg) {
   };
   out_pg->game = game_create(&args);
   if (out_pg->game == NULL) {
-    goto fail;
+    return preview_init_failed(err, out_pg);
   }
   draw_starting_racks(out_pg->game);
   play_out_max_score(out_pg);
 
   error_stack_destroy(err);
   return true;
-
-fail:
-  error_stack_destroy(err);
-  tui_preview_game_destroy(out_pg);
-  return false;
 }
 
 void tui_preview_game_destroy(TuiPreviewGame *pg) {
