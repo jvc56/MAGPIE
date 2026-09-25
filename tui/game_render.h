@@ -117,6 +117,5 @@ void tui_game_render_reset_grids(void);
 void tui_debug_record_frame_us(long frame_us);
 void tui_debug_record_sprixel_stats(uint64_t emits, uint64_t elides);
 void tui_debug_set_input_lag_us(long us);
-unsigned long tui_debug_rack_blits(void);
 
 #endif
