@@ -9220,6 +9220,10 @@ void impl_contribute(Config *config, const char *settings_path,
     }
 
     const int threads = contribute_get_threads(state);
+    // Before the executor, not only inside it: a task's derived files are
+    // built first, with the config's thread count, which in a fresh task
+    // config is every core rather than the count contribute.txt asks for.
+    task_config->num_threads = threads;
     char *result_json = NULL;
     if (strings_equal(job_type, "games")) {
       result_json = config_contribute_games(task_config, request, false,
