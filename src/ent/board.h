@@ -825,6 +825,9 @@ static inline void board_reset(Board *board) {
   board_set_all_crosses(board);
   board_reset_all_cross_scores(board);
   board_update_all_anchors(board);
+  // Boards are allocated uninitialized, so a fresh or reused board starts
+  // with no recorded tile owners.
+  board_clear_square_owners(board);
 
   // Clear the WIT parallel arrays so that, when no word info table is loaded,
   // move generation reads NULL block rows (skipping the prune) instead of
