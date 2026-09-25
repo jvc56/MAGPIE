@@ -33,6 +33,129 @@
 // AnalysisRow / AnalysisTint / row + ply caps now live in
 // game_state.h so per-turn snapshots stored on TuiHistoryEntry
 // can share the same shape with no conversion.
+// Rendered width of a move: the panel draws moves with hide_parens, so
+// parentheses take no cells.
+static int analysis_move_width(const char *move) {
+  int width = 0;
+  for (const char *ch = move; *ch != '\0'; ch++) {
+    if (*ch != '(' && *ch != ')') {
+      width++;
+    }
+  }
+  return width;
+}
+
+// Truncates `move` in place to at most `max_width` rendered cells
+// (empty when max_width <= 0). Counting rendered width rather than
+// strlen matters: "H2 ISOBU(TA)NE" has strlen 14 but renders as 12
+// ("H2 ISOBUTANE"), so counting parens would crop it unnecessarily.
+static void analysis_fit_move(char *move, int max_width) {
+  if (max_width <= 0) {
+    move[0] = '\0';
+    return;
+  }
+  int width = 0;
+  char *ch = move;
+  for (; *ch != '\0'; ch++) {
+    if (*ch != '(' && *ch != ')') {
+      if (width >= max_width) {
+        break;
+      }
+      width++;
+    }
+  }
+  *ch = '\0';
+}
+
+// Compacts every "(exch ABCD)" to "-ABCD" in place: the verbose form
+// takes too much horizontal room and the short form is unambiguous
+// next to placement moves like "7F JUTE". Returns the widest rendered
+// move across all `count` rows afterwards.
+static int analysis_compact_exchanges(AnalysisRow *rows, int count) {
+  int max_width = 0;
+  for (int i = 0; i < count; i++) {
+    char *s = rows[i].move;
+    if (strncmp(s, "(exch ", 6) == 0) {
+      char *close_paren = strchr(s, ')');
+      if (close_paren != NULL) {
+        const int letters_len = (int)(close_paren - (s + 6));
+        char tmp[80];
+        tmp[0] = '-';
+        const int copy = letters_len < (int)sizeof(tmp) - 2
+                             ? letters_len
+                             : (int)sizeof(tmp) - 2;
+        memcpy(tmp + 1, s + 6, (size_t)copy);
+        tmp[1 + copy] = '\0';
+        const size_t tlen = strlen(tmp);
+        const size_t cap = sizeof(rows[i].move) - 1;
+        const size_t finalcopy = tlen < cap ? tlen : cap;
+        memcpy(s, tmp, finalcopy);
+        s[finalcopy] = '\0';
+      }
+    }
+    const int move_width = analysis_move_width(s);
+    if (move_width > max_width) {
+      max_width = move_width;
+    }
+  }
+  return max_width;
+}
+
+// Compact-layout form of a primary value: percent values (containing
+// '.') round to an integer percent; W/T/L stay as-is, minus padding.
+static void analysis_compact_primary(const char *primary, char *buf,
+                                     size_t buf_size) {
+  if (strchr(primary, '.') != NULL) {
+    const double val = atof(primary);
+    int int_pct = (int)(val + 0.5);
+    if (int_pct > 100) {
+      int_pct = 100;
+    }
+    if (int_pct < 0) {
+      int_pct = 0;
+    }
+    snprintf(buf, buf_size, "%d%%", int_pct);
+  } else {
+    const char *src = primary;
+    while (*src == ' ') {
+      src++;
+    }
+    snprintf(buf, buf_size, "%s", src);
+  }
+}
+
+// Fades a header strip in from the panel bg to the dim_fg band over
+// columns fade_left..fade_right. Each cell renders a left-half-block ▌
+// (U+258C): fg paints the cell's left half, bg the right half, giving
+// two color samples per cell, so the fade eases in smoothly even on
+// narrow strips.
+static void render_analysis_header_fade(struct ncplane *plane,
+                                        const Theme *theme, int row,
+                                        int fade_left, int fade_right) {
+  const int fade_w = fade_right - fade_left + 1;
+  const int sub_steps = 2 * fade_w;
+  for (int c = fade_left; c <= fade_right; c++) {
+    const int pos = c - fade_left;
+    const int left_sub = 2 * pos;
+    const int right_sub = left_sub + 1;
+    const double tl =
+        sub_steps > 1 ? (double)left_sub / (double)(sub_steps - 1) : 1.0;
+    const double tr =
+        sub_steps > 1 ? (double)right_sub / (double)(sub_steps - 1) : 1.0;
+    ThemeRgb fg;
+    fg.r = (uint8_t)(theme->bg.r + (theme->dim_fg.r - theme->bg.r) * tl);
+    fg.g = (uint8_t)(theme->bg.g + (theme->dim_fg.g - theme->bg.g) * tl);
+    fg.b = (uint8_t)(theme->bg.b + (theme->dim_fg.b - theme->bg.b) * tl);
+    ThemeRgb bg;
+    bg.r = (uint8_t)(theme->bg.r + (theme->dim_fg.r - theme->bg.r) * tr);
+    bg.g = (uint8_t)(theme->bg.g + (theme->dim_fg.g - theme->bg.g) * tr);
+    bg.b = (uint8_t)(theme->bg.b + (theme->dim_fg.b - theme->bg.b) * tr);
+    theme_apply_fg(plane, fg);
+    theme_apply_bg(plane, bg);
+    ncplane_putstr_yx(plane, row, c, "\xe2\x96\x8c"); // ▌ left-half block
+  }
+}
+
 // Render the ranked candidates given a pre-populated row array.
 // Handles the leave column auto-sizing, exchange compaction, and
 // right-anchored primary/secondary columns. primary_bold gates whether
@@ -103,71 +226,22 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   // visual gap from the leave for any realistic win percentage.
   const int leave_gap_r = 0;
 
-  // Move text in analysis renders with hide_parens=true, so the
-  // rendered column width is strlen minus paren characters. Use the
-  // rendered width for layout decisions; using raw strlen
-  // overestimates and causes the leave column to get suppressed when
-  // a playthrough move's parens push the max over the budget.
-  int max_move_w = 0;
   int max_leave_w = 0;
   for (int i = 0; i < visible; i++) {
     if (!rows[i].valid) {
       continue;
     }
-    int rendered = 0;
-    for (const char *p = rows[i].move; *p != '\0'; p++) {
-      if (*p != '(' && *p != ')') {
-        rendered++;
-      }
-    }
     const int ll = (int)strlen(rows[i].leave);
-    if (rendered > max_move_w) {
-      max_move_w = rendered;
-    }
     if (ll > max_leave_w) {
       max_leave_w = ll;
     }
   }
-
-  // Always compact "(exch ABCD)" → "-ABCD" in the analysis panel —
-  // the verbose form takes too much horizontal room and the short
-  // form is unambiguous next to placement moves like "7F JUTE".
-  // Recompute max_move_w after compaction using rendered width
-  // (parens hidden), since parens don't show up at render time.
-  {
-    int new_max = 0;
-    for (int i = 0; i < visible; i++) {
-      char *s = rows[i].move;
-      if (strncmp(s, "(exch ", 6) == 0) {
-        char *close_paren = strchr(s, ')');
-        if (close_paren != NULL) {
-          const int letters_len = (int)(close_paren - (s + 6));
-          char tmp[80];
-          tmp[0] = '-';
-          const int copy = letters_len < (int)sizeof(tmp) - 2
-                               ? letters_len
-                               : (int)sizeof(tmp) - 2;
-          memcpy(tmp + 1, s + 6, (size_t)copy);
-          tmp[1 + copy] = '\0';
-          const size_t tlen = strlen(tmp);
-          const size_t cap = sizeof(rows[i].move) - 1;
-          const size_t finalcopy = tlen < cap ? tlen : cap;
-          memcpy(s, tmp, finalcopy);
-          s[finalcopy] = '\0';
-        }
-      }
-      int ml = 0;
-      for (const char *p = s; *p != '\0'; p++) {
-        if (*p != '(' && *p != ')') {
-          ml++;
-        }
-      }
-      if (ml > new_max) {
-        new_max = ml;
-      }
-    }
-    max_move_w = new_max;
-  }
+  // Moves render with hide_parens=true, so layout uses the rendered
+  // width (strlen minus parens): raw strlen overestimates and gets the
+  // leave column suppressed when a playthrough move's parens push the
+  // max over the budget. Exchanges are compacted first, since that
+  // form is what renders.
+  const int max_move_w = analysis_compact_exchanges(rows, visible);
 
   // Now that rank_w + max_move_w are final, decide the avg-block
   // width and the right-side anchor in one pass. score_w isn't
@@ -218,26 +292,10 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       if (!rows[i].valid) {
         continue;
       }
-      int len_here;
-      if (strchr(rows[i].primary, '.') != NULL) {
-        const double val = atof(rows[i].primary);
-        int int_pct = (int)(val + 0.5);
-        if (int_pct > 100) {
-          int_pct = 100;
-        }
-        if (int_pct < 0) {
-          int_pct = 0;
-        }
-        char tmp[8];
-        snprintf(tmp, sizeof(tmp), "%d%%", int_pct);
-        len_here = (int)strlen(tmp);
-      } else {
-        const char *src = rows[i].primary;
-        while (*src == ' ') {
-          src++;
-        }
-        len_here = (int)strlen(src);
-      }
+      char compact_primary[8];
+      analysis_compact_primary(rows[i].primary, compact_primary,
+                               sizeof(compact_primary));
+      const int len_here = (int)strlen(compact_primary);
       if (len_here > compact_primary_w) {
         compact_primary_w = len_here;
       }
@@ -310,37 +368,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
                                   ? title_end_col + 1
                                   : interior_left;
         if (fade_left <= fade_right) {
-          const int fade_w = fade_right - fade_left + 1;
-          const int sub_steps = 2 * fade_w;
-          for (int c = fade_left; c <= fade_right; c++) {
-            const int pos = c - fade_left;
-            const int left_sub = 2 * pos;
-            const int right_sub = left_sub + 1;
-            const double tl = sub_steps > 1
-                                  ? (double)left_sub / (double)(sub_steps - 1)
-                                  : 1.0;
-            const double tr = sub_steps > 1
-                                  ? (double)right_sub / (double)(sub_steps - 1)
-                                  : 1.0;
-            ThemeRgb fg;
-            fg.r =
-                (uint8_t)(theme->bg.r + (theme->dim_fg.r - theme->bg.r) * tl);
-            fg.g =
-                (uint8_t)(theme->bg.g + (theme->dim_fg.g - theme->bg.g) * tl);
-            fg.b =
-                (uint8_t)(theme->bg.b + (theme->dim_fg.b - theme->bg.b) * tl);
-            ThemeRgb bg;
-            bg.r =
-                (uint8_t)(theme->bg.r + (theme->dim_fg.r - theme->bg.r) * tr);
-            bg.g =
-                (uint8_t)(theme->bg.g + (theme->dim_fg.g - theme->bg.g) * tr);
-            bg.b =
-                (uint8_t)(theme->bg.b + (theme->dim_fg.b - theme->bg.b) * tr);
-            theme_apply_fg(plane, fg);
-            theme_apply_bg(plane, bg);
-            ncplane_putstr_yx(plane, compact_header_row, c,
-                              "\xe2\x96\x8c"); // ▌ left-half block
-          }
+          render_analysis_header_fade(plane, theme, compact_header_row,
+                                      fade_left, fade_right);
         }
         // The "win%" label itself sits on the inverted band.
         theme_apply_fg(plane, theme->bg);
@@ -358,26 +387,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
         row++;
         continue;
       }
-      // Reformat the primary: percent values (containing '.') round
-      // to an integer; W/T/L stay as-is.
       char pbuf[8];
-      if (strchr(rows[i].primary, '.') != NULL) {
-        const double val = atof(rows[i].primary);
-        int int_pct = (int)(val + 0.5);
-        if (int_pct > 100) {
-          int_pct = 100;
-        }
-        if (int_pct < 0) {
-          int_pct = 0;
-        }
-        snprintf(pbuf, sizeof(pbuf), "%d%%", int_pct);
-      } else {
-        const char *src = rows[i].primary;
-        while (*src == ' ') {
-          src++;
-        }
-        snprintf(pbuf, sizeof(pbuf), "%s", src);
-      }
+      analysis_compact_primary(rows[i].primary, pbuf, sizeof(pbuf));
       const int plen = (int)strlen(pbuf);
       const int pcol = interior_right - plen + 1;
 
@@ -398,12 +409,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
         const int with_leave_budget =
             leave_text_col - leave_gap_l - compact_move_col;
         // Count this row's rendered move width.
-        int row_rendered = 0;
-        for (const char *p = rows[i].move; *p != '\0'; p++) {
-          if (*p != '(' && *p != ')') {
-            row_rendered++;
-          }
-        }
+        const int row_rendered = analysis_move_width(rows[i].move);
         if (with_leave_budget > 0 && row_rendered <= with_leave_budget) {
           this_row_show_leave = true;
           move_budget = with_leave_budget;
@@ -415,27 +421,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       }
 
       char *move_text = rows[i].move;
-      int rendered = 0;
-      for (const char *p = move_text; *p != '\0'; p++) {
-        if (*p != '(' && *p != ')') {
-          rendered++;
-        }
-      }
-      if (move_budget <= 0) {
-        move_text[0] = '\0';
-      } else if (rendered > move_budget) {
-        int cnt = 0;
-        char *p = move_text;
-        for (; *p != '\0'; p++) {
-          if (*p != '(' && *p != ')') {
-            if (cnt >= move_budget) {
-              break;
-            }
-            cnt++;
-          }
-        }
-        *p = '\0';
-      }
+      analysis_fit_move(move_text, move_budget);
       if (move_budget > 0 && move_text[0] != '\0') {
         theme_apply_fg(plane, theme->fg);
         render_move_styled(plane, row, compact_move_col, move_text,
@@ -639,37 +625,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       }
     }
     if (!headers_fit_on_border && interior_left < leftmost_header_col) {
-      // Each cell renders a left-half-block ▌ (U+258C): fg paints
-      // the cell's left half, bg paints the right half. That gives
-      // us two color samples per terminal cell — twice the
-      // gradient resolution of plain spaces — so the fade from
-      // theme->bg to theme->dim_fg eases in smoothly even on
-      // narrow strips.
-      const int fade_left = interior_left;
-      const int fade_right = leftmost_header_col - 1;
-      const int fade_w = fade_right - fade_left + 1;
-      const int sub_steps = 2 * fade_w;
-      for (int c = fade_left; c <= fade_right; c++) {
-        const int pos = c - fade_left;
-        const int left_sub = 2 * pos;
-        const int right_sub = left_sub + 1;
-        const double tl =
-            sub_steps > 1 ? (double)left_sub / (double)(sub_steps - 1) : 1.0;
-        const double tr =
-            sub_steps > 1 ? (double)right_sub / (double)(sub_steps - 1) : 1.0;
-        ThemeRgb fg;
-        fg.r = (uint8_t)(theme->bg.r + (theme->dim_fg.r - theme->bg.r) * tl);
-        fg.g = (uint8_t)(theme->bg.g + (theme->dim_fg.g - theme->bg.g) * tl);
-        fg.b = (uint8_t)(theme->bg.b + (theme->dim_fg.b - theme->bg.b) * tl);
-        ThemeRgb bg;
-        bg.r = (uint8_t)(theme->bg.r + (theme->dim_fg.r - theme->bg.r) * tr);
-        bg.g = (uint8_t)(theme->bg.g + (theme->dim_fg.g - theme->bg.g) * tr);
-        bg.b = (uint8_t)(theme->bg.b + (theme->dim_fg.b - theme->bg.b) * tr);
-        theme_apply_fg(plane, fg);
-        theme_apply_bg(plane, bg);
-        ncplane_putstr_yx(plane, header_row, c,
-                          "\xe2\x96\x8c"); // ▌ left-half block
-      }
+      render_analysis_header_fade(plane, theme, header_row, interior_left,
+                                  leftmost_header_col - 1);
     }
 
     theme_apply_fg(plane, theme->bg);
@@ -810,15 +767,6 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     char rank_str[8];
     snprintf(rank_str, sizeof(rank_str), rank_fmt, data_i + 1);
 
-    // Rendered width of this row's move (parens are dropped at
-    // render time so they don't count toward layout width).
-    int rendered = 0;
-    for (const char *p = rows[data_i].move; *p != '\0'; p++) {
-      if (*p != '(' && *p != ')') {
-        rendered++;
-      }
-    }
-
     // Leave column placement is decided globally (show_leaves):
     // either every row shows its own leave at leave_right_edge, or
     // the column is hidden entirely. Rows where the play exhausts
@@ -848,25 +796,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
                                           : full_move_max;
 
     char *move_text = rows[data_i].move;
-    if (this_move_max <= 0) {
-      move_text[0] = '\0';
-    } else if (rendered > this_move_max) {
-      // Truncate against rendered width, not raw strlen — a move
-      // like "H2 ISOBU(TA)NE" has strlen 14 but renders as 12
-      // ("H2 ISOBUTANE" with hide_parens). Counting parens as
-      // billable width would crop the move unnecessarily.
-      int cnt = 0;
-      char *p = move_text;
-      for (; *p != '\0'; p++) {
-        if (*p != '(' && *p != ')') {
-          if (cnt >= this_move_max) {
-            break;
-          }
-          cnt++;
-        }
-      }
-      *p = '\0';
-    }
+    analysis_fit_move(move_text, this_move_max);
 
     // Cursor styling: highlight is column-aware.
     //   - RANK column: invert the rank chip (bg on fg, bold)
