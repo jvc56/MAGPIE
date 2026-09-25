@@ -26,6 +26,7 @@
 #include "render_common.h"
 #include "render_hit_test.h"
 #include "render_layout.h"
+#include "render_planes.h"
 #include "render_view.h"
 #include "theme.h"
 #include "time_picker.h"
@@ -189,29 +190,6 @@ static void draw_combined_pills_history_frame(struct ncplane *plane,
 // region of cells. Pixels with alpha=0 composite through to the std plane,
 // so the cells' glyph content stays readable underneath. On terminals
 // without pixel support, the calls are no-ops via notcurses_canpixel.
-
-// All grid planes live in one module-level registry so a single
-// invalidation call (on resize or after the onboarding picker closes)
-// can destroy them and the next render rebuilds fresh. Without this,
-// font-size changes leave the previous pixel image at its old cell
-// offset and the terminal can show ghost lines smearing into nearby
-// rows — most visibly cutting the player-pill box borders.
-static struct {
-  // 2x board pixel composite.
-  struct ncplane *board;
-  // 2x board row + column coordinate labels. Drawn as pixels so a
-  // 1-cell-tall glyph can be centered against the 2-cell-tall board
-  // rows (which is impossible with text mode).
-  struct ncplane *labels_col;
-  struct ncplane *labels_row;
-  // 2x rack pixel composite. Tiles in the rack scale alongside the
-  // board so they don't read as tiny next to a giant board.
-  struct ncplane *rack;
-  // Modal box renders to its own child plane so it sits above the 2x
-  // pixel composite. A dedicated top-most modal plane keeps both the
-  // board and the menu visible at once.
-  struct ncplane *modal;
-} grid_planes;
 
 // Debug instrumentation. Three counters surfaced in the top-right
 // overlay while we tune the pixel-worker pipeline:
@@ -457,97 +435,12 @@ static void invalidate_blit_caches(void) {
 }
 
 static void invalidate_grid_planes(void) {
-  if (grid_planes.board != NULL) {
-    ncplane_destroy(grid_planes.board);
-    grid_planes.board = NULL;
-  }
-  if (grid_planes.rack != NULL) {
-    ncplane_destroy(grid_planes.rack);
-    grid_planes.rack = NULL;
-  }
-  if (grid_planes.labels_col != NULL) {
-    ncplane_destroy(grid_planes.labels_col);
-    grid_planes.labels_col = NULL;
-  }
-  if (grid_planes.labels_row != NULL) {
-    ncplane_destroy(grid_planes.labels_row);
-    grid_planes.labels_row = NULL;
-  }
-  if (grid_planes.modal != NULL) {
-    ncplane_destroy(grid_planes.modal);
-    grid_planes.modal = NULL;
-  }
+  tui_planes_destroy_all();
   invalidate_blit_caches();
   invalidate_tile_planes();
 }
 
 void tui_game_render_reset_grids(void) { invalidate_grid_planes(); }
-
-// Public accessor for the cached modal plane, shared across all modal
-// renderers (menu / settings / time picker / lexicon picker). Creates
-// the plane on first use; resizes/repositions on subsequent calls.
-// Returns NULL on allocation failure. The plane is destroyed when
-// tui_game_render sees modal == TUI_MODAL_NONE, so callers don't
-// have to manage its lifetime.
-struct ncplane *
-tui_game_render_get_or_create_modal_plane(struct ncplane *parent, int top,
-                                          int left, int rows, int cols) {
-  if (grid_planes.modal == NULL) {
-    ncplane_options opts = {0};
-    opts.y = top;
-    opts.x = left;
-    opts.rows = (unsigned)rows;
-    opts.cols = (unsigned)cols;
-    opts.name = "modal";
-    grid_planes.modal = ncplane_create(parent, &opts);
-    return grid_planes.modal;
-  }
-  unsigned cur_rows = 0;
-  unsigned cur_cols = 0;
-  ncplane_dim_yx(grid_planes.modal, &cur_rows, &cur_cols);
-  if ((int)cur_rows != rows || (int)cur_cols != cols) {
-    ncplane_resize_simple(grid_planes.modal, (unsigned)rows, (unsigned)cols);
-  }
-  ncplane_move_yx(grid_planes.modal, top, left);
-  return grid_planes.modal;
-}
-
-// Acquire (or move/resize) a cached child plane via a pointer-to-pointer
-// slot in `grid_planes`. On first call we allocate and set the base cell
-// to fully transparent; on subsequent calls we just reposition/resize.
-static struct ncplane *acquire_grid_plane(struct ncplane **slot,
-                                          struct ncplane *parent,
-                                          const char *name, int y, int x,
-                                          int rows, int cols) {
-  if (rows <= 0 || cols <= 0) {
-    return NULL;
-  }
-  if (*slot == NULL) {
-    ncplane_options opts = {0};
-    opts.y = y;
-    opts.x = x;
-    opts.rows = (unsigned)rows;
-    opts.cols = (unsigned)cols;
-    opts.name = name;
-    *slot = ncplane_create(parent, &opts);
-    if (*slot == NULL) {
-      return NULL;
-    }
-    uint64_t base_ch = 0;
-    ncchannels_set_fg_alpha(&base_ch, NCALPHA_TRANSPARENT);
-    ncchannels_set_bg_alpha(&base_ch, NCALPHA_TRANSPARENT);
-    ncplane_set_base(*slot, " ", 0, base_ch);
-    return *slot;
-  }
-  unsigned cur_rows = 0;
-  unsigned cur_cols = 0;
-  ncplane_dim_yx(*slot, &cur_rows, &cur_cols);
-  if ((int)cur_rows != rows || (int)cur_cols != cols) {
-    ncplane_resize_simple(*slot, (unsigned)rows, (unsigned)cols);
-  }
-  ncplane_move_yx(*slot, y, x);
-  return *slot;
-}
 
 // ── Board ─────────────────────────────────────────────────────────────────
 //
@@ -857,12 +750,13 @@ render_board_text_bg(struct ncplane *plane, const Theme *theme,
 static void render_board_grid_overlay(struct ncplane *parent,
                                       const Theme *theme, const Layout *L,
                                       int thickness, uint64_t render_version) {
+  TuiGridPlanes *planes = tui_grid_planes();
   struct notcurses *nc = ncplane_notcurses(parent);
   if (nc == NULL || !notcurses_canpixel(nc) || thickness <= 0) {
     return;
   }
   struct ncplane *p = acquire_grid_plane(
-      &grid_planes.board, parent, "board_grid_overlay", CELL_ROW_BASE,
+      &planes->board, parent, "board_grid_overlay", CELL_ROW_BASE,
       CELL_COL_BASE, BOARD_DIM * L->board_cell_h, BOARD_DIM * L->board_cell_w);
   if (p == NULL) {
     return;
@@ -937,6 +831,7 @@ static void render_board_grid_overlay(struct ncplane *parent,
 static void render_board_labels_pixel(struct ncplane *plane, const Theme *theme,
                                       const TuiGameState *state,
                                       const Layout *L) {
+  TuiGridPlanes *planes = tui_grid_planes();
   struct notcurses *nc = ncplane_notcurses(plane);
   if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache_sub == NULL) {
     return;
@@ -947,10 +842,10 @@ static void render_board_labels_pixel(struct ncplane *plane, const Theme *theme,
   const int row_cols = CELL_COL_BASE;
 
   struct ncplane *col_p =
-      acquire_grid_plane(&grid_planes.labels_col, plane, "board_col_labels",
+      acquire_grid_plane(&planes->labels_col, plane, "board_col_labels",
                          COL_LABELS_ROW, CELL_COL_BASE, col_rows, col_cols);
   struct ncplane *row_p =
-      acquire_grid_plane(&grid_planes.labels_row, plane, "board_row_labels",
+      acquire_grid_plane(&planes->labels_row, plane, "board_row_labels",
                          CELL_ROW_BASE, 0, row_rows, row_cols);
   if (col_p == NULL || row_p == NULL) {
     return;
@@ -1135,6 +1030,7 @@ static void render_board_box(struct ncplane *plane, const Theme *theme,
 
 static void render_board(struct ncplane *plane, const Theme *theme,
                          const TuiGameState *state, const Layout *L) {
+  TuiGridPlanes *planes = tui_grid_planes();
   render_board_box(plane, theme, state, L);
   if (L->scale >= 2 && state->glyph_cache != NULL) {
     render_board_labels_pixel(plane, theme, state, L);
@@ -1146,9 +1042,9 @@ static void render_board(struct ncplane *plane, const Theme *theme,
     // border pixels per cell. Caching (TileCache) skips planes
     // whose content + geometry haven't changed, so a 60fps idle
     // frame re-blits zero cells.
-    if (grid_planes.board != NULL) {
-      ncplane_destroy(grid_planes.board);
-      grid_planes.board = NULL;
+    if (planes->board != NULL) {
+      ncplane_destroy(planes->board);
+      planes->board = NULL;
       board_pixel_cache.valid = false;
     }
     render_board_pixel(plane, theme, state, L);
@@ -1158,19 +1054,19 @@ static void render_board(struct ncplane *plane, const Theme *theme,
   // image data would otherwise sit on top of the text-mode layout.
   // Drop the cached board grid-overlay plane, the labels, AND any
   // per-tile pixel planes from the layered 2x renderer.
-  if (grid_planes.board != NULL) {
-    ncplane_destroy(grid_planes.board);
-    grid_planes.board = NULL;
+  if (planes->board != NULL) {
+    ncplane_destroy(planes->board);
+    planes->board = NULL;
     board_pixel_cache.valid = false;
   }
-  if (grid_planes.labels_col != NULL) {
-    ncplane_destroy(grid_planes.labels_col);
-    grid_planes.labels_col = NULL;
+  if (planes->labels_col != NULL) {
+    ncplane_destroy(planes->labels_col);
+    planes->labels_col = NULL;
     label_pixel_cache.valid = false;
   }
-  if (grid_planes.labels_row != NULL) {
-    ncplane_destroy(grid_planes.labels_row);
-    grid_planes.labels_row = NULL;
+  if (planes->labels_row != NULL) {
+    ncplane_destroy(planes->labels_row);
+    planes->labels_row = NULL;
     label_pixel_cache.valid = false;
   }
   invalidate_tile_planes();
@@ -1271,6 +1167,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
                                     const TuiGameState *state, const Layout *L,
                                     int start_col, int tile_count,
                                     bool conceal) {
+  TuiGridPlanes *planes = tui_grid_planes();
   struct notcurses *nc = ncplane_notcurses(plane);
   if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL) {
     return;
@@ -1421,14 +1318,15 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   // it so a future regression that re-enables it starts cold
   // rather than reusing stale state.
   rack_pixel_cache.valid = false;
-  if (grid_planes.rack != NULL) {
-    ncplane_destroy(grid_planes.rack);
-    grid_planes.rack = NULL;
+  if (planes->rack != NULL) {
+    ncplane_destroy(planes->rack);
+    planes->rack = NULL;
   }
 }
 
 static void render_rack_panel(struct ncplane *plane, const Theme *theme,
                               const TuiGameState *state, const Layout *L) {
+  TuiGridPlanes *planes = tui_grid_planes();
   const int box_height = L->rack_bottom - L->rack_top + 1;
   // Follow the History cursor: when parked on a committed turn we
   // show that turn's player + rack, not the live game's on-turn
@@ -1517,9 +1415,9 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
 
   // Drop the 2x-only rack pixel plane if we're not using it — stale
   // pixel content otherwise sits on top of the text-mode rack.
-  if (grid_planes.rack != NULL) {
-    ncplane_destroy(grid_planes.rack);
-    grid_planes.rack = NULL;
+  if (planes->rack != NULL) {
+    ncplane_destroy(planes->rack);
+    planes->rack = NULL;
     rack_pixel_cache.valid = false;
   }
 
@@ -5381,6 +5279,7 @@ static void render_too_small(struct ncplane *plane, const Theme *theme) {
 void tui_game_render(struct ncplane *plane, const Theme *theme,
                      const TuiGameState *state, int time_per_side_seconds,
                      TuiModalState modal) {
+  TuiGridPlanes *planes = tui_grid_planes();
   TuiHitMaps *hit = tui_hit_maps();
   if (plane == NULL || theme == NULL || state == NULL || state->game == NULL) {
     return;
@@ -5784,9 +5683,9 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   // When a modal closes, drop its plane so the next open recreates it
   // at the right size and z-position. Cheap (one destroy) and keeps
   // the modal-open path's plane setup simple.
-  if (modal == TUI_MODAL_NONE && grid_planes.modal != NULL) {
-    ncplane_destroy(grid_planes.modal);
-    grid_planes.modal = NULL;
+  if (modal == TUI_MODAL_NONE && planes->modal != NULL) {
+    ncplane_destroy(planes->modal);
+    planes->modal = NULL;
   }
 }
 
@@ -5813,6 +5712,7 @@ static void render_modal_ex(struct ncplane *plane, const Theme *theme,
                             const int *cursor_cols, const int *zone_starts,
                             const int *zone_widths, int item_count, int focus,
                             int width) {
+  TuiGridPlanes *planes = tui_grid_planes();
   TuiHitMaps *hit = tui_hit_maps();
   unsigned plane_rows = 0;
   unsigned plane_cols = 0;
@@ -5895,28 +5795,28 @@ static void render_modal_ex(struct ncplane *plane, const Theme *theme,
   // (plane_h-1, plane_w-1); the modal proper occupies (0..height-1,
   // 0..width-1) and the shadow occupies (height, 1..width) plus
   // (1..height, width).
-  if (grid_planes.modal == NULL) {
+  if (planes->modal == NULL) {
     ncplane_options opts = {0};
     opts.y = top;
     opts.x = left;
     opts.rows = (unsigned)plane_h;
     opts.cols = (unsigned)plane_w;
     opts.name = "modal";
-    grid_planes.modal = ncplane_create(plane, &opts);
-    if (grid_planes.modal == NULL) {
+    planes->modal = ncplane_create(plane, &opts);
+    if (planes->modal == NULL) {
       return;
     }
   } else {
     unsigned cur_rows = 0;
     unsigned cur_cols = 0;
-    ncplane_dim_yx(grid_planes.modal, &cur_rows, &cur_cols);
+    ncplane_dim_yx(planes->modal, &cur_rows, &cur_cols);
     if ((int)cur_rows != plane_h || (int)cur_cols != plane_w) {
-      ncplane_resize_simple(grid_planes.modal, (unsigned)plane_h,
+      ncplane_resize_simple(planes->modal, (unsigned)plane_h,
                             (unsigned)plane_w);
     }
-    ncplane_move_yx(grid_planes.modal, top, left);
+    ncplane_move_yx(planes->modal, top, left);
   }
-  struct ncplane *mp = grid_planes.modal;
+  struct ncplane *mp = planes->modal;
   // Plane base is transparent: cells outside the modal proper and
   // outside the shadow strips let the underlying game frame show
   // through. The modal area fills explicitly below.
@@ -6442,6 +6342,7 @@ static void render_load_text_modal(struct ncplane *plane, const Theme *theme,
                                    const char *title, const char *prompt,
                                    const char *buf, int cursor,
                                    const char *error) {
+  TuiGridPlanes *planes = tui_grid_planes();
   if (plane == NULL || theme == NULL) {
     return;
   }
@@ -6473,28 +6374,27 @@ static void render_load_text_modal(struct ncplane *plane, const Theme *theme,
   // Reuse the shared modal plane (created on first use by
   // render_modal_ex) — same z-order rules apply. Re-create if
   // not present and size to our dimensions.
-  if (grid_planes.modal == NULL) {
+  if (planes->modal == NULL) {
     ncplane_options opts = {0};
     opts.y = top;
     opts.x = left;
     opts.rows = (unsigned)height;
     opts.cols = (unsigned)width;
     opts.name = "modal";
-    grid_planes.modal = ncplane_create(plane, &opts);
-    if (grid_planes.modal == NULL) {
+    planes->modal = ncplane_create(plane, &opts);
+    if (planes->modal == NULL) {
       return;
     }
   } else {
     unsigned cur_rows = 0;
     unsigned cur_cols = 0;
-    ncplane_dim_yx(grid_planes.modal, &cur_rows, &cur_cols);
+    ncplane_dim_yx(planes->modal, &cur_rows, &cur_cols);
     if ((int)cur_rows != height || (int)cur_cols != width) {
-      ncplane_resize_simple(grid_planes.modal, (unsigned)height,
-                            (unsigned)width);
+      ncplane_resize_simple(planes->modal, (unsigned)height, (unsigned)width);
     }
-    ncplane_move_yx(grid_planes.modal, top, left);
+    ncplane_move_yx(planes->modal, top, left);
   }
-  struct ncplane *mp = grid_planes.modal;
+  struct ncplane *mp = planes->modal;
   uint64_t base_ch = 0;
   ncchannels_set_fg_alpha(&base_ch, NCALPHA_TRANSPARENT);
   ncchannels_set_bg_alpha(&base_ch, NCALPHA_TRANSPARENT);

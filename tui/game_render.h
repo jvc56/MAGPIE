@@ -86,14 +86,6 @@ void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
 void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
                                   int focus);
 
-// Shared modal-plane accessor (used by render_modal and the lexicon
-// picker). Creates the plane on first use; resizes/repositions on
-// subsequent calls. The plane is destroyed when tui_game_render sees
-// modal == TUI_MODAL_NONE, so callers don't manage its lifetime.
-struct ncplane *
-tui_game_render_get_or_create_modal_plane(struct ncplane *parent, int top,
-                                          int left, int rows, int cols);
-
 // Settings modal; rows are TuiSettingsItem.
 // `board_scale` is 1 or 2; the scale row is grayed out when 2x is
 // unavailable (no pixel support or font load failed). `antialias`

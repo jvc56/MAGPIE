@@ -1,6 +1,7 @@
 #include "lexicon_picker.h"
 
 #include "game_render.h"
+#include "render_planes.h"
 #include "theme.h"
 #include "tui_resize.h"
 #include <ctype.h>
