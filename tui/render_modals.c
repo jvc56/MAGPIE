@@ -1226,3 +1226,98 @@ void tui_game_render_settings(
                   /*zone_widths=*/NULL, TUI_SETTINGS_ITEM_COUNT, focus,
                   MODAL_WIDTH);
 }
+
+// One-line description of a dialog row, shown on the command-bar row
+// while the dialog is open. NULL when the modal or row has none.
+const char *tui_modal_help(TuiModalState modal, int focus) {
+  switch (modal) {
+  case TUI_MODAL_SETTINGS:
+    switch (focus) {
+    case TUI_SETTINGS_SCALE:
+      return "Board size: 1x text, or 2x pixel tiles on terminals with "
+             "graphics.";
+    case TUI_SETTINGS_AA:
+      return "Smooth the edges of letters on 2x tiles.";
+    case TUI_SETTINGS_SUBSCRIPTS:
+      return "Show tile point values on 2x tiles: off, nonzero, or all.";
+    case TUI_SETTINGS_BORDER:
+      return "Width of the grid lines between 2x tiles.";
+    case TUI_SETTINGS_PREMIUM:
+      return "How premium squares are labeled: TW, tw, punctuation, or none.";
+    case TUI_SETTINGS_BLANKS:
+      return "Show played blanks as uppercase (tinted) or lowercase.";
+    case TUI_SETTINGS_RACK_SORT:
+      return "Tile order in racks and leaves; ? marks where blanks go.";
+    case TUI_SETTINGS_RIT:
+      return "Load the rack info table: faster move generation, more "
+             "memory. Applies from the next game.";
+    case TUI_SETTINGS_BACK:
+      return "Close Settings.";
+    default:
+      return NULL;
+    }
+  case TUI_MODAL_WATCH_SETUP:
+    switch (focus) {
+    case TUI_WATCH_SETUP_TIME:
+      return "Clock for each player.";
+    case TUI_WATCH_SETUP_LANGUAGE:
+      return "Which language's lexicons to choose from.";
+    case TUI_WATCH_SETUP_LEXICON:
+      return "Word list both computer players use.";
+    case TUI_WATCH_SETUP_SIM_PLIES:
+      return "How many turns ahead each simulation looks.";
+    case TUI_WATCH_SETUP_SIM_CANDIDATES:
+      return "How many candidate moves each turn's simulation compares.";
+    case TUI_WATCH_SETUP_START:
+      return "Start the game.";
+    default:
+      return NULL;
+    }
+  case TUI_MODAL_PLAY_SETUP:
+    switch (focus) {
+    case TUI_PLAY_SETUP_HUMAN_NAME:
+    case TUI_PLAY_SETUP_COMPUTER_NAME:
+      return "Name shown in the history and score pills.";
+    case TUI_PLAY_SETUP_FIRST_MOVE:
+      return "Who plays first.";
+    case TUI_PLAY_SETUP_TIME:
+      return "Clock for each player.";
+    case TUI_PLAY_SETUP_OVERTIME:
+      return "What happens when a clock runs out.";
+    case TUI_PLAY_SETUP_OVERTIME_CAP:
+      return "Overtime allowed before losing on time.";
+    case TUI_PLAY_SETUP_TIME_PENALTY:
+      return "Points deducted for time used in overtime.";
+    case TUI_PLAY_SETUP_CHALLENGE:
+      return "Challenge rule for words not in the lexicon.";
+    case TUI_PLAY_SETUP_CHALLENGE_PENALTY:
+      return "Points lost for challenging a valid play.";
+    case TUI_PLAY_SETUP_LANGUAGE:
+      return "Which language's lexicons to choose from.";
+    case TUI_PLAY_SETUP_LEXICON:
+      return "Word list for the game.";
+    case TUI_PLAY_SETUP_SIM_PLIES:
+      return "How many turns ahead the computer's simulation looks.";
+    case TUI_PLAY_SETUP_SIM_CANDIDATES:
+      return "How many candidate moves the computer's simulation compares.";
+    case TUI_PLAY_SETUP_START:
+      return "Start the game.";
+    default:
+      return NULL;
+    }
+  case TUI_MODAL_ANNOTATE_SETUP:
+    switch (focus) {
+    case TUI_ANNOTATE_SETUP_LEXICON:
+      return "Word list for checking the moves you enter.";
+    case TUI_ANNOTATE_SETUP_P1_NAME:
+    case TUI_ANNOTATE_SETUP_P2_NAME:
+      return "Name shown in the history and score pills.";
+    case TUI_ANNOTATE_SETUP_START:
+      return "Start annotating.";
+    default:
+      return NULL;
+    }
+  default:
+    return NULL;
+  }
+}
