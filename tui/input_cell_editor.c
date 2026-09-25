@@ -631,19 +631,21 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   const int idx = state->edit_history_idx;
   const bool field_move = state->edit_field == TUI_EDIT_FIELD_MOVE;
   const bool field_leave = state->edit_field == TUI_EDIT_FIELD_LEAVE;
-  char *buf =
-      field_move ? state->edit_move_buf
-                 : (field_leave ? state->edit_leave_buf : state->edit_rack_buf);
-  int *plen = field_move ? &state->edit_move_len
-                         : (field_leave ? &state->edit_leave_len
-                                        : &state->edit_rack_len);
-  int *pcur = field_move ? &state->edit_move_cursor
-                         : (field_leave ? &state->edit_leave_cursor
-                                        : &state->edit_rack_cursor);
+  // The active field's buffer, length, cursor, and capacity (RACK unless
+  // MOVE or LEAVE is being edited).
+  char *buf = state->edit_rack_buf;
+  int *plen = &state->edit_rack_len;
+  int *pcur = &state->edit_rack_cursor;
   size_t buf_cap = sizeof(state->edit_rack_buf);
   if (field_move) {
+    buf = state->edit_move_buf;
+    plen = &state->edit_move_len;
+    pcur = &state->edit_move_cursor;
     buf_cap = sizeof(state->edit_move_buf);
   } else if (field_leave) {
+    buf = state->edit_leave_buf;
+    plen = &state->edit_leave_len;
+    pcur = &state->edit_leave_cursor;
     buf_cap = sizeof(state->edit_leave_buf);
   }
 

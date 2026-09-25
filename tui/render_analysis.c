@@ -200,7 +200,7 @@ static void analysis_find_bests(const AnalysisRow *rows, int visible,
 static void analysis_compact_primary(const char *primary, char *buf,
                                      size_t buf_size) {
   if (strchr(primary, '.') != NULL) {
-    const double val = atof(primary);
+    const double val = strtod(primary, NULL);
     int int_pct = (int)(val + 0.5);
     if (int_pct > 100) {
       int_pct = 100;
@@ -306,9 +306,12 @@ static void render_analysis_rows_compact(struct ncplane *plane,
     level = 3;
   }
 
-  const int compact_rank_w = (level == 0)   ? 0
-                             : (level == 1) ? rank_short
-                                            : rank_full;
+  int compact_rank_w = rank_full;
+  if (level == 0) {
+    compact_rank_w = 0;
+  } else if (level == 1) {
+    compact_rank_w = rank_short;
+  }
   const int compact_move_col = interior_left + compact_rank_w;
   const bool compact_show_leave = (level >= 3);
   char rfmt[8];
@@ -660,8 +663,8 @@ static void render_analysis_row(struct ncplane *plane, const Theme *theme,
       const ThemeRgb tile_bg =
           candidate_idx == 1 ? theme->tile2_bg : theme->tile1_bg;
       const uint8_t lum =
-          (uint8_t)((30u * tile_bg.r + 59u * tile_bg.g + 11u * tile_bg.b) /
-                    100u);
+          (uint8_t)((30U * tile_bg.r + 59U * tile_bg.g + 11U * tile_bg.b) /
+                    100U);
       const ThemeRgb gray_bg = {lum, lum, lum};
       theme_apply_fg(plane, theme->fg);
       theme_apply_bg(plane, gray_bg);
@@ -1055,7 +1058,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       continue;
     }
     any_score = true;
-    const int s = atoi(rows[i].score);
+    const int s = (int)strtol(rows[i].score, NULL, 10);
     if (s > max_score_int) {
       max_score_int = s;
     }

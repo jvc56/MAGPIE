@@ -64,7 +64,7 @@ static const char *find_data_paths(const char *lexicon) {
 }
 
 static void copy_error(ErrorStack *err, char *buf, size_t buf_size) {
-  if (buf_size == 0) {
+  if (buf == NULL || buf_size == 0) {
     return;
   }
   buf[0] = '\0';
@@ -339,7 +339,7 @@ static int playthrough_parens_to_dots(const char *src, char *out,
     } else if (*ch == ')') {
       in_parens = false;
     } else {
-      out[len++] = in_parens ? ASCII_PLAYED_THROUGH : *ch;
+      out[len++] = (char)(in_parens ? ASCII_PLAYED_THROUGH : *ch);
     }
   }
   out[len] = '\0';
@@ -418,7 +418,7 @@ static bool is_prefix_of_exchange(const char *s, int n) {
   }
   for (int i = 0; i < n; i++) {
     const char c = s[i];
-    const char lower = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    const char lower = (char)((c >= 'A' && c <= 'Z') ? c + 32 : c);
     if (lower != full[i]) {
       return false;
     }
@@ -435,7 +435,7 @@ static bool is_iequal(const char *s, int n, const char *target) {
   }
   for (int i = 0; i < n; i++) {
     const char c = s[i];
-    const char lower = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    const char lower = (char)((c >= 'A' && c <= 'Z') ? c + 32 : c);
     if (lower != target[i]) {
       return false;
     }
@@ -589,15 +589,15 @@ size_t tui_game_state_effective_editor_rack(const TuiGameState *state,
       qsort(combined, (size_t)oi, 1, char_cmp);
     }
     snprintf(out, out_size, "%s", combined);
-  } else if (state->edit_rack_user_modified && state->edit_rack_len > 0 &&
-             state->edit_rack_valid) {
+  } else if (state->edit_rack_len > 0 && state->edit_rack_valid &&
+             (state->edit_rack_user_modified ||
+              state->edit_move_inferred_rack[0] == '\0')) {
+    // Steps 2 and 4: a valid buffer wins when user-typed, or when
+    // there's no inferred rack to fall back on.
     snprintf(out, out_size, "%.*s", state->edit_rack_len, state->edit_rack_buf);
     from_buffer = true;
   } else if (state->edit_move_inferred_rack[0] != '\0') {
     snprintf(out, out_size, "%s", state->edit_move_inferred_rack);
-  } else if (state->edit_rack_len > 0 && state->edit_rack_valid) {
-    snprintf(out, out_size, "%.*s", state->edit_rack_len, state->edit_rack_buf);
-    from_buffer = true;
   }
   if (out_from_buffer != NULL) {
     *out_from_buffer = from_buffer;

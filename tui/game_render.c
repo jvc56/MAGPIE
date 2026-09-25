@@ -174,9 +174,11 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   // are also reset so the next set_size call re-rasterizes at the
   // new pixel height instead of reusing bitmaps for the old aspect.
   {
-    unsigned probe_cdy = 0, probe_cdx = 0;
+    unsigned probe_cdy = 0;
+    unsigned probe_cdx = 0;
     ncplane_pixel_geom(plane, NULL, NULL, &probe_cdy, &probe_cdx, NULL, NULL);
-    static unsigned prev_cdy = 0, prev_cdx = 0;
+    static unsigned prev_cdy = 0;
+    static unsigned prev_cdx = 0;
     if (probe_cdy > 0 && probe_cdx > 0 &&
         (probe_cdy != prev_cdy || probe_cdx != prev_cdx)) {
       if (prev_cdy != 0 || prev_cdx != 0) {
@@ -358,7 +360,12 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
       const bool arrow_pixel_ok =
           L.scale == 2 && arrow_nc != NULL && notcurses_canpixel(arrow_nc);
       if (arrow_pixel_ok) {
-        unsigned pxy = 0, pxx = 0, cdy = 0, cdx = 0, mby = 0, mbx = 0;
+        unsigned pxy = 0;
+        unsigned pxx = 0;
+        unsigned cdy = 0;
+        unsigned cdx = 0;
+        unsigned mby = 0;
+        unsigned mbx = 0;
         ncplane_pixel_geom(plane, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
         if (cdy > 0 && cdx > 0) {
           const int tile_w = (int)cdx * L.board_cell_w;
@@ -458,13 +465,12 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
         // as awkwardly skewed; one centered arrow reads cleaner
         // even though it doesn't fill the whole cell.
         const bool double_glyph = L.board_cell_w == 2;
-        const char *glyph_h_single = "\xe2\x86\x92";             // →
-        const char *glyph_v_single = "\xe2\x86\x93";             // ↓
-        const char *glyph_h_double = "\xe2\x86\x92\xe2\x86\x92"; // →→
-        const char *glyph_v_double = "\xe2\x86\x93\xe2\x86\x93"; // ↓↓
-        const char *glyph =
-            vertical ? (double_glyph ? glyph_v_double : glyph_v_single)
-                     : (double_glyph ? glyph_h_double : glyph_h_single);
+        const char *glyph = double_glyph ? "\xe2\x86\x92\xe2\x86\x92" // →→
+                                         : "\xe2\x86\x92";            // →
+        if (vertical) {
+          glyph = double_glyph ? "\xe2\x86\x93\xe2\x86\x93" // ↓↓
+                               : "\xe2\x86\x93";            // ↓
+        }
         const int glyph_w = double_glyph ? 2 : 1;
         const int glyph_row = screen_top + (L.board_cell_h - 1) / 2;
         const int glyph_col = screen_left + (L.board_cell_w - glyph_w) / 2;

@@ -289,7 +289,7 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
       struct stat path_stat;
       const bool not_regular_file =
           stat(path, &path_stat) == 0 && !S_ISREG(path_stat.st_mode);
-      FILE *fp = not_regular_file ? NULL : fopen(path, "rb");
+      FILE *fp = not_regular_file ? NULL : fopen(path, "rbe");
       if (not_regular_file) {
         snprintf(ui->load_game_error, sizeof(ui->load_game_error),
                  "%s is not a file", path);
@@ -299,20 +299,20 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
                  "Cannot open %s", path);
         resolve_ok = false;
       } else {
-        fseek(fp, 0, SEEK_END);
+        (void)fseek(fp, 0, SEEK_END);
         long fsize = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
+        (void)fseek(fp, 0, SEEK_SET);
         if (fsize < 0 || fsize > (long)(1 << 20)) {
           // Cap at 1 MiB — anything bigger is almost certainly
           // not a real GCG.
           snprintf(ui->load_game_error, sizeof(ui->load_game_error),
                    "%s is too large", path);
-          fclose(fp);
+          (void)fclose(fp);
           resolve_ok = false;
         } else {
           gcg_payload = malloc_or_die((size_t)fsize + 1);
           size_t n = fread(gcg_payload, 1, (size_t)fsize, fp);
-          fclose(fp);
+          (void)fclose(fp);
           gcg_payload[n] = '\0';
         }
       }
@@ -513,14 +513,14 @@ void tui_load_position_live_parse(TuiGameState *state, TuiUiState *ui) {
       } else {
         snprintf(path, sizeof(path), "%s", start);
       }
-      FILE *fp = fopen(path, "rb");
+      FILE *fp = fopen(path, "rbe");
       if (fp == NULL) {
         snprintf(ui->load_position_error, sizeof(ui->load_position_error),
                  "Cannot open %s", path);
         resolve_ok = false;
       } else {
         size_t n = fread(cgp_payload, 1, sizeof(cgp_payload) - 1, fp);
-        fclose(fp);
+        (void)fclose(fp);
         cgp_payload[n] = '\0';
       }
     } else {

@@ -41,11 +41,9 @@ typedef struct {
   int letter;
   int player_idx;
   int score;
-  bool antialias;
-  bool ghost;
-  bool empty; // concealed opponent tile (no letter)
   int score_subscripts;
-  unsigned cdy, cdx;
+  unsigned cdy;
+  unsigned cdx;
   int scale;
   // Last screen position the plane was created at. Pixel-mode
   // terminals don't move sprixel pixels when ncplane_move_yx is
@@ -56,6 +54,9 @@ typedef struct {
   // coords (the "ghost Q is misplaced" bug).
   int screen_top;
   int screen_left;
+  bool antialias;
+  bool ghost;
+  bool empty; // concealed opponent tile (no letter)
   bool valid;
 } RackTileCache;
 static RackTileCache rack_tile_cache[RACK_SIZE];
@@ -101,7 +102,12 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   const int cell_w = L->board_cell_w; // 4
   const int cell_h = L->board_cell_h; // 2
   // Probe cell-pixel geometry off the parent plane.
-  unsigned pxy = 0, pxx = 0, cdy = 0, cdx = 0, mby = 0, mbx = 0;
+  unsigned pxy = 0;
+  unsigned pxx = 0;
+  unsigned cdy = 0;
+  unsigned cdx = 0;
+  unsigned mby = 0;
+  unsigned mbx = 0;
   ncplane_pixel_geom(plane, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
   if (cdy == 0 || cdx == 0) {
     return;

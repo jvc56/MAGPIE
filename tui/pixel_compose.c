@@ -384,6 +384,9 @@ uint8_t *compose_tile_pixels(MachineLetter ml, int owner, bool blank_uppercase,
                              TuiScoreSubscripts score_subscripts,
                              bool antialias, int border_thickness,
                              const Theme *theme, const LetterDistribution *ld) {
+  if (ld == NULL) {
+    return NULL;
+  }
   uint8_t *buf = (uint8_t *)calloc(1, (size_t)tile_w * tile_h * 4);
   if (buf == NULL) {
     return NULL;
@@ -532,6 +535,9 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
   // rendering at 2*letter_px, hints and rasterization quirks
   // happen on a finer grid, then the average yields smooth
   // sub-pixel-positioned strokes regardless of the target size.
+  if (ld == NULL) {
+    return NULL;
+  }
   const int SS = 2;
   const int tw = tile_w * SS;
   const int th = tile_h * SS;
@@ -545,12 +551,12 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
   // subscript) so the rack visually communicates "this tile is
   // about to be spent" while keeping the slot's physical
   // position occupied.
-  const ThemeRgb bg =
-      ghost ? theme->bg
-            : (player_idx == 1 ? theme->rack_tile2_bg : theme->rack_tile1_bg);
-  const ThemeRgb fg =
-      ghost ? (ThemeRgb){.r = 102, .g = 102, .b = 102}
-            : (player_idx == 1 ? theme->rack_tile2_fg : theme->rack_tile1_fg);
+  ThemeRgb bg = player_idx == 1 ? theme->rack_tile2_bg : theme->rack_tile1_bg;
+  ThemeRgb fg = player_idx == 1 ? theme->rack_tile2_fg : theme->rack_tile1_fg;
+  if (ghost) {
+    bg = theme->bg;
+    fg = (ThemeRgb){.r = 102, .g = 102, .b = 102};
+  }
   if (empty) {
     // Concealed opponent tiles: a full-size tile-color square (matching
     // the board / face-up rack tiles) framed by a thin panel-bg border
@@ -580,7 +586,10 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
 
   // Concealed (opponent's hidden) tiles render as a bare tile box: the
   // player-hued bg fill above, with no letter glyph and no score.
-  const char *ascii = empty ? "" : (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+  const char *ascii = "";
+  if (!empty) {
+    ascii = ml == 0 ? "?" : ld->ld_ml_to_hl[ml];
+  }
   const TuiGlyph *g =
       (ascii != NULL && ascii[0] != '\0' && (unsigned char)ascii[0] < 0x80)
           ? tui_glyph_cache_get(glyph_cache, (uint32_t)ascii[0])
@@ -635,7 +644,9 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
   const int denom = SS * SS;
   for (int row = 0; row < tile_h; row++) {
     for (int col = 0; col < tile_w; col++) {
-      uint32_t r_sum = 0, g_sum = 0, b_sum = 0;
+      uint32_t r_sum = 0;
+      uint32_t g_sum = 0;
+      uint32_t b_sum = 0;
       for (int dy = 0; dy < SS; dy++) {
         const uint8_t *src_row =
             buf_ss + (size_t)((row * SS + dy) * tw + col * SS) * 4;

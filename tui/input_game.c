@@ -478,7 +478,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
         // Insert (lowercased) at the cursor position rather than
         // always appending. Shifts the buffer tail right.
         const char ch =
-            (key >= 'A' && key <= 'Z') ? (char)(key + ('a' - 'A')) : (char)key;
+            (char)((key >= 'A' && key <= 'Z') ? key + ('a' - 'A') : key);
         pthread_mutex_lock(&state->mutex);
         if (state->slash_len < (int)sizeof(state->slash_buf) - 1) {
           memmove(state->slash_buf + state->slash_cursor + 1,

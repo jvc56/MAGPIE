@@ -58,7 +58,7 @@ enum {
   MIN_BUDGET_MS = 250,
   // The watchdog polls bot_stop while the engine is running and signals
   // the thread_control if a quit is requested.
-  WATCHDOG_POLL_NS = 50 * 1000 * 1000L,
+  WATCHDOG_POLL_NS = 50L * 1000 * 1000,
   // Grace past a bot sim's budget before the watchdog interrupts it. BAI
   // normally stops itself at the budget; this is the backstop.
   SIM_DEADLINE_GRACE_MS = 1000,
@@ -1074,9 +1074,10 @@ static void *bot_thread_main(void *arg) {
         state->edit_move_len = 0;
         state->edit_move_cursor = 0;
         tui_game_state_parse_edit_buf(state);
-        const char *loser_name = state->player_names[player_idx][0] != '\0'
-                                     ? state->player_names[player_idx]
-                                     : (player_idx == 0 ? "P1" : "P2");
+        const char *loser_name = player_idx == 0 ? "P1" : "P2";
+        if (state->player_names[player_idx][0] != '\0') {
+          loser_name = state->player_names[player_idx];
+        }
         snprintf(state->notice_buf, sizeof(state->notice_buf),
                  "%s lost on time", loser_name);
         clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
@@ -1123,7 +1124,7 @@ static void *bot_thread_main(void *arg) {
     if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
         player_idx == state->human_player_idx) {
       pthread_mutex_unlock(&state->mutex);
-      const struct timespec idle = {.tv_sec = 0, .tv_nsec = 30 * 1000 * 1000L};
+      const struct timespec idle = {.tv_sec = 0, .tv_nsec = 30L * 1000 * 1000};
       nanosleep(&idle, NULL);
       continue;
     }

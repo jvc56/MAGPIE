@@ -6,7 +6,7 @@
 #include <string.h>
 
 void print_usage(void) {
-  fputs(
+  (void)fputs(
       "Usage: magpie_tui [options]\n"
       "\n"
       "Options:\n"
@@ -47,29 +47,29 @@ CliArgs parse_args(int argc, char *argv[]) {
       args.watch = true;
     } else if (strcmp(arg, "--theme") == 0) {
       if (idx + 1 >= argc) {
-        fputs("magpie_tui: --theme requires an argument\n", stderr);
+        (void)fputs("magpie_tui: --theme requires an argument\n", stderr);
         args.error = true;
         return args;
       }
       const char *theme_id = argv[++idx];
       if (theme_get_by_id(theme_id) == NULL) {
-        fprintf(stderr,
-                "magpie_tui: unknown theme '%s'. "
-                "Valid: dark, light, dim, high_contrast\n",
-                theme_id);
+        (void)fprintf(stderr,
+                      "magpie_tui: unknown theme '%s'. "
+                      "Valid: dark, light, dim, high_contrast\n",
+                      theme_id);
         args.error = true;
         return args;
       }
       args.theme_arg = theme_id;
     } else if (strcmp(arg, "--config") == 0) {
       if (idx + 1 >= argc) {
-        fputs("magpie_tui: --config requires a path argument\n", stderr);
+        (void)fputs("magpie_tui: --config requires a path argument\n", stderr);
         args.error = true;
         return args;
       }
       args.config_path = argv[++idx];
     } else {
-      fprintf(stderr, "magpie_tui: unknown argument '%s'\n", arg);
+      (void)fprintf(stderr, "magpie_tui: unknown argument '%s'\n", arg);
       args.error = true;
       return args;
     }

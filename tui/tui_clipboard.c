@@ -43,8 +43,9 @@ static void tui_copy_to_clipboard(const char *text) {
     const uint32_t chunk = (byte0 << 16) | (byte1 << 8) | byte2;
     *out++ = b64_alphabet[(chunk >> 18) & 0x3f];
     *out++ = b64_alphabet[(chunk >> 12) & 0x3f];
-    *out++ = in_idx + 1 < text_len ? b64_alphabet[(chunk >> 6) & 0x3f] : '=';
-    *out++ = in_idx + 2 < text_len ? b64_alphabet[chunk & 0x3f] : '=';
+    *out++ =
+        (char)(in_idx + 1 < text_len ? b64_alphabet[(chunk >> 6) & 0x3f] : '=');
+    *out++ = (char)(in_idx + 2 < text_len ? b64_alphabet[chunk & 0x3f] : '=');
     in_idx += 3;
   }
   *out++ = '\x07';

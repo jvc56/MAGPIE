@@ -1,10 +1,10 @@
 #include "render_bars.h"
 
-#include "mach_compat.h" // IWYU pragma: keep (Apple memory stats)
 #include "../src/ent/game.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/endgame.h"
 #include "game_state.h"
+#include "mach_compat.h" // IWYU pragma: keep
 #include "render_common.h"
 #include "render_layout.h"
 #include "theme.h"
@@ -69,7 +69,7 @@ void tui_debug_record_frame_us(long frame_us) {
   }
   const long since_start_ms =
       (long)(now.tv_sec - window_start.tv_sec) * 1000L +
-      (long)(now.tv_nsec - window_start.tv_nsec) / 1000000L;
+      (now.tv_nsec - window_start.tv_nsec) / 1000000L;
   if (since_start_ms >= 1000) {
     atomic_store(&g_max_frame_us, max_in_window);
     max_in_window = 0;
@@ -496,7 +496,8 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
              unit);
   }
   char dim_str[48];
-  unsigned cdy_now = 0, cdx_now = 0;
+  unsigned cdy_now = 0;
+  unsigned cdx_now = 0;
   ncplane_pixel_geom(plane, NULL, NULL, &cdy_now, &cdx_now, NULL, NULL);
   if (cdy_now > 0 && cdx_now > 0) {
     snprintf(dim_str, sizeof(dim_str), " \xc2\xb7 %ux%u (%ux%u)", L->plane_cols,
@@ -599,24 +600,15 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   const char *hint = state->slash_active ? " Esc cancel " : " Esc menu ";
   switch (modal) {
   case TUI_MODAL_MAIN_MENU:
+  case TUI_MODAL_TIME_PICKER:
+  case TUI_MODAL_LEXICON_PICKER:
+  case TUI_MODAL_QUIT_CONFIRM:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
            "\xb7 Esc back ";
     break;
   case TUI_MODAL_SETTINGS:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 \xe2\x86\x90\xe2"
            "\x86\x92 adjust \xc2\xb7 Esc back ";
-    break;
-  case TUI_MODAL_TIME_PICKER:
-    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
-           "\xb7 Esc back ";
-    break;
-  case TUI_MODAL_LEXICON_PICKER:
-    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
-           "\xb7 Esc back ";
-    break;
-  case TUI_MODAL_QUIT_CONFIRM:
-    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
-           "\xb7 Esc back ";
     break;
   case TUI_MODAL_NONE:
   default:

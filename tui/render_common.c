@@ -446,9 +446,7 @@ void render_move_styled(struct ncplane *plane, int row, int col,
       // newly-played blanks (the GCG convention is bare lowercase
       // for new blanks; played-through blanks come pre-wrapped as
       // (l)) and render bold like the rest. seg_bold is set
-      // per-sub-run inside the inner loop, so the outer
-      // initialization is just a placeholder.
-      seg_bold = true;
+      // per-sub-run inside the inner loop.
       seg_end = p;
       while (seg_end < end && *seg_end != '(' && *seg_end != '[') {
         seg_end++;

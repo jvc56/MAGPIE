@@ -26,7 +26,7 @@ typedef struct {
   int height;
 } CapturedPlane;
 
-#define FRAME_DUMP_MAX_PLANES 512
+enum { FRAME_DUMP_MAX_PLANES = 512 };
 
 static CapturedPlane g_planes[FRAME_DUMP_MAX_PLANES];
 static int g_plane_count;
@@ -345,7 +345,7 @@ static bool write_png_rgba(const char *path, const uint8_t *rgba, int w,
     return false;
   }
 
-  FILE *fp = fopen(path, "wb");
+  FILE *fp = fopen(path, "wbe");
   if (fp == NULL) {
     free(comp);
     return false;

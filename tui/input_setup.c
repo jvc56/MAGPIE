@@ -57,12 +57,13 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
     const bool focus_comp =
         ui->play_setup_focus == TUI_PLAY_SETUP_COMPUTER_NAME;
     const bool focus_name = focus_human || focus_comp;
-    char *name_buf = focus_human
-                         ? ui->play_setup_human_name
-                         : (focus_comp ? ui->play_setup_computer_name : NULL);
+    char *name_buf = NULL;
     size_t name_cap = sizeof(ui->play_setup_computer_name);
     if (focus_human) {
+      name_buf = ui->play_setup_human_name;
       name_cap = sizeof(ui->play_setup_human_name);
+    } else if (focus_comp) {
+      name_buf = ui->play_setup_computer_name;
     }
 
     if (key == NCKEY_ESC) {
@@ -424,11 +425,13 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
     const bool focus_p2 =
         ui->annotate_setup_focus == TUI_ANNOTATE_SETUP_P2_NAME;
     const bool focus_name = focus_p1 || focus_p2;
-    char *name_buf = focus_p1 ? ui->annotate_setup_p1_name
-                              : (focus_p2 ? ui->annotate_setup_p2_name : NULL);
+    char *name_buf = NULL;
     size_t name_cap = sizeof(ui->annotate_setup_p2_name);
     if (focus_p1) {
+      name_buf = ui->annotate_setup_p1_name;
       name_cap = sizeof(ui->annotate_setup_p1_name);
+    } else if (focus_p2) {
+      name_buf = ui->annotate_setup_p2_name;
     }
 
     if (key == NCKEY_ESC) {

@@ -135,7 +135,7 @@ bool tui_config_load(TuiConfig *config) {
   if (!tui_config_resolve_path(path, sizeof(path))) {
     return false;
   }
-  FILE *file = fopen(path, "r");
+  FILE *file = fopen(path, "re");
   if (file == NULL) {
     return false;
   }
@@ -185,7 +185,7 @@ bool tui_config_load(TuiConfig *config) {
     } else if (strcmp(trimmed, "time_per_side_seconds") == 0) {
       char *endptr = NULL;
       const long parsed = strtol(value, &endptr, 10);
-      if (endptr != value && parsed > 0 && parsed <= 24 * 60 * 60) {
+      if (endptr != value && parsed > 0 && parsed <= 24L * 60 * 60) {
         config->time_per_side_seconds = (int)parsed;
         config->time_per_side_set = true;
       }
@@ -324,7 +324,7 @@ bool tui_config_load(TuiConfig *config) {
     }
   }
 
-  fclose(file);
+  (void)fclose(file);
   return true;
 }
 
@@ -339,25 +339,25 @@ bool tui_config_save(const TuiConfig *config) {
   if (!ensure_parent_dirs(path)) {
     return false;
   }
-  FILE *file = fopen(path, "w");
+  FILE *file = fopen(path, "we");
   if (file == NULL) {
     return false;
   }
 
-  fputs("[tui]\n", file);
+  (void)fputs("[tui]\n", file);
   if (config->theme_set) {
     const Theme *theme = theme_get(config->theme);
-    fprintf(file, "theme = \"%s\"\n", theme->id);
+    (void)fprintf(file, "theme = \"%s\"\n", theme->id);
   }
   if (config->lexicon_set && config->lexicon[0] != '\0') {
-    fprintf(file, "lexicon = \"%s\"\n", config->lexicon);
+    (void)fprintf(file, "lexicon = \"%s\"\n", config->lexicon);
   }
   if (config->time_per_side_set && config->time_per_side_seconds > 0) {
-    fprintf(file, "time_per_side_seconds = %d\n",
-            config->time_per_side_seconds);
+    (void)fprintf(file, "time_per_side_seconds = %d\n",
+                  config->time_per_side_seconds);
   }
   if (config->overtime_rule_set) {
-    const char *value = "max";
+    const char *value;
     switch (config->overtime_rule) {
     case UI_OVERTIME_FLAG:
       value = "flag";
@@ -371,19 +371,20 @@ bool tui_config_save(const TuiConfig *config) {
       value = "max";
       break;
     }
-    fprintf(file, "overtime_rule = \"%s\"\n", value);
+    (void)fprintf(file, "overtime_rule = \"%s\"\n", value);
   }
   if (config->overtime_cap_set) {
-    fprintf(file, "overtime_cap_minutes = %d\n", config->overtime_cap_minutes);
+    (void)fprintf(file, "overtime_cap_minutes = %d\n",
+                  config->overtime_cap_minutes);
   }
   if (config->time_penalty_set) {
-    fprintf(file, "time_penalty = \"%s\"\n",
-            config->time_penalty_rate == UI_TIME_PENALTY_1_PER_SEC
-                ? "1_per_sec"
-                : "10_per_min");
+    (void)fprintf(file, "time_penalty = \"%s\"\n",
+                  config->time_penalty_rate == UI_TIME_PENALTY_1_PER_SEC
+                      ? "1_per_sec"
+                      : "10_per_min");
   }
   if (config->challenge_rule_set) {
-    const char *value = "void";
+    const char *value;
     switch (config->challenge_rule) {
     case UI_CHALLENGE_SINGLE:
       value = "single";
@@ -400,10 +401,10 @@ bool tui_config_save(const TuiConfig *config) {
       value = "void";
       break;
     }
-    fprintf(file, "challenge_rule = \"%s\"\n", value);
+    (void)fprintf(file, "challenge_rule = \"%s\"\n", value);
   }
   if (config->challenge_penalty_set) {
-    const char *value = "5_per_play";
+    const char *value;
     switch (config->challenge_penalty) {
     case UI_CHALLENGE_PENALTY_10_PER_PLAY:
       value = "10_per_play";
@@ -420,17 +421,17 @@ bool tui_config_save(const TuiConfig *config) {
       value = "5_per_play";
       break;
     }
-    fprintf(file, "challenge_penalty = \"%s\"\n", value);
+    (void)fprintf(file, "challenge_penalty = \"%s\"\n", value);
   }
   if (config->border_thickness_set) {
-    fprintf(file, "border_thickness = %d\n", config->border_thickness);
+    (void)fprintf(file, "border_thickness = %d\n", config->border_thickness);
   }
   if (config->blank_uppercase_set) {
-    fprintf(file, "blank_uppercase = %s\n",
-            config->blank_uppercase ? "true" : "false");
+    (void)fprintf(file, "blank_uppercase = %s\n",
+                  config->blank_uppercase ? "true" : "false");
   }
   if (config->premium_labels_set) {
-    const char *value = "uppercase";
+    const char *value;
     switch (config->premium_labels) {
     case TUI_PREMIUM_LABELS_LOWERCASE:
       value = "lowercase";
@@ -447,16 +448,17 @@ bool tui_config_save(const TuiConfig *config) {
       value = "uppercase";
       break;
     }
-    fprintf(file, "premium_labels = \"%s\"\n", value);
+    (void)fprintf(file, "premium_labels = \"%s\"\n", value);
   }
   if (config->board_scale_set) {
-    fprintf(file, "board_scale = %d\n", config->board_scale);
+    (void)fprintf(file, "board_scale = %d\n", config->board_scale);
   }
   if (config->antialias_set) {
-    fprintf(file, "antialias = %s\n", config->antialias ? "true" : "false");
+    (void)fprintf(file, "antialias = %s\n",
+                  config->antialias ? "true" : "false");
   }
   if (config->score_subscripts_set) {
-    const char *value = "off";
+    const char *value;
     switch (config->score_subscripts) {
     case TUI_SCORE_SUBSCRIPTS_NONZERO:
       value = "nonzero";
@@ -470,10 +472,10 @@ bool tui_config_save(const TuiConfig *config) {
       value = "off";
       break;
     }
-    fprintf(file, "score_subscripts = \"%s\"\n", value);
+    (void)fprintf(file, "score_subscripts = \"%s\"\n", value);
   }
   if (config->rack_sort_set) {
-    const char *value = "blanks_alpha";
+    const char *value;
     switch (config->rack_sort) {
     case TUI_RACK_SORT_ALPHA:
       value = "alpha";
@@ -490,10 +492,10 @@ bool tui_config_save(const TuiConfig *config) {
       value = "blanks_alpha";
       break;
     }
-    fprintf(file, "rack_sort = \"%s\"\n", value);
+    (void)fprintf(file, "rack_sort = \"%s\"\n", value);
   }
   if (config->load_rit_set) {
-    fprintf(file, "load_rit = %s\n", config->load_rit ? "true" : "false");
+    (void)fprintf(file, "load_rit = %s\n", config->load_rit ? "true" : "false");
   }
 
   if (fclose(file) != 0) {

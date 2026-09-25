@@ -37,6 +37,9 @@ static void render_modal_ex(struct ncplane *plane, const Theme *theme,
                             const int *cursor_cols, const int *zone_starts,
                             const int *zone_widths, int item_count, int focus,
                             int width) {
+  if (items == NULL) {
+    return;
+  }
   TuiGridPlanes *planes = tui_grid_planes();
   TuiHitMaps *hit = tui_hit_maps();
   unsigned plane_rows = 0;
@@ -80,7 +83,7 @@ static void render_modal_ex(struct ncplane *plane, const Theme *theme,
     // Each chevron occupies 1 display column. Item text renders
     // starting at modal-interior col 3, so the screen column is
     // (left + 3 + display_offset).
-    if (items != NULL && items[i] != NULL) {
+    if (items[i] != NULL) {
       const unsigned char *s = (const unsigned char *)items[i];
       int disp = 0;
       while (*s != '\0') {
@@ -212,9 +215,12 @@ static void render_modal_ex(struct ncplane *plane, const Theme *theme,
     // Disabled items never use the focus highlight — they paint
     // dim text on the unfocused row background so they read as
     // "informational only, not selectable".
-    const ThemeRgb row_fg = item_disabled ? theme->modal_shortcut_fg
-                            : focused     ? theme->modal_focus_fg
-                                          : theme->modal_fg;
+    ThemeRgb row_fg = theme->modal_fg;
+    if (item_disabled) {
+      row_fg = theme->modal_shortcut_fg;
+    } else if (focused) {
+      row_fg = theme->modal_focus_fg;
+    }
     const ThemeRgb row_bg =
         (focused && !item_disabled) ? theme->modal_focus_bg : theme->modal_bg;
     const ThemeRgb shortcut_fg = focused && !item_disabled
@@ -559,7 +565,7 @@ static void format_setup_text_row(char *out, size_t out_size, int content_w,
     const int max_chars = zone_width - 1; // leave a trailing cell for the
                                           // end-of-text caret
     for (int i = 0; i < max_chars && value[i] != '\0' &&
-                    (size_t)(zone_start + i) < out_size - 1;
+                    (size_t)zone_start + (size_t)i < out_size - 1;
          i++) {
       out[zone_start + i] = value[i];
     }
@@ -871,6 +877,62 @@ void tui_play_setup_enabled_rows(UiOvertimeRule overtime_rule, int time_seconds,
     out_enabled[TUI_PLAY_SETUP_TIME_PENALTY] = false;
   }
 }
+// Play-setup row labels for each option's current value.
+static const char *first_move_label(int first_move) {
+  switch (first_move) {
+  case TUI_PLAY_FIRST_HUMAN:
+    return "Human";
+  case TUI_PLAY_FIRST_COMPUTER:
+    return "Computer";
+  default:
+    return "Random";
+  }
+}
+
+static const char *overtime_rule_label(UiOvertimeRule overtime_rule) {
+  switch (overtime_rule) {
+  case UI_OVERTIME_FLAG:
+    return "flag at 0:00";
+  case UI_OVERTIME_MAX:
+    return "max overtime";
+  case UI_OVERTIME_UNLIMITED:
+  case UI_OVERTIME_RULE_COUNT:
+  default:
+    return "unlimited";
+  }
+}
+
+static const char *challenge_rule_label(UiChallengeRule challenge_rule) {
+  switch (challenge_rule) {
+  case UI_CHALLENGE_VOID:
+    return "void";
+  case UI_CHALLENGE_SINGLE:
+    return "single";
+  case UI_CHALLENGE_DOUBLE:
+    return "double";
+  case UI_CHALLENGE_PENALTY:
+  case UI_CHALLENGE_RULE_COUNT:
+  default:
+    return "penalty";
+  }
+}
+
+static const char *
+challenge_penalty_label(UiChallengePenalty challenge_penalty) {
+  switch (challenge_penalty) {
+  case UI_CHALLENGE_PENALTY_5_PER_PLAY:
+    return "5 pts/play";
+  case UI_CHALLENGE_PENALTY_10_PER_PLAY:
+    return "10 pts/play";
+  case UI_CHALLENGE_PENALTY_5_PER_WORD:
+    return "5 pts/word";
+  case UI_CHALLENGE_PENALTY_10_PER_WORD:
+  case UI_CHALLENGE_PENALTY_COUNT:
+  default:
+    return "10 pts/word";
+  }
+}
+
 void tui_game_render_play_setup(
     struct ncplane *plane, const Theme *theme, int focus,
     const char *human_name, const char *computer_name, int first_move,
@@ -910,9 +972,7 @@ void tui_game_render_play_setup(
   format_setup_text_row(buf[TUI_PLAY_SETUP_COMPUTER_NAME], ROW_BUF, CONTENT_W,
                         NAME_ZONE_W, "Computer name",
                         computer_name != NULL ? computer_name : "");
-  const char *first_value = first_move == TUI_PLAY_FIRST_HUMAN      ? "Human"
-                            : first_move == TUI_PLAY_FIRST_COMPUTER ? "Computer"
-                                                                    : "Random";
+  const char *first_value = first_move_label(first_move);
   format_setup_row(buf[TUI_PLAY_SETUP_FIRST_MOVE], ROW_BUF, CONTENT_W,
                    "First move", first_value,
                    focus == TUI_PLAY_SETUP_FIRST_MOVE);
@@ -939,10 +999,7 @@ void tui_game_render_play_setup(
   // Overtime rule + its dependents. Disabled rows render their value
   // dimmed without the ◀ ▶ adjusters (the cap only matters under
   // "max overtime"; penalties don't exist under "flag at 0:00").
-  const char *overtime_value =
-      overtime_rule == UI_OVERTIME_FLAG  ? "flag at 0:00"
-      : overtime_rule == UI_OVERTIME_MAX ? "max overtime"
-                                         : "unlimited";
+  const char *overtime_value = overtime_rule_label(overtime_rule);
   format_setup_row(buf[TUI_PLAY_SETUP_OVERTIME], ROW_BUF, CONTENT_W, "Overtime",
                    overtime_value,
                    focus == TUI_PLAY_SETUP_OVERTIME &&
@@ -973,21 +1030,13 @@ void tui_game_render_play_setup(
 
   // Challenge rule + its penalty variant (the variant row only
   // applies under the "penalty" rule).
-  const char *challenge_value =
-      challenge_rule == UI_CHALLENGE_VOID     ? "void"
-      : challenge_rule == UI_CHALLENGE_SINGLE ? "single"
-      : challenge_rule == UI_CHALLENGE_DOUBLE ? "double"
-                                              : "penalty";
+  const char *challenge_value = challenge_rule_label(challenge_rule);
   format_setup_row(buf[TUI_PLAY_SETUP_CHALLENGE], ROW_BUF, CONTENT_W,
                    "Challenge", challenge_value,
                    focus == TUI_PLAY_SETUP_CHALLENGE);
   const char *challenge_penalty_value = "n/a";
   if (enabled[TUI_PLAY_SETUP_CHALLENGE_PENALTY]) {
-    challenge_penalty_value =
-        challenge_penalty == UI_CHALLENGE_PENALTY_5_PER_PLAY    ? "5 pts/play"
-        : challenge_penalty == UI_CHALLENGE_PENALTY_10_PER_PLAY ? "10 pts/play"
-        : challenge_penalty == UI_CHALLENGE_PENALTY_5_PER_WORD  ? "5 pts/word"
-                                                                : "10 pts/word";
+    challenge_penalty_value = challenge_penalty_label(challenge_penalty);
   }
   format_setup_row(buf[TUI_PLAY_SETUP_CHALLENGE_PENALTY], ROW_BUF, CONTENT_W,
                    "Challenge penalty", challenge_penalty_value,

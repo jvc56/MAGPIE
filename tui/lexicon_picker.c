@@ -110,7 +110,7 @@ typedef struct {
 } LexiconEntry;
 
 static int count_lines_in_file(const char *path) {
-  FILE *file = fopen(path, "r");
+  FILE *file = fopen(path, "re");
   if (file == NULL) {
     return -1;
   }
@@ -124,7 +124,7 @@ static int count_lines_in_file(const char *path) {
       }
     }
   }
-  fclose(file);
+  (void)fclose(file);
   return count;
 }
 
@@ -224,16 +224,16 @@ static bool scan_lexica_dir(const char *dir_path, LexiconList *list) {
     // cost is negligible and lexica/ is small anyway.
     char side_path[512];
     snprintf(side_path, sizeof(side_path), "%s/%s.wmp", dir_path, out->name);
-    FILE *f = fopen(side_path, "rb");
+    FILE *f = fopen(side_path, "rbe");
     out->has_wmp = (f != NULL);
     if (f != NULL) {
-      fclose(f);
+      (void)fclose(f);
     }
     snprintf(side_path, sizeof(side_path), "%s/%s.rit", dir_path, out->name);
-    f = fopen(side_path, "rb");
+    f = fopen(side_path, "rbe");
     out->has_rit = (f != NULL);
     if (f != NULL) {
-      fclose(f);
+      (void)fclose(f);
     }
     list->count++;
   }

@@ -38,12 +38,10 @@ bool tui_input_quit_confirm(TuiGameState *state, TuiUiState *ui,
         return true;
       }
     }
-    if (key == NCKEY_ESC) {
+    if (key == NCKEY_ESC || key == 'n' || key == 'N') {
       ui->modal = ui->quit_confirm_return;
     } else if (key == 'y' || key == 'Y') {
       ui->running = false;
-    } else if (key == 'n' || key == 'N') {
-      ui->modal = ui->quit_confirm_return;
     } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
       if (ui->quit_confirm_focus > 0) {
         ui->quit_confirm_focus--;

@@ -399,7 +399,7 @@ void populate_frame_analysis_rows(TuiGameState *state) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     const long since_ms = (long)(now.tv_sec - last_build.tv_sec) * 1000L +
-                          (long)(now.tv_nsec - last_build.tv_nsec) / 1000000L;
+                          (now.tv_nsec - last_build.tv_nsec) / 1000000L;
     if (last_build_count > 0 && since_ms >= 0 && since_ms < 100) {
       state->last_rendered_analysis_row_count = last_build_count;
       return;

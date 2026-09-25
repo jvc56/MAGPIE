@@ -1027,12 +1027,15 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   // rack yet) just leave the cell empty — once a block cursor
   // lives in this cell during editing, the cursor itself will
   // be the only visible mark.
-  const char *rack_disp = conceal_tiles ? "\xe2\x80\xa2\xe2\x80\xa2\xe2\x80"
-                                          "\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2"
-                                          "\x80\xa2\xe2\x80\xa2"
-                          : sorted_rack[0] != '\0' ? sorted_rack
-                          : e->pending             ? ""
-                                                   : "\xe2\x80\x94";
+  const char *rack_disp = "\xe2\x80\x94"; // em dash
+  if (conceal_tiles) {
+    rack_disp = "\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80"
+                "\xa2\xe2\x80\xa2\xe2\x80\xa2"; // seven bullets
+  } else if (sorted_rack[0] != '\0') {
+    rack_disp = sorted_rack;
+  } else if (e->pending) {
+    rack_disp = "";
+  }
   // Row 2 indent matches the prefix length so the secondary
   // info (clock + rack, or just rack in CGP mode) aligns with
   // where the move started on row 1 ("4. 14F XU" → "   2:45 EGIPS").

@@ -236,11 +236,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       // an early-return drop). That's the whole point of this
       // refactor — uniform per-cell pixel planes so the grid
       // borders are consistent across cell types.
-      const MachineLetter ml = is_preview
-                                   ? preview_ml
-                                   : (board_ml == ALPHABET_EMPTY_SQUARE_MARKER
-                                          ? ALPHABET_EMPTY_SQUARE_MARKER
-                                          : board_ml);
+      const MachineLetter ml = is_preview ? preview_ml : board_ml;
       const bool is_tile = (ml != ALPHABET_EMPTY_SQUARE_MARKER);
       TileCache *tc = &board_tile_cache[row][col];
       int owner = 0;
@@ -310,7 +306,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       struct timespec blit_end;
       clock_gettime(CLOCK_MONOTONIC, &blit_end);
       total_blit_us += (long)(blit_end.tv_sec - blit_start.tv_sec) * 1000000L +
-                       (long)(blit_end.tv_nsec - blit_start.tv_nsec) / 1000L;
+                       (blit_end.tv_nsec - blit_start.tv_nsec) / 1000L;
       free(buf);
       any_blit = true;
       tile_blits++;
@@ -339,7 +335,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       clock_gettime(CLOCK_MONOTONIC, &now);
       const long us =
           (long)(now.tv_sec - g_cursor_pending_since.tv_sec) * 1000000L +
-          (long)(now.tv_nsec - g_cursor_pending_since.tv_nsec) / 1000L;
+          (now.tv_nsec - g_cursor_pending_since.tv_nsec) / 1000L;
       atomic_store(&g_board_blit_latency_us, us);
       g_cursor_pending = false;
     }

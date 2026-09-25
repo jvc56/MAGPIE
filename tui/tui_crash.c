@@ -41,7 +41,8 @@ static void crash_handler(int signo) {
     notcurses_stop(nc);
   }
 
-  int fd = open(MAGPIE_CRASH_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  int fd =
+      open(MAGPIE_CRASH_LOG, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
   if (fd < 0) {
     fd = STDERR_FILENO;
   }
@@ -78,6 +79,8 @@ static void crash_handler(int signo) {
   case SIGFPE:
     name = "SIGFPE";
     break;
+  default:
+    break;
   case SIGILL:
     name = "SIGILL";
     break;
@@ -100,8 +103,8 @@ static void crash_handler(int signo) {
 
   // Re-raise with the default handler so the process exits with the
   // right status (and gets dumped to a corefile when configured).
-  signal(signo, SIG_DFL);
-  raise(signo);
+  (void)signal(signo, SIG_DFL);
+  (void)raise(signo);
 }
 // SIGUSR1 arms a one-shot off-terminal PNG screenshot. The main loop
 // services the request just after notcurses_render(). The handler only
@@ -135,7 +138,8 @@ void install_crash_handlers(void) {
   // Touch the log file so we can verify the handler at least got
   // installed — if /tmp/magpie_crash.log doesn't exist post-crash,
   // we know the install never ran or got clobbered.
-  int fd = open(MAGPIE_CRASH_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  int fd =
+      open(MAGPIE_CRASH_LOG, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
   if (fd >= 0) {
     crash_write(fd, "magpie_tui started, crash handlers installed\n");
     close(fd);

@@ -81,7 +81,7 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
       state->analysis_scrollbar_dragging = true;
       const int track_h = sb_bot - sb_top + 1;
       const int max_scroll = sb_total - sb_view;
-      int y_rel = (int)input.y - sb_top;
+      int y_rel = input.y - sb_top;
       if (y_rel < 0) {
         y_rel = 0;
       }

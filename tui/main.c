@@ -287,11 +287,11 @@ static void emit_frame_and_record_stats(struct notcurses *nc,
   // Full render time (compose + blit + emit) drives the fps readout.
   const long frame_us =
       (long)(frame_end.tv_sec - render_begin.tv_sec) * 1000000L +
-      (long)(frame_end.tv_nsec - render_begin.tv_nsec) / 1000L;
+      (frame_end.tv_nsec - render_begin.tv_nsec) / 1000L;
   // notcurses_render (graphics emit) time, for the perf trace only.
   const long emit_us =
       (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000L +
-      (long)(frame_end.tv_nsec - frame_start.tv_nsec) / 1000L;
+      (frame_end.tv_nsec - frame_start.tv_nsec) / 1000L;
   tui_debug_record_frame_us(frame_us);
   // Keypress-to-pixels latency: from when input first dirtied this
   // frame to when its render finished. -1 when this render wasn't
@@ -299,7 +299,7 @@ static void emit_frame_and_record_stats(struct notcurses *nc,
   long input_lag_us = -1;
   if (*input_dirty_pending) {
     input_lag_us = (long)(frame_end.tv_sec - input_dirty_ts.tv_sec) * 1000000L +
-                   (long)(frame_end.tv_nsec - input_dirty_ts.tv_nsec) / 1000L;
+                   (frame_end.tv_nsec - input_dirty_ts.tv_nsec) / 1000L;
     *input_dirty_pending = false;
   }
   // Publish the latest measured keypress latency to the status bar.
@@ -326,16 +326,16 @@ static void emit_frame_and_record_stats(struct notcurses *nc,
         static unsigned long dbg_rasters;
         const unsigned long cur_rack = tui_debug_rack_blits();
         const unsigned long cur_rasters = tui_debug_glyph_rasters();
-        fprintf(stderr,
-                "[fps] full_us=%ld lock_us=%ld emit_us=%ld emit+=%llu "
-                "elide+=%llu blits=%d rack+=%lu rast+=%lu inv=%lu "
-                "input_lag_us=%ld\n",
-                frame_us, lock_us, emit_us,
-                (unsigned long long)(st->sprixelemissions - dbg_emit),
-                (unsigned long long)(st->sprixelelisions - dbg_elide),
-                tui_debug_last_tile_blits(), cur_rack - dbg_rack,
-                cur_rasters - dbg_rasters, tui_debug_tile_invalidations(),
-                input_lag_us);
+        (void)fprintf(stderr,
+                      "[fps] full_us=%ld lock_us=%ld emit_us=%ld emit+=%llu "
+                      "elide+=%llu blits=%d rack+=%lu rast+=%lu inv=%lu "
+                      "input_lag_us=%ld\n",
+                      frame_us, lock_us, emit_us,
+                      (unsigned long long)(st->sprixelemissions - dbg_emit),
+                      (unsigned long long)(st->sprixelelisions - dbg_elide),
+                      tui_debug_last_tile_blits(), cur_rack - dbg_rack,
+                      cur_rasters - dbg_rasters, tui_debug_tile_invalidations(),
+                      input_lag_us);
         dbg_rack = cur_rack;
         dbg_rasters = cur_rasters;
         dbg_emit = st->sprixelemissions;
@@ -353,7 +353,7 @@ static void wait_for_frame_deadline(struct timespec *next_frame_deadline) {
   clock_gettime(CLOCK_MONOTONIC, &now);
   const long remaining_ns =
       (long)(next_frame_deadline->tv_sec - now.tv_sec) * 1000000000L +
-      (long)(next_frame_deadline->tv_nsec - now.tv_nsec);
+      (next_frame_deadline->tv_nsec - now.tv_nsec);
   if (remaining_ns > 0) {
     // On schedule — sleep the rest of the budget and advance the
     // deadline from where it was, so we hit a consistent 60fps.
@@ -559,7 +559,7 @@ int main(int argc, char *argv[]) {
   // config access below. No-op when NULL.
   tui_config_set_path_override(session.args.config_path);
 
-  setlocale(LC_ALL, "");
+  (void)setlocale(LC_ALL, "");
 
   // Redirect stderr to a known file BEFORE notcurses takes over the
   // TTY. notcurses puts the terminal in alt-screen mode, so any
@@ -571,7 +571,7 @@ int main(int argc, char *argv[]) {
   if (freopen("/tmp/magpie_stderr.log", "w", stderr) != NULL) {
     // Unbuffer stderr so engine log_fatal output reaches disk before
     // abort().
-    setvbuf(stderr, NULL, _IONBF, 0);
+    (void)setvbuf(stderr, NULL, _IONBF, 0);
   }
 
   notcurses_options opts = {
@@ -827,7 +827,7 @@ int main(int argc, char *argv[]) {
       clock_gettime(CLOCK_MONOTONIC, &lock_acquired);
       const long lock_us =
           (long)(lock_acquired.tv_sec - render_begin.tv_sec) * 1000000L +
-          (long)(lock_acquired.tv_nsec - render_begin.tv_nsec) / 1000L;
+          (lock_acquired.tv_nsec - render_begin.tv_nsec) / 1000L;
       tui_game_render(std_plane, theme, &game_state, session.chosen_time,
                       ui.modal);
       pthread_mutex_unlock(&game_state.mutex);

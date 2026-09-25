@@ -34,10 +34,10 @@ static MachineLetter tui_ml_for_upper(const TuiGameState *gs, char up) {
   if (gs->ld == NULL) {
     return 0;
   }
-  for (MachineLetter ml = 1; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
+  for (int ml = 1; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
     const char *hl = gs->ld->ld_ml_to_hl[ml];
     if (hl != NULL && hl[0] == up && hl[1] == '\0') {
-      return ml;
+      return (MachineLetter)ml;
     }
   }
   return 0;
@@ -97,7 +97,7 @@ TuiTypedLetterAction tui_move_entry_resolve_letter(const TuiGameState *gs,
     return TUI_TYPED_LETTER_REJECT;
   }
   const char up =
-      (typed >= 'a' && typed <= 'z') ? (char)(typed - 'a' + 'A') : typed;
+      (char)((typed >= 'a' && typed <= 'z') ? typed - 'a' + 'A' : typed);
   const bool pvc = gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER;
   // Occupied landing square: a matching letter is playthrough spelling
   // (take the BOARD tile's notation case — lowercase when it's a
@@ -114,7 +114,7 @@ TuiTypedLetterAction tui_move_entry_resolve_letter(const TuiGameState *gs,
     if (board_ml != ALPHABET_EMPTY_SQUARE_MARKER) {
       if (get_unblanked_machine_letter(board_ml) == tui_ml_for_upper(gs, up)) {
         const char *hl = gs->ld != NULL ? gs->ld->ld_ml_to_hl[board_ml] : NULL;
-        *out_glyph = (hl != NULL && hl[0] != '\0') ? hl[0] : up;
+        *out_glyph = (char)((hl != NULL && hl[0] != '\0') ? hl[0] : up);
         return TUI_TYPED_LETTER_PLAYTHROUGH;
       }
       if (pvc) {
@@ -127,10 +127,10 @@ TuiTypedLetterAction tui_move_entry_resolve_letter(const TuiGameState *gs,
     if (!tui_pvc_resolve_typed_letter(gs, up, shift, &blank)) {
       return TUI_TYPED_LETTER_REJECT;
     }
-    *out_glyph = blank ? (char)(up - 'A' + 'a') : up;
+    *out_glyph = (char)(blank ? up - 'A' + 'a' : up);
     return TUI_TYPED_LETTER_PLACE;
   }
-  *out_glyph = shift ? (char)(up - 'A' + 'a') : up;
+  *out_glyph = (char)(shift ? up - 'A' + 'a' : up);
   return TUI_TYPED_LETTER_PLACE;
 }
 
@@ -450,7 +450,7 @@ void tui_board_builder_toggle_dir(TuiGameState *gs) {
   for (int i = 0; i < n_user; i++) {
     const char ch = user_tiles[i];
     const bool was_blank = ch >= 'a' && ch <= 'z';
-    const char up = was_blank ? (char)(ch - 'a' + 'A') : ch;
+    const char up = (char)(was_blank ? ch - 'a' + 'A' : ch);
     tui_move_entry_append_letter(gs, up, was_blank);
   }
 }

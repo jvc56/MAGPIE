@@ -184,7 +184,12 @@ Layout compute_layout(struct ncplane *plane, int user_scale,
     // the rest of the fields stay zeroed and unused.
     return L;
   }
-  L.board_cell_w = (L.scale == 2) ? 4 : (L.scale == 1) ? 2 : 1;
+  L.board_cell_w = 1;
+  if (L.scale == 2) {
+    L.board_cell_w = 4;
+  } else if (L.scale == 1) {
+    L.board_cell_w = 2;
+  }
   L.board_cell_h = (L.scale == 2) ? 2 : 1;
   // board_width spans cols [0, board_width-1], with col 0 the left
   // border and col board_width-1 the right border.
@@ -271,10 +276,12 @@ Layout compute_layout(struct ncplane *plane, int user_scale,
     // Cap so analysis still gets at least ANALYSIS_MIN_WIDTH.
     const int max_hist =
         L.right_col_width - ANALYSIS_GUTTER - ANALYSIS_MIN_WIDTH;
-    const int actual_hist = hist_w > max_hist ? max_hist
-                            : hist_w < HISTORY_TWO_COL_HALFWIDTH_THRESHOLD
-                                ? HISTORY_TWO_COL_HALFWIDTH_THRESHOLD
-                                : hist_w;
+    int actual_hist = hist_w;
+    if (hist_w > max_hist) {
+      actual_hist = max_hist;
+    } else if (hist_w < HISTORY_TWO_COL_HALFWIDTH_THRESHOLD) {
+      actual_hist = HISTORY_TWO_COL_HALFWIDTH_THRESHOLD;
+    }
     const int analysis_width =
         L.right_col_width - actual_hist - ANALYSIS_GUTTER;
     L.analysis_right = L.right_col_right;
