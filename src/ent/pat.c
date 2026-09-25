@@ -1055,9 +1055,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SHRINK_ROW_PREFIX,
                                       pat->fit_shrink ? 1 : 0);
   if (pat->fit_fixed_zero) {
-    string_builder_add_formatted_string(sb, "%s%s\n",
-                                        PAT_FIT_FIXED_ZERO_ROW_PREFIX,
-                                        pat->fit_fixed_zero);
+    string_builder_add_formatted_string(
+        sb, "%s%s\n", PAT_FIT_FIXED_ZERO_ROW_PREFIX, pat->fit_fixed_zero);
   }
   if (pat->utility_adjust > 0.0) {
     string_builder_add_formatted_string(
@@ -1328,16 +1327,35 @@ static inline int pat_ctz(uint64_t bits) {
 // letters the set admits makes a hook needing a J the near-nothing it
 // usually is, and makes a hook only the evaluating player can fill (its
 // letters all sitting on their own rack) score as no threat at all.
+// A dense masked sum over every letter slot (the blank's bit 0 excluded)
+// rather than a walk over the set bits, so the compiler vectorizes it.
 static inline int pat_set_flex(const uint8_t *unseen_counts,
                                uint64_t letter_set) {
   int flex = 0;
-  uint64_t remaining = letter_set & ~(uint64_t)1;
-  while (remaining) {
-    const int machine_letter = pat_ctz(remaining);
-    remaining &= remaining - 1;
-    flex += unseen_counts[machine_letter];
+  for (int machine_letter = 1; machine_letter < MAX_ALPHABET_SIZE;
+       machine_letter++) {
+    flex += (int)((letter_set >> machine_letter) & 1) *
+            (int)unseen_counts[machine_letter];
   }
   return flex;
+}
+
+// The sum of unseen_score (see PATCrossCache) over the set's letters, the
+// blank's bit 0 excluded; dense like pat_set_flex.
+static inline int32_t pat_set_score_sum(const int32_t *unseen_score,
+                                        uint64_t letter_set) {
+  int32_t score_sum = 0;
+  for (int machine_letter = 1; machine_letter < MAX_ALPHABET_SIZE;
+       machine_letter++) {
+    score_sum += (int32_t)((letter_set >> machine_letter) & 1) *
+                 unseen_score[machine_letter];
+  }
+  return score_sum;
+}
+
+static inline bool pat_cross_cache_is_valid(const PATCrossCache *cache, int dir,
+                                            int square_index) {
+  return (cache->valid[dir][square_index / 64] >> (square_index % 64)) & 1;
 }
 
 // The hypergeometric expectation of how many of the unseen pool's copies
@@ -1616,10 +1634,15 @@ static inline int pat_letter_score_exposure(int cross_score, int tile_score,
 // use for that channel. ld and premium_word_multiplier feed
 // score_exposure only; a caller that never reads it may pass NULL and any
 // multiplier.
+// cache (NULL for none) supplies the pre-move letter sums of squares
+// without a fresh perpendicular neighbour; cache_fill (NULL for none)
+// receives the sums this call computes. Both give exactly the sums the
+// cross set would.
 static PATCrossInfo pat_effective_cross_info(
     const Square *lane, int idx, int dir, const PATMoveOverlay *overlay,
     int row, int col, const uint8_t *unseen_counts, double hyper_scale,
-    const LetterDistribution *ld, int premium_word_multiplier) {
+    const LetterDistribution *ld, int premium_word_multiplier,
+    const PATCrossCache *cache, PATCrossCache *cache_fill) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   PATCrossInfo info;
   // Exact created hooks: if a fresh tile sits perpendicular-adjacent,
@@ -1679,31 +1702,60 @@ static PATCrossInfo pat_effective_cross_info(
   info.dead = (base_cross_set == 0);
 
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
-  info.flex = info.hooky ? pat_set_flex(unseen_counts, base_cross_set) : 0;
-  info.scaled_flex =
-      info.hooky
-          ? pat_set_flex_scaled(unseen_counts, base_cross_set, hyper_scale)
-          : 0;
+  info.flex = 0;
+  info.scaled_flex = 0;
   info.letter_set = info.hooky ? base_cross_set : 0;
   info.score_exposure = 0;
+  // The pre-move cross set's letter sums: from the cache when the baseline
+  // scan already summed them, and into it when this is that scan.
+  bool have_score_sum = false;
+  int32_t score_sum = 0;
+  if (info.hooky) {
+    const int square_index = row * BOARD_DIM + col;
+    if (cache != NULL && pat_cross_cache_is_valid(cache, dir, square_index)) {
+      info.flex = cache->flex[dir][square_index];
+      score_sum = cache->score_sum[dir][square_index];
+      have_score_sum = true;
+    } else {
+      info.flex = pat_set_flex(unseen_counts, base_cross_set);
+      if (cache_fill != NULL) {
+        score_sum = pat_set_score_sum(cache_fill->unseen_score, base_cross_set);
+        have_score_sum = true;
+        cache_fill->flex[dir][square_index] = info.flex;
+        cache_fill->score_sum[dir][square_index] = score_sum;
+        cache_fill->valid[dir][square_index / 64] |= (uint64_t)1
+                                                     << (square_index % 64);
+      }
+    }
+    // Exactly pat_set_flex_scaled of the same set.
+    info.scaled_flex = (int)lround(info.flex * hyper_scale);
+  }
   const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
   const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
   const int word_multiplier = bonus_square_get_word_multiplier(bonus);
   if (info.hooky && ld != NULL) {
     const int cross_score = equity_to_int(square_get_cross_score(&lane[idx]));
     int64_t exposure = 0;
-    uint64_t remaining = base_cross_set & ~(uint64_t)1;
-    while (remaining) {
-      const int machine_letter = pat_ctz(remaining);
-      remaining &= remaining - 1;
-      if (unseen_counts[machine_letter] == 0) {
-        continue;
+    if (have_score_sum) {
+      // The per-letter sum below, regrouped: each letter's term is linear
+      // in its tile score, so it splits into a flex term and a score term.
+      exposure = (int64_t)word_multiplier * cross_score * info.flex +
+                 (int64_t)letter_multiplier *
+                     (word_multiplier + premium_word_multiplier) * score_sum;
+    } else {
+      uint64_t remaining = base_cross_set & ~(uint64_t)1;
+      while (remaining) {
+        const int machine_letter = pat_ctz(remaining);
+        remaining &= remaining - 1;
+        if (unseen_counts[machine_letter] == 0) {
+          continue;
+        }
+        exposure +=
+            (int64_t)unseen_counts[machine_letter] *
+            pat_letter_score_exposure(
+                cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
+                letter_multiplier, word_multiplier, premium_word_multiplier);
       }
-      exposure +=
-          (int64_t)unseen_counts[machine_letter] *
-          pat_letter_score_exposure(
-              cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
-              letter_multiplier, word_multiplier, premium_word_multiplier);
     }
     info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
   }
@@ -1781,7 +1833,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           const PATMoveOverlay *overlay, int32_t *features,
                           int *extent_lo, int *extent_hi,
                           int opponent_rack_size, uint64_t *hook_letters_out,
-                          bool lm_channels, bool score_channels) {
+                          bool lm_channels, bool score_channels,
+                          const PATCrossCache *cache,
+                          PATCrossCache *cache_fill) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const double hyper_scale = pat_hyper_scale(unseen_counts, opponent_rack_size);
@@ -1858,7 +1912,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   const PATCrossInfo tws_info = pat_effective_cross_info(
       lane, tws_idx, dir, overlay, pat_unit_row(dir, lane_index, tws_idx),
       pat_unit_col(dir, lane_index, tws_idx), unseen_counts, hyper_scale,
-      hook_score_ld, premium_word_multiplier);
+      hook_score_ld, premium_word_multiplier, cache, cache_fill);
   if (tws_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -2057,7 +2111,8 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       const PATCrossInfo info = pat_effective_cross_info(
           lane, idx, dir, overlay, square_row, square_col, unseen_counts,
-          hyper_scale, hook_score_ld, premium_word_multiplier);
+          hyper_scale, hook_score_ld, premium_word_multiplier, cache,
+          cache_fill);
       if (info.dead) {
         break;
       }
@@ -2168,8 +2223,9 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
                              int dir, int lane_index, int lo, int hi, int tier,
                              const PATMoveOverlay *overlay, int32_t *features,
                              int *extent_lo, int *extent_hi,
-                             int opponent_rack_size,
-                             uint64_t *hook_letters_out) {
+                             int opponent_rack_size, uint64_t *hook_letters_out,
+                             const PATCrossCache *cache,
+                             PATCrossCache *cache_fill) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
   const int tier_base =
@@ -2201,9 +2257,9 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     }
     // Never reads scaled_flex or score_exposure, so hyper_scale, ld and
     // the premium multiplier are don't-cares here.
-    const PATCrossInfo info =
-        pat_effective_cross_info(lane, idx, dir, overlay, square_row,
-                                 square_col, unseen_counts, 1.0, NULL, 2);
+    const PATCrossInfo info = pat_effective_cross_info(
+        lane, idx, dir, overlay, square_row, square_col, unseen_counts, 1.0,
+        NULL, 2, cache, cache_fill);
     if (info.dead) {
       return;
     }
@@ -2359,11 +2415,11 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true, true);
+                  opponent_rack_size, NULL, true, true, NULL, NULL);
     pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                   tws_cols[tws_idx], tws_classes[tws_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true, true);
+                  opponent_rack_size, NULL, true, true, NULL, NULL);
   }
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
@@ -2375,7 +2431,8 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
   for (int dd_idx = 0; dd_idx < num_dd; dd_idx++) {
     pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                      dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                     features, NULL, NULL, opponent_rack_size, NULL);
+                     features, NULL, NULL, opponent_rack_size, NULL, NULL,
+                     NULL);
   }
 }
 
@@ -2576,11 +2633,14 @@ pat_eval_utility_adjustment(const PATEvalContext *pat_eval_ctx,
 // walks and the span of lane squares that walk could read. Units 2*i and
 // 2*i+1 are TWS i's horizontal and vertical walks; the units after those are
 // the double-double windows.
+// cache_fill is the context's own cross cache for the baseline scans at
+// load, which fill it, and NULL for the per-move rescans, which read it.
 static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                                   int unit_index, const PATMoveOverlay *overlay,
                                   int32_t *features, int *dir_out,
                                   int *lane_out, int *extent_lo, int *extent_hi,
-                                  uint64_t *hook_letters_out) {
+                                  uint64_t *hook_letters_out,
+                                  PATCrossCache *cache_fill) {
   const int num_tws_units = pat_eval_ctx->num_tws * 2;
   if (unit_index < num_tws_units) {
     const int tws_idx = unit_index / 2;
@@ -2595,7 +2655,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
         pat_eval_ctx->tws_classes[tws_idx], dir, overlay, features, extent_lo,
         extent_hi, pat_eval_ctx->opponent_rack_size, hook_letters_out,
         (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_LM) != 0,
-        (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_HOOK_SCORE) != 0);
+        (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_HOOK_SCORE) != 0,
+        &pat_eval_ctx->cross_cache, cache_fill);
     return;
   }
   const int dd_idx = unit_index - num_tws_units;
@@ -2606,7 +2667,8 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                    pat_eval_ctx->dd_lanes[dd_idx], pat_eval_ctx->dd_los[dd_idx],
                    pat_eval_ctx->dd_his[dd_idx], pat_eval_ctx->dd_tiers[dd_idx],
                    overlay, features, extent_lo, extent_hi,
-                   pat_eval_ctx->opponent_rack_size, hook_letters_out);
+                   pat_eval_ctx->opponent_rack_size, hook_letters_out,
+                   &pat_eval_ctx->cross_cache, cache_fill);
 }
 
 // Whether any channel a walk from this premium class can write carries a
@@ -2810,6 +2872,14 @@ static void pat_eval_context_load_units(
       }
     }
   }
+  PATCrossCache *cross_cache = &pat_eval_ctx->cross_cache;
+  memset(cross_cache->valid, 0, sizeof(cross_cache->valid));
+  memset(cross_cache->unseen_score, 0, sizeof(cross_cache->unseen_score));
+  const int ld_size = ld_get_size(ld);
+  for (int ml = 1; ml < ld_size && ml < MAX_ALPHABET_SIZE; ml++) {
+    cross_cache->unseen_score[ml] = (int32_t)pat_eval_ctx->unseen_counts[ml] *
+                                    equity_to_int(ld_get_score(ld, ml));
+  }
   for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
     int32_t *unit_features = pat_eval_ctx->unit_features[unit_index];
     memset(unit_features, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
@@ -2820,7 +2890,8 @@ static void pat_eval_context_load_units(
     pat_eval_ctx->unit_hook_letters[unit_index] = 0;
     pat_scan_context_unit(pat_eval_ctx, unit_index, NULL, unit_features, &dir,
                           &lane, &extent_lo, &extent_hi,
-                          &pat_eval_ctx->unit_hook_letters[unit_index]);
+                          &pat_eval_ctx->unit_hook_letters[unit_index],
+                          &pat_eval_ctx->cross_cache);
     pat_eval_ctx->unit_penalty[unit_index] =
         pat_dot_ctx(pat_eval_ctx, unit_features);
     // A move affects this unit only when it has a tile on or directly
@@ -3211,8 +3282,8 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
         // which is a penalty on bingos and nothing to do with hooks.
         pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
                               overlay_features, &scan_dir, &scan_lane, NULL,
-                              NULL,
-                              discount > 0.0 ? &fresh_hook_letters : NULL);
+                              NULL, discount > 0.0 ? &fresh_hook_letters : NULL,
+                              NULL);
         penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
         // The move's own placement can create or destroy this unit's hook
         // letters (a newly hooked square, or covering one that existed at
@@ -3315,7 +3386,7 @@ void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
       int scan_dir = 0;
       int scan_lane = 0;
       pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay, row, &scan_dir,
-                            &scan_lane, NULL, NULL, NULL);
+                            &scan_lane, NULL, NULL, NULL, NULL);
       penalty = pat_dot_ctx(pat_eval_ctx, row);
     } else {
       memcpy(row, pat_eval_ctx->unit_features[unit_index],
@@ -3380,13 +3451,13 @@ void pat_extract_features_combined(const Square *lanes,
       const int tws_idx = unit_index / 2;
       pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
                     tws_cols[tws_idx], tws_classes[tws_idx], unit_index % 2,
-                    NULL, row, NULL, NULL, opponent_rack_size, NULL, true,
-                    true);
+                    NULL, row, NULL, NULL, opponent_rack_size, NULL, true, true,
+                    NULL, NULL);
     } else {
       const int dd_idx = unit_index - num_tws * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                        dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
-                       row, NULL, NULL, opponent_rack_size, NULL);
+                       row, NULL, NULL, opponent_rack_size, NULL, NULL, NULL);
     }
     const Equity penalty = pat_dot(pat, row);
     if (penalty < worst_penalty) {

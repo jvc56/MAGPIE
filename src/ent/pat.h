@@ -198,6 +198,25 @@ enum {
 // The lanes pointer is only valid while the board is alive, untransposed,
 // and unmutated, which holds for the duration of a move generation call and
 // for a stack-scoped validated-move evaluation.
+enum {
+  PAT_CROSS_CACHE_SQUARES = BOARD_DIM * BOARD_DIM,
+  PAT_CROSS_CACHE_WORDS = (PAT_CROSS_CACHE_SQUARES + 63) / 64,
+};
+
+// The pre-move letter sums of the hooky squares the context's baseline
+// scans visited, per (direction, square): how many unseen tiles fit the
+// square's cross set, and the same count weighted by each tile's score. A
+// square keeps its pre-move cross set in every rescan where no fresh tile
+// sits perpendicular-adjacent to it, so the per-move rescans read these
+// instead of summing the cross set again (see pat_effective_cross_info).
+typedef struct PATCrossCache {
+  uint64_t valid[2][PAT_CROSS_CACHE_WORDS];
+  int32_t flex[2][PAT_CROSS_CACHE_SQUARES];
+  int32_t score_sum[2][PAT_CROSS_CACHE_SQUARES];
+  // Unseen count times tile score, per machine letter.
+  int32_t unseen_score[MAX_ALPHABET_SIZE];
+} PATCrossCache;
+
 typedef struct PATEvalContext {
   // NULL means the context is disabled and the defense term is zero.
   const PATWeights *weights;
@@ -235,6 +254,8 @@ typedef struct PATEvalContext {
   // either. The player's whole rack is excluded, not the leave the move
   // would keep, since the context is built once for the position.
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
+  // Filled by the baseline scans at load, read by the per-move rescans.
+  PATCrossCache cross_cache;
   int32_t unit_features[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
