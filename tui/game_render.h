@@ -209,16 +209,6 @@ void tui_render_board_at(struct ncplane *plane, int top, int left,
 // change rebuilds them at the new cell-to-pixel ratio.
 void tui_game_render_reset_grids(void);
 
-// Alphagram-sort a rack-like input string according to the user's
-// rack_sort preference (vowels-first, blanks-first, etc.). Output is
-// the sorted form in a caller-owned buffer with a NUL terminator.
-// Public form of the in-renderer helper so the annotation editor can
-// canonicalize the rack buffer on focus-leave.
-void tui_format_alphagram_for_sort(const char *in,
-                                   const struct LetterDistribution *ld,
-                                   TuiRackSort sort, char *out,
-                                   size_t out_size);
-
 // Debug / perf instrumentation (see MAGPIE_FPS_DEBUG in main.c). The
 // UI thread records per-frame measurements; the status bar and perf
 // trace read them back.
