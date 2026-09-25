@@ -160,6 +160,8 @@ typedef enum {
   ARG_TOKEN_PEG_MAX_BAG,
   ARG_TOKEN_P1_PEG_DISABLE_PAT,
   ARG_TOKEN_P2_PEG_DISABLE_PAT,
+  ARG_TOKEN_P1_PEG_PAT,
+  ARG_TOKEN_P2_PEG_PAT,
   ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME,
   ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE,
   ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES,
@@ -380,6 +382,9 @@ struct Config {
   int peg_max_bag;
   bool p1_peg_disable_pat;
   bool p2_peg_disable_pat;
+  // Owned PAT weights for a player's PEG (see -pegpat1/-pegpat2); NULL
+  // means PEG uses the player's own weights.
+  PATWeights *peg_pats[2];
   bool play_chooser_static_midgame;
   double play_chooser_seconds_per_move;
   int play_chooser_endgame_plies;
@@ -1824,6 +1829,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "pre-endgame solver without PAT, for both sides' moves, even "
              "when the players load PAT weights.";
       break;
+    case ARG_TOKEN_P1_PEG_PAT:
+    case ARG_TOKEN_P2_PEG_PAT:
+      usages[0] = "<pat_name_or_none>";
+      examples[0] = "CSW24_hsx_u350_late050";
+      examples[1] = "none";
+      text = "Loads PAT weights that player 1 or 2's PlayChooser gives both "
+             "sides inside the pre-endgame solver, in place of the weights "
+             "the players load for the rest of the game; none reverts to "
+             "those.";
+      break;
     case ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2574,6 +2589,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PEG_MAX_BAG,                   /* pegmaxbag */
         ARG_TOKEN_P1_PEG_DISABLE_PAT,            /* pegnopat1 */
         ARG_TOKEN_P2_PEG_DISABLE_PAT,            /* pegnopat2 */
+        ARG_TOKEN_P1_PEG_PAT,                    /* pegpat1 */
+        ARG_TOKEN_P2_PEG_PAT,                    /* pegpat2 */
         ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES,    /* pceplies */
         ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE, /* pcsecs */
         ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME,   /* pcstatic */
@@ -4002,7 +4019,11 @@ void config_fill_autoplay_args(const Config *config,
             // pre-endgame solver's bag range.
             .win_pcts =
                 config->play_chooser_static_midgame ? NULL : config->win_pcts,
-            .peg_disable_pat = peg_disable_pat[player_index],
+            .peg_pat_override = peg_disable_pat[player_index] ||
+                                config->peg_pats[player_index] != NULL,
+            .peg_pat = peg_disable_pat[player_index]
+                           ? NULL
+                           : config->peg_pats[player_index],
             .num_threads = num_worker_threads_per_sim,
             .peg_scenario_stride = config->peg_scenario_stride,
             .peg_max_bag = config->peg_max_bag,
@@ -7532,6 +7553,24 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  const arg_token_t peg_pat_tokens[2] = {ARG_TOKEN_P1_PEG_PAT,
+                                         ARG_TOKEN_P2_PEG_PAT};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const char *peg_pat_name =
+        config_get_parg_value(config, peg_pat_tokens[player_index], 0);
+    if (peg_pat_name == NULL) {
+      continue;
+    }
+    pat_destroy(config->peg_pats[player_index]);
+    config->peg_pats[player_index] = NULL;
+    if (!strings_equal(peg_pat_name, "none")) {
+      config->peg_pats[player_index] =
+          pat_create(config->data_paths, peg_pat_name, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    }
+  }
   config_load_bool(config, ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME,
                    &config->play_chooser_static_midgame, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8641,6 +8680,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
             players_data_get_kwg(config->players_data, player_index),
             config->ld);
       }
+    }
+  }
+  // PEG weights (-pegpat1/-pegpat2) read the same lexicon tables.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (config->peg_pats[player_index] != NULL) {
+      pat_prepare_hook_flex(
+          config->peg_pats[player_index],
+          players_data_get_kwg(config->players_data, player_index), config->ld);
     }
   }
 }
@@ -9838,6 +9885,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_MAX_BAG, "pegmaxbag", 1, 1);
   arg(ARG_TOKEN_P1_PEG_DISABLE_PAT, "pegnopat1", 1, 1);
   arg(ARG_TOKEN_P2_PEG_DISABLE_PAT, "pegnopat2", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_PAT, "pegpat1", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_PAT, "pegpat2", 1, 1);
   arg(ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME, "pcstatic", 1, 1);
   arg(ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE, "pcsecs", 1, 1);
   arg(ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES, "pceplies", 1, 1);
@@ -9969,6 +10018,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_max_bag = 0;
   config->p1_peg_disable_pat = false;
   config->p2_peg_disable_pat = false;
+  config->peg_pats[0] = NULL;
+  config->peg_pats[1] = NULL;
   config->play_chooser_static_midgame = false;
   config->play_chooser_seconds_per_move = 0.0;
   config->play_chooser_endgame_plies = 0;
@@ -10081,6 +10132,8 @@ void config_destroy(Config *config) {
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
+  pat_destroy(config->peg_pats[0]);
+  pat_destroy(config->peg_pats[1]);
   thread_control_destroy(config->thread_control);
   game_destroy(config->game);
   game_destroy(config->game_backup);
@@ -10443,6 +10496,16 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->p2_peg_disable_pat);
       break;
+    case ARG_TOKEN_P1_PEG_PAT:
+    case ARG_TOKEN_P2_PEG_PAT: {
+      const PATWeights *peg_pat =
+          config->peg_pats[arg_token == ARG_TOKEN_P1_PEG_PAT ? 0 : 1];
+      if (peg_pat != NULL) {
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    pat_get_name(peg_pat));
+      }
+      break;
+    }
     case ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME:
       config_add_bool_setting_to_string_builder(
           config, sb, arg_token, config->play_chooser_static_midgame);

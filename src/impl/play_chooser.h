@@ -4,6 +4,7 @@
 #include "../ent/game.h"
 #include "../ent/game_timer.h"
 #include "../ent/move.h"
+#include "../ent/pat.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
@@ -84,9 +85,10 @@ typedef struct PlayChooserStrategy {
   // Largest bag size PEG handles; above it the pre-endgame falls back to
   // SIM or STATIC as for any bag above PEG_MAX_BAG. 0 = PEG_MAX_BAG.
   int peg_max_bag;
-  // Run PEG without PAT for either player: its candidate generation and
-  // playouts use plain static equity even when the players load PAT weights.
-  bool peg_disable_pat;
+  // Run PEG with peg_pat as both players' PAT weights (NULL for none)
+  // instead of the weights they load for the rest of the game. Not owned.
+  bool peg_pat_override;
+  const PATWeights *peg_pat;
   // Score+win utility for valuing a branch, identical to the simmer's
   // sim_utility_blend (see sim_args.h): the branch value is
   //   (w_winpct * win% + w_spread * sigmoid(spread / spread_scale))

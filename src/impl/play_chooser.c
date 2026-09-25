@@ -715,13 +715,13 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
         &play_chooser_benchmark_stats.peg_calls, 1, memory_order_relaxed);
     benchmark_context.start_ns = ctimer_monotonic_ns();
   }
-  // PEG copies the game it is given for its workers, so a copy without PAT
-  // weights keeps PAT out of every movegen PEG runs.
+  // PEG copies the game it is given for its workers, so a copy with other
+  // PAT weights gives every movegen PEG runs those weights.
   Game *peg_game = NULL;
-  if (strategy->peg_disable_pat) {
+  if (strategy->peg_pat_override) {
     peg_game = game_duplicate(game);
     for (int player_idx = 0; player_idx < 2; player_idx++) {
-      player_set_pat(game_get_player(peg_game, player_idx), NULL);
+      player_set_pat(game_get_player(peg_game, player_idx), strategy->peg_pat);
     }
   }
   ThreadControl *thread_control = thread_control_create();
