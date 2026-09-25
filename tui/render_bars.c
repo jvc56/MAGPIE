@@ -52,6 +52,12 @@ void tui_debug_record_sprixel_stats(uint64_t emits, uint64_t elides) {
   last_elides = elides;
 }
 // Last measured keypress-to-pixels latency (microseconds). -1 = none yet.
+enum {
+  // The status bar shows the last keypress-to-pixels latency only at or
+  // above this many microseconds; below it, input feels instant.
+  STATUS_LAG_SHOW_US = 100000,
+};
+
 static _Atomic long g_input_lag_us = -1;
 void tui_debug_set_input_lag_us(long us) { atomic_store(&g_input_lag_us, us); }
 void tui_debug_record_frame_us(long frame_us) {
@@ -584,9 +590,10 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
     ncplane_putstr(plane, nps_buf);
   }
   // Keypress-to-pixels latency (the time from a keystroke dirtying a
-  // frame to that frame rendering). Shown in ms once we've measured one.
+  // frame to that frame rendering). Like fps, it only appears when it's
+  // worth noticing: at or above STATUS_LAG_SHOW_US.
   const long input_lag_us = atomic_load(&g_input_lag_us);
-  if (input_lag_us >= 0) {
+  if (input_lag_us >= STATUS_LAG_SHOW_US) {
     char lag_buf[32];
     (void)snprintf(lag_buf, sizeof(lag_buf), " \xc2\xb7 %ld ms lag",
                    (input_lag_us + 500) / 1000);
