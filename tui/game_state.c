@@ -3,6 +3,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/peg_defs.h"
 #include "../src/def/players_data_defs.h"
@@ -22,7 +23,9 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/peg.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "glyph_cache.h"
 #include <pthread.h>
 #include <stdatomic.h>
@@ -309,6 +312,31 @@ bool tui_game_state_play_over(const TuiGameState *state) {
     return true;
   }
   return state->game != NULL && game_over(state->game);
+}
+
+// Copies placement notation from `src` into `out`, turning engine
+// display notation's parenthesized playthrough tiles ("IS(O)TOPES")
+// into one ASCII_PLAYED_THROUGH '.' per tile ("IS.TOPES"): the form both
+// the engine's move parser and the history-cell editor accept. Returns
+// the length written.
+static int playthrough_parens_to_dots(const char *src, char *out,
+                                      size_t out_cap) {
+  if (out_cap == 0) {
+    return 0;
+  }
+  int len = 0;
+  bool in_parens = false;
+  for (const char *ch = src; *ch != '\0' && (size_t)len + 1 < out_cap; ch++) {
+    if (*ch == '(') {
+      in_parens = true;
+    } else if (*ch == ')') {
+      in_parens = false;
+    } else {
+      out[len++] = in_parens ? ASCII_PLAYED_THROUGH : *ch;
+    }
+  }
+  out[len] = '\0';
+  return len;
 }
 
 static bool tok_is_rack_char(char c) {
@@ -765,6 +793,32 @@ static int score_canonical_move(TuiGameState *state, const char *canonical,
   return score;
 }
 
+void tui_game_state_seed_edit_move(TuiGameState *state, const char *move_str) {
+  const int len = playthrough_parens_to_dots(move_str, state->edit_move_buf,
+                                             sizeof(state->edit_move_buf));
+  state->edit_move_len = len;
+  state->edit_move_cursor = len;
+}
+
+void tui_game_state_edit_move_display(const TuiGameState *state, char *out,
+                                      size_t out_size) {
+  if (strncmp(state->edit_move_canonical, "ex ", 3) == 0) {
+    snprintf(out, out_size, "-%s", state->edit_move_canonical + 3);
+    return;
+  }
+  if (state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT &&
+      state->edit_preview_move_valid && state->edit_move_score >= 0 &&
+      state->game != NULL) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, game_get_board(state->game),
+                            state->edit_preview_move, state->ld, false);
+    snprintf(out, out_size, "%s", string_builder_peek(sb));
+    string_builder_destroy(sb);
+    return;
+  }
+  snprintf(out, out_size, "%s", state->edit_move_canonical);
+}
+
 void tui_game_state_parse_edit_buf(TuiGameState *state) {
   if (state == NULL) {
     return;
@@ -1183,9 +1237,10 @@ static void canonicalize_history_move(const char *display, char *out,
     }
     return;
   }
-  // Default: treat as a placement notation and hand it to the
-  // engine as-is.
-  snprintf(out, out_cap, "%s", display);
+  // Default: placement notation. Stored moves use the engine's display
+  // form, whose parenthesized playthrough tiles its parser rejects, so
+  // hand it over with '.' per playthrough tile instead.
+  playthrough_parens_to_dots(display, out, out_cap);
 }
 
 // Shared replay core. Resets the engine and applies committed

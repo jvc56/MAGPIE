@@ -858,7 +858,7 @@ void tui_board_entry_submit(TuiGameState *gs) {
   play_move_without_drawing_tiles(gs->edit_preview_move, gs->game);
   tui_tag_move_owners(game_get_board(gs->game), gs->edit_preview_move,
                       player_idx);
-  snprintf(e->move_str, sizeof(e->move_str), "%s", gs->edit_move_canonical);
+  tui_game_state_edit_move_display(gs, e->move_str, sizeof(e->move_str));
   e->score = gs->edit_move_score;
   // Seed the rack from the move's played tiles when the annotator
   // hasn't typed a fuller rack — matches the cell editor's behavior.

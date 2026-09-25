@@ -693,6 +693,21 @@ void tui_game_state_destroy(TuiGameState *state);
 // "<coord> <word>"; rack parses as 1-7 chars of A-Z/?.
 void tui_game_state_parse_edit_buf(TuiGameState *state);
 
+// Loads a stored move string into the MOVE edit buffer, cursor at the
+// end. Engine notation marks playthrough tiles with parentheses
+// ("M2 pANIN(I)"), which the editor's parser rejects; the editor types
+// them as '.' per tile, so each parenthesized tile becomes a '.'
+// ("M2 pANIN.").
+void tui_game_state_seed_edit_move(TuiGameState *state, const char *move_str);
+
+// Writes the parsed MOVE buffer in the history's stored notation: an
+// engine-accepted placement in the engine's display form, with
+// playthrough tiles parenthesized from the board ("M2 pANIN(I)"), an
+// exchange as "-ABC", and anything else as its canonical text. Call
+// while the engine board is at the edited turn's position.
+void tui_game_state_edit_move_display(const TuiGameState *state, char *out,
+                                      size_t out_size);
+
 // Single source of truth for the editor's effective rack — the letters that
 // should appear in BOTH the player pill (engine rack, set by
 // sync_player_rack_to_editor) and the history cell's rack row (rendered in

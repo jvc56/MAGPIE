@@ -23,12 +23,7 @@ static void tui_commit_edit_to_entry(TuiGameState *gs) {
   case TUI_EDIT_MOVE_KIND_PASS:
     // Engine-recognized move: store the canonical form ("-ABC"
     // display normalization for exchanges) and its score.
-    if (strncmp(gs->edit_move_canonical, "ex ", 3) == 0) {
-      snprintf(e->move_str, sizeof(e->move_str), "-%s",
-               gs->edit_move_canonical + 3);
-    } else {
-      snprintf(e->move_str, sizeof(e->move_str), "%s", gs->edit_move_canonical);
-    }
+    tui_game_state_edit_move_display(gs, e->move_str, sizeof(e->move_str));
     e->score = gs->edit_move_score >= 0 ? gs->edit_move_score : 0;
     e->pending = false;
     break;

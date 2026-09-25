@@ -94,10 +94,7 @@ static bool cell_editor_step_turn(TuiGameState *state, uint32_t key) {
     // target's stored text.
     tui_commit_edit_and_revalidate(state);
     TuiHistoryEntry *e = &state->history[target];
-    snprintf(state->edit_move_buf, sizeof(state->edit_move_buf), "%s",
-             e->move_str);
-    state->edit_move_len = (int)strlen(state->edit_move_buf);
-    state->edit_move_cursor = state->edit_move_len;
+    tui_game_state_seed_edit_move(state, e->move_str);
     snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
              e->rack_str);
     state->edit_rack_len = (int)strlen(state->edit_rack_buf);
@@ -186,13 +183,7 @@ static bool cell_editor_advance_to_rack(TuiGameState *state, int idx) {
       // sees "ex ABC" via edit_move_canonical above; this
       // is purely a display normalization at the commit
       // boundary.
-      if (strncmp(state->edit_move_canonical, "ex ", 3) == 0) {
-        snprintf(e->move_str, sizeof(e->move_str), "-%s",
-                 state->edit_move_canonical + 3);
-      } else {
-        snprintf(e->move_str, sizeof(e->move_str), "%s",
-                 state->edit_move_canonical);
-      }
+      tui_game_state_edit_move_display(state, e->move_str, sizeof(e->move_str));
       // Always re-sync the score on every commit, even
       // when the engine rejected the new move (score < 0).
       // Otherwise editing XIPHOID → XYSTI leaves the old
@@ -297,13 +288,8 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
         // branch should be unreachable since Enter-on-MOVE
         // is caught above, but if anything ever routes here
         // we don't want stale "ex ABC" leaking onto entries.
-        if (strncmp(state->edit_move_canonical, "ex ", 3) == 0) {
-          snprintf(e->move_str, sizeof(e->move_str), "-%s",
-                   state->edit_move_canonical + 3);
-        } else {
-          snprintf(e->move_str, sizeof(e->move_str), "%s",
-                   state->edit_move_canonical);
-        }
+        tui_game_state_edit_move_display(state, e->move_str,
+                                         sizeof(e->move_str));
         if (e->rack_str[0] == '\0' &&
             state->edit_move_inferred_rack[0] != '\0') {
           snprintf(e->rack_str, sizeof(e->rack_str), "%s",
@@ -467,10 +453,7 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
         // Advancing onto an EXISTING (already-edited) next
         // turn: load its stored move / rack so re-committing
         // a middle turn doesn't blank the turn after it.
-        snprintf(state->edit_move_buf, sizeof(state->edit_move_buf), "%s",
-                 dest->move_str);
-        state->edit_move_len = (int)strlen(state->edit_move_buf);
-        state->edit_move_cursor = state->edit_move_len;
+        tui_game_state_seed_edit_move(state, dest->move_str);
         snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
                  dest->rack_str);
         state->edit_rack_len = (int)strlen(state->edit_rack_buf);

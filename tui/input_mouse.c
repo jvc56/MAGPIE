@@ -181,10 +181,7 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
               // re-resolve the pointer to be safe.
               e = &state->history[target];
             }
-            snprintf(state->edit_move_buf, sizeof(state->edit_move_buf), "%s",
-                     e->move_str);
-            state->edit_move_len = (int)strlen(state->edit_move_buf);
-            state->edit_move_cursor = state->edit_move_len;
+            tui_game_state_seed_edit_move(state, e->move_str);
             snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
                      e->rack_str);
             state->edit_rack_len = (int)strlen(state->edit_rack_buf);

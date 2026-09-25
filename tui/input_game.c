@@ -27,10 +27,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
     // been typed yet — preserves any in-flight text the user
     // had left in the buffer.
     if (state->edit_move_len == 0) {
-      snprintf(state->edit_move_buf, sizeof(state->edit_move_buf), "%s",
-               e->move_str);
-      state->edit_move_len = (int)strlen(state->edit_move_buf);
-      state->edit_move_cursor = state->edit_move_len;
+      tui_game_state_seed_edit_move(state, e->move_str);
     }
     if (state->edit_rack_len == 0) {
       snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
@@ -249,10 +246,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
         state->history_cursor <= last) {
       // N> → N.MOVE
       TuiHistoryEntry *e = &state->history[state->history_cursor];
-      snprintf(state->edit_move_buf, sizeof(state->edit_move_buf), "%s",
-               e->move_str);
-      state->edit_move_len = (int)strlen(state->edit_move_buf);
-      state->edit_move_cursor = state->edit_move_len;
+      tui_game_state_seed_edit_move(state, e->move_str);
       snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
                e->rack_str);
       state->edit_rack_len = (int)strlen(state->edit_rack_buf);
@@ -266,10 +260,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
       // N> → (N-1).RACK
       const int target = state->history_cursor - 1;
       TuiHistoryEntry *e = &state->history[target];
-      snprintf(state->edit_move_buf, sizeof(state->edit_move_buf), "%s",
-               e->move_str);
-      state->edit_move_len = (int)strlen(state->edit_move_buf);
-      state->edit_move_cursor = state->edit_move_len;
+      tui_game_state_seed_edit_move(state, e->move_str);
       snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
                e->rack_str);
       state->edit_rack_len = (int)strlen(state->edit_rack_buf);
