@@ -806,6 +806,117 @@ static void render_history_committed_move(
   }
 }
 
+// Draws the rank prefix of a pending turn with its "N." chunk in tile
+// colors, so it reads like a played tile next to the spinner.
+static void render_history_pending_prefix(
+    struct ncplane *plane, const Theme *theme, const TuiHistoryEntry *e,
+    int row, int interior_left, const ThemeRgb player_fg, const char *prefix) {
+  // Pending turn: paint the "N." chunk with tile colors so it reads
+  // like a played tile next to the spinner. Leading space (when N
+  // is a single digit) and the trailing separator stay on the
+  // normal background.
+  int digit_start = 0;
+  while (prefix[digit_start] == ' ') {
+    digit_start++;
+  }
+  int after_period = digit_start;
+  while (prefix[after_period] != '\0' && prefix[after_period] != ' ') {
+    after_period++;
+  }
+  if (digit_start > 0) {
+    char leading[8];
+    memcpy(leading, prefix, (size_t)digit_start);
+    leading[digit_start] = '\0';
+    ncplane_putstr_yx(plane, row, interior_left, leading);
+  }
+  char tile_part[8];
+  const int tile_len = after_period - digit_start;
+  memcpy(tile_part, prefix + digit_start, (size_t)tile_len);
+  tile_part[tile_len] = '\0';
+  theme_apply_fg(plane, e->player_idx == 1 ? theme->tile2_fg : theme->tile1_fg);
+  theme_apply_bg(plane, e->player_idx == 1 ? theme->tile2_bg : theme->tile1_bg);
+  ncplane_set_styles(plane, NCSTYLE_BOLD);
+  ncplane_putstr_yx(plane, row, interior_left + digit_start, tile_part);
+  ncplane_set_styles(plane, 0);
+  theme_apply_fg(plane, player_fg);
+  theme_apply_bg(plane, theme->bg);
+  if (prefix[after_period] != '\0') {
+    ncplane_putstr_yx(plane, row, interior_left + after_period,
+                      prefix + after_period);
+  }
+}
+
+// Draws the rank prefix of the entry under the history cursor as an
+// inverted "N>" chip ("N." when the panel is unfocused, non-inverted while
+// the entry is being edited).
+static void render_history_cursor_prefix(struct ncplane *plane,
+                                         const Theme *theme, int row,
+                                         int interior_left,
+                                         bool history_focused, bool editing,
+                                         const ThemeRgb player_fg,
+                                         const char *prefix) {
+  // History-panel cursor sits on this entry: render the rank
+  // prefix with inverted colors (player hue preserved — bg =
+  // player_fg, fg = theme->bg) and turn the trailing "." into
+  // ">" when the panel is focused so the chip reads as "5>";
+  // when the panel has lost focus, keep the inverted highlight
+  // but restore the "." so it reads as a parked selection
+  // rather than the active cursor. Bold for the same visual
+  // weight a played tile uses. This takes precedence over the
+  // pending tile-style highlight so the user can land the
+  // cursor on the in-flight turn while the spinner is still
+  // running.
+  //
+  // While the editor is active on this entry, focus has moved
+  // INTO the row (a specific cell has the white cursor), so
+  // the entry-level highlight steps down: we still show the
+  // ">" chevron in player_fg + bold, but drop the inverted
+  // background fill. That keeps "this is the active row" cue
+  // without competing visually with the fine-grained cursor.
+  int digit_start = 0;
+  while (prefix[digit_start] == ' ') {
+    digit_start++;
+  }
+  int after_period = digit_start;
+  while (prefix[after_period] != '\0' && prefix[after_period] != ' ') {
+    after_period++;
+  }
+  // Leading spaces stay on theme->bg in the player color.
+  if (digit_start > 0) {
+    char leading[8];
+    memcpy(leading, prefix, (size_t)digit_start);
+    leading[digit_start] = '\0';
+    ncplane_putstr_yx(plane, row, interior_left, leading);
+  }
+  // "5>" / "5." segment: digits as-is, then ">" or "." in the
+  // tail. Both share the inverted-colors chip — except in
+  // editing mode, where the chip downgrades to non-inverted
+  // bold text to defer to the in-cell white cursor.
+  char chip[8];
+  int chip_len = 0;
+  for (int k = digit_start; k < after_period - 1 && chip_len < 6; k++) {
+    chip[chip_len++] = prefix[k];
+  }
+  chip[chip_len++] = history_focused ? '>' : '.';
+  chip[chip_len] = '\0';
+  if (editing) {
+    theme_apply_fg(plane, player_fg);
+    theme_apply_bg(plane, theme->bg);
+  } else {
+    theme_apply_fg(plane, theme->bg);
+    theme_apply_bg(plane, player_fg);
+  }
+  ncplane_set_styles(plane, NCSTYLE_BOLD);
+  ncplane_putstr_yx(plane, row, interior_left + digit_start, chip);
+  ncplane_set_styles(plane, 0);
+  theme_apply_fg(plane, player_fg);
+  theme_apply_bg(plane, theme->bg);
+  if (prefix[after_period] != '\0') {
+    ncplane_putstr_yx(plane, row, interior_left + after_period,
+                      prefix + after_period);
+  }
+}
+
 static void
 render_history_entry(struct ncplane *plane, const Theme *theme,
                      const TuiGameState *state, const TuiHistoryEntry *e,
@@ -843,102 +954,11 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   snprintf(prefix, sizeof(prefix), "%*d. ", rank_digits > 0 ? rank_digits : 1,
            idx + 1);
   if (cursor_here) {
-    // History-panel cursor sits on this entry: render the rank
-    // prefix with inverted colors (player hue preserved — bg =
-    // player_fg, fg = theme->bg) and turn the trailing "." into
-    // ">" when the panel is focused so the chip reads as "5>";
-    // when the panel has lost focus, keep the inverted highlight
-    // but restore the "." so it reads as a parked selection
-    // rather than the active cursor. Bold for the same visual
-    // weight a played tile uses. This takes precedence over the
-    // pending tile-style highlight so the user can land the
-    // cursor on the in-flight turn while the spinner is still
-    // running.
-    //
-    // While the editor is active on this entry, focus has moved
-    // INTO the row (a specific cell has the white cursor), so
-    // the entry-level highlight steps down: we still show the
-    // ">" chevron in player_fg + bold, but drop the inverted
-    // background fill. That keeps "this is the active row" cue
-    // without competing visually with the fine-grained cursor.
-    int digit_start = 0;
-    while (prefix[digit_start] == ' ') {
-      digit_start++;
-    }
-    int after_period = digit_start;
-    while (prefix[after_period] != '\0' && prefix[after_period] != ' ') {
-      after_period++;
-    }
-    // Leading spaces stay on theme->bg in the player color.
-    if (digit_start > 0) {
-      char leading[8];
-      memcpy(leading, prefix, (size_t)digit_start);
-      leading[digit_start] = '\0';
-      ncplane_putstr_yx(plane, row, interior_left, leading);
-    }
-    // "5>" / "5." segment: digits as-is, then ">" or "." in the
-    // tail. Both share the inverted-colors chip — except in
-    // editing mode, where the chip downgrades to non-inverted
-    // bold text to defer to the in-cell white cursor.
-    char chip[8];
-    int chip_len = 0;
-    for (int k = digit_start; k < after_period - 1 && chip_len < 6; k++) {
-      chip[chip_len++] = prefix[k];
-    }
-    chip[chip_len++] = history_focused ? '>' : '.';
-    chip[chip_len] = '\0';
-    if (editing) {
-      theme_apply_fg(plane, player_fg);
-      theme_apply_bg(plane, theme->bg);
-    } else {
-      theme_apply_fg(plane, theme->bg);
-      theme_apply_bg(plane, player_fg);
-    }
-    ncplane_set_styles(plane, NCSTYLE_BOLD);
-    ncplane_putstr_yx(plane, row, interior_left + digit_start, chip);
-    ncplane_set_styles(plane, 0);
-    theme_apply_fg(plane, player_fg);
-    theme_apply_bg(plane, theme->bg);
-    if (prefix[after_period] != '\0') {
-      ncplane_putstr_yx(plane, row, interior_left + after_period,
-                        prefix + after_period);
-    }
+    render_history_cursor_prefix(plane, theme, row, interior_left,
+                                 history_focused, editing, player_fg, prefix);
   } else if (e->pending) {
-    // Pending turn: paint the "N." chunk with tile colors so it reads
-    // like a played tile next to the spinner. Leading space (when N
-    // is a single digit) and the trailing separator stay on the
-    // normal background.
-    int digit_start = 0;
-    while (prefix[digit_start] == ' ') {
-      digit_start++;
-    }
-    int after_period = digit_start;
-    while (prefix[after_period] != '\0' && prefix[after_period] != ' ') {
-      after_period++;
-    }
-    if (digit_start > 0) {
-      char leading[8];
-      memcpy(leading, prefix, (size_t)digit_start);
-      leading[digit_start] = '\0';
-      ncplane_putstr_yx(plane, row, interior_left, leading);
-    }
-    char tile_part[8];
-    const int tile_len = after_period - digit_start;
-    memcpy(tile_part, prefix + digit_start, (size_t)tile_len);
-    tile_part[tile_len] = '\0';
-    theme_apply_fg(plane,
-                   e->player_idx == 1 ? theme->tile2_fg : theme->tile1_fg);
-    theme_apply_bg(plane,
-                   e->player_idx == 1 ? theme->tile2_bg : theme->tile1_bg);
-    ncplane_set_styles(plane, NCSTYLE_BOLD);
-    ncplane_putstr_yx(plane, row, interior_left + digit_start, tile_part);
-    ncplane_set_styles(plane, 0);
-    theme_apply_fg(plane, player_fg);
-    theme_apply_bg(plane, theme->bg);
-    if (prefix[after_period] != '\0') {
-      ncplane_putstr_yx(plane, row, interior_left + after_period,
-                        prefix + after_period);
-    }
+    render_history_pending_prefix(plane, theme, e, row, interior_left,
+                                  player_fg, prefix);
   } else {
     ncplane_putstr_yx(plane, row, interior_left, prefix);
   }
