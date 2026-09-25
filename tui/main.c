@@ -89,18 +89,19 @@ static void render_init_error(struct ncplane *plane, const Theme *theme,
 }
 
 int main(int argc, char *argv[]) {
-  const CliArgs args = parse_args(argc, argv);
-  if (args.error) {
+  TuiSession session = {0};
+  session.args = parse_args(argc, argv);
+  if (session.args.error) {
     return 2;
   }
-  if (args.show_help) {
+  if (session.args.show_help) {
     print_usage();
     return 0;
   }
 
   // Redirect config load/save to the --config path (if given) before any
   // config access below. No-op when NULL.
-  tui_config_set_path_override(args.config_path);
+  tui_config_set_path_override(session.args.config_path);
 
   setlocale(LC_ALL, "");
 
@@ -165,64 +166,66 @@ int main(int argc, char *argv[]) {
   // time. Any picker may be skipped if the value is already known and
   // --reconfigure was not passed.
   TuiConfig loaded = {0};
-  const bool config_existed = !args.no_config && tui_config_load(&loaded);
-  TuiConfig to_save = loaded;
+  const bool config_existed =
+      !session.args.no_config && tui_config_load(&loaded);
+  session.to_save = loaded;
   bool should_save = false;
 
   // THEME ---------------------------------------------------------------
   ThemeName chosen_theme = THEME_DARK;
-  if (args.theme_arg != NULL) {
-    chosen_theme = theme_get_by_id(args.theme_arg)->name;
-  } else if (config_existed && loaded.theme_set && !args.reconfigure) {
+  if (session.args.theme_arg != NULL) {
+    chosen_theme = theme_get_by_id(session.args.theme_arg)->name;
+  } else if (config_existed && loaded.theme_set && !session.args.reconfigure) {
     chosen_theme = loaded.theme;
   } else {
     const ThemeName initial =
         loaded.theme_set ? loaded.theme : theme_auto_detect(nc);
     chosen_theme = tui_onboarding_run(nc, initial);
-    to_save.theme = chosen_theme;
-    to_save.theme_set = true;
+    session.to_save.theme = chosen_theme;
+    session.to_save.theme_set = true;
     should_save = true;
   }
   const Theme *theme = theme_get(chosen_theme);
 
   // LEXICON -------------------------------------------------------------
-  char chosen_lexicon[TUI_LEXICON_NAME_MAX];
-  chosen_lexicon[0] = '\0';
-  if (config_existed && loaded.lexicon_set && !args.reconfigure) {
-    strncpy(chosen_lexicon, loaded.lexicon, sizeof(chosen_lexicon) - 1);
-    chosen_lexicon[sizeof(chosen_lexicon) - 1] = '\0';
+  session.chosen_lexicon[0] = '\0';
+  if (config_existed && loaded.lexicon_set && !session.args.reconfigure) {
+    strncpy(session.chosen_lexicon, loaded.lexicon,
+            sizeof(session.chosen_lexicon) - 1);
+    session.chosen_lexicon[sizeof(session.chosen_lexicon) - 1] = '\0';
   } else {
     const char *initial = loaded.lexicon_set ? loaded.lexicon : NULL;
-    if (!tui_lexicon_picker_run(nc, theme, initial, chosen_lexicon,
-                                sizeof(chosen_lexicon))) {
+    if (!tui_lexicon_picker_run(nc, theme, initial, session.chosen_lexicon,
+                                sizeof(session.chosen_lexicon))) {
       notcurses_stop(nc);
       return 0;
     }
-    strncpy(to_save.lexicon, chosen_lexicon, sizeof(to_save.lexicon) - 1);
-    to_save.lexicon[sizeof(to_save.lexicon) - 1] = '\0';
-    to_save.lexicon_set = true;
+    strncpy(session.to_save.lexicon, session.chosen_lexicon,
+            sizeof(session.to_save.lexicon) - 1);
+    session.to_save.lexicon[sizeof(session.to_save.lexicon) - 1] = '\0';
+    session.to_save.lexicon_set = true;
     should_save = true;
   }
 
   // TIME ----------------------------------------------------------------
-  int chosen_time = 0;
-  if (config_existed && loaded.time_per_side_set && !args.reconfigure) {
-    chosen_time = loaded.time_per_side_seconds;
+  session.chosen_time = 0;
+  if (config_existed && loaded.time_per_side_set && !session.args.reconfigure) {
+    session.chosen_time = loaded.time_per_side_seconds;
   } else {
     const int initial =
         loaded.time_per_side_set ? loaded.time_per_side_seconds : 0;
-    chosen_time = tui_time_picker_run(nc, theme, initial);
-    if (chosen_time < 0) {
+    session.chosen_time = tui_time_picker_run(nc, theme, initial);
+    if (session.chosen_time < 0) {
       notcurses_stop(nc);
       return 0;
     }
-    to_save.time_per_side_seconds = chosen_time;
-    to_save.time_per_side_set = true;
+    session.to_save.time_per_side_seconds = session.chosen_time;
+    session.to_save.time_per_side_set = true;
     should_save = true;
   }
 
-  if (should_save && !args.no_config) {
-    tui_config_save(&to_save);
+  if (should_save && !session.args.no_config) {
+    tui_config_save(&session.to_save);
   }
 
   struct ncplane *std_plane = notcurses_stdplane(nc);
@@ -235,10 +238,11 @@ int main(int argc, char *argv[]) {
   static TuiGameState game_state = {0};
   char init_error[256] = {0};
   const uint64_t seed = (uint64_t)time(NULL);
-  const bool initial_load_rit = loaded.load_rit_set ? loaded.load_rit : false;
-  if (!tui_game_state_init(chosen_lexicon, seed, initial_load_rit, &game_state,
-                           init_error, sizeof(init_error))) {
-    render_init_error(std_plane, theme, chosen_lexicon, init_error);
+  session.initial_load_rit = loaded.load_rit_set ? loaded.load_rit : false;
+  if (!tui_game_state_init(session.chosen_lexicon, seed,
+                           session.initial_load_rit, &game_state, init_error,
+                           sizeof(init_error))) {
+    render_init_error(std_plane, theme, session.chosen_lexicon, init_error);
     notcurses_render(nc);
     ncinput input;
     notcurses_get(nc, NULL, &input);
@@ -246,7 +250,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  tui_game_state_set_time_per_side(&game_state, chosen_time);
+  tui_game_state_set_time_per_side(&game_state, session.chosen_time);
   // Pixel-grid border thickness: from config when present, else default 2.
   game_state.border_thickness =
       loaded.border_thickness_set ? loaded.border_thickness : 2;
@@ -262,12 +266,13 @@ int main(int argc, char *argv[]) {
                                     : TUI_SCORE_SUBSCRIPTS_OFF;
   game_state.rack_sort =
       loaded.rack_sort_set ? loaded.rack_sort : TUI_RACK_SORT_ALPHA;
-  const bool pixel_supported = notcurses_canpixel(nc);
-  const bool font_available = game_state.glyph_cache != NULL;
+  session.pixel_supported = notcurses_canpixel(nc);
+  session.font_available = game_state.glyph_cache != NULL;
   // If the user's saved scale=2 can't be honored on this machine, fall
   // back transparently rather than show a broken board. The user's
   // saved preference stays in tui.toml for next time.
-  if (game_state.board_scale >= 2 && (!pixel_supported || !font_available)) {
+  if (game_state.board_scale >= 2 &&
+      (!session.pixel_supported || !session.font_available)) {
     game_state.board_scale = 1;
   }
   // Bot worker stays idle at launch — the startup menu picks the
@@ -305,9 +310,9 @@ int main(int argc, char *argv[]) {
   // debugging — reattaching with lldb on each crash without having
   // to click through the menu first.
   ui.modal = TUI_MODAL_STARTUP_MENU;
-  if (args.watch) {
+  if (session.args.watch) {
     pthread_mutex_lock(&game_state.mutex);
-    tui_game_state_set_time_per_side(&game_state, chosen_time);
+    tui_game_state_set_time_per_side(&game_state, session.chosen_time);
     tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
     pthread_mutex_unlock(&game_state.mutex);
     tui_bot_worker_start(&game_state);
@@ -387,9 +392,6 @@ int main(int argc, char *argv[]) {
   ui.load_game_cursor = 0;
   ui.load_game_dirty = false;
   ui.load_game_parse_ok = false;
-  // Width of the input area's wrap column — matches the modal's
-  // interior width so Up/Down arrow can walk visual rows.
-  enum { LOAD_POSITION_WRAP_W = 73 };
   // Quit-confirmation modal: focus tracks Yes/No (0 = No, 1 = Yes),
   // default No since it's the safer option. quit_confirm_return is
   // the modal to return to when the user picks No / hits Esc; the
@@ -927,21 +929,25 @@ int main(int argc, char *argv[]) {
       const long lock_us =
           (long)(lock_acquired.tv_sec - render_begin.tv_sec) * 1000000L +
           (long)(lock_acquired.tv_nsec - render_begin.tv_nsec) / 1000L;
-      tui_game_render(std_plane, theme, &game_state, chosen_time, ui.modal);
+      tui_game_render(std_plane, theme, &game_state, session.chosen_time,
+                      ui.modal);
       pthread_mutex_unlock(&game_state.mutex);
       if (ui.modal == TUI_MODAL_MAIN_MENU) {
         tui_game_render_menu(std_plane, theme, ui.main_menu_focus);
       } else if (ui.modal == TUI_MODAL_SETTINGS) {
-        const char *current_lexicon =
-            to_save.lexicon_set ? to_save.lexicon : chosen_lexicon;
-        const bool current_load_rit =
-            to_save.load_rit_set ? to_save.load_rit : initial_load_rit;
+        const char *current_lexicon = session.to_save.lexicon_set
+                                          ? session.to_save.lexicon
+                                          : session.chosen_lexicon;
+        const bool current_load_rit = session.to_save.load_rit_set
+                                          ? session.to_save.load_rit
+                                          : session.initial_load_rit;
         tui_game_render_settings(
             std_plane, theme, ui.settings_focus, game_state.board_scale,
             game_state.antialias, game_state.score_subscripts,
-            game_state.border_thickness, pixel_supported, font_available,
-            game_state.premium_labels, game_state.blank_uppercase,
-            game_state.rack_sort, current_lexicon, current_load_rit);
+            game_state.border_thickness, session.pixel_supported,
+            session.font_available, game_state.premium_labels,
+            game_state.blank_uppercase, game_state.rack_sort, current_lexicon,
+            current_load_rit);
       } else if (ui.modal == TUI_MODAL_TIME_PICKER) {
         tui_game_render_time_picker(std_plane, theme, ui.time_focus);
       } else if (ui.modal == TUI_MODAL_LEXICON_PICKER &&
@@ -1720,9 +1726,9 @@ int main(int argc, char *argv[]) {
             // settings. Before this point the adjusters touched
             // only watch_setup_lexicon / watch_setup_time, so an
             // Esc cancel leaves the underlying session untouched.
-            chosen_time = ui.watch_setup_time;
-            snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
-                     ui.watch_setup_lexicon);
+            session.chosen_time = ui.watch_setup_time;
+            snprintf(session.chosen_lexicon, sizeof(session.chosen_lexicon),
+                     "%s", ui.watch_setup_lexicon);
             pthread_mutex_lock(&game_state.mutex);
             snprintf(game_state.pending_lexicon,
                      sizeof(game_state.pending_lexicon), "%s",
@@ -1742,14 +1748,15 @@ int main(int argc, char *argv[]) {
               game_state.bot_started = false;
               atomic_store(&game_state.bot_stop, false);
             }
-            if (!args.no_config) {
-              to_save.time_per_side_seconds = chosen_time;
-              to_save.time_per_side_set = true;
-              strncpy(to_save.lexicon, chosen_lexicon,
-                      sizeof(to_save.lexicon) - 1);
-              to_save.lexicon[sizeof(to_save.lexicon) - 1] = '\0';
-              to_save.lexicon_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.time_per_side_seconds = session.chosen_time;
+              session.to_save.time_per_side_set = true;
+              strncpy(session.to_save.lexicon, session.chosen_lexicon,
+                      sizeof(session.to_save.lexicon) - 1);
+              session.to_save.lexicon[sizeof(session.to_save.lexicon) - 1] =
+                  '\0';
+              session.to_save.lexicon_set = true;
+              tui_config_save(&session.to_save);
             }
             const bool needs_reinit =
                 strcmp(game_state.pending_lexicon, game_state.active_lexicon) !=
@@ -1767,22 +1774,24 @@ int main(int argc, char *argv[]) {
               if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
                                        new_load_rit, &game_state, reinit_error,
                                        sizeof(reinit_error))) {
-                if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
-                                         initial_load_rit, &game_state,
+                if (!tui_game_state_init(session.chosen_lexicon,
+                                         (uint64_t)time(NULL),
+                                         session.initial_load_rit, &game_state,
                                          reinit_error, sizeof(reinit_error))) {
                   ui.running = false;
                   ui.modal = TUI_MODAL_NONE;
                   continue;
                 }
               } else {
-                snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
-                         new_lexicon);
+                snprintf(session.chosen_lexicon, sizeof(session.chosen_lexicon),
+                         "%s", new_lexicon);
               }
               // Preserve sim params across the destroy/init cycle —
               // tui_game_state_init resets them to defaults.
               game_state.sim_plies = saved_sim_plies;
               game_state.sim_candidates = saved_sim_candidates;
-              tui_game_state_set_time_per_side(&game_state, chosen_time);
+              tui_game_state_set_time_per_side(&game_state,
+                                               session.chosen_time);
               // tui_game_state_init intentionally leaves the racks
               // empty so the startup menu can render an idle state
               // (Bag full, Racks empty). For a fresh watch game we
@@ -1795,7 +1804,8 @@ int main(int argc, char *argv[]) {
               pthread_mutex_unlock(&game_state.mutex);
             } else {
               pthread_mutex_lock(&game_state.mutex);
-              tui_game_state_set_time_per_side(&game_state, chosen_time);
+              tui_game_state_set_time_per_side(&game_state,
+                                               session.chosen_time);
               tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
               pthread_mutex_unlock(&game_state.mutex);
             }
@@ -2006,19 +2016,19 @@ int main(int argc, char *argv[]) {
             game_state.bot_started = false;
             atomic_store(&game_state.bot_stop, false);
           }
-          snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
+          snprintf(session.chosen_lexicon, sizeof(session.chosen_lexicon), "%s",
                    ui.annotate_setup_lexicon);
           pthread_mutex_lock(&game_state.mutex);
           snprintf(game_state.pending_lexicon,
                    sizeof(game_state.pending_lexicon), "%s",
                    ui.annotate_setup_lexicon);
           pthread_mutex_unlock(&game_state.mutex);
-          if (!args.no_config) {
-            strncpy(to_save.lexicon, chosen_lexicon,
-                    sizeof(to_save.lexicon) - 1);
-            to_save.lexicon[sizeof(to_save.lexicon) - 1] = '\0';
-            to_save.lexicon_set = true;
-            tui_config_save(&to_save);
+          if (!session.args.no_config) {
+            strncpy(session.to_save.lexicon, session.chosen_lexicon,
+                    sizeof(session.to_save.lexicon) - 1);
+            session.to_save.lexicon[sizeof(session.to_save.lexicon) - 1] = '\0';
+            session.to_save.lexicon_set = true;
+            tui_config_save(&session.to_save);
           }
           const bool needs_reinit =
               strcmp(game_state.pending_lexicon, game_state.active_lexicon) !=
@@ -2036,20 +2046,21 @@ int main(int argc, char *argv[]) {
             if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
                                      new_load_rit, &game_state, reinit_error,
                                      sizeof(reinit_error))) {
-              if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
-                                       initial_load_rit, &game_state,
+              if (!tui_game_state_init(session.chosen_lexicon,
+                                       (uint64_t)time(NULL),
+                                       session.initial_load_rit, &game_state,
                                        reinit_error, sizeof(reinit_error))) {
                 ui.running = false;
                 ui.modal = TUI_MODAL_NONE;
                 continue;
               }
             } else {
-              snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
-                       new_lexicon);
+              snprintf(session.chosen_lexicon, sizeof(session.chosen_lexicon),
+                       "%s", new_lexicon);
             }
             game_state.sim_plies = saved_sim_plies;
             game_state.sim_candidates = saved_sim_candidates;
-            tui_game_state_set_time_per_side(&game_state, chosen_time);
+            tui_game_state_set_time_per_side(&game_state, session.chosen_time);
           }
           pthread_mutex_lock(&game_state.mutex);
           game_state.app_mode = TUI_APP_MODE_ANNOTATE;
@@ -2390,8 +2401,8 @@ int main(int argc, char *argv[]) {
                                ? ui.play_setup_computer_name
                                : "Computer";
           // Commit the modal's scratch time / lexicon into the session.
-          chosen_time = ui.watch_setup_time;
-          snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
+          session.chosen_time = ui.watch_setup_time;
+          snprintf(session.chosen_lexicon, sizeof(session.chosen_lexicon), "%s",
                    ui.watch_setup_lexicon);
           pthread_mutex_lock(&game_state.mutex);
           snprintf(game_state.pending_lexicon,
@@ -2408,24 +2419,24 @@ int main(int argc, char *argv[]) {
             game_state.bot_started = false;
             atomic_store(&game_state.bot_stop, false);
           }
-          if (!args.no_config) {
-            to_save.time_per_side_seconds = chosen_time;
-            to_save.time_per_side_set = true;
-            to_save.overtime_rule = ui.play_setup_overtime_rule;
-            to_save.overtime_rule_set = true;
-            to_save.overtime_cap_minutes = ui.play_setup_overtime_cap;
-            to_save.overtime_cap_set = true;
-            to_save.time_penalty_rate = ui.play_setup_penalty_rate;
-            to_save.time_penalty_set = true;
-            to_save.challenge_rule = ui.play_setup_challenge_rule;
-            to_save.challenge_rule_set = true;
-            to_save.challenge_penalty = ui.play_setup_challenge_penalty;
-            to_save.challenge_penalty_set = true;
-            strncpy(to_save.lexicon, chosen_lexicon,
-                    sizeof(to_save.lexicon) - 1);
-            to_save.lexicon[sizeof(to_save.lexicon) - 1] = '\0';
-            to_save.lexicon_set = true;
-            tui_config_save(&to_save);
+          if (!session.args.no_config) {
+            session.to_save.time_per_side_seconds = session.chosen_time;
+            session.to_save.time_per_side_set = true;
+            session.to_save.overtime_rule = ui.play_setup_overtime_rule;
+            session.to_save.overtime_rule_set = true;
+            session.to_save.overtime_cap_minutes = ui.play_setup_overtime_cap;
+            session.to_save.overtime_cap_set = true;
+            session.to_save.time_penalty_rate = ui.play_setup_penalty_rate;
+            session.to_save.time_penalty_set = true;
+            session.to_save.challenge_rule = ui.play_setup_challenge_rule;
+            session.to_save.challenge_rule_set = true;
+            session.to_save.challenge_penalty = ui.play_setup_challenge_penalty;
+            session.to_save.challenge_penalty_set = true;
+            strncpy(session.to_save.lexicon, session.chosen_lexicon,
+                    sizeof(session.to_save.lexicon) - 1);
+            session.to_save.lexicon[sizeof(session.to_save.lexicon) - 1] = '\0';
+            session.to_save.lexicon_set = true;
+            tui_config_save(&session.to_save);
           }
           const bool play_needs_reinit =
               strcmp(game_state.pending_lexicon, game_state.active_lexicon) !=
@@ -2443,22 +2454,23 @@ int main(int argc, char *argv[]) {
             if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
                                      new_load_rit, &game_state, reinit_error,
                                      sizeof(reinit_error))) {
-              if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
-                                       initial_load_rit, &game_state,
+              if (!tui_game_state_init(session.chosen_lexicon,
+                                       (uint64_t)time(NULL),
+                                       session.initial_load_rit, &game_state,
                                        reinit_error, sizeof(reinit_error))) {
                 ui.running = false;
                 ui.modal = TUI_MODAL_NONE;
                 continue;
               }
             } else {
-              snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
-                       new_lexicon);
+              snprintf(session.chosen_lexicon, sizeof(session.chosen_lexicon),
+                       "%s", new_lexicon);
             }
             game_state.sim_plies = saved_sim_plies;
             game_state.sim_candidates = saved_sim_candidates;
           }
           pthread_mutex_lock(&game_state.mutex);
-          tui_game_state_set_time_per_side(&game_state, chosen_time);
+          tui_game_state_set_time_per_side(&game_state, session.chosen_time);
           game_state.overtime_rule = ui.play_setup_overtime_rule;
           game_state.overtime_cap_minutes = ui.play_setup_overtime_cap;
           game_state.time_penalty_rate = ui.play_setup_penalty_rate;
@@ -2531,8 +2543,8 @@ int main(int argc, char *argv[]) {
           // modal handles starting the game once the user confirms.
           ui.modal = TUI_MODAL_WATCH_SETUP;
           snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon), "%s",
-                   chosen_lexicon);
-          ui.watch_setup_time = chosen_time;
+                   session.chosen_lexicon);
+          ui.watch_setup_time = session.chosen_time;
         } else if (key == 'p' || key == 'P') {
           ui.modal = TUI_MODAL_LOAD_POSITION;
           ui.load_position_buf[0] = '\0';
@@ -2552,7 +2564,7 @@ int main(int argc, char *argv[]) {
         } else if (key == 'a' || key == 'A') {
           ui.modal = TUI_MODAL_ANNOTATE_SETUP;
           snprintf(ui.annotate_setup_lexicon, sizeof(ui.annotate_setup_lexicon),
-                   "%s", chosen_lexicon);
+                   "%s", session.chosen_lexicon);
           snprintf(ui.annotate_setup_p1_name, sizeof(ui.annotate_setup_p1_name),
                    "Player 1");
           snprintf(ui.annotate_setup_p2_name, sizeof(ui.annotate_setup_p2_name),
@@ -2570,14 +2582,14 @@ int main(int argc, char *argv[]) {
           ui.play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
           ui.play_setup_name_cursor = 0;
           snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon), "%s",
-                   chosen_lexicon);
-          ui.watch_setup_time = chosen_time;
+                   session.chosen_lexicon);
+          ui.watch_setup_time = session.chosen_time;
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
           if (ui.startup_menu_focus == TUI_STARTUP_WATCH) {
             ui.modal = TUI_MODAL_WATCH_SETUP;
             snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon),
-                     "%s", chosen_lexicon);
-            ui.watch_setup_time = chosen_time;
+                     "%s", session.chosen_lexicon);
+            ui.watch_setup_time = session.chosen_time;
           } else if (ui.startup_menu_focus == TUI_STARTUP_LOAD_POSITION) {
             ui.modal = TUI_MODAL_LOAD_POSITION;
             ui.load_position_buf[0] = '\0';
@@ -2597,7 +2609,8 @@ int main(int argc, char *argv[]) {
           } else if (ui.startup_menu_focus == TUI_STARTUP_ANNOTATE) {
             ui.modal = TUI_MODAL_ANNOTATE_SETUP;
             snprintf(ui.annotate_setup_lexicon,
-                     sizeof(ui.annotate_setup_lexicon), "%s", chosen_lexicon);
+                     sizeof(ui.annotate_setup_lexicon), "%s",
+                     session.chosen_lexicon);
             snprintf(ui.annotate_setup_p1_name,
                      sizeof(ui.annotate_setup_p1_name), "Player 1");
             snprintf(ui.annotate_setup_p2_name,
@@ -2619,8 +2632,8 @@ int main(int argc, char *argv[]) {
             ui.play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
             ui.play_setup_name_cursor = 0;
             snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon),
-                     "%s", chosen_lexicon);
-            ui.watch_setup_time = chosen_time;
+                     "%s", session.chosen_lexicon);
+            ui.watch_setup_time = session.chosen_time;
           }
           // Disabled items are no-op for now. As each mode ships,
           // add its branch here and flip su_enabled[i] true above.
@@ -2733,8 +2746,9 @@ int main(int argc, char *argv[]) {
           // shortcut.
           ui.modal = ui.settings_return;
         } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-          const bool effective_2x =
-              pixel_supported && font_available && game_state.board_scale >= 2;
+          const bool effective_2x = session.pixel_supported &&
+                                    session.font_available &&
+                                    game_state.board_scale >= 2;
           int idx = ui.settings_focus - 1;
           while (idx > 0 && SETTINGS_2X_ONLY(idx) && !effective_2x) {
             idx--;
@@ -2743,8 +2757,9 @@ int main(int argc, char *argv[]) {
             ui.settings_focus = idx;
           }
         } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-          const bool effective_2x =
-              pixel_supported && font_available && game_state.board_scale >= 2;
+          const bool effective_2x = session.pixel_supported &&
+                                    session.font_available &&
+                                    game_state.board_scale >= 2;
           int idx = ui.settings_focus + 1;
           while (idx < TUI_SETTINGS_ITEM_COUNT - 1 && SETTINGS_2X_ONLY(idx) &&
                  !effective_2x) {
@@ -2754,31 +2769,32 @@ int main(int argc, char *argv[]) {
             ui.settings_focus = idx;
           }
         } else if (key == NCKEY_LEFT || key == 'h' || key == 'H') {
-          if (ui.settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
-              font_available) {
+          if (ui.settings_focus == TUI_SETTINGS_SCALE &&
+              session.pixel_supported && session.font_available) {
             // Scale is a 2-state toggle (1, 2). Both arrows flip it.
             pthread_mutex_lock(&game_state.mutex);
             game_state.board_scale = game_state.board_scale == 2 ? 1 : 2;
             const int v = game_state.board_scale;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.board_scale = v;
-              to_save.board_scale_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.board_scale = v;
+              session.to_save.board_scale_set = true;
+              tui_config_save(&session.to_save);
             }
-          } else if (ui.settings_focus == TUI_SETTINGS_AA && pixel_supported &&
-                     font_available && game_state.board_scale >= 2) {
+          } else if (ui.settings_focus == TUI_SETTINGS_AA &&
+                     session.pixel_supported && session.font_available &&
+                     game_state.board_scale >= 2) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.antialias = !game_state.antialias;
             const bool v = game_state.antialias;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.antialias = v;
-              to_save.antialias_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.antialias = v;
+              session.to_save.antialias_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_SUBSCRIPTS &&
-                     pixel_supported && font_available &&
+                     session.pixel_supported && session.font_available &&
                      game_state.board_scale >= 2) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.score_subscripts =
@@ -2787,23 +2803,23 @@ int main(int argc, char *argv[]) {
                                      TUI_SCORE_SUBSCRIPTS_COUNT);
             const TuiScoreSubscripts v = game_state.score_subscripts;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.score_subscripts = v;
-              to_save.score_subscripts_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.score_subscripts = v;
+              session.to_save.score_subscripts_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_BORDER &&
-                     pixel_supported) {
+                     session.pixel_supported) {
             pthread_mutex_lock(&game_state.mutex);
             if (game_state.border_thickness > 0) {
               game_state.border_thickness--;
             }
             const int v = game_state.border_thickness;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.border_thickness = v;
-              to_save.border_thickness_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.border_thickness = v;
+              session.to_save.border_thickness_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_PREMIUM) {
             pthread_mutex_lock(&game_state.mutex);
@@ -2813,10 +2829,10 @@ int main(int argc, char *argv[]) {
                                    TUI_PREMIUM_LABELS_COUNT);
             const TuiPremiumLabels v = game_state.premium_labels;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.premium_labels = v;
-              to_save.premium_labels_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.premium_labels = v;
+              session.to_save.premium_labels_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_BLANKS) {
             // Blanks is a two-state toggle, so left and right both flip it.
@@ -2824,10 +2840,10 @@ int main(int argc, char *argv[]) {
             game_state.blank_uppercase = !game_state.blank_uppercase;
             const bool v = game_state.blank_uppercase;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.blank_uppercase = v;
-              to_save.blank_uppercase_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.blank_uppercase = v;
+              session.to_save.blank_uppercase_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_RACK_SORT) {
             pthread_mutex_lock(&game_state.mutex);
@@ -2838,37 +2854,38 @@ int main(int argc, char *argv[]) {
             game_state.rack_sort = (TuiRackSort)v;
             const TuiRackSort saved = game_state.rack_sort;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.rack_sort = saved;
-              to_save.rack_sort_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.rack_sort = saved;
+              session.to_save.rack_sort_set = true;
+              tui_config_save(&session.to_save);
             }
           }
         } else if (key == NCKEY_RIGHT || key == 'l' || key == 'L') {
-          if (ui.settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
-              font_available) {
+          if (ui.settings_focus == TUI_SETTINGS_SCALE &&
+              session.pixel_supported && session.font_available) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.board_scale = game_state.board_scale == 2 ? 1 : 2;
             const int v = game_state.board_scale;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.board_scale = v;
-              to_save.board_scale_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.board_scale = v;
+              session.to_save.board_scale_set = true;
+              tui_config_save(&session.to_save);
             }
-          } else if (ui.settings_focus == TUI_SETTINGS_AA && pixel_supported &&
-                     font_available && game_state.board_scale >= 2) {
+          } else if (ui.settings_focus == TUI_SETTINGS_AA &&
+                     session.pixel_supported && session.font_available &&
+                     game_state.board_scale >= 2) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.antialias = !game_state.antialias;
             const bool v = game_state.antialias;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.antialias = v;
-              to_save.antialias_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.antialias = v;
+              session.to_save.antialias_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_SUBSCRIPTS &&
-                     pixel_supported && font_available &&
+                     session.pixel_supported && session.font_available &&
                      game_state.board_scale >= 2) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.score_subscripts =
@@ -2876,23 +2893,23 @@ int main(int argc, char *argv[]) {
                                      TUI_SCORE_SUBSCRIPTS_COUNT);
             const TuiScoreSubscripts v = game_state.score_subscripts;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.score_subscripts = v;
-              to_save.score_subscripts_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.score_subscripts = v;
+              session.to_save.score_subscripts_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_BORDER &&
-                     pixel_supported) {
+                     session.pixel_supported) {
             pthread_mutex_lock(&game_state.mutex);
             if (game_state.border_thickness < 6) {
               game_state.border_thickness++;
             }
             const int v = game_state.border_thickness;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.border_thickness = v;
-              to_save.border_thickness_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.border_thickness = v;
+              session.to_save.border_thickness_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_PREMIUM) {
             pthread_mutex_lock(&game_state.mutex);
@@ -2901,20 +2918,20 @@ int main(int argc, char *argv[]) {
                                    TUI_PREMIUM_LABELS_COUNT);
             const TuiPremiumLabels v = game_state.premium_labels;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.premium_labels = v;
-              to_save.premium_labels_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.premium_labels = v;
+              session.to_save.premium_labels_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_BLANKS) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.blank_uppercase = !game_state.blank_uppercase;
             const bool v = game_state.blank_uppercase;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.blank_uppercase = v;
-              to_save.blank_uppercase_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.blank_uppercase = v;
+              session.to_save.blank_uppercase_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_RACK_SORT) {
             pthread_mutex_lock(&game_state.mutex);
@@ -2925,25 +2942,26 @@ int main(int argc, char *argv[]) {
             game_state.rack_sort = (TuiRackSort)v;
             const TuiRackSort saved = game_state.rack_sort;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.rack_sort = saved;
-              to_save.rack_sort_set = true;
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              session.to_save.rack_sort = saved;
+              session.to_save.rack_sort_set = true;
+              tui_config_save(&session.to_save);
             }
           } else if (ui.settings_focus == TUI_SETTINGS_RIT) {
             // RIT is a deferred toggle — write to config; the live
             // game keeps using whatever was loaded at game-state init.
             // The pending-change banner picks up the divergence and the
             // setting takes effect on the next New Game.
-            const bool prev =
-                to_save.load_rit_set ? to_save.load_rit : initial_load_rit;
-            to_save.load_rit = !prev;
-            to_save.load_rit_set = true;
+            const bool prev = session.to_save.load_rit_set
+                                  ? session.to_save.load_rit
+                                  : session.initial_load_rit;
+            session.to_save.load_rit = !prev;
+            session.to_save.load_rit_set = true;
             pthread_mutex_lock(&game_state.mutex);
-            game_state.pending_load_rit = to_save.load_rit;
+            game_state.pending_load_rit = session.to_save.load_rit;
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              tui_config_save(&session.to_save);
             }
           }
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
@@ -2993,11 +3011,11 @@ int main(int argc, char *argv[]) {
               game_state.bot_started = false;
               atomic_store(&game_state.bot_stop, false);
             }
-            chosen_time = new_time;
-            if (!args.no_config) {
-              to_save.time_per_side_seconds = new_time;
-              to_save.time_per_side_set = true;
-              tui_config_save(&to_save);
+            session.chosen_time = new_time;
+            if (!session.args.no_config) {
+              session.to_save.time_per_side_seconds = new_time;
+              session.to_save.time_per_side_set = true;
+              tui_config_save(&session.to_save);
             }
             // Pending lexicon / RIT changes that need a full re-init?
             // If so, tear down the state and re-init with the new
@@ -3021,16 +3039,17 @@ int main(int argc, char *argv[]) {
                 // settings so the user isn't left without a playable
                 // game. We've already torn the state down, so we have
                 // to retry with the old values.
-                if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
-                                         initial_load_rit, &game_state,
+                if (!tui_game_state_init(session.chosen_lexicon,
+                                         (uint64_t)time(NULL),
+                                         session.initial_load_rit, &game_state,
                                          reinit_error, sizeof(reinit_error))) {
                   ui.running = false;
                   ui.modal = TUI_MODAL_NONE;
                   continue;
                 }
               } else {
-                snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
-                         new_lexicon);
+                snprintf(session.chosen_lexicon, sizeof(session.chosen_lexicon),
+                         "%s", new_lexicon);
               }
               tui_game_state_set_time_per_side(&game_state, new_time);
             } else {
@@ -3069,14 +3088,15 @@ int main(int argc, char *argv[]) {
           char picked[TUI_LEXICON_NAME_MAX] = {0};
           if (tui_lexicon_list_name(ui.lexicon_list, ui.lexicon_focus, picked,
                                     sizeof(picked))) {
-            snprintf(to_save.lexicon, sizeof(to_save.lexicon), "%s", picked);
-            to_save.lexicon_set = true;
+            snprintf(session.to_save.lexicon, sizeof(session.to_save.lexicon),
+                     "%s", picked);
+            session.to_save.lexicon_set = true;
             pthread_mutex_lock(&game_state.mutex);
             snprintf(game_state.pending_lexicon,
                      sizeof(game_state.pending_lexicon), "%s", picked);
             pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              tui_config_save(&to_save);
+            if (!session.args.no_config) {
+              tui_config_save(&session.to_save);
             }
           }
           ui.modal = TUI_MODAL_SETTINGS;
@@ -3513,7 +3533,8 @@ int main(int argc, char *argv[]) {
             snprintf(cmd, sizeof(cmd), "%s", game_state.slash_buf);
             if (strcmp(cmd, "new") == 0 || strcmp(cmd, "n") == 0) {
               ui.modal = TUI_MODAL_TIME_PICKER;
-              ui.time_focus = tui_time_picker_closest_index(chosen_time);
+              ui.time_focus =
+                  tui_time_picker_closest_index(session.chosen_time);
               ui.time_picker_return = TUI_MODAL_NONE;
             } else if (strcmp(cmd, "settings") == 0) {
               ui.modal = TUI_MODAL_SETTINGS;
@@ -3552,7 +3573,8 @@ int main(int argc, char *argv[]) {
               if (n_match == 1 && match != NULL) {
                 if (strcmp(match, "new") == 0) {
                   ui.modal = TUI_MODAL_TIME_PICKER;
-                  ui.time_focus = tui_time_picker_closest_index(chosen_time);
+                  ui.time_focus =
+                      tui_time_picker_closest_index(session.chosen_time);
                   ui.time_picker_return = TUI_MODAL_NONE;
                 } else if (strcmp(match, "settings") == 0) {
                   ui.modal = TUI_MODAL_SETTINGS;
@@ -3611,7 +3633,7 @@ int main(int argc, char *argv[]) {
           ui.settings_return = TUI_MODAL_NONE;
         } else if (key == 'n' || key == 'N') {
           ui.modal = TUI_MODAL_TIME_PICKER;
-          ui.time_focus = tui_time_picker_closest_index(chosen_time);
+          ui.time_focus = tui_time_picker_closest_index(session.chosen_time);
           ui.time_picker_return = TUI_MODAL_NONE;
         }
       }

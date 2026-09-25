@@ -3,8 +3,13 @@
 
 #include "config.h"
 #include "lexicon_picker.h"
+#include "tui_cli_args.h"
 #include "tui_ui_types.h"
 #include <stdbool.h>
+
+// Width of the input area's wrap column — matches the modal's
+// interior width so Up/Down arrow can walk visual rows.
+enum { LOAD_POSITION_WRAP_W = 73 };
 
 // UI state for the main loop: which modal is open, each modal's focus /
 // return target, the setup dialogs' in-progress values, and the Load
@@ -58,5 +63,18 @@ typedef struct {
   int lexicon_focus;
   bool frame_dirty;
 } TuiUiState;
+
+// Per-run session values the setup / settings handlers read or update:
+// command-line args, the chosen lexicon and clock, the config to save,
+// and what the terminal supports. One instance lives in main().
+typedef struct {
+  CliArgs args;
+  TuiConfig to_save;
+  char chosen_lexicon[TUI_LEXICON_NAME_MAX];
+  int chosen_time;
+  bool initial_load_rit;
+  bool pixel_supported;
+  bool font_available;
+} TuiSession;
 
 #endif
