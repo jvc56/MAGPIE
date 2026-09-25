@@ -47,6 +47,13 @@ static bool load_text_modal_keys(TuiGameState *state, TuiUiState *ui, char *buf,
     // newlines are never part of the input. If the last parse
     // failed, the error stays visible and Enter is a no-op.
     if (parse_ok) {
+      // A loaded game opens with History focused (the import puts its
+      // cursor on turn 1), so the arrows step through turns at once.
+      if (ui->modal == TUI_MODAL_LOAD_GAME) {
+        pthread_mutex_lock(&state->mutex);
+        state->focused_panel = TUI_FOCUS_HISTORY;
+        pthread_mutex_unlock(&state->mutex);
+      }
       ui->modal = TUI_MODAL_NONE;
     }
     return true;
