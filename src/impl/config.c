@@ -8617,10 +8617,13 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
   game_reset(config->game);
   config_reset_move_list_and_invalidate_sim_results(config);
   config->seed = seed;
-  // A full rack, drawable from the bag. Fewer letters drew and analysed a
-  // partial rack -- an empty string, a pass-only "analysis" -- as if it were
-  // the opening rack the task named.
-  if (draw_rack_string_from_bag(config->game, 0, rack_str) != RACK_SIZE) {
+  // At least one letter, drawable from the bag. An empty string drew nothing
+  // and was "analysed" as a pass. Not a full rack: birdtest's opening-rack
+  // jobs choose their rack size (1 to RACK_SIZE), and the request does not
+  // restate it -- requiring RACK_SIZE letters refused every task of a job
+  // with smaller racks. Over-long and malformed racks are the draw's to
+  // refuse (negative codes).
+  if (draw_rack_string_from_bag(config->game, 0, rack_str) < 1) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string("server sent an unusable rack: '%s'", rack_str));
