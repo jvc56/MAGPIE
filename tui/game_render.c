@@ -240,8 +240,15 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   // cells stay unchanged and the sprixels elide; the board renderers
   // overwrite the box / labels with identical content, leaving nothing
   // under the board dirty. At 1x there are no sprixels, so a plain
-  // full erase is both correct and cheap.
-  if (L.scale >= 2) {
+  // full erase is both correct and cheap. The first frame after
+  // switching into 2x also takes the full erase: the text a smaller
+  // scale left under the board and rack (row labels, panel titles, bag
+  // letters) would otherwise show through the sprixels' transparent
+  // pixels, and every sprixel is new that frame anyway.
+  static int prev_scale = -1;
+  const bool entered_pixel_scale = L.scale >= 2 && prev_scale != L.scale;
+  prev_scale = L.scale;
+  if (L.scale >= 2 && !entered_pixel_scale) {
     unsigned total_rows = 0;
     unsigned total_cols = 0;
     ncplane_dim_yx(plane, &total_rows, &total_cols);

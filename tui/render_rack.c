@@ -300,16 +300,27 @@ void render_rack_panel(struct ncplane *plane, const Theme *theme,
     start_col = 1;
   }
 
+  // Idle / pre-game state: rack hasn't been drawn yet. Print a
+  // single dim placeholder centered in the panel interior. The 2x
+  // pixel path still gets called below so any leftover rack pixel
+  // planes from a prior game get destroyed. At 2x the rack interior
+  // isn't erased between frames (that would re-emit the tile
+  // sprixels), so once letters arrive, blank the placeholder's cells
+  // or its text shows between the tiles.
+  const char *msg = "(no rack specified)";
+  const int msg_len = (int)strlen(msg);
+  const int msg_col = 1 + (L->board_width - 2 - msg_len) / 2;
+  static bool placeholder_shown = false;
+  theme_apply_bg(plane, theme->bg);
   if (total_letters == 0) {
-    // Idle / pre-game state: rack hasn't been drawn yet. Print a
-    // single dim placeholder centered in the panel interior. The
-    // 2x pixel path still gets called below so any leftover rack
-    // pixel planes from a prior game get destroyed.
     theme_apply_fg(plane, theme->dim_fg);
-    theme_apply_bg(plane, theme->bg);
-    const char *msg = "(no rack specified)";
-    const int msg_col = 1 + (L->board_width - 2 - (int)strlen(msg)) / 2;
     ncplane_putstr_yx(plane, L->rack_top + 1, msg_col, msg);
+    placeholder_shown = true;
+  } else if (placeholder_shown) {
+    for (int col = msg_col; col < msg_col + msg_len; col++) {
+      ncplane_putstr_yx(plane, L->rack_top + 1, col, " ");
+    }
+    placeholder_shown = false;
   }
 
   if (L->scale >= 2 && state->glyph_cache != NULL) {
