@@ -3,6 +3,7 @@
 #include "bot_worker.h"
 #include "render_hit_test.h"
 #include "time_picker.h"
+#include "tui_session.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -144,35 +145,13 @@ bool tui_input_time_picker(TuiGameState *state, TuiUiState *ui,
         // If so, tear down the state and re-init with the new
         // settings (loading fresh tables). Otherwise the fast in-
         // place reset is enough.
-        const bool needs_reinit =
-            strcmp(state->pending_lexicon, state->active_lexicon) != 0 ||
-            state->pending_load_rit != state->active_load_rit;
-        if (needs_reinit) {
-          char new_lexicon[TUI_LEXICON_NAME_MAX];
-          snprintf(new_lexicon, sizeof(new_lexicon), "%s",
-                   state->pending_lexicon);
-          const bool new_load_rit = state->pending_load_rit;
-          tui_game_state_destroy(state);
-          char reinit_error[256] = {0};
-          if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
-                                   new_load_rit, state, reinit_error,
-                                   sizeof(reinit_error))) {
-            // Re-init failed; fall back to the previously active
-            // settings so the user isn't left without a playable
-            // game. We've already torn the state down, so we have
-            // to retry with the old values.
-            if (!tui_game_state_init(session->chosen_lexicon,
-                                     (uint64_t)time(NULL),
-                                     session->initial_load_rit, state,
-                                     reinit_error, sizeof(reinit_error))) {
-              ui->running = false;
-              ui->modal = TUI_MODAL_NONE;
-              return true;
-            }
-          } else {
-            snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
-                     "%s", new_lexicon);
-          }
+        bool reinitialized = false;
+        if (!tui_reinit_game_state_if_needed(state, session, &reinitialized)) {
+          ui->running = false;
+          ui->modal = TUI_MODAL_NONE;
+          return true;
+        }
+        if (reinitialized) {
           tui_game_state_set_time_per_side(state, new_time);
         } else {
           pthread_mutex_lock(&state->mutex);

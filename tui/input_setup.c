@@ -5,6 +5,7 @@
 #include "render_hit_test.h"
 #include "render_modals.h"
 #include "time_picker.h"
+#include "tui_session.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -332,35 +333,11 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
         session->to_save.lexicon_set = true;
         tui_config_save(&session->to_save);
       }
-      const bool play_needs_reinit =
-          strcmp(state->pending_lexicon, state->active_lexicon) != 0 ||
-          state->pending_load_rit != state->active_load_rit;
-      if (play_needs_reinit) {
-        char new_lexicon[TUI_LEXICON_NAME_MAX];
-        snprintf(new_lexicon, sizeof(new_lexicon), "%s",
-                 state->pending_lexicon);
-        const bool new_load_rit = state->pending_load_rit;
-        const int saved_sim_plies = state->sim_plies;
-        const int saved_sim_candidates = state->sim_candidates;
-        tui_game_state_destroy(state);
-        char reinit_error[256] = {0};
-        if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
-                                 new_load_rit, state, reinit_error,
-                                 sizeof(reinit_error))) {
-          if (!tui_game_state_init(session->chosen_lexicon,
-                                   (uint64_t)time(NULL),
-                                   session->initial_load_rit, state,
-                                   reinit_error, sizeof(reinit_error))) {
-            ui->running = false;
-            ui->modal = TUI_MODAL_NONE;
-            return true;
-          }
-        } else {
-          snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
-                   "%s", new_lexicon);
-        }
-        state->sim_plies = saved_sim_plies;
-        state->sim_candidates = saved_sim_candidates;
+      bool reinitialized = false;
+      if (!tui_reinit_game_state_if_needed(state, session, &reinitialized)) {
+        ui->running = false;
+        ui->modal = TUI_MODAL_NONE;
+        return true;
       }
       pthread_mutex_lock(&state->mutex);
       tui_game_state_set_time_per_side(state, session->chosen_time);
@@ -595,35 +572,13 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
         session->to_save.lexicon_set = true;
         tui_config_save(&session->to_save);
       }
-      const bool needs_reinit =
-          strcmp(state->pending_lexicon, state->active_lexicon) != 0 ||
-          state->pending_load_rit != state->active_load_rit;
-      if (needs_reinit) {
-        char new_lexicon[TUI_LEXICON_NAME_MAX];
-        snprintf(new_lexicon, sizeof(new_lexicon), "%s",
-                 state->pending_lexicon);
-        const bool new_load_rit = state->pending_load_rit;
-        const int saved_sim_plies = state->sim_plies;
-        const int saved_sim_candidates = state->sim_candidates;
-        tui_game_state_destroy(state);
-        char reinit_error[256] = {0};
-        if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
-                                 new_load_rit, state, reinit_error,
-                                 sizeof(reinit_error))) {
-          if (!tui_game_state_init(session->chosen_lexicon,
-                                   (uint64_t)time(NULL),
-                                   session->initial_load_rit, state,
-                                   reinit_error, sizeof(reinit_error))) {
-            ui->running = false;
-            ui->modal = TUI_MODAL_NONE;
-            return true;
-          }
-        } else {
-          snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
-                   "%s", new_lexicon);
-        }
-        state->sim_plies = saved_sim_plies;
-        state->sim_candidates = saved_sim_candidates;
+      bool reinitialized = false;
+      if (!tui_reinit_game_state_if_needed(state, session, &reinitialized)) {
+        ui->running = false;
+        ui->modal = TUI_MODAL_NONE;
+        return true;
+      }
+      if (reinitialized) {
         tui_game_state_set_time_per_side(state, session->chosen_time);
       }
       pthread_mutex_lock(&state->mutex);
@@ -830,37 +785,13 @@ bool tui_input_watch_setup(TuiGameState *state, TuiUiState *ui,
           session->to_save.lexicon_set = true;
           tui_config_save(&session->to_save);
         }
-        const bool needs_reinit =
-            strcmp(state->pending_lexicon, state->active_lexicon) != 0 ||
-            state->pending_load_rit != state->active_load_rit;
-        if (needs_reinit) {
-          char new_lexicon[TUI_LEXICON_NAME_MAX];
-          snprintf(new_lexicon, sizeof(new_lexicon), "%s",
-                   state->pending_lexicon);
-          const bool new_load_rit = state->pending_load_rit;
-          const int saved_sim_plies = state->sim_plies;
-          const int saved_sim_candidates = state->sim_candidates;
-          tui_game_state_destroy(state);
-          char reinit_error[256] = {0};
-          if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
-                                   new_load_rit, state, reinit_error,
-                                   sizeof(reinit_error))) {
-            if (!tui_game_state_init(session->chosen_lexicon,
-                                     (uint64_t)time(NULL),
-                                     session->initial_load_rit, state,
-                                     reinit_error, sizeof(reinit_error))) {
-              ui->running = false;
-              ui->modal = TUI_MODAL_NONE;
-              return true;
-            }
-          } else {
-            snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
-                     "%s", new_lexicon);
-          }
-          // Preserve sim params across the destroy/init cycle —
-          // tui_game_state_init resets them to defaults.
-          state->sim_plies = saved_sim_plies;
-          state->sim_candidates = saved_sim_candidates;
+        bool reinitialized = false;
+        if (!tui_reinit_game_state_if_needed(state, session, &reinitialized)) {
+          ui->running = false;
+          ui->modal = TUI_MODAL_NONE;
+          return true;
+        }
+        if (reinitialized) {
           tui_game_state_set_time_per_side(state, session->chosen_time);
           // tui_game_state_init intentionally leaves the racks
           // empty so the startup menu can render an idle state
