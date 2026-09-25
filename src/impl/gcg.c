@@ -272,6 +272,13 @@ StringSplitter *decode_gcg_with_gcg_lines(const StringSplitter *gcg_lines,
 
 StringSplitter *decode_gcg(GCGParser *gcg_parser, const char *gcg_string,
                            ErrorStack *error_stack) {
+  // An empty or whitespace-only GCG has no first line for the encoding
+  // check to read, so report it here rather than fail on the missing line.
+  if (is_string_empty_or_whitespace(gcg_string)) {
+    error_stack_push(error_stack, ERROR_STATUS_GCG_PARSE_GCG_EMPTY,
+                     string_duplicate("GCG is empty"));
+    return NULL;
+  }
   StringSplitter *gcg_lines = split_string_by_newline(gcg_string, true);
   StringSplitter *utf8_gcg_lines =
       decode_gcg_with_gcg_lines(gcg_lines, gcg_parser, error_stack);
