@@ -23,6 +23,10 @@
 typedef struct AsyncCommandInputArgs {
   AsyncCommandControl *acc;
   Config *config;
+  // When non-NULL, lines that aren't async commands are appended here to
+  // run after the current command instead of being rejected. Written
+  // only by the input thread, read after it is joined.
+  StringList *queued_commands;
 } AsyncCommandInputArgs;
 
 char *command_search_status(Config *config, bool should_exit) {
@@ -151,7 +155,11 @@ void *execute_async_input_worker(void *uncasted_args) {
     trim_whitespace(input);
 
     async_token_t input_token = parse_async_command(input, err_msg_sb);
-    if (string_builder_length(err_msg_sb) > 0) {
+    if (input_token == NUMBER_OF_ASYNC_COMMAND_TOKENS &&
+        string_builder_length(err_msg_sb) == 0 &&
+        args->queued_commands != NULL) {
+      string_list_add_string(args->queued_commands, input);
+    } else if (string_builder_length(err_msg_sb) > 0) {
       error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_AMBIGUOUS_COMMAND,
                        string_builder_dump(err_msg_sb, NULL));
       error_stack_print_and_reset(error_stack);
@@ -183,9 +191,13 @@ void *execute_async_input_worker(void *uncasted_args) {
   return NULL;
 }
 
-// Blocks until the async command is finished
-void execute_command_async(Config *config, ErrorStack *error_stack,
-                           const char *command) {
+// Blocks until the async command is finished. Lines other than async
+// commands that arrive meanwhile are appended to `queued_commands` when
+// it is non-NULL, and rejected with an error otherwise.
+static void execute_command_async_queueing(Config *config,
+                                           ErrorStack *error_stack,
+                                           const char *command,
+                                           StringList *queued_commands) {
   if (!load_command_sync(config, error_stack, command)) {
     return;
   }
@@ -198,6 +210,7 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
   AsyncCommandInputArgs async_args;
   async_args.acc = acc;
   async_args.config = config;
+  async_args.queued_commands = queued_commands;
 
   cpthread_t cmd_input_thread;
   cpthread_create(&cmd_input_thread, execute_async_input_worker, &async_args);
@@ -220,6 +233,11 @@ void execute_command_async(Config *config, ErrorStack *error_stack,
 
   cpthread_join(cmd_input_thread);
   async_command_control_destroy(acc);
+}
+
+void execute_command_async(Config *config, ErrorStack *error_stack,
+                           const char *command) {
+  execute_command_async_queueing(config, error_stack, command, NULL);
 }
 
 void save_config_settings(const Config *config, ErrorStack *error_stack) {
@@ -255,6 +273,74 @@ void load_config_settings(Config *config, ErrorStack *error_stack) {
   free(settings_string);
 }
 
+// Runs one line of input from the command loop. Returns false when the
+// line asks to terminate. `queued_commands` is passed through to
+// execute_command_async_queueing.
+static bool run_input_line(Config *config, ErrorStack *error_stack,
+                           const char *raw_input, StringList *queued_commands) {
+  char *input = string_duplicate(raw_input);
+  trim_whitespace(input);
+  if (is_string_empty_or_null(input)) {
+    free(input);
+    return true;
+  }
+  if (strings_iequal(TERMINATE_KEYWORD, input) ||
+      strings_iequal(TERMINATE_KEYWORD_ALIAS_EXIT, input) ||
+      strings_iequal(TERMINATE_KEYWORD_ALIAS_SHORT, input)) {
+    free(input);
+    return false;
+  }
+  if (strings_iequal(input, ASYNC_STOP_COMMAND_STRING)) {
+    error_stack_push(error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
+                     string_duplicate("no currently running command to stop"));
+  } else {
+    linenoiseHistoryAdd(input);
+    switch (config_get_exec_mode(config)) {
+    case EXEC_MODE_SYNC:
+      execute_command_sync(config, error_stack, input);
+      break;
+    case EXEC_MODE_ASYNC:
+      execute_command_async_queueing(config, error_stack, input,
+                                     queued_commands);
+      break;
+    case EXEC_MODE_UNKNOWN:
+      log_fatal("attempted to execute command in unknown mode");
+      break;
+    }
+  }
+  if (error_stack_is_empty(error_stack)) {
+    save_config_settings(config, error_stack);
+  }
+  error_stack_print_and_reset(error_stack);
+  free(input);
+  return true;
+}
+
+// Runs the lines queued while earlier commands were executing, in order,
+// including any queued while these run. Returns false when one asks to
+// terminate.
+static bool run_queued_commands(Config *config, ErrorStack *error_stack,
+                                StringList **queued_commands) {
+  if (*queued_commands == NULL) {
+    return true;
+  }
+  while (string_list_get_count(*queued_commands) > 0) {
+    StringList *batch = *queued_commands;
+    *queued_commands = string_list_create();
+    const int count = string_list_get_count(batch);
+    for (int line_idx = 0; line_idx < count; line_idx++) {
+      if (!run_input_line(config, error_stack,
+                          string_list_get_string(batch, line_idx),
+                          *queued_commands)) {
+        string_list_destroy(batch);
+        return false;
+      }
+    }
+    string_list_destroy(batch);
+  }
+  return true;
+}
+
 void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
                             const char *initial_command_string) {
   // To suppress 'finished' for internal load settings commands
@@ -273,6 +359,13 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
   if (!config_continue_on_coldstart(config)) {
     return;
   }
+  // At a terminal, a line typed while a command runs is rejected with a
+  // warning. From a pipe or file (a script), it is queued and run in
+  // order afterwards, since nobody is there to see the warning.
+  StringList *queued_commands = NULL;
+  if (!isatty(fileno(get_stream_in()))) {
+    queued_commands = string_list_create();
+  }
   char *input = NULL;
   linenoiseHistorySetMaxLen(1000);
   while (1) {
@@ -287,41 +380,14 @@ void sync_command_scan_loop(Config *config, ErrorStack *error_stack,
       break;
     }
 
-    trim_whitespace(input);
-
-    if (is_string_empty_or_null(input)) {
-      continue;
-    }
-
-    if (strings_iequal(TERMINATE_KEYWORD, input) ||
-        strings_iequal(TERMINATE_KEYWORD_ALIAS_EXIT, input) ||
-        strings_iequal(TERMINATE_KEYWORD_ALIAS_SHORT, input)) {
+    if (!run_input_line(config, error_stack, input, queued_commands)) {
       break;
     }
-
-    if (strings_iequal(input, ASYNC_STOP_COMMAND_STRING)) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_COMMAND_NOTHING_TO_STOP,
-          string_duplicate("no currently running command to stop"));
-    } else {
-      linenoiseHistoryAdd(input);
-      switch (config_get_exec_mode(config)) {
-      case EXEC_MODE_SYNC:
-        execute_command_sync(config, error_stack, input);
-        break;
-      case EXEC_MODE_ASYNC:
-        execute_command_async(config, error_stack, input);
-        break;
-      case EXEC_MODE_UNKNOWN:
-        log_fatal("attempted to execute command in unknown mode");
-        break;
-      }
+    if (!run_queued_commands(config, error_stack, &queued_commands)) {
+      break;
     }
-    if (error_stack_is_empty(error_stack)) {
-      save_config_settings(config, error_stack);
-    }
-    error_stack_print_and_reset(error_stack);
   }
+  string_list_destroy(queued_commands);
   free(input);
 }
 
