@@ -846,6 +846,22 @@ static void render_history_pending_prefix(
   }
 }
 
+// Sum of the committed scores (plus end bonuses) of `player_idx`'s
+// entries before history index `idx`, skipping challenged-off plays.
+static int history_player_total_before(const TuiGameState *state, int idx,
+                                       int player_idx) {
+  int total_before = 0;
+  for (int prev = 0; prev < idx; prev++) {
+    const TuiHistoryEntry *pe = &state->history[prev];
+    if (pe->player_idx == player_idx && !pe->pending) {
+      if (!pe->challenged_off) {
+        total_before += pe->score + pe->end_bonus;
+      }
+    }
+  }
+  return total_before;
+}
+
 // Draws the rank prefix of the entry under the history cursor as an
 // inverted "N>" chip ("N." when the panel is unfocused, non-inverted while
 // the entry is being edited).
@@ -1061,15 +1077,8 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     // Pending row with a committed move — show the cumulative
     // total the same way a finalized row does. Sum prior same-
     // player committed scores and add this entry's score.
-    int total_before = 0;
-    for (int prev = 0; prev < idx; prev++) {
-      const TuiHistoryEntry *pe = &state->history[prev];
-      if (pe->player_idx == e->player_idx && !pe->pending) {
-        if (!pe->challenged_off) {
-          total_before += pe->score + pe->end_bonus;
-        }
-      }
-    }
+    const int total_before =
+        history_player_total_before(state, idx, e->player_idx);
     char total_str[16];
     snprintf(total_str, sizeof(total_str), "%d", total_before + e->score);
     const int total_len = (int)strlen(total_str);
@@ -1086,15 +1095,8 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     // plus the just-parsed move's score. Renders bold in the
     // muted player accent so the eye reads it as "what your
     // score WILL be" rather than committed.
-    int total_before = 0;
-    for (int prev = 0; prev < idx; prev++) {
-      const TuiHistoryEntry *pe = &state->history[prev];
-      if (pe->player_idx == e->player_idx && !pe->pending) {
-        if (!pe->challenged_off) {
-          total_before += pe->score + pe->end_bonus;
-        }
-      }
-    }
+    const int total_before =
+        history_player_total_before(state, idx, e->player_idx);
     char total_str[16];
     snprintf(total_str, sizeof(total_str), "%d",
              total_before + state->edit_move_score);
