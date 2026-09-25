@@ -57,11 +57,12 @@ typedef enum {
 // — the annotator fills in racks + moves manually as the live
 // game plays out).
 typedef enum {
-  TUI_ANNOTATE_SETUP_LEXICON = 0,
-  TUI_ANNOTATE_SETUP_P1_NAME = 1,
-  TUI_ANNOTATE_SETUP_P2_NAME = 2,
-  TUI_ANNOTATE_SETUP_START = 3,
-  TUI_ANNOTATE_SETUP_ITEM_COUNT = 4,
+  TUI_ANNOTATE_SETUP_LANGUAGE = 0,
+  TUI_ANNOTATE_SETUP_LEXICON = 1,
+  TUI_ANNOTATE_SETUP_P1_NAME = 2,
+  TUI_ANNOTATE_SETUP_P2_NAME = 3,
+  TUI_ANNOTATE_SETUP_START = 4,
+  TUI_ANNOTATE_SETUP_ITEM_COUNT = 5,
 } TuiAnnotateSetupItem;
 
 // Which panel currently has keyboard focus. NONE means no panel is
