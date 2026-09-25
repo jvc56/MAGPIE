@@ -797,7 +797,11 @@ void fj_data_consolidate(Recorder **recorders, int num_recorders,
 
 // Win percentage recorder functions
 enum {
-  WIN_PCT_MAX_SPREAD = 500,
+  // The widest future swing the win percentage recorder tracks. On 15x15 no
+  // swing from any position exceeded 500 in 10M self-play games; 21x21
+  // (super) games run about twice as long and swing up to 0.56% past 500
+  // but none past 1000 in 20K games, so their tables are wider.
+  WIN_PCT_MAX_SPREAD = BOARD_DIM >= 21 ? 1000 : 500,
   // Use x2 the max spread to account for positive and negative spread
   // Use +1 to account for the tie
   WIN_PCT_NUM_COLUMNS = ((WIN_PCT_MAX_SPREAD * 2) + 1),
