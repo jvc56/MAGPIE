@@ -31,9 +31,9 @@ void tui_play_setup_enabled_rows(UiOvertimeRule overtime_rule, int time_seconds,
 
 // Annotate-game setup modal; rows are TuiAnnotateSetupItem.
 void tui_game_render_annotate_setup(struct ncplane *plane, const Theme *theme,
-                                    int focus, const char *lexicon,
-                                    const char *p1_name, const char *p2_name,
-                                    int name_edit_pos);
+                                    int focus, const char *language,
+                                    const char *lexicon, const char *p1_name,
+                                    const char *p2_name, int name_edit_pos);
 
 // Main menu modal (Esc); items are TuiMenuItem.
 void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);

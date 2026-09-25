@@ -570,9 +570,9 @@ static void format_setup_text_row(char *out, size_t out_size, int content_w,
   }
 }
 void tui_game_render_annotate_setup(struct ncplane *plane, const Theme *theme,
-                                    int focus, const char *lexicon,
-                                    const char *p1_name, const char *p2_name,
-                                    int name_edit_pos) {
+                                    int focus, const char *language,
+                                    const char *lexicon, const char *p1_name,
+                                    const char *p2_name, int name_edit_pos) {
   if (plane == NULL || theme == NULL) {
     return;
   }
@@ -598,6 +598,10 @@ void tui_game_render_annotate_setup(struct ncplane *plane, const Theme *theme,
   const bool focus_p1 = (focus == TUI_ANNOTATE_SETUP_P1_NAME);
   const bool focus_p2 = (focus == TUI_ANNOTATE_SETUP_P2_NAME);
 
+  format_setup_row(
+      buf[TUI_ANNOTATE_SETUP_LANGUAGE], ROW_BUF, CONTENT_W, "Language",
+      language != NULL && language[0] != '\0' ? language : "(none)",
+      focus == TUI_ANNOTATE_SETUP_LANGUAGE);
   format_setup_row(
       buf[TUI_ANNOTATE_SETUP_LEXICON], ROW_BUF, CONTENT_W, "Lexicon",
       lexicon != NULL && lexicon[0] != '\0' ? lexicon : "(none)", focus_lex);
@@ -1307,6 +1311,8 @@ const char *tui_modal_help(TuiModalState modal, int focus) {
     }
   case TUI_MODAL_ANNOTATE_SETUP:
     switch (focus) {
+    case TUI_ANNOTATE_SETUP_LANGUAGE:
+      return "Which language's lexicons to choose from.";
     case TUI_ANNOTATE_SETUP_LEXICON:
       return "Word list for checking the moves you enter.";
     case TUI_ANNOTATE_SETUP_P1_NAME:

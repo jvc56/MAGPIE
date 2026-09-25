@@ -27,6 +27,7 @@
 #include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -198,6 +199,23 @@ static int modal_focus(const TuiUiState *ui) {
   }
 }
 
+// Writes the display name of `lexicon`'s language to `out` for a setup
+// dialog's Language row, or "(unknown)" when the lexicon isn't installed.
+// Loads the lexicon list on first use.
+static void lexicon_language(TuiUiState *ui, const char *lexicon, char *out,
+                             size_t out_size) {
+  (void)snprintf(out, out_size, "(unknown)");
+  if (ui->lexicon_list == NULL) {
+    ui->lexicon_list = tui_lexicon_list_load();
+  }
+  if (ui->lexicon_list != NULL) {
+    const int idx = tui_lexicon_list_find(ui->lexicon_list, lexicon);
+    if (idx >= 0) {
+      tui_lexicon_list_language_name(ui->lexicon_list, idx, out, out_size);
+    }
+  }
+}
+
 // Draws the open modal (if any) over the rendered game.
 static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
                                  const TuiGameState *state, TuiUiState *ui,
@@ -224,18 +242,8 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
     // Render from the modal's own local copy of lexicon + time
     // so adjusters preview against the in-modal value, not the
     // live session value.
-    if (ui->lexicon_list == NULL) {
-      ui->lexicon_list = tui_lexicon_list_load();
-    }
-    char lang_buf[32] = "(unknown)";
-    if (ui->lexicon_list != NULL) {
-      const int idx =
-          tui_lexicon_list_find(ui->lexicon_list, ui->watch_setup_lexicon);
-      if (idx >= 0) {
-        tui_lexicon_list_language_name(ui->lexicon_list, idx, lang_buf,
-                                       sizeof(lang_buf));
-      }
-    }
+    char lang_buf[32];
+    lexicon_language(ui, ui->watch_setup_lexicon, lang_buf, sizeof(lang_buf));
     tui_game_render_watch_setup(
         std_plane, theme, ui->watch_setup_focus, ui->watch_setup_time, lang_buf,
         ui->watch_setup_lexicon, state->sim_plies, state->sim_candidates);
@@ -247,23 +255,17 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
     tui_game_render_load_game(std_plane, theme, ui->load_game_buf,
                               ui->load_game_cursor, ui->load_game_error);
   } else if (ui->modal == TUI_MODAL_ANNOTATE_SETUP) {
+    char annotate_lang_buf[32];
+    lexicon_language(ui, ui->annotate_setup_lexicon, annotate_lang_buf,
+                     sizeof(annotate_lang_buf));
     tui_game_render_annotate_setup(
-        std_plane, theme, ui->annotate_setup_focus, ui->annotate_setup_lexicon,
-        ui->annotate_setup_p1_name, ui->annotate_setup_p2_name,
-        ui->annotate_setup_name_cursor);
+        std_plane, theme, ui->annotate_setup_focus, annotate_lang_buf,
+        ui->annotate_setup_lexicon, ui->annotate_setup_p1_name,
+        ui->annotate_setup_p2_name, ui->annotate_setup_name_cursor);
   } else if (ui->modal == TUI_MODAL_PLAY_SETUP) {
-    if (ui->lexicon_list == NULL) {
-      ui->lexicon_list = tui_lexicon_list_load();
-    }
-    char play_lang_buf[32] = "(unknown)";
-    if (ui->lexicon_list != NULL) {
-      const int idx =
-          tui_lexicon_list_find(ui->lexicon_list, ui->watch_setup_lexicon);
-      if (idx >= 0) {
-        tui_lexicon_list_language_name(ui->lexicon_list, idx, play_lang_buf,
-                                       sizeof(play_lang_buf));
-      }
-    }
+    char play_lang_buf[32];
+    lexicon_language(ui, ui->watch_setup_lexicon, play_lang_buf,
+                     sizeof(play_lang_buf));
     tui_game_render_play_setup(
         std_plane, theme, ui->play_setup_focus, ui->play_setup_human_name,
         ui->play_setup_computer_name, ui->play_setup_first_move,

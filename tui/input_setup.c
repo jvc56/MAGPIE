@@ -429,7 +429,8 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
       }
       return true;
     }
-    if (ui->annotate_setup_focus == TUI_ANNOTATE_SETUP_LEXICON &&
+    if ((ui->annotate_setup_focus == TUI_ANNOTATE_SETUP_LANGUAGE ||
+         ui->annotate_setup_focus == TUI_ANNOTATE_SETUP_LEXICON) &&
         (key == NCKEY_LEFT || key == NCKEY_RIGHT)) {
       const int dir = key == NCKEY_RIGHT ? 1 : -1;
       if (ui->lexicon_list == NULL) {
@@ -441,8 +442,13 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
         if (cur < 0) {
           cur = 0;
         }
+        // Language steps to the next language's first lexicon; Lexicon
+        // steps within the current language.
         const int next =
-            tui_lexicon_list_step_same_language(ui->lexicon_list, cur, dir);
+            ui->annotate_setup_focus == TUI_ANNOTATE_SETUP_LANGUAGE
+                ? tui_lexicon_list_step_language(ui->lexicon_list, cur, dir)
+                : tui_lexicon_list_step_same_language(ui->lexicon_list, cur,
+                                                      dir);
         char namebuf[TUI_LEXICON_NAME_MAX];
         if (next != cur && tui_lexicon_list_name(ui->lexicon_list, next,
                                                  namebuf, sizeof(namebuf))) {
