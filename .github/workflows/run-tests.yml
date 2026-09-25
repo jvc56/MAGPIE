@@ -45,7 +45,8 @@ jobs:
       - name: Run clang-tidy static analysis
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-tidy-18 && ./tidy.sh clang-tidy-18
+          sudo apt-get install -y clang-tidy-18 libnotcurses-dev libfreetype-dev zlib1g-dev pkg-config
+          MAGPIE_TIDY_REQUIRE_TUI=1 ./tidy.sh clang-tidy-18
 
   unit-tests-no-pgo-release:
     runs-on: ubuntu-latest
