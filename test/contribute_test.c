@@ -1347,7 +1347,53 @@ static void test_the_claim_body_matches_the_claim_fixture(void) {
   (void)remove(path);
 }
 
+// contribute puts the settings file back byte for byte, and the REPL's save
+// after it is skipped once. Rebuilt from the session instead, a replay that
+// failed -- a snapshot taken before any lexicon was loaded still says
+// `-w1 true`, replayed over a task's lexicon whose wordmap the worker lacks --
+// saved the task's lexicon and `-w1 true`, and every later start of magpie
+// failed loading that wordmap before running anything.
+static void test_contribute_puts_the_settings_file_back(void) {
+  Config *config = config_create_default_test();
+  load_and_exec_config_or_die(config, "set -savesettings true");
+  const char *settings = config_get_settings_filename(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  char *snapshot = config_contribute_snapshot_settings(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(snapshot);
+
+  // What a task does to the session.
+  load_and_exec_config_or_die(config, "set -lex CSW21 -wmp true -numplays 3");
+
+  config_contribute_restore_settings(config, snapshot, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *restored = get_string_from_file_or_die(settings);
+  assert(strings_equal(restored, snapshot));
+
+  // The REPL saves after every command; after contribute, that once is
+  // skipped...
+  save_config_settings(config, error_stack);
+  char *after_save = get_string_from_file_or_die(settings);
+  assert(strings_equal(after_save, snapshot));
+  // ...and only that once.
+  delete_file(settings);
+  save_config_settings(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *next = get_string_from_file_or_die(settings);
+  assert(next[0] != '\0');
+
+  delete_file(settings);
+  free(next);
+  free(after_save);
+  free(restored);
+  free(snapshot);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_contribute(void) {
+  test_contribute_puts_the_settings_file_back();
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();
   test_lexical_flags_are_set_before_the_load();

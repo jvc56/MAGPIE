@@ -415,6 +415,10 @@ struct Config {
   bool show_game_with_moves;
   bool show_prompt;
   bool save_settings;
+  // Set when a command has put the settings file back exactly as it was
+  // (contribute does): the save the REPL makes after every command would
+  // otherwise write this session's state over it. Consumed by that save.
+  bool skip_next_settings_save;
   bool use_mmap_for_rit;
   // The names to load each player's rack info table under, in place of that
   // player's lexicon name. Set only on the contribute path; NULL everywhere
@@ -9187,6 +9191,45 @@ static void config_restore_settings_file(Config *config,
   free(settings_string);
 }
 
+char *config_contribute_snapshot_settings(Config *config,
+                                          ErrorStack *error_stack) {
+  if (!config_get_save_settings(config)) {
+    return NULL;
+  }
+  save_config_settings(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  char *snapshot =
+      get_string_from_file(config_get_settings_filename(config), error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(snapshot);
+    return NULL;
+  }
+  return snapshot;
+}
+
+void config_contribute_restore_settings(Config *config, const char *snapshot,
+                                        ErrorStack *error_stack) {
+  // Replayed into this session as best it can be. Best effort: a snapshot
+  // taken before any lexicon was loaded names none but still says `-w1 true`,
+  // and replayed over a task's lexicon that asks for a wordmap the worker
+  // may not have -- which is why the file is not rebuilt from this session.
+  config_restore_settings_file(config, config_get_settings_filename(config),
+                               error_stack);
+  error_stack_reset(error_stack);
+  if (!snapshot) {
+    return;
+  }
+  // The file itself goes back byte for byte, and the REPL's save after this
+  // command is skipped. Rebuilt from the session, as it was, a failed replay
+  // saved the last task's lexicon and `-w1 true` into it, and every later
+  // start of magpie failed loading that wordmap before running anything.
+  write_string_to_file(config_get_settings_filename(config), "w", snapshot,
+                       error_stack);
+  config->skip_next_settings_save = true;
+}
+
 void impl_contribute(Config *config, const char *settings_path,
                      ErrorStack *error_stack) {
   // Every task mutates config directly (lexicon, per-player settings,
@@ -9201,7 +9244,8 @@ void impl_contribute(Config *config, const char *settings_path,
   // here should not be folded into the contribute loop's own error
   // reporting, which is about tasks, not local settings-file bookkeeping.
   ErrorStack *settings_error_stack = error_stack_create();
-  save_config_settings(config, settings_error_stack);
+  char *settings_snapshot =
+      config_contribute_snapshot_settings(config, settings_error_stack);
   if (!error_stack_is_empty(settings_error_stack)) {
     error_stack_print_and_reset(settings_error_stack);
   }
@@ -9317,11 +9361,12 @@ void impl_contribute(Config *config, const char *settings_path,
 
   // Restore whatever was snapshotted above, win, lose, or interrupted --
   // every exit from the loop above reaches here.
-  config_restore_settings_file(config, config_get_settings_filename(config),
-                               settings_error_stack);
+  config_contribute_restore_settings(config, settings_snapshot,
+                                     settings_error_stack);
   if (!error_stack_is_empty(settings_error_stack)) {
     error_stack_print_and_reset(settings_error_stack);
   }
+  free(settings_snapshot);
   error_stack_destroy(settings_error_stack);
 }
 
@@ -11911,6 +11956,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->show_game_with_moves = true;
   config->show_prompt = true;
   config->save_settings = true;
+  config->skip_next_settings_save = false;
   config->autosave_gcg = true;
   config->fg_required = true;
   config->loaded_settings = true;
@@ -12614,7 +12660,11 @@ void config_add_settings_to_string_builder(const Config *config,
   }
 }
 
-void save_config_settings(const Config *config, ErrorStack *error_stack) {
+void save_config_settings(Config *config, ErrorStack *error_stack) {
+  if (config->skip_next_settings_save) {
+    config->skip_next_settings_save = false;
+    return;
+  }
   if (!config_get_save_settings(config)) {
     return;
   }

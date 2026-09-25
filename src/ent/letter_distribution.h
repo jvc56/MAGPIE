@@ -223,7 +223,9 @@ static inline void ld_create_internal(const char *ld_name,
         string_splitter_get_item(single_letter_info, 1);
     int dist = string_to_int(string_splitter_get_item(single_letter_info, 2),
                              error_stack);
-    if (!error_stack_is_empty(error_stack)) {
+    // A count is kept in a byte: 256 read as none, and a negative one (or
+    // one cast from past INT_MAX) sized the bag wrong and wrote past it.
+    if (!error_stack_is_empty(error_stack) || dist < 0 || dist > UINT8_MAX) {
       error_stack_push(
           error_stack, ERROR_STATUS_LD_INVALID_ROW,
           get_formatted_string("invalid value for the number of '%s' in letter "
@@ -256,6 +258,18 @@ static inline void ld_create_internal(const char *ld_name,
       break;
     }
 
+    // Each form is kept in MAX_LETTER_BYTE_LENGTH bytes with its
+    // terminator; a longer one was copied without it and ran into the next
+    // row's.
+    if (string_length(letter) >= MAX_LETTER_BYTE_LENGTH ||
+        string_length(lower_case_letter) >= MAX_LETTER_BYTE_LENGTH) {
+      error_stack_push(error_stack, ERROR_STATUS_LD_INVALID_ROW,
+                       get_formatted_string(
+                           "letter '%s' in letter distribution file %s is "
+                           "longer than %d bytes: %s",
+                           letter, ld_name, MAX_LETTER_BYTE_LENGTH - 1, line));
+      break;
+    }
     size_t tile_length = string_length(letter);
     if (tile_length > max_tile_length) {
       max_tile_length = tile_length;
@@ -328,8 +342,7 @@ static inline LetterDistribution *ld_create(const char *data_paths,
     char *file_contents =
         fileproxy_get_string_from_filename(ld_filename, error_stack);
     if (error_stack_is_empty(error_stack)) {
-      StringSplitter *ld_lines =
-          split_string_by_newline(file_contents, error_stack);
+      StringSplitter *ld_lines = split_string_by_newline(file_contents, true);
       if (error_stack_is_empty(error_stack)) {
         ld = calloc_or_die(1, sizeof(LetterDistribution));
         ld_create_internal(ld_name, ld_lines, ld, error_stack);

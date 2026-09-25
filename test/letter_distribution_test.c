@@ -335,8 +335,35 @@ static void test_a_distribution_past_the_alphabet_limit_is_refused(void) {
   error_stack_destroy(error_stack);
 }
 
+// A distribution row MAGPIE cannot hold is refused: a count past a byte (256
+// read as none; a negative one sized the bag wrong and wrote past it), and a
+// letter past its buffer (copied without its terminator, into the next
+// row's).
+static void test_a_row_past_what_magpie_holds_is_refused(void) {
+  const char *data_path = DEFAULT_TEST_DATA_PATH;
+  const char *rows[] = {"A,a,256,1,1\nB,b,1,1,0\n", "A,a,-1,1,1\nB,b,1,1,0\n",
+                        "ABCDEF,abcdef,1,1,1\nB,b,1,1,0\n"};
+  for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+    ErrorStack *error_stack = error_stack_create();
+    char *path = data_filepaths_get_writable_filename(
+        data_path, "rowpastlimit", DATA_FILEPATH_TYPE_LD, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    FILE *stream = fopen(path, "w");
+    assert(stream);
+    fputs(rows[i], stream);
+    fclose(stream);
+    LetterDistribution *ld = ld_create(data_path, "rowpastlimit", error_stack);
+    delete_file(path);
+    free(path);
+    assert(ld == NULL);
+    assert(error_stack_top(error_stack) == ERROR_STATUS_LD_INVALID_ROW);
+    error_stack_destroy(error_stack);
+  }
+}
+
 void test_ld(void) {
   test_ld_score_order();
+  test_a_row_past_what_magpie_holds_is_refused();
   test_a_distribution_past_the_alphabet_limit_is_refused();
   test_ld_str_to_mls();
   test_fast_str_to_mls();
