@@ -208,6 +208,11 @@ struct ContributeState {
   DeferredJob *deferred;
   int deferred_count;
   int deferred_capacity;
+  // Whether the last claim's body named any set-aside job. Decided when the
+  // body is built, not afterwards by the clock: a deferral that ended while
+  // the claim was retrying (a 429, a deployment's 503s) was still in the body
+  // the server answered.
+  bool claim_named_deferred;
   // Set once the server has told this worker to stop.
   bool shutdown_requested;
   // Set once any claim has been answered by the server, whatever it said.
@@ -573,7 +578,12 @@ static DeferredJob *find_deferral(ContributeState *state, const char *job_id) {
 
 // Sets `job_id` aside, for twice as long as last time (from the idle interval
 // up to CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS). Returns the interval.
-static int defer_job(ContributeState *state, const char *job_id) {
+int contribute_defer_job(ContributeState *state, const char *job_id) {
+  const int idle_wait = state->client_state->idle_wait_seconds;
+  if (!job_id) {
+    // A claim without a job id cannot be set aside by id; wait instead.
+    return idle_wait > 0 ? idle_wait : 1;
+  }
   DeferredJob *deferred = find_deferral(state, job_id);
   if (!deferred) {
     if (state->deferred_count == state->deferred_capacity) {
@@ -795,6 +805,43 @@ static void print_shutdown(const ContributeState *state,
   }
 }
 
+// The body is required. Both fields are load-bearing: the version drives the
+// per-job floor filter, and the unsupported set is what keeps the server from
+// offering work this worker has already found it cannot do -- for good, or
+// (the set-aside jobs, after the others) for now.
+char *contribute_claim_body(ContributeState *state,
+                            const char *this_magpie_version) {
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_string_field(sb, "magpie_version", this_magpie_version, &first);
+  json_write_array_start(sb, "unsupported_jobs", &first);
+  const int unsupported_count = string_list_get_count(state->unsupported_jobs);
+  bool first_job = true;
+  for (int i = 0; i < unsupported_count; i++) {
+    if (!first_job) {
+      string_builder_add_string(sb, ",");
+    }
+    first_job = false;
+    json_write_quoted(sb, string_list_get_string(state->unsupported_jobs, i));
+  }
+  state->claim_named_deferred = false;
+  for (int i = 0; i < state->deferred_count; i++) {
+    if (!deferral_active(&state->deferred[i])) {
+      continue;
+    }
+    if (!first_job) {
+      string_builder_add_string(sb, ",");
+    }
+    first_job = false;
+    json_write_quoted(sb, state->deferred[i].job_id);
+    state->claim_named_deferred = true;
+  }
+  json_write_array_end(sb);
+  json_write_object_end(sb);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
 static contribute_claim_outcome_t
 claim_task_over_http(ContributeState *state, const char *this_magpie_version,
                      ErrorStack *error_stack) {
@@ -805,37 +852,7 @@ claim_task_over_http(ContributeState *state, const char *this_magpie_version,
   // contribute_state_create's only failure path (client_state_load) returns
   // NULL exactly when error_stack is non-empty, which contribute_claim_task
   // already checks and returns on before this point.
-  // The body is required. Both fields are load-bearing: the version drives
-  // the per-job floor filter, and the unsupported set is what keeps the server
-  // from offering work this worker has already found it cannot do.
-  StringBuilder *sb = string_builder_create();
-  bool first = true;
-  json_write_object_start(sb);
-  json_write_string_field(sb, "magpie_version", this_magpie_version, &first);
-  json_write_array_start(sb, "unsupported_jobs", &first);
-  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference): see above.
-  const int unsupported_count = string_list_get_count(state->unsupported_jobs);
-  bool first_job = true;
-  for (int i = 0; i < unsupported_count; i++) {
-    if (!first_job) {
-      string_builder_add_string(sb, ",");
-    }
-    first_job = false;
-    json_write_quoted(sb, string_list_get_string(state->unsupported_jobs, i));
-  }
-  for (int i = 0; i < state->deferred_count; i++) {
-    if (!deferral_active(&state->deferred[i])) {
-      continue;
-    }
-    if (!first_job) {
-      string_builder_add_string(sb, ",");
-    }
-    first_job = false;
-    json_write_quoted(sb, state->deferred[i].job_id);
-  }
-  json_write_array_end(sb);
-  json_write_object_end(sb);
-  char *claim_body = string_builder_dump_and_destroy(sb, NULL);
+  char *claim_body = contribute_claim_body(state, this_magpie_version);
 
   // A claim that cannot reach the server keeps asking, once this run has been
   // answered by that server at all. An outage has no length a client can know
@@ -918,10 +935,18 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
   // (a server KLV that was missing or wrong): the server cannot tell those
   // from jobs this worker cannot run at all. Wait for the first to come back
   // rather than end the run over a condition an admin is expected to fix.
-  const int deferral_left = seconds_until_a_deferral_ends(state);
-  if (shutdown && deferral_left > 0) {
+  // Only a shutdown about data: one about this build's version
+  // (`magpie_too_old`) has nothing to do with the jobs set aside, and is
+  // obeyed at once.
+  const char *shutdown_reason =
+      shutdown ? json_get_string_or_null(shutdown, "reason") : NULL;
+  const bool about_data =
+      shutdown_reason && (strings_equal(shutdown_reason, "data_out_of_date") ||
+                          strings_equal(shutdown_reason, "both"));
+  if (shutdown && about_data && state->claim_named_deferred) {
     json_destroy(state->assignment);
     state->assignment = NULL;
+    const int deferral_left = seconds_until_a_deferral_ends(state);
     thread_control_print_formatted(
         thread_control,
         "nothing to do but jobs set aside; asking again in %d seconds\n",
@@ -1028,7 +1053,7 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   char *missing_json = string_builder_dump_and_destroy(sb, NULL);
   const bool server_artifact = state->server_artifact_mismatch;
   if (server_artifact) {
-    const int wait_seconds = defer_job(state, state->claimed_job_id);
+    const int wait_seconds = contribute_defer_job(state, state->claimed_job_id);
     thread_control_print_formatted(
         thread_control,
         "declining this task: the server's leave file is missing or does not "

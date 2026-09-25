@@ -215,6 +215,16 @@ ContributeState *contribute_state_create(const char *settings_path,
                                          ErrorStack *error_stack);
 void contribute_state_destroy(ContributeState *state);
 
+// The body of a claim: this build's version and the jobs to leave out --
+// those it cannot run, and those set aside for now. Exposed for tests.
+char *contribute_claim_body(ContributeState *state,
+                            const char *this_magpie_version);
+
+// Sets a job aside, for twice as long as last time (from the idle interval to
+// CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS); returns the interval. Exposed
+// for tests.
+int contribute_defer_job(ContributeState *state, const char *job_id);
+
 // Compares dotted numeric versions, returning <0, 0 or >0. Missing components
 // count as zero, so "1.4" and "1.4.0" are equal. Exposed for testing: naive
 // string comparison gets this wrong ("1.10" sorts below "1.9").

@@ -1,5 +1,6 @@
 #include "io_util.h"
 
+#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include <assert.h>
 #include <ctype.h>
@@ -671,8 +672,8 @@ char *temporary_sibling(const char *filename) {
   static atomic_uint_least64_t counter = 0;
   const unsigned long long sequence =
       (unsigned long long)atomic_fetch_add(&counter, 1);
-  struct timespec now;
-  (void)timespec_get(&now, TIME_UTC);
+  TimeSpec now = {0};
+  ctimer_clock_gettime_realtime(&now);
   const unsigned long long nonce =
       (unsigned long long)now.tv_sec * 1000000000ULL +
       (unsigned long long)now.tv_nsec;

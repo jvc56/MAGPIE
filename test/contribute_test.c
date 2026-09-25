@@ -1242,6 +1242,46 @@ static void test_a_runs_state_starts_clean(void) {
   (void)remove(path);
 }
 
+// A job whose server KLV is missing or wrong is set aside for a doubling
+// interval, named in the claim's unsupported list meanwhile (after the jobs
+// set aside for good), and the claim says it named one -- which is what lets
+// a data shutdown answered because of it be waited out, not obeyed.
+static void test_a_set_aside_job_is_left_out_of_claims_for_a_while(void) {
+  const char *path = "contribute_test_defer_settings.txt";
+  write_settings_file(path, "server https://birdtest.example\nidlewait 3\n");
+  ErrorStack *error_stack = error_stack_create();
+  ThreadControl *thread_control = thread_control_create();
+  ContributeState *state =
+      contribute_state_create(path, thread_control, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  char *body = contribute_claim_body(state, "0.1.1");
+  assert_strings_equal(
+      body, "{\"magpie_version\":\"0.1.1\",\"unsupported_jobs\":[]}");
+  free(body);
+
+  assert(contribute_defer_job(state, "job-a") == 3);
+  assert(contribute_defer_job(state, "job-a") == 6);
+  assert(contribute_defer_job(state, NULL) == 3);
+  body = contribute_claim_body(state, "0.1.1");
+  assert(strstr(body, "\"unsupported_jobs\":[\"job-a\"]"));
+  free(body);
+  for (int i = 0; i < 20; i++) {
+    (void)contribute_defer_job(state, "job-b");
+  }
+  assert(contribute_defer_job(state, "job-b") ==
+         CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS);
+  body = contribute_claim_body(state, "0.1.1");
+  assert(strstr(body, "\"job-a\",\"job-b\"") ||
+         strstr(body, "\"job-b\",\"job-a\""));
+  free(body);
+
+  contribute_state_destroy(state);
+  thread_control_destroy(thread_control);
+  error_stack_destroy(error_stack);
+  (void)remove(path);
+}
+
 void test_contribute(void) {
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();
@@ -1262,4 +1302,5 @@ void test_contribute(void) {
   test_a_rewritten_klv_is_read_again();
   test_an_abandoned_temporary_is_removed();
   test_a_runs_state_starts_clean();
+  test_a_set_aside_job_is_left_out_of_claims_for_a_while();
 }
