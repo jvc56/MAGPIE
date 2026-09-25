@@ -5324,9 +5324,10 @@ void parse_commit(Config *config, StringBuilder *move_string_builder,
         rack_set_to_string(config->ld, rack_to_draw_before_pass_out_game_end,
                            rack_to_draw_before_pass_out_game_end_str);
     if (num_mls < 0) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_COMMIT_INVALID_PASS_OUT_RACK,
-          string_duplicate("invalid rack '%s' for consecutive pass game end"));
+      error_stack_push(error_stack, ERROR_STATUS_COMMIT_INVALID_PASS_OUT_RACK,
+                       get_formatted_string(
+                           "invalid rack '%s' for consecutive pass game end",
+                           rack_to_draw_before_pass_out_game_end_str));
       return;
     }
     if (num_mls > RACK_SIZE) {
@@ -8616,7 +8617,10 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
   game_reset(config->game);
   config_reset_move_list_and_invalidate_sim_results(config);
   config->seed = seed;
-  if (draw_rack_string_from_bag(config->game, 0, rack_str) < 0) {
+  // A full rack, drawable from the bag. Fewer letters drew and analysed a
+  // partial rack -- an empty string, a pass-only "analysis" -- as if it were
+  // the opening rack the task named.
+  if (draw_rack_string_from_bag(config->game, 0, rack_str) != RACK_SIZE) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string("server sent an unusable rack: '%s'", rack_str));

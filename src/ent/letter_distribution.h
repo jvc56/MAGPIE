@@ -187,6 +187,19 @@ static inline void ld_create_internal(const char *ld_name,
     ld->ld_ml_to_alt_hl[i][0] = '\0';
   }
 
+  // Every per-letter array -- a Rack's counts, the machine-letter tables, the
+  // blanked forms at ml | 0x80 -- has room for MAX_ALPHABET_SIZE letters. A
+  // longer file was loaded without complaint and written past all of them.
+  if (number_of_lines < 1 || number_of_lines > MAX_ALPHABET_SIZE) {
+    ld->size = 0;
+    error_stack_push(
+        error_stack, ERROR_STATUS_LD_INVALID_ROW,
+        get_formatted_string("letter distribution file %s has %d rows; it must "
+                             "have between 1 and %d",
+                             ld_name, number_of_lines, MAX_ALPHABET_SIZE));
+    return;
+  }
+
   int machine_letter = 0;
   size_t max_tile_length = 0;
   ld->total_tiles = 0;

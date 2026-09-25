@@ -132,7 +132,17 @@ static void convert_rack_equity_to_klv(const LetterDistribution *ld,
                                rows + 1, csv_filename));
       break;
     }
-    rack_set_to_string(ld, &rack, rack_str);
+    if (rack_set_to_string(ld, &rack, rack_str) < 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+          get_formatted_string("line %d of rack equity csv file '%s': rack "
+                               "equity rows must name full racks of %d tiles "
+                               "drawable from this letter distribution, and "
+                               "'%s' has a letter it does not have (or a "
+                               "lower-case one)",
+                               rows + 1, csv_filename, (RACK_SIZE), rack_str));
+      break;
+    }
     const uint64_t count = string_to_uint64(count_str, error_stack);
     const double equity_sum =
         error_stack_is_empty(error_stack)
