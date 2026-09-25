@@ -4,6 +4,7 @@
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/gameplay_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
@@ -1010,6 +1011,29 @@ static void test_get_top_move_for_player_on_turn_records_all_ranked(void) {
   config_destroy(config);
 }
 
+// A server-sent opening rack is drawn with draw_rack_string_from_bag. A
+// lower-case letter in it was counted outside the rack's array and crashed the
+// worker, release build included; it is refused as malformed, and nothing is
+// drawn.
+static void test_a_designated_letter_is_not_a_drawable_rack(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const Bag *bag = game_get_bag(game);
+  const int in_bag = bag_get_letters(bag);
+
+  assert(draw_rack_string_from_bag(game, 0, "aEINST?") ==
+         DRAW_RACK_STRING_MALFORMED);
+  assert(draw_rack_string_from_bag(game, 0, "AEINSTz") ==
+         DRAW_RACK_STRING_MALFORMED);
+  assert(rack_is_empty(player_get_rack(game_get_player(game, 0))));
+  assert(bag_get_letters(bag) == in_bag);
+
+  assert(draw_rack_string_from_bag(game, 0, "AEINST?") == 7);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_gameplay(void) {
   test_draw_to_full_rack();
   test_rack_is_drawable();
@@ -1024,4 +1048,5 @@ void test_gameplay(void) {
   test_incremental_cross_set_undo();
   test_get_top_move_for_player_on_turn_respects_sort_type();
   test_get_top_move_for_player_on_turn_records_all_ranked();
+  test_a_designated_letter_is_not_a_drawable_rack();
 }

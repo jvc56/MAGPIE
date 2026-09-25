@@ -275,21 +275,21 @@ void test_encoded_rack(void) {
 
 // A rack of undrawn tiles has no designated blanks. A lower-case letter, one
 // to ld_str_to_mls, was counted at a machine letter past the end of the
-// rack's array by rack_set_to_string (a stack-buffer-overflow under ASan from
-// `convert rackequity2klv` and forced racks); the undesignated form refuses
-// the string and leaves the rack empty.
+// rack's array (a stack-buffer-overflow under ASan from `convert
+// rackequity2klv`, forced racks, and a server-sent opening rack, which crashed
+// the release worker); now the string is refused and the rack left empty.
 static void test_an_undrawn_rack_refuses_designated_blanks(void) {
   Config *config = config_create_or_die("set -lex NWL20");
   const LetterDistribution *ld = config_get_ld(config);
   Rack *rack = rack_create(ld_get_size(ld));
 
-  assert(rack_set_to_string_undesignated(ld, rack, "?AEINST") == 7);
+  assert(rack_set_to_string(ld, rack, "?AEINST") == 7);
   assert(rack_get_total_letters(rack) == 7);
   assert(rack_get_letter(rack, BLANK_MACHINE_LETTER) == 1);
 
-  assert(rack_set_to_string_undesignated(ld, rack, "aEINST?") == -1);
+  assert(rack_set_to_string(ld, rack, "aEINST?") == -1);
   assert(rack_get_total_letters(rack) == 0);
-  assert(rack_set_to_string_undesignated(ld, rack, "AEINSTz") == -1);
+  assert(rack_set_to_string(ld, rack, "AEINSTz") == -1);
   assert(rack_get_total_letters(rack) == 0);
 
   rack_destroy(rack);

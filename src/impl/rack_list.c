@@ -279,8 +279,7 @@ static uint32_t *rack_list_resolve_forced_rack_indices(
   rack_set_dist_size(&rack, ld_get_size(ld));
   for (int i = 0; i < num_forced_racks; i++) {
     const char *forced_rack = forced_racks[i];
-    const int num_letters =
-        rack_set_to_string_undesignated(ld, &rack, forced_rack);
+    const int num_letters = rack_set_to_string(ld, &rack, forced_rack);
     uint32_t word_index = KLV_UNFOUND_INDEX;
     if (num_letters == (RACK_SIZE)) {
       word_index = klv_get_word_index(rack_list->klv, &rack);
