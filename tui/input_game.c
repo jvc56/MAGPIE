@@ -110,9 +110,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
     // Works from any panel focus; editing contexts (board entry,
     // history cells, slash input, modals) consume their keys
     // before this chain so a typed 'c' never lands here.
-    pthread_mutex_lock(&state->mutex);
     tui_copy_position_cgp(state);
-    pthread_mutex_unlock(&state->mutex);
   } else if (state->focused_panel == TUI_FOCUS_BOARD &&
              (key == NCKEY_ENTER || key == '\r' || key == '\n') &&
              state->app_mode != TUI_APP_MODE_WATCH) {
@@ -400,9 +398,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
           ui->quit_confirm_focus = 0;
           ui->quit_confirm_return = TUI_MODAL_NONE;
         } else if (strcmp(cmd, "copy") == 0) {
-          pthread_mutex_lock(&state->mutex);
           tui_copy_position_cgp(state);
-          pthread_mutex_unlock(&state->mutex);
         } else if (strcmp(cmd, "resume") == 0) {
           pthread_mutex_lock(&state->mutex);
           tui_analysis_worker_start(state, state->history_cursor);
@@ -441,9 +437,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
               ui->quit_confirm_focus = 0;
               ui->quit_confirm_return = TUI_MODAL_NONE;
             } else if (strcmp(match, "copy") == 0) {
-              pthread_mutex_lock(&state->mutex);
               tui_copy_position_cgp(state);
-              pthread_mutex_unlock(&state->mutex);
             } else if (strcmp(match, "resume") == 0) {
               pthread_mutex_lock(&state->mutex);
               tui_analysis_worker_start(state, state->history_cursor);

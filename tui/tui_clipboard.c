@@ -1,6 +1,7 @@
 #include "tui_clipboard.h"
 
 #include "../src/impl/cgp.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,13 +58,13 @@ static void tui_copy_to_clipboard(const char *text) {
 // computer's rack is blanked out of the CGP — consistent with the
 // rack-panel / history concealment, the clipboard must not leak the
 // computer's tiles; once the game is over the full position is
-// copied. Caller must hold gs->mutex.
+// copied. Takes gs->mutex itself, and releases it before writing the
+// clipboard so a slow pbcopy can't stall the bot or the renderer.
 void tui_copy_position_cgp(TuiGameState *gs) {
-  if (gs->game == NULL) {
-    return;
-  }
-  char *cgp = game_get_cgp(gs->game, true);
+  pthread_mutex_lock(&gs->mutex);
+  char *cgp = gs->game != NULL ? game_get_cgp(gs->game, true) : NULL;
   if (cgp == NULL) {
+    pthread_mutex_unlock(&gs->mutex);
     return;
   }
   const bool conceal = gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
@@ -88,10 +89,11 @@ void tui_copy_position_cgp(TuiGameState *gs) {
       }
     }
   }
-  tui_copy_to_clipboard(cgp);
-  free(cgp);
   snprintf(gs->notice_buf, sizeof(gs->notice_buf), "Copied CGP%s",
            conceal ? " (computer rack hidden)" : "");
   clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
   gs->notice_expires_at.tv_sec += 2;
+  pthread_mutex_unlock(&gs->mutex);
+  tui_copy_to_clipboard(cgp);
+  free(cgp);
 }
