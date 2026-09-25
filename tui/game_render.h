@@ -111,11 +111,4 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
 // change rebuilds them at the new cell-to-pixel ratio.
 void tui_game_render_reset_grids(void);
 
-// Debug / perf instrumentation (see MAGPIE_FPS_DEBUG in main.c). The
-// UI thread records per-frame measurements; the status bar and perf
-// trace read them back.
-void tui_debug_record_frame_us(long frame_us);
-void tui_debug_record_sprixel_stats(uint64_t emits, uint64_t elides);
-void tui_debug_set_input_lag_us(long us);
-
 #endif

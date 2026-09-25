@@ -21,6 +21,7 @@
 #include "lexicon_picker.h"
 #include "move_entry.h"
 #include "onboarding.h"
+#include "render_bars.h"
 #include "render_board.h"
 #include "render_common.h"
 #include "render_hit_test.h"
