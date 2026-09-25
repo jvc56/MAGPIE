@@ -87,24 +87,7 @@ static void evict_oldest_history_entry(TuiGameState *state) {
   if (state->history_count < TUI_HISTORY_MAX) {
     return;
   }
-  if (state->history[0].board_before != NULL) {
-    board_destroy(state->history[0].board_before);
-  }
-  if (state->history[0].rack_before != NULL) {
-    rack_destroy(state->history[0].rack_before);
-  }
-  if (state->history[0].opp_rack_before != NULL) {
-    rack_destroy(state->history[0].opp_rack_before);
-  }
-  if (state->history[0].sim_results_saved != NULL) {
-    sim_results_destroy(state->history[0].sim_results_saved);
-  }
-  if (state->history[0].endgame_moves_saved != NULL) {
-    free(state->history[0].endgame_moves_saved);
-  }
-  if (state->history[0].loaded_move != NULL) {
-    free(state->history[0].loaded_move);
-  }
+  tui_history_entry_release(&state->history[0]);
   memmove(&state->history[0], &state->history[1],
           sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
   state->history_count = TUI_HISTORY_MAX - 1;
@@ -356,31 +339,7 @@ static void finalize_history(TuiGameState *state, int idx, const Move *move,
 static void pop_history(TuiGameState *state) {
   if (state->history_count > 0) {
     TuiHistoryEntry *entry = &state->history[state->history_count - 1];
-    if (entry->board_before != NULL) {
-      board_destroy(entry->board_before);
-      entry->board_before = NULL;
-    }
-    if (entry->rack_before != NULL) {
-      rack_destroy(entry->rack_before);
-      entry->rack_before = NULL;
-    }
-    if (entry->opp_rack_before != NULL) {
-      rack_destroy(entry->opp_rack_before);
-      entry->opp_rack_before = NULL;
-    }
-    if (entry->sim_results_saved != NULL) {
-      sim_results_destroy(entry->sim_results_saved);
-      entry->sim_results_saved = NULL;
-    }
-    if (entry->endgame_moves_saved != NULL) {
-      free(entry->endgame_moves_saved);
-      entry->endgame_moves_saved = NULL;
-      entry->endgame_moves_saved_count = 0;
-    }
-    if (entry->loaded_move != NULL) {
-      free(entry->loaded_move);
-      entry->loaded_move = NULL;
-    }
+    tui_history_entry_release(entry);
     state->history_count--;
   }
 }

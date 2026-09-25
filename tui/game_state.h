@@ -810,4 +810,9 @@ bool tui_game_state_play_over(const TuiGameState *state);
 // first (otherwise the bot's reads race against the reset).
 void tui_game_state_reset_game(TuiGameState *state, uint64_t seed);
 
+// Free everything a history entry owns (pre-move board / racks, saved sim
+// results and endgame moves, the loaded move) and clear the pointers so
+// the slot can be reused.
+void tui_history_entry_release(TuiHistoryEntry *entry);
+
 #endif

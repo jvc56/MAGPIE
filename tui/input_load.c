@@ -526,31 +526,7 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
       if (ok) {
         for (int i = 0; i < state->history_count; i++) {
           TuiHistoryEntry *e = &state->history[i];
-          if (e->board_before != NULL) {
-            board_destroy(e->board_before);
-            e->board_before = NULL;
-          }
-          if (e->rack_before != NULL) {
-            rack_destroy(e->rack_before);
-            e->rack_before = NULL;
-          }
-          if (e->opp_rack_before != NULL) {
-            rack_destroy(e->opp_rack_before);
-            e->opp_rack_before = NULL;
-          }
-          if (e->sim_results_saved != NULL) {
-            sim_results_destroy(e->sim_results_saved);
-            e->sim_results_saved = NULL;
-          }
-          if (e->endgame_moves_saved != NULL) {
-            free(e->endgame_moves_saved);
-            e->endgame_moves_saved = NULL;
-            e->endgame_moves_saved_count = 0;
-          }
-          if (e->loaded_move != NULL) {
-            free(e->loaded_move);
-            e->loaded_move = NULL;
-          }
+          tui_history_entry_release(e);
         }
         state->history_count = 0;
         state->history_cursor = -1;
@@ -704,31 +680,7 @@ void tui_load_position_live_parse(TuiGameState *state, TuiUiState *ui) {
         // position.
         for (int i = 0; i < state->history_count; i++) {
           TuiHistoryEntry *e = &state->history[i];
-          if (e->board_before != NULL) {
-            board_destroy(e->board_before);
-            e->board_before = NULL;
-          }
-          if (e->rack_before != NULL) {
-            rack_destroy(e->rack_before);
-            e->rack_before = NULL;
-          }
-          if (e->opp_rack_before != NULL) {
-            rack_destroy(e->opp_rack_before);
-            e->opp_rack_before = NULL;
-          }
-          if (e->sim_results_saved != NULL) {
-            sim_results_destroy(e->sim_results_saved);
-            e->sim_results_saved = NULL;
-          }
-          if (e->endgame_moves_saved != NULL) {
-            free(e->endgame_moves_saved);
-            e->endgame_moves_saved = NULL;
-            e->endgame_moves_saved_count = 0;
-          }
-          if (e->loaded_move != NULL) {
-            free(e->loaded_move);
-            e->loaded_move = NULL;
-          }
+          tui_history_entry_release(e);
         }
         state->history_count = 0;
         state->history_cursor = -1;

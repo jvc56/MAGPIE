@@ -1129,26 +1129,7 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state) {
   // keep this change scoped.
   for (int idx = 0; idx < state->history_count; idx++) {
     TuiHistoryEntry *entry = &state->history[idx];
-    if (entry->board_before != NULL) {
-      board_destroy(entry->board_before);
-      entry->board_before = NULL;
-    }
-    if (entry->rack_before != NULL) {
-      rack_destroy(entry->rack_before);
-      entry->rack_before = NULL;
-    }
-    if (entry->opp_rack_before != NULL) {
-      rack_destroy(entry->opp_rack_before);
-      entry->opp_rack_before = NULL;
-    }
-    if (entry->sim_results_saved != NULL) {
-      sim_results_destroy(entry->sim_results_saved);
-      entry->sim_results_saved = NULL;
-    }
-    if (entry->loaded_move != NULL) {
-      free(entry->loaded_move);
-      entry->loaded_move = NULL;
-    }
+    tui_history_entry_release(entry);
   }
   state->history_count = 0;
   state->history_cursor = -1;
@@ -1450,26 +1431,7 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
   // Free per-entry owned state before zeroing the count.
   for (int idx = 0; idx < state->history_count; idx++) {
     TuiHistoryEntry *entry = &state->history[idx];
-    if (entry->board_before != NULL) {
-      board_destroy(entry->board_before);
-      entry->board_before = NULL;
-    }
-    if (entry->rack_before != NULL) {
-      rack_destroy(entry->rack_before);
-      entry->rack_before = NULL;
-    }
-    if (entry->opp_rack_before != NULL) {
-      rack_destroy(entry->opp_rack_before);
-      entry->opp_rack_before = NULL;
-    }
-    if (entry->sim_results_saved != NULL) {
-      sim_results_destroy(entry->sim_results_saved);
-      entry->sim_results_saved = NULL;
-    }
-    if (entry->loaded_move != NULL) {
-      free(entry->loaded_move);
-      entry->loaded_move = NULL;
-    }
+    tui_history_entry_release(entry);
   }
   state->history_count = 0;
   state->history_cursor = -1;
@@ -1549,26 +1511,7 @@ void tui_game_state_destroy(TuiGameState *state) {
   // Free per-entry owned state stashed during gameplay.
   for (int idx = 0; idx < state->history_count; idx++) {
     TuiHistoryEntry *entry = &state->history[idx];
-    if (entry->board_before != NULL) {
-      board_destroy(entry->board_before);
-      entry->board_before = NULL;
-    }
-    if (entry->rack_before != NULL) {
-      rack_destroy(entry->rack_before);
-      entry->rack_before = NULL;
-    }
-    if (entry->opp_rack_before != NULL) {
-      rack_destroy(entry->opp_rack_before);
-      entry->opp_rack_before = NULL;
-    }
-    if (entry->sim_results_saved != NULL) {
-      sim_results_destroy(entry->sim_results_saved);
-      entry->sim_results_saved = NULL;
-    }
-    if (entry->loaded_move != NULL) {
-      free(entry->loaded_move);
-      entry->loaded_move = NULL;
-    }
+    tui_history_entry_release(entry);
   }
   state->history_count = 0;
   if (state->game != NULL) {
@@ -1653,4 +1596,32 @@ void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap) {
   snap->depth = 0;
   snap->solving_player = 0;
   snap->valid = false;
+}
+
+void tui_history_entry_release(TuiHistoryEntry *entry) {
+  if (entry->board_before != NULL) {
+    board_destroy(entry->board_before);
+    entry->board_before = NULL;
+  }
+  if (entry->rack_before != NULL) {
+    rack_destroy(entry->rack_before);
+    entry->rack_before = NULL;
+  }
+  if (entry->opp_rack_before != NULL) {
+    rack_destroy(entry->opp_rack_before);
+    entry->opp_rack_before = NULL;
+  }
+  if (entry->sim_results_saved != NULL) {
+    sim_results_destroy(entry->sim_results_saved);
+    entry->sim_results_saved = NULL;
+  }
+  if (entry->endgame_moves_saved != NULL) {
+    free(entry->endgame_moves_saved);
+    entry->endgame_moves_saved = NULL;
+    entry->endgame_moves_saved_count = 0;
+  }
+  if (entry->loaded_move != NULL) {
+    free(entry->loaded_move);
+    entry->loaded_move = NULL;
+  }
 }
