@@ -153,6 +153,13 @@ static void heartbeat_stop(Heartbeat *heartbeat) {
 // The claim/submit state machine
 // ---------------------------------------------------------------------------
 
+// See ContributeState.deferred.
+typedef struct DeferredJob {
+  char *job_id;
+  int64_t until_ns;
+  int wait_seconds;
+} DeferredJob;
+
 struct ContributeState {
   ClientState *client_state;
   HttpClient *http_client;
@@ -193,15 +200,14 @@ struct ContributeState {
   // Whether one of them is the server's own artifact (the leave KLV) rather
   // than a file built here; see contribute_decline_derived_mismatch.
   bool server_artifact_mismatch;
-  // The last server KLV found not to be what the claim said -- its key, the
-  // hash the claim expected, and what was fetched (NULL: not found) -- so a
-  // claim naming the same pair is declined without fetching it again, and
-  // how long the worker now waits between such claims (doubling to ten
-  // minutes). Cleared when a KLV verifies.
-  char *bad_artifact_key;
-  char *bad_artifact_expected;
-  char *bad_artifact_actual;
-  int bad_artifact_wait_seconds;
+  // Jobs set aside for a while because the server's leave KLV for them was
+  // missing or wrong: sent as unsupported until `until_ns`, then claimable
+  // again -- and the KLV fetched afresh, so an admin's repair is noticed.
+  // The interval doubles per job to ten minutes and is forgotten when the
+  // job's KLV verifies. Only that job waits: the worker goes on with others.
+  DeferredJob *deferred;
+  int deferred_count;
+  int deferred_capacity;
   // Set once the server has told this worker to stop.
   bool shutdown_requested;
   // Set once any claim has been answered by the server, whatever it said.
@@ -490,20 +496,6 @@ void contribute_record_derived_mismatch(ContributeState *state,
   // the server's to fix, and nothing on this disk is out of date.
   if (strings_equal(role, "klv")) {
     state->server_artifact_mismatch = true;
-    if (!state->bad_artifact_key ||
-        !strings_equal(state->bad_artifact_key, name) ||
-        !strings_equal(state->bad_artifact_expected, expected)) {
-      // A different artifact, or a new hash for this one: whatever was wrong
-      // before is not what is wrong now, so the wait starts short again.
-      state->bad_artifact_wait_seconds = 0;
-    }
-    free(state->bad_artifact_key);
-    free(state->bad_artifact_expected);
-    char *previous_actual = state->bad_artifact_actual;
-    state->bad_artifact_key = string_duplicate(name);
-    state->bad_artifact_expected = string_duplicate(expected);
-    state->bad_artifact_actual = string_duplicate_allow_null(actual);
-    free(previous_actual);
     return;
   }
 
@@ -563,16 +555,91 @@ static void report_server_retry(void *context, int retry_idx, int wait_seconds,
   }
 }
 
-static ContributeState *contribute_state_create(const char *settings_path,
-                                                ThreadControl *thread_control,
-                                                ErrorStack *error_stack) {
+// Nanoseconds on the monotonic clock.
+static int64_t now_ns(void) { return ctimer_monotonic_ns(); }
+
+static bool deferral_active(const DeferredJob *deferred) {
+  return deferred->until_ns > now_ns();
+}
+
+static DeferredJob *find_deferral(ContributeState *state, const char *job_id) {
+  for (int i = 0; i < state->deferred_count; i++) {
+    if (strings_equal(state->deferred[i].job_id, job_id)) {
+      return &state->deferred[i];
+    }
+  }
+  return NULL;
+}
+
+// Sets `job_id` aside, for twice as long as last time (from the idle interval
+// up to CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS). Returns the interval.
+static int defer_job(ContributeState *state, const char *job_id) {
+  DeferredJob *deferred = find_deferral(state, job_id);
+  if (!deferred) {
+    if (state->deferred_count == state->deferred_capacity) {
+      state->deferred_capacity =
+          state->deferred_capacity ? state->deferred_capacity * 2 : 4;
+      state->deferred = (DeferredJob *)realloc_or_die(
+          state->deferred,
+          (size_t)state->deferred_capacity * sizeof(DeferredJob));
+    }
+    deferred = &state->deferred[state->deferred_count++];
+    deferred->job_id = string_duplicate(job_id);
+    deferred->wait_seconds = 0;
+  }
+  const int idle = state->client_state->idle_wait_seconds;
+  int wait = deferred->wait_seconds <= 0 ? (idle > 0 ? idle : 1)
+                                         : deferred->wait_seconds * 2;
+  if (wait > CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS) {
+    wait = CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS;
+  }
+  deferred->wait_seconds = wait;
+  deferred->until_ns = now_ns() + (int64_t)wait * 1000000000LL;
+  return wait;
+}
+
+void contribute_artifact_verified(ContributeState *state) {
+  if (!state->claimed_job_id) {
+    return;
+  }
+  for (int i = 0; i < state->deferred_count; i++) {
+    if (strings_equal(state->deferred[i].job_id, state->claimed_job_id)) {
+      free(state->deferred[i].job_id);
+      state->deferred[i] = state->deferred[--state->deferred_count];
+      return;
+    }
+  }
+}
+
+// Seconds until the first active deferral ends, or 0 if none is active.
+static int seconds_until_a_deferral_ends(const ContributeState *state) {
+  int64_t soonest = 0;
+  for (int i = 0; i < state->deferred_count; i++) {
+    const int64_t left = state->deferred[i].until_ns - now_ns();
+    if (left > 0 && (soonest == 0 || left < soonest)) {
+      soonest = left;
+    }
+  }
+  return soonest == 0 ? 0 : (int)(soonest / 1000000000LL) + 1;
+}
+
+static bool interrupted_check(void *thread_control) {
+  return contribute_interrupted((ThreadControl *)thread_control);
+}
+
+ContributeState *contribute_state_create(const char *settings_path,
+                                         ThreadControl *thread_control,
+                                         ErrorStack *error_stack) {
   ClientState *client_state = client_state_load(settings_path, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
 
+  // Zeroed: every field not set below starts false, zero or NULL. Fields
+  // added without a line here were read uninitialized -- and freed at the
+  // end of every run.
   ContributeState *state =
-      (ContributeState *)malloc_or_die(sizeof(ContributeState));
+      (ContributeState *)calloc_or_die(1, sizeof(ContributeState));
   state->client_state = client_state;
   state->threads = client_state->threads;
   if (state->threads <= 0) {
@@ -598,6 +665,8 @@ static ContributeState *contribute_state_create(const char *settings_path,
   state->reached_server = false;
   http_client_set_retry_listener(state->http_client, report_server_retry,
                                  thread_control);
+  http_client_set_abort_check(state->http_client, interrupted_check,
+                              thread_control);
   memset(&state->heartbeat, 0, sizeof(state->heartbeat));
   state->claim_token = NULL;
   state->claimed_job_id = NULL;
@@ -746,11 +815,23 @@ claim_task_over_http(ContributeState *state, const char *this_magpie_version,
   json_write_array_start(sb, "unsupported_jobs", &first);
   // NOLINTNEXTLINE(clang-analyzer-core.NullDereference): see above.
   const int unsupported_count = string_list_get_count(state->unsupported_jobs);
+  bool first_job = true;
   for (int i = 0; i < unsupported_count; i++) {
-    if (i > 0) {
+    if (!first_job) {
       string_builder_add_string(sb, ",");
     }
+    first_job = false;
     json_write_quoted(sb, string_list_get_string(state->unsupported_jobs, i));
+  }
+  for (int i = 0; i < state->deferred_count; i++) {
+    if (!deferral_active(&state->deferred[i])) {
+      continue;
+    }
+    if (!first_job) {
+      string_builder_add_string(sb, ",");
+    }
+    first_job = false;
+    json_write_quoted(sb, state->deferred[i].job_id);
   }
   json_write_array_end(sb);
   json_write_object_end(sb);
@@ -833,6 +914,21 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
   // of a 204, which is a quiet server. Exit cleanly, having said what is
   // wrong and what to do about it.
   const JsonValue *shutdown = json_object_get(state->assignment, "shutdown");
+  // Nothing claimable may only be because of the jobs set aside for a while
+  // (a server KLV that was missing or wrong): the server cannot tell those
+  // from jobs this worker cannot run at all. Wait for the first to come back
+  // rather than end the run over a condition an admin is expected to fix.
+  const int deferral_left = seconds_until_a_deferral_ends(state);
+  if (shutdown && deferral_left > 0) {
+    json_destroy(state->assignment);
+    state->assignment = NULL;
+    thread_control_print_formatted(
+        thread_control,
+        "nothing to do but jobs set aside; asking again in %d seconds\n",
+        deferral_left);
+    nap_unless_interrupted(thread_control, deferral_left);
+    return CONTRIBUTE_CLAIM_NO_WORK;
+  }
   if (shutdown) {
     print_shutdown(state, thread_control, shutdown);
     state->shutdown_requested = true;
@@ -931,23 +1027,13 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   }
   char *missing_json = string_builder_dump_and_destroy(sb, NULL);
   const bool server_artifact = state->server_artifact_mismatch;
-  int wait_seconds = 0;
   if (server_artifact) {
-    // Doubling from the idle interval to ten minutes: every retry is a claim,
-    // a decline and (unless this pair is already known bad) a download of
-    // the KLV, from every leave worker, until an admin puts the object right.
-    const int idle = state->client_state->idle_wait_seconds;
-    wait_seconds = state->bad_artifact_wait_seconds <= 0
-                       ? (idle > 0 ? idle : 1)
-                       : state->bad_artifact_wait_seconds * 2;
-    if (wait_seconds > CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS) {
-      wait_seconds = CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS;
-    }
-    state->bad_artifact_wait_seconds = wait_seconds;
+    const int wait_seconds = defer_job(state, state->claimed_job_id);
     thread_control_print_formatted(
         thread_control,
         "declining this task: the server's leave file is missing or does not "
-        "match the hash it recorded for it; asking again in %d seconds\n",
+        "match the hash it recorded for it; setting the job aside for %d "
+        "seconds\n",
         wait_seconds);
   } else {
     thread_control_print_formatted(
@@ -960,41 +1046,18 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   string_list_destroy(state->derived_mismatches);
   state->derived_mismatches = string_list_create();
   state->server_artifact_mismatch = false;
-  // A file built here stays wrong for the run, so the job is set aside. The
-  // server's KLV does not: an admin's "Check artifacts" puts it right, and
-  // setting the job aside would end the run of every worker for whom it is
-  // the only active job (the server answers "every active job needs input
-  // data you do not have", which sends the contributor to the wrong fix).
-  // Wait instead, and ask again.
-  if (server_artifact) {
-    release_claim(state);
-    nap_unless_interrupted(thread_control, wait_seconds);
-    return;
+  // A file built here stays wrong for the run, so the job is set aside for
+  // good. The server's KLV does not: an admin's "Check artifacts" or a
+  // restored object version puts it right, so the job is set aside only for
+  // a while (above) and its KLV fetched afresh after. Setting it aside for
+  // good ended the run of every worker for whom it was the only active job,
+  // with the server's "every active job needs input data you do not have"
+  // sending the contributor to the wrong fix; and napping the whole worker,
+  // as it next did, idled it for every other job too.
+  if (!server_artifact) {
+    remember_unsupported(state, state->claimed_job_id);
   }
-  remember_unsupported(state, state->claimed_job_id);
   release_claim(state);
-}
-
-bool contribute_artifact_known_bad(const ContributeState *state,
-                                   const char *key, const char *expected,
-                                   const char **actual) {
-  if (!state->bad_artifact_key || !key || !expected ||
-      !strings_equal(state->bad_artifact_key, key) ||
-      !strings_equal(state->bad_artifact_expected, expected)) {
-    return false;
-  }
-  *actual = state->bad_artifact_actual;
-  return true;
-}
-
-void contribute_artifact_verified(ContributeState *state) {
-  free(state->bad_artifact_key);
-  free(state->bad_artifact_expected);
-  free(state->bad_artifact_actual);
-  state->bad_artifact_key = NULL;
-  state->bad_artifact_expected = NULL;
-  state->bad_artifact_actual = NULL;
-  state->bad_artifact_wait_seconds = 0;
 }
 
 typedef enum {
@@ -1233,9 +1296,10 @@ void contribute_state_destroy(ContributeState *state) {
     return;
   }
   free(state->last_failure);
-  free(state->bad_artifact_key);
-  free(state->bad_artifact_expected);
-  free(state->bad_artifact_actual);
+  for (int i = 0; i < state->deferred_count; i++) {
+    free(state->deferred[i].job_id);
+  }
+  free(state->deferred);
   free(state->claim_token);
   free(state->claimed_job_id);
   string_list_destroy(state->unsupported_jobs);

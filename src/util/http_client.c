@@ -64,6 +64,9 @@ struct HttpClient {
   // that runs the contribute loop.
   http_client_retry_listener_t retry_listener;
   void *retry_listener_context;
+  // See http_client_set_abort_check.
+  http_client_abort_check_t abort_check;
+  void *abort_check_context;
 };
 
 static void rebuild_auth_header(HttpClient *client) {
@@ -87,7 +90,8 @@ static void rebuild_auth_header(HttpClient *client) {
 
 HttpClient *http_client_create(const char *base_url, const char *api_key,
                                const char *worker_uuid) {
-  HttpClient *client = (HttpClient *)malloc_or_die(sizeof(HttpClient));
+  // Zeroed: a field added without a line below starts NULL, not garbage.
+  HttpClient *client = (HttpClient *)calloc_or_die(1, sizeof(HttpClient));
   client->base_url = string_duplicate(base_url);
   // Trailing slashes would produce a double slash when joined with a path.
   size_t length = string_length(client->base_url);
@@ -117,13 +121,39 @@ void http_client_set_retry_listener(HttpClient *client,
 }
 
 // Waits out one transient retry, telling the listener first.
-static void nap_before_retry(const HttpClient *client, int retry_idx) {
+// Waits `seconds` a second at a time; false if the abort check asked to give
+// up meanwhile.
+static bool nap_unless_aborted(const HttpClient *client, int seconds) {
+  for (int i = 0; i < seconds; i++) {
+    if (client->abort_check &&
+        client->abort_check(client->abort_check_context)) {
+      return false;
+    }
+    ctime_nap(1.0);
+  }
+  return !(client->abort_check &&
+           client->abort_check(client->abort_check_context));
+}
+
+static bool nap_before_retry(const HttpClient *client, int retry_idx) {
   const int wait_seconds = http_client_backoff_seconds(retry_idx);
   if (client->retry_listener) {
     client->retry_listener(client->retry_listener_context, retry_idx,
                            wait_seconds, /*rate_limited=*/false);
   }
-  ctime_nap(wait_seconds);
+  return nap_unless_aborted(client, wait_seconds);
+}
+
+void http_client_set_abort_check(HttpClient *client,
+                                 http_client_abort_check_t check,
+                                 void *context) {
+  client->abort_check = check;
+  client->abort_check_context = context;
+}
+
+static void push_interrupted(ErrorStack *error_stack) {
+  error_stack_push(error_stack, ERROR_STATUS_HTTP_REQUEST_FAILED,
+                   string_duplicate("the request was interrupted"));
 }
 
 static bool may_retry(int transient_retries, int max_transient_retries) {
@@ -179,7 +209,11 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
       // server's: see http_client_backoff_seconds.
       if (may_retry(transient_retries, max_transient_retries)) {
         error_stack_destroy(attempt_errors);
-        nap_before_retry(client, transient_retries);
+        if (!nap_before_retry(client, transient_retries)) {
+          push_interrupted(error_stack);
+          free(url);
+          return;
+        }
         // Saturating: a request that retries without limit must not wrap its
         // own count, which only ever indexes the back-off.
         if (transient_retries < HTTP_CLIENT_MAX_TRANSIENT_RETRIES) {
@@ -216,14 +250,22 @@ static void perform(HttpClient *client, chttp_method_t method, const char *path,
                                rate_limit_retries - 1, wait,
                                /*rate_limited=*/true);
       }
-      ctime_nap(wait);
+      if (!nap_unless_aborted(client, wait)) {
+        push_interrupted(error_stack);
+        free(url);
+        return;
+      }
       continue;
     }
 
     if (response->status_code >= 500 &&
         may_retry(transient_retries, max_transient_retries)) {
       chttp_response_destroy(response);
-      nap_before_retry(client, transient_retries);
+      if (!nap_before_retry(client, transient_retries)) {
+        push_interrupted(error_stack);
+        free(url);
+        return;
+      }
       if (transient_retries < HTTP_CLIENT_MAX_TRANSIENT_RETRIES) {
         transient_retries++;
       }

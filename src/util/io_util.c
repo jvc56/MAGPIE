@@ -662,15 +662,22 @@ static void remove_stale_temporary_siblings(const char *filename) {
 
 char *temporary_sibling(const char *filename) {
   remove_stale_temporary_siblings(filename);
-  // The process id and a per-process counter: unique within a machine's PID
-  // space. Two containers sharing a data volume can both be PID 1, so
-  // writers open the name exclusively (fopen_exclusive) and a clash fails
-  // rather than truncating the other's file.
+  // The process id, a per-process counter and the clock to the nanosecond.
+  // The first two alone are unique within one PID space, but two containers
+  // sharing a data volume can both be PID 1 with their counters in step (the
+  // same generation's KLV, fetched at the same point in two runs). Writers
+  // still open the name exclusively ("wbx"), so a clash fails rather than
+  // truncating the other's file.
   static atomic_uint_least64_t counter = 0;
   const unsigned long long sequence =
       (unsigned long long)atomic_fetch_add(&counter, 1);
-  return get_formatted_string("%s.%ld-%llu.tmp", filename, (long)getpid(),
-                              sequence);
+  struct timespec now;
+  (void)timespec_get(&now, TIME_UTC);
+  const unsigned long long nonce =
+      (unsigned long long)now.tv_sec * 1000000000ULL +
+      (unsigned long long)now.tv_nsec;
+  return get_formatted_string("%s.%ld-%llu-%llu.tmp", filename, (long)getpid(),
+                              sequence, nonce);
 }
 
 void rename_into_place(const char *temporary, const char *filename,

@@ -7681,9 +7681,15 @@ config_contribute_reload_changed_ld_and_layout(Config *config,
     free(name);
     config_invalidate_everything(config, false);
   }
+  // Recorded only once read: a failed read must be tried again next task.
   free(config->contribute_layout_identity);
-  config->contribute_layout_identity = layout_identity;
-  if (!error_stack_is_empty(error_stack) || !config->ld) {
+  config->contribute_layout_identity =
+      error_stack_is_empty(error_stack) ? layout_identity : NULL;
+  if (!error_stack_is_empty(error_stack)) {
+    free(layout_identity);
+    return;
+  }
+  if (!config->ld) {
     return;
   }
 
@@ -7708,7 +7714,11 @@ config_contribute_reload_changed_ld_and_layout(Config *config,
   }
   free(ld_name);
   free(config->contribute_ld_identity);
-  config->contribute_ld_identity = ld_identity;
+  config->contribute_ld_identity =
+      error_stack_is_empty(error_stack) ? ld_identity : NULL;
+  if (!error_stack_is_empty(error_stack)) {
+    free(ld_identity);
+  }
 }
 
 // Players' lexical data is cached in memory by *name*: a load that finds a
@@ -8681,6 +8691,19 @@ static char *config_contribute_opening_rack(Config *config,
     return NULL;
   }
 
+  // birdtest's request carries `previous_play` and always sends null: every
+  // rack is analysed on an empty board. This path has no way to play one
+  // first, so a request that names one is refused rather than analysed as if
+  // it did not.
+  const JsonValue *previous_play = json_object_get(request, "previous_play");
+  if (previous_play && !json_is_null(previous_play)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     string_duplicate("server sent an opening rack task with a "
+                                      "previous play, which this build cannot "
+                                      "analyse"));
+    return NULL;
+  }
+
   const JsonValue *racks = json_object_get(request, CONTRIBUTE_KEY_RACKS);
   const int rack_count = json_array_length(racks);
   if (rack_count <= 0) {
@@ -8936,21 +8959,6 @@ static char *config_contribute_leave_gen(Config *config,
             previous_artifact_sha256));
     return NULL;
   }
-  // Already found missing or wrong this run, and the claim still says the
-  // same: declined without downloading it again (see
-  // contribute_decline_derived_mismatch, which also waits longer each time).
-  const char *known_actual = NULL;
-  if (contribute_artifact_known_bad(state, previous_artifact_key,
-                                    previous_artifact_sha256, &known_actual)) {
-    contribute_record_derived_mismatch(state, "klv", previous_artifact_key,
-                                       previous_artifact_sha256, known_actual);
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
-        get_formatted_string("the KLV at %s was already found not to match "
-                             "the sha256 the server recorded for it",
-                             previous_artifact_key));
-    return NULL;
-  }
   ChttpResponse artifact;
   bool artifact_missing = false;
   contribute_fetch_artifact(state, previous_artifact_key, &artifact,
@@ -9014,7 +9022,11 @@ static char *config_contribute_leave_gen(Config *config,
     written = false;
   }
   if (!written) {
-    (void)remove(temp_path);
+    // Only a file this process created: an exclusive open that failed found
+    // someone else's.
+    if (klv_file) {
+      (void)remove(temp_path);
+    }
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string("could not write fetched KLV to %s", klv_path));
@@ -9284,6 +9296,11 @@ void impl_contribute(Config *config, const char *settings_path,
                              error_stack);
     free(result_json);
     free(error_message);
+  }
+  // A stop request gives up whatever request was waiting to retry; that is
+  // the stop, not a failure to report.
+  if (contribute_interrupted(thread_control)) {
+    error_stack_reset(error_stack);
   }
   contribute_state_destroy(state);
   // The table names the last task pinned would otherwise outlive the run: a

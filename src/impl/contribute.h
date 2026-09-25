@@ -200,20 +200,19 @@ void contribute_fetch_artifact(ContributeState *state, const char *key,
                                ChttpResponse *response, bool *not_found,
                                ErrorStack *error_stack);
 
-// Whether the server KLV `key` was already found not to be `expected` this
-// run (a claim naming the same pair is declined without fetching it again);
-// if so, *actual is what was found, or NULL for a missing object.
-bool contribute_artifact_known_bad(const ContributeState *state,
-                                   const char *key, const char *expected,
-                                   const char **actual);
-
-// A server KLV verified: forgets the known-bad one and the wait.
+// The claimed job's server KLV verified: the job is no longer set aside, and
+// a later failure starts its wait short again.
 void contribute_artifact_verified(ContributeState *state);
 
 // Whether the user asked the running command to stop (the REPL's `stop`, the
 // API's stop call).
 bool contribute_interrupted(ThreadControl *thread_control);
 
+// The run's state, from the settings file; what contribute_claim_task makes
+// on its first call. Exposed for tests.
+ContributeState *contribute_state_create(const char *settings_path,
+                                         ThreadControl *thread_control,
+                                         ErrorStack *error_stack);
 void contribute_state_destroy(ContributeState *state);
 
 // Compares dotted numeric versions, returning <0, 0 or >0. Missing components

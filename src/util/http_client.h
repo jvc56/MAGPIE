@@ -61,6 +61,15 @@ void http_client_set_retry_listener(HttpClient *client,
                                     http_client_retry_listener_t listener,
                                     void *context);
 
+// Asked once a second while a retry waits: true gives the request up, as a
+// failed request ("interrupted"). How a stop request reaches a claim that
+// retries without limit against a server that is down. Optional; NULL clears
+// it.
+typedef bool (*http_client_abort_check_t)(void *context);
+void http_client_set_abort_check(HttpClient *client,
+                                 http_client_abort_check_t check,
+                                 void *context);
+
 // One attempt, with no retry of a transport failure, a 5xx or a 429. For a
 // request whose own schedule is the retry: the heartbeat goes out every thirty
 // seconds whatever happened to the last one, and a heartbeat that spent minutes

@@ -11,6 +11,7 @@
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/contribute.h"
 #include "../src/impl/rack_list.h"
@@ -1217,6 +1218,30 @@ static void test_an_abandoned_temporary_is_removed(void) {
   (void)remove(other_file);
 }
 
+// A run's state starts with every field set: fields added to it without a
+// line in contribute_state_create were read uninitialized and freed at the
+// end of every run (the sanitizer build's allocator fills new memory, so a
+// garbage pointer fails here). A leave KLV's mismatch is recorded without
+// touching anything else.
+static void test_a_runs_state_starts_clean(void) {
+  const char *path = "contribute_test_state_settings.txt";
+  write_settings_file(path, "server https://birdtest.example\n");
+  ErrorStack *error_stack = error_stack_create();
+  ThreadControl *thread_control = thread_control_create();
+  ContributeState *state =
+      contribute_state_create(path, thread_control, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(state);
+  assert(!contribute_should_stop(state));
+  contribute_record_derived_mismatch(state, "klv", "leaves/x/generation-1.klv2",
+                                     "expected", NULL);
+  contribute_artifact_verified(state);
+  contribute_state_destroy(state);
+  thread_control_destroy(thread_control);
+  error_stack_destroy(error_stack);
+  (void)remove(path);
+}
+
 void test_contribute(void) {
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();
@@ -1236,4 +1261,5 @@ void test_contribute(void) {
   test_player_settings_do_not_leak_between_tasks();
   test_a_rewritten_klv_is_read_again();
   test_an_abandoned_temporary_is_removed();
+  test_a_runs_state_starts_clean();
 }

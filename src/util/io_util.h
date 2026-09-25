@@ -387,7 +387,7 @@ bool path_is_directory(const char *path);
 char *get_file_identity(const char *path);
 
 // A name beside `filename` for writing it in full before renaming it into
-// place -- `<filename>.<pid>-<n>.tmp` -- so that no reader, and no other
+// place -- `<filename>.<pid>-<n>-<ns>.tmp` -- so that no reader, and no other
 // process writing the same file, ever sees half of it. Open it exclusively
 // ("wbx"): two containers sharing a volume can both be PID 1. Removes the
 // temporaries of earlier writes of `filename` left untouched for an hour -- a
