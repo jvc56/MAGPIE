@@ -161,18 +161,6 @@ int tui_analysis_cursor_at(int y, int x);
 // unchanged otherwise.
 int tui_analysis_cursor_column_at(int y, int x, TuiAnalysisColumn *out_column);
 
-// Populate a snapshot of the Analysis-panel contents for the
-// currently-active sim or endgame solve. Called by the bot worker
-// at finalize time (just after a move is chosen, just before
-// play_move advances the board) so each history entry can
-// preserve the analysis the user was looking at when the bot
-// committed. Picks sim vs endgame the same way the live render
-// does: endgame when the bag is empty and the endgame snapshot
-// is valid, sim otherwise. Safe to call from any thread that
-// already holds state->mutex.
-void tui_capture_analysis_snapshot(const TuiGameState *state,
-                                   TuiAnalysisSnapshot *out);
-
 // Settings modal; rows are TuiSettingsItem.
 // `board_scale` is 1 or 2; the scale row is grayed out when 2x is
 // unavailable (no pixel support or font load failed). `antialias`

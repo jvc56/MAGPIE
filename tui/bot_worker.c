@@ -26,7 +26,7 @@
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-#include "game_render.h"
+#include "analysis_rows.h"
 #include "game_state.h"
 #include "pixel_compose.h"
 #include <pthread.h>
