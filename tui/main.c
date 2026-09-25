@@ -37,6 +37,7 @@
 #include "tui_crash.h"
 #include "tui_history_edit.h"
 #include "tui_text_edit.h"
+#include "tui_ui_state.h"
 #include <execinfo.h>
 #include <fcntl.h>
 #include <locale.h>
@@ -144,7 +145,8 @@ int main(int argc, char *argv[]) {
   // dragged smoothly across the track.
   const unsigned mice_eventmask = NCMICE_BUTTON_EVENT | NCMICE_DRAG_EVENT;
   notcurses_mice_enable(nc, mice_eventmask);
-  bool mouse_enabled = true;
+  TuiUiState ui = {0};
+  ui.mouse_enabled = true;
 
   // Ask the terminal to report focus-in / focus-out events
   // (xterm DEC mode 1004). When the terminal loses focus — e.g.
@@ -277,7 +279,7 @@ int main(int argc, char *argv[]) {
 
   // Modal state: which (if any) modal is open. Drives keyboard routing
   // and the status-bar control hints.
-  bool running = true;
+  ui.running = true;
 
   // Focus-event detection state. The terminal sends CSI I on
   // focus-in and CSI O on focus-out when DEC mode 1004 is on
@@ -290,8 +292,8 @@ int main(int argc, char *argv[]) {
   // handlers expect. Mouse mode is auto-disabled on focus-out
   // and re-enabled on focus-in so the macOS screenshot UI
   // doesn't fight the terminal for cursor capture.
-  int focus_state = 0; // 0 = normal, 1 = saw ESC, 2 = saw ESC '['
-  bool focus_pending_esc = false;
+  ui.focus_state = 0; // 0 = normal, 1 = saw ESC, 2 = saw ESC '['
+  ui.focus_pending_esc = false;
   // First-launch experience: show the startup menu before any game
   // gets played. Picking "Watch computer play" routes through the
   // time picker and resumes the bot-vs-bot flow that used to be
@@ -302,71 +304,69 @@ int main(int argc, char *argv[]) {
   // watch game using the saved (or default) settings. Useful for
   // debugging — reattaching with lldb on each crash without having
   // to click through the menu first.
-  TuiModalState modal = TUI_MODAL_STARTUP_MENU;
+  ui.modal = TUI_MODAL_STARTUP_MENU;
   if (args.watch) {
     pthread_mutex_lock(&game_state.mutex);
     tui_game_state_set_time_per_side(&game_state, chosen_time);
     tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
     pthread_mutex_unlock(&game_state.mutex);
     tui_bot_worker_start(&game_state);
-    modal = TUI_MODAL_NONE;
+    ui.modal = TUI_MODAL_NONE;
   }
-  int startup_menu_focus = TUI_STARTUP_WATCH;
-  int main_menu_focus = 0;
-  int settings_focus = 0;
+  ui.startup_menu_focus = TUI_STARTUP_WATCH;
+  ui.main_menu_focus = 0;
+  ui.settings_focus = 0;
   // Where to return when Esc is pressed inside the Settings modal.
   // Reached from the main menu → return to the menu so the user can
   // pick another entry. Reached from the command-bar S → return to
   // no modal, since that's where the user was.
-  TuiModalState settings_return = TUI_MODAL_MAIN_MENU;
-  int time_focus = 0;
+  ui.settings_return = TUI_MODAL_MAIN_MENU;
+  ui.time_focus = 0;
   // Where Esc inside the time picker should return to. Reached
   // from the main menu's New Game → MAIN_MENU; reached via the
   // command bar's N / /new → NONE.
-  TuiModalState time_picker_return = TUI_MODAL_MAIN_MENU;
+  ui.time_picker_return = TUI_MODAL_MAIN_MENU;
   // Where Esc inside the startup menu should return to. At app
   // launch there's no prior modal to return to (Esc just dismisses
   // it). When the user opens it via Esc → New game we want Esc to
   // step back to the main menu.
-  TuiModalState startup_menu_return = TUI_MODAL_NONE;
+  ui.startup_menu_return = TUI_MODAL_NONE;
   // Watch-setup modal: row focus, pre-set to "Start game" so Enter
   // on first open kicks off the bot game with the displayed
   // defaults (time / lexicon / sim params).
-  int watch_setup_focus = TUI_WATCH_SETUP_START;
+  ui.watch_setup_focus = TUI_WATCH_SETUP_START;
   // Watch setup runs on its own copy of the lexicon + time control
   // so adjusters can preview without mutating the live session
   // settings. Initialized when the modal opens; committed to
   // chosen_lexicon / chosen_time only when the user hits "Start
   // game". Esc closes the modal and the locals are abandoned.
-  char watch_setup_lexicon[TUI_LEXICON_NAME_MAX] = "";
-  int watch_setup_time = 0;
+  ui.watch_setup_time = 0;
   // Play-vs-computer setup: editable player names, who moves first, and
   // the focused row / name caret. Defaults focus to Start so a quick
   // Enter launches with the defaults.
-  int play_setup_focus = TUI_PLAY_SETUP_START;
-  char play_setup_human_name[32] = "You";
-  char play_setup_computer_name[32] = "Computer";
-  int play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
-  int play_setup_name_cursor = 0;
+  ui.play_setup_focus = TUI_PLAY_SETUP_START;
+  snprintf(ui.play_setup_human_name, sizeof(ui.play_setup_human_name), "%s",
+           "You");
+  snprintf(ui.play_setup_computer_name, sizeof(ui.play_setup_computer_name),
+           "%s", "Computer");
+  ui.play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+  ui.play_setup_name_cursor = 0;
   // Overtime rule + penalty rate scratch. Seeded from the config (or
   // its defaults when the file / keys are missing) and persisted on
   // Start; survives across modal opens within the session.
-  UiOvertimeRule play_setup_overtime_rule = loaded.overtime_rule;
-  int play_setup_overtime_cap = loaded.overtime_cap_minutes;
-  UiTimePenaltyRate play_setup_penalty_rate = loaded.time_penalty_rate;
-  UiChallengeRule play_setup_challenge_rule = loaded.challenge_rule;
-  UiChallengePenalty play_setup_challenge_penalty = loaded.challenge_penalty;
+  ui.play_setup_overtime_rule = loaded.overtime_rule;
+  ui.play_setup_overtime_cap = loaded.overtime_cap_minutes;
+  ui.play_setup_penalty_rate = loaded.time_penalty_rate;
+  ui.play_setup_challenge_rule = loaded.challenge_rule;
+  ui.play_setup_challenge_penalty = loaded.challenge_penalty;
   // Annotate setup: lexicon (◀/▶ cycled, language-scoped) plus
   // two free-form player names. Same modal-local pattern as
   // Watch setup — commits to the session only on Start.
-  char annotate_setup_lexicon[TUI_LEXICON_NAME_MAX] = "";
-  char annotate_setup_p1_name[32] = "";
-  char annotate_setup_p2_name[32] = "";
-  int annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
+  ui.annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
   // Caret position within the currently-focused name field, in
   // bytes. Bounded by the name's strlen(); shared between P1 and
   // P2 because only one name row is focused at a time.
-  int annotate_setup_name_cursor = 0;
+  ui.annotate_setup_name_cursor = 0;
   // Load-position modal state. Buffer holds the user-entered text
   // (raw CGP or a dragged file path); cursor is the byte offset
   // of the insertion point. The position is parsed live whenever
@@ -375,22 +375,18 @@ int main(int argc, char *argv[]) {
   // Enter can fire only when the CGP is loadable. `error_msg`
   // displays the last parse / file error inside the modal until
   // the next edit clears it.
-  char load_position_buf[2048] = {0};
-  int load_position_len = 0;
-  int load_position_cursor = 0;
-  bool load_position_dirty = false;
-  bool load_position_parse_ok = false;
-  char load_position_error[160] = {0};
+  ui.load_position_len = 0;
+  ui.load_position_cursor = 0;
+  ui.load_position_dirty = false;
+  ui.load_position_parse_ok = false;
   // Load-game modal state. Mirrors the load-position modal but
   // holds a multi-line GCG game record. GCGs are typically much
   // bigger than CGPs (a 25-turn record can run several KB), so
   // the buffer is correspondingly larger.
-  char load_game_buf[16384] = {0};
-  int load_game_len = 0;
-  int load_game_cursor = 0;
-  bool load_game_dirty = false;
-  bool load_game_parse_ok = false;
-  char load_game_error[160] = {0};
+  ui.load_game_len = 0;
+  ui.load_game_cursor = 0;
+  ui.load_game_dirty = false;
+  ui.load_game_parse_ok = false;
   // Width of the input area's wrap column — matches the modal's
   // interior width so Up/Down arrow can walk visual rows.
   enum { LOAD_POSITION_WRAP_W = 73 };
@@ -398,12 +394,12 @@ int main(int argc, char *argv[]) {
   // default No since it's the safer option. quit_confirm_return is
   // the modal to return to when the user picks No / hits Esc; the
   // caller (main menu Q or command-bar Q) sets this before opening.
-  int quit_confirm_focus = 0;
-  TuiModalState quit_confirm_return = TUI_MODAL_NONE;
+  ui.quit_confirm_focus = 0;
+  ui.quit_confirm_return = TUI_MODAL_NONE;
   // Modal-style lexicon picker state. Lazily allocated when the user
   // enters the modal; destroyed before exit.
-  LexiconList *lexicon_list = NULL;
-  int lexicon_focus = 0;
+  ui.lexicon_list = NULL;
+  ui.lexicon_focus = 0;
   // Settings rows for Antialias / Subscript / Border are hidden when
   // the board isn't rendering at 2x — they're 2x-only settings. The
   // renderer in game_render.c filters identically; this predicate
@@ -428,14 +424,14 @@ int main(int argc, char *argv[]) {
   // wall-clock second ticked (live clock countdown), or the bot is
   // animating a spinner. Otherwise the last frame stays on screen
   // untouched.
-  bool frame_dirty = true; // render the first frame
+  ui.frame_dirty = true; // render the first frame
   // Input→display latency probe: timestamp when input first dirtied the
   // current (not-yet-rendered) frame, so we can measure keypress-to-pixels.
   struct timespec input_dirty_ts = {0, 0};
   bool input_dirty_pending = false;
   uint64_t rendered_version = ~(uint64_t)0;
   long rendered_wall_sec = -1;
-  while (running) {
+  while (ui.running) {
     {
       struct timespec now;
       clock_gettime(CLOCK_MONOTONIC, &now);
@@ -470,10 +466,10 @@ int main(int argc, char *argv[]) {
     // many keys arrived in the burst) so the board / racks behind
     // the modal reflect the latest CGP text and Enter has a
     // definitive parse_ok flag to consult.
-    if (modal == TUI_MODAL_LOAD_POSITION && load_position_dirty) {
-      load_position_dirty = false;
+    if (ui.modal == TUI_MODAL_LOAD_POSITION && ui.load_position_dirty) {
+      ui.load_position_dirty = false;
       char working[2048];
-      snprintf(working, sizeof(working), "%s", load_position_buf);
+      snprintf(working, sizeof(working), "%s", ui.load_position_buf);
       // Strip leading + trailing whitespace.
       char *start = working;
       while (*start == ' ' || *start == '\t' || *start == '\n' ||
@@ -512,7 +508,7 @@ int main(int argc, char *argv[]) {
       cgp_payload[0] = '\0';
       bool resolve_ok = true;
       if (wlen == 0) {
-        load_position_error[0] = '\0';
+        ui.load_position_error[0] = '\0';
         resolve_ok = false;
       } else if (looks_like_path) {
         char path[1024];
@@ -529,7 +525,7 @@ int main(int argc, char *argv[]) {
         }
         FILE *fp = fopen(path, "rb");
         if (fp == NULL) {
-          snprintf(load_position_error, sizeof(load_position_error),
+          snprintf(ui.load_position_error, sizeof(ui.load_position_error),
                    "Cannot open %s", path);
           resolve_ok = false;
         } else {
@@ -608,19 +604,19 @@ int main(int argc, char *argv[]) {
           tui_bot_worker_append_pending_history(
               &game_state, on_turn, on_turn_rack,
               game_state.time_per_side_seconds);
-          load_position_error[0] = '\0';
-          load_position_parse_ok = true;
+          ui.load_position_error[0] = '\0';
+          ui.load_position_parse_ok = true;
         } else {
           char *msg = error_stack_get_string_and_reset(err);
-          snprintf(load_position_error, sizeof(load_position_error), "%s",
+          snprintf(ui.load_position_error, sizeof(ui.load_position_error), "%s",
                    msg != NULL ? msg : "Parse error");
           free(msg);
-          load_position_parse_ok = false;
+          ui.load_position_parse_ok = false;
         }
         pthread_mutex_unlock(&game_state.mutex);
         error_stack_destroy(err);
       } else {
-        load_position_parse_ok = false;
+        ui.load_position_parse_ok = false;
       }
     }
 
@@ -631,13 +627,13 @@ int main(int argc, char *argv[]) {
     // parse_gcg_events. The events parser internally resets the
     // game and replays moves, so on success the game ends in
     // its final-state position.
-    if (modal == TUI_MODAL_LOAD_GAME && load_game_dirty) {
-      load_game_dirty = false;
+    if (ui.modal == TUI_MODAL_LOAD_GAME && ui.load_game_dirty) {
+      ui.load_game_dirty = false;
       // Working buffer big enough to copy the entire load buffer.
       // GCGs can be several KB; we keep this on the stack but
       // sized to the modal buffer.
-      static char working[sizeof(load_game_buf)];
-      snprintf(working, sizeof(working), "%s", load_game_buf);
+      static char working[sizeof(ui.load_game_buf)];
+      snprintf(working, sizeof(working), "%s", ui.load_game_buf);
       char *start = working;
       while (*start == ' ' || *start == '\t' || *start == '\n' ||
              *start == '\r') {
@@ -677,7 +673,7 @@ int main(int argc, char *argv[]) {
       char *gcg_payload = NULL;
       bool resolve_ok = true;
       if (wlen == 0) {
-        load_game_error[0] = '\0';
+        ui.load_game_error[0] = '\0';
         resolve_ok = false;
       } else if (looks_like_path) {
         char path[1024];
@@ -700,12 +696,12 @@ int main(int argc, char *argv[]) {
             stat(path, &path_stat) == 0 && !S_ISREG(path_stat.st_mode);
         FILE *fp = not_regular_file ? NULL : fopen(path, "rb");
         if (not_regular_file) {
-          snprintf(load_game_error, sizeof(load_game_error), "%s is not a file",
-                   path);
+          snprintf(ui.load_game_error, sizeof(ui.load_game_error),
+                   "%s is not a file", path);
           resolve_ok = false;
         } else if (fp == NULL) {
-          snprintf(load_game_error, sizeof(load_game_error), "Cannot open %s",
-                   path);
+          snprintf(ui.load_game_error, sizeof(ui.load_game_error),
+                   "Cannot open %s", path);
           resolve_ok = false;
         } else {
           fseek(fp, 0, SEEK_END);
@@ -714,7 +710,7 @@ int main(int argc, char *argv[]) {
           if (fsize < 0 || fsize > (long)(1 << 20)) {
             // Cap at 1 MiB — anything bigger is almost certainly
             // not a real GCG.
-            snprintf(load_game_error, sizeof(load_game_error),
+            snprintf(ui.load_game_error, sizeof(ui.load_game_error),
                      "%s is too large", path);
             fclose(fp);
             resolve_ok = false;
@@ -773,7 +769,7 @@ int main(int argc, char *argv[]) {
         // never hand it an empty payload (an empty file, or text that was
         // only the trailing rack hint).
         if (gcg_payload[0] == '\0') {
-          snprintf(load_game_error, sizeof(load_game_error), "Empty GCG");
+          snprintf(ui.load_game_error, sizeof(ui.load_game_error), "Empty GCG");
           resolve_ok = false;
         }
       }
@@ -874,21 +870,21 @@ int main(int argc, char *argv[]) {
 
           tui_gcg_import_history(&game_state, history);
 
-          load_game_error[0] = '\0';
-          load_game_parse_ok = true;
+          ui.load_game_error[0] = '\0';
+          ui.load_game_parse_ok = true;
         } else {
           char *msg = error_stack_get_string_and_reset(err);
-          snprintf(load_game_error, sizeof(load_game_error), "%s",
+          snprintf(ui.load_game_error, sizeof(ui.load_game_error), "%s",
                    msg != NULL ? msg : "Parse error");
           free(msg);
-          load_game_parse_ok = false;
+          ui.load_game_parse_ok = false;
         }
         pthread_mutex_unlock(&game_state.mutex);
         gcg_parser_destroy(parser);
         game_history_destroy(history);
         error_stack_destroy(err);
       } else {
-        load_game_parse_ok = false;
+        ui.load_game_parse_ok = false;
       }
       free(gcg_payload);
     }
@@ -913,7 +909,7 @@ int main(int argc, char *argv[]) {
                         last_entry->player_idx == game_state.human_player_idx);
     }
     pthread_mutex_unlock(&game_state.mutex);
-    const bool need_render = frame_dirty || modal != TUI_MODAL_NONE ||
+    const bool need_render = ui.frame_dirty || ui.modal != TUI_MODAL_NONE ||
                              cur_render_version != rendered_version ||
                              render_now.tv_sec != rendered_wall_sec ||
                              bot_animating;
@@ -931,82 +927,84 @@ int main(int argc, char *argv[]) {
       const long lock_us =
           (long)(lock_acquired.tv_sec - render_begin.tv_sec) * 1000000L +
           (long)(lock_acquired.tv_nsec - render_begin.tv_nsec) / 1000L;
-      tui_game_render(std_plane, theme, &game_state, chosen_time, modal);
+      tui_game_render(std_plane, theme, &game_state, chosen_time, ui.modal);
       pthread_mutex_unlock(&game_state.mutex);
-      if (modal == TUI_MODAL_MAIN_MENU) {
-        tui_game_render_menu(std_plane, theme, main_menu_focus);
-      } else if (modal == TUI_MODAL_SETTINGS) {
+      if (ui.modal == TUI_MODAL_MAIN_MENU) {
+        tui_game_render_menu(std_plane, theme, ui.main_menu_focus);
+      } else if (ui.modal == TUI_MODAL_SETTINGS) {
         const char *current_lexicon =
             to_save.lexicon_set ? to_save.lexicon : chosen_lexicon;
         const bool current_load_rit =
             to_save.load_rit_set ? to_save.load_rit : initial_load_rit;
         tui_game_render_settings(
-            std_plane, theme, settings_focus, game_state.board_scale,
+            std_plane, theme, ui.settings_focus, game_state.board_scale,
             game_state.antialias, game_state.score_subscripts,
             game_state.border_thickness, pixel_supported, font_available,
             game_state.premium_labels, game_state.blank_uppercase,
             game_state.rack_sort, current_lexicon, current_load_rit);
-      } else if (modal == TUI_MODAL_TIME_PICKER) {
-        tui_game_render_time_picker(std_plane, theme, time_focus);
-      } else if (modal == TUI_MODAL_LEXICON_PICKER && lexicon_list != NULL) {
-        tui_game_render_lexicon_picker(std_plane, theme, lexicon_list,
-                                       lexicon_focus);
-      } else if (modal == TUI_MODAL_QUIT_CONFIRM) {
-        tui_game_render_quit_confirm(std_plane, theme, quit_confirm_focus);
-      } else if (modal == TUI_MODAL_STARTUP_MENU) {
-        tui_game_render_startup_menu(std_plane, theme, startup_menu_focus);
-      } else if (modal == TUI_MODAL_WATCH_SETUP) {
+      } else if (ui.modal == TUI_MODAL_TIME_PICKER) {
+        tui_game_render_time_picker(std_plane, theme, ui.time_focus);
+      } else if (ui.modal == TUI_MODAL_LEXICON_PICKER &&
+                 ui.lexicon_list != NULL) {
+        tui_game_render_lexicon_picker(std_plane, theme, ui.lexicon_list,
+                                       ui.lexicon_focus);
+      } else if (ui.modal == TUI_MODAL_QUIT_CONFIRM) {
+        tui_game_render_quit_confirm(std_plane, theme, ui.quit_confirm_focus);
+      } else if (ui.modal == TUI_MODAL_STARTUP_MENU) {
+        tui_game_render_startup_menu(std_plane, theme, ui.startup_menu_focus);
+      } else if (ui.modal == TUI_MODAL_WATCH_SETUP) {
         // Render from the modal's own local copy of lexicon + time
         // so adjusters preview against the in-modal value, not the
         // live session value.
-        if (lexicon_list == NULL) {
-          lexicon_list = tui_lexicon_list_load();
+        if (ui.lexicon_list == NULL) {
+          ui.lexicon_list = tui_lexicon_list_load();
         }
         char lang_buf[32] = "(unknown)";
-        if (lexicon_list != NULL) {
+        if (ui.lexicon_list != NULL) {
           const int idx =
-              tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+              tui_lexicon_list_find(ui.lexicon_list, ui.watch_setup_lexicon);
           if (idx >= 0) {
-            tui_lexicon_list_language_name(lexicon_list, idx, lang_buf,
+            tui_lexicon_list_language_name(ui.lexicon_list, idx, lang_buf,
                                            sizeof(lang_buf));
           }
         }
-        tui_game_render_watch_setup(std_plane, theme, watch_setup_focus,
-                                    watch_setup_time, lang_buf,
-                                    watch_setup_lexicon, game_state.sim_plies,
-                                    game_state.sim_candidates);
-      } else if (modal == TUI_MODAL_LOAD_POSITION) {
-        tui_game_render_load_position(std_plane, theme, load_position_buf,
-                                      load_position_cursor,
-                                      load_position_error);
-      } else if (modal == TUI_MODAL_LOAD_GAME) {
-        tui_game_render_load_game(std_plane, theme, load_game_buf,
-                                  load_game_cursor, load_game_error);
-      } else if (modal == TUI_MODAL_ANNOTATE_SETUP) {
+        tui_game_render_watch_setup(
+            std_plane, theme, ui.watch_setup_focus, ui.watch_setup_time,
+            lang_buf, ui.watch_setup_lexicon, game_state.sim_plies,
+            game_state.sim_candidates);
+      } else if (ui.modal == TUI_MODAL_LOAD_POSITION) {
+        tui_game_render_load_position(std_plane, theme, ui.load_position_buf,
+                                      ui.load_position_cursor,
+                                      ui.load_position_error);
+      } else if (ui.modal == TUI_MODAL_LOAD_GAME) {
+        tui_game_render_load_game(std_plane, theme, ui.load_game_buf,
+                                  ui.load_game_cursor, ui.load_game_error);
+      } else if (ui.modal == TUI_MODAL_ANNOTATE_SETUP) {
         tui_game_render_annotate_setup(
-            std_plane, theme, annotate_setup_focus, annotate_setup_lexicon,
-            annotate_setup_p1_name, annotate_setup_p2_name,
-            annotate_setup_name_cursor);
-      } else if (modal == TUI_MODAL_PLAY_SETUP) {
-        if (lexicon_list == NULL) {
-          lexicon_list = tui_lexicon_list_load();
+            std_plane, theme, ui.annotate_setup_focus,
+            ui.annotate_setup_lexicon, ui.annotate_setup_p1_name,
+            ui.annotate_setup_p2_name, ui.annotate_setup_name_cursor);
+      } else if (ui.modal == TUI_MODAL_PLAY_SETUP) {
+        if (ui.lexicon_list == NULL) {
+          ui.lexicon_list = tui_lexicon_list_load();
         }
         char play_lang_buf[32] = "(unknown)";
-        if (lexicon_list != NULL) {
+        if (ui.lexicon_list != NULL) {
           const int idx =
-              tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+              tui_lexicon_list_find(ui.lexicon_list, ui.watch_setup_lexicon);
           if (idx >= 0) {
-            tui_lexicon_list_language_name(lexicon_list, idx, play_lang_buf,
+            tui_lexicon_list_language_name(ui.lexicon_list, idx, play_lang_buf,
                                            sizeof(play_lang_buf));
           }
         }
         tui_game_render_play_setup(
-            std_plane, theme, play_setup_focus, play_setup_human_name,
-            play_setup_computer_name, play_setup_first_move,
-            play_setup_name_cursor, watch_setup_time, play_setup_overtime_rule,
-            play_setup_overtime_cap, play_setup_penalty_rate,
-            play_setup_challenge_rule, play_setup_challenge_penalty,
-            play_lang_buf, watch_setup_lexicon, game_state.sim_plies,
+            std_plane, theme, ui.play_setup_focus, ui.play_setup_human_name,
+            ui.play_setup_computer_name, ui.play_setup_first_move,
+            ui.play_setup_name_cursor, ui.watch_setup_time,
+            ui.play_setup_overtime_rule, ui.play_setup_overtime_cap,
+            ui.play_setup_penalty_rate, ui.play_setup_challenge_rule,
+            ui.play_setup_challenge_penalty, play_lang_buf,
+            ui.watch_setup_lexicon, game_state.sim_plies,
             game_state.sim_candidates);
       }
       // Time the UI thread's full render path so the debug overlay
@@ -1081,7 +1079,7 @@ int main(int argc, char *argv[]) {
       }
       rendered_version = cur_render_version;
       rendered_wall_sec = render_now.tv_sec;
-      frame_dirty = false;
+      ui.frame_dirty = false;
     } // end if (need_render)
 
     // Service a pending SIGUSR1 screenshot request. Done after the frame
@@ -1115,18 +1113,18 @@ int main(int argc, char *argv[]) {
       // Esc finally fires" because each synthesized Esc fell back
       // into focus_state=1 and got stalled.
       bool synthesized_esc = false;
-      if (focus_pending_esc) {
+      if (ui.focus_pending_esc) {
         memset(&input, 0, sizeof(input));
         input.id = NCKEY_ESC;
         input.evtype = NCTYPE_PRESS;
         key = NCKEY_ESC;
-        focus_pending_esc = false;
+        ui.focus_pending_esc = false;
         synthesized_esc = true;
       } else {
         key = notcurses_get(nc, &nonblocking, &input);
       }
       if (key == (uint32_t)-1) {
-        running = false;
+        ui.running = false;
         break;
       }
       if (key == 0) {
@@ -1134,21 +1132,21 @@ int main(int argc, char *argv[]) {
         // waiting for a follow-up byte, the burst has finished
         // without forming a focus sequence — schedule a real Esc
         // keypress for the next drain pass.
-        if (focus_state >= 1) {
-          focus_pending_esc = true;
+        if (ui.focus_state >= 1) {
+          ui.focus_pending_esc = true;
         }
         // The buffered '[' (focus_state == 2) is dropped silently;
         // a bare ESC + '[' isn't meaningful to any of our modals,
         // so re-injecting it would be cosmetic noise. Keep the
         // simpler path.
-        focus_state = 0;
+        ui.focus_state = 0;
         // No more input this frame — drop out of the drain loop so
         // the outer while re-renders.
         break;
       }
       // A real key/mouse event arrived — mark the frame dirty so the
       // conditional-render gate above renders the result next tick.
-      frame_dirty = true;
+      ui.frame_dirty = true;
       if (!input_dirty_pending) {
         clock_gettime(CLOCK_MONOTONIC, &input_dirty_ts);
         input_dirty_pending = true;
@@ -1166,39 +1164,39 @@ int main(int argc, char *argv[]) {
       // synthesized_esc skips this — that Esc came from our own
       // re-injection and is already known to be a real keypress;
       // re-buffering it would just deadlock.
-      if (!synthesized_esc && focus_state == 0 && key == NCKEY_ESC &&
+      if (!synthesized_esc && ui.focus_state == 0 && key == NCKEY_ESC &&
           input.evtype != NCTYPE_RELEASE) {
-        focus_state = 1;
+        ui.focus_state = 1;
         continue;
       }
-      if (focus_state == 1) {
+      if (ui.focus_state == 1) {
         if (key == '[') {
-          focus_state = 2;
+          ui.focus_state = 2;
           continue;
         }
         // Mismatch — treat the buffered ESC as a real Esc by
         // re-injecting it next iteration, then fall through with
         // the current key.
-        focus_pending_esc = true;
-        focus_state = 0;
+        ui.focus_pending_esc = true;
+        ui.focus_state = 0;
         // Fall through; current key handled normally below.
-      } else if (focus_state == 2) {
+      } else if (ui.focus_state == 2) {
         if (key == 'I' || key == 'O') {
           const bool focus_in = (key == 'I');
-          if (focus_in && !mouse_enabled) {
+          if (focus_in && !ui.mouse_enabled) {
             notcurses_mice_enable(nc, mice_eventmask);
-            mouse_enabled = true;
-          } else if (!focus_in && mouse_enabled) {
+            ui.mouse_enabled = true;
+          } else if (!focus_in && ui.mouse_enabled) {
             notcurses_mice_disable(nc);
-            mouse_enabled = false;
+            ui.mouse_enabled = false;
           }
-          focus_state = 0;
+          ui.focus_state = 0;
           continue;
         }
         // Mismatch on the third byte. Drop the buffered '['
         // and synthesize the original Esc on the next pass.
-        focus_pending_esc = true;
-        focus_state = 0;
+        ui.focus_pending_esc = true;
+        ui.focus_state = 0;
         // Fall through.
       }
       if (input.evtype == NCTYPE_RELEASE) {
@@ -1231,14 +1229,14 @@ int main(int argc, char *argv[]) {
           key == NCKEY_BUTTON7 || key == NCKEY_BUTTON8 ||
           key == NCKEY_BUTTON9 || key == NCKEY_BUTTON10 ||
           key == NCKEY_BUTTON11 || key == NCKEY_MOTION;
-      if (modal == TUI_MODAL_NONE && game_state.edit_history_idx >= 0 &&
+      if (ui.modal == TUI_MODAL_NONE && game_state.edit_history_idx >= 0 &&
           !is_mouse_event) {
         if (tui_input_cell_editor(&game_state, key, input)) {
           continue;
         }
       }
 
-      if (tui_input_mouse(&game_state, std_plane, modal, key, input)) {
+      if (tui_input_mouse(&game_state, std_plane, ui.modal, key, input)) {
         continue;
       }
       if (key == NCKEY_RESIZE) {
@@ -1253,14 +1251,14 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
-      if (modal == TUI_MODAL_LOAD_POSITION) {
+      if (ui.modal == TUI_MODAL_LOAD_POSITION) {
         if (key == NCKEY_ESC) {
           // Cancel — reset the previewed game back to idle so the
           // user returns to the empty board they came from.
           pthread_mutex_lock(&game_state.mutex);
           game_reset(game_state.game);
           pthread_mutex_unlock(&game_state.mutex);
-          modal = TUI_MODAL_STARTUP_MENU;
+          ui.modal = TUI_MODAL_STARTUP_MENU;
           continue;
         }
         if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
@@ -1269,29 +1267,29 @@ int main(int argc, char *argv[]) {
           // Enter to do anything else inside the input. If the last
           // parse failed, the error stays visible and Enter is a
           // no-op.
-          if (load_position_parse_ok) {
-            modal = TUI_MODAL_NONE;
+          if (ui.load_position_parse_ok) {
+            ui.modal = TUI_MODAL_NONE;
           }
           continue;
         }
         if (key == NCKEY_LEFT) {
-          if (load_position_cursor > 0) {
-            load_position_cursor--;
+          if (ui.load_position_cursor > 0) {
+            ui.load_position_cursor--;
           }
           continue;
         }
         if (key == NCKEY_RIGHT) {
-          if (load_position_cursor < load_position_len) {
-            load_position_cursor++;
+          if (ui.load_position_cursor < ui.load_position_len) {
+            ui.load_position_cursor++;
           }
           continue;
         }
         if (key == NCKEY_HOME) {
-          load_position_cursor = 0;
+          ui.load_position_cursor = 0;
           continue;
         }
         if (key == NCKEY_END) {
-          load_position_cursor = load_position_len;
+          ui.load_position_cursor = ui.load_position_len;
           continue;
         }
         if (key == NCKEY_UP || key == NCKEY_DOWN) {
@@ -1305,8 +1303,8 @@ int main(int argc, char *argv[]) {
           int cur_row = 0;
           int cur_col = 0;
           int target_offset = 0;
-          for (int i = 0; i < load_position_cursor; i++) {
-            if (load_position_buf[i] == '\n') {
+          for (int i = 0; i < ui.load_position_cursor; i++) {
+            if (ui.load_position_buf[i] == '\n') {
               cur_row++;
               cur_col = 0;
               continue;
@@ -1326,18 +1324,18 @@ int main(int argc, char *argv[]) {
             int row = 0;
             int col = 0;
             int i = 0;
-            target_offset = load_position_cursor; // default: stay put
+            target_offset = ui.load_position_cursor; // default: stay put
             bool found = false;
-            for (; i <= load_position_len; i++) {
+            for (; i <= ui.load_position_len; i++) {
               if (row == desired_row && col == cur_col) {
                 target_offset = i;
                 found = true;
                 break;
               }
-              if (i == load_position_len) {
+              if (i == ui.load_position_len) {
                 break;
               }
-              if (load_position_buf[i] == '\n') {
+              if (ui.load_position_buf[i] == '\n') {
                 if (row == desired_row) {
                   target_offset = i;
                   found = true;
@@ -1360,30 +1358,31 @@ int main(int argc, char *argv[]) {
             }
             if (!found) {
               // Past the end — clamp to end of buffer.
-              target_offset = load_position_len;
+              target_offset = ui.load_position_len;
             }
           }
-          load_position_cursor = target_offset;
+          ui.load_position_cursor = target_offset;
           continue;
         }
         if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
-          if (load_position_cursor > 0) {
-            memmove(&load_position_buf[load_position_cursor - 1],
-                    &load_position_buf[load_position_cursor],
-                    (size_t)(load_position_len - load_position_cursor + 1));
-            load_position_cursor--;
-            load_position_len--;
-            load_position_dirty = true;
+          if (ui.load_position_cursor > 0) {
+            memmove(
+                &ui.load_position_buf[ui.load_position_cursor - 1],
+                &ui.load_position_buf[ui.load_position_cursor],
+                (size_t)(ui.load_position_len - ui.load_position_cursor + 1));
+            ui.load_position_cursor--;
+            ui.load_position_len--;
+            ui.load_position_dirty = true;
           }
           continue;
         }
         if (key == NCKEY_DEL) {
-          if (load_position_cursor < load_position_len) {
-            memmove(&load_position_buf[load_position_cursor],
-                    &load_position_buf[load_position_cursor + 1],
-                    (size_t)(load_position_len - load_position_cursor));
-            load_position_len--;
-            load_position_dirty = true;
+          if (ui.load_position_cursor < ui.load_position_len) {
+            memmove(&ui.load_position_buf[ui.load_position_cursor],
+                    &ui.load_position_buf[ui.load_position_cursor + 1],
+                    (size_t)(ui.load_position_len - ui.load_position_cursor));
+            ui.load_position_len--;
+            ui.load_position_dirty = true;
           }
           continue;
         }
@@ -1398,27 +1397,28 @@ int main(int argc, char *argv[]) {
             rl_key_p = key - 'A' + 1;
           }
         }
-        if (tui_text_readline_key(rl_key_p, load_position_buf,
-                                  &load_position_cursor, &load_position_len,
-                                  &load_position_dirty)) {
+        if (tui_text_readline_key(
+                rl_key_p, ui.load_position_buf, &ui.load_position_cursor,
+                &ui.load_position_len, &ui.load_position_dirty)) {
           continue;
         }
         if (key >= 0x20 && key < 0x7f) {
-          if (load_position_len + 1 < (int)sizeof(load_position_buf)) {
-            memmove(&load_position_buf[load_position_cursor + 1],
-                    &load_position_buf[load_position_cursor],
-                    (size_t)(load_position_len - load_position_cursor + 1));
-            load_position_buf[load_position_cursor] = (char)key;
-            load_position_cursor++;
-            load_position_len++;
-            load_position_dirty = true;
+          if (ui.load_position_len + 1 < (int)sizeof(ui.load_position_buf)) {
+            memmove(
+                &ui.load_position_buf[ui.load_position_cursor + 1],
+                &ui.load_position_buf[ui.load_position_cursor],
+                (size_t)(ui.load_position_len - ui.load_position_cursor + 1));
+            ui.load_position_buf[ui.load_position_cursor] = (char)key;
+            ui.load_position_cursor++;
+            ui.load_position_len++;
+            ui.load_position_dirty = true;
           }
           continue;
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_LOAD_GAME) {
+      if (ui.modal == TUI_MODAL_LOAD_GAME) {
         // Mirrors the LOAD_POSITION handler: Esc cancels and resets
         // the previewed game; Enter commits when the live parse
         // succeeded; arrows / Home / End / Backspace / Del / printable
@@ -1431,27 +1431,27 @@ int main(int argc, char *argv[]) {
           pthread_mutex_lock(&game_state.mutex);
           game_reset(game_state.game);
           pthread_mutex_unlock(&game_state.mutex);
-          modal = TUI_MODAL_STARTUP_MENU;
+          ui.modal = TUI_MODAL_STARTUP_MENU;
           continue;
         }
         if (key == NCKEY_LEFT) {
-          if (load_game_cursor > 0) {
-            load_game_cursor--;
+          if (ui.load_game_cursor > 0) {
+            ui.load_game_cursor--;
           }
           continue;
         }
         if (key == NCKEY_RIGHT) {
-          if (load_game_cursor < load_game_len) {
-            load_game_cursor++;
+          if (ui.load_game_cursor < ui.load_game_len) {
+            ui.load_game_cursor++;
           }
           continue;
         }
         if (key == NCKEY_HOME) {
-          load_game_cursor = 0;
+          ui.load_game_cursor = 0;
           continue;
         }
         if (key == NCKEY_END) {
-          load_game_cursor = load_game_len;
+          ui.load_game_cursor = ui.load_game_len;
           continue;
         }
         if (key == NCKEY_UP || key == NCKEY_DOWN) {
@@ -1459,8 +1459,8 @@ int main(int argc, char *argv[]) {
           int cur_row = 0;
           int cur_col = 0;
           int target_offset = 0;
-          for (int i = 0; i < load_game_cursor; i++) {
-            if (load_game_buf[i] == '\n') {
+          for (int i = 0; i < ui.load_game_cursor; i++) {
+            if (ui.load_game_buf[i] == '\n') {
               cur_row++;
               cur_col = 0;
               continue;
@@ -1478,18 +1478,18 @@ int main(int argc, char *argv[]) {
             int row = 0;
             int col = 0;
             int i = 0;
-            target_offset = load_game_cursor;
+            target_offset = ui.load_game_cursor;
             bool found = false;
-            for (; i <= load_game_len; i++) {
+            for (; i <= ui.load_game_len; i++) {
               if (row == desired_row && col == cur_col) {
                 target_offset = i;
                 found = true;
                 break;
               }
-              if (i == load_game_len) {
+              if (i == ui.load_game_len) {
                 break;
               }
-              if (load_game_buf[i] == '\n') {
+              if (ui.load_game_buf[i] == '\n') {
                 if (row == desired_row) {
                   target_offset = i;
                   found = true;
@@ -1511,30 +1511,30 @@ int main(int argc, char *argv[]) {
               }
             }
             if (!found) {
-              target_offset = load_game_len;
+              target_offset = ui.load_game_len;
             }
           }
-          load_game_cursor = target_offset;
+          ui.load_game_cursor = target_offset;
           continue;
         }
         if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
-          if (load_game_cursor > 0) {
-            memmove(&load_game_buf[load_game_cursor - 1],
-                    &load_game_buf[load_game_cursor],
-                    (size_t)(load_game_len - load_game_cursor + 1));
-            load_game_cursor--;
-            load_game_len--;
-            load_game_dirty = true;
+          if (ui.load_game_cursor > 0) {
+            memmove(&ui.load_game_buf[ui.load_game_cursor - 1],
+                    &ui.load_game_buf[ui.load_game_cursor],
+                    (size_t)(ui.load_game_len - ui.load_game_cursor + 1));
+            ui.load_game_cursor--;
+            ui.load_game_len--;
+            ui.load_game_dirty = true;
           }
           continue;
         }
         if (key == NCKEY_DEL) {
-          if (load_game_cursor < load_game_len) {
-            memmove(&load_game_buf[load_game_cursor],
-                    &load_game_buf[load_game_cursor + 1],
-                    (size_t)(load_game_len - load_game_cursor));
-            load_game_len--;
-            load_game_dirty = true;
+          if (ui.load_game_cursor < ui.load_game_len) {
+            memmove(&ui.load_game_buf[ui.load_game_cursor],
+                    &ui.load_game_buf[ui.load_game_cursor + 1],
+                    (size_t)(ui.load_game_len - ui.load_game_cursor));
+            ui.load_game_len--;
+            ui.load_game_dirty = true;
           }
           continue;
         }
@@ -1546,8 +1546,8 @@ int main(int argc, char *argv[]) {
           // mitigation silently strips newlines, leaving the
           // parser unable to tokenize). Enter just submits when
           // the live-preview parse succeeded.
-          if (load_game_parse_ok) {
-            modal = TUI_MODAL_NONE;
+          if (ui.load_game_parse_ok) {
+            ui.modal = TUI_MODAL_NONE;
           }
           continue;
         }
@@ -1564,26 +1564,27 @@ int main(int argc, char *argv[]) {
             rl_key_g = key - 'A' + 1;
           }
         }
-        if (tui_text_readline_key(rl_key_g, load_game_buf, &load_game_cursor,
-                                  &load_game_len, &load_game_dirty)) {
+        if (tui_text_readline_key(rl_key_g, ui.load_game_buf,
+                                  &ui.load_game_cursor, &ui.load_game_len,
+                                  &ui.load_game_dirty)) {
           continue;
         }
         if (key >= 0x20 && key < 0x7f) {
-          if (load_game_len + 1 < (int)sizeof(load_game_buf)) {
-            memmove(&load_game_buf[load_game_cursor + 1],
-                    &load_game_buf[load_game_cursor],
-                    (size_t)(load_game_len - load_game_cursor + 1));
-            load_game_buf[load_game_cursor] = (char)key;
-            load_game_cursor++;
-            load_game_len++;
-            load_game_dirty = true;
+          if (ui.load_game_len + 1 < (int)sizeof(ui.load_game_buf)) {
+            memmove(&ui.load_game_buf[ui.load_game_cursor + 1],
+                    &ui.load_game_buf[ui.load_game_cursor],
+                    (size_t)(ui.load_game_len - ui.load_game_cursor + 1));
+            ui.load_game_buf[ui.load_game_cursor] = (char)key;
+            ui.load_game_cursor++;
+            ui.load_game_len++;
+            ui.load_game_dirty = true;
           }
           continue;
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_WATCH_SETUP) {
+      if (ui.modal == TUI_MODAL_WATCH_SETUP) {
         // Click on a setup row: select that row. For the "Start
         // game" row, also trigger commit (Enter). Other rows use
         // ←/→ to cycle values; click on the ◀ / ▶ chevrons fires
@@ -1593,7 +1594,7 @@ int main(int argc, char *argv[]) {
           const int hit = tui_modal_item_at(input.y, input.x);
           if (hit >= 0 && hit < TUI_WATCH_SETUP_ITEM_COUNT) {
             const TuiModalChevron chev = tui_modal_chevron_at(input.y, input.x);
-            watch_setup_focus = hit;
+            ui.watch_setup_focus = hit;
             if (chev == TUI_MODAL_CHEVRON_LEFT) {
               key = NCKEY_LEFT;
             } else if (chev == TUI_MODAL_CHEVRON_RIGHT) {
@@ -1612,26 +1613,26 @@ int main(int argc, char *argv[]) {
         const bool key_left = key == NCKEY_LEFT || key == 'h' || key == 'H';
         const bool key_right = key == NCKEY_RIGHT || key == 'l' || key == 'L';
         if (key == NCKEY_ESC) {
-          modal = TUI_MODAL_STARTUP_MENU;
+          ui.modal = TUI_MODAL_STARTUP_MENU;
           continue;
         }
         if (key_up) {
-          if (watch_setup_focus > 0) {
-            watch_setup_focus--;
+          if (ui.watch_setup_focus > 0) {
+            ui.watch_setup_focus--;
           }
           continue;
         }
         if (key_down) {
-          if (watch_setup_focus < TUI_WATCH_SETUP_ITEM_COUNT - 1) {
-            watch_setup_focus++;
+          if (ui.watch_setup_focus < TUI_WATCH_SETUP_ITEM_COUNT - 1) {
+            ui.watch_setup_focus++;
           }
           continue;
         }
         if (key_left || key_right) {
           const int dir = key_right ? 1 : -1;
-          if (watch_setup_focus == TUI_WATCH_SETUP_TIME) {
+          if (ui.watch_setup_focus == TUI_WATCH_SETUP_TIME) {
             const int n = tui_time_picker_preset_count();
-            const int cur = tui_time_picker_closest_index(watch_setup_time);
+            const int cur = tui_time_picker_closest_index(ui.watch_setup_time);
             int next = cur + dir;
             if (next < 0) {
               next = 0;
@@ -1639,56 +1640,56 @@ int main(int argc, char *argv[]) {
             if (next >= n) {
               next = n - 1;
             }
-            watch_setup_time = tui_time_picker_preset_seconds(next);
-          } else if (watch_setup_focus == TUI_WATCH_SETUP_LANGUAGE) {
+            ui.watch_setup_time = tui_time_picker_preset_seconds(next);
+          } else if (ui.watch_setup_focus == TUI_WATCH_SETUP_LANGUAGE) {
             // Cycle to the next/previous language group, snapping to
             // that group's first lexicon so the Lexicon row below
             // always shows a valid entry for the new language.
             // Mutates only the modal-local lexicon copy — committed
             // to the session on "Start game".
-            if (lexicon_list == NULL) {
-              lexicon_list = tui_lexicon_list_load();
+            if (ui.lexicon_list == NULL) {
+              ui.lexicon_list = tui_lexicon_list_load();
             }
-            if (lexicon_list != NULL) {
-              int cur =
-                  tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+            if (ui.lexicon_list != NULL) {
+              int cur = tui_lexicon_list_find(ui.lexicon_list,
+                                              ui.watch_setup_lexicon);
               if (cur < 0) {
                 cur = 0;
               }
               const int next =
-                  tui_lexicon_list_step_language(lexicon_list, cur, dir);
+                  tui_lexicon_list_step_language(ui.lexicon_list, cur, dir);
               char buf[TUI_LEXICON_NAME_MAX];
-              if (next != cur &&
-                  tui_lexicon_list_name(lexicon_list, next, buf, sizeof(buf))) {
-                snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
-                         buf);
+              if (next != cur && tui_lexicon_list_name(ui.lexicon_list, next,
+                                                       buf, sizeof(buf))) {
+                snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon),
+                         "%s", buf);
               }
             }
-          } else if (watch_setup_focus == TUI_WATCH_SETUP_LEXICON) {
+          } else if (ui.watch_setup_focus == TUI_WATCH_SETUP_LEXICON) {
             // Lazy-load the lexicon list on first use; the Settings
             // modal already keeps its own copy alive, so reuse it.
             // Cycling stays within the current language group — to
             // change language, use the Language row above. Mutates
             // only the modal-local copy.
-            if (lexicon_list == NULL) {
-              lexicon_list = tui_lexicon_list_load();
+            if (ui.lexicon_list == NULL) {
+              ui.lexicon_list = tui_lexicon_list_load();
             }
-            if (lexicon_list != NULL) {
-              int cur =
-                  tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+            if (ui.lexicon_list != NULL) {
+              int cur = tui_lexicon_list_find(ui.lexicon_list,
+                                              ui.watch_setup_lexicon);
               if (cur < 0) {
                 cur = 0;
               }
-              const int next =
-                  tui_lexicon_list_step_same_language(lexicon_list, cur, dir);
+              const int next = tui_lexicon_list_step_same_language(
+                  ui.lexicon_list, cur, dir);
               char buf[TUI_LEXICON_NAME_MAX];
-              if (next != cur &&
-                  tui_lexicon_list_name(lexicon_list, next, buf, sizeof(buf))) {
-                snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
-                         buf);
+              if (next != cur && tui_lexicon_list_name(ui.lexicon_list, next,
+                                                       buf, sizeof(buf))) {
+                snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon),
+                         "%s", buf);
               }
             }
-          } else if (watch_setup_focus == TUI_WATCH_SETUP_SIM_PLIES) {
+          } else if (ui.watch_setup_focus == TUI_WATCH_SETUP_SIM_PLIES) {
             pthread_mutex_lock(&game_state.mutex);
             int v = game_state.sim_plies + dir;
             if (v < 1) {
@@ -1699,7 +1700,7 @@ int main(int argc, char *argv[]) {
             }
             game_state.sim_plies = v;
             pthread_mutex_unlock(&game_state.mutex);
-          } else if (watch_setup_focus == TUI_WATCH_SETUP_SIM_CANDIDATES) {
+          } else if (ui.watch_setup_focus == TUI_WATCH_SETUP_SIM_CANDIDATES) {
             pthread_mutex_lock(&game_state.mutex);
             int v = game_state.sim_candidates + dir * 10;
             if (v < 2) {
@@ -1714,18 +1715,18 @@ int main(int argc, char *argv[]) {
           continue;
         }
         if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-          if (watch_setup_focus == TUI_WATCH_SETUP_START) {
+          if (ui.watch_setup_focus == TUI_WATCH_SETUP_START) {
             // Commit the modal's local copies into the live session
             // settings. Before this point the adjusters touched
             // only watch_setup_lexicon / watch_setup_time, so an
             // Esc cancel leaves the underlying session untouched.
-            chosen_time = watch_setup_time;
+            chosen_time = ui.watch_setup_time;
             snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
-                     watch_setup_lexicon);
+                     ui.watch_setup_lexicon);
             pthread_mutex_lock(&game_state.mutex);
             snprintf(game_state.pending_lexicon,
                      sizeof(game_state.pending_lexicon), "%s",
-                     watch_setup_lexicon);
+                     ui.watch_setup_lexicon);
             pthread_mutex_unlock(&game_state.mutex);
 
             // Replicate the time-picker confirm path: stop any bot
@@ -1769,8 +1770,8 @@ int main(int argc, char *argv[]) {
                 if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
                                          initial_load_rit, &game_state,
                                          reinit_error, sizeof(reinit_error))) {
-                  running = false;
-                  modal = TUI_MODAL_NONE;
+                  ui.running = false;
+                  ui.modal = TUI_MODAL_NONE;
                   continue;
                 }
               } else {
@@ -1802,14 +1803,14 @@ int main(int argc, char *argv[]) {
             game_state.app_mode = TUI_APP_MODE_WATCH;
             pthread_mutex_unlock(&game_state.mutex);
             tui_bot_worker_start(&game_state);
-            modal = TUI_MODAL_NONE;
+            ui.modal = TUI_MODAL_NONE;
           }
           continue;
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_ANNOTATE_SETUP) {
+      if (ui.modal == TUI_MODAL_ANNOTATE_SETUP) {
         // Click anywhere on the modal: focus the clicked item.
         // Chevrons on the Lexicon row synthesize ←/→. The Start row
         // commits via synthesized Enter.
@@ -1820,16 +1821,16 @@ int main(int argc, char *argv[]) {
             // Reset the name caret to end-of-text when switching to
             // a different name row so a fresh click on the row
             // doesn't strand the caret mid-word.
-            if (hit != annotate_setup_focus) {
+            if (hit != ui.annotate_setup_focus) {
               if (hit == TUI_ANNOTATE_SETUP_P1_NAME) {
-                annotate_setup_name_cursor =
-                    (int)strlen(annotate_setup_p1_name);
+                ui.annotate_setup_name_cursor =
+                    (int)strlen(ui.annotate_setup_p1_name);
               } else if (hit == TUI_ANNOTATE_SETUP_P2_NAME) {
-                annotate_setup_name_cursor =
-                    (int)strlen(annotate_setup_p2_name);
+                ui.annotate_setup_name_cursor =
+                    (int)strlen(ui.annotate_setup_p2_name);
               }
             }
-            annotate_setup_focus = hit;
+            ui.annotate_setup_focus = hit;
             if (chev == TUI_MODAL_CHEVRON_LEFT) {
               key = NCKEY_LEFT;
             } else if (chev == TUI_MODAL_CHEVRON_RIGHT) {
@@ -1845,33 +1846,36 @@ int main(int argc, char *argv[]) {
         }
 
         const bool focus_p1 =
-            annotate_setup_focus == TUI_ANNOTATE_SETUP_P1_NAME;
+            ui.annotate_setup_focus == TUI_ANNOTATE_SETUP_P1_NAME;
         const bool focus_p2 =
-            annotate_setup_focus == TUI_ANNOTATE_SETUP_P2_NAME;
+            ui.annotate_setup_focus == TUI_ANNOTATE_SETUP_P2_NAME;
         const bool focus_name = focus_p1 || focus_p2;
-        char *name_buf = focus_p1 ? annotate_setup_p1_name
-                                  : (focus_p2 ? annotate_setup_p2_name : NULL);
-        const size_t name_cap = focus_p1 ? sizeof(annotate_setup_p1_name)
-                                         : sizeof(annotate_setup_p2_name);
+        char *name_buf = focus_p1
+                             ? ui.annotate_setup_p1_name
+                             : (focus_p2 ? ui.annotate_setup_p2_name : NULL);
+        const size_t name_cap = focus_p1 ? sizeof(ui.annotate_setup_p1_name)
+                                         : sizeof(ui.annotate_setup_p2_name);
 
         if (key == NCKEY_ESC) {
-          modal = TUI_MODAL_STARTUP_MENU;
+          ui.modal = TUI_MODAL_STARTUP_MENU;
           continue;
         }
         if (key == NCKEY_UP || key == NCKEY_DOWN) {
           const int delta = key == NCKEY_UP ? -1 : 1;
-          int next = annotate_setup_focus + delta;
+          int next = ui.annotate_setup_focus + delta;
           if (next < 0) {
             next = 0;
           }
           if (next >= TUI_ANNOTATE_SETUP_ITEM_COUNT) {
             next = TUI_ANNOTATE_SETUP_ITEM_COUNT - 1;
           }
-          annotate_setup_focus = next;
+          ui.annotate_setup_focus = next;
           if (next == TUI_ANNOTATE_SETUP_P1_NAME) {
-            annotate_setup_name_cursor = (int)strlen(annotate_setup_p1_name);
+            ui.annotate_setup_name_cursor =
+                (int)strlen(ui.annotate_setup_p1_name);
           } else if (next == TUI_ANNOTATE_SETUP_P2_NAME) {
-            annotate_setup_name_cursor = (int)strlen(annotate_setup_p2_name);
+            ui.annotate_setup_name_cursor =
+                (int)strlen(ui.annotate_setup_p2_name);
           }
           continue;
         }
@@ -1884,42 +1888,44 @@ int main(int argc, char *argv[]) {
         if (key == NCKEY_TAB) {
           const bool shift = ncinput_shift_p(&input);
           int next;
-          if (annotate_setup_focus == TUI_ANNOTATE_SETUP_P1_NAME) {
+          if (ui.annotate_setup_focus == TUI_ANNOTATE_SETUP_P1_NAME) {
             next = TUI_ANNOTATE_SETUP_P2_NAME;
-          } else if (annotate_setup_focus == TUI_ANNOTATE_SETUP_P2_NAME) {
+          } else if (ui.annotate_setup_focus == TUI_ANNOTATE_SETUP_P2_NAME) {
             next = TUI_ANNOTATE_SETUP_P1_NAME;
           } else {
             next =
                 shift ? TUI_ANNOTATE_SETUP_P2_NAME : TUI_ANNOTATE_SETUP_P1_NAME;
           }
-          annotate_setup_focus = next;
+          ui.annotate_setup_focus = next;
           if (next == TUI_ANNOTATE_SETUP_P1_NAME) {
-            annotate_setup_name_cursor = (int)strlen(annotate_setup_p1_name);
+            ui.annotate_setup_name_cursor =
+                (int)strlen(ui.annotate_setup_p1_name);
           } else {
-            annotate_setup_name_cursor = (int)strlen(annotate_setup_p2_name);
+            ui.annotate_setup_name_cursor =
+                (int)strlen(ui.annotate_setup_p2_name);
           }
           continue;
         }
-        if (annotate_setup_focus == TUI_ANNOTATE_SETUP_LEXICON &&
+        if (ui.annotate_setup_focus == TUI_ANNOTATE_SETUP_LEXICON &&
             (key == NCKEY_LEFT || key == NCKEY_RIGHT)) {
           const int dir = key == NCKEY_RIGHT ? 1 : -1;
-          if (lexicon_list == NULL) {
-            lexicon_list = tui_lexicon_list_load();
+          if (ui.lexicon_list == NULL) {
+            ui.lexicon_list = tui_lexicon_list_load();
           }
-          if (lexicon_list != NULL) {
-            int cur =
-                tui_lexicon_list_find(lexicon_list, annotate_setup_lexicon);
+          if (ui.lexicon_list != NULL) {
+            int cur = tui_lexicon_list_find(ui.lexicon_list,
+                                            ui.annotate_setup_lexicon);
             if (cur < 0) {
               cur = 0;
             }
             const int next =
-                tui_lexicon_list_step_same_language(lexicon_list, cur, dir);
+                tui_lexicon_list_step_same_language(ui.lexicon_list, cur, dir);
             char namebuf[TUI_LEXICON_NAME_MAX];
             if (next != cur &&
-                tui_lexicon_list_name(lexicon_list, next, namebuf,
+                tui_lexicon_list_name(ui.lexicon_list, next, namebuf,
                                       sizeof(namebuf))) {
-              snprintf(annotate_setup_lexicon, sizeof(annotate_setup_lexicon),
-                       "%s", namebuf);
+              snprintf(ui.annotate_setup_lexicon,
+                       sizeof(ui.annotate_setup_lexicon), "%s", namebuf);
             }
           }
           continue;
@@ -1927,48 +1933,48 @@ int main(int argc, char *argv[]) {
         if (focus_name && name_buf != NULL) {
           const int len = (int)strlen(name_buf);
           if (key == NCKEY_LEFT) {
-            if (annotate_setup_name_cursor > 0) {
-              annotate_setup_name_cursor--;
+            if (ui.annotate_setup_name_cursor > 0) {
+              ui.annotate_setup_name_cursor--;
             }
             continue;
           }
           if (key == NCKEY_RIGHT) {
-            if (annotate_setup_name_cursor < len) {
-              annotate_setup_name_cursor++;
+            if (ui.annotate_setup_name_cursor < len) {
+              ui.annotate_setup_name_cursor++;
             }
             continue;
           }
           if (key == NCKEY_HOME) {
-            annotate_setup_name_cursor = 0;
+            ui.annotate_setup_name_cursor = 0;
             continue;
           }
           if (key == NCKEY_END) {
-            annotate_setup_name_cursor = len;
+            ui.annotate_setup_name_cursor = len;
             continue;
           }
           if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
-            if (annotate_setup_name_cursor > 0) {
-              memmove(name_buf + annotate_setup_name_cursor - 1,
-                      name_buf + annotate_setup_name_cursor,
-                      (size_t)(len - annotate_setup_name_cursor + 1));
-              annotate_setup_name_cursor--;
+            if (ui.annotate_setup_name_cursor > 0) {
+              memmove(name_buf + ui.annotate_setup_name_cursor - 1,
+                      name_buf + ui.annotate_setup_name_cursor,
+                      (size_t)(len - ui.annotate_setup_name_cursor + 1));
+              ui.annotate_setup_name_cursor--;
             }
             continue;
           }
           if (key == NCKEY_DEL) {
-            if (annotate_setup_name_cursor < len) {
-              memmove(name_buf + annotate_setup_name_cursor,
-                      name_buf + annotate_setup_name_cursor + 1,
-                      (size_t)(len - annotate_setup_name_cursor));
+            if (ui.annotate_setup_name_cursor < len) {
+              memmove(name_buf + ui.annotate_setup_name_cursor,
+                      name_buf + ui.annotate_setup_name_cursor + 1,
+                      (size_t)(len - ui.annotate_setup_name_cursor));
             }
             continue;
           }
           if (key >= 0x20 && key < 0x7f && len + 1 < (int)name_cap) {
-            memmove(name_buf + annotate_setup_name_cursor + 1,
-                    name_buf + annotate_setup_name_cursor,
-                    (size_t)(len - annotate_setup_name_cursor + 1));
-            name_buf[annotate_setup_name_cursor] = (char)key;
-            annotate_setup_name_cursor++;
+            memmove(name_buf + ui.annotate_setup_name_cursor + 1,
+                    name_buf + ui.annotate_setup_name_cursor,
+                    (size_t)(len - ui.annotate_setup_name_cursor + 1));
+            name_buf[ui.annotate_setup_name_cursor] = (char)key;
+            ui.annotate_setup_name_cursor++;
             continue;
           }
         }
@@ -1976,12 +1982,14 @@ int main(int argc, char *argv[]) {
           // Enter on a non-Start row advances to the next field.
           // Enter on Start (or anywhere from the keyboard with focus
           // already on Start) commits.
-          if (annotate_setup_focus != TUI_ANNOTATE_SETUP_START) {
-            annotate_setup_focus++;
-            if (annotate_setup_focus == TUI_ANNOTATE_SETUP_P1_NAME) {
-              annotate_setup_name_cursor = (int)strlen(annotate_setup_p1_name);
-            } else if (annotate_setup_focus == TUI_ANNOTATE_SETUP_P2_NAME) {
-              annotate_setup_name_cursor = (int)strlen(annotate_setup_p2_name);
+          if (ui.annotate_setup_focus != TUI_ANNOTATE_SETUP_START) {
+            ui.annotate_setup_focus++;
+            if (ui.annotate_setup_focus == TUI_ANNOTATE_SETUP_P1_NAME) {
+              ui.annotate_setup_name_cursor =
+                  (int)strlen(ui.annotate_setup_p1_name);
+            } else if (ui.annotate_setup_focus == TUI_ANNOTATE_SETUP_P2_NAME) {
+              ui.annotate_setup_name_cursor =
+                  (int)strlen(ui.annotate_setup_p2_name);
             }
             continue;
           }
@@ -1999,11 +2007,11 @@ int main(int argc, char *argv[]) {
             atomic_store(&game_state.bot_stop, false);
           }
           snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
-                   annotate_setup_lexicon);
+                   ui.annotate_setup_lexicon);
           pthread_mutex_lock(&game_state.mutex);
           snprintf(game_state.pending_lexicon,
                    sizeof(game_state.pending_lexicon), "%s",
-                   annotate_setup_lexicon);
+                   ui.annotate_setup_lexicon);
           pthread_mutex_unlock(&game_state.mutex);
           if (!args.no_config) {
             strncpy(to_save.lexicon, chosen_lexicon,
@@ -2031,8 +2039,8 @@ int main(int argc, char *argv[]) {
               if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
                                        initial_load_rit, &game_state,
                                        reinit_error, sizeof(reinit_error))) {
-                running = false;
-                modal = TUI_MODAL_NONE;
+                ui.running = false;
+                ui.modal = TUI_MODAL_NONE;
                 continue;
               }
             } else {
@@ -2052,10 +2060,10 @@ int main(int argc, char *argv[]) {
           tui_game_render_reset_grids();
           snprintf(game_state.player_names[0],
                    sizeof(game_state.player_names[0]), "%s",
-                   annotate_setup_p1_name);
+                   ui.annotate_setup_p1_name);
           snprintf(game_state.player_names[1],
                    sizeof(game_state.player_names[1]), "%s",
-                   annotate_setup_p2_name);
+                   ui.annotate_setup_p2_name);
           // Seed history with one pending entry for P1 so the
           // History panel reads "1." waiting for input. Rack is
           // NULL because the annotator will fill it in later.
@@ -2079,25 +2087,27 @@ int main(int argc, char *argv[]) {
           pthread_mutex_unlock(&game_state.mutex);
           // No tui_bot_worker_start — annotation mode is human-
           // driven. Move-entry / rack-entry UI will hook in later.
-          modal = TUI_MODAL_NONE;
+          ui.modal = TUI_MODAL_NONE;
           continue;
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_PLAY_SETUP) {
+      if (ui.modal == TUI_MODAL_PLAY_SETUP) {
         if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
           const int hit = tui_modal_item_at(input.y, input.x);
           if (hit >= 0 && hit < TUI_PLAY_SETUP_ITEM_COUNT) {
             const TuiModalChevron chev = tui_modal_chevron_at(input.y, input.x);
-            if (hit != play_setup_focus) {
+            if (hit != ui.play_setup_focus) {
               if (hit == TUI_PLAY_SETUP_HUMAN_NAME) {
-                play_setup_name_cursor = (int)strlen(play_setup_human_name);
+                ui.play_setup_name_cursor =
+                    (int)strlen(ui.play_setup_human_name);
               } else if (hit == TUI_PLAY_SETUP_COMPUTER_NAME) {
-                play_setup_name_cursor = (int)strlen(play_setup_computer_name);
+                ui.play_setup_name_cursor =
+                    (int)strlen(ui.play_setup_computer_name);
               }
             }
-            play_setup_focus = hit;
+            ui.play_setup_focus = hit;
             // Chevrons only render on the focused adjustable row, so a
             // chevron hit always means "adjust this row".
             if (hit == TUI_PLAY_SETUP_START) {
@@ -2114,47 +2124,51 @@ int main(int argc, char *argv[]) {
           }
         }
 
-        const bool focus_human = play_setup_focus == TUI_PLAY_SETUP_HUMAN_NAME;
+        const bool focus_human =
+            ui.play_setup_focus == TUI_PLAY_SETUP_HUMAN_NAME;
         const bool focus_comp =
-            play_setup_focus == TUI_PLAY_SETUP_COMPUTER_NAME;
+            ui.play_setup_focus == TUI_PLAY_SETUP_COMPUTER_NAME;
         const bool focus_name = focus_human || focus_comp;
-        char *name_buf = focus_human
-                             ? play_setup_human_name
-                             : (focus_comp ? play_setup_computer_name : NULL);
-        const size_t name_cap = focus_human ? sizeof(play_setup_human_name)
-                                            : sizeof(play_setup_computer_name);
+        char *name_buf =
+            focus_human ? ui.play_setup_human_name
+                        : (focus_comp ? ui.play_setup_computer_name : NULL);
+        const size_t name_cap = focus_human
+                                    ? sizeof(ui.play_setup_human_name)
+                                    : sizeof(ui.play_setup_computer_name);
 
         if (key == NCKEY_ESC) {
-          modal = TUI_MODAL_STARTUP_MENU;
-          startup_menu_focus = TUI_STARTUP_PLAY_VS_COMPUTER;
+          ui.modal = TUI_MODAL_STARTUP_MENU;
+          ui.startup_menu_focus = TUI_STARTUP_PLAY_VS_COMPUTER;
           continue;
         }
         // Cursor navigation skips rows the current overtime rule
         // disables (cap under non-MAX, penalty rate under FLAG).
         bool ps_enabled[TUI_PLAY_SETUP_ITEM_COUNT];
-        tui_play_setup_enabled_rows(play_setup_overtime_rule, watch_setup_time,
-                                    play_setup_challenge_rule, ps_enabled);
+        tui_play_setup_enabled_rows(ui.play_setup_overtime_rule,
+                                    ui.watch_setup_time,
+                                    ui.play_setup_challenge_rule, ps_enabled);
         if (key == NCKEY_UP || key == NCKEY_DOWN) {
           const int delta = key == NCKEY_UP ? -1 : 1;
-          int next = play_setup_focus + delta;
+          int next = ui.play_setup_focus + delta;
           while (next >= 0 && next < TUI_PLAY_SETUP_ITEM_COUNT &&
                  !ps_enabled[next]) {
             next += delta;
           }
           if (next < 0 || next >= TUI_PLAY_SETUP_ITEM_COUNT) {
-            next = play_setup_focus; // no enabled row that way — stay put
+            next = ui.play_setup_focus; // no enabled row that way — stay put
           }
-          play_setup_focus = next;
+          ui.play_setup_focus = next;
           if (next == TUI_PLAY_SETUP_HUMAN_NAME) {
-            play_setup_name_cursor = (int)strlen(play_setup_human_name);
+            ui.play_setup_name_cursor = (int)strlen(ui.play_setup_human_name);
           } else if (next == TUI_PLAY_SETUP_COMPUTER_NAME) {
-            play_setup_name_cursor = (int)strlen(play_setup_computer_name);
+            ui.play_setup_name_cursor =
+                (int)strlen(ui.play_setup_computer_name);
           }
           continue;
         }
         if (key == NCKEY_TAB) {
           const bool shift = ncinput_shift_p(&input);
-          int next = play_setup_focus;
+          int next = ui.play_setup_focus;
           for (int step = 0; step < TUI_PLAY_SETUP_ITEM_COUNT; step++) {
             next += shift ? -1 : 1;
             if (next < 0) {
@@ -2167,23 +2181,24 @@ int main(int argc, char *argv[]) {
               break;
             }
           }
-          play_setup_focus = next;
+          ui.play_setup_focus = next;
           if (next == TUI_PLAY_SETUP_HUMAN_NAME) {
-            play_setup_name_cursor = (int)strlen(play_setup_human_name);
+            ui.play_setup_name_cursor = (int)strlen(ui.play_setup_human_name);
           } else if (next == TUI_PLAY_SETUP_COMPUTER_NAME) {
-            play_setup_name_cursor = (int)strlen(play_setup_computer_name);
+            ui.play_setup_name_cursor =
+                (int)strlen(ui.play_setup_computer_name);
           }
           continue;
         }
         if (!focus_name && (key == NCKEY_LEFT || key == NCKEY_RIGHT)) {
           const int dir = key == NCKEY_RIGHT ? 1 : -1;
-          if (play_setup_focus == TUI_PLAY_SETUP_FIRST_MOVE) {
-            play_setup_first_move =
-                (play_setup_first_move + dir + TUI_PLAY_FIRST_COUNT) %
+          if (ui.play_setup_focus == TUI_PLAY_SETUP_FIRST_MOVE) {
+            ui.play_setup_first_move =
+                (ui.play_setup_first_move + dir + TUI_PLAY_FIRST_COUNT) %
                 TUI_PLAY_FIRST_COUNT;
-          } else if (play_setup_focus == TUI_PLAY_SETUP_TIME) {
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_TIME) {
             const int n = tui_time_picker_preset_count();
-            const int cur = tui_time_picker_closest_index(watch_setup_time);
+            const int cur = tui_time_picker_closest_index(ui.watch_setup_time);
             int next = cur + dir;
             if (next < 0) {
               next = 0;
@@ -2191,84 +2206,84 @@ int main(int argc, char *argv[]) {
             if (next >= n) {
               next = n - 1;
             }
-            watch_setup_time = tui_time_picker_preset_seconds(next);
-          } else if (play_setup_focus == TUI_PLAY_SETUP_OVERTIME) {
-            play_setup_overtime_rule =
-                (UiOvertimeRule)(((int)play_setup_overtime_rule + dir +
+            ui.watch_setup_time = tui_time_picker_preset_seconds(next);
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_OVERTIME) {
+            ui.play_setup_overtime_rule =
+                (UiOvertimeRule)(((int)ui.play_setup_overtime_rule + dir +
                                   UI_OVERTIME_RULE_COUNT) %
                                  UI_OVERTIME_RULE_COUNT);
-          } else if (play_setup_focus == TUI_PLAY_SETUP_OVERTIME_CAP) {
-            if (play_setup_overtime_rule == UI_OVERTIME_MAX) {
-              int v = play_setup_overtime_cap + dir;
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_OVERTIME_CAP) {
+            if (ui.play_setup_overtime_rule == UI_OVERTIME_MAX) {
+              int v = ui.play_setup_overtime_cap + dir;
               if (v < 1) {
                 v = 1;
               }
               if (v > 60) {
                 v = 60;
               }
-              play_setup_overtime_cap = v;
+              ui.play_setup_overtime_cap = v;
             }
-          } else if (play_setup_focus == TUI_PLAY_SETUP_TIME_PENALTY) {
-            if (play_setup_overtime_rule != UI_OVERTIME_FLAG) {
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_TIME_PENALTY) {
+            if (ui.play_setup_overtime_rule != UI_OVERTIME_FLAG) {
               // Two rates — Left/Right both toggle.
-              play_setup_penalty_rate =
-                  play_setup_penalty_rate == UI_TIME_PENALTY_10_PER_MIN
+              ui.play_setup_penalty_rate =
+                  ui.play_setup_penalty_rate == UI_TIME_PENALTY_10_PER_MIN
                       ? UI_TIME_PENALTY_1_PER_SEC
                       : UI_TIME_PENALTY_10_PER_MIN;
             }
-          } else if (play_setup_focus == TUI_PLAY_SETUP_CHALLENGE) {
-            play_setup_challenge_rule =
-                (UiChallengeRule)(((int)play_setup_challenge_rule + dir +
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_CHALLENGE) {
+            ui.play_setup_challenge_rule =
+                (UiChallengeRule)(((int)ui.play_setup_challenge_rule + dir +
                                    UI_CHALLENGE_RULE_COUNT) %
                                   UI_CHALLENGE_RULE_COUNT);
-          } else if (play_setup_focus == TUI_PLAY_SETUP_CHALLENGE_PENALTY) {
-            if (play_setup_challenge_rule == UI_CHALLENGE_PENALTY) {
-              play_setup_challenge_penalty =
-                  (UiChallengePenalty)(((int)play_setup_challenge_penalty +
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_CHALLENGE_PENALTY) {
+            if (ui.play_setup_challenge_rule == UI_CHALLENGE_PENALTY) {
+              ui.play_setup_challenge_penalty =
+                  (UiChallengePenalty)(((int)ui.play_setup_challenge_penalty +
                                         dir + UI_CHALLENGE_PENALTY_COUNT) %
                                        UI_CHALLENGE_PENALTY_COUNT);
             }
-          } else if (play_setup_focus == TUI_PLAY_SETUP_LANGUAGE) {
-            if (lexicon_list == NULL) {
-              lexicon_list = tui_lexicon_list_load();
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_LANGUAGE) {
+            if (ui.lexicon_list == NULL) {
+              ui.lexicon_list = tui_lexicon_list_load();
             }
-            if (lexicon_list != NULL) {
-              int cur =
-                  tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+            if (ui.lexicon_list != NULL) {
+              int cur = tui_lexicon_list_find(ui.lexicon_list,
+                                              ui.watch_setup_lexicon);
               if (cur < 0) {
                 cur = 0;
               }
               const int next =
-                  tui_lexicon_list_step_language(lexicon_list, cur, dir);
+                  tui_lexicon_list_step_language(ui.lexicon_list, cur, dir);
               char namebuf[TUI_LEXICON_NAME_MAX];
               if (next != cur &&
-                  tui_lexicon_list_name(lexicon_list, next, namebuf,
+                  tui_lexicon_list_name(ui.lexicon_list, next, namebuf,
                                         sizeof(namebuf))) {
-                snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
-                         namebuf);
+                snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon),
+                         "%s", namebuf);
               }
             }
-          } else if (play_setup_focus == TUI_PLAY_SETUP_LEXICON) {
-            if (lexicon_list == NULL) {
-              lexicon_list = tui_lexicon_list_load();
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_LEXICON) {
+            if (ui.lexicon_list == NULL) {
+              ui.lexicon_list = tui_lexicon_list_load();
             }
-            if (lexicon_list != NULL) {
-              int cur =
-                  tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+            if (ui.lexicon_list != NULL) {
+              int cur = tui_lexicon_list_find(ui.lexicon_list,
+                                              ui.watch_setup_lexicon);
               if (cur < 0) {
                 cur = 0;
               }
-              const int next =
-                  tui_lexicon_list_step_same_language(lexicon_list, cur, dir);
+              const int next = tui_lexicon_list_step_same_language(
+                  ui.lexicon_list, cur, dir);
               char namebuf[TUI_LEXICON_NAME_MAX];
               if (next != cur &&
-                  tui_lexicon_list_name(lexicon_list, next, namebuf,
+                  tui_lexicon_list_name(ui.lexicon_list, next, namebuf,
                                         sizeof(namebuf))) {
-                snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
-                         namebuf);
+                snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon),
+                         "%s", namebuf);
               }
             }
-          } else if (play_setup_focus == TUI_PLAY_SETUP_SIM_PLIES) {
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_SIM_PLIES) {
             pthread_mutex_lock(&game_state.mutex);
             int v = game_state.sim_plies + dir;
             if (v < 1) {
@@ -2279,7 +2294,7 @@ int main(int argc, char *argv[]) {
             }
             game_state.sim_plies = v;
             pthread_mutex_unlock(&game_state.mutex);
-          } else if (play_setup_focus == TUI_PLAY_SETUP_SIM_CANDIDATES) {
+          } else if (ui.play_setup_focus == TUI_PLAY_SETUP_SIM_CANDIDATES) {
             pthread_mutex_lock(&game_state.mutex);
             int v = game_state.sim_candidates + dir * 10;
             if (v < 2) {
@@ -2296,63 +2311,64 @@ int main(int argc, char *argv[]) {
         if (focus_name && name_buf != NULL) {
           const int len = (int)strlen(name_buf);
           if (key == NCKEY_LEFT) {
-            if (play_setup_name_cursor > 0) {
-              play_setup_name_cursor--;
+            if (ui.play_setup_name_cursor > 0) {
+              ui.play_setup_name_cursor--;
             }
             continue;
           }
           if (key == NCKEY_RIGHT) {
-            if (play_setup_name_cursor < len) {
-              play_setup_name_cursor++;
+            if (ui.play_setup_name_cursor < len) {
+              ui.play_setup_name_cursor++;
             }
             continue;
           }
           if (key == NCKEY_HOME) {
-            play_setup_name_cursor = 0;
+            ui.play_setup_name_cursor = 0;
             continue;
           }
           if (key == NCKEY_END) {
-            play_setup_name_cursor = len;
+            ui.play_setup_name_cursor = len;
             continue;
           }
           if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
-            if (play_setup_name_cursor > 0) {
-              memmove(name_buf + play_setup_name_cursor - 1,
-                      name_buf + play_setup_name_cursor,
-                      (size_t)(len - play_setup_name_cursor + 1));
-              play_setup_name_cursor--;
+            if (ui.play_setup_name_cursor > 0) {
+              memmove(name_buf + ui.play_setup_name_cursor - 1,
+                      name_buf + ui.play_setup_name_cursor,
+                      (size_t)(len - ui.play_setup_name_cursor + 1));
+              ui.play_setup_name_cursor--;
             }
             continue;
           }
           if (key == NCKEY_DEL) {
-            if (play_setup_name_cursor < len) {
-              memmove(name_buf + play_setup_name_cursor,
-                      name_buf + play_setup_name_cursor + 1,
-                      (size_t)(len - play_setup_name_cursor));
+            if (ui.play_setup_name_cursor < len) {
+              memmove(name_buf + ui.play_setup_name_cursor,
+                      name_buf + ui.play_setup_name_cursor + 1,
+                      (size_t)(len - ui.play_setup_name_cursor));
             }
             continue;
           }
           if (key >= 0x20 && key < 0x7f && len + 1 < (int)name_cap) {
-            memmove(name_buf + play_setup_name_cursor + 1,
-                    name_buf + play_setup_name_cursor,
-                    (size_t)(len - play_setup_name_cursor + 1));
-            name_buf[play_setup_name_cursor] = (char)key;
-            play_setup_name_cursor++;
+            memmove(name_buf + ui.play_setup_name_cursor + 1,
+                    name_buf + ui.play_setup_name_cursor,
+                    (size_t)(len - ui.play_setup_name_cursor + 1));
+            name_buf[ui.play_setup_name_cursor] = (char)key;
+            ui.play_setup_name_cursor++;
             continue;
           }
         }
         if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
           // Enter on a non-Start row advances to the next enabled
           // field; Enter on Start launches the game.
-          if (play_setup_focus != TUI_PLAY_SETUP_START) {
+          if (ui.play_setup_focus != TUI_PLAY_SETUP_START) {
             do {
-              play_setup_focus++;
-            } while (play_setup_focus < TUI_PLAY_SETUP_START &&
-                     !ps_enabled[play_setup_focus]);
-            if (play_setup_focus == TUI_PLAY_SETUP_HUMAN_NAME) {
-              play_setup_name_cursor = (int)strlen(play_setup_human_name);
-            } else if (play_setup_focus == TUI_PLAY_SETUP_COMPUTER_NAME) {
-              play_setup_name_cursor = (int)strlen(play_setup_computer_name);
+              ui.play_setup_focus++;
+            } while (ui.play_setup_focus < TUI_PLAY_SETUP_START &&
+                     !ps_enabled[ui.play_setup_focus]);
+            if (ui.play_setup_focus == TUI_PLAY_SETUP_HUMAN_NAME) {
+              ui.play_setup_name_cursor = (int)strlen(ui.play_setup_human_name);
+            } else if (ui.play_setup_focus == TUI_PLAY_SETUP_COMPUTER_NAME) {
+              ui.play_setup_name_cursor =
+                  (int)strlen(ui.play_setup_computer_name);
             }
             continue;
           }
@@ -2360,26 +2376,27 @@ int main(int argc, char *argv[]) {
           // the human is P1 (index 0); "Computer" makes the human P2;
           // "Random" flips a coin.
           int human_idx;
-          if (play_setup_first_move == TUI_PLAY_FIRST_HUMAN) {
+          if (ui.play_setup_first_move == TUI_PLAY_FIRST_HUMAN) {
             human_idx = 0;
-          } else if (play_setup_first_move == TUI_PLAY_FIRST_COMPUTER) {
+          } else if (ui.play_setup_first_move == TUI_PLAY_FIRST_COMPUTER) {
             human_idx = 1;
           } else {
             human_idx = (int)((uint64_t)time(NULL) & 1ULL);
           }
-          const char *hn =
-              play_setup_human_name[0] != '\0' ? play_setup_human_name : "You";
-          const char *cn = play_setup_computer_name[0] != '\0'
-                               ? play_setup_computer_name
+          const char *hn = ui.play_setup_human_name[0] != '\0'
+                               ? ui.play_setup_human_name
+                               : "You";
+          const char *cn = ui.play_setup_computer_name[0] != '\0'
+                               ? ui.play_setup_computer_name
                                : "Computer";
           // Commit the modal's scratch time / lexicon into the session.
-          chosen_time = watch_setup_time;
+          chosen_time = ui.watch_setup_time;
           snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
-                   watch_setup_lexicon);
+                   ui.watch_setup_lexicon);
           pthread_mutex_lock(&game_state.mutex);
           snprintf(game_state.pending_lexicon,
                    sizeof(game_state.pending_lexicon), "%s",
-                   watch_setup_lexicon);
+                   ui.watch_setup_lexicon);
           pthread_mutex_unlock(&game_state.mutex);
           // Stop any running bot before reconfiguring the game.
           // The analysis-resume worker reads history entries and the
@@ -2394,15 +2411,15 @@ int main(int argc, char *argv[]) {
           if (!args.no_config) {
             to_save.time_per_side_seconds = chosen_time;
             to_save.time_per_side_set = true;
-            to_save.overtime_rule = play_setup_overtime_rule;
+            to_save.overtime_rule = ui.play_setup_overtime_rule;
             to_save.overtime_rule_set = true;
-            to_save.overtime_cap_minutes = play_setup_overtime_cap;
+            to_save.overtime_cap_minutes = ui.play_setup_overtime_cap;
             to_save.overtime_cap_set = true;
-            to_save.time_penalty_rate = play_setup_penalty_rate;
+            to_save.time_penalty_rate = ui.play_setup_penalty_rate;
             to_save.time_penalty_set = true;
-            to_save.challenge_rule = play_setup_challenge_rule;
+            to_save.challenge_rule = ui.play_setup_challenge_rule;
             to_save.challenge_rule_set = true;
-            to_save.challenge_penalty = play_setup_challenge_penalty;
+            to_save.challenge_penalty = ui.play_setup_challenge_penalty;
             to_save.challenge_penalty_set = true;
             strncpy(to_save.lexicon, chosen_lexicon,
                     sizeof(to_save.lexicon) - 1);
@@ -2429,8 +2446,8 @@ int main(int argc, char *argv[]) {
               if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
                                        initial_load_rit, &game_state,
                                        reinit_error, sizeof(reinit_error))) {
-                running = false;
-                modal = TUI_MODAL_NONE;
+                ui.running = false;
+                ui.modal = TUI_MODAL_NONE;
                 continue;
               }
             } else {
@@ -2442,11 +2459,11 @@ int main(int argc, char *argv[]) {
           }
           pthread_mutex_lock(&game_state.mutex);
           tui_game_state_set_time_per_side(&game_state, chosen_time);
-          game_state.overtime_rule = play_setup_overtime_rule;
-          game_state.overtime_cap_minutes = play_setup_overtime_cap;
-          game_state.time_penalty_rate = play_setup_penalty_rate;
-          game_state.challenge_rule = play_setup_challenge_rule;
-          game_state.challenge_penalty = play_setup_challenge_penalty;
+          game_state.overtime_rule = ui.play_setup_overtime_rule;
+          game_state.overtime_cap_minutes = ui.play_setup_overtime_cap;
+          game_state.time_penalty_rate = ui.play_setup_penalty_rate;
+          game_state.challenge_rule = ui.play_setup_challenge_rule;
+          game_state.challenge_penalty = ui.play_setup_challenge_penalty;
           tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
           game_state.app_mode = TUI_APP_MODE_PLAY_VS_COMPUTER;
           game_state.human_player_idx = human_idx;
@@ -2462,13 +2479,13 @@ int main(int argc, char *argv[]) {
           // Start the bot — it idles on the human's turn and plays the
           // computer's.
           tui_bot_worker_start(&game_state);
-          modal = TUI_MODAL_NONE;
+          ui.modal = TUI_MODAL_NONE;
           continue;
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_STARTUP_MENU) {
+      if (ui.modal == TUI_MODAL_STARTUP_MENU) {
         // Helper: which menu items are currently selectable. Only
         // "Watch computer play" is wired up; others render dimmed
         // and the cursor skips past them. Keep this aligned with
@@ -2482,7 +2499,7 @@ int main(int argc, char *argv[]) {
         if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
           const int hit = tui_modal_item_at(input.y, input.x);
           if (hit >= 0 && hit < TUI_STARTUP_ITEM_COUNT && su_enabled[hit]) {
-            startup_menu_focus = hit;
+            ui.startup_menu_focus = hit;
             key = NCKEY_ENTER;
           } else {
             continue;
@@ -2493,114 +2510,117 @@ int main(int argc, char *argv[]) {
           // First-launch: TUI_MODAL_NONE (dismisses to the bot game
           // already running underneath). Esc → New game: returns to
           // TUI_MODAL_MAIN_MENU so the user can pick Settings/Quit.
-          modal = startup_menu_return;
+          ui.modal = ui.startup_menu_return;
         } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-          for (int i = startup_menu_focus - 1; i >= 0; i--) {
+          for (int i = ui.startup_menu_focus - 1; i >= 0; i--) {
             if (su_enabled[i]) {
-              startup_menu_focus = i;
+              ui.startup_menu_focus = i;
               break;
             }
           }
         } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-          for (int i = startup_menu_focus + 1; i < TUI_STARTUP_ITEM_COUNT;
+          for (int i = ui.startup_menu_focus + 1; i < TUI_STARTUP_ITEM_COUNT;
                i++) {
             if (su_enabled[i]) {
-              startup_menu_focus = i;
+              ui.startup_menu_focus = i;
               break;
             }
           }
         } else if (key == 'w' || key == 'W') {
           // Mnemonic shortcut: open the Watch setup modal. The setup
           // modal handles starting the game once the user confirms.
-          modal = TUI_MODAL_WATCH_SETUP;
-          snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
+          ui.modal = TUI_MODAL_WATCH_SETUP;
+          snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon), "%s",
                    chosen_lexicon);
-          watch_setup_time = chosen_time;
+          ui.watch_setup_time = chosen_time;
         } else if (key == 'p' || key == 'P') {
-          modal = TUI_MODAL_LOAD_POSITION;
-          load_position_buf[0] = '\0';
-          load_position_len = 0;
-          load_position_cursor = 0;
-          load_position_parse_ok = false;
-          load_position_dirty = false;
-          load_position_error[0] = '\0';
+          ui.modal = TUI_MODAL_LOAD_POSITION;
+          ui.load_position_buf[0] = '\0';
+          ui.load_position_len = 0;
+          ui.load_position_cursor = 0;
+          ui.load_position_parse_ok = false;
+          ui.load_position_dirty = false;
+          ui.load_position_error[0] = '\0';
         } else if (key == 'g' || key == 'G') {
-          modal = TUI_MODAL_LOAD_GAME;
-          load_game_buf[0] = '\0';
-          load_game_len = 0;
-          load_game_cursor = 0;
-          load_game_parse_ok = false;
-          load_game_dirty = false;
-          load_game_error[0] = '\0';
+          ui.modal = TUI_MODAL_LOAD_GAME;
+          ui.load_game_buf[0] = '\0';
+          ui.load_game_len = 0;
+          ui.load_game_cursor = 0;
+          ui.load_game_parse_ok = false;
+          ui.load_game_dirty = false;
+          ui.load_game_error[0] = '\0';
         } else if (key == 'a' || key == 'A') {
-          modal = TUI_MODAL_ANNOTATE_SETUP;
-          snprintf(annotate_setup_lexicon, sizeof(annotate_setup_lexicon), "%s",
-                   chosen_lexicon);
-          snprintf(annotate_setup_p1_name, sizeof(annotate_setup_p1_name),
+          ui.modal = TUI_MODAL_ANNOTATE_SETUP;
+          snprintf(ui.annotate_setup_lexicon, sizeof(ui.annotate_setup_lexicon),
+                   "%s", chosen_lexicon);
+          snprintf(ui.annotate_setup_p1_name, sizeof(ui.annotate_setup_p1_name),
                    "Player 1");
-          snprintf(annotate_setup_p2_name, sizeof(annotate_setup_p2_name),
+          snprintf(ui.annotate_setup_p2_name, sizeof(ui.annotate_setup_p2_name),
                    "Player 2");
-          annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
-          annotate_setup_name_cursor = (int)strlen(annotate_setup_p1_name);
+          ui.annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
+          ui.annotate_setup_name_cursor =
+              (int)strlen(ui.annotate_setup_p1_name);
         } else if (key == 'c' || key == 'C') {
-          modal = TUI_MODAL_PLAY_SETUP;
-          play_setup_focus = TUI_PLAY_SETUP_START;
-          snprintf(play_setup_human_name, sizeof(play_setup_human_name), "You");
-          snprintf(play_setup_computer_name, sizeof(play_setup_computer_name),
-                   "Computer");
-          play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
-          play_setup_name_cursor = 0;
-          snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
+          ui.modal = TUI_MODAL_PLAY_SETUP;
+          ui.play_setup_focus = TUI_PLAY_SETUP_START;
+          snprintf(ui.play_setup_human_name, sizeof(ui.play_setup_human_name),
+                   "You");
+          snprintf(ui.play_setup_computer_name,
+                   sizeof(ui.play_setup_computer_name), "Computer");
+          ui.play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+          ui.play_setup_name_cursor = 0;
+          snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon), "%s",
                    chosen_lexicon);
-          watch_setup_time = chosen_time;
+          ui.watch_setup_time = chosen_time;
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-          if (startup_menu_focus == TUI_STARTUP_WATCH) {
-            modal = TUI_MODAL_WATCH_SETUP;
-            snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
-                     chosen_lexicon);
-            watch_setup_time = chosen_time;
-          } else if (startup_menu_focus == TUI_STARTUP_LOAD_POSITION) {
-            modal = TUI_MODAL_LOAD_POSITION;
-            load_position_buf[0] = '\0';
-            load_position_len = 0;
-            load_position_cursor = 0;
-            load_position_parse_ok = false;
-            load_position_dirty = false;
-            load_position_error[0] = '\0';
-          } else if (startup_menu_focus == TUI_STARTUP_LOAD_GAME) {
-            modal = TUI_MODAL_LOAD_GAME;
-            load_game_buf[0] = '\0';
-            load_game_len = 0;
-            load_game_cursor = 0;
-            load_game_parse_ok = false;
-            load_game_dirty = false;
-            load_game_error[0] = '\0';
-          } else if (startup_menu_focus == TUI_STARTUP_ANNOTATE) {
-            modal = TUI_MODAL_ANNOTATE_SETUP;
-            snprintf(annotate_setup_lexicon, sizeof(annotate_setup_lexicon),
+          if (ui.startup_menu_focus == TUI_STARTUP_WATCH) {
+            ui.modal = TUI_MODAL_WATCH_SETUP;
+            snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon),
                      "%s", chosen_lexicon);
-            snprintf(annotate_setup_p1_name, sizeof(annotate_setup_p1_name),
-                     "Player 1");
-            snprintf(annotate_setup_p2_name, sizeof(annotate_setup_p2_name),
-                     "Player 2");
-            annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
-            annotate_setup_name_cursor = (int)strlen(annotate_setup_p1_name);
-          } else if (startup_menu_focus == TUI_STARTUP_PLAY_VS_COMPUTER) {
+            ui.watch_setup_time = chosen_time;
+          } else if (ui.startup_menu_focus == TUI_STARTUP_LOAD_POSITION) {
+            ui.modal = TUI_MODAL_LOAD_POSITION;
+            ui.load_position_buf[0] = '\0';
+            ui.load_position_len = 0;
+            ui.load_position_cursor = 0;
+            ui.load_position_parse_ok = false;
+            ui.load_position_dirty = false;
+            ui.load_position_error[0] = '\0';
+          } else if (ui.startup_menu_focus == TUI_STARTUP_LOAD_GAME) {
+            ui.modal = TUI_MODAL_LOAD_GAME;
+            ui.load_game_buf[0] = '\0';
+            ui.load_game_len = 0;
+            ui.load_game_cursor = 0;
+            ui.load_game_parse_ok = false;
+            ui.load_game_dirty = false;
+            ui.load_game_error[0] = '\0';
+          } else if (ui.startup_menu_focus == TUI_STARTUP_ANNOTATE) {
+            ui.modal = TUI_MODAL_ANNOTATE_SETUP;
+            snprintf(ui.annotate_setup_lexicon,
+                     sizeof(ui.annotate_setup_lexicon), "%s", chosen_lexicon);
+            snprintf(ui.annotate_setup_p1_name,
+                     sizeof(ui.annotate_setup_p1_name), "Player 1");
+            snprintf(ui.annotate_setup_p2_name,
+                     sizeof(ui.annotate_setup_p2_name), "Player 2");
+            ui.annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
+            ui.annotate_setup_name_cursor =
+                (int)strlen(ui.annotate_setup_p1_name);
+          } else if (ui.startup_menu_focus == TUI_STARTUP_PLAY_VS_COMPUTER) {
             // Single play-vs-computer setup modal: names, who moves
             // first, time, lexicon, and sim (computer-strength) params.
             // Reuses watch_setup_time / watch_setup_lexicon as the scratch
             // copies for the time / lexicon adjusters.
-            modal = TUI_MODAL_PLAY_SETUP;
-            play_setup_focus = TUI_PLAY_SETUP_START;
-            snprintf(play_setup_human_name, sizeof(play_setup_human_name),
+            ui.modal = TUI_MODAL_PLAY_SETUP;
+            ui.play_setup_focus = TUI_PLAY_SETUP_START;
+            snprintf(ui.play_setup_human_name, sizeof(ui.play_setup_human_name),
                      "You");
-            snprintf(play_setup_computer_name, sizeof(play_setup_computer_name),
-                     "Computer");
-            play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
-            play_setup_name_cursor = 0;
-            snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
-                     chosen_lexicon);
-            watch_setup_time = chosen_time;
+            snprintf(ui.play_setup_computer_name,
+                     sizeof(ui.play_setup_computer_name), "Computer");
+            ui.play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+            ui.play_setup_name_cursor = 0;
+            snprintf(ui.watch_setup_lexicon, sizeof(ui.watch_setup_lexicon),
+                     "%s", chosen_lexicon);
+            ui.watch_setup_time = chosen_time;
           }
           // Disabled items are no-op for now. As each mode ships,
           // add its branch here and flip su_enabled[i] true above.
@@ -2608,25 +2628,25 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
-      if (modal == TUI_MODAL_MAIN_MENU) {
+      if (ui.modal == TUI_MODAL_MAIN_MENU) {
         if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
           const int hit = tui_modal_item_at(input.y, input.x);
           if (hit >= 0) {
-            main_menu_focus = hit;
+            ui.main_menu_focus = hit;
             key = NCKEY_ENTER;
           } else {
             continue;
           }
         }
         if (key == NCKEY_ESC) {
-          modal = TUI_MODAL_NONE;
+          ui.modal = TUI_MODAL_NONE;
         } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-          if (main_menu_focus > 0) {
-            main_menu_focus--;
+          if (ui.main_menu_focus > 0) {
+            ui.main_menu_focus--;
           }
         } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-          if (main_menu_focus < TUI_MENU_ITEM_COUNT - 1) {
-            main_menu_focus++;
+          if (ui.main_menu_focus < TUI_MENU_ITEM_COUNT - 1) {
+            ui.main_menu_focus++;
           }
         } else if (key == 'n' || key == 'N') {
           // Mnemonic shortcuts trigger the action immediately, matching
@@ -2634,42 +2654,42 @@ int main(int argc, char *argv[]) {
           // skip focus-then-Enter so the menu behaves like a launcher.
           // New game now routes through the startup menu so the user
           // can pick load/annotate modes alongside watch.
-          modal = TUI_MODAL_STARTUP_MENU;
-          startup_menu_focus = TUI_STARTUP_WATCH;
-          startup_menu_return = TUI_MODAL_MAIN_MENU;
+          ui.modal = TUI_MODAL_STARTUP_MENU;
+          ui.startup_menu_focus = TUI_STARTUP_WATCH;
+          ui.startup_menu_return = TUI_MODAL_MAIN_MENU;
         } else if (key == 's' || key == 'S') {
-          modal = TUI_MODAL_SETTINGS;
-          settings_focus = 0;
-          settings_return = TUI_MODAL_MAIN_MENU;
+          ui.modal = TUI_MODAL_SETTINGS;
+          ui.settings_focus = 0;
+          ui.settings_return = TUI_MODAL_MAIN_MENU;
         } else if (key == 'q' || key == 'Q') {
-          modal = TUI_MODAL_QUIT_CONFIRM;
-          quit_confirm_focus = 0;
-          quit_confirm_return = TUI_MODAL_MAIN_MENU;
+          ui.modal = TUI_MODAL_QUIT_CONFIRM;
+          ui.quit_confirm_focus = 0;
+          ui.quit_confirm_return = TUI_MODAL_MAIN_MENU;
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-          if (main_menu_focus == TUI_MENU_NEW_GAME) {
+          if (ui.main_menu_focus == TUI_MENU_NEW_GAME) {
             // Pivot to the startup menu so the user can pick what
             // KIND of new game (watch / load / annotate / vs-cpu) —
             // Watch from there opens the time picker and ends up
             // doing what this branch used to do directly.
-            modal = TUI_MODAL_STARTUP_MENU;
-            startup_menu_focus = TUI_STARTUP_WATCH;
-            startup_menu_return = TUI_MODAL_MAIN_MENU;
-          } else if (main_menu_focus == TUI_MENU_SETTINGS) {
-            modal = TUI_MODAL_SETTINGS;
-            settings_focus = 0;
-            settings_return = TUI_MODAL_MAIN_MENU;
-          } else if (main_menu_focus == TUI_MENU_QUIT) {
-            modal = TUI_MODAL_QUIT_CONFIRM;
-            quit_confirm_focus = 0;
-            quit_confirm_return = TUI_MODAL_MAIN_MENU;
-          } else if (main_menu_focus == TUI_MENU_BACK) {
-            modal = TUI_MODAL_NONE;
+            ui.modal = TUI_MODAL_STARTUP_MENU;
+            ui.startup_menu_focus = TUI_STARTUP_WATCH;
+            ui.startup_menu_return = TUI_MODAL_MAIN_MENU;
+          } else if (ui.main_menu_focus == TUI_MENU_SETTINGS) {
+            ui.modal = TUI_MODAL_SETTINGS;
+            ui.settings_focus = 0;
+            ui.settings_return = TUI_MODAL_MAIN_MENU;
+          } else if (ui.main_menu_focus == TUI_MENU_QUIT) {
+            ui.modal = TUI_MODAL_QUIT_CONFIRM;
+            ui.quit_confirm_focus = 0;
+            ui.quit_confirm_return = TUI_MODAL_MAIN_MENU;
+          } else if (ui.main_menu_focus == TUI_MENU_BACK) {
+            ui.modal = TUI_MODAL_NONE;
           }
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_SETTINGS) {
+      if (ui.modal == TUI_MODAL_SETTINGS) {
         // Click on a settings row: select that row. Settings uses
         // ←/→ to adjust values rather than Enter, so a click just
         // changes focus — it doesn't trigger a value change. The
@@ -2681,7 +2701,7 @@ int main(int argc, char *argv[]) {
           const int hit = tui_modal_item_at(input.y, input.x);
           if (hit >= 0) {
             const TuiModalChevron chev = tui_modal_chevron_at(input.y, input.x);
-            settings_focus = hit;
+            ui.settings_focus = hit;
             if (chev == TUI_MODAL_CHEVRON_LEFT) {
               key = NCKEY_LEFT;
             } else if (chev == TUI_MODAL_CHEVRON_RIGHT) {
@@ -2711,30 +2731,30 @@ int main(int argc, char *argv[]) {
           // to another menu entry without re-opening from scratch), or
           // back to no modal when reached via the command-bar S
           // shortcut.
-          modal = settings_return;
+          ui.modal = ui.settings_return;
         } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
           const bool effective_2x =
               pixel_supported && font_available && game_state.board_scale >= 2;
-          int idx = settings_focus - 1;
+          int idx = ui.settings_focus - 1;
           while (idx > 0 && SETTINGS_2X_ONLY(idx) && !effective_2x) {
             idx--;
           }
           if (idx >= 0) {
-            settings_focus = idx;
+            ui.settings_focus = idx;
           }
         } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
           const bool effective_2x =
               pixel_supported && font_available && game_state.board_scale >= 2;
-          int idx = settings_focus + 1;
+          int idx = ui.settings_focus + 1;
           while (idx < TUI_SETTINGS_ITEM_COUNT - 1 && SETTINGS_2X_ONLY(idx) &&
                  !effective_2x) {
             idx++;
           }
           if (idx < TUI_SETTINGS_ITEM_COUNT) {
-            settings_focus = idx;
+            ui.settings_focus = idx;
           }
         } else if (key == NCKEY_LEFT || key == 'h' || key == 'H') {
-          if (settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
+          if (ui.settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
               font_available) {
             // Scale is a 2-state toggle (1, 2). Both arrows flip it.
             pthread_mutex_lock(&game_state.mutex);
@@ -2746,7 +2766,7 @@ int main(int argc, char *argv[]) {
               to_save.board_scale_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_AA && pixel_supported &&
+          } else if (ui.settings_focus == TUI_SETTINGS_AA && pixel_supported &&
                      font_available && game_state.board_scale >= 2) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.antialias = !game_state.antialias;
@@ -2757,7 +2777,7 @@ int main(int argc, char *argv[]) {
               to_save.antialias_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_SUBSCRIPTS &&
+          } else if (ui.settings_focus == TUI_SETTINGS_SUBSCRIPTS &&
                      pixel_supported && font_available &&
                      game_state.board_scale >= 2) {
             pthread_mutex_lock(&game_state.mutex);
@@ -2772,7 +2792,8 @@ int main(int argc, char *argv[]) {
               to_save.score_subscripts_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
+          } else if (ui.settings_focus == TUI_SETTINGS_BORDER &&
+                     pixel_supported) {
             pthread_mutex_lock(&game_state.mutex);
             if (game_state.border_thickness > 0) {
               game_state.border_thickness--;
@@ -2784,7 +2805,7 @@ int main(int argc, char *argv[]) {
               to_save.border_thickness_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_PREMIUM) {
+          } else if (ui.settings_focus == TUI_SETTINGS_PREMIUM) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.premium_labels =
                 (TuiPremiumLabels)((game_state.premium_labels +
@@ -2797,7 +2818,7 @@ int main(int argc, char *argv[]) {
               to_save.premium_labels_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_BLANKS) {
+          } else if (ui.settings_focus == TUI_SETTINGS_BLANKS) {
             // Blanks is a two-state toggle, so left and right both flip it.
             pthread_mutex_lock(&game_state.mutex);
             game_state.blank_uppercase = !game_state.blank_uppercase;
@@ -2808,7 +2829,7 @@ int main(int argc, char *argv[]) {
               to_save.blank_uppercase_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_RACK_SORT) {
+          } else if (ui.settings_focus == TUI_SETTINGS_RACK_SORT) {
             pthread_mutex_lock(&game_state.mutex);
             int v = (int)game_state.rack_sort - 1;
             if (v < 0) {
@@ -2824,7 +2845,7 @@ int main(int argc, char *argv[]) {
             }
           }
         } else if (key == NCKEY_RIGHT || key == 'l' || key == 'L') {
-          if (settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
+          if (ui.settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
               font_available) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.board_scale = game_state.board_scale == 2 ? 1 : 2;
@@ -2835,7 +2856,7 @@ int main(int argc, char *argv[]) {
               to_save.board_scale_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_AA && pixel_supported &&
+          } else if (ui.settings_focus == TUI_SETTINGS_AA && pixel_supported &&
                      font_available && game_state.board_scale >= 2) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.antialias = !game_state.antialias;
@@ -2846,7 +2867,7 @@ int main(int argc, char *argv[]) {
               to_save.antialias_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_SUBSCRIPTS &&
+          } else if (ui.settings_focus == TUI_SETTINGS_SUBSCRIPTS &&
                      pixel_supported && font_available &&
                      game_state.board_scale >= 2) {
             pthread_mutex_lock(&game_state.mutex);
@@ -2860,7 +2881,8 @@ int main(int argc, char *argv[]) {
               to_save.score_subscripts_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
+          } else if (ui.settings_focus == TUI_SETTINGS_BORDER &&
+                     pixel_supported) {
             pthread_mutex_lock(&game_state.mutex);
             if (game_state.border_thickness < 6) {
               game_state.border_thickness++;
@@ -2872,7 +2894,7 @@ int main(int argc, char *argv[]) {
               to_save.border_thickness_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_PREMIUM) {
+          } else if (ui.settings_focus == TUI_SETTINGS_PREMIUM) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.premium_labels =
                 (TuiPremiumLabels)((game_state.premium_labels + 1) %
@@ -2884,7 +2906,7 @@ int main(int argc, char *argv[]) {
               to_save.premium_labels_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_BLANKS) {
+          } else if (ui.settings_focus == TUI_SETTINGS_BLANKS) {
             pthread_mutex_lock(&game_state.mutex);
             game_state.blank_uppercase = !game_state.blank_uppercase;
             const bool v = game_state.blank_uppercase;
@@ -2894,7 +2916,7 @@ int main(int argc, char *argv[]) {
               to_save.blank_uppercase_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_RACK_SORT) {
+          } else if (ui.settings_focus == TUI_SETTINGS_RACK_SORT) {
             pthread_mutex_lock(&game_state.mutex);
             int v = (int)game_state.rack_sort + 1;
             if (v >= TUI_RACK_SORT_COUNT) {
@@ -2908,7 +2930,7 @@ int main(int argc, char *argv[]) {
               to_save.rack_sort_set = true;
               tui_config_save(&to_save);
             }
-          } else if (settings_focus == TUI_SETTINGS_RIT) {
+          } else if (ui.settings_focus == TUI_SETTINGS_RIT) {
             // RIT is a deferred toggle — write to config; the live
             // game keeps using whatever was loaded at game-state init.
             // The pending-change banner picks up the divergence and the
@@ -2925,38 +2947,38 @@ int main(int argc, char *argv[]) {
             }
           }
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-          if (settings_focus == TUI_SETTINGS_BACK) {
-            modal = settings_return;
+          if (ui.settings_focus == TUI_SETTINGS_BACK) {
+            ui.modal = ui.settings_return;
           }
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_TIME_PICKER) {
+      if (ui.modal == TUI_MODAL_TIME_PICKER) {
         const int preset_count = tui_time_picker_preset_count();
         if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
           const int hit = tui_modal_item_at(input.y, input.x);
           if (hit >= 0 && hit < preset_count) {
-            time_focus = hit;
+            ui.time_focus = hit;
             key = NCKEY_ENTER;
           } else {
             continue;
           }
         }
         if (key == NCKEY_ESC) {
-          modal = time_picker_return;
+          ui.modal = ui.time_picker_return;
         } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-          if (time_focus > 0) {
-            time_focus--;
+          if (ui.time_focus > 0) {
+            ui.time_focus--;
           }
         } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-          if (time_focus < preset_count - 1) {
-            time_focus++;
+          if (ui.time_focus < preset_count - 1) {
+            ui.time_focus++;
           }
         } else if (key >= '1' && key <= (uint32_t)('0' + preset_count)) {
-          time_focus = (int)(key - '1');
+          ui.time_focus = (int)(key - '1');
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-          const int new_time = tui_time_picker_preset_seconds(time_focus);
+          const int new_time = tui_time_picker_preset_seconds(ui.time_focus);
           if (new_time > 0) {
             // Stop the bot only when one is actually running. At first
             // launch the bot is idle (waiting on the startup menu), so
@@ -3002,8 +3024,8 @@ int main(int argc, char *argv[]) {
                 if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
                                          initial_load_rit, &game_state,
                                          reinit_error, sizeof(reinit_error))) {
-                  running = false;
-                  modal = TUI_MODAL_NONE;
+                  ui.running = false;
+                  ui.modal = TUI_MODAL_NONE;
                   continue;
                 }
               } else {
@@ -3022,30 +3044,30 @@ int main(int argc, char *argv[]) {
             pthread_mutex_unlock(&game_state.mutex);
             tui_bot_worker_start(&game_state);
           }
-          modal = TUI_MODAL_NONE;
+          ui.modal = TUI_MODAL_NONE;
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_LEXICON_PICKER) {
-        const int n = tui_lexicon_list_count(lexicon_list);
+      if (ui.modal == TUI_MODAL_LEXICON_PICKER) {
+        const int n = tui_lexicon_list_count(ui.lexicon_list);
         if (key == NCKEY_ESC) {
-          modal = TUI_MODAL_SETTINGS;
+          ui.modal = TUI_MODAL_SETTINGS;
         } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-          if (lexicon_focus > 0) {
-            lexicon_focus--;
+          if (ui.lexicon_focus > 0) {
+            ui.lexicon_focus--;
           }
         } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-          if (lexicon_focus < n - 1) {
-            lexicon_focus++;
+          if (ui.lexicon_focus < n - 1) {
+            ui.lexicon_focus++;
           }
         } else if (key == NCKEY_HOME || key == 'g') {
-          lexicon_focus = 0;
+          ui.lexicon_focus = 0;
         } else if (key == NCKEY_END || key == 'G') {
-          lexicon_focus = n - 1;
+          ui.lexicon_focus = n - 1;
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
           char picked[TUI_LEXICON_NAME_MAX] = {0};
-          if (tui_lexicon_list_name(lexicon_list, lexicon_focus, picked,
+          if (tui_lexicon_list_name(ui.lexicon_list, ui.lexicon_focus, picked,
                                     sizeof(picked))) {
             snprintf(to_save.lexicon, sizeof(to_save.lexicon), "%s", picked);
             to_save.lexicon_set = true;
@@ -3057,12 +3079,12 @@ int main(int argc, char *argv[]) {
               tui_config_save(&to_save);
             }
           }
-          modal = TUI_MODAL_SETTINGS;
+          ui.modal = TUI_MODAL_SETTINGS;
         }
         continue;
       }
 
-      if (modal == TUI_MODAL_QUIT_CONFIRM) {
+      if (ui.modal == TUI_MODAL_QUIT_CONFIRM) {
         // Y / N shortcuts trigger their action regardless of focus.
         // Enter confirms whatever's focused (default No, the safer
         // option). Esc / N returns to whichever modal opened the
@@ -3071,31 +3093,31 @@ int main(int argc, char *argv[]) {
         if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
           const int hit = tui_modal_item_at(input.y, input.x);
           if (hit >= 0 && hit < 2) {
-            quit_confirm_focus = hit;
+            ui.quit_confirm_focus = hit;
             key = NCKEY_ENTER;
           } else {
             continue;
           }
         }
         if (key == NCKEY_ESC) {
-          modal = quit_confirm_return;
+          ui.modal = ui.quit_confirm_return;
         } else if (key == 'y' || key == 'Y') {
-          running = false;
+          ui.running = false;
         } else if (key == 'n' || key == 'N') {
-          modal = quit_confirm_return;
+          ui.modal = ui.quit_confirm_return;
         } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-          if (quit_confirm_focus > 0) {
-            quit_confirm_focus--;
+          if (ui.quit_confirm_focus > 0) {
+            ui.quit_confirm_focus--;
           }
         } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-          if (quit_confirm_focus < 1) {
-            quit_confirm_focus++;
+          if (ui.quit_confirm_focus < 1) {
+            ui.quit_confirm_focus++;
           }
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-          if (quit_confirm_focus == 1) {
-            running = false;
+          if (ui.quit_confirm_focus == 1) {
+            ui.running = false;
           } else {
-            modal = quit_confirm_return;
+            ui.modal = ui.quit_confirm_return;
           }
         }
         continue;
@@ -3107,7 +3129,7 @@ int main(int argc, char *argv[]) {
       // entry-to-entry navigation. This is the keyboard mirror of
       // the click-to-edit path — annotation users shouldn't need
       // the mouse to start typing the next field.
-      if (modal == TUI_MODAL_NONE && game_state.edit_history_idx < 0 &&
+      if (ui.modal == TUI_MODAL_NONE && game_state.edit_history_idx < 0 &&
           game_state.focused_panel == TUI_FOCUS_HISTORY &&
           game_state.history_cursor >= 0 &&
           game_state.history_cursor < game_state.history_count &&
@@ -3154,8 +3176,8 @@ int main(int argc, char *argv[]) {
       }
 
       if (key == NCKEY_ESC) {
-        modal = TUI_MODAL_MAIN_MENU;
-        main_menu_focus = 0;
+        ui.modal = TUI_MODAL_MAIN_MENU;
+        ui.main_menu_focus = 0;
       } else if (key >= '0' && key <= '5') {
         // Direct panel focus hotkeys (no modal). '0' focuses the
         // command bar; '1'-'5' focus the corresponding panel. These
@@ -3490,17 +3512,17 @@ int main(int argc, char *argv[]) {
             char cmd[64];
             snprintf(cmd, sizeof(cmd), "%s", game_state.slash_buf);
             if (strcmp(cmd, "new") == 0 || strcmp(cmd, "n") == 0) {
-              modal = TUI_MODAL_TIME_PICKER;
-              time_focus = tui_time_picker_closest_index(chosen_time);
-              time_picker_return = TUI_MODAL_NONE;
+              ui.modal = TUI_MODAL_TIME_PICKER;
+              ui.time_focus = tui_time_picker_closest_index(chosen_time);
+              ui.time_picker_return = TUI_MODAL_NONE;
             } else if (strcmp(cmd, "settings") == 0) {
-              modal = TUI_MODAL_SETTINGS;
-              settings_focus = 0;
-              settings_return = TUI_MODAL_NONE;
+              ui.modal = TUI_MODAL_SETTINGS;
+              ui.settings_focus = 0;
+              ui.settings_return = TUI_MODAL_NONE;
             } else if (strcmp(cmd, "quit") == 0 || strcmp(cmd, "exit") == 0) {
-              modal = TUI_MODAL_QUIT_CONFIRM;
-              quit_confirm_focus = 0;
-              quit_confirm_return = TUI_MODAL_NONE;
+              ui.modal = TUI_MODAL_QUIT_CONFIRM;
+              ui.quit_confirm_focus = 0;
+              ui.quit_confirm_return = TUI_MODAL_NONE;
             } else if (strcmp(cmd, "copy") == 0) {
               pthread_mutex_lock(&game_state.mutex);
               tui_copy_position_cgp(&game_state);
@@ -3529,18 +3551,18 @@ int main(int argc, char *argv[]) {
               }
               if (n_match == 1 && match != NULL) {
                 if (strcmp(match, "new") == 0) {
-                  modal = TUI_MODAL_TIME_PICKER;
-                  time_focus = tui_time_picker_closest_index(chosen_time);
-                  time_picker_return = TUI_MODAL_NONE;
+                  ui.modal = TUI_MODAL_TIME_PICKER;
+                  ui.time_focus = tui_time_picker_closest_index(chosen_time);
+                  ui.time_picker_return = TUI_MODAL_NONE;
                 } else if (strcmp(match, "settings") == 0) {
-                  modal = TUI_MODAL_SETTINGS;
-                  settings_focus = 0;
-                  settings_return = TUI_MODAL_NONE;
+                  ui.modal = TUI_MODAL_SETTINGS;
+                  ui.settings_focus = 0;
+                  ui.settings_return = TUI_MODAL_NONE;
                 } else if (strcmp(match, "quit") == 0 ||
                            strcmp(match, "exit") == 0) {
-                  modal = TUI_MODAL_QUIT_CONFIRM;
-                  quit_confirm_focus = 0;
-                  quit_confirm_return = TUI_MODAL_NONE;
+                  ui.modal = TUI_MODAL_QUIT_CONFIRM;
+                  ui.quit_confirm_focus = 0;
+                  ui.quit_confirm_return = TUI_MODAL_NONE;
                 } else if (strcmp(match, "copy") == 0) {
                   pthread_mutex_lock(&game_state.mutex);
                   tui_copy_position_cgp(&game_state);
@@ -3580,20 +3602,20 @@ int main(int argc, char *argv[]) {
             pthread_mutex_unlock(&game_state.mutex);
           }
         } else if (key == 'q' || key == 'Q') {
-          modal = TUI_MODAL_QUIT_CONFIRM;
-          quit_confirm_focus = 0;
-          quit_confirm_return = TUI_MODAL_NONE;
+          ui.modal = TUI_MODAL_QUIT_CONFIRM;
+          ui.quit_confirm_focus = 0;
+          ui.quit_confirm_return = TUI_MODAL_NONE;
         } else if (key == 's' || key == 'S') {
-          modal = TUI_MODAL_SETTINGS;
-          settings_focus = 0;
-          settings_return = TUI_MODAL_NONE;
+          ui.modal = TUI_MODAL_SETTINGS;
+          ui.settings_focus = 0;
+          ui.settings_return = TUI_MODAL_NONE;
         } else if (key == 'n' || key == 'N') {
-          modal = TUI_MODAL_TIME_PICKER;
-          time_focus = tui_time_picker_closest_index(chosen_time);
-          time_picker_return = TUI_MODAL_NONE;
+          ui.modal = TUI_MODAL_TIME_PICKER;
+          ui.time_focus = tui_time_picker_closest_index(chosen_time);
+          ui.time_picker_return = TUI_MODAL_NONE;
         }
       }
-    } while (running);
+    } while (ui.running);
 
     // If this frame's input drain dirtied the frame, render it ASAP instead
     // of sleeping a full pacing interval first. The top-of-loop sleep would
@@ -3603,14 +3625,14 @@ int main(int argc, char *argv[]) {
     // "now" makes the next iteration skip the sleep and render immediately;
     // frame_dirty is always cleared by the render block, so steady-state
     // frames with no input still pace normally via the deadline advance.
-    if (frame_dirty) {
+    if (ui.frame_dirty) {
       clock_gettime(CLOCK_MONOTONIC, &next_frame_deadline);
     }
   }
 
   tui_game_state_destroy(&game_state);
-  if (lexicon_list != NULL) {
-    tui_lexicon_list_destroy(lexicon_list);
+  if (ui.lexicon_list != NULL) {
+    tui_lexicon_list_destroy(ui.lexicon_list);
   }
   // Symmetric with the startup enable — politely turn off focus
   // reporting so the terminal isn't left in an unexpected mode
