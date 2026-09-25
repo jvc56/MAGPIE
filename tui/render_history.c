@@ -520,6 +520,123 @@ static void render_history_rack_editor(
   theme_apply_bg(plane, theme->bg);
 }
 
+// Rows 3-4 of a challenged-off phony: the event label with the
+// cancelling adjustment, then the corrected running total.
+static void render_history_challenged_rows(
+    struct ncplane *plane, const Theme *theme, const TuiHistoryEntry *e,
+    int row, int interior_left, int interior_right, int row_bottom_inclusive,
+    const char *prefix, const ThemeRgb player_fg,
+    const ThemeRgb player_dim_fg) {
+  if (row + 2 > row_bottom_inclusive) {
+    return;
+  }
+  const int challenge_row = row + 2;
+  ncplane_set_styles(plane, 0);
+  theme_apply_bg(plane, theme->bg);
+  theme_apply_fg(plane, theme->error_fg);
+  char challenge_left[32];
+  snprintf(challenge_left, sizeof(challenge_left), "%*schallenged off",
+           (int)strlen(prefix), "");
+  ncplane_putstr_yx(plane, challenge_row, interior_left, challenge_left);
+  char delta_chal_str[16];
+  snprintf(delta_chal_str, sizeof(delta_chal_str), "%d", -e->score);
+  const int delta_chal_len = (int)strlen(delta_chal_str);
+  const int delta_chal_col = interior_right - delta_chal_len + 1;
+  if (delta_chal_col > interior_left + (int)strlen(challenge_left)) {
+    theme_apply_fg(plane, player_fg);
+    ncplane_putstr_yx(plane, challenge_row, delta_chal_col, delta_chal_str);
+  }
+  if (row + 3 > row_bottom_inclusive) {
+    return;
+  }
+  // No clock on the resolution row — the player's next turn shows
+  // the same value as its start clock.
+  const int resolve_row = row + 3;
+  theme_apply_fg(plane, player_dim_fg);
+  char corrected_str[16];
+  snprintf(corrected_str, sizeof(corrected_str), "%d",
+           e->total_after - e->score);
+  const int corrected_len = (int)strlen(corrected_str);
+  const int corrected_col = interior_right - corrected_len + 1;
+  ncplane_set_styles(plane, NCSTYLE_BOLD);
+  ncplane_putstr_yx(plane, resolve_row, corrected_col, corrected_str);
+  ncplane_set_styles(plane, 0);
+}
+
+// Rows 3-4 of the move that ended the game: the opponent's leftover
+// rack with the going-out bonus, then the final clock and score.
+static void render_history_end_bonus_rows(
+    struct ncplane *plane, const Theme *theme, const TuiHistoryEntry *e,
+    int row, int interior_left, int interior_right, int row_bottom_inclusive,
+    const char *prefix, const ThemeRgb player_fg, const ThemeRgb player_dim_fg,
+    bool clocks_active, const LetterDistribution *ld, TuiRackSort rack_sort) {
+  // ── Row 3 (going-out bonus delta): "    (LNRU)               +8" ──────
+  // Split coloring: the leftover-rack chunk on the left is rendered
+  // in the *opponent's* color (those are their tiles), while the
+  // "+N" bonus stays in the going-out player's color (their points).
+  if (e->end_bonus == 0 || row + 2 > row_bottom_inclusive) {
+    return;
+  }
+  const int row3 = row + 2;
+  ncplane_set_styles(plane, 0);
+  const ThemeRgb opponent_fg =
+      e->player_idx == 1 ? theme->history_p1_fg : theme->history_p2_fg;
+  char bonus_left[48];
+  if (e->end_rack_str[0] != '\0') {
+    char sorted_end[24];
+    if (ld != NULL) {
+      format_alphagram_for_sort(e->end_rack_str, ld, rack_sort, sorted_end,
+                                sizeof(sorted_end));
+    } else {
+      snprintf(sorted_end, sizeof(sorted_end), "%s", e->end_rack_str);
+    }
+    snprintf(bonus_left, sizeof(bonus_left), "    (%s)", sorted_end);
+  } else {
+    snprintf(bonus_left, sizeof(bonus_left), "    ");
+  }
+  theme_apply_fg(plane, opponent_fg);
+  ncplane_putstr_yx(plane, row3, interior_left, bonus_left);
+
+  char delta3_str[16];
+  snprintf(delta3_str, sizeof(delta3_str), "+%d", e->end_bonus);
+  const int delta3_len = (int)strlen(delta3_str);
+  const int delta3_col = interior_right - delta3_len + 1;
+  if (delta3_col > interior_left + (int)strlen(bonus_left)) {
+    theme_apply_fg(plane, player_fg);
+    ncplane_putstr_yx(plane, row3, delta3_col, delta3_str);
+  }
+
+  // ── Row 4 (final clock + final score): "    0:09         489" ──────────
+  // Bold, right-aligned final game total; on the left, the player's
+  // clock at the moment they finished the game so the closing time
+  // shows in-place rather than only in the player pill. Mirrors
+  // row 2's "<clock> <rack>" layout — same indent, same player
+  // accent color.
+  if (row + 3 > row_bottom_inclusive) {
+    return;
+  }
+  const int row4 = row + 3;
+
+  if (clocks_active) {
+    char end_clock_str[16];
+    format_clock(e->clock_at_end, end_clock_str, sizeof(end_clock_str));
+    char end_line[32];
+    snprintf(end_line, sizeof(end_line), "%*s%s", (int)strlen(prefix), "",
+             end_clock_str);
+    theme_apply_fg(plane, player_fg);
+    ncplane_putstr_yx(plane, row4, interior_left, end_line);
+  }
+
+  theme_apply_fg(plane, player_dim_fg);
+  char total4_str[16];
+  snprintf(total4_str, sizeof(total4_str), "%d", e->total_after + e->end_bonus);
+  const int total4_len = (int)strlen(total4_str);
+  const int total4_col = interior_right - total4_len + 1;
+  ncplane_set_styles(plane, NCSTYLE_BOLD);
+  ncplane_putstr_yx(plane, row4, total4_col, total4_str);
+  ncplane_set_styles(plane, 0);
+}
+
 static void
 render_history_entry(struct ncplane *plane, const Theme *theme,
                      const TuiGameState *state, const TuiHistoryEntry *e,
@@ -943,108 +1060,15 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   // the corrected running total (back to where it was before the
   // play).
   if (e->challenged_off) {
-    if (row + 2 > row_bottom_inclusive) {
-      return;
-    }
-    const int challenge_row = row + 2;
-    ncplane_set_styles(plane, 0);
-    theme_apply_bg(plane, theme->bg);
-    theme_apply_fg(plane, theme->error_fg);
-    char challenge_left[32];
-    snprintf(challenge_left, sizeof(challenge_left), "%*schallenged off",
-             (int)strlen(prefix), "");
-    ncplane_putstr_yx(plane, challenge_row, interior_left, challenge_left);
-    char delta_chal_str[16];
-    snprintf(delta_chal_str, sizeof(delta_chal_str), "%d", -e->score);
-    const int delta_chal_len = (int)strlen(delta_chal_str);
-    const int delta_chal_col = interior_right - delta_chal_len + 1;
-    if (delta_chal_col > interior_left + (int)strlen(challenge_left)) {
-      theme_apply_fg(plane, player_fg);
-      ncplane_putstr_yx(plane, challenge_row, delta_chal_col, delta_chal_str);
-    }
-    if (row + 3 > row_bottom_inclusive) {
-      return;
-    }
-    // No clock on the resolution row — the player's next turn shows
-    // the same value as its start clock.
-    const int resolve_row = row + 3;
-    theme_apply_fg(plane, player_dim_fg);
-    char corrected_str[16];
-    snprintf(corrected_str, sizeof(corrected_str), "%d",
-             e->total_after - e->score);
-    const int corrected_len = (int)strlen(corrected_str);
-    const int corrected_col = interior_right - corrected_len + 1;
-    ncplane_set_styles(plane, NCSTYLE_BOLD);
-    ncplane_putstr_yx(plane, resolve_row, corrected_col, corrected_str);
-    ncplane_set_styles(plane, 0);
+    render_history_challenged_rows(plane, theme, e, row, interior_left,
+                                   interior_right, row_bottom_inclusive, prefix,
+                                   player_fg, player_dim_fg);
     return;
   }
 
-  // ── Row 3 (going-out bonus delta): "    (LNRU)               +8" ──────
-  // Split coloring: the leftover-rack chunk on the left is rendered
-  // in the *opponent's* color (those are their tiles), while the
-  // "+N" bonus stays in the going-out player's color (their points).
-  if (e->end_bonus == 0 || row + 2 > row_bottom_inclusive) {
-    return;
-  }
-  const int row3 = row + 2;
-  ncplane_set_styles(plane, 0);
-  const ThemeRgb opponent_fg =
-      e->player_idx == 1 ? theme->history_p1_fg : theme->history_p2_fg;
-  char bonus_left[48];
-  if (e->end_rack_str[0] != '\0') {
-    char sorted_end[24];
-    if (ld != NULL) {
-      format_alphagram_for_sort(e->end_rack_str, ld, rack_sort, sorted_end,
-                                sizeof(sorted_end));
-    } else {
-      snprintf(sorted_end, sizeof(sorted_end), "%s", e->end_rack_str);
-    }
-    snprintf(bonus_left, sizeof(bonus_left), "    (%s)", sorted_end);
-  } else {
-    snprintf(bonus_left, sizeof(bonus_left), "    ");
-  }
-  theme_apply_fg(plane, opponent_fg);
-  ncplane_putstr_yx(plane, row3, interior_left, bonus_left);
-
-  char delta3_str[16];
-  snprintf(delta3_str, sizeof(delta3_str), "+%d", e->end_bonus);
-  const int delta3_len = (int)strlen(delta3_str);
-  const int delta3_col = interior_right - delta3_len + 1;
-  if (delta3_col > interior_left + (int)strlen(bonus_left)) {
-    theme_apply_fg(plane, player_fg);
-    ncplane_putstr_yx(plane, row3, delta3_col, delta3_str);
-  }
-
-  // ── Row 4 (final clock + final score): "    0:09         489" ──────────
-  // Bold, right-aligned final game total; on the left, the player's
-  // clock at the moment they finished the game so the closing time
-  // shows in-place rather than only in the player pill. Mirrors
-  // row 2's "<clock> <rack>" layout — same indent, same player
-  // accent color.
-  if (row + 3 > row_bottom_inclusive) {
-    return;
-  }
-  const int row4 = row + 3;
-
-  if (clocks_active) {
-    char end_clock_str[16];
-    format_clock(e->clock_at_end, end_clock_str, sizeof(end_clock_str));
-    char end_line[32];
-    snprintf(end_line, sizeof(end_line), "%*s%s", (int)strlen(prefix), "",
-             end_clock_str);
-    theme_apply_fg(plane, player_fg);
-    ncplane_putstr_yx(plane, row4, interior_left, end_line);
-  }
-
-  theme_apply_fg(plane, player_dim_fg);
-  char total4_str[16];
-  snprintf(total4_str, sizeof(total4_str), "%d", e->total_after + e->end_bonus);
-  const int total4_len = (int)strlen(total4_str);
-  const int total4_col = interior_right - total4_len + 1;
-  ncplane_set_styles(plane, NCSTYLE_BOLD);
-  ncplane_putstr_yx(plane, row4, total4_col, total4_str);
-  ncplane_set_styles(plane, 0);
+  render_history_end_bonus_rows(
+      plane, theme, e, row, interior_left, interior_right, row_bottom_inclusive,
+      prefix, player_fg, player_dim_fg, clocks_active, ld, rack_sort);
 }
 // Render the entry's revalidation error message on the row just
 // past the entry's main body. `err_row` is the absolute screen
