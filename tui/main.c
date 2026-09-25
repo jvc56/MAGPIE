@@ -182,6 +182,23 @@ static void init_ui_state(TuiUiState *ui, const TuiConfig *loaded) {
   ui->lexicon_focus = 0;
 }
 
+// The focused row of the open dialog, for its help line; -1 when the
+// open modal has no per-row help.
+static int modal_focus(const TuiUiState *ui) {
+  switch (ui->modal) {
+  case TUI_MODAL_SETTINGS:
+    return ui->settings_focus;
+  case TUI_MODAL_WATCH_SETUP:
+    return ui->watch_setup_focus;
+  case TUI_MODAL_PLAY_SETUP:
+    return ui->play_setup_focus;
+  case TUI_MODAL_ANNOTATE_SETUP:
+    return ui->annotate_setup_focus;
+  default:
+    return -1;
+  }
+}
+
 // Draws the open modal (if any) over the rendered game.
 static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
                                  const TuiGameState *state, TuiUiState *ui,
@@ -825,7 +842,7 @@ int main(int argc, char *argv[]) {
           (long)(lock_acquired.tv_sec - render_begin.tv_sec) * 1000000L +
           (lock_acquired.tv_nsec - render_begin.tv_nsec) / 1000L;
       tui_game_render(std_plane, theme, &game_state, session.chosen_time,
-                      ui.modal);
+                      ui.modal, tui_modal_help(ui.modal, modal_focus(&ui)));
       pthread_mutex_unlock(&game_state.mutex);
       render_modal_overlay(std_plane, theme, &game_state, &ui, &session);
       emit_frame_and_record_stats(nc, render_begin, lock_us, input_dirty_ts,

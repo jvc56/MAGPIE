@@ -94,6 +94,10 @@ void tui_game_render_settings(
     bool pixel_supported, bool font_available, TuiPremiumLabels premium_labels,
     bool blank_uppercase, TuiRackSort rack_sort, bool load_rit);
 
+// One-line description of row `focus` in `modal`, shown on the
+// command-bar row while the dialog is open; NULL when there is none.
+const char *tui_modal_help(TuiModalState modal, int focus);
+
 // Which Settings rows are adjustable: Scale needs pixel graphics and
 // the bundled font, and Antialias / Subscript / Border apply only while
 // the board renders at 2x. Disabled rows render dimmed and are skipped
