@@ -9,6 +9,24 @@
 #include <stdio.h>
 #include <string.h>
 
+// Whether the keyboard may open the history-cell editor on entry `idx`.
+// Play-vs-computer edits only the human's live pending turn (the cell is
+// its keyboard move-entry surface); reopening a committed turn would
+// replay history from text and desync the bag-drawn racks, which is
+// also why mouse clicks never open the editor in that mode.
+static bool history_entry_keyboard_editable(const TuiGameState *state,
+                                            int idx) {
+  if (idx < 0 || idx >= state->history_count) {
+    return false;
+  }
+  if (state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER) {
+    return true;
+  }
+  const TuiHistoryEntry *entry = &state->history[idx];
+  return idx == state->history_count - 1 && entry->pending &&
+         entry->player_idx == state->human_player_idx;
+}
+
 // Game-screen keys when no modal or cell editor is open: panel focus
 // (0-5, Tab), Esc menu, CGP copy, board / Analysis / History navigation,
 // and the command bar with its slash commands. Returns true when consumed.
@@ -18,6 +36,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
       state->focused_panel == TUI_FOCUS_HISTORY && state->history_cursor >= 0 &&
       state->history_cursor < state->history_count &&
       state->history[state->history_cursor].pending &&
+      history_entry_keyboard_editable(state, state->history_cursor) &&
       (key == NCKEY_TAB || key == '\t' || key == NCKEY_ENTER || key == '\r' ||
        key == '\n' || key == NCKEY_RIGHT || key == NCKEY_DOWN)) {
     pthread_mutex_lock(&state->mutex);
@@ -243,7 +262,8 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
     const int prev_cursor = state->history_cursor;
     const bool step_into = is_horizontal && !shift;
     if (step_into && forward && state->history_cursor >= 0 &&
-        state->history_cursor <= last) {
+        state->history_cursor <= last &&
+        history_entry_keyboard_editable(state, state->history_cursor)) {
       // N> → N.MOVE
       TuiHistoryEntry *e = &state->history[state->history_cursor];
       tui_game_state_seed_edit_move(state, e->move_str);
@@ -256,7 +276,9 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
       state->edit_history_idx = state->history_cursor;
       state->edit_field = TUI_EDIT_FIELD_MOVE;
       tui_game_state_parse_edit_buf(state);
-    } else if (step_into && !forward && state->history_cursor > 0) {
+    } else if (step_into && !forward && state->history_cursor > 0 &&
+               history_entry_keyboard_editable(state,
+                                               state->history_cursor - 1)) {
       // N> → (N-1).RACK
       const int target = state->history_cursor - 1;
       TuiHistoryEntry *e = &state->history[target];
