@@ -110,6 +110,91 @@ static int analysis_compact_exchanges(AnalysisRow *rows, int count) {
   return max_width;
 }
 
+// Standard-layout column geometry, fixed once per frame before the
+// header strip, rows, and scrollbar are drawn. Columns right-anchor:
+// [rank][move]  [leave] [score][primary][secondary][avg1 avg2 ...]
+typedef struct {
+  int interior_left;
+  int interior_right; // excludes the scrollbar cell when it shows
+  int interior_top;
+  int interior_bottom;
+  int move_col;
+  int max_leave_w;
+  int primary_w;
+  int secondary_w;
+  int primary_secondary_gap;
+  int prim_col;
+  int sec_col;
+  bool show_avgs;
+  int max_ply_count;
+  int avg_left_edge;
+  bool show_score;
+  int score_w;
+  int score_right_edge;
+  bool show_leaves;
+  int leave_right_edge;
+  // Widest move that fits when the leave column is hidden.
+  int full_move_max;
+} AnalysisColumns;
+
+// Per-column maxima across the visible rows, so the renderer can bold
+// the row(s) achieving each. Score is an integer (exact ties are legit
+// and all bold); primary/secondary compare the raw doubles, so ties at
+// the displayed precision still resolve to a unique winner when the
+// underlying values differ.
+typedef struct {
+  int best_score;
+  double best_primary;
+  double best_secondary;
+  bool any_primary;
+  bool any_secondary;
+  // best_ply_avg[k] is the maximum of avg column k across rows that ran
+  // at least k+1 plies; any_ply_avg[k] gates against the all-empty case.
+  double best_ply_avg[MAX_ANALYSIS_PLIES];
+  bool any_ply_avg[MAX_ANALYSIS_PLIES];
+} AnalysisBests;
+
+static void analysis_find_bests(const AnalysisRow *rows, int visible,
+                                AnalysisBests *bests) {
+  bests->best_score = INT_MIN;
+  bests->best_primary = -1e300;
+  bests->best_secondary = -1e300;
+  bests->any_primary = false;
+  bests->any_secondary = false;
+  for (int k = 0; k < MAX_ANALYSIS_PLIES; k++) {
+    bests->best_ply_avg[k] = -1e300;
+    bests->any_ply_avg[k] = false;
+  }
+  for (int i = 0; i < visible; i++) {
+    if (!rows[i].valid) {
+      continue;
+    }
+    if (rows[i].score[0] != '\0' && rows[i].score_value > bests->best_score) {
+      bests->best_score = rows[i].score_value;
+    }
+    if (rows[i].primary[0] != '\0') {
+      if (!bests->any_primary || rows[i].primary_value > bests->best_primary) {
+        bests->best_primary = rows[i].primary_value;
+        bests->any_primary = true;
+      }
+    }
+    if (rows[i].secondary[0] != '\0') {
+      if (!bests->any_secondary ||
+          rows[i].secondary_value > bests->best_secondary) {
+        bests->best_secondary = rows[i].secondary_value;
+        bests->any_secondary = true;
+      }
+    }
+    for (int k = 0; k < rows[i].ply_count && k < MAX_ANALYSIS_PLIES; k++) {
+      if (!bests->any_ply_avg[k] ||
+          rows[i].ply_avg[k] > bests->best_ply_avg[k]) {
+        bests->best_ply_avg[k] = rows[i].ply_avg[k];
+        bests->any_ply_avg[k] = true;
+      }
+    }
+  }
+}
+
 // Compact-layout form of a primary value: percent values (containing
 // '.') round to an integer percent; W/T/L stay as-is, minus padding.
 static void analysis_compact_primary(const char *primary, char *buf,
@@ -346,6 +431,504 @@ static void render_analysis_rows_compact(struct ncplane *plane,
   }
 }
 
+// Paints the column-header strip (leave / sc / avgN / win% / sprd) on the
+// panel's top border when the title leaves room, else on the first
+// interior row. Returns the first row available for data.
+static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
+                                   const Layout *L,
+                                   const AnalysisColumns *columns,
+                                   int title_end_col, bool has_primary_label,
+                                   bool has_secondary_label) {
+  // Find the leftmost col any header would touch (the "leave"
+  // header is the leftmost; if no leave column, "sc" or "win%").
+  int leftmost_header_col = INT_MAX;
+  if (columns->max_leave_w > 0) {
+    const int col = columns->leave_right_edge - 5 + 1; // "leave"
+    if (col < leftmost_header_col) {
+      leftmost_header_col = col;
+    }
+  }
+  if (columns->show_score) {
+    const int len = columns->score_w == 2 ? 2 : 3;
+    const int col = columns->score_right_edge - len + 1;
+    if (col < leftmost_header_col) {
+      leftmost_header_col = col;
+    }
+  }
+  // avg cols are right-anchored past sprd, so they don't affect
+  // leftmost_header_col — they sit further right than every other
+  // header.
+  if (has_primary_label) {
+    const int col = columns->prim_col + columns->primary_w - 4; // "win%"
+    if (col < leftmost_header_col) {
+      leftmost_header_col = col;
+    }
+  }
+  // Prefer the top border row when the title leaves enough room
+  // there. title_end_col is the last col of the title's trailing
+  // " "; we need a 1-col gap after it before the leftmost header.
+  const bool headers_fit_on_border =
+      title_end_col >= 0 && leftmost_header_col > title_end_col + 1 &&
+      leftmost_header_col >= L->analysis_left + 1;
+  const int header_row =
+      headers_fit_on_border ? L->analysis_top : columns->interior_top;
+  const int list_top =
+      headers_fit_on_border ? columns->interior_top : columns->interior_top + 1;
+
+  // Paint the header strip. The right portion (from the leftmost
+  // header word out to the right interior edge) always uses the
+  // inverted band — same look the on-border placement gets. The
+  // LEFT portion of an inside-panel strip fades into the panel's
+  // bg using DOS-style shade glyphs (░ ▒ ▓) split into thirds:
+  //   ░ section at the far left, ▓ section just before the band,
+  //   ▒ in the middle. The shade glyph density alone reads as
+  //   banded, so we also linearly ramp the foreground color from
+  //   bg (invisible) at the far left to dim_fg at the band — the
+  //   dithering pattern remains visible but the overall line
+  //   fades smoothly into the surrounding rows.
+  {
+    // Right portion: true inverted band — dark text on the
+    // dim_fg-colored band, matching how header_bg / header_fg
+    // chrome bars elsewhere read.
+    const int band_left =
+        headers_fit_on_border ? leftmost_header_col : leftmost_header_col;
+    theme_apply_fg(plane, theme->bg);
+    theme_apply_bg(plane, theme->dim_fg);
+    for (int c = band_left; c <= columns->interior_right; c++) {
+      ncplane_putstr_yx(plane, header_row, c, " ");
+    }
+  }
+  if (!headers_fit_on_border && columns->interior_left < leftmost_header_col) {
+    render_analysis_header_fade(plane, theme, header_row,
+                                columns->interior_left,
+                                leftmost_header_col - 1);
+  }
+
+  theme_apply_fg(plane, theme->bg);
+  theme_apply_bg(plane, theme->dim_fg);
+  ncplane_set_styles(plane, NCSTYLE_BOLD);
+  if (columns->show_leaves) {
+    const char *leave_label = "leave";
+    const int len = (int)strlen(leave_label);
+    const int col = columns->leave_right_edge - len + 1;
+    if (col >= columns->move_col) {
+      ncplane_putstr_yx(plane, header_row, col, leave_label);
+    }
+  }
+  if (columns->show_score) {
+    const char *sc_label = columns->score_w == 2 ? "sc" : "scr";
+    const int len = (int)strlen(sc_label);
+    const int col = columns->score_right_edge - len + 1;
+    ncplane_putstr_yx(plane, header_row, col, sc_label);
+  }
+  if (columns->show_avgs) {
+    for (int ply = 0; ply < columns->max_ply_count; ply++) {
+      char hdr[8];
+      snprintf(hdr, sizeof(hdr), "avg%d", ply + 1);
+      const int col =
+          columns->avg_left_edge + ply * (AVG_COL_W + AVG_GAP_W) + AVG_GAP_W;
+      ncplane_putstr_yx(plane, header_row, col, hdr);
+    }
+  }
+  if (has_primary_label) {
+    const char *win_label = "win%";
+    const int len = (int)strlen(win_label);
+    const int col = columns->prim_col + columns->primary_w - len;
+    ncplane_putstr_yx(plane, header_row, col, win_label);
+  }
+  if (has_secondary_label) {
+    const char *sprd_label = "sprd";
+    const int len = (int)strlen(sprd_label);
+    // Right-align inside the secondary column's slot, not against
+    // interior_right — when the avg block is on, sec_col has
+    // shifted left to make room for the avgs further right.
+    const int col = columns->sec_col + columns->secondary_w - len;
+    ncplane_putstr_yx(plane, header_row, col, sprd_label);
+  }
+  ncplane_set_styles(plane, 0);
+  return list_top;
+}
+
+// Draws candidate rows[data_i] on screen row `row`: the rank (or cursor
+// chip), move, leave, score, per-ply averages, primary, and secondary,
+// bolding column bests, and records the row's click rectangle.
+static void render_analysis_row(struct ncplane *plane, const Theme *theme,
+                                const TuiGameState *state, AnalysisRow *rows,
+                                const AnalysisColumns *columns,
+                                bool primary_bold, TuiHitMaps *hit, int row,
+                                const char *rank_fmt,
+                                const AnalysisBests *bests,
+                                int effective_cursor, int data_i) {
+  char rank_str[8];
+  snprintf(rank_str, sizeof(rank_str), rank_fmt, data_i + 1);
+
+  // Leave column placement is decided globally (show_leaves):
+  // either every row shows its own leave at leave_right_edge, or
+  // the column is hidden entirely. Rows where the play exhausts
+  // the rack (bingos / endgame outplays) have an empty leave —
+  // render those as "·" so the column stays consistently
+  // populated, otherwise the gaps look like rendering bugs.
+  // Re-sort the candidate's leave per the user's rack-sort
+  // preference so the leave column lines up with how rack
+  // tiles are ordered elsewhere (rack panel, history).
+  char sorted_row_leave[24];
+  if (rows[data_i].leave[0] != '\0' && state != NULL && state->ld != NULL) {
+    format_alphagram_for_sort(rows[data_i].leave, state->ld, state->rack_sort,
+                              sorted_row_leave, sizeof(sorted_row_leave));
+  } else {
+    sorted_row_leave[0] = '\0';
+  }
+  const char *leave_str =
+      sorted_row_leave[0] != '\0' ? sorted_row_leave : "\xc2\xb7";
+  const int leave_len = (int)strlen(leave_str);
+  const int leave_text_col =
+      columns->show_leaves
+          ? columns->leave_right_edge -
+                (rows[data_i].leave[0] != '\0' ? leave_len : 1) + 1
+          : 0;
+  const bool show_this_leave = columns->show_leaves;
+  const int this_move_max =
+      columns->show_leaves ? columns->leave_right_edge - LEAVE_GAP_L -
+                                 columns->move_col + 1 - columns->max_leave_w
+                           : columns->full_move_max;
+
+  char *move_text = rows[data_i].move;
+  analysis_fit_move(move_text, this_move_max);
+
+  // Cursor styling: highlight is column-aware.
+  //   - RANK column: invert the rank chip (bg on fg, bold)
+  //     and put ">" (focused) or "." (unfocused) after the digits.
+  //   - MOVE column: leave the rank chip in dim color and invert
+  //     the move text instead.
+  // The "cursor here" test compares against effective_cursor —
+  // the row currently selected after MOVE-anchor resolution.
+  const bool cursor_here = (data_i == effective_cursor);
+  // The cursor is "explicit" when state->analysis_cursor is on a
+  // real candidate row; -1 means the user is parked on the [5]
+  // label and effective_cursor only fell through to 0 to mark
+  // the implicit "previewed" row. The inverted/chevron look
+  // (the active-cursor cue) only fires when the cursor is
+  // explicit AND the panel is focused; otherwise the row
+  // renders with the medium-bg parked-selection look.
+  const bool cursor_explicit = state != NULL && state->analysis_cursor >= 0;
+  const bool panel_focused =
+      state != NULL && state->focused_panel == TUI_FOCUS_ANALYSIS;
+  const bool focused_here = cursor_explicit && panel_focused;
+  const bool cursor_on_rank =
+      cursor_here && state != NULL &&
+      state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_RANK;
+  const bool cursor_on_move =
+      cursor_here && state != NULL &&
+      state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_MOVE;
+  if (cursor_on_rank) {
+    // Find the position of the '.' in rank_str (right-aligned;
+    // walk to end and back). Then split: leading digits +
+    // padding go on the chip, the '.' becomes '>' when the
+    // panel is focused (stays '.' otherwise), the trailing
+    // space goes plain.
+    char chip[8];
+    int chip_len = 0;
+    int after_period_idx = 0;
+    for (int k = 0; rank_str[k] != '\0'; k++) {
+      if (rank_str[k] == '.') {
+        after_period_idx = k + 1;
+        break;
+      }
+    }
+    for (int k = 0; k < after_period_idx - 1 && chip_len < 6; k++) {
+      chip[chip_len++] = rank_str[k];
+    }
+    chip[chip_len++] = focused_here ? '>' : '.';
+    chip[chip_len] = '\0';
+    // Focused panel: full-invert (bg on fg, bold) so the active
+    // cursor pops. Unfocused panel: keep the rank readable in
+    // normal fg, but sit it on a medium-brightness bg (the
+    // on-turn player's tile_bg, same family used for unfocused
+    // thinking-turn chips in History) so the row reads as
+    // "parked selection, panel not focused" — visually distinct
+    // from the active cursor.
+    if (focused_here) {
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, theme->fg);
+    } else {
+      // Parked-cursor chip: same luminance as the player tile_bg
+      // used in the History panel's pending chip, but neutral
+      // gray — the Analysis row shouldn't pick up the player's
+      // green / amber tint when it's just marking the top move,
+      // since at that point it's a cursor cue rather than a
+      // "this tile belongs to player X" indicator.
+      const int candidate_idx = rows[data_i].candidate_player_idx;
+      const ThemeRgb tile_bg =
+          candidate_idx == 1 ? theme->tile2_bg : theme->tile1_bg;
+      const uint8_t lum =
+          (uint8_t)((30u * tile_bg.r + 59u * tile_bg.g + 11u * tile_bg.b) /
+                    100u);
+      const ThemeRgb gray_bg = {lum, lum, lum};
+      theme_apply_fg(plane, theme->fg);
+      theme_apply_bg(plane, gray_bg);
+    }
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, row, columns->interior_left, chip);
+    ncplane_set_styles(plane, 0);
+    theme_apply_fg(plane, theme->dim_fg);
+    theme_apply_bg(plane, theme->bg);
+    if (rank_str[after_period_idx] != '\0') {
+      ncplane_putstr_yx(plane, row, columns->interior_left + after_period_idx,
+                        rank_str + after_period_idx);
+    }
+  } else {
+    theme_apply_fg(plane, theme->dim_fg);
+    ncplane_putstr_yx(plane, row, columns->interior_left, rank_str);
+  }
+  // Record the row's screen rectangle for click-to-cursor.
+  if (hit->analysis_row_map_count <
+      (int)(sizeof(hit->analysis_row_map) / sizeof(hit->analysis_row_map[0]))) {
+    AnalysisRowMap *m = &hit->analysis_row_map[hit->analysis_row_map_count++];
+    m->top_row = row;
+    m->bottom_row = row;
+    m->left_col = columns->interior_left;
+    m->right_col = columns->interior_right;
+    m->move_left_col = columns->move_col;
+    m->idx = data_i;
+  }
+
+  if (this_move_max > 0 && move_text[0] != '\0') {
+    if (cursor_on_move) {
+      // Invert the move text (bg on fg, bold). The inverted
+      // background by itself is enough of a selection cue —
+      // no chevron is appended on the move side. render_move_styled
+      // would re-apply its own colors, so paint a backing
+      // rectangle in inverse colors first and then write the
+      // move text with the inverted palette.
+      const int move_render_w = this_move_max;
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, theme->fg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      for (int c = 0; c < move_render_w; c++) {
+        ncplane_putstr_yx(plane, row, columns->move_col + c, " ");
+      }
+      ncplane_putstr_yx(plane, row, columns->move_col, move_text);
+      ncplane_set_styles(plane, 0);
+      theme_apply_bg(plane, theme->bg);
+    } else {
+      theme_apply_fg(plane, theme->fg);
+      render_move_styled(plane, row, columns->move_col, move_text,
+                         /*hide_parens=*/true,
+                         /*hide_playthrough_parens=*/false);
+    }
+  }
+
+  if (show_this_leave) {
+    theme_apply_fg(plane, theme->dim_fg);
+    ncplane_putstr_yx(plane, row, leave_text_col, leave_str);
+  }
+
+  if (columns->show_score && rows[data_i].score[0] != '\0') {
+    const int sl = (int)strlen(rows[data_i].score);
+    const int sc_col = columns->score_right_edge - sl + 1;
+    const bool is_best = (rows[data_i].score_value == bests->best_score);
+    theme_apply_fg(plane, theme->fg);
+    if (is_best) {
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+    }
+    ncplane_putstr_yx(plane, row, sc_col, rows[data_i].score);
+    if (is_best) {
+      ncplane_set_styles(plane, 0);
+    }
+  }
+
+  // Per-ply averages. Ply 0 is the candidate-player's move (on-
+  // turn at evaluation time); subsequent plies alternate. Color
+  // each column by whose turn that ply was, using the same per-
+  // player accent the player pill uses.
+  if (columns->show_avgs && rows[data_i].ply_count > 0) {
+    const int candidate_idx = rows[data_i].candidate_player_idx;
+    for (int ply = 0; ply < rows[data_i].ply_count; ply++) {
+      const int ply_player = (candidate_idx + ply) % 2;
+      const ThemeRgb ply_color =
+          ply_player == 1 ? theme->on_turn_fg_p2 : theme->on_turn_fg;
+      const int col =
+          columns->avg_left_edge + ply * (AVG_COL_W + AVG_GAP_W) + AVG_GAP_W;
+      // Pick "12" vs "12.3" so the value fits in AVG_COL_W cells.
+      char buf[16];
+      const double v = rows[data_i].ply_avg[ply];
+      if (v >= 100.0 || v <= -10.0) {
+        snprintf(buf, sizeof(buf), "%*.0f", AVG_COL_W, v);
+      } else {
+        snprintf(buf, sizeof(buf), "%*.1f", AVG_COL_W, v);
+      }
+      const bool is_best = ply < MAX_ANALYSIS_PLIES &&
+                           bests->any_ply_avg[ply] &&
+                           v == bests->best_ply_avg[ply];
+      theme_apply_fg(plane, ply_color);
+      ncplane_set_styles(plane, is_best ? NCSTYLE_BOLD : 0);
+      ncplane_putstr_yx(plane, row, col, buf);
+    }
+    ncplane_set_styles(plane, 0);
+    theme_apply_fg(plane, theme->fg);
+  }
+
+  // Primary column (win% or W/T/L). Right-justified within its slot
+  // so single-char W/T/L lines up with the right edge.
+  {
+    const int len = (int)strlen(rows[data_i].primary);
+    const int col = columns->sec_col - columns->primary_secondary_gap - len;
+    theme_apply_fg(plane, theme->fg);
+    const bool is_best = bests->any_primary &&
+                         rows[data_i].primary[0] != '\0' &&
+                         rows[data_i].primary_value == bests->best_primary;
+    const bool bold = primary_bold || is_best;
+    if (bold) {
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+    }
+    ncplane_putstr_yx(plane, row, col, rows[data_i].primary);
+    if (bold) {
+      ncplane_set_styles(plane, 0);
+    }
+  }
+
+  // Secondary column (equity or spread). Stays in the dim color
+  // even when bolded — the spread column reads as supplementary
+  // info next to the white win%, and switching it to full white
+  // when bolded made it shout louder than win%.
+  {
+    const int len = (int)strlen(rows[data_i].secondary);
+    // Mirror the header: right-align within sec_col's slot rather
+    // than against interior_right, so the column tracks sec_col
+    // when it shifts left to make room for the avg block.
+    const int col = columns->sec_col + columns->secondary_w - len;
+    const bool is_best = bests->any_secondary &&
+                         rows[data_i].secondary[0] != '\0' &&
+                         rows[data_i].secondary_value == bests->best_secondary;
+    theme_apply_fg(plane, theme->dim_fg);
+    if (is_best) {
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+    }
+    ncplane_putstr_yx(plane, row, col, rows[data_i].secondary);
+    if (is_best) {
+      ncplane_set_styles(plane, 0);
+    }
+  }
+}
+
+// Draws the scrollbar in the cell right of the interior, spanning the
+// view_h list rows: a thumb sized view_h/total_rows with 1/8-row edges,
+// and publishes its geometry for the input handlers' hit tests.
+static void render_analysis_scrollbar(struct ncplane *plane, const Theme *theme,
+                                      const TuiGameState *state,
+                                      const AnalysisColumns *columns,
+                                      int total_rows, int list_top, int view_h,
+                                      int scroll_offset) {
+  const int scrollbar_col = columns->interior_right + 1;
+  const int track_top = list_top;
+  const int track_bottom = list_top + view_h - 1;
+  const int track_h = view_h;
+  // Thumb position in 1/8 row units relative to the track.
+  const int total_eighths = track_h * 8;
+  int thumb_top_8 =
+      (int)((long long)scroll_offset * total_eighths / total_rows);
+  int thumb_bot_8 =
+      (int)((long long)(scroll_offset + view_h) * total_eighths / total_rows);
+  if (thumb_bot_8 > total_eighths) {
+    thumb_bot_8 = total_eighths;
+  }
+  if (thumb_top_8 < 0) {
+    thumb_top_8 = 0;
+  }
+  // Ensure the thumb always shows at least 1/8 of a cell so the
+  // user can see something even when total_rows >> view_h.
+  if (thumb_bot_8 - thumb_top_8 < 1) {
+    thumb_bot_8 = thumb_top_8 + 1;
+    if (thumb_bot_8 > total_eighths) {
+      thumb_bot_8 = total_eighths;
+      thumb_top_8 = thumb_bot_8 - 1;
+    }
+  }
+  // Single thumb color so every pixel of the bar reads as
+  // exactly the same shade regardless of which glyph variant
+  // the cell uses (full block, lower-N, inverted upper-N).
+  // Pulls from the theme so dark / light / etc. palettes all
+  // theme the bar appropriately; only the *uniformity* across
+  // cells is the constraint here.
+  const ThemeRgb thumb_color = theme->fg;
+  static const char *const lower_blocks[9] = {
+      "\xe2\x96\x8f", // ▏ track (LEFT ONE EIGHTH) — used as track sliver
+      "\xe2\x96\x81", // ▁ lower 1/8
+      "\xe2\x96\x82", // ▂ lower 2/8
+      "\xe2\x96\x83", // ▃ lower 3/8
+      "\xe2\x96\x84", // ▄ lower 4/8 (half)
+      "\xe2\x96\x85", // ▅ lower 5/8
+      "\xe2\x96\x86", // ▆ lower 6/8
+      "\xe2\x96\x87", // ▇ lower 7/8
+      "\xe2\x96\x88", // █ full
+  };
+  for (int r = 0; r < track_h; r++) {
+    const int cell_top_8 = r * 8;
+    const int cell_bot_8 = cell_top_8 + 8;
+    int overlap_top_8 = thumb_top_8 > cell_top_8 ? thumb_top_8 : cell_top_8;
+    int overlap_bot_8 = thumb_bot_8 < cell_bot_8 ? thumb_bot_8 : cell_bot_8;
+    const int in_cell_top = overlap_top_8 - cell_top_8;
+    const int in_cell_bot = overlap_bot_8 - cell_top_8;
+    const int fill_eighths =
+        overlap_bot_8 > overlap_top_8 ? overlap_bot_8 - overlap_top_8 : 0;
+    if (fill_eighths <= 0) {
+      // Cell entirely outside the thumb. Paint as panel bg so
+      // the track shares the same color as the non-thumb
+      // portions of partial cells — gives a clean seam at the
+      // thumb's edges. The thumb is the only visible mark of
+      // the scrollbar; clicks elsewhere in the column still
+      // hit-test via the published geometry.
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_putstr_yx(plane, track_top + r, scrollbar_col, " ");
+      continue;
+    }
+    if (fill_eighths == 8) {
+      // Cell entirely inside the thumb → full block.
+      theme_apply_fg(plane, thumb_color);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_putstr_yx(plane, track_top + r, scrollbar_col, lower_blocks[8]);
+      continue;
+    }
+    if (in_cell_top == 0) {
+      // Thumb fills FROM THE TOP downward to in_cell_bot/8. To
+      // get top-filled-N/8 we render a lower-(8-N) block with
+      // fg=panel_bg, bg=thumb_color. ON pixels (bottom portion)
+      // render in panel_bg so the cell's non-thumb region
+      // matches the surrounding track exactly — no dim-gray
+      // band appears at the thumb's upper edge.
+      const int inv_idx = 8 - in_cell_bot;
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, thumb_color);
+      ncplane_putstr_yx(plane, track_top + r, scrollbar_col,
+                        lower_blocks[inv_idx]);
+    } else if (in_cell_bot == 8) {
+      // Thumb fills FROM THE BOTTOM upward. ON pixels = thumb,
+      // OFF pixels = panel_bg (track).
+      const int idx = 8 - in_cell_top;
+      theme_apply_fg(plane, thumb_color);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_putstr_yx(plane, track_top + r, scrollbar_col, lower_blocks[idx]);
+    } else {
+      // Thumb sits entirely in the middle of the cell (rare —
+      // happens only when total_rows is large enough that the
+      // thumb is shorter than 1/8 of a cell). Render a half-
+      // block thumb centered visually.
+      theme_apply_fg(plane, thumb_color);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_putstr_yx(plane, track_top + r, scrollbar_col, "\xe2\x96\x84");
+    }
+  }
+  // Publish geometry so main.c's input handlers can hit-test
+  // mouse clicks against the scrollbar.
+  TuiGameState *mut = (TuiGameState *)state;
+  atomic_store(&mut->analysis_scrollbar_top, track_top);
+  atomic_store(&mut->analysis_scrollbar_bottom, track_bottom);
+  atomic_store(&mut->analysis_scrollbar_col, scrollbar_col);
+  atomic_store(&mut->analysis_scrollbar_total, total_rows);
+  atomic_store(&mut->analysis_scrollbar_view, view_h);
+}
+
 // Render the ranked candidates given a pre-populated row array.
 // Handles the leave column auto-sizing, exchange compaction, and
 // right-anchored primary/secondary columns. primary_bold gates whether
@@ -378,15 +961,6 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   hit->analysis_panel_bottom = L->analysis_bottom;
   hit->analysis_panel_left = L->analysis_left;
   hit->analysis_panel_right = L->analysis_right;
-  // Reserve a column-header strip; either on the panel's top border
-  // (sharing the row with the title, when there's room) or on the
-  // first interior row. The on-border placement is preferred since
-  // it gives the data one extra row of vertical space. Final
-  // decision happens below once we know how far the leftmost header
-  // would extend; placeholder values here.
-  bool show_headers = interior_top <= interior_bottom;
-  int header_row = interior_top;
-  int list_top = show_headers ? interior_top + 1 : interior_top;
 
   // Size the rank column to the digit count of the largest visible
   // rank, so a 9-row list shows "9. " (no pad) and only a 10+ list
@@ -508,51 +1082,9 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int score_left_edge =
       show_score ? score_right_edge - score_w + 1 : prim_col;
 
-  // Find the max values across visible rows so we can bold the
-  // row(s) that achieve each maximum. Score is integer (exact ties
-  // legit and all bold); primary/secondary use the raw double so
-  // ties at the displayed precision still resolve to a unique winner
-  // when the underlying values differ.
-  int best_score = INT_MIN;
-  double best_primary = -1e300;
-  double best_secondary = -1e300;
-  bool any_primary = false;
-  bool any_secondary = false;
-  // Per-ply column maxes. best_ply_avg[k] is the maximum value in
-  // avg-column k across all visible, valid rows that ran at least
-  // k+1 plies. any_ply_avg[k] gates against the all-empty case.
-  double best_ply_avg[MAX_ANALYSIS_PLIES];
-  bool any_ply_avg[MAX_ANALYSIS_PLIES];
-  for (int k = 0; k < MAX_ANALYSIS_PLIES; k++) {
-    best_ply_avg[k] = -1e300;
-    any_ply_avg[k] = false;
-  }
-  for (int i = 0; i < visible; i++) {
-    if (!rows[i].valid) {
-      continue;
-    }
-    if (rows[i].score[0] != '\0' && rows[i].score_value > best_score) {
-      best_score = rows[i].score_value;
-    }
-    if (rows[i].primary[0] != '\0') {
-      if (!any_primary || rows[i].primary_value > best_primary) {
-        best_primary = rows[i].primary_value;
-        any_primary = true;
-      }
-    }
-    if (rows[i].secondary[0] != '\0') {
-      if (!any_secondary || rows[i].secondary_value > best_secondary) {
-        best_secondary = rows[i].secondary_value;
-        any_secondary = true;
-      }
-    }
-    for (int k = 0; k < rows[i].ply_count && k < MAX_ANALYSIS_PLIES; k++) {
-      if (!any_ply_avg[k] || rows[i].ply_avg[k] > best_ply_avg[k]) {
-        best_ply_avg[k] = rows[i].ply_avg[k];
-        any_ply_avg[k] = true;
-      }
-    }
-  }
+  // Bold the row(s) that achieve each column's maximum.
+  AnalysisBests bests;
+  analysis_find_bests(rows, visible, &bests);
   // Leave's right edge slides left to make room for the score column.
   const int leave_to_score_gap = 1;
   const int leave_right_edge = show_score
@@ -573,6 +1105,29 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int full_move_max =
       (show_score ? score_left_edge - 2 : prim_col - 1) - move_col;
 
+  const AnalysisColumns columns = {
+      .interior_left = interior_left,
+      .interior_right = interior_right,
+      .interior_top = interior_top,
+      .interior_bottom = interior_bottom,
+      .move_col = move_col,
+      .max_leave_w = max_leave_w,
+      .primary_w = primary_w,
+      .secondary_w = secondary_w,
+      .primary_secondary_gap = primary_secondary_gap,
+      .prim_col = prim_col,
+      .sec_col = sec_col,
+      .show_avgs = show_avgs,
+      .max_ply_count = max_ply_count,
+      .avg_left_edge = avg_left_edge,
+      .show_score = show_score,
+      .score_w = score_w,
+      .score_right_edge = score_right_edge,
+      .show_leaves = show_leaves,
+      .leave_right_edge = leave_right_edge,
+      .full_move_max = full_move_max,
+  };
+
   // Column headers above the data rows. We render the strip whenever
   // at least one label has something to say. Sim mode lights up
   // every header (leave / sc / win% / sprd / avg…); play-only mode
@@ -583,121 +1138,17 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   // right-aligns at the same edge as the column it labels.
   const bool has_primary_label = primary_w >= 4;
   const bool has_secondary_label = secondary_w >= 4;
-  show_headers = show_headers && (has_primary_label || has_secondary_label ||
-                                  show_score || max_leave_w > 0);
-  if (show_headers) {
-    // Find the leftmost col any header would touch (the "leave"
-    // header is the leftmost; if no leave column, "sc" or "win%").
-    int leftmost_header_col = INT_MAX;
-    if (max_leave_w > 0) {
-      const int col = leave_right_edge - 5 + 1; // "leave"
-      if (col < leftmost_header_col) {
-        leftmost_header_col = col;
-      }
-    }
-    if (show_score) {
-      const int len = score_w == 2 ? 2 : 3;
-      const int col = score_right_edge - len + 1;
-      if (col < leftmost_header_col) {
-        leftmost_header_col = col;
-      }
-    }
-    // avg cols are right-anchored past sprd, so they don't affect
-    // leftmost_header_col — they sit further right than every other
-    // header.
-    if (has_primary_label) {
-      const int col = prim_col + primary_w - 4; // "win%"
-      if (col < leftmost_header_col) {
-        leftmost_header_col = col;
-      }
-    }
-    // Prefer the top border row when the title leaves enough room
-    // there. title_end_col is the last col of the title's trailing
-    // " "; we need a 1-col gap after it before the leftmost header.
-    const bool headers_fit_on_border =
-        title_end_col >= 0 && leftmost_header_col > title_end_col + 1 &&
-        leftmost_header_col >= L->analysis_left + 1;
-    if (headers_fit_on_border) {
-      header_row = L->analysis_top;
-      list_top = interior_top;
-    } else {
-      header_row = interior_top;
-      list_top = interior_top + 1;
-    }
-
-    // Paint the header strip. The right portion (from the leftmost
-    // header word out to the right interior edge) always uses the
-    // inverted band — same look the on-border placement gets. The
-    // LEFT portion of an inside-panel strip fades into the panel's
-    // bg using DOS-style shade glyphs (░ ▒ ▓) split into thirds:
-    //   ░ section at the far left, ▓ section just before the band,
-    //   ▒ in the middle. The shade glyph density alone reads as
-    //   banded, so we also linearly ramp the foreground color from
-    //   bg (invisible) at the far left to dim_fg at the band — the
-    //   dithering pattern remains visible but the overall line
-    //   fades smoothly into the surrounding rows.
-    {
-      // Right portion: true inverted band — dark text on the
-      // dim_fg-colored band, matching how header_bg / header_fg
-      // chrome bars elsewhere read.
-      const int band_left =
-          headers_fit_on_border ? leftmost_header_col : leftmost_header_col;
-      theme_apply_fg(plane, theme->bg);
-      theme_apply_bg(plane, theme->dim_fg);
-      for (int c = band_left; c <= interior_right; c++) {
-        ncplane_putstr_yx(plane, header_row, c, " ");
-      }
-    }
-    if (!headers_fit_on_border && interior_left < leftmost_header_col) {
-      render_analysis_header_fade(plane, theme, header_row, interior_left,
-                                  leftmost_header_col - 1);
-    }
-
-    theme_apply_fg(plane, theme->bg);
-    theme_apply_bg(plane, theme->dim_fg);
-    ncplane_set_styles(plane, NCSTYLE_BOLD);
-    if (show_leaves) {
-      const char *leave_label = "leave";
-      const int len = (int)strlen(leave_label);
-      const int col = leave_right_edge - len + 1;
-      if (col >= move_col) {
-        ncplane_putstr_yx(plane, header_row, col, leave_label);
-      }
-    }
-    if (show_score) {
-      const char *sc_label = score_w == 2 ? "sc" : "scr";
-      const int len = (int)strlen(sc_label);
-      const int col = score_right_edge - len + 1;
-      ncplane_putstr_yx(plane, header_row, col, sc_label);
-    }
-    if (show_avgs) {
-      for (int ply = 0; ply < max_ply_count; ply++) {
-        char hdr[8];
-        snprintf(hdr, sizeof(hdr), "avg%d", ply + 1);
-        const int col =
-            avg_left_edge + ply * (AVG_COL_W + AVG_GAP_W) + AVG_GAP_W;
-        ncplane_putstr_yx(plane, header_row, col, hdr);
-      }
-    }
-    if (has_primary_label) {
-      const char *win_label = "win%";
-      const int len = (int)strlen(win_label);
-      const int col = prim_col + primary_w - len;
-      ncplane_putstr_yx(plane, header_row, col, win_label);
-    }
-    if (has_secondary_label) {
-      const char *sprd_label = "sprd";
-      const int len = (int)strlen(sprd_label);
-      // Right-align inside the secondary column's slot, not against
-      // interior_right — when the avg block is on, sec_col has
-      // shifted left to make room for the avgs further right.
-      const int col = sec_col + secondary_w - len;
-      ncplane_putstr_yx(plane, header_row, col, sprd_label);
-    }
-    ncplane_set_styles(plane, 0);
-  } else {
-    list_top = interior_top;
-  }
+  // The strip goes on the panel's top border (sharing the row with the
+  // title) when there's room, else on the first interior row; the
+  // on-border placement gives the data one extra row.
+  const bool show_headers = interior_top <= interior_bottom &&
+                            (has_primary_label || has_secondary_label ||
+                             show_score || max_leave_w > 0);
+  const int list_top =
+      show_headers
+          ? render_analysis_headers(plane, theme, L, &columns, title_end_col,
+                                    has_primary_label, has_secondary_label)
+          : interior_top;
 
   // Resolve the effective cursor row for this frame. RANK column
   // pins to a row index; MOVE column pins to a specific move and
@@ -788,251 +1239,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       row++;
       continue;
     }
-    char rank_str[8];
-    snprintf(rank_str, sizeof(rank_str), rank_fmt, data_i + 1);
-
-    // Leave column placement is decided globally (show_leaves):
-    // either every row shows its own leave at leave_right_edge, or
-    // the column is hidden entirely. Rows where the play exhausts
-    // the rack (bingos / endgame outplays) have an empty leave —
-    // render those as "·" so the column stays consistently
-    // populated, otherwise the gaps look like rendering bugs.
-    // Re-sort the candidate's leave per the user's rack-sort
-    // preference so the leave column lines up with how rack
-    // tiles are ordered elsewhere (rack panel, history).
-    char sorted_row_leave[24];
-    if (rows[data_i].leave[0] != '\0' && state != NULL && state->ld != NULL) {
-      format_alphagram_for_sort(rows[data_i].leave, state->ld, state->rack_sort,
-                                sorted_row_leave, sizeof(sorted_row_leave));
-    } else {
-      sorted_row_leave[0] = '\0';
-    }
-    const char *leave_str =
-        sorted_row_leave[0] != '\0' ? sorted_row_leave : "\xc2\xb7";
-    const int leave_len = (int)strlen(leave_str);
-    const int leave_text_col =
-        show_leaves ? leave_right_edge -
-                          (rows[data_i].leave[0] != '\0' ? leave_len : 1) + 1
-                    : 0;
-    const bool show_this_leave = show_leaves;
-    const int this_move_max = show_leaves ? leave_right_edge - LEAVE_GAP_L -
-                                                move_col + 1 - max_leave_w
-                                          : full_move_max;
-
-    char *move_text = rows[data_i].move;
-    analysis_fit_move(move_text, this_move_max);
-
-    // Cursor styling: highlight is column-aware.
-    //   - RANK column: invert the rank chip (bg on fg, bold)
-    //     and put ">" (focused) or "." (unfocused) after the digits.
-    //   - MOVE column: leave the rank chip in dim color and invert
-    //     the move text instead.
-    // The "cursor here" test compares against effective_cursor —
-    // the row currently selected after MOVE-anchor resolution.
-    const bool cursor_here = (data_i == effective_cursor);
-    // The cursor is "explicit" when state->analysis_cursor is on a
-    // real candidate row; -1 means the user is parked on the [5]
-    // label and effective_cursor only fell through to 0 to mark
-    // the implicit "previewed" row. The inverted/chevron look
-    // (the active-cursor cue) only fires when the cursor is
-    // explicit AND the panel is focused; otherwise the row
-    // renders with the medium-bg parked-selection look.
-    const bool cursor_explicit = state != NULL && state->analysis_cursor >= 0;
-    const bool panel_focused =
-        state != NULL && state->focused_panel == TUI_FOCUS_ANALYSIS;
-    const bool focused_here = cursor_explicit && panel_focused;
-    const bool cursor_on_rank =
-        cursor_here && state != NULL &&
-        state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_RANK;
-    const bool cursor_on_move =
-        cursor_here && state != NULL &&
-        state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_MOVE;
-    if (cursor_on_rank) {
-      // Find the position of the '.' in rank_str (right-aligned;
-      // walk to end and back). Then split: leading digits +
-      // padding go on the chip, the '.' becomes '>' when the
-      // panel is focused (stays '.' otherwise), the trailing
-      // space goes plain.
-      char chip[8];
-      int chip_len = 0;
-      int after_period_idx = 0;
-      for (int k = 0; rank_str[k] != '\0'; k++) {
-        if (rank_str[k] == '.') {
-          after_period_idx = k + 1;
-          break;
-        }
-      }
-      for (int k = 0; k < after_period_idx - 1 && chip_len < 6; k++) {
-        chip[chip_len++] = rank_str[k];
-      }
-      chip[chip_len++] = focused_here ? '>' : '.';
-      chip[chip_len] = '\0';
-      // Focused panel: full-invert (bg on fg, bold) so the active
-      // cursor pops. Unfocused panel: keep the rank readable in
-      // normal fg, but sit it on a medium-brightness bg (the
-      // on-turn player's tile_bg, same family used for unfocused
-      // thinking-turn chips in History) so the row reads as
-      // "parked selection, panel not focused" — visually distinct
-      // from the active cursor.
-      if (focused_here) {
-        theme_apply_fg(plane, theme->bg);
-        theme_apply_bg(plane, theme->fg);
-      } else {
-        // Parked-cursor chip: same luminance as the player tile_bg
-        // used in the History panel's pending chip, but neutral
-        // gray — the Analysis row shouldn't pick up the player's
-        // green / amber tint when it's just marking the top move,
-        // since at that point it's a cursor cue rather than a
-        // "this tile belongs to player X" indicator.
-        const int candidate_idx = rows[data_i].candidate_player_idx;
-        const ThemeRgb tile_bg =
-            candidate_idx == 1 ? theme->tile2_bg : theme->tile1_bg;
-        const uint8_t lum =
-            (uint8_t)((30u * tile_bg.r + 59u * tile_bg.g + 11u * tile_bg.b) /
-                      100u);
-        const ThemeRgb gray_bg = {lum, lum, lum};
-        theme_apply_fg(plane, theme->fg);
-        theme_apply_bg(plane, gray_bg);
-      }
-      ncplane_set_styles(plane, NCSTYLE_BOLD);
-      ncplane_putstr_yx(plane, row, interior_left, chip);
-      ncplane_set_styles(plane, 0);
-      theme_apply_fg(plane, theme->dim_fg);
-      theme_apply_bg(plane, theme->bg);
-      if (rank_str[after_period_idx] != '\0') {
-        ncplane_putstr_yx(plane, row, interior_left + after_period_idx,
-                          rank_str + after_period_idx);
-      }
-    } else {
-      theme_apply_fg(plane, theme->dim_fg);
-      ncplane_putstr_yx(plane, row, interior_left, rank_str);
-    }
-    // Record the row's screen rectangle for click-to-cursor.
-    if (hit->analysis_row_map_count < (int)(sizeof(hit->analysis_row_map) /
-                                            sizeof(hit->analysis_row_map[0]))) {
-      AnalysisRowMap *m = &hit->analysis_row_map[hit->analysis_row_map_count++];
-      m->top_row = row;
-      m->bottom_row = row;
-      m->left_col = interior_left;
-      m->right_col = interior_right;
-      m->move_left_col = move_col;
-      m->idx = data_i;
-    }
-
-    if (this_move_max > 0 && move_text[0] != '\0') {
-      if (cursor_on_move) {
-        // Invert the move text (bg on fg, bold). The inverted
-        // background by itself is enough of a selection cue —
-        // no chevron is appended on the move side. render_move_styled
-        // would re-apply its own colors, so paint a backing
-        // rectangle in inverse colors first and then write the
-        // move text with the inverted palette.
-        const int move_render_w = this_move_max;
-        theme_apply_fg(plane, theme->bg);
-        theme_apply_bg(plane, theme->fg);
-        ncplane_set_styles(plane, NCSTYLE_BOLD);
-        for (int c = 0; c < move_render_w; c++) {
-          ncplane_putstr_yx(plane, row, move_col + c, " ");
-        }
-        ncplane_putstr_yx(plane, row, move_col, move_text);
-        ncplane_set_styles(plane, 0);
-        theme_apply_bg(plane, theme->bg);
-      } else {
-        theme_apply_fg(plane, theme->fg);
-        render_move_styled(plane, row, move_col, move_text,
-                           /*hide_parens=*/true,
-                           /*hide_playthrough_parens=*/false);
-      }
-    }
-
-    if (show_this_leave) {
-      theme_apply_fg(plane, theme->dim_fg);
-      ncplane_putstr_yx(plane, row, leave_text_col, leave_str);
-    }
-
-    if (show_score && rows[data_i].score[0] != '\0') {
-      const int sl = (int)strlen(rows[data_i].score);
-      const int sc_col = score_right_edge - sl + 1;
-      const bool is_best = (rows[data_i].score_value == best_score);
-      theme_apply_fg(plane, theme->fg);
-      if (is_best) {
-        ncplane_set_styles(plane, NCSTYLE_BOLD);
-      }
-      ncplane_putstr_yx(plane, row, sc_col, rows[data_i].score);
-      if (is_best) {
-        ncplane_set_styles(plane, 0);
-      }
-    }
-
-    // Per-ply averages. Ply 0 is the candidate-player's move (on-
-    // turn at evaluation time); subsequent plies alternate. Color
-    // each column by whose turn that ply was, using the same per-
-    // player accent the player pill uses.
-    if (show_avgs && rows[data_i].ply_count > 0) {
-      const int candidate_idx = rows[data_i].candidate_player_idx;
-      for (int ply = 0; ply < rows[data_i].ply_count; ply++) {
-        const int ply_player = (candidate_idx + ply) % 2;
-        const ThemeRgb ply_color =
-            ply_player == 1 ? theme->on_turn_fg_p2 : theme->on_turn_fg;
-        const int col =
-            avg_left_edge + ply * (AVG_COL_W + AVG_GAP_W) + AVG_GAP_W;
-        // Pick "12" vs "12.3" so the value fits in AVG_COL_W cells.
-        char buf[16];
-        const double v = rows[data_i].ply_avg[ply];
-        if (v >= 100.0 || v <= -10.0) {
-          snprintf(buf, sizeof(buf), "%*.0f", AVG_COL_W, v);
-        } else {
-          snprintf(buf, sizeof(buf), "%*.1f", AVG_COL_W, v);
-        }
-        const bool is_best = ply < MAX_ANALYSIS_PLIES && any_ply_avg[ply] &&
-                             v == best_ply_avg[ply];
-        theme_apply_fg(plane, ply_color);
-        ncplane_set_styles(plane, is_best ? NCSTYLE_BOLD : 0);
-        ncplane_putstr_yx(plane, row, col, buf);
-      }
-      ncplane_set_styles(plane, 0);
-      theme_apply_fg(plane, theme->fg);
-    }
-
-    // Primary column (win% or W/T/L). Right-justified within its slot
-    // so single-char W/T/L lines up with the right edge.
-    {
-      const int len = (int)strlen(rows[data_i].primary);
-      const int col = sec_col - primary_secondary_gap - len;
-      theme_apply_fg(plane, theme->fg);
-      const bool is_best = any_primary && rows[data_i].primary[0] != '\0' &&
-                           rows[data_i].primary_value == best_primary;
-      const bool bold = primary_bold || is_best;
-      if (bold) {
-        ncplane_set_styles(plane, NCSTYLE_BOLD);
-      }
-      ncplane_putstr_yx(plane, row, col, rows[data_i].primary);
-      if (bold) {
-        ncplane_set_styles(plane, 0);
-      }
-    }
-
-    // Secondary column (equity or spread). Stays in the dim color
-    // even when bolded — the spread column reads as supplementary
-    // info next to the white win%, and switching it to full white
-    // when bolded made it shout louder than win%.
-    {
-      const int len = (int)strlen(rows[data_i].secondary);
-      // Mirror the header: right-align within sec_col's slot rather
-      // than against interior_right, so the column tracks sec_col
-      // when it shifts left to make room for the avg block.
-      const int col = sec_col + secondary_w - len;
-      const bool is_best = any_secondary && rows[data_i].secondary[0] != '\0' &&
-                           rows[data_i].secondary_value == best_secondary;
-      theme_apply_fg(plane, theme->dim_fg);
-      if (is_best) {
-        ncplane_set_styles(plane, NCSTYLE_BOLD);
-      }
-      ncplane_putstr_yx(plane, row, col, rows[data_i].secondary);
-      if (is_best) {
-        ncplane_set_styles(plane, 0);
-      }
-    }
+    render_analysis_row(plane, theme, state, rows, &columns, primary_bold, hit,
+                        row, rank_fmt, &bests, effective_cursor, data_i);
 
     row++;
   }
@@ -1047,115 +1255,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   // LOWER N/8 BLOCK chars for the thumb's fractional top/bottom
   // edges (gives ~1/8-row visual precision).
   if (scrollbar_visible && state != NULL && view_h > 0 && total_rows > 0) {
-    const int scrollbar_col = interior_right + 1;
-    const int track_top = list_top;
-    const int track_bottom = list_top + view_h - 1;
-    const int track_h = view_h;
-    // Thumb position in 1/8 row units relative to the track.
-    const int total_eighths = track_h * 8;
-    int thumb_top_8 =
-        (int)((long long)scroll_offset * total_eighths / total_rows);
-    int thumb_bot_8 =
-        (int)((long long)(scroll_offset + view_h) * total_eighths / total_rows);
-    if (thumb_bot_8 > total_eighths) {
-      thumb_bot_8 = total_eighths;
-    }
-    if (thumb_top_8 < 0) {
-      thumb_top_8 = 0;
-    }
-    // Ensure the thumb always shows at least 1/8 of a cell so the
-    // user can see something even when total_rows >> view_h.
-    if (thumb_bot_8 - thumb_top_8 < 1) {
-      thumb_bot_8 = thumb_top_8 + 1;
-      if (thumb_bot_8 > total_eighths) {
-        thumb_bot_8 = total_eighths;
-        thumb_top_8 = thumb_bot_8 - 1;
-      }
-    }
-    // Single thumb color so every pixel of the bar reads as
-    // exactly the same shade regardless of which glyph variant
-    // the cell uses (full block, lower-N, inverted upper-N).
-    // Pulls from the theme so dark / light / etc. palettes all
-    // theme the bar appropriately; only the *uniformity* across
-    // cells is the constraint here.
-    const ThemeRgb thumb_color = theme->fg;
-    static const char *const lower_blocks[9] = {
-        "\xe2\x96\x8f", // ▏ track (LEFT ONE EIGHTH) — used as track sliver
-        "\xe2\x96\x81", // ▁ lower 1/8
-        "\xe2\x96\x82", // ▂ lower 2/8
-        "\xe2\x96\x83", // ▃ lower 3/8
-        "\xe2\x96\x84", // ▄ lower 4/8 (half)
-        "\xe2\x96\x85", // ▅ lower 5/8
-        "\xe2\x96\x86", // ▆ lower 6/8
-        "\xe2\x96\x87", // ▇ lower 7/8
-        "\xe2\x96\x88", // █ full
-    };
-    for (int r = 0; r < track_h; r++) {
-      const int cell_top_8 = r * 8;
-      const int cell_bot_8 = cell_top_8 + 8;
-      int overlap_top_8 = thumb_top_8 > cell_top_8 ? thumb_top_8 : cell_top_8;
-      int overlap_bot_8 = thumb_bot_8 < cell_bot_8 ? thumb_bot_8 : cell_bot_8;
-      const int in_cell_top = overlap_top_8 - cell_top_8;
-      const int in_cell_bot = overlap_bot_8 - cell_top_8;
-      const int fill_eighths =
-          overlap_bot_8 > overlap_top_8 ? overlap_bot_8 - overlap_top_8 : 0;
-      if (fill_eighths <= 0) {
-        // Cell entirely outside the thumb. Paint as panel bg so
-        // the track shares the same color as the non-thumb
-        // portions of partial cells — gives a clean seam at the
-        // thumb's edges. The thumb is the only visible mark of
-        // the scrollbar; clicks elsewhere in the column still
-        // hit-test via the published geometry.
-        theme_apply_fg(plane, theme->bg);
-        theme_apply_bg(plane, theme->bg);
-        ncplane_putstr_yx(plane, track_top + r, scrollbar_col, " ");
-        continue;
-      }
-      if (fill_eighths == 8) {
-        // Cell entirely inside the thumb → full block.
-        theme_apply_fg(plane, thumb_color);
-        theme_apply_bg(plane, theme->bg);
-        ncplane_putstr_yx(plane, track_top + r, scrollbar_col, lower_blocks[8]);
-        continue;
-      }
-      if (in_cell_top == 0) {
-        // Thumb fills FROM THE TOP downward to in_cell_bot/8. To
-        // get top-filled-N/8 we render a lower-(8-N) block with
-        // fg=panel_bg, bg=thumb_color. ON pixels (bottom portion)
-        // render in panel_bg so the cell's non-thumb region
-        // matches the surrounding track exactly — no dim-gray
-        // band appears at the thumb's upper edge.
-        const int inv_idx = 8 - in_cell_bot;
-        theme_apply_fg(plane, theme->bg);
-        theme_apply_bg(plane, thumb_color);
-        ncplane_putstr_yx(plane, track_top + r, scrollbar_col,
-                          lower_blocks[inv_idx]);
-      } else if (in_cell_bot == 8) {
-        // Thumb fills FROM THE BOTTOM upward. ON pixels = thumb,
-        // OFF pixels = panel_bg (track).
-        const int idx = 8 - in_cell_top;
-        theme_apply_fg(plane, thumb_color);
-        theme_apply_bg(plane, theme->bg);
-        ncplane_putstr_yx(plane, track_top + r, scrollbar_col,
-                          lower_blocks[idx]);
-      } else {
-        // Thumb sits entirely in the middle of the cell (rare —
-        // happens only when total_rows is large enough that the
-        // thumb is shorter than 1/8 of a cell). Render a half-
-        // block thumb centered visually.
-        theme_apply_fg(plane, thumb_color);
-        theme_apply_bg(plane, theme->bg);
-        ncplane_putstr_yx(plane, track_top + r, scrollbar_col, "\xe2\x96\x84");
-      }
-    }
-    // Publish geometry so main.c's input handlers can hit-test
-    // mouse clicks against the scrollbar.
-    TuiGameState *mut = (TuiGameState *)state;
-    atomic_store(&mut->analysis_scrollbar_top, track_top);
-    atomic_store(&mut->analysis_scrollbar_bottom, track_bottom);
-    atomic_store(&mut->analysis_scrollbar_col, scrollbar_col);
-    atomic_store(&mut->analysis_scrollbar_total, total_rows);
-    atomic_store(&mut->analysis_scrollbar_view, view_h);
+    render_analysis_scrollbar(plane, theme, state, &columns, total_rows,
+                              list_top, view_h, scroll_offset);
   } else if (state != NULL) {
     // Hidden scrollbar — publish zero so input handlers know not
     // to try to hit-test against stale geometry.
