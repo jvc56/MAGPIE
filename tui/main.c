@@ -17,6 +17,7 @@
 #include "frame_dump.h"
 #include "game_render.h"
 #include "game_state.h"
+#include "glyph_cache.h"
 #include "lexicon_picker.h"
 #include "move_entry.h"
 #include "onboarding.h"
@@ -1837,9 +1838,6 @@ int main(int argc, char *argv[]) {
       // Time the UI thread's full render path so the debug overlay
       // can surface the worst-case frame in the last second. Captures
       // notcurses_render too, where the Kitty graphics emit lives.
-      extern void tui_debug_record_frame_us(long);
-      extern void tui_debug_record_sprixel_stats(uint64_t emits,
-                                                 uint64_t elides);
       struct timespec frame_start;
       clock_gettime(CLOCK_MONOTONIC, &frame_start);
       notcurses_render(nc);
@@ -1868,7 +1866,6 @@ int main(int argc, char *argv[]) {
       // Only update on input-triggered frames so the last value persists
       // (clock-tick frames carry no latency and would otherwise blank it).
       if (input_lag_us >= 0) {
-        extern void tui_debug_set_input_lag_us(long us);
         tui_debug_set_input_lag_us(input_lag_us);
       }
       // Snapshot notcurses' sprixel emission counters so the debug
@@ -1886,10 +1883,6 @@ int main(int argc, char *argv[]) {
           if (getenv("MAGPIE_FPS_DEBUG") != NULL) {
             static uint64_t dbg_emit;
             static uint64_t dbg_elide;
-            extern int tui_debug_last_tile_blits(void);
-            extern unsigned long tui_debug_tile_invalidations(void);
-            extern unsigned long tui_debug_rack_blits(void);
-            extern unsigned long tui_debug_glyph_rasters(void);
             static unsigned long dbg_rack;
             static unsigned long dbg_rasters;
             const unsigned long cur_rack = tui_debug_rack_blits();

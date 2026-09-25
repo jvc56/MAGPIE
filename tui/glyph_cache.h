@@ -67,4 +67,8 @@ const TuiGlyph *tui_glyph_cache_get(TuiGlyphCache *cache, uint32_t codepoint);
 const TuiGlyph *tui_glyph_cache_get_bold(TuiGlyphCache *cache,
                                          uint32_t codepoint);
 
+// Total FreeType rasterizations since start, for the MAGPIE_FPS_DEBUG
+// perf trace.
+unsigned long tui_debug_glyph_rasters(void);
+
 #endif
