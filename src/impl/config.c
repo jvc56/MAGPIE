@@ -158,6 +158,11 @@ typedef enum {
   ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
   ARG_TOKEN_PEG_MAX_BAG,
+  ARG_TOKEN_P1_PEG_DISABLE_PAT,
+  ARG_TOKEN_P2_PEG_DISABLE_PAT,
+  ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME,
+  ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE,
+  ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_NESTED,
@@ -373,6 +378,11 @@ struct Config {
   int peg_scenario_stride;
   // Largest bag size PlayChooser runs PEG on; 0 = PEG_MAX_BAG.
   int peg_max_bag;
+  bool p1_peg_disable_pat;
+  bool p2_peg_disable_pat;
+  bool play_chooser_static_midgame;
+  double play_chooser_seconds_per_move;
+  int play_chooser_endgame_plies;
   // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
   // the cell always fits the label + a worst-case token) and max wrapped lines
   // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
@@ -1805,6 +1815,34 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "'all'/0 "
           "or an integer >= 2.";
       break;
+    case ARG_TOKEN_P1_PEG_DISABLE_PAT:
+    case ARG_TOKEN_P2_PEG_DISABLE_PAT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether player 1 or 2's PlayChooser runs the "
+             "pre-endgame solver without PAT, for both sides' moves, even "
+             "when the players load PAT weights.";
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether PlayChooser plays statically above the "
+             "pre-endgame solver's bag range instead of simulating.";
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE:
+      usages[0] = "<seconds>";
+      examples[0] = "60";
+      text = "Gives PlayChooser a flat per-move time budget in seconds "
+             "instead of splitting the player's clock; 0 uses the clock.";
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES:
+      usages[0] = "<plies>";
+      examples[0] = "4";
+      text = "Caps PlayChooser's endgame solve depth; 0 solves as deep as "
+             "the time budget allows.";
+      break;
     case ARG_TOKEN_PEG_MAX_BAG:
       usages[0] = "<bag_size>";
       examples[0] = "2";
@@ -2508,76 +2546,81 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
-        ARG_TOKEN_CUTOFF,                  /* cutoff */
-        ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
-        ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
-        ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
-        ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
-        ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
-        ARG_TOKEN_P1_INFERENCE_MARGIN,     /* im1 */
-        ARG_TOKEN_P2_INFERENCE_MARGIN,     /* im2 */
-        ARG_TOKEN_MAX_ITERATIONS,          /* iterations */
-        ARG_TOKEN_P1_MAX_ITERATIONS,       /* i1 */
-        ARG_TOKEN_P2_MAX_ITERATIONS,       /* i2 */
-        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
-        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
-        ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
-        ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
-        ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
-        ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
-        ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
-        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
-        ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
-        ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
-        ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
-        ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
-        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
-        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
-        ARG_TOKEN_PEG_MAX_BAG,             /* pegmaxbag */
-        ARG_TOKEN_PEG_NESTED,              /* pegnested */
-        ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
-        ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
-        ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
-        ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
-        ARG_TOKEN_PEG_STRIDE,              /* pegstride */
-        ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
-        ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
-        ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
-        ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
-        ARG_TOKEN_PLIES,                   /* plies */
-        ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
-        ARG_TOKEN_STOP_COND_PCT,           /* scondition */
-        ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
-        ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
-        ARG_TOKEN_SAMPLING_RULE,           /* sr */
-        ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
-        ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
-        ARG_TOKEN_PAT_LABEL_PLIES,         /* patplies */
-        ARG_TOKEN_PAT_COMBINE_GAMMA,       /* patgamma */
-        ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
-        ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
-        ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
-        ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
-        ARG_TOKEN_P1_THRESHOLD,            /* th1 */
-        ARG_TOKEN_P2_THRESHOLD,            /* th2 */
-        ARG_TOKEN_THRESHOLD,               /* threshold */
-        ARG_TOKEN_P1_TIME_LIMIT,           /* tl1 */
-        ARG_TOKEN_P2_TIME_LIMIT,           /* tl2 */
-        ARG_TOKEN_TIME_LIMIT,              /* tlim */
-        ARG_TOKEN_TT_FRACTION_OF_MEM,      /* ttfraction */
-        ARG_TOKEN_USE_HEAT_MAP,            /* useheatmap */
-        ARG_TOKEN_UTILITY_W_SPREAD,        /* uspread */
-        ARG_TOKEN_P1_UTILITY_W_SPREAD,     /* uspread1 */
-        ARG_TOKEN_P2_UTILITY_W_SPREAD,     /* uspread2 */
-        ARG_TOKEN_UTILITY_SPREAD_SCALE,    /* uspreadscale */
-        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, /* uspreadscale1 */
-        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, /* uspreadscale2 */
-        ARG_TOKEN_UTILITY_W_WINPCT,        /* uwin */
-        ARG_TOKEN_P1_UTILITY_W_WINPCT,     /* uwin1 */
-        ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
-        ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
-        ARG_TOKEN_WIN_PCT,                 /* winpct */
-        ARG_TOKEN_P2_WIN_PCT,              /* winpct2 */
+        ARG_TOKEN_CUTOFF,                        /* cutoff */
+        ARG_TOKEN_ENDGAME_PLIES,                 /* eplies */
+        ARG_TOKEN_ENDGAME_TIME_LIMIT,            /* etlim */
+        ARG_TOKEN_ENDGAME_TOP_K,                 /* etopk */
+        ARG_TOKEN_USE_GAME_PAIRS,                /* gp */
+        ARG_TOKEN_INFERENCE_MARGIN,              /* imargin */
+        ARG_TOKEN_P1_INFERENCE_MARGIN,           /* im1 */
+        ARG_TOKEN_P2_INFERENCE_MARGIN,           /* im2 */
+        ARG_TOKEN_MAX_ITERATIONS,                /* iterations */
+        ARG_TOKEN_P1_MAX_ITERATIONS,             /* i1 */
+        ARG_TOKEN_P2_MAX_ITERATIONS,             /* i2 */
+        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,        /* mi1 */
+        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,        /* mi2 */
+        ARG_TOKEN_MIN_PLAY_ITERATIONS,           /* minplayiterations */
+        ARG_TOKEN_SHOW_MISTAKES,                 /* mistakes */
+        ARG_TOKEN_MOVEGEN_MARGIN,                /* mmargin */
+        ARG_TOKEN_MULTI_THREADING_MODE,          /* mtmode */
+        ARG_TOKEN_NUMBER_OF_PLAYS,               /* numplays */
+        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,         /* numsmallplays */
+        ARG_TOKEN_P1_NUM_PLAYS,                  /* np1 */
+        ARG_TOKEN_P2_NUM_PLAYS,                  /* np2 */
+        ARG_TOKEN_OVERTIME_PENALTY_POINTS,       /* otpenalty */
+        ARG_TOKEN_OVERTIME_PERIOD,               /* otperiod */
+        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,          /* pc1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,          /* pc2 */
+        ARG_TOKEN_PEG_MAX_BAG,                   /* pegmaxbag */
+        ARG_TOKEN_P1_PEG_DISABLE_PAT,            /* pegnopat1 */
+        ARG_TOKEN_P2_PEG_DISABLE_PAT,            /* pegnopat2 */
+        ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES,    /* pceplies */
+        ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE, /* pcsecs */
+        ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME,   /* pcstatic */
+        ARG_TOKEN_PEG_NESTED,                    /* pegnested */
+        ARG_TOKEN_PEG_OUTCOMES,                  /* pegoutcomes */
+        ARG_TOKEN_PEG_OUT_LINES,                 /* pegoutlines */
+        ARG_TOKEN_PEG_OUT_WIDTH,                 /* pegoutwidth */
+        ARG_TOKEN_PEG_PESSIMISTIC,               /* pegpess */
+        ARG_TOKEN_PEG_STRIDE,                    /* pegstride */
+        ARG_TOKEN_PEG_TIME_LIMIT,                /* pegtlim */
+        ARG_TOKEN_PEG_TOP_K,                     /* pegtopk */
+        ARG_TOKEN_P1_SIM_PLIES,                  /* pl1 */
+        ARG_TOKEN_P2_SIM_PLIES,                  /* pl2 */
+        ARG_TOKEN_PLIES,                         /* plies */
+        ARG_TOKEN_PEG_NOPRUNE,                   /* pnoprune */
+        ARG_TOKEN_STOP_COND_PCT,                 /* scondition */
+        ARG_TOKEN_SIM_WITH_INFERENCE,            /* sinfer */
+        ARG_TOKEN_USE_SMALL_PLAYS,               /* sp */
+        ARG_TOKEN_SAMPLING_RULE,                 /* sr */
+        ARG_TOKEN_P1_STOP_COND_PCT,              /* sc1 */
+        ARG_TOKEN_P2_STOP_COND_PCT,              /* sc2 */
+        ARG_TOKEN_PAT_LABEL_PLIES,               /* patplies */
+        ARG_TOKEN_PAT_COMBINE_GAMMA,             /* patgamma */
+        ARG_TOKEN_P1_SIM_WITH_INFERENCE,         /* si1 */
+        ARG_TOKEN_P2_SIM_WITH_INFERENCE,         /* si2 */
+        ARG_TOKEN_P1_SAMPLING_RULE,              /* sa1 */
+        ARG_TOKEN_P2_SAMPLING_RULE,              /* sa2 */
+        ARG_TOKEN_P1_THRESHOLD,                  /* th1 */
+        ARG_TOKEN_P2_THRESHOLD,                  /* th2 */
+        ARG_TOKEN_THRESHOLD,                     /* threshold */
+        ARG_TOKEN_P1_TIME_LIMIT,                 /* tl1 */
+        ARG_TOKEN_P2_TIME_LIMIT,                 /* tl2 */
+        ARG_TOKEN_TIME_LIMIT,                    /* tlim */
+        ARG_TOKEN_TT_FRACTION_OF_MEM,            /* ttfraction */
+        ARG_TOKEN_USE_HEAT_MAP,                  /* useheatmap */
+        ARG_TOKEN_UTILITY_W_SPREAD,              /* uspread */
+        ARG_TOKEN_P1_UTILITY_W_SPREAD,           /* uspread1 */
+        ARG_TOKEN_P2_UTILITY_W_SPREAD,           /* uspread2 */
+        ARG_TOKEN_UTILITY_SPREAD_SCALE,          /* uspreadscale */
+        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE,       /* uspreadscale1 */
+        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,       /* uspreadscale2 */
+        ARG_TOKEN_UTILITY_W_WINPCT,              /* uwin */
+        ARG_TOKEN_P1_UTILITY_W_WINPCT,           /* uwin1 */
+        ARG_TOKEN_P2_UTILITY_W_WINPCT,           /* uwin2 */
+        ARG_TOKEN_WRITE_BUFFER_SIZE,             /* wb */
+        ARG_TOKEN_WIN_PCT,                       /* winpct */
+        ARG_TOKEN_P2_WIN_PCT,                    /* winpct2 */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -3920,8 +3963,8 @@ void config_fill_autoplay_args(const Config *config,
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
       /*known_opp_rack=*/NULL,
-      config->p2_win_pcts ? config->p2_win_pcts : config->win_pcts, /*inference_results=*/NULL,
-      config->thread_control,
+      config->p2_win_pcts ? config->p2_win_pcts : config->win_pcts,
+      /*inference_results=*/NULL, config->thread_control,
       /*game=*/NULL, config->p2_sim_with_inference, /*use_heat_map=*/false,
       /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
       config->p2_num_plays, config->shplies,
@@ -3946,12 +3989,20 @@ void config_fill_autoplay_args(const Config *config,
                                     config->p2_utility_w_spread};
   const double utility_spread_scale[2] = {config->p1_utility_spread_scale,
                                           config->p2_utility_spread_scale};
+  const bool peg_disable_pat[2] = {config->p1_peg_disable_pat,
+                                   config->p2_peg_disable_pat};
   for (int player_index = 0; player_index < 2; player_index++) {
     autoplay_args->play_chooser_strategies[player_index] =
         (PlayChooserStrategy){
             .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
             .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
-            .win_pcts = config->win_pcts,
+            .endgame_plies = config->play_chooser_endgame_plies,
+            .fixed_seconds_per_move = config->play_chooser_seconds_per_move,
+            // Without a win% table PlayChooser plays statically above the
+            // pre-endgame solver's bag range.
+            .win_pcts =
+                config->play_chooser_static_midgame ? NULL : config->win_pcts,
+            .peg_disable_pat = peg_disable_pat[player_index],
             .num_threads = num_worker_threads_per_sim,
             .peg_scenario_stride = config->peg_scenario_stride,
             .peg_max_bag = config->peg_max_bag,
@@ -7471,6 +7522,31 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config_load_bool(config, ARG_TOKEN_P1_PEG_DISABLE_PAT,
+                   &config->p1_peg_disable_pat, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_PEG_DISABLE_PAT,
+                   &config->p2_peg_disable_pat, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME,
+                   &config->play_chooser_static_midgame, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_double(config, ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE, 0, 1e9,
+                     &config->play_chooser_seconds_per_move, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES, 0, MAX_PLIES,
+                  &config->play_chooser_endgame_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   config_load_int(config, ARG_TOKEN_PEG_OUT_WIDTH, 0, INT_MAX,
                   &config->peg_out_width, error_stack);
@@ -9760,6 +9836,11 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
   arg(ARG_TOKEN_PEG_MAX_BAG, "pegmaxbag", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_DISABLE_PAT, "pegnopat1", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_DISABLE_PAT, "pegnopat2", 1, 1);
+  arg(ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME, "pcstatic", 1, 1);
+  arg(ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE, "pcsecs", 1, 1);
+  arg(ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES, "pceplies", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
   arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
@@ -9886,6 +9967,11 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_num_stages = 0;
   config->peg_scenario_stride = 0;
   config->peg_max_bag = 0;
+  config->p1_peg_disable_pat = false;
+  config->p2_peg_disable_pat = false;
+  config->play_chooser_static_midgame = false;
+  config->play_chooser_seconds_per_move = 0.0;
+  config->play_chooser_endgame_plies = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;
   config->peg_show_outcomes = true;
@@ -10348,6 +10434,26 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_STRIDE:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->peg_scenario_stride);
+      break;
+    case ARG_TOKEN_P1_PEG_DISABLE_PAT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_peg_disable_pat);
+      break;
+    case ARG_TOKEN_P2_PEG_DISABLE_PAT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_peg_disable_pat);
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_STATIC_MIDGAME:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token, config->play_chooser_static_midgame);
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_SECONDS_PER_MOVE:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->play_chooser_seconds_per_move);
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_ENDGAME_PLIES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->play_chooser_endgame_plies);
       break;
     case ARG_TOKEN_PEG_MAX_BAG:
       if (config->peg_max_bag > 0) {

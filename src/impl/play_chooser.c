@@ -715,10 +715,20 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
         &play_chooser_benchmark_stats.peg_calls, 1, memory_order_relaxed);
     benchmark_context.start_ns = ctimer_monotonic_ns();
   }
+  // PEG copies the game it is given for its workers, so a copy without PAT
+  // weights keeps PAT out of every movegen PEG runs.
+  Game *peg_game = NULL;
+  if (strategy->peg_disable_pat) {
+    peg_game = game_duplicate(game);
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      player_set_pat(game_get_player(peg_game, player_idx), NULL);
+    }
+  }
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   PegArgs peg_args = {0};
-  peg_args_fill(game, thread_control, /*num_threads=*/
+  peg_args_fill(peg_game != NULL ? peg_game : game,
+                thread_control, /*num_threads=*/
                 num_threads > 0 ? num_threads : 1,
                 /*time_budget_seconds=*/budget_seconds, /*max_stage=*/0,
                 greedy_only, /*stage_top_k=*/NULL, /*num_stages=*/0,
@@ -777,6 +787,7 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
     chose = true;
   }
   peg_result_destroy(&peg_result);
+  game_destroy(peg_game);
   return chose;
 }
 

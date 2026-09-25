@@ -84,6 +84,9 @@ typedef struct PlayChooserStrategy {
   // Largest bag size PEG handles; above it the pre-endgame falls back to
   // SIM or STATIC as for any bag above PEG_MAX_BAG. 0 = PEG_MAX_BAG.
   int peg_max_bag;
+  // Run PEG without PAT for either player: its candidate generation and
+  // playouts use plain static equity even when the players load PAT weights.
+  bool peg_disable_pat;
   // Score+win utility for valuing a branch, identical to the simmer's
   // sim_utility_blend (see sim_args.h): the branch value is
   //   (w_winpct * win% + w_spread * sigmoid(spread / spread_scale))

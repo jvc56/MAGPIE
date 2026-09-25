@@ -1055,9 +1055,8 @@ void pat_write(const PATWeights *pat, const char *data_paths,
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SHRINK_ROW_PREFIX,
                                       pat->fit_shrink ? 1 : 0);
   if (pat->fit_fixed_zero) {
-    string_builder_add_formatted_string(sb, "%s%s\n",
-                                        PAT_FIT_FIXED_ZERO_ROW_PREFIX,
-                                        pat->fit_fixed_zero);
+    string_builder_add_formatted_string(
+        sb, "%s%s\n", PAT_FIT_FIXED_ZERO_ROW_PREFIX, pat->fit_fixed_zero);
   }
   if (pat->utility_adjust > 0.0) {
     string_builder_add_formatted_string(
