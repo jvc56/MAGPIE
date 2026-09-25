@@ -105,17 +105,6 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               bool blank_uppercase, TuiRackSort rack_sort,
                               const char *lexicon, bool load_rit);
 
-// Render just the board cells (no row/col labels) at (top, left). Each
-// cell is 2 columns wide; the rendered region is BOARD_DIM rows tall and
-// BOARD_DIM*2 columns wide. When the host terminal supports pixel
-// graphics and `border_thickness` is positive, a grid overlay is drawn
-// on top using a private cached child plane.
-void tui_render_board_at(struct ncplane *plane, int top, int left,
-                         const Theme *theme, const struct Game *game,
-                         const struct LetterDistribution *ld,
-                         bool blank_uppercase, TuiPremiumLabels premium_labels,
-                         int border_thickness);
-
 // Destroy any cached pixel-grid child planes (board, rack, both pills,
 // preview). Call after the theme picker exits so the preview's grid
 // doesn't linger under the in-game UI, and on resize so a font-size
@@ -128,8 +117,6 @@ void tui_game_render_reset_grids(void);
 void tui_debug_record_frame_us(long frame_us);
 void tui_debug_record_sprixel_stats(uint64_t emits, uint64_t elides);
 void tui_debug_set_input_lag_us(long us);
-int tui_debug_last_tile_blits(void);
-unsigned long tui_debug_tile_invalidations(void);
 unsigned long tui_debug_rack_blits(void);
 
 #endif

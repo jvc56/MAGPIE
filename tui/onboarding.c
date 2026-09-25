@@ -3,6 +3,7 @@
 #include "config.h"
 #include "game_render.h"
 #include "preview_game.h"
+#include "render_board.h"
 #include "theme.h"
 #include "tui_resize.h"
 #include <notcurses/notcurses.h>

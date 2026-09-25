@@ -2,6 +2,8 @@
 #define TUI_RENDER_PLANES_H
 
 #include <notcurses/notcurses.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 // All grid planes live in one module-level registry so a single
 // invalidation call (on resize or after the onboarding picker closes)
@@ -25,6 +27,22 @@ typedef struct {
   // board and the menu visible at once.
   struct ncplane *modal;
 } TuiGridPlanes;
+
+// Cache for the 2x board pixel composite. ncblit_rgba is the FPS
+// bottleneck even when the buffer hasn't changed; tracking a signature
+// lets us skip the work and rely on notcurses keeping the plane's
+// previous pixel content.
+typedef struct {
+  uint64_t version;     // game_state.render_version at last blit
+  unsigned cdy, cdx;    // notcurses cell-pixel dims at last blit
+  int param_a, param_b; // scale, antialias
+  // History-cursor index at last blit. -1 = live board (the
+  // common case); 0..N-1 = previewing entry N's pre-move board.
+  // Changing this invalidates the cache so the historical board
+  // gets re-rasterized on the first frame after navigation.
+  int history_cursor;
+  bool valid;
+} BlitCache;
 
 // Accessor for the single plane registry.
 TuiGridPlanes *tui_grid_planes(void);
