@@ -312,15 +312,7 @@ bool tui_input_play_setup(TuiGameState *state, TuiUiState *ui,
                ui->watch_setup_lexicon);
       pthread_mutex_unlock(&state->mutex);
       // Stop any running bot before reconfiguring the game.
-      // The analysis-resume worker reads history entries and the
-      // endgame ctx — stop it before any reset / reconfigure.
-      tui_analysis_worker_stop_and_join(state);
-      if (state->bot_started) {
-        atomic_store(&state->bot_stop, true);
-        pthread_join(state->bot_thread, NULL);
-        state->bot_started = false;
-        atomic_store(&state->bot_stop, false);
-      }
+      tui_stop_workers(state);
       if (!session->args.no_config) {
         session->to_save.time_per_side_seconds = session->chosen_time;
         session->to_save.time_per_side_set = true;
@@ -589,15 +581,7 @@ bool tui_input_annotate_setup(TuiGameState *state, TuiUiState *ui,
       // empty-board reset, set player names, append one
       // pending entry for P1, drop into annotation mode (no
       // bot started).
-      // The analysis-resume worker reads history entries and the
-      // endgame ctx — stop it before any reset / reconfigure.
-      tui_analysis_worker_stop_and_join(state);
-      if (state->bot_started) {
-        atomic_store(&state->bot_stop, true);
-        pthread_join(state->bot_thread, NULL);
-        state->bot_started = false;
-        atomic_store(&state->bot_stop, false);
-      }
+      tui_stop_workers(state);
       snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon), "%s",
                ui->annotate_setup_lexicon);
       pthread_mutex_lock(&state->mutex);
@@ -836,15 +820,7 @@ bool tui_input_watch_setup(TuiGameState *state, TuiUiState *ui,
         // that's running, reset state (re-init if lexicon /
         // RIT changed), kick off a fresh bot run with the
         // chosen settings.
-        // The analysis-resume worker reads history entries and the
-        // endgame ctx — stop it before any reset / reconfigure.
-        tui_analysis_worker_stop_and_join(state);
-        if (state->bot_started) {
-          atomic_store(&state->bot_stop, true);
-          pthread_join(state->bot_thread, NULL);
-          state->bot_started = false;
-          atomic_store(&state->bot_stop, false);
-        }
+        tui_stop_workers(state);
         if (!session->args.no_config) {
           session->to_save.time_per_side_seconds = session->chosen_time;
           session->to_save.time_per_side_set = true;

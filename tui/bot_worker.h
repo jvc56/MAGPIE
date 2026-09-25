@@ -65,4 +65,11 @@ void tui_analysis_worker_stop_and_join(TuiGameState *state);
 // Caller must hold state->mutex.
 void tui_bot_worker_apply_time_penalties(TuiGameState *state);
 
+// Stop the analysis-resume worker and the bot thread (if running) before
+// the game is reset or reconfigured, and leave bot_stop cleared for the
+// next bot run. The analysis-resume worker reads history entries and the
+// endgame ctx, so it must be stopped first. Joins threads, so call it
+// without holding state->mutex.
+void tui_stop_workers(TuiGameState *state);
+
 #endif

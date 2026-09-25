@@ -133,15 +133,7 @@ bool tui_input_time_picker(TuiGameState *state, TuiUiState *ui,
         // launch the bot is idle (waiting on the startup menu), so
         // the pthread_join would block forever on a never-started
         // thread.
-        // The analysis-resume worker reads history entries and the
-        // endgame ctx — stop it before any reset / reconfigure.
-        tui_analysis_worker_stop_and_join(state);
-        if (state->bot_started) {
-          atomic_store(&state->bot_stop, true);
-          pthread_join(state->bot_thread, NULL);
-          state->bot_started = false;
-          atomic_store(&state->bot_stop, false);
-        }
+        tui_stop_workers(state);
         session->chosen_time = new_time;
         if (!session->args.no_config) {
           session->to_save.time_per_side_seconds = new_time;

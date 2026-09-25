@@ -508,15 +508,7 @@ void tui_load_game_live_parse(TuiGameState *state, TuiUiState *ui) {
       }
     }
     if (resolve_ok) {
-      // The analysis-resume worker reads history entries and the
-      // endgame ctx — stop it before any reset / reconfigure.
-      tui_analysis_worker_stop_and_join(state);
-      if (state->bot_started) {
-        atomic_store(&state->bot_stop, true);
-        pthread_join(state->bot_thread, NULL);
-        state->bot_started = false;
-        atomic_store(&state->bot_stop, false);
-      }
+      tui_stop_workers(state);
       ErrorStack *err = error_stack_create();
       GameHistory *history = game_history_create();
       GCGParser *parser =
@@ -701,15 +693,7 @@ void tui_load_position_live_parse(TuiGameState *state, TuiUiState *ui) {
     if (resolve_ok) {
       // Stop the bot if a previous load started one (currently
       // we never start the bot on load, but be safe).
-      // The analysis-resume worker reads history entries and the
-      // endgame ctx — stop it before any reset / reconfigure.
-      tui_analysis_worker_stop_and_join(state);
-      if (state->bot_started) {
-        atomic_store(&state->bot_stop, true);
-        pthread_join(state->bot_thread, NULL);
-        state->bot_started = false;
-        atomic_store(&state->bot_stop, false);
-      }
+      tui_stop_workers(state);
       ErrorStack *err = error_stack_create();
       pthread_mutex_lock(&state->mutex);
       game_load_cgp(state->game, cgp_payload, err);
