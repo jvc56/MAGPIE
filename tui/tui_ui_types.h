@@ -107,7 +107,7 @@ typedef enum {
 
 // Watch-game setup modal. Lets the user pick time control, lexicon,
 // and sim parameters before starting a bot-vs-bot game. Pre-focused
-// on the "Start game" row so Enter immediately starts with the
+// on the "Start" row so Enter immediately starts with the
 // currently-displayed values.
 typedef enum {
   TUI_WATCH_SETUP_TIME = 0,

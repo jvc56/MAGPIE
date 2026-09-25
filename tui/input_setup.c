@@ -704,7 +704,7 @@ bool tui_input_watch_setup(TuiGameState *state, TuiUiState *ui,
         // that group's first lexicon so the Lexicon row below
         // always shows a valid entry for the new language.
         // Mutates only the modal-local lexicon copy — committed
-        // to the session on "Start game".
+        // to the session on "Start".
         if (ui->lexicon_list == NULL) {
           ui->lexicon_list = tui_lexicon_list_load();
         }
