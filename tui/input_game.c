@@ -57,7 +57,9 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
     return true;
   }
 
-  if (key == NCKEY_ESC) {
+  if (key == NCKEY_ESC && !state->slash_active) {
+    // Esc while typing a slash command cancels the command instead
+    // (handled with the rest of the slash input below).
     ui->modal = TUI_MODAL_MAIN_MENU;
     ui->main_menu_focus = 0;
   } else if (key >= '0' && key <= '5') {

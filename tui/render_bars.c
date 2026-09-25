@@ -591,7 +591,8 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   // Right side: dynamic shortcut hint depending on what modal is open.
   // Key names use leading caps for consistency with the rest of the
   // chrome (e.g. status bar's "Esc menu", command bar's "Q quit").
-  const char *hint = " Esc menu ";
+  // Esc cancels a half-typed slash command before it opens the menu.
+  const char *hint = state->slash_active ? " Esc cancel " : " Esc menu ";
   switch (modal) {
   case TUI_MODAL_MAIN_MENU:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
