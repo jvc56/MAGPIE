@@ -1,5 +1,6 @@
 #include "gcg_import.h"
 
+#include "../src/def/game_history_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
@@ -84,6 +85,50 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
        evi++) {
     GameEvent *event = game_history_get_event(history, evi);
     const game_event_t etype = game_event_get_type(event);
+    if (etype == GAME_EVENT_PHONY_TILES_RETURNED && state->history_count > 0) {
+      // A withdrawn phony ("--" in GCG) folds into the play's own entry,
+      // the way play-vs-computer records an auto-challenge, so the
+      // history shows it challenged off and a replay treats the turn
+      // as lost rather than leaving the play on the board.
+      TuiHistoryEntry *withdrawn = &state->history[state->history_count - 1];
+      if (withdrawn->player_idx == game_event_get_player_index(event)) {
+        withdrawn->challenged_off = true;
+      }
+      continue;
+    }
+    if (etype == GAME_EVENT_CHALLENGE_BONUS && state->history_count > 0) {
+      // A valid play that was challenged earns its player a bonus; keep
+      // it on that play's entry so a replay's totals match the record.
+      TuiHistoryEntry *challenged = &state->history[state->history_count - 1];
+      const Equity bonus_eq = game_event_get_score_adjustment(event);
+      if (challenged->player_idx == game_event_get_player_index(event) &&
+          bonus_eq != EQUITY_UNDEFINED_VALUE) {
+        challenged->challenge_bonus += equity_to_int(bonus_eq);
+        const Equity cume_eq = game_event_get_cumulative_score(event);
+        if (cume_eq != EQUITY_UNDEFINED_VALUE) {
+          challenged->total_after = equity_to_int(cume_eq);
+        }
+      }
+      continue;
+    }
+    if (etype == GAME_EVENT_END_RACK_POINTS && state->history_count > 0) {
+      // Going out earns the opponent's leftover rack; show it on the
+      // play that went out, as a live game's history does.
+      TuiHistoryEntry *went_out = &state->history[state->history_count - 1];
+      const Equity bonus_eq = game_event_get_score_adjustment(event);
+      const Rack *end_rack = game_event_get_const_rack(event);
+      if (went_out->player_idx == game_event_get_player_index(event) &&
+          bonus_eq != EQUITY_UNDEFINED_VALUE && end_rack != NULL) {
+        went_out->end_bonus = equity_to_int(bonus_eq);
+        StringBuilder *rack_sb = string_builder_create();
+        string_builder_add_rack(rack_sb, end_rack, game_get_ld(state->game),
+                                false);
+        snprintf(went_out->end_rack_str, sizeof(went_out->end_rack_str), "%s",
+                 string_builder_peek(rack_sb));
+        string_builder_destroy(rack_sb);
+      }
+      continue;
+    }
     if (etype != GAME_EVENT_TILE_PLACEMENT_MOVE && etype != GAME_EVENT_PASS &&
         etype != GAME_EVENT_EXCHANGE) {
       continue;

@@ -1358,9 +1358,15 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
       }
       break;
     }
-    // Normalize display notation → engine canonical, validate.
+    // Normalize display notation → engine canonical, validate. A play
+    // that was challenged off cost its player the turn and left the
+    // board and rack as they were, which is a pass.
     char canonical[64];
-    canonicalize_history_move(e->move_str, canonical, sizeof(canonical));
+    if (e->challenged_off) {
+      snprintf(canonical, sizeof(canonical), "pass");
+    } else {
+      canonicalize_history_move(e->move_str, canonical, sizeof(canonical));
+    }
     if (canonical[0] == '\0') {
       if (record_errors) {
         snprintf(e->error_str, sizeof(e->error_str), "no move specified");
@@ -1429,9 +1435,19 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
         }
       }
     }
-    // Refresh total_after with the engine's running score.
+    if (e->challenge_bonus != 0) {
+      player_add_to_score(game_get_player(state->game, e->player_idx),
+                          int_to_equity(e->challenge_bonus));
+    }
+    // Refresh total_after with the engine's running score. A
+    // challenged-off entry records the total as if the play had stood
+    // (score included); its history rows show that and then the
+    // corrected total, total_after - score.
     e->total_after = equity_to_int(
         player_get_score(game_get_player(state->game, e->player_idx)));
+    if (e->challenged_off) {
+      e->total_after += e->score;
+    }
     if (vms != NULL) {
       validated_moves_destroy(vms);
     }

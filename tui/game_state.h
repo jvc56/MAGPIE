@@ -184,6 +184,10 @@ typedef struct {
   // GAME_EVENT_PHONY_TILES_RETURNED adjustment), and running-total
   // aggregation treats the entry as zero points.
   bool challenged_off;
+  // Points awarded to this play's player when an opponent challenged
+  // it and it stood (GCG "(challenge) +N"). Included in total_after;
+  // history replay adds it after applying the play.
+  int challenge_bonus;
   // True while the bot is still computing this turn's move. The
   // renderer shows a braille spinner in place of move_str / +score
   // and the bot worker flips it back to false once the move is
