@@ -33,6 +33,15 @@
 // AnalysisRow / AnalysisTint / row + ply caps now live in
 // game_state.h so per-turn snapshots stored on TuiHistoryEntry
 // can share the same shape with no conversion.
+
+enum {
+  // Width of one per-ply average column, and the gap before it.
+  AVG_COL_W = 4,
+  AVG_GAP_W = 1,
+  // Gap between the move text and the leave column.
+  LEAVE_GAP_L = 2,
+};
+
 // Rendered width of a move: the panel draws moves with hide_parens, so
 // parentheses take no cells.
 static int analysis_move_width(const char *move) {
@@ -156,6 +165,187 @@ static void render_analysis_header_fade(struct ncplane *plane,
   }
 }
 
+// Compact layout for a panel too narrow for the standard columns: the
+// spread column is dropped, and rank, the space after it, and the leave
+// column are added back in priority order as they fit, beside an integer
+// win% (or W/T/L) under a "win%" header.
+static void render_analysis_rows_compact(struct ncplane *plane,
+                                         const Theme *theme, const Layout *L,
+                                         AnalysisRow *rows, int visible,
+                                         bool primary_bold, int title_end_col,
+                                         int interior_right, int max_move_w,
+                                         int max_leave_w, int rank_digits) {
+  const int interior_left = L->analysis_left + 1;
+  const int interior_top = L->analysis_top + 1;
+  const int interior_bottom = L->analysis_bottom - 1;
+  const int interior_width = interior_right - interior_left + 1;
+  int list_top =
+      interior_top <= interior_bottom ? interior_top + 1 : interior_top;
+  // Width of the widest integer-percent we'll actually render. "100%"
+  // is 4 cols but only matters when a row actually hits it; with
+  // every visible row below 100% we size the slot at 3 ("XX%") and
+  // get a free column for rank, space, or leave. W/T/L primaries
+  // stay 1 col.
+  int compact_primary_w = 0;
+  for (int i = 0; i < visible; i++) {
+    if (!rows[i].valid) {
+      continue;
+    }
+    char compact_primary[8];
+    analysis_compact_primary(rows[i].primary, compact_primary,
+                             sizeof(compact_primary));
+    const int len_here = (int)strlen(compact_primary);
+    if (len_here > compact_primary_w) {
+      compact_primary_w = len_here;
+    }
+  }
+  if (compact_primary_w == 0) {
+    compact_primary_w = 1;
+  }
+  const int rank_short = rank_digits + 1; // "N."
+  const int rank_full = rank_short + 1;   // "N. "
+  const int base_need = max_move_w + 1 + compact_primary_w;
+  const int level1_need = rank_short + base_need;
+  const int level2_need = rank_full + base_need;
+  const int level3_need = rank_full + max_move_w + LEAVE_GAP_L + max_leave_w +
+                          1 + compact_primary_w;
+
+  int level = 0;
+  if (level1_need <= interior_width) {
+    level = 1;
+  }
+  if (level2_need <= interior_width) {
+    level = 2;
+  }
+  if (level3_need <= interior_width && max_leave_w > 0) {
+    level = 3;
+  }
+
+  const int compact_rank_w = (level == 0)   ? 0
+                             : (level == 1) ? rank_short
+                                            : rank_full;
+  const int compact_move_col = interior_left + compact_rank_w;
+  const bool compact_show_leave = (level >= 3);
+  char rfmt[8];
+  if (level >= 1) {
+    snprintf(rfmt, sizeof(rfmt), level == 1 ? "%%%dd." : "%%%dd. ",
+             rank_digits);
+  }
+
+  // Compact mode also gets a "win%" header. Try the panel's top
+  // border row first (sharing with the title) — if the title is
+  // too long for that, fall back to the first interior row and
+  // shift the data rows down by one.
+  int compact_header_row = -1;
+  {
+    const char *win_label = "win%";
+    const int win_label_len = (int)strlen(win_label);
+    const int win_label_col = interior_right - win_label_len + 1;
+    const bool win_fits_on_border =
+        title_end_col >= 0 && win_label_col > title_end_col + 1;
+    if (win_fits_on_border) {
+      compact_header_row = L->analysis_top;
+      // list_top was initialised to interior_top+1 expecting an
+      // interior header row — reclaim that first interior row
+      // for data since the header is up on the title bar.
+      list_top = interior_top;
+    } else if (interior_top <= interior_bottom) {
+      compact_header_row = interior_top;
+      list_top = interior_top + 1;
+    }
+    if (compact_header_row >= 0) {
+      // Fade-in to the inverted band: each cell to the left of the
+      // label is a left-half-block ▌ (U+258C) whose fg/bg ramp from
+      // theme->bg to theme->dim_fg. Same trick the standard-mode
+      // header uses, giving 2x gradient resolution per cell.
+      const int fade_right = win_label_col - 1;
+      // On the title-border row, the title text occupies cells up
+      // through title_end_col — start the fade just past it so we
+      // don't overwrite "Sim (...)". On an interior fallback row
+      // the entire interior is ours to fade across.
+      const int fade_left = compact_header_row == L->analysis_top
+                                ? title_end_col + 1
+                                : interior_left;
+      if (fade_left <= fade_right) {
+        render_analysis_header_fade(plane, theme, compact_header_row, fade_left,
+                                    fade_right);
+      }
+      // The "win%" label itself sits on the inverted band.
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, theme->dim_fg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, compact_header_row, win_label_col, win_label);
+      ncplane_set_styles(plane, 0);
+    }
+  }
+
+  theme_apply_bg(plane, theme->bg);
+  int row = list_top;
+  for (int i = 0; i < visible && row <= interior_bottom; i++) {
+    if (!rows[i].valid) {
+      row++;
+      continue;
+    }
+    char pbuf[8];
+    analysis_compact_primary(rows[i].primary, pbuf, sizeof(pbuf));
+    const int plen = (int)strlen(pbuf);
+    const int pcol = interior_right - plen + 1;
+
+    if (level >= 1) {
+      char rstr[8];
+      snprintf(rstr, sizeof(rstr), rfmt, i + 1);
+      theme_apply_fg(plane, theme->dim_fg);
+      ncplane_putstr_yx(plane, row, interior_left, rstr);
+    }
+
+    // Optional leave column, right-anchored just before the int%.
+    const int leave_len = (int)strlen(rows[i].leave);
+    int leave_text_col = 0;
+    bool this_row_show_leave = false;
+    int move_budget;
+    if (compact_show_leave && leave_len > 0) {
+      leave_text_col = pcol - 1 - leave_len;
+      const int with_leave_budget =
+          leave_text_col - LEAVE_GAP_L - compact_move_col;
+      // Count this row's rendered move width.
+      const int row_rendered = analysis_move_width(rows[i].move);
+      if (with_leave_budget > 0 && row_rendered <= with_leave_budget) {
+        this_row_show_leave = true;
+        move_budget = with_leave_budget;
+      } else {
+        move_budget = pcol - compact_move_col - 1;
+      }
+    } else {
+      move_budget = pcol - compact_move_col - 1;
+    }
+
+    char *move_text = rows[i].move;
+    analysis_fit_move(move_text, move_budget);
+    if (move_budget > 0 && move_text[0] != '\0') {
+      theme_apply_fg(plane, theme->fg);
+      render_move_styled(plane, row, compact_move_col, move_text,
+                         /*hide_parens=*/true,
+                         /*hide_playthrough_parens=*/false);
+    }
+
+    if (this_row_show_leave) {
+      theme_apply_fg(plane, theme->dim_fg);
+      ncplane_putstr_yx(plane, row, leave_text_col, rows[i].leave);
+    }
+
+    theme_apply_fg(plane, theme->fg);
+    if (primary_bold) {
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+    }
+    ncplane_putstr_yx(plane, row, pcol, pbuf);
+    if (primary_bold) {
+      ncplane_set_styles(plane, 0);
+    }
+
+    row++;
+  }
+}
+
 // Render the ranked candidates given a pre-populated row array.
 // Handles the leave column auto-sizing, exchange compaction, and
 // right-anchored primary/secondary columns. primary_bold gates whether
@@ -198,11 +388,6 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   int header_row = interior_top;
   int list_top = show_headers ? interior_top + 1 : interior_top;
 
-  // Forward declaration only — final values are set further down
-  // after rank_w / max_move_w / score_w are known. Initialized to
-  // safe defaults so any accidental early read doesn't crash.
-  enum { AVG_COL_W = 4, AVG_GAP_W = 1 };
-
   // Size the rank column to the digit count of the largest visible
   // rank, so a 9-row list shows "9. " (no pad) and only a 10+ list
   // pays for the leading space. Generalizes to 100+ if ever needed.
@@ -219,7 +404,6 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int rank_w = rank_digits + 2; // digits + ". "
   const int move_col = interior_left + rank_w;
 
-  const int leave_gap_l = 2;
   // No explicit gap between the leave column and the primary column —
   // the win% format ("%5.1f%%") leaves an implicit leading space
   // unless the value hits exactly 100.0%, which gives a clean 1-col
@@ -282,169 +466,9 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int standard_need =
       rank_w + max_move_w + 1 + primary_w + primary_secondary_gap + secondary_w;
   if (standard_need > interior_width) {
-    // Width of the widest integer-percent we'll actually render. "100%"
-    // is 4 cols but only matters when a row actually hits it; with
-    // every visible row below 100% we size the slot at 3 ("XX%") and
-    // get a free column for rank, space, or leave. W/T/L primaries
-    // stay 1 col.
-    int compact_primary_w = 0;
-    for (int i = 0; i < visible; i++) {
-      if (!rows[i].valid) {
-        continue;
-      }
-      char compact_primary[8];
-      analysis_compact_primary(rows[i].primary, compact_primary,
-                               sizeof(compact_primary));
-      const int len_here = (int)strlen(compact_primary);
-      if (len_here > compact_primary_w) {
-        compact_primary_w = len_here;
-      }
-    }
-    if (compact_primary_w == 0) {
-      compact_primary_w = 1;
-    }
-    const int rank_short = rank_digits + 1; // "N."
-    const int rank_full = rank_short + 1;   // "N. "
-    const int base_need = max_move_w + 1 + compact_primary_w;
-    const int level1_need = rank_short + base_need;
-    const int level2_need = rank_full + base_need;
-    const int level3_need = rank_full + max_move_w + leave_gap_l + max_leave_w +
-                            1 + compact_primary_w;
-
-    int level = 0;
-    if (level1_need <= interior_width) {
-      level = 1;
-    }
-    if (level2_need <= interior_width) {
-      level = 2;
-    }
-    if (level3_need <= interior_width && max_leave_w > 0) {
-      level = 3;
-    }
-
-    const int compact_rank_w = (level == 0)   ? 0
-                               : (level == 1) ? rank_short
-                                              : rank_full;
-    const int compact_move_col = interior_left + compact_rank_w;
-    const bool compact_show_leave = (level >= 3);
-    char rfmt[8];
-    if (level >= 1) {
-      snprintf(rfmt, sizeof(rfmt), level == 1 ? "%%%dd." : "%%%dd. ",
-               rank_digits);
-    }
-
-    // Compact mode also gets a "win%" header. Try the panel's top
-    // border row first (sharing with the title) — if the title is
-    // too long for that, fall back to the first interior row and
-    // shift the data rows down by one.
-    int compact_header_row = -1;
-    {
-      const char *win_label = "win%";
-      const int win_label_len = (int)strlen(win_label);
-      const int win_label_col = interior_right - win_label_len + 1;
-      const bool win_fits_on_border =
-          title_end_col >= 0 && win_label_col > title_end_col + 1;
-      if (win_fits_on_border) {
-        compact_header_row = L->analysis_top;
-        // list_top was initialised to interior_top+1 expecting an
-        // interior header row — reclaim that first interior row
-        // for data since the header is up on the title bar.
-        list_top = interior_top;
-      } else if (interior_top <= interior_bottom) {
-        compact_header_row = interior_top;
-        list_top = interior_top + 1;
-      }
-      if (compact_header_row >= 0) {
-        // Fade-in to the inverted band: each cell to the left of the
-        // label is a left-half-block ▌ (U+258C) whose fg/bg ramp from
-        // theme->bg to theme->dim_fg. Same trick the standard-mode
-        // header uses, giving 2x gradient resolution per cell.
-        const int fade_right = win_label_col - 1;
-        // On the title-border row, the title text occupies cells up
-        // through title_end_col — start the fade just past it so we
-        // don't overwrite "Sim (...)". On an interior fallback row
-        // the entire interior is ours to fade across.
-        const int fade_left = compact_header_row == L->analysis_top
-                                  ? title_end_col + 1
-                                  : interior_left;
-        if (fade_left <= fade_right) {
-          render_analysis_header_fade(plane, theme, compact_header_row,
-                                      fade_left, fade_right);
-        }
-        // The "win%" label itself sits on the inverted band.
-        theme_apply_fg(plane, theme->bg);
-        theme_apply_bg(plane, theme->dim_fg);
-        ncplane_set_styles(plane, NCSTYLE_BOLD);
-        ncplane_putstr_yx(plane, compact_header_row, win_label_col, win_label);
-        ncplane_set_styles(plane, 0);
-      }
-    }
-
-    theme_apply_bg(plane, theme->bg);
-    int row = list_top;
-    for (int i = 0; i < visible && row <= interior_bottom; i++) {
-      if (!rows[i].valid) {
-        row++;
-        continue;
-      }
-      char pbuf[8];
-      analysis_compact_primary(rows[i].primary, pbuf, sizeof(pbuf));
-      const int plen = (int)strlen(pbuf);
-      const int pcol = interior_right - plen + 1;
-
-      if (level >= 1) {
-        char rstr[8];
-        snprintf(rstr, sizeof(rstr), rfmt, i + 1);
-        theme_apply_fg(plane, theme->dim_fg);
-        ncplane_putstr_yx(plane, row, interior_left, rstr);
-      }
-
-      // Optional leave column, right-anchored just before the int%.
-      const int leave_len = (int)strlen(rows[i].leave);
-      int leave_text_col = 0;
-      bool this_row_show_leave = false;
-      int move_budget;
-      if (compact_show_leave && leave_len > 0) {
-        leave_text_col = pcol - 1 - leave_len;
-        const int with_leave_budget =
-            leave_text_col - leave_gap_l - compact_move_col;
-        // Count this row's rendered move width.
-        const int row_rendered = analysis_move_width(rows[i].move);
-        if (with_leave_budget > 0 && row_rendered <= with_leave_budget) {
-          this_row_show_leave = true;
-          move_budget = with_leave_budget;
-        } else {
-          move_budget = pcol - compact_move_col - 1;
-        }
-      } else {
-        move_budget = pcol - compact_move_col - 1;
-      }
-
-      char *move_text = rows[i].move;
-      analysis_fit_move(move_text, move_budget);
-      if (move_budget > 0 && move_text[0] != '\0') {
-        theme_apply_fg(plane, theme->fg);
-        render_move_styled(plane, row, compact_move_col, move_text,
-                           /*hide_parens=*/true,
-                           /*hide_playthrough_parens=*/false);
-      }
-
-      if (this_row_show_leave) {
-        theme_apply_fg(plane, theme->dim_fg);
-        ncplane_putstr_yx(plane, row, leave_text_col, rows[i].leave);
-      }
-
-      theme_apply_fg(plane, theme->fg);
-      if (primary_bold) {
-        ncplane_set_styles(plane, NCSTYLE_BOLD);
-      }
-      ncplane_putstr_yx(plane, row, pcol, pbuf);
-      if (primary_bold) {
-        ncplane_set_styles(plane, 0);
-      }
-
-      row++;
-    }
+    render_analysis_rows_compact(plane, theme, L, rows, visible, primary_bold,
+                                 title_end_col, interior_right, max_move_w,
+                                 max_leave_w, rank_digits);
     return;
   }
 
@@ -543,7 +567,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   // (Bingos legitimately have empty leave strings — those still
   // render as a blank slot under the column.)
   const int move_budget_with_leaves =
-      leave_right_edge - max_leave_w - leave_gap_l - move_col + 1;
+      leave_right_edge - max_leave_w - LEAVE_GAP_L - move_col + 1;
   const bool show_leaves =
       max_leave_w > 0 && move_budget_with_leaves >= max_move_w;
   const int full_move_max =
@@ -791,7 +815,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
                           (rows[data_i].leave[0] != '\0' ? leave_len : 1) + 1
                     : 0;
     const bool show_this_leave = show_leaves;
-    const int this_move_max = show_leaves ? leave_right_edge - leave_gap_l -
+    const int this_move_max = show_leaves ? leave_right_edge - LEAVE_GAP_L -
                                                 move_col + 1 - max_leave_w
                                           : full_move_max;
 
