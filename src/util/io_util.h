@@ -267,6 +267,9 @@ typedef enum {
   ERROR_STATUS_CMD_API_UNINITIALIZED,
   // Appended rather than grouped so that no existing code changes value.
   ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL,
+  ERROR_STATUS_WIN_PCT_INVALID_HEADER,
+  ERROR_STATUS_WIN_PCT_INVALID_ROW,
+  ERROR_STATUS_CONFIG_WIN_PCT_NO_MARGIN,
 } error_code_t;
 
 typedef enum {

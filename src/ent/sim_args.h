@@ -11,6 +11,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct SimArgs {
@@ -37,6 +38,10 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // Whether a nonterminal sim horizon's spread is projected to the end of the
+  // game with the win percentage table's expected swing for that state (see
+  // rv_sim_sample). Requires a table keyed by game state.
+  bool use_margin_forecast;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -57,7 +62,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
               const bai_threshold_t threshold, const double time_limit_seconds,
               const bai_sampling_rule_t sampling_rule, const double cutoff,
               const double utility_w_winpct, const double utility_w_spread,
-              const double utility_spread_scale,
+              const double utility_spread_scale, const bool use_margin_forecast,
               const InferenceArgs *inference_args, SimArgs *sim_args) {
   sim_args->num_plies = num_plies;
   sim_args->move_list = move_list;
@@ -100,6 +105,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = utility_w_winpct;
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
+  sim_args->use_margin_forecast = use_margin_forecast;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

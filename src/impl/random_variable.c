@@ -403,6 +403,7 @@ typedef struct Simmer {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  bool use_margin_forecast;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -533,16 +534,33 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   const Equity spread =
       player_get_score(game_get_player(game, simmer->initial_player)) -
       player_get_score(game_get_player(game, 1 - simmer->initial_player));
+  const int horizon_on_turn_index = game_get_player_on_turn_index(game);
+  const int bag_tiles = bag_get_letters(game_get_bag(game));
+  const int on_turn_rack_tiles = rack_get_total_letters(
+      player_get_rack(game_get_player(game, horizon_on_turn_index)));
+  const int off_turn_rack_tiles = rack_get_total_letters(
+      player_get_rack(game_get_player(game, 1 - horizon_on_turn_index)));
+  const game_end_reason_t game_end_reason = game_get_game_end_reason(game);
+  // With the margin forecast, the equity and the utility's spread term use
+  // the projected final margin: the horizon spread and leave values plus the
+  // expected swing from the horizon's bag and rack sizes, which carries who is
+  // likely to get the last turns. The win% lookup already accounts for the
+  // state and still uses the horizon spread.
+  Equity projected_leftover = leftover;
+  if (simmer->use_margin_forecast && game_end_reason == GAME_END_REASON_NONE) {
+    Equity expected_swing = win_pct_get_expected_swing(
+        simmer->win_pcts, (unsigned int)bag_tiles,
+        (unsigned int)on_turn_rack_tiles, (unsigned int)off_turn_rack_tiles);
+    if (horizon_on_turn_index != simmer->initial_player) {
+      expected_swing = -expected_swing;
+    }
+    projected_leftover = leftover + expected_swing;
+  }
   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
-                              leftover);
+                              projected_leftover);
   const double wpct = simmed_play_add_win_pct_stat(
-      simmer->win_pcts, simmed_play, spread, leftover,
-      game_get_game_end_reason(game),
-      // number of tiles unseen to us: bag tiles + tiles on opp rack.
-      bag_get_letters(game_get_bag(game)) +
-          rack_get_total_letters(player_get_rack(
-              game_get_player(game, 1 - simmer->initial_player))),
-      plies % 2);
+      simmer->win_pcts, simmed_play, spread, leftover, game_end_reason,
+      bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, plies % 2);
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
@@ -555,8 +573,10 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
+  const Equity utility_spread =
+      simmer->use_margin_forecast ? spread + projected_leftover : spread;
   const double utility =
-      sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+      sim_utility_blend(wpct, utility_spread, simmer->utility_w_winpct,
                         simmer->utility_w_spread, simmer->utility_spread_scale);
   // With a zero spread weight, utility_stat is never read: BU is hidden from
   // display (see show_bu in sim_string.c) and both the best-move choice and
@@ -644,6 +664,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->use_margin_forecast = sim_args->use_margin_forecast;
 
   simmer->thread_control = thread_control;
 
@@ -688,6 +709,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
     simmer_reset_worker(simmer->workers[thread_index], sim_args->game);
   }
 
+  simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
   simmer->use_alias_method =
       simmer->use_inference &&
@@ -696,6 +718,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->use_margin_forecast = sim_args->use_margin_forecast;
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,

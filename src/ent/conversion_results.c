@@ -1,11 +1,13 @@
 #include "conversion_results.h"
 
 #include "../util/io_util.h"
+#include <stddef.h>
 #include <stdlib.h>
 
 struct ConversionResults {
   int number_of_strings;
   int number_of_nodes;
+  char *report;
 };
 
 ConversionResults *conversion_results_create(void) {
@@ -13,6 +15,7 @@ ConversionResults *conversion_results_create(void) {
       malloc_or_die(sizeof(ConversionResults));
   conversion_results->number_of_strings = 0;
   conversion_results->number_of_nodes = 0;
+  conversion_results->report = NULL;
   return conversion_results;
 }
 
@@ -20,6 +23,7 @@ void conversion_results_destroy(ConversionResults *conversion_results) {
   if (!conversion_results) {
     return;
   }
+  free(conversion_results->report);
   free(conversion_results);
 }
 
@@ -41,4 +45,14 @@ void conversion_results_set_number_of_strings(
 void conversion_results_set_number_of_nodes(
     ConversionResults *conversion_results, int number_of_nodes) {
   conversion_results->number_of_nodes = number_of_nodes;
+}
+const char *
+conversion_results_get_report(const ConversionResults *conversion_results) {
+  return conversion_results->report;
+}
+
+void conversion_results_set_report(ConversionResults *conversion_results,
+                                   char *report) {
+  free(conversion_results->report);
+  conversion_results->report = report;
 }

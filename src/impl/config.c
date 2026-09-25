@@ -163,6 +163,7 @@ typedef enum {
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
+  ARG_TOKEN_SIM_MARGIN_FORECAST,
   ARG_TOKEN_USE_HEAT_MAP,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
@@ -226,6 +227,8 @@ typedef enum {
   ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
+  ARG_TOKEN_P1_SIM_MARGIN_FORECAST,
+  ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
   ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
@@ -395,6 +398,7 @@ struct Config {
   bool show_mistakes;
   bool use_small_plays;
   bool sim_with_inference;
+  bool sim_margin_forecast;
   bool use_heat_map;
   bool print_boards;
   bool print_on_finish;
@@ -412,6 +416,8 @@ struct Config {
   bool write_rack_equity_csv;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
+  bool p1_sim_margin_forecast;
+  bool p2_sim_margin_forecast;
   // Set when the most recent sim ran inference internally and it completed
   // (not interrupted). Separate from inference_results's own valid flag,
   // which a sim-driven inference deliberately does not set so that an
@@ -1225,13 +1231,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "kwg2wit CSW24";
       examples[2] = "text2wordmap NWL20";
       examples[3] = "kwg2witifneeded CSW24";
+      examples[4] = "winpct CSW24_winpct_record CSW24_winpct";
       text =
           "Runs the convert command for the specified type with the given "
           "input and output name, using different file extensions. The letter "
           "distribution defaults to the lexicon's distribution. kwg2wit reads "
           "the KWG and creates ordinary and positional word-info tables. "
           "kwg2witifneeded preserves a current matching table and otherwise "
-          "rebuilds it before use.";
+          "rebuilds it before use. winpct takes a recorded win percentage "
+          "table (autoplay winpct) and an output table name in place of the "
+          "letter distribution, chooses smoothing by cross-validating the "
+          "record's two independent samples, and writes the smoothed table.";
       break;
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
@@ -1873,6 +1883,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to run and use the inference result "
              "when simulating.";
       break;
+    case ARG_TOKEN_SIM_MARGIN_FORECAST:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether simulations project each nonterminal "
+             "horizon's spread to the end of the game with the win "
+             "percentage table's expected swing for that bag and rack "
+             "state. The projection feeds the equity and the spread term "
+             "of the utility blend. Requires a win percentage table keyed "
+             "by game state.";
+      break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2169,6 +2190,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether to use inference during simulation for player "
              "1 or 2 during autoplay.";
       break;
+    case ARG_TOKEN_P1_SIM_MARGIN_FORECAST:
+    case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
+      usages[0] = "<true_or_false>";
+      text = "Specifies whether simulation projects the final margin (see "
+             "smargin) for player 1 or 2 during autoplay.";
+      break;
     case ARG_TOKEN_P1_TIME_LIMIT:
     case ARG_TOKEN_P2_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
@@ -2428,12 +2455,15 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
         ARG_TOKEN_STOP_COND_PCT,           /* scondition */
         ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
+        ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
         ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
         ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
         ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
+        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
+        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
         ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
         ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
         ARG_TOKEN_P1_THRESHOLD,            /* th1 */
@@ -2969,8 +2999,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, config->time_limit_seconds,
       config->sampling_rule, config->cutoff, config->utility_w_winpct,
-      config->utility_w_spread, config->utility_spread_scale, &inference_args,
-      sim_args);
+      config->utility_w_spread, config->utility_spread_scale,
+      config->sim_margin_forecast, &inference_args, sim_args);
 }
 
 // The win percentage table the config should use: the one named by
@@ -3046,6 +3076,21 @@ static void config_ensure_win_pcts(Config *config, ErrorStack *error_stack) {
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
   config_ensure_win_pcts(config, error_stack);
+  if (!error_stack_is_empty(error_stack) || config->win_pcts == NULL) {
+    return;
+  }
+  const bool margin_forecast_requested = config->sim_margin_forecast ||
+                                         config->p1_sim_margin_forecast ||
+                                         config->p2_sim_margin_forecast;
+  if (margin_forecast_requested &&
+      !win_pct_has_expected_swing(config->win_pcts)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_WIN_PCT_NO_MARGIN,
+        get_formatted_string(
+            "the simulation margin forecast needs a win percentage table "
+            "keyed by game state, but '%s' is keyed by unseen tiles",
+            win_pct_get_name(config->win_pcts)));
+  }
 }
 
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
@@ -3848,8 +3893,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
       config->p1_utility_w_winpct, config->p1_utility_w_spread,
-      config->p1_utility_spread_scale, &p1_inference_args,
-      &autoplay_args->p1_sim_args);
+      config->p1_utility_spread_scale, config->p1_sim_margin_forecast,
+      &p1_inference_args, &autoplay_args->p1_sim_args);
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -3862,8 +3907,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
-      config->p2_utility_spread_scale, &p2_inference_args,
-      &autoplay_args->p2_sim_args);
+      config->p2_utility_spread_scale, config->p2_sim_margin_forecast,
+      &p2_inference_args, &autoplay_args->p2_sim_args);
 
   const double utility_win_pct[2] = {config->p1_utility_w_winpct,
                                      config->p2_utility_w_winpct};
@@ -3960,7 +4005,13 @@ void config_convert(const Config *config, ConversionResults *results,
 }
 
 void impl_convert(Config *config, ErrorStack *error_stack) {
+  conversion_results_set_report(config->conversion_results, NULL);
   config_convert(config, config->conversion_results, error_stack);
+  const char *report =
+      conversion_results_get_report(config->conversion_results);
+  if (report != NULL) {
+    thread_control_print(config->thread_control, report);
+  }
 }
 
 // Leave Gen
@@ -7490,6 +7541,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_SIM_MARGIN_FORECAST,
+                   &config->sim_margin_forecast, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Use heatmaps
 
   config_load_bool(config, ARG_TOKEN_USE_HEAT_MAP, &config->use_heat_map,
@@ -8002,6 +8059,21 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
   config_load_bool(config, ARG_TOKEN_P2_SIM_WITH_INFERENCE,
                    &config->p2_sim_with_inference, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_SIM_MARGIN_FORECAST, 0) != NULL) {
+    config->p1_sim_margin_forecast = config->sim_margin_forecast;
+    config->p2_sim_margin_forecast = config->sim_margin_forecast;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_SIM_MARGIN_FORECAST,
+                   &config->p1_sim_margin_forecast, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
+                   &config->p2_sim_margin_forecast, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -9489,6 +9561,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
+  arg(ARG_TOKEN_SIM_MARGIN_FORECAST, "smargin", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -9523,6 +9596,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_MARGIN_FORECAST, "sm1", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_MARGIN_FORECAST, "sm2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_P1_PLAY_CHOOSER_TIME, "pc1", 1, 1);
@@ -9623,6 +9698,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->human_readable = true;
   config->show_mistakes = false;
   config->sim_with_inference = true;
+  config->sim_margin_forecast = false;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
   config->p1_num_plays = config->num_plays;
@@ -9635,6 +9711,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_min_play_iterations = config->min_play_iterations;
   config->p1_sim_with_inference = config->sim_with_inference;
   config->p2_sim_with_inference = config->sim_with_inference;
+  config->p1_sim_margin_forecast = config->sim_margin_forecast;
+  config->p2_sim_margin_forecast = config->sim_margin_forecast;
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
   config->p1_play_chooser_time_ms = -1.0;
@@ -10136,6 +10214,18 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->p2_sim_with_inference);
+      break;
+    case ARG_TOKEN_SIM_MARGIN_FORECAST:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->sim_margin_forecast);
+      break;
+    case ARG_TOKEN_P1_SIM_MARGIN_FORECAST:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_sim_margin_forecast);
+      break;
+    case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_sim_margin_forecast);
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

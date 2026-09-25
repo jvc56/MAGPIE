@@ -45,7 +45,9 @@ void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
-                                    int game_unseen_tiles, bool plies_are_odd);
+                                    int bag_tiles, int on_turn_rack_tiles,
+                                    int off_turn_rack_tiles,
+                                    bool plies_are_odd);
 void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility);
 
 typedef struct SimResults SimResults;
