@@ -798,8 +798,14 @@ static int score_canonical_move(const TuiGameState *state,
 }
 
 void tui_game_state_seed_edit_move(TuiGameState *state, const char *move_str) {
-  const int len = playthrough_parens_to_dots(move_str, state->edit_move_buf,
-                                             sizeof(state->edit_move_buf));
+  const int cap = (int)sizeof(state->edit_move_buf) - 1;
+  int len = 0;
+  for (const char *ch = move_str; *ch != '\0' && len < cap; ch++) {
+    if (*ch != '(' && *ch != ')') {
+      state->edit_move_buf[len++] = *ch;
+    }
+  }
+  state->edit_move_buf[len] = '\0';
   state->edit_move_len = len;
   state->edit_move_cursor = len;
 }

@@ -699,9 +699,9 @@ void tui_game_state_parse_edit_buf(TuiGameState *state);
 
 // Loads a stored move string into the MOVE edit buffer, cursor at the
 // end. Engine notation marks playthrough tiles with parentheses
-// ("M2 pANIN(I)"), which the editor's parser rejects; the editor types
-// them as '.' per tile, so each parenthesized tile becomes a '.'
-// ("M2 pANIN.").
+// ("M2 pANIN(I)"), which the editor's parser rejects; the parentheses
+// are dropped and the played-through letters kept ("M2 pANINI"), which
+// the engine accepts as playthrough.
 void tui_game_state_seed_edit_move(TuiGameState *state, const char *move_str);
 
 // Writes the parsed MOVE buffer in the history's stored notation: an
