@@ -258,11 +258,16 @@ static inline void ld_create_internal(const char *ld_name,
       break;
     }
 
-    // Each form is kept in MAX_LETTER_BYTE_LENGTH bytes with its
-    // terminator; a longer one was copied without it and ran into the next
-    // row's.
+    // Each form -- the fullwidth display forms too -- is kept in
+    // MAX_LETTER_BYTE_LENGTH bytes with its terminator; a longer one was
+    // copied without it and ran into the next row's.
     if (string_length(letter) >= MAX_LETTER_BYTE_LENGTH ||
-        string_length(lower_case_letter) >= MAX_LETTER_BYTE_LENGTH) {
+        string_length(lower_case_letter) >= MAX_LETTER_BYTE_LENGTH ||
+        (num_columns == 7 &&
+         (string_length(string_splitter_get_item(single_letter_info, 5)) >=
+              MAX_LETTER_BYTE_LENGTH ||
+          string_length(string_splitter_get_item(single_letter_info, 6)) >=
+              MAX_LETTER_BYTE_LENGTH))) {
       error_stack_push(error_stack, ERROR_STATUS_LD_INVALID_ROW,
                        get_formatted_string(
                            "letter '%s' in letter distribution file %s is "

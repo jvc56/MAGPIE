@@ -342,7 +342,8 @@ static void test_a_distribution_past_the_alphabet_limit_is_refused(void) {
 static void test_a_row_past_what_magpie_holds_is_refused(void) {
   const char *data_path = DEFAULT_TEST_DATA_PATH;
   const char *rows[] = {"A,a,256,1,1\nB,b,1,1,0\n", "A,a,-1,1,1\nB,b,1,1,0\n",
-                        "ABCDEF,abcdef,1,1,1\nB,b,1,1,0\n"};
+                        "ABCDEF,abcdef,1,1,1\nB,b,1,1,0\n",
+                        "A,a,1,1,1,AAAAAA,a\nB,b,1,1,0,B,b\n"};
   for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
     ErrorStack *error_stack = error_stack_create();
     char *path = data_filepaths_get_writable_filename(

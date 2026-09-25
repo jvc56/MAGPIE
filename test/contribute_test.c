@@ -1383,6 +1383,16 @@ static void test_contribute_puts_the_settings_file_back(void) {
   char *next = get_string_from_file_or_die(settings);
   assert(next[0] != '\0');
 
+  // A command that failed is not saved, and drops the skip with it: left
+  // set, it swallowed the next command's save.
+  config_contribute_restore_settings(config, snapshot, error_stack);
+  config_clear_skip_next_settings_save(config);
+  delete_file(settings);
+  save_config_settings(config, error_stack);
+  char *after_failure = get_string_from_file_or_die(settings);
+  assert(after_failure[0] != '\0');
+  free(after_failure);
+
   delete_file(settings);
   free(next);
   free(after_save);
@@ -1392,8 +1402,60 @@ static void test_contribute_puts_the_settings_file_back(void) {
   config_destroy(config);
 }
 
+// With settings not being saved there is no snapshot, and the file on disk --
+// an older session's -- is not replayed: replayed, it turned saving back on,
+// and the REPL then saved the task's lexicon over it after all.
+static void test_contribute_leaves_an_unsaved_session_unsaved(void) {
+  Config *config = config_create_default_test();
+  const char *settings = config_get_settings_filename(config);
+  const char *older = "setoptions -savesettings true -numplays 9\n";
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(settings, "w", older, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  char *snapshot = config_contribute_snapshot_settings(config, error_stack);
+  assert(snapshot == NULL);
+  config_contribute_restore_settings(config, snapshot, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!config_get_save_settings(config));
+  save_config_settings(config, error_stack);
+  char *after = get_string_from_file_or_die(settings);
+  assert(strings_equal(after, older));
+
+  delete_file(settings);
+  free(after);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// A snapshot that cannot be replayed in full -- one taken before any lexicon
+// was loaded still says `-w1 true`, replayed over a task's lexicon whose
+// wordmap this machine lacks -- leaves a session that still loads. It held the
+// lexicon with the flag on, and every later command failed loading the
+// wordmap.
+static void test_a_session_loads_after_contribute(void) {
+  Config *config = config_create_default_test();
+  load_and_exec_config_or_die(config, "set -savesettings true");
+  const char *settings = config_get_settings_filename(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  // The task's lexicon, which has no wordmap here, used without one.
+  load_and_exec_config_or_die(config, "set -lex OSPS49 -wmp false -rit false");
+  config_contribute_restore_settings(config, "setoptions -w1 true -w2 true\n",
+                                     error_stack);
+  assert(error_stack_is_empty(error_stack));
+  // Would die loading OSPS49.wmp if the flag had been left on.
+  load_and_exec_config_or_die(config, "set -numplays 7");
+
+  delete_file(settings);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_contribute(void) {
   test_contribute_puts_the_settings_file_back();
+  test_contribute_leaves_an_unsaved_session_unsaved();
+  test_a_session_loads_after_contribute();
   test_http_retries_outlast_a_server_deployment();
   test_a_request_must_state_its_distribution_and_layout();
   test_lexical_flags_are_set_before_the_load();

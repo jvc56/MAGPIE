@@ -208,5 +208,8 @@ char *config_contribute_snapshot_settings(Config *config,
                                           ErrorStack *error_stack);
 void config_contribute_restore_settings(Config *config, const char *snapshot,
                                         ErrorStack *error_stack);
+// Drops a pending skip of the REPL's after-command save (see above), for a
+// command that ended in an error and so is not saved.
+void config_clear_skip_next_settings_save(Config *config);
 
 #endif

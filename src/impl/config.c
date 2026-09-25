@@ -9169,16 +9169,9 @@ static char *config_contribute_leave_gen(Config *config,
 // follows, and "setoptions"'s own exec_func is a no-op (config_load_command
 // alone already applied everything), so skipping straight to it is exactly
 // as complete as the normal path for this one line shape.
-static void config_restore_settings_file(Config *config,
-                                         const char *settings_filename,
-                                         ErrorStack *error_stack) {
-  char *settings_string = get_string_from_file(settings_filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    // Nothing saved (or nothing readable) -- nothing to restore.
-    error_stack_reset(error_stack);
-    return;
-  }
-  StringSplitter *lines = split_string_by_newline(settings_string, true);
+static void config_replay_settings(Config *config, const char *settings,
+                                   ErrorStack *error_stack) {
+  StringSplitter *lines = split_string_by_newline(settings, true);
   const int num_lines = string_splitter_get_number_of_items(lines);
   for (int i = 0; i < num_lines; i++) {
     config_load_command(config, string_splitter_get_item(lines, i),
@@ -9188,7 +9181,6 @@ static void config_restore_settings_file(Config *config,
     }
   }
   string_splitter_destroy(lines);
-  free(settings_string);
 }
 
 char *config_contribute_snapshot_settings(Config *config,
@@ -9209,15 +9201,36 @@ char *config_contribute_snapshot_settings(Config *config,
   return snapshot;
 }
 
+void config_clear_skip_next_settings_save(Config *config) {
+  config->skip_next_settings_save = false;
+}
+
 void config_contribute_restore_settings(Config *config, const char *snapshot,
                                         ErrorStack *error_stack) {
-  // Replayed into this session as best it can be. Best effort: a snapshot
-  // taken before any lexicon was loaded names none but still says `-w1 true`,
-  // and replayed over a task's lexicon that asks for a wordmap the worker
-  // may not have -- which is why the file is not rebuilt from this session.
-  config_restore_settings_file(config, config_get_settings_filename(config),
-                               error_stack);
-  error_stack_reset(error_stack);
+  // The snapshot, not the file, is replayed into this session: with settings
+  // not being saved there is no snapshot, and the file on disk -- an older
+  // session's -- turned saving back on when replayed, so the REPL then saved
+  // the task's lexicon over it after all.
+  bool loads = false;
+  if (snapshot) {
+    config_replay_settings(config, snapshot, error_stack);
+    loads = error_stack_is_empty(error_stack);
+    error_stack_reset(error_stack);
+  }
+  if (!loads) {
+    // No snapshot, or one that could not be replayed in full: a snapshot
+    // taken before any lexicon was loaded names none but says `-w1 true`,
+    // and replayed over a task's lexicon whose wordmap the worker lacks it
+    // failed part way. The session then held that lexicon with the flag on,
+    // and every later command -- another contribute included -- failed
+    // loading the wordmap. Derived files off, the session loads again; the
+    // file is not saved from it (the REPL's save is skipped below, or
+    // settings are not being saved at all).
+    config_load_command(
+        config, "setoptions -w1 false -w2 false -rit1 false -rit2 false",
+        error_stack);
+    error_stack_reset(error_stack);
+  }
   if (!snapshot) {
     return;
   }
