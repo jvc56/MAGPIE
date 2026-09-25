@@ -57,7 +57,7 @@ static struct ncplane *rack_tile_planes[RACK_SIZE];
 void invalidate_rack_tile_planes(void) {
   for (int i = 0; i < RACK_SIZE; i++) {
     if (rack_tile_planes[i] != NULL) {
-      ncplane_destroy(rack_tile_planes[i]);
+      tui_plane_destroy(rack_tile_planes[i]);
       rack_tile_planes[i] = NULL;
     }
     rack_tile_cache[i].valid = false;
@@ -85,7 +85,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   if (tile_count <= 0) {
     for (int i = 0; i < RACK_SIZE; i++) {
       if (rack_tile_planes[i] != NULL) {
-        ncplane_destroy(rack_tile_planes[i]);
+        tui_plane_destroy(rack_tile_planes[i]);
         rack_tile_planes[i] = NULL;
         rack_tile_cache[i].valid = false;
       }
@@ -138,7 +138,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   // shrinking rack (end of game) frees its planes.
   for (int i = tile_count; i < RACK_SIZE; i++) {
     if (rack_tile_planes[i] != NULL) {
-      ncplane_destroy(rack_tile_planes[i]);
+      tui_plane_destroy(rack_tile_planes[i]);
       rack_tile_planes[i] = NULL;
       rack_tile_cache[i].valid = false;
     }
@@ -166,7 +166,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
                           rc->screen_top == screen_top &&
                           rc->screen_left == screen_left;
     if (!same_pos && rack_tile_planes[i] != NULL) {
-      ncplane_destroy(rack_tile_planes[i]);
+      tui_plane_destroy(rack_tile_planes[i]);
       rack_tile_planes[i] = NULL;
       rc->valid = false;
     }
@@ -225,7 +225,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   // rather than reusing stale state.
   rack_pixel_cache.valid = false;
   if (planes->rack != NULL) {
-    ncplane_destroy(planes->rack);
+    tui_plane_destroy(planes->rack);
     planes->rack = NULL;
   }
 }
@@ -321,7 +321,7 @@ void render_rack_panel(struct ncplane *plane, const Theme *theme,
   // Drop the 2x-only rack pixel plane if we're not using it — stale
   // pixel content otherwise sits on top of the text-mode rack.
   if (planes->rack != NULL) {
-    ncplane_destroy(planes->rack);
+    tui_plane_destroy(planes->rack);
     planes->rack = NULL;
     rack_pixel_cache.valid = false;
   }

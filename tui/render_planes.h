@@ -28,6 +28,10 @@ typedef struct {
   struct ncplane *modal;
 } TuiGridPlanes;
 
+// Destroys `plane`, first dropping any pixels the frame dump recorded
+// for it. Use for every plane the TUI destroys.
+void tui_plane_destroy(struct ncplane *plane);
+
 // Cache for the 2x board pixel composite. ncblit_rgba is the FPS
 // bottleneck even when the buffer hasn't changed; tracking a signature
 // lets us skip the work and rely on notcurses keeping the plane's

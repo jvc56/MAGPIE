@@ -72,6 +72,16 @@ void tui_frame_dump_capture(struct ncplane *plane, const uint8_t *rgba,
   memcpy(slot->rgba, rgba, bytes);
 }
 
+void tui_frame_dump_forget(const struct ncplane *plane) {
+  for (int idx = 0; idx < g_plane_count; idx++) {
+    if (g_planes[idx].plane == plane) {
+      free(g_planes[idx].rgba);
+      g_planes[idx] = g_planes[--g_plane_count];
+      return;
+    }
+  }
+}
+
 // ── Compositing ───────────────────────────────────────────────────────────
 
 // Alpha-over `src` (w*h RGBA) onto `frame` (frame_w*frame_h RGBA, opaque)

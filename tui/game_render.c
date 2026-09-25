@@ -81,7 +81,7 @@ static struct ncplane *edit_arrow_plane;
 
 static void invalidate_edit_arrow_plane(void) {
   if (edit_arrow_plane != NULL) {
-    ncplane_destroy(edit_arrow_plane);
+    tui_plane_destroy(edit_arrow_plane);
     edit_arrow_plane = NULL;
   }
   edit_arrow_cache.valid = false;
@@ -522,7 +522,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   // at the right size and z-position. Cheap (one destroy) and keeps
   // the modal-open path's plane setup simple.
   if (modal == TUI_MODAL_NONE && planes->modal != NULL) {
-    ncplane_destroy(planes->modal);
+    tui_plane_destroy(planes->modal);
     planes->modal = NULL;
   }
 }

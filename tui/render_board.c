@@ -103,7 +103,7 @@ void render_board_invalidate_tile_planes(void) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       if (board_tile_planes[row][col] != NULL) {
-        ncplane_destroy(board_tile_planes[row][col]);
+        tui_plane_destroy(board_tile_planes[row][col]);
         board_tile_planes[row][col] = NULL;
       }
       board_tile_cache[row][col].valid = false;
@@ -625,7 +625,7 @@ void render_board(struct ncplane *plane, const Theme *theme,
     // whose content + geometry haven't changed, so a 60fps idle
     // frame re-blits zero cells.
     if (planes->board != NULL) {
-      ncplane_destroy(planes->board);
+      tui_plane_destroy(planes->board);
       planes->board = NULL;
       board_pixel_cache.valid = false;
     }
@@ -637,17 +637,17 @@ void render_board(struct ncplane *plane, const Theme *theme,
   // Drop the cached board grid-overlay plane, the labels, AND any
   // per-tile pixel planes from the layered 2x renderer.
   if (planes->board != NULL) {
-    ncplane_destroy(planes->board);
+    tui_plane_destroy(planes->board);
     planes->board = NULL;
     board_pixel_cache.valid = false;
   }
   if (planes->labels_col != NULL) {
-    ncplane_destroy(planes->labels_col);
+    tui_plane_destroy(planes->labels_col);
     planes->labels_col = NULL;
     label_pixel_cache.valid = false;
   }
   if (planes->labels_row != NULL) {
-    ncplane_destroy(planes->labels_row);
+    tui_plane_destroy(planes->labels_row);
     planes->labels_row = NULL;
     label_pixel_cache.valid = false;
   }

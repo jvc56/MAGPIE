@@ -44,6 +44,12 @@
 void tui_frame_dump_capture(struct ncplane *plane, const uint8_t *rgba,
                             int width, int height);
 
+// Drop the RGBA recorded for `plane`. Call before destroying a plane:
+// notcurses may hand the same address to a later plane, which the dump
+// would otherwise composite as the dead plane's image. No-op if `plane`
+// has nothing recorded.
+void tui_frame_dump_forget(const struct ncplane *plane);
+
 // Async-signal-safe: arm a one-shot dump. Safe to call from a signal
 // handler (it only stores to an atomic flag).
 void tui_frame_dump_request(void);

@@ -1,30 +1,36 @@
 #include "render_planes.h"
 
+#include "frame_dump.h"
 #include <stdint.h>
 
 static TuiGridPlanes grid_planes;
+
+void tui_plane_destroy(struct ncplane *plane) {
+  tui_frame_dump_forget(plane);
+  ncplane_destroy(plane);
+}
 
 TuiGridPlanes *tui_grid_planes(void) { return &grid_planes; }
 
 void tui_planes_destroy_all(void) {
   if (grid_planes.board != NULL) {
-    ncplane_destroy(grid_planes.board);
+    tui_plane_destroy(grid_planes.board);
     grid_planes.board = NULL;
   }
   if (grid_planes.rack != NULL) {
-    ncplane_destroy(grid_planes.rack);
+    tui_plane_destroy(grid_planes.rack);
     grid_planes.rack = NULL;
   }
   if (grid_planes.labels_col != NULL) {
-    ncplane_destroy(grid_planes.labels_col);
+    tui_plane_destroy(grid_planes.labels_col);
     grid_planes.labels_col = NULL;
   }
   if (grid_planes.labels_row != NULL) {
-    ncplane_destroy(grid_planes.labels_row);
+    tui_plane_destroy(grid_planes.labels_row);
     grid_planes.labels_row = NULL;
   }
   if (grid_planes.modal != NULL) {
-    ncplane_destroy(grid_planes.modal);
+    tui_plane_destroy(grid_planes.modal);
     grid_planes.modal = NULL;
   }
 }
