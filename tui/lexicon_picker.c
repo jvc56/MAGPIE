@@ -1,6 +1,5 @@
 #include "lexicon_picker.h"
 
-#include "game_render.h"
 #include "render_planes.h"
 #include "theme.h"
 #include "tui_resize.h"
@@ -13,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 enum {
   LEXICON_NAME_MAX = 64,
@@ -163,7 +163,6 @@ struct LexiconList {
   int entry_display_row[LEXICON_LIST_MAX];
   int total_display_rows;
 };
-typedef struct LexiconList LexiconList;
 
 static int compare_entries(const void *lhs, const void *rhs) {
   const LexiconEntry *left = (const LexiconEntry *)lhs;

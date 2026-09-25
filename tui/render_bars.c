@@ -1,14 +1,18 @@
 #include "render_bars.h"
 
+#include "mach_compat.h" // IWYU pragma: keep (Apple memory stats)
 #include "../src/ent/game.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/endgame.h"
-#include "mach_compat.h"
+#include "game_state.h"
 #include "render_common.h"
-#include "render_view.h"
-#include "time_picker.h"
+#include "render_layout.h"
+#include "theme.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

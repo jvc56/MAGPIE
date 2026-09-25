@@ -1,6 +1,7 @@
 #ifndef TUI_RENDER_LAYOUT_H
 #define TUI_RENDER_LAYOUT_H
 
+#include "../src/def/board_defs.h"
 #include "game_state.h"
 #include <stdbool.h>
 

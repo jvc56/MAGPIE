@@ -7,10 +7,12 @@
 #include "../src/def/move_defs.h"
 #include "../src/def/peg_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/endgame_results.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
@@ -26,6 +28,7 @@
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "config.h"
 #include "glyph_cache.h"
 #include <pthread.h>
 #include <stdatomic.h>
@@ -33,6 +36,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 enum {

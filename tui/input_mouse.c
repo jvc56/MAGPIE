@@ -1,13 +1,21 @@
 #include "input_mouse.h"
 
+#include "../src/def/letter_distribution_defs.h"
+#include "../src/ent/board.h"
+#include "../src/ent/game.h"
+#include "game_state.h"
 #include "move_entry.h"
-#include "render_board.h"
 #include "render_hit_test.h"
 #include "tui_history_edit.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 // Mouse handling on the game screen: wheel scrolling of the Analysis panel,
 // Analysis scrollbar click / drag, and click-to-focus / click-to-select on

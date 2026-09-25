@@ -1,6 +1,11 @@
 #include "render_hit_test.h"
 
 #include "../src/def/board_defs.h"
+#include "game_state.h"
+#include "render_layout.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
+#include <stddef.h>
 
 static TuiHitMaps hit_maps;
 

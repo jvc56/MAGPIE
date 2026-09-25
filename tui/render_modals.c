@@ -1,13 +1,18 @@
 #include "render_modals.h"
 
-#include "../src/util/string_util.h"
+#include "config.h"
 #include "render_common.h"
 #include "render_hit_test.h"
 #include "render_layout.h"
 #include "render_planes.h"
+#include "theme.h"
 #include "time_picker.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 // ── Modal helpers ─────────────────────────────────────────────────────────
 //

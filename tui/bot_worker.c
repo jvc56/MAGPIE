@@ -2,7 +2,12 @@
 
 #include "../src/compat/memory_info.h"
 #include "../src/def/bai_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/peg_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
@@ -15,7 +20,6 @@
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/thread_control.h"
-#include "../src/ent/win_pct.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
@@ -27,8 +31,8 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "analysis_rows.h"
+#include "config.h"
 #include "game_state.h"
-#include "pixel_compose.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>

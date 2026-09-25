@@ -1,12 +1,22 @@
 #include "pixel_compose.h"
 
+#include "../src/def/board_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
+#include "../src/ent/board.h"
 #include "../src/ent/bonus_square.h"
-#include "../src/ent/game.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/letter_distribution.h"
-#include "../src/ent/rack.h"
-#include "render_layout.h"
+#include "../src/ent/move.h"
+#include "config.h"
+#include "game_state.h"
+#include "glyph_cache.h"
+#include "render_common.h"
 #include "render_view.h"
-#include <pthread.h>
+#include "theme.h"
+#include <dirent.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 

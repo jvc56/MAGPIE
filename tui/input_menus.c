@@ -1,13 +1,21 @@
 #include "input_menus.h"
 
 #include "bot_worker.h"
+#include "config.h"
+#include "game_state.h"
+#include "lexicon_picker.h"
 #include "render_hit_test.h"
 #include "time_picker.h"
 #include "tui_session.h"
+#include "tui_ui_state.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 // Quit-confirm modal keys.
 // Returns true when the key was consumed.

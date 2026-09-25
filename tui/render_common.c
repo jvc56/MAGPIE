@@ -1,7 +1,17 @@
 #include "render_common.h"
 
+#include "../src/def/board_defs.h"
+#include "../src/def/letter_distribution_defs.h"
+#include "../src/ent/bonus_square.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/util/string_util.h"
+#include "config.h"
+#include "theme.h"
+#include <dirent.h>
+#include <notcurses/notcurses.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Empty / non-premium cells render an ideographic space so the cell still

@@ -1,13 +1,19 @@
 #include "input_game.h"
 
 #include "bot_worker.h"
+#include "game_state.h"
 #include "move_entry.h"
 #include "time_picker.h"
 #include "tui_clipboard.h"
+#include "tui_ui_state.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 // Whether the keyboard may open the history-cell editor on entry `idx`.
 // Play-vs-computer edits only the human's live pending turn (the cell is

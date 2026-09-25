@@ -1,9 +1,11 @@
 #include "analysis_rows.h"
 
-#include "../src/ent/endgame_results.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/board.h"
 #include "../src/ent/equity.h"
-#include "../src/ent/letter_distribution.h"
+#include "../src/ent/game.h"
 #include "../src/ent/move.h"
+#include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
@@ -11,8 +13,9 @@
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
 #include "../src/util/string_util.h"
-#include "render_common.h"
-#include "render_view.h"
+#include "game_state.h"
+#include <dirent.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

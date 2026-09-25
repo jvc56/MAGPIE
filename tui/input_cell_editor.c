@@ -1,5 +1,13 @@
 #include "input_cell_editor.h"
 
+#include "../src/def/board_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
+#include "../src/ent/board.h"
+#include "../src/ent/equity.h"
+#include "../src/ent/game.h"
+#include "../src/ent/move.h"
+#include "../src/ent/player.h"
 #include "../src/impl/gameplay.h"
 #include "bot_worker.h"
 #include "game_state.h"
@@ -12,6 +20,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 // A key while board move entry is active: drives the on-board move
 // builder (Space toggles direction, arrows move the anchor, Backspace

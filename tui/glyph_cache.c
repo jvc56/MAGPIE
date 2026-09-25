@@ -2,9 +2,9 @@
 
 #include <freetype/freetype.h>
 #include <freetype/ftsynth.h>
-#include <ft2build.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

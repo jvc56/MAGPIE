@@ -3,9 +3,11 @@
 #include "frame_dump.h"
 #include <execinfo.h>
 #include <fcntl.h>
+#include <notcurses/notcurses.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 // ── Crash diagnostics ─────────────────────────────────────────────────────

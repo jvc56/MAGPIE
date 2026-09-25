@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 static bool ensure_parent_dirs(const char *file_path) {
   char path_copy[TUI_CONFIG_PATH_MAX];

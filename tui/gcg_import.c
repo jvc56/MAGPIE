@@ -1,17 +1,22 @@
 #include "gcg_import.h"
 
+#include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/board.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
 #include "../src/ent/move.h"
-#include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/validated_move.h"
 #include "../src/impl/gameplay.h"
-#include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "game_state.h"
+#include <dirent.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,11 +1,17 @@
 #include "render_layout.h"
 
+#include "../src/def/board_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "game_state.h"
 #include "render_view.h"
+#include <notcurses/notcurses.h>
+#include <stdio.h>
 #include <string.h>
 
 int compute_effective_scale(int user_pref, unsigned plane_cols,

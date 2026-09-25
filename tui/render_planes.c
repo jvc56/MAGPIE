@@ -1,6 +1,8 @@
 #include "render_planes.h"
 
 #include "frame_dump.h"
+#include <notcurses/notcurses.h>
+#include <stddef.h>
 #include <stdint.h>
 
 static TuiGridPlanes grid_planes;

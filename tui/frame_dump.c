@@ -1,12 +1,14 @@
 #include "frame_dump.h"
 
 #include "glyph_cache.h"
+#include "theme.h"
 #include <notcurses/notcurses.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <zlib.h>
 
 // ── Per-plane RGBA registry ───────────────────────────────────────────────

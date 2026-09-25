@@ -1,6 +1,8 @@
 #include "tui_session.h"
 
 #include "config.h"
+#include "game_state.h"
+#include "tui_ui_state.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>

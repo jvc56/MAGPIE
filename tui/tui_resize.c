@@ -1,6 +1,7 @@
 #include "tui_resize.h"
 
 #include <notcurses/notcurses.h>
+#include <stddef.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 

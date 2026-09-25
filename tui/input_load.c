@@ -1,14 +1,24 @@
 #include "input_load.h"
 
 #include "../src/ent/board.h"
+#include "../src/ent/game.h"
+#include "../src/ent/game_history.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
+#include "../src/ent/sim_results.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/gcg.h"
 #include "../src/util/io_util.h"
 #include "bot_worker.h"
+#include "game_state.h"
 #include "gcg_import.h"
 #include "tui_text_edit.h"
+#include "tui_ui_state.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

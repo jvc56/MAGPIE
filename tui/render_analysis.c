@@ -1,25 +1,25 @@
 #include "render_analysis.h"
 
-#include "../src/def/letter_distribution_defs.h"
-#include "../src/ent/endgame_results.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/game.h"
-#include "../src/ent/letter_distribution.h"
-#include "../src/ent/move.h"
-#include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/impl/endgame.h"
-#include "../src/str/move_string.h"
-#include "../src/util/string_util.h"
 #include "analysis_rows.h"
+#include "game_state.h"
 #include "render_common.h"
 #include "render_hit_test.h"
+#include "render_layout.h"
 #include "render_view.h"
+#include "theme.h"
 #include "tui_ui_types.h"
+#include <limits.h>
+#include <notcurses/notcurses.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 // ── Analysis panel ────────────────────────────────────────────────────────
 //

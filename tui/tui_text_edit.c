@@ -1,6 +1,8 @@
 #include "tui_text_edit.h"
 
+#include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 // Apply readline / emacs-style cursor and kill bindings to a
 // multi-line text buffer. Returns true if the key was consumed,

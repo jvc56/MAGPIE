@@ -1,7 +1,13 @@
 #include "input_settings.h"
 
+#include "config.h"
+#include "game_state.h"
 #include "render_hit_test.h"
+#include "tui_ui_state.h"
+#include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
 #include <pthread.h>
+#include <stdint.h>
 
 // Settings modal keys.
 // Returns true when the key was consumed.

@@ -1,8 +1,6 @@
 #include "tui_history_edit.h"
 
-#include "../src/ent/game.h"
-#include "../src/ent/rack.h"
-#include "render_common.h"
+#include "game_state.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>

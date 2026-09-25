@@ -2,6 +2,8 @@
 
 #include "../src/def/board_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -16,7 +18,9 @@
 #include "../src/str/rack_string.h"
 #include "../src/util/string_util.h"
 #include "bot_worker.h"
+#include "config.h"
 #include "game_state.h"
+#include <dirent.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>

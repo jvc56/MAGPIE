@@ -1,10 +1,15 @@
 #include "tui_clipboard.h"
 
+#include "../src/ent/game.h"
 #include "../src/impl/cgp.h"
+#include "game_state.h"
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 // Copy `text` to the system clipboard. Primary mechanism is OSC 52,
 // written straight to the tty the same way the focus-reporting

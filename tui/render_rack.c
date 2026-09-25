@@ -1,15 +1,21 @@
 #include "render_rack.h"
 
+#include "../src/def/board_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/rack_defs.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/rack.h"
 #include "frame_dump.h"
-#include "glyph_cache.h"
+#include "game_state.h"
 #include "pixel_compose.h"
 #include "render_common.h"
+#include "render_layout.h"
 #include "render_planes.h"
 #include "render_view.h"
+#include "theme.h"
 #include "tui_ui_types.h"
+#include <notcurses/notcurses.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
