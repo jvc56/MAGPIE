@@ -25,6 +25,7 @@
 #include "render_board.h"
 #include "render_common.h"
 #include "render_hit_test.h"
+#include "render_modals.h"
 #include "render_rack.h"
 #include "theme.h"
 #include "time_picker.h"
