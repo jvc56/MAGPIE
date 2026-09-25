@@ -11,7 +11,6 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/play_chooser.h"
 #include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
 #include <errno.h>
 #include <limits.h>
 #include <math.h>

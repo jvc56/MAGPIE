@@ -65,7 +65,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-30
+          key: downloaded-data-files-31
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -121,7 +121,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-30
+          key: downloaded-data-files-31
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -172,7 +172,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-30
+          key: downloaded-data-files-31
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -205,7 +205,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-30
+          key: downloaded-data-files-31
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
