@@ -622,7 +622,6 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   case TUI_MODAL_STARTUP_MENU:
   case TUI_MODAL_MAIN_MENU:
   case TUI_MODAL_TIME_PICKER:
-  case TUI_MODAL_LEXICON_PICKER:
   case TUI_MODAL_QUIT_CONFIRM:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
            "\xb7 Esc back ";

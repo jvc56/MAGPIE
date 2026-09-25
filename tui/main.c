@@ -176,10 +176,9 @@ static void init_ui_state(TuiUiState *ui, const TuiConfig *loaded) {
   // caller (main menu Q or command-bar Q) sets this before opening.
   ui->quit_confirm_focus = 0;
   ui->quit_confirm_return = TUI_MODAL_NONE;
-  // Modal-style lexicon picker state. Lazily allocated when the user
-  // enters the modal; destroyed before exit.
+  // Lexicon list for the setup dialogs' Language / Lexicon rows. Lazily
+  // allocated on first use; destroyed before exit.
   ui->lexicon_list = NULL;
-  ui->lexicon_focus = 0;
 }
 
 // The focused row of the open dialog, for its help line; -1 when the
@@ -217,10 +216,6 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
                              state->rack_sort, current_load_rit);
   } else if (ui->modal == TUI_MODAL_TIME_PICKER) {
     tui_game_render_time_picker(std_plane, theme, ui->time_focus);
-  } else if (ui->modal == TUI_MODAL_LEXICON_PICKER &&
-             ui->lexicon_list != NULL) {
-    tui_game_render_lexicon_picker(std_plane, theme, ui->lexicon_list,
-                                   ui->lexicon_focus);
   } else if (ui->modal == TUI_MODAL_QUIT_CONFIRM) {
     tui_game_render_quit_confirm(std_plane, theme, ui->quit_confirm_focus);
   } else if (ui->modal == TUI_MODAL_STARTUP_MENU) {
@@ -537,10 +532,6 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
   }
 
   if (tui_input_time_picker(state, ui, session, key, input)) {
-    return;
-  }
-
-  if (tui_input_lexicon_picker(state, ui, session, key, input)) {
     return;
   }
 
