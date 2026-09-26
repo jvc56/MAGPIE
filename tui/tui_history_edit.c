@@ -74,3 +74,15 @@ void tui_commit_edit_and_revalidate(TuiGameState *gs) {
   tui_commit_edit_to_entry(gs);
   tui_game_state_revalidate_history(gs);
 }
+
+bool tui_history_entry_editable(const TuiGameState *state, int idx) {
+  if (idx < 0 || idx >= state->history_count) {
+    return false;
+  }
+  if (state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER) {
+    return true;
+  }
+  const TuiHistoryEntry *entry = &state->history[idx];
+  return idx == state->history_count - 1 && entry->pending &&
+         entry->player_idx == state->human_player_idx;
+}

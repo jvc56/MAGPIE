@@ -744,7 +744,7 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   }
   // Plain Left/Right inside the editor follow the unified
   // step-through sequence:
-  //   [4>] / 1> → 1.MOVE → 1.RACK → 2> → 2.MOVE → 2.RACK → 3> → ...
+  //   [4>] / 1> → 1.MOVE → 1.RACK → 1.LEAVE → 2> → 2.MOVE → ...
   // Within a field's text the arrow moves the cursor; at the
   // far edge of the field it advances/retreats one position
   // in the sequence (which may exit the editor onto the next
@@ -755,10 +755,7 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
     if (*pcur > 0) {
       (*pcur)--;
     } else if (field_leave) {
-      // LEAVE start → RACK end of same turn. (LEAVE itself
-      // is not in the forward arrow sequence — it's only
-      // reachable via click — but if you arrived there by
-      // clicking, Left walks you back to RACK.)
+      // LEAVE start → RACK end of same turn.
       state->edit_field = TUI_EDIT_FIELD_RACK;
       state->edit_rack_cursor = state->edit_rack_len;
     } else if (!field_move) {
@@ -784,8 +781,13 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
       // MOVE end → RACK start of same turn.
       state->edit_field = TUI_EDIT_FIELD_RACK;
       state->edit_rack_cursor = 0;
+    } else if (!field_leave) {
+      // RACK end (past the cursor slot after the tiles) → LEAVE
+      // start of same turn.
+      state->edit_field = TUI_EDIT_FIELD_LEAVE;
+      state->edit_leave_cursor = 0;
     } else {
-      // RACK end (or LEAVE end) → forward out of the turn.
+      // LEAVE end → forward out of the turn.
       // Blur-commit, then advance: onto the next turn's label
       // if it exists, or — when this is the LAST turn and it
       // holds a valid move — create the next turn and land on
