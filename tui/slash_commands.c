@@ -5,22 +5,40 @@
 #include <string.h>
 
 static const TuiSlashCommand slash_commands[] = {
-    {TUI_SLASH_COPY, "copy", "Copy current position to clipboard as CGP"},
-    {TUI_SLASH_EXIT, "exit", "Quit MAGPIE TUI (alias for /quit)"},
-    {TUI_SLASH_KIBITZ, "gen", "Alias for /kibitz"},
-    {TUI_SLASH_KIBITZ, "generate", "Alias for /kibitz"},
+    {TUI_SLASH_COPY, "copy", "Copy current position to clipboard as CGP",
+     "Copy position (CGP)"},
+    {TUI_SLASH_EXIT, "exit", "Quit MAGPIE TUI (alias for /quit)", NULL},
+    {TUI_SLASH_KIBITZ, "gen", "Alias for /kibitz", NULL},
+    {TUI_SLASH_KIBITZ, "generate", "Alias for /kibitz", NULL},
     {TUI_SLASH_KIBITZ, "kibitz",
-     "Rank the selected turn's moves by static equity"},
-    {TUI_SLASH_NEW, "new", "Start a new game"},
-    {TUI_SLASH_QUIT, "quit", "Quit MAGPIE TUI"},
+     "Rank the selected turn's moves by static equity", "Kibitz (static eval)"},
+    {TUI_SLASH_NEW, "new", "Start a new game", NULL},
+    {TUI_SLASH_QUIT, "quit", "Quit MAGPIE TUI", NULL},
     {TUI_SLASH_RESUME, "resume",
-     "Continue the selected turn's saved analysis (finished games)"},
-    {TUI_SLASH_SET, "set", "Change a setting: /set <name> <value>"},
-    {TUI_SLASH_SETTINGS, "settings", "Open settings"},
-    {TUI_SLASH_SIM, "sim",
-     "Simulate the selected turn (continues a saved sim)"},
-    {TUI_SLASH_STOP, "stop", "Stop the running analysis"},
+     "Continue the selected turn's saved analysis (finished games)",
+     "Resume saved analysis"},
+    {TUI_SLASH_SET, "set", "Change a setting: /set <name> <value>", NULL},
+    {TUI_SLASH_SETTINGS, "settings", "Open settings", NULL},
+    {TUI_SLASH_SIM, "sim", "Simulate the selected turn (continues a saved sim)",
+     "Simulate"},
+    {TUI_SLASH_STOP, "stop", "Stop the running analysis", "Stop analysis"},
 };
+
+const TuiSlashCommand *tui_slash_command(TuiSlashCommandId id) {
+  int count = 0;
+  const TuiSlashCommand *cmds = tui_slash_commands(&count);
+  for (int cmd_idx = 0; cmd_idx < count; cmd_idx++) {
+    if (cmds[cmd_idx].id == id && cmds[cmd_idx].menu_label != NULL) {
+      return &cmds[cmd_idx];
+    }
+  }
+  for (int cmd_idx = 0; cmd_idx < count; cmd_idx++) {
+    if (cmds[cmd_idx].id == id) {
+      return &cmds[cmd_idx];
+    }
+  }
+  return NULL;
+}
 
 const TuiSlashCommand *tui_slash_commands(int *count) {
   *count = (int)(sizeof(slash_commands) / sizeof(slash_commands[0]));
