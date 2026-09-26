@@ -767,9 +767,9 @@ int main(int argc, char *argv[]) {
   // on the human in play-vs-computer) at a few fps and burns CPU. So we
   // only run the render path when something actually changed: input was
   // processed, the bot bumped render_version, a modal is open, the
-  // wall-clock second ticked (live clock countdown), or the bot is
-  // animating a spinner. Otherwise the last frame stays on screen
-  // untouched.
+  // wall-clock second ticked (live clock countdown), the bot is
+  // animating a spinner, or an analysis is streaming results.
+  // Otherwise the last frame stays on screen untouched.
   ui.frame_dirty = true; // render the first frame
   // Input→display latency probe: timestamp when input first dirtied the
   // current (not-yet-rendered) frame, so we can measure keypress-to-pixels.
@@ -816,10 +816,14 @@ int main(int argc, char *argv[]) {
                         last_entry->player_idx == game_state.human_player_idx);
     }
     pthread_mutex_unlock(&game_state.mutex);
+    // A running /sim, /resume, or re-solve streams into the Plays panel;
+    // like the bot's own search, keep rendering so it updates every frame
+    // rather than on the once-a-second clock tick.
+    const bool analysis_live = atomic_load(&game_state.analysis_running);
     const bool need_render = ui.frame_dirty || ui.modal != TUI_MODAL_NONE ||
                              cur_render_version != rendered_version ||
                              render_now.tv_sec != rendered_wall_sec ||
-                             bot_animating;
+                             bot_animating || analysis_live;
     if (need_render) {
       // Time the FULL render path (cell composition + pixel ncblits AND
       // the notcurses_render emit) so the fps readout reflects the real
