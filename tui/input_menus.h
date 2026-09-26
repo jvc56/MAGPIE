@@ -15,6 +15,10 @@ const char *tui_analysis_menu_reason(const TuiGameState *state, int item);
 // The analysis panel's menu: Space or Enter on the [5] badge opens it
 // for the turn selected in History. Returns true when the key was
 // consumed.
+// Phony-confirm dialog keys: Keep resumes the held-back annotation
+// commit, Undo or Esc returns to the move.
+bool tui_input_phony_confirm(TuiGameState *state, TuiUiState *ui, uint32_t key,
+                             ncinput input);
 bool tui_input_analysis_menu(TuiGameState *state, TuiUiState *ui, uint32_t key,
                              ncinput input);
 
