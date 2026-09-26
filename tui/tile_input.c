@@ -6,9 +6,113 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
-// The middle dot of the Catalan L·L. "." and "-" type it.
-static const char middle_dot[] = "\xc2\xb7";
+enum {
+  ALIAS_MAX = 64,
+  ALIAS_LD_MAX = 32,
+  ALIAS_TYPED_MAX = 8,
+  ALIAS_LINE_MAX = 256,
+};
+
+// One row of the tile alias file: in letter distribution `ld` (and its
+// variants), `typed` reads as `letters`.
+typedef struct {
+  char ld[ALIAS_LD_MAX];
+  char typed[ALIAS_TYPED_MAX];
+  char letters[TUI_TILE_TEXT_MAX];
+} TileAlias;
+
+// Loaded once at startup, before other threads run; read-only after.
+static TileAlias aliases[ALIAS_MAX];
+static int alias_count;
+
+bool tui_tile_aliases_find_path(char *out, size_t out_size) {
+  // Probed like the bundled font, so the binary finds it from the repo
+  // root or from bin/.
+  static const char *candidates[] = {
+      "tui/assets/tile_aliases.csv",
+      "../tui/assets/tile_aliases.csv",
+  };
+  for (size_t idx = 0; idx < sizeof(candidates) / sizeof(candidates[0]);
+       idx++) {
+    if (access(candidates[idx], R_OK) == 0) {
+      (void)snprintf(out, out_size, "%s", candidates[idx]);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Copies field `field_idx` of the comma-separated `line` into `out`.
+// Returns false when the line has fewer fields or the field doesn't
+// fit.
+static bool csv_field(const char *line, int field_idx, char *out,
+                      size_t out_size) {
+  const char *start = line;
+  for (int skip_idx = 0; skip_idx < field_idx; skip_idx++) {
+    start = strchr(start, ',');
+    if (start == NULL) {
+      return false;
+    }
+    start++;
+  }
+  size_t len = strcspn(start, ",\r\n");
+  if (len == 0 || len >= out_size) {
+    return false;
+  }
+  memcpy(out, start, len);
+  out[len] = '\0';
+  return true;
+}
+
+int tui_tile_aliases_load(const char *path) {
+  alias_count = 0;
+  FILE *file = fopen(path, "re");
+  if (file == NULL) {
+    return -1;
+  }
+  char line[ALIAS_LINE_MAX];
+  while (alias_count < ALIAS_MAX && fgets(line, sizeof(line), file) != NULL) {
+    if (line[0] == '#' || line[0] == '\n' || line[0] == '\r' ||
+        line[0] == '\0') {
+      continue;
+    }
+    TileAlias *alias = &aliases[alias_count];
+    if (csv_field(line, 0, alias->ld, sizeof(alias->ld)) &&
+        csv_field(line, 1, alias->typed, sizeof(alias->typed)) &&
+        csv_field(line, 2, alias->letters, sizeof(alias->letters))) {
+      alias_count++;
+    }
+  }
+  (void)fclose(file);
+  return alias_count;
+}
+
+// Whether alias rows for `alias_ld` apply to letter distribution
+// `ld_name`: the same name, or a variant of it ("catalan_super").
+static bool alias_applies(const char *alias_ld, const char *ld_name) {
+  const size_t len = strlen(alias_ld);
+  return ld_name != NULL && strncmp(ld_name, alias_ld, len) == 0 &&
+         (ld_name[len] == '\0' || ld_name[len] == '_');
+}
+
+// The longest alias of `ld` that `text` starts with, or NULL.
+static const TileAlias *alias_at(const LetterDistribution *ld,
+                                 const char *text) {
+  const TileAlias *found = NULL;
+  size_t found_len = 0;
+  for (int alias_idx = 0; alias_idx < alias_count; alias_idx++) {
+    const TileAlias *alias = &aliases[alias_idx];
+    const size_t len = strlen(alias->typed);
+    if (len > found_len && strncmp(text, alias->typed, len) == 0 &&
+        alias_applies(alias->ld, ld->name)) {
+      found = alias;
+      found_len = len;
+    }
+  }
+  return found;
+}
 
 void tui_tile_key_reset(TuiTileKeyState *state) {
   state->bracket = false;
@@ -16,24 +120,30 @@ void tui_tile_key_reset(TuiTileKeyState *state) {
   state->skip[0] = '\0';
 }
 
-// Copies `text` into `out`, ASCII letters uppercased and "." / "-" read
-// as the middle dot, so it compares with the tiles' uppercase faces.
-static void fold_text(const char *text, char *out, size_t out_size) {
+// Copies `text` into `out`, each alias of `ld` replaced by its letters
+// and ASCII letters uppercased, so it compares with the tiles'
+// uppercase faces.
+static void fold_text(const LetterDistribution *ld, const char *text, char *out,
+                      size_t out_size) {
   size_t used = 0;
-  for (const char *ch = text; *ch != '\0' && used + 1 < out_size; ch++) {
-    if (*ch == '.' || *ch == '-') {
-      if (used + sizeof(middle_dot) > out_size) {
+  for (const char *ch = text; *ch != '\0' && used + 1 < out_size;) {
+    const TileAlias *alias = alias_at(ld, ch);
+    if (alias != NULL) {
+      const size_t letters_len = strlen(alias->letters);
+      if (used + letters_len + 1 > out_size) {
         break;
       }
-      memcpy(out + used, middle_dot, sizeof(middle_dot) - 1);
-      used += sizeof(middle_dot) - 1;
-    } else {
-      char folded = *ch;
-      if (folded >= 'a' && folded <= 'z') {
-        folded = (char)(folded - 'a' + 'A');
-      }
-      out[used++] = folded;
+      memcpy(out + used, alias->letters, letters_len);
+      used += letters_len;
+      ch += strlen(alias->typed);
+      continue;
     }
+    char folded = *ch;
+    if (folded >= 'a' && folded <= 'z') {
+      folded = (char)(folded - 'a' + 'A');
+    }
+    out[used++] = folded;
+    ch++;
   }
   out[used] = '\0';
 }
@@ -63,7 +173,7 @@ static bool face_matches(const LetterDistribution *ld, int ml, const char *raw,
 
 int tui_tile_for_text(const LetterDistribution *ld, const char *text) {
   char folded[TUI_TILE_TEXT_MAX * 2];
-  fold_text(text, folded, sizeof(folded));
+  fold_text(ld, text, folded, sizeof(folded));
   for (int ml = 1; ml < ld_get_size(ld); ml++) {
     if (face_matches(ld, ml, text, folded, false)) {
       return ml;
@@ -76,7 +186,7 @@ int tui_tile_for_text(const LetterDistribution *ld, const char *text) {
 // several.
 static int only_extension(const LetterDistribution *ld, const char *text) {
   char folded[TUI_TILE_TEXT_MAX * 2];
-  fold_text(text, folded, sizeof(folded));
+  fold_text(ld, text, folded, sizeof(folded));
   int found = -1;
   for (int ml = 1; ml < ld_get_size(ld); ml++) {
     if (face_matches(ld, ml, text, folded, true)) {
@@ -94,7 +204,7 @@ static int only_extension(const LetterDistribution *ld, const char *text) {
 static void set_skip(const LetterDistribution *ld, TuiTileKeyState *state,
                      int ml, const char *typed) {
   char folded[TUI_TILE_TEXT_MAX * 2];
-  fold_text(typed, folded, sizeof(folded));
+  fold_text(ld, typed, folded, sizeof(folded));
   const char *face = ld->ld_ml_to_hl[ml];
   const size_t typed_len = strlen(folded);
   (void)snprintf(state->skip, sizeof(state->skip), "%s",
@@ -105,7 +215,7 @@ TuiTileKeyAction tui_tile_key(const LetterDistribution *ld,
                               TuiTileKeyState *state, const char *key,
                               const char *last_tile, int *out_ml) {
   char folded_key[TUI_TILE_TEXT_MAX];
-  fold_text(key, folded_key, sizeof(folded_key));
+  fold_text(ld, key, folded_key, sizeof(folded_key));
   if (state->skip[0] != '\0') {
     const size_t key_len = strlen(folded_key);
     if (key_len > 0 && strncmp(state->skip, folded_key, key_len) == 0) {
@@ -285,6 +395,36 @@ bool tui_tiles_valid(const LetterDistribution *ld, const char *text, int len,
     pos += token_len;
   }
   return true;
+}
+
+void tui_tiles_canonical_rack(const LetterDistribution *ld, const char *text,
+                              int len, char *out, size_t out_size) {
+  size_t used = 0;
+  out[0] = '\0';
+  for (int pos = 0; pos < len && text[pos] != '\0';) {
+    int token_len = tui_tile_token_len(text + pos);
+    if (token_len > len - pos) {
+      token_len = len - pos;
+    }
+    const bool open_bracket =
+        text[pos] == '[' && text[pos + token_len - 1] != ']';
+    char face[TUI_TILE_TEXT_MAX];
+    tui_tile_token_face(text + pos, token_len, face, sizeof(face));
+    const int ml = open_bracket ? -1 : tui_tile_for_text(ld, face);
+    char token[TUI_TILE_TEXT_MAX + 2];
+    if (ml > 0) {
+      tui_tile_token(ld, ml, false, token, sizeof(token));
+    } else {
+      (void)snprintf(token, sizeof(token), "%.*s", token_len, text + pos);
+    }
+    const size_t token_bytes = strlen(token);
+    if (used + token_bytes + 1 > out_size) {
+      break;
+    }
+    memcpy(out + used, token, token_bytes + 1);
+    used += token_bytes;
+    pos += token_len;
+  }
 }
 
 enum { SORT_MAX_TILES = 32, SORT_UNKNOWN_RANK = 1 << 20 };
