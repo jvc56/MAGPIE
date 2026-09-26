@@ -7,6 +7,7 @@
 #include "klv.h"
 #include "kwg.h"
 #include "pat.h"
+#include "pat_file.h"
 #include "rack_info_table.h"
 #include "wmp.h"
 #include "word_info_table.h"

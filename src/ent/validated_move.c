@@ -20,6 +20,7 @@
 #include "letter_distribution.h"
 #include "move.h"
 #include "pat.h"
+#include "pat_eval.h"
 #include "player.h"
 #include "rack.h"
 #include "static_eval.h"
