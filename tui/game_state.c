@@ -1272,6 +1272,11 @@ static void canonicalize_history_move(const char *display, char *out,
   playthrough_parens_to_dots(display, out, out_cap);
 }
 
+void tui_history_move_to_engine(const char *display, char *out,
+                                size_t out_size) {
+  canonicalize_history_move(display, out, out_size);
+}
+
 // Shared replay core. Resets the engine and applies committed
 // turns in [0, up_to) (up_to < 0 means "all of history"). When
 // record_errors is true, clears every entry's error_str first and
