@@ -245,7 +245,6 @@ typedef enum {
   ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_PAT_LABEL_PLIES,
-  ARG_TOKEN_PAT_COMBINE_GAMMA,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
   ARG_TOKEN_P1_SIM_MARGIN_FORECAST,
@@ -437,8 +436,6 @@ struct Config {
   bool write_rack_equity_csv;
   // Plies of net result a PAT training label spans.
   int pat_label_plies;
-  // See PATWeights.combine_gamma; used when patgen bootstraps weights.
-  double pat_combine_gamma;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
   bool p1_sim_margin_forecast;
@@ -1168,12 +1165,6 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
             "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
             "and 'patrolloutclasses2' set one.";
     break;
-  case ARG_TOKEN_PAT_COMBINE_GAMMA:
-    usages[0] = "<gamma>";
-    *text = "Specifies how much a second route to danger counts once the "
-            "worst one is counted, when training PAT weights: 1 "
-            "adds every scan unit, 0 charges only the worst.";
-    break;
   case ARG_TOKEN_PAT_LABEL_PLIES:
     usages[0] = "<plies>";
     *text = "Specifies how many plies of net result a PAT training "
@@ -1239,7 +1230,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
-    case ARG_TOKEN_PAT_COMBINE_GAMMA:
     case ARG_TOKEN_PAT_LABEL_PLIES:
       add_pat_help_arg(arg_token, usages, examples, &text);
       break;
@@ -2630,7 +2620,6 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
         ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
         ARG_TOKEN_PAT_LABEL_PLIES,         /* patplies */
-        ARG_TOKEN_PAT_COMBINE_GAMMA,       /* patgamma */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
         ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
         ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
@@ -4368,7 +4357,7 @@ void impl_pat_gen(Config *config, ErrorStack *error_stack) {
     char *bootstrap_name =
         get_formatted_string("%s_pat", ld_get_name(config_get_ld(config)));
     pat = pat_create_zeroed(bootstrap_name);
-    pat_set_combine_gamma(pat, config->pat_combine_gamma);
+    pat_set_combine_gamma(pat, PAT_TRAINING_COMBINE_GAMMA);
     free(bootstrap_name);
     players_data_set_data(config->players_data, PLAYERS_DATA_TYPE_PAT, 0, pat);
     players_data_set_data(config->players_data, PLAYERS_DATA_TYPE_PAT, 1, pat);
@@ -8383,11 +8372,6 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->p1_sim_with_inference = config->sim_with_inference;
     config->p2_sim_with_inference = config->sim_with_inference;
   }
-  config_load_double(config, ARG_TOKEN_PAT_COMBINE_GAMMA, 0.0, 1.0,
-                     &config->pat_combine_gamma, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
   config_load_int(config, ARG_TOKEN_PAT_LABEL_PLIES, 1, PAT_MAX_LABEL_PLIES,
                   &config->pat_label_plies, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -10066,7 +10050,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, "mi1", 1, 1);
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
   arg(ARG_TOKEN_PAT_LABEL_PLIES, "patplies", 1, 1);
-  arg(ARG_TOKEN_PAT_COMBINE_GAMMA, "patgamma", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_MARGIN_FORECAST, "sm1", 1, 1);
@@ -10172,7 +10155,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->show_mistakes = false;
   config->sim_with_inference = true;
   config->pat_label_plies = 1;
-  config->pat_combine_gamma = PAT_TRAINING_COMBINE_GAMMA;
   config->sim_margin_forecast = false;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
@@ -10777,10 +10759,6 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PAT_LABEL_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->pat_label_plies);
-      break;
-    case ARG_TOKEN_PAT_COMBINE_GAMMA:
-      config_add_double_setting_to_string_builder(config, sb, arg_token,
-                                                  config->pat_combine_gamma);
       break;
     case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

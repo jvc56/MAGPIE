@@ -112,8 +112,8 @@ enum {
 // PATWeights.combine_gamma). Absent means 1.0, the plain sum.
 #define PAT_GAMMA_ROW_PREFIX "gamma,"
 #define PAT_DEFAULT_COMBINE_GAMMA 1.0
-// What training uses unless told otherwise: a second route to danger is
-// worth half a first.
+// The gamma of weights patgen bootstraps from zero: a second route to danger
+// is worth half a first.
 #define PAT_TRAINING_COMBINE_GAMMA 0.5
 
 // Optional row: the fraction of a unit's penalty credited back when the
