@@ -265,13 +265,27 @@ static void render_history_move_editor(
                               state->rack_sort, leave_disp, sizeof(leave_disp));
   }
   const bool leave_empty = leave_disp[0] == '\0';
+  // Focused but not typed in: the derived leave shows dim as a
+  // placeholder, which typing replaces (an empty field keeps it).
+  char leave_placeholder[24];
+  leave_placeholder[0] = '\0';
+  if (leave_focused && state->edit_leave_len == 0 &&
+      state->edit_move_leave[0] != '\0') {
+    format_alphagram_for_sort(state->edit_move_leave, state->ld,
+                              state->rack_sort, leave_placeholder,
+                              sizeof(leave_placeholder));
+  }
+  const int placeholder_len = (int)strlen(leave_placeholder);
   // Ensure the zone is wide enough for the cursor when focused
   // — at least 1 cell wider than the text so an end-of-buffer
   // cursor has somewhere to sit. Caps at 8 cells (max practical
   // leave length + cursor).
   int leave_zone_w = leave_empty ? 1 : (int)strlen(leave_disp);
   if (leave_focused) {
-    leave_zone_w = state->edit_leave_len + 1;
+    leave_zone_w =
+        (state->edit_leave_len > placeholder_len ? state->edit_leave_len
+                                                 : placeholder_len) +
+        1;
     if (leave_zone_w < 1) {
       leave_zone_w = 1;
     }
@@ -331,7 +345,18 @@ static void render_history_move_editor(
     if (leave_focused) {
       // Render each char of edit_leave_buf left-justified; the
       // placeholder "·" only shows when the field is empty AND
-      // not focused.
+      // not focused. An untyped focused field shows the derived
+      // leave dim instead.
+      for (int j = 0; j < placeholder_len; j++) {
+        const int col = leave_zone_left + j;
+        if (col > leave_zone_right) {
+          break;
+        }
+        char ch[2] = {leave_placeholder[j], '\0'};
+        theme_apply_bg(plane, zone_bg);
+        theme_apply_fg(plane, theme->dim_fg);
+        ncplane_putstr_yx(plane, row, col, ch);
+      }
       for (int j = 0; j < state->edit_leave_len; j++) {
         const int col = leave_zone_left + j;
         if (col > leave_zone_right) {
@@ -356,6 +381,8 @@ static void render_history_move_editor(
       char ch[2] = {' ', '\0'};
       if (state->edit_leave_cursor < state->edit_leave_len) {
         ch[0] = state->edit_leave_buf[state->edit_leave_cursor];
+      } else if (state->edit_leave_cursor < placeholder_len) {
+        ch[0] = leave_placeholder[state->edit_leave_cursor];
       }
       theme_apply_fg(plane, theme->bg);
       theme_apply_bg(plane, white_bg);
