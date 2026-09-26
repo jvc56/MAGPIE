@@ -39,6 +39,7 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
+#include "../ent/root_leaves.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -152,6 +153,9 @@ typedef enum {
   ARG_TOKEN_P2_PAT_CANDIDATES,
   ARG_TOKEN_P2_PAT_ROLLOUT,
   ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES,
+  ARG_TOKEN_ROOT_LEAVES,
+  ARG_TOKEN_P1_ROOT_LEAVES,
+  ARG_TOKEN_P2_ROOT_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
@@ -445,6 +449,9 @@ struct Config {
   bool p2_sim_with_inference;
   bool p1_sim_margin_forecast;
   bool p2_sim_margin_forecast;
+  // Contextual leaves ranking each player's sim root candidates (see
+  // -rootleaves); owned, NULL for plain move generation.
+  RootLeaves *root_leaves[2];
   // Set when the most recent sim ran inference internally and it completed
   // (not interrupted). Separate from inference_results's own valid flag,
   // which a sim-driven inference deliberately does not set so that an
@@ -1742,6 +1749,20 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
              "and 'patrolloutclasses2' set one.";
       break;
+    case ARG_TOKEN_ROOT_LEAVES:
+    case ARG_TOKEN_P1_ROOT_LEAVES:
+    case ARG_TOKEN_P2_ROOT_LEAVES:
+      usages[0] = "<klv3_name_or_none>";
+      examples[0] = "CSW24_klv3_ctx";
+      examples[1] = "none";
+      text = "Ranks the root candidates of the player's autoplay "
+             "simulations and PlayChooser sims with the contextual (KLV3) "
+             "leave values in data/lexica/<name>.klv3, trained over the "
+             "player's own leaves. Rollouts keep the ordinary leaves, so no "
+             "leave cache is affected. none reverts to plain move "
+             "generation, the default. 'rootleaves' sets both players; "
+             "'rootleaves1' and 'rootleaves2' set one.";
+      break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       usages[0] = "<sort_type>";
@@ -2557,6 +2578,9 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PAT_ROLLOUT_CLASSES,    /* patrolloutclasses */
         ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, /* patrolloutclasses1 */
         ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, /* patrolloutclasses2 */
+        ARG_TOKEN_ROOT_LEAVES,            /* rootleaves */
+        ARG_TOKEN_P1_ROOT_LEAVES,         /* rootleaves1 */
+        ARG_TOKEN_P2_ROOT_LEAVES,         /* rootleaves2 */
         ARG_TOKEN_GAME_VARIANT,           /* var */
         ARG_TOKEN_P1_USE_WMP,             /* w1 */
         ARG_TOKEN_P2_USE_WMP,             /* w2 */
@@ -4148,6 +4172,8 @@ void config_fill_autoplay_args(const Config *config,
 
   config_set_sim_args_pat_rollout(config, 0, &autoplay_args->p1_sim_args);
   config_set_sim_args_pat_rollout(config, 1, &autoplay_args->p2_sim_args);
+  autoplay_args->p1_sim_args.root_leaves = config->root_leaves[0];
+  autoplay_args->p2_sim_args.root_leaves = config->root_leaves[1];
 
   autoplay_args->pat_label_plies = config->pat_label_plies;
 
@@ -4174,6 +4200,7 @@ void config_fill_autoplay_args(const Config *config,
             .pat_rollout_disabled_classes_mask =
                 players_data_get_pat_rollout_disabled_classes_mask(
                     config->players_data, player_index),
+            .root_leaves = config->root_leaves[player_index],
         };
   }
 }
@@ -8766,6 +8793,41 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  // Root-candidate contextual leaves, per player; unset keeps what is set.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const char *root_leaves_name = config_get_player_arg_value(
+        config, ARG_TOKEN_ROOT_LEAVES, ARG_TOKEN_P1_ROOT_LEAVES,
+        ARG_TOKEN_P2_ROOT_LEAVES, player_index);
+    if (root_leaves_name == NULL) {
+      continue;
+    }
+    root_leaves_destroy(config->root_leaves[player_index]);
+    config->root_leaves[player_index] = NULL;
+    if (strings_equal(root_leaves_name, "none")) {
+      continue;
+    }
+    config->root_leaves[player_index] =
+        root_leaves_create(config->data_paths, root_leaves_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const RootLeaves *root_leaves = config->root_leaves[player_index];
+    if (root_leaves && config->ld &&
+        root_leaves_get_alphabet_size(root_leaves) != ld_get_size(config->ld)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_ROOT_LEAVES_MISMATCH,
+          get_formatted_string(
+              "root leaves '%s' have %d tile types, but letter distribution "
+              "'%s' has %d",
+              root_leaves_get_name(root_leaves),
+              root_leaves_get_alphabet_size(root_leaves),
+              ld_get_name(config->ld), ld_get_size(config->ld)));
+      return;
+    }
+  }
+
   // The PAT's lexicon tables (hook flexibility, floater extension sets,
   // through tables) belong to the lexicon, so rebuild them from each
   // player's own KWG whenever data may have changed (cheap: one walk).
@@ -9892,6 +9954,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // win_pcts is loaded lazily on first use (simulation, etc.)
   config->win_pcts = NULL;
   config->win_pct_explicit_name = NULL;
+  config->root_leaves[0] = NULL;
+  config->root_leaves[1] = NULL;
 
   // Command parsed from string input
 #define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
@@ -9992,6 +10056,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_CANDIDATES, "patcand2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT, "patrollout2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
+  arg(ARG_TOKEN_ROOT_LEAVES, "rootleaves", 1, 1);
+  arg(ARG_TOKEN_P1_ROOT_LEAVES, "rootleaves1", 1, 1);
+  arg(ARG_TOKEN_P2_ROOT_LEAVES, "rootleaves2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -10244,6 +10311,8 @@ void config_destroy(Config *config) {
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
+  root_leaves_destroy(config->root_leaves[0]);
+  root_leaves_destroy(config->root_leaves[1]);
   thread_control_destroy(config->thread_control);
   game_destroy(config->game);
   game_destroy(config->game_backup);
@@ -10564,6 +10633,19 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           !players_data_get_pat_rollout_disabled(config->players_data, 1));
       break;
+    case ARG_TOKEN_ROOT_LEAVES:
+      // Set per player.
+      break;
+    case ARG_TOKEN_P1_ROOT_LEAVES:
+    case ARG_TOKEN_P2_ROOT_LEAVES: {
+      const RootLeaves *root_leaves =
+          config->root_leaves[arg_token == ARG_TOKEN_P1_ROOT_LEAVES ? 0 : 1];
+      if (root_leaves) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token, root_leaves_get_name(root_leaves));
+      }
+      break;
+    }
     case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES: {
       char *classes_str = pat_classes_mask_to_string(
           PAT_CLASS_MASK_ALL &

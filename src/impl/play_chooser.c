@@ -30,6 +30,7 @@
 #include "gameplay.h"
 #include "move_gen.h"
 #include "peg.h"
+#include "root_candidates.h"
 #include "simmer.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -456,19 +457,7 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
   MoveList *move_list = play_chooser->move_list;
   move_list_reset(move_list);
-  const MoveGenArgs gen_args = {
-      .game = game,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .move_list = move_list,
-      .tiles_played_bv = NULL,
-      .initial_tiles_bv = 0,
-  };
-  generate_moves(&gen_args);
+  generate_root_candidates(strategy->root_leaves, game, move_list);
   const int num_candidates = move_list_get_count(move_list);
   if (num_candidates == 0) {
     return false;

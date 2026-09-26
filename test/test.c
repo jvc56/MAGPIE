@@ -59,6 +59,7 @@
 #include "rack_list_test.h"
 #include "rack_test.h"
 #include "random_variable_test.h"
+#include "root_leaves_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_test.h"
@@ -146,6 +147,7 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"pat", test_pat},
+    {"rootleaves", test_root_leaves},
     {"winpctcoverage", test_win_pct_coverage},
     {"winpctstate", test_win_pct_state},
     {"winpctrecord", test_win_pct_record},

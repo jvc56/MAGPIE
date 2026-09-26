@@ -4,6 +4,7 @@
 #include "../ent/game.h"
 #include "../ent/game_timer.h"
 #include "../ent/move.h"
+#include "../ent/root_leaves.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
@@ -101,6 +102,9 @@ typedef struct PlayChooserStrategy {
   // SimArgs.pat_rollout_disabled). Zero/unset: PAT on, every class.
   bool pat_rollout_disabled;
   uint32_t pat_rollout_disabled_classes_mask;
+  // Contextual leaves that rank the midgame sim's root candidates (see
+  // generate_root_candidates); NULL for plain move generation. Not owned.
+  const RootLeaves *root_leaves;
   uint64_t seed;
 } PlayChooserStrategy;
 

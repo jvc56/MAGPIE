@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 // Transfer little-endian uint32 arrays without changing the write buffer.
 // Empty arrays succeed without accessing the buffer or stream. Callers own
@@ -36,6 +37,36 @@ static inline bool fread_le_uint32s(uint32_t *values, size_t count,
 #if !IS_LITTLE_ENDIAN
   for (size_t index = 0; index < count; index++) {
     values[index] = le32toh(values[index]);
+  }
+#endif
+  return true;
+}
+
+// Transfer little-endian uint16 arrays; the same contract as above.
+static inline bool fread_le_uint16s(uint16_t *values, size_t count,
+                                    FILE *stream) {
+  if (count != 0 && fread(values, sizeof(uint16_t), count, stream) != count) {
+    return false;
+  }
+#if !IS_LITTLE_ENDIAN
+  for (size_t index = 0; index < count; index++) {
+    values[index] = le16toh(values[index]);
+  }
+#endif
+  return true;
+}
+
+// Transfer little-endian IEEE-754 float32 arrays; the same contract as above.
+static inline bool fread_le_floats(float *values, size_t count, FILE *stream) {
+  if (count != 0 && fread(values, sizeof(float), count, stream) != count) {
+    return false;
+  }
+#if !IS_LITTLE_ENDIAN
+  for (size_t index = 0; index < count; index++) {
+    uint32_t bits;
+    memcpy(&bits, &values[index], sizeof(bits));
+    bits = le32toh(bits);
+    memcpy(&values[index], &bits, sizeof(bits));
   }
 #endif
   return true;

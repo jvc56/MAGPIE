@@ -8,6 +8,7 @@
 #define DAWG_PACKED_EXTENSION ".pdawg"
 #define WORDMAP_EXTENSION ".wmp"
 #define KLV_EXTENSION ".klv2"
+#define KLV3_EXTENSION ".klv3"
 #define RACK_INFO_TABLE_EXTENSION ".rit"
 #define WORD_INFO_TABLE_EXTENSION ".wit"
 #define PAT_EXTENSION ".pat"
@@ -30,6 +31,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_DAWG_PACKED,
   DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
   DATA_FILEPATH_TYPE_PAT,
+  DATA_FILEPATH_TYPE_KLV3,
 } data_filepath_t;
 
 char *get_filepath(const char *data_path, const char *data_name,

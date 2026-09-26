@@ -8,6 +8,7 @@
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
+#include "../ent/root_leaves.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include <math.h>
@@ -58,6 +59,9 @@ typedef struct SimArgs {
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
   bool use_margin_forecast;
+  // Contextual leaves that rank the root candidates when set (see
+  // generate_root_candidates); NULL keeps plain move generation. Not owned.
+  const RootLeaves *root_leaves;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -122,6 +126,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->use_margin_forecast = use_margin_forecast;
+  sim_args->root_leaves = NULL;
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger
