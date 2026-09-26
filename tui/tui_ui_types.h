@@ -26,26 +26,26 @@ typedef enum {
 // Play-vs-computer setup modal. A single modal with everything: editable
 // human + computer names, who moves first, time control, language /
 // lexicon, and the simmer (computer-strength) params, then Start. The
-// human's seat is derived from the first-move choice.
+// human's seat is derived from the first-player choice. Overtime is one
+// row: none, up to N minutes, or unlimited (the rule and its cap).
 typedef enum {
   TUI_PLAY_SETUP_HUMAN_NAME = 0,
   TUI_PLAY_SETUP_COMPUTER_NAME = 1,
-  TUI_PLAY_SETUP_FIRST_MOVE = 2,
+  TUI_PLAY_SETUP_FIRST_PLAYER = 2,
   TUI_PLAY_SETUP_TIME = 3,
   TUI_PLAY_SETUP_OVERTIME = 4,
-  TUI_PLAY_SETUP_OVERTIME_CAP = 5,
-  TUI_PLAY_SETUP_TIME_PENALTY = 6,
-  TUI_PLAY_SETUP_CHALLENGE = 7,
-  TUI_PLAY_SETUP_CHALLENGE_PENALTY = 8,
-  TUI_PLAY_SETUP_LANGUAGE = 9,
-  TUI_PLAY_SETUP_LEXICON = 10,
-  TUI_PLAY_SETUP_SIM_PLIES = 11,
-  TUI_PLAY_SETUP_SIM_CANDIDATES = 12,
-  TUI_PLAY_SETUP_START = 13,
-  TUI_PLAY_SETUP_ITEM_COUNT = 14,
+  TUI_PLAY_SETUP_TIME_PENALTY = 5,
+  TUI_PLAY_SETUP_CHALLENGE = 6,
+  TUI_PLAY_SETUP_CHALLENGE_PENALTY = 7,
+  TUI_PLAY_SETUP_LANGUAGE = 8,
+  TUI_PLAY_SETUP_LEXICON = 9,
+  TUI_PLAY_SETUP_SIM_PLIES = 10,
+  TUI_PLAY_SETUP_SIM_CANDIDATES = 11,
+  TUI_PLAY_SETUP_START = 12,
+  TUI_PLAY_SETUP_ITEM_COUNT = 13,
 } TuiPlaySetupItem;
 
-// First-move choice on the play-setup modal.
+// First-player choice on the play-setup modal.
 typedef enum {
   TUI_PLAY_FIRST_RANDOM = 0,
   TUI_PLAY_FIRST_HUMAN = 1,

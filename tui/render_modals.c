@@ -880,12 +880,8 @@ void tui_play_setup_enabled_rows(UiOvertimeRule overtime_rule, int time_seconds,
   }
   if (time_seconds <= 0) {
     out_enabled[TUI_PLAY_SETUP_OVERTIME] = false;
-    out_enabled[TUI_PLAY_SETUP_OVERTIME_CAP] = false;
     out_enabled[TUI_PLAY_SETUP_TIME_PENALTY] = false;
     return;
-  }
-  if (overtime_rule != UI_OVERTIME_MAX) {
-    out_enabled[TUI_PLAY_SETUP_OVERTIME_CAP] = false;
   }
   if (overtime_rule == UI_OVERTIME_FLAG) {
     out_enabled[TUI_PLAY_SETUP_TIME_PENALTY] = false;
@@ -903,16 +899,48 @@ static const char *first_move_label(int first_move) {
   }
 }
 
-static const char *overtime_rule_label(UiOvertimeRule overtime_rule) {
+int tui_overtime_step(UiOvertimeRule overtime_rule, int cap_minutes) {
+  if (overtime_rule == UI_OVERTIME_FLAG) {
+    return 0;
+  }
+  if (overtime_rule == UI_OVERTIME_UNLIMITED) {
+    return TUI_OVERTIME_STEP_COUNT - 1;
+  }
+  if (cap_minutes < 1) {
+    return 1;
+  }
+  return cap_minutes > TUI_OVERTIME_MAX_CAP_MINUTES
+             ? TUI_OVERTIME_MAX_CAP_MINUTES
+             : cap_minutes;
+}
+
+void tui_overtime_from_step(int step, UiOvertimeRule *overtime_rule,
+                            int *cap_minutes) {
+  if (step <= 0) {
+    *overtime_rule = UI_OVERTIME_FLAG;
+  } else if (step >= TUI_OVERTIME_STEP_COUNT - 1) {
+    *overtime_rule = UI_OVERTIME_UNLIMITED;
+  } else {
+    *overtime_rule = UI_OVERTIME_MAX;
+    *cap_minutes = step;
+  }
+}
+
+// The Overtime row's value: "none", "up to 5 min", or "unlimited".
+static void overtime_label(UiOvertimeRule overtime_rule, int cap_minutes,
+                           char *out, size_t out_size) {
   switch (overtime_rule) {
   case UI_OVERTIME_FLAG:
-    return "flag at 0:00";
+    (void)snprintf(out, out_size, "none");
+    break;
   case UI_OVERTIME_MAX:
-    return "max overtime";
+    (void)snprintf(out, out_size, "up to %d min", cap_minutes);
+    break;
   case UI_OVERTIME_UNLIMITED:
   case UI_OVERTIME_RULE_COUNT:
   default:
-    return "unlimited";
+    (void)snprintf(out, out_size, "unlimited");
+    break;
   }
 }
 
@@ -987,9 +1015,9 @@ void tui_game_render_play_setup(
                         NAME_ZONE_W, "Computer name",
                         computer_name != NULL ? computer_name : "");
   const char *first_value = first_move_label(first_move);
-  format_setup_row(buf[TUI_PLAY_SETUP_FIRST_MOVE], ROW_BUF, CONTENT_W,
-                   "First move", first_value,
-                   focus == TUI_PLAY_SETUP_FIRST_MOVE);
+  format_setup_row(buf[TUI_PLAY_SETUP_FIRST_PLAYER], ROW_BUF, CONTENT_W,
+                   "First player", first_value,
+                   focus == TUI_PLAY_SETUP_FIRST_PLAYER);
 
   // Time control — same preset resolution as the Watch-setup modal.
   const int preset_idx = tui_time_picker_closest_index(time_seconds);
@@ -1010,10 +1038,11 @@ void tui_game_render_play_setup(
   format_setup_row(buf[TUI_PLAY_SETUP_TIME], ROW_BUF, CONTENT_W, "Time",
                    time_value, focus == TUI_PLAY_SETUP_TIME);
 
-  // Overtime rule + its dependents. Disabled rows render their value
-  // dimmed without the ◀ ▶ adjusters (the cap only matters under
-  // "max overtime"; penalties don't exist under "flag at 0:00").
-  const char *overtime_value = overtime_rule_label(overtime_rule);
+  // Overtime and its penalty. Disabled rows render their value dimmed
+  // without the ◀ ▶ adjusters (there's no penalty without overtime).
+  char overtime_value[24];
+  overtime_label(overtime_rule, overtime_cap_minutes, overtime_value,
+                 sizeof(overtime_value));
   format_setup_row(buf[TUI_PLAY_SETUP_OVERTIME], ROW_BUF, CONTENT_W, "Overtime",
                    overtime_value,
                    focus == TUI_PLAY_SETUP_OVERTIME &&
@@ -1021,17 +1050,6 @@ void tui_game_render_play_setup(
   // Disabled rows show a plain-ASCII "n/a" — format_setup_row pads by
   // byte length, so a multi-byte glyph (em dash) would right-align two
   // columns short.
-  char cap_value[24];
-  if (enabled[TUI_PLAY_SETUP_OVERTIME_CAP]) {
-    (void)snprintf(cap_value, sizeof(cap_value), "%d min",
-                   overtime_cap_minutes);
-  } else {
-    (void)snprintf(cap_value, sizeof(cap_value), "n/a");
-  }
-  format_setup_row(buf[TUI_PLAY_SETUP_OVERTIME_CAP], ROW_BUF, CONTENT_W,
-                   "Overtime cap", cap_value,
-                   focus == TUI_PLAY_SETUP_OVERTIME_CAP &&
-                       enabled[TUI_PLAY_SETUP_OVERTIME_CAP]);
   const char *penalty_value = "n/a";
   if (enabled[TUI_PLAY_SETUP_TIME_PENALTY]) {
     penalty_value = time_penalty_rate == UI_TIME_PENALTY_1_PER_SEC
@@ -1184,14 +1202,13 @@ const char *tui_modal_help(TuiModalState modal, int focus) {
     case TUI_PLAY_SETUP_HUMAN_NAME:
     case TUI_PLAY_SETUP_COMPUTER_NAME:
       return "Name shown in the history and score pills.";
-    case TUI_PLAY_SETUP_FIRST_MOVE:
+    case TUI_PLAY_SETUP_FIRST_PLAYER:
       return "Who plays first.";
     case TUI_PLAY_SETUP_TIME:
       return "Clock for each player.";
     case TUI_PLAY_SETUP_OVERTIME:
-      return "What happens when a clock runs out.";
-    case TUI_PLAY_SETUP_OVERTIME_CAP:
-      return "Overtime allowed before losing on time.";
+      return "Time allowed past 0:00: none loses on time at 0:00; beyond the "
+             "limit also loses.";
     case TUI_PLAY_SETUP_TIME_PENALTY:
       return "Points deducted for time used in overtime.";
     case TUI_PLAY_SETUP_CHALLENGE:

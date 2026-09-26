@@ -18,6 +18,18 @@ void tui_game_render_play_setup(
     const char *language, const char *lexicon, int sim_plies,
     int sim_candidates);
 
+// The Play-setup Overtime row's one scale: step 0 is no overtime (lose at
+// 0:00), 1..TUI_OVERTIME_MAX_CAP_MINUTES a cap in minutes, the last step
+// unlimited. Maps the overtime rule and cap to a step and back (a step
+// keeps `*cap_minutes` unless it sets one).
+enum {
+  TUI_OVERTIME_MAX_CAP_MINUTES = 10,
+  TUI_OVERTIME_STEP_COUNT = TUI_OVERTIME_MAX_CAP_MINUTES + 2,
+};
+int tui_overtime_step(UiOvertimeRule overtime_rule, int cap_minutes);
+void tui_overtime_from_step(int step, UiOvertimeRule *overtime_rule,
+                            int *cap_minutes);
+
 // Which Play-setup rows are adjustable given the current rule
 // settings: the overtime-cap row only applies under UI_OVERTIME_MAX,
 // the time-penalty row never applies under UI_OVERTIME_FLAG (the game
