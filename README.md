@@ -345,12 +345,24 @@ magpie> set -lex CSW24 -pat CSW24
 | `patcand` | `true` | Use PAT in the player's own move generation: static play and the candidates a simulation starts from. |
 | `patclasses` | `all` | Which PAT classes that move generation uses: a comma-separated list from `tws`, `dws`, `tls`, `dls`, `qws`, `qls` and `windows`. |
 | `patrollout` | `true` | Use PAT in the rollouts of the player's simulations (both sides' plies, each with its own weights). |
-| `patrolloutclasses` | `all` | Which PAT classes the rollouts use, for example `tws,windows` for cheaper rollouts. |
+| `patrolloutclasses` | `tws,windows` (`qws,tws,windows` on 21x21) | Which PAT classes the rollouts use; `all` uses every class. |
 
-For example, full PAT for the candidates and a cheaper subset in the rollouts:
+Rollouts default to a cheaper subset of classes, because they generate many more positions than candidate selection does. The defaults keep most of full PAT's value at a fraction of its cost. These numbers are from CSW24 static self-play with the shipped weights; "vs full PAT" is full PAT's spread per game pair against the subset, head to head:
+
+| Board | Classes | Time vs no PAT | vs full PAT |
+|---|---|---|---|
+| 15x15 | `tws` | 1.35x | +2.03 ± 0.28 |
+| 15x15 | **`tws,windows`** (default) | 1.45x | +1.25 ± 0.27 |
+| 15x15 | `all` | 2.66x | — |
+| 21x21 | `tws` | 1.24x | +6.04 ± 0.70 |
+| 21x21 | `tws,windows` | 1.37x | +2.18 ± 0.67 |
+| 21x21 | **`qws,tws,windows`** (default) | 1.35x | +1.64 ± 0.67 |
+| 21x21 | `all` | 1.94x | — |
+
+For example, full PAT everywhere, rollouts included:
 
 ```
-magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses tws,windows
+magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses all
 ```
 
 `notes/pat_training.md` describes how they are trained (`test/pat_build.sh` and `test/pat_build_super.sh` run the whole process for a lexicon) and `notes/pat_utility_correction.md` the utility correction.
