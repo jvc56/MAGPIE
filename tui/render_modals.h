@@ -89,32 +89,20 @@ void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
 void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
                                   int focus);
 
-// Settings modal; rows are TuiSettingsItem.
-// `board_scale` is 1 or 2; the scale row is grayed out when 2x is
-// unavailable (no pixel support or font load failed). `antialias`
-// applies to the 2x render only and is grayed at 1x. `score_subscripts`
-// is also 2x-only. `border_thickness` is the current pixel-grid
-// thickness (0..6). `pixel_supported` is true when the host terminal
-// can render pixel graphics. `font_available` is true when the bundled
-// TTF loaded. `premium_labels` selects the TW/tw/none labeling style
-// for premium squares. `blank_uppercase` controls whether played blanks
-// render uppercase (with blank_tile_fg) or lowercase (with tile_fg).
-void tui_game_render_settings(
-    struct ncplane *plane, const Theme *theme, int focus, int board_scale,
-    bool antialias, TuiScoreSubscripts score_subscripts, int border_thickness,
-    bool pixel_supported, bool font_available, TuiPremiumLabels premium_labels,
-    bool blank_uppercase, TuiRackSort rack_sort, bool load_rit);
+// Settings dialog, or a panel menu's settings section: `row_count` rows
+// of `labels` with their `values` (NULL for a row without one, like
+// Back). `heading` rows are section titles, never focused; `unavailable`
+// rows are dimmed but still focusable, so the help line can say why.
+// Scrolls when the rows don't fit, keeping `focus` in view; `*scroll` is
+// the first row shown, updated here and read by click handling.
+void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
+                              const char *title, const char *const *labels,
+                              const char *const *values, const bool *heading,
+                              const bool *unavailable, int row_count, int focus,
+                              int *scroll);
 
 // One-line description of row `focus` in `modal`, shown on the
 // command-bar row while the dialog is open; NULL when there is none.
 const char *tui_modal_help(TuiModalState modal, int focus);
-
-// Which Settings rows are adjustable: Scale needs pixel graphics and
-// the bundled font, and Antialias / Subscript / Border apply only while
-// the board renders at 2x. Disabled rows render dimmed and are skipped
-// by cursor navigation / clicks, as in the setup dialogs.
-void tui_settings_enabled_rows(int board_scale, bool pixel_supported,
-                               bool font_available,
-                               bool out_enabled[TUI_SETTINGS_ITEM_COUNT]);
 
 #endif
