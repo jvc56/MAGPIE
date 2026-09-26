@@ -46,6 +46,7 @@
 #include "pat_opening_sim_test.h"
 #include "pat_test.h"
 #include "path_move_lists_test.h"
+#include "pc_cands_oracle_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -213,6 +214,7 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"pcbench", test_play_chooser_benchmark},
+    {"pccands", test_pc_cands_oracle},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
     {"peg1pb", test_peg_1bag_pass_best},
