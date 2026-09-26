@@ -1741,4 +1741,9 @@ void tui_history_entry_release(TuiHistoryEntry *entry) {
     free(entry->loaded_move);
     entry->loaded_move = NULL;
   }
+  if (entry->static_moves_saved != NULL) {
+    free(entry->static_moves_saved);
+    entry->static_moves_saved = NULL;
+    entry->static_moves_saved_count = 0;
+  }
 }

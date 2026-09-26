@@ -7,11 +7,17 @@
 static const TuiSlashCommand slash_commands[] = {
     {TUI_SLASH_COPY, "copy", "Copy current position to clipboard as CGP"},
     {TUI_SLASH_EXIT, "exit", "Quit MAGPIE TUI (alias for /quit)"},
+    {TUI_SLASH_KIBITZ, "gen", "Alias for /kibitz"},
+    {TUI_SLASH_KIBITZ, "generate", "Alias for /kibitz"},
+    {TUI_SLASH_KIBITZ, "kibitz",
+     "Rank the selected turn's moves by static equity"},
     {TUI_SLASH_NEW, "new", "Start a new game"},
     {TUI_SLASH_QUIT, "quit", "Quit MAGPIE TUI"},
     {TUI_SLASH_RESUME, "resume",
      "Continue the selected turn's saved analysis (finished games)"},
     {TUI_SLASH_SETTINGS, "settings", "Open settings"},
+    {TUI_SLASH_SIM, "sim",
+     "Simulate the selected turn (continues a saved sim)"},
     {TUI_SLASH_STOP, "stop", "Stop the running analysis"},
 };
 
