@@ -11,6 +11,7 @@
 #include "render_layout.h"
 #include "render_view.h"
 #include "theme.h"
+#include "tile_input.h"
 #include <notcurses/notcurses.h>
 #include <stdio.h>
 #include <string.h>
@@ -241,7 +242,6 @@ void render_player_pill(struct ncplane *plane, const Theme *theme,
   if (rack == NULL) {
     return;
   }
-  const LetterDistribution *ld = state->ld;
   // content_left + 2 = column after the arrow / 2-space prefix.
   // + name_w = past the name. + 1 = one-col gap before the rack.
   const int rack_left = content_left + 2 + name_w + 1;
@@ -264,28 +264,16 @@ void render_player_pill(struct ncplane *plane, const Theme *theme,
                                           : theme->rack_tile1_fg);
     theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
                                           : theme->rack_tile1_bg);
+    const LetterDistribution *ld = state->ld;
     MachineLetter pill_slots[RACK_SIZE];
     const int pill_slot_count = sort_rack_for_display(
         rack, ld, state->rack_sort, pill_slots, RACK_SIZE);
     for (int i = 0;
          i < pill_slot_count && rcol + (tile_w - 1) <= rack_right_max; i++) {
       const MachineLetter ml = pill_slots[i];
-      if (halfwidth) {
-        // Halfwidth blank: plain "?" glyph. The previous ZWNJ-
-        // splicing-between-adjacent-blanks trick caused the row
-        // containing the blanks to drop out on some terminals.
-        const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-        ncplane_putstr_yx(plane, content_row, rcol, ascii);
-      } else {
-        const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
-        if (fullwidth[0] != '\0') {
-          ncplane_putstr_yx(plane, content_row, rcol, fullwidth);
-        } else {
-          const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-          ncplane_putstr_yx(plane, content_row, rcol, " ");
-          ncplane_putstr(plane, ascii);
-        }
-      }
+      char face[TUI_TILE_TEXT_MAX];
+      tile_face_cells(ld, ml, halfwidth, face, sizeof(face));
+      ncplane_putstr_yx(plane, content_row, rcol, face);
       rcol += tile_w;
     }
   }
