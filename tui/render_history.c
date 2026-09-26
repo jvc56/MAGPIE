@@ -83,9 +83,11 @@ static int wrap_error_lines(const char *text, int width, char lines[][128],
 // Number of wrapped rows the error message needs for the given
 // interior `width`. Accounts for the 2-cell "⚠ " prefix / indent
 // by wrapping the message to width-2.
+// A kept phony cross-word adds one informational row after them.
 static int history_error_rows(const TuiHistoryEntry *e, int width) {
+  const int hook_rows = e->phony_hooks[0] != '\0' ? 1 : 0;
   if (e->error_str[0] == '\0') {
-    return 0;
+    return hook_rows;
   }
   int ew = width - 2;
   if (ew < 4) {
@@ -93,7 +95,7 @@ static int history_error_rows(const TuiHistoryEntry *e, int width) {
   }
   char lines[HISTORY_ERROR_MAX_LINES][128];
   int n = wrap_error_lines(e->error_str, ew, lines, HISTORY_ERROR_MAX_LINES);
-  return n < 1 ? 1 : n;
+  return (n < 1 ? 1 : n) + hook_rows;
 }
 static int history_entry_rows(const TuiHistoryEntry *e, int width) {
   int rows = (e->end_bonus != 0 || e->challenged_off) ? 4 : 2;
@@ -662,6 +664,16 @@ static void render_history_end_bonus_rows(
   ncplane_set_styles(plane, 0);
 }
 
+// "*" right after the move text (where render_move_styled left the
+// cursor) when the play's main word is a phony the annotator kept.
+static void render_phony_mark(struct ncplane *plane, const TuiHistoryEntry *e) {
+  if (e->phony_main) {
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr(plane, "*");
+    ncplane_set_styles(plane, 0);
+  }
+}
+
 // Row 1 of a finalized entry: the move (masked for a concealed exchange),
 // its score, and the leave.
 static void
@@ -697,6 +709,7 @@ render_history_played_move(struct ncplane *plane, const Theme *theme,
     render_move_styled(plane, row, interior_left + (int)strlen(prefix),
                        e->move_str, /*hide_parens=*/true,
                        /*hide_playthrough_parens=*/false);
+    render_phony_mark(plane, e);
   }
 
   char delta_str[16];
@@ -790,6 +803,7 @@ static void render_history_committed_move(
   render_move_styled(plane, row, interior_left + (int)strlen(prefix),
                      e->move_str, /*hide_parens=*/true,
                      /*hide_playthrough_parens=*/false);
+  render_phony_mark(plane, e);
   char delta_str[16];
   (void)snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
   const int delta_len = (int)strlen(delta_str);
@@ -1166,6 +1180,26 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
 // the row via history_entry_rows. Two-column callers reserve the
 // row per-entry, so two adjacent entries' errors can coexist on
 // the same screen row (each in its own column).
+// Draws the entry's kept phony cross-words ("phony hook: ZE*") at
+// `row`, dim: the play stands, this is just information. Returns the
+// rows drawn (0 or 1).
+static int render_history_hook_row(struct ncplane *plane, const Theme *theme,
+                                   const TuiHistoryEntry *e, int row,
+                                   int interior_left, int width) {
+  if (e->phony_hooks[0] == '\0') {
+    return 0;
+  }
+  char text[96];
+  (void)snprintf(text, sizeof(text), "phony hook: %s", e->phony_hooks);
+  if ((int)strlen(text) > width) {
+    text[width > 0 ? width : 0] = '\0';
+  }
+  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_bg(plane, theme->bg);
+  ncplane_set_styles(plane, 0);
+  ncplane_putstr_yx(plane, row, interior_left, text);
+  return 1;
+}
 // Render the entry's (word-wrapped) error message starting at
 // `err_row`. The first line carries the "⚠ " glyph prefix;
 // continuation lines indent 2 cells to align under the message.
@@ -1173,12 +1207,16 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
 static int render_history_error_row(struct ncplane *plane, const Theme *theme,
                                     const TuiHistoryEntry *e, int err_row,
                                     int interior_left, int interior_right) {
-  if (e == NULL || e->error_str[0] == '\0') {
+  if (e == NULL) {
     return 0;
   }
   const int width = interior_right - interior_left + 1;
   if (width <= 0) {
     return 0;
+  }
+  if (e->error_str[0] == '\0') {
+    return render_history_hook_row(plane, theme, e, err_row, interior_left,
+                                   width);
   }
   int ew = width - 2; // leave room for the "⚠ " prefix / indent
   if (ew < 4) {
@@ -1200,7 +1238,8 @@ static int render_history_error_row(struct ncplane *plane, const Theme *theme,
       ncplane_putstr_yx(plane, err_row + i, interior_left + 2, lines[i]);
     }
   }
-  return n;
+  return n + render_history_hook_row(plane, theme, e, err_row + n,
+                                     interior_left, width);
 }
 void render_history_panel(struct ncplane *plane, const Theme *theme,
                           const TuiGameState *state, const Layout *L) {
@@ -1304,8 +1343,8 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
       // occupies (entry_rows − base) rows; base = entry_rows minus
       // the error-row count, so the first error row is at
       // row + base.
-      if (e->error_str[0] != '\0') {
-        const int err_rows = history_error_rows(e, interior_width);
+      const int err_rows = history_error_rows(e, interior_width);
+      if (err_rows > 0) {
         render_history_error_row(plane, theme, e, row + entry_rows - err_rows,
                                  interior_left, interior_right);
       }
@@ -1405,7 +1444,7 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
                            left_r, bottom, leave_w_left, rank_digits,
                            cursor_here, history_focused, state->bot_started,
                            state->ld, state->rack_sort);
-      if (e->error_str[0] != '\0') {
+      if (err_rows > 0) {
         render_history_error_row(plane, theme, e, row_left + rows - err_rows,
                                  left_l, left_r);
       }
@@ -1418,7 +1457,7 @@ void render_history_panel(struct ncplane *plane, const Theme *theme,
                            right_r, bottom, leave_w_right, rank_digits,
                            cursor_here, history_focused, state->bot_started,
                            state->ld, state->rack_sort);
-      if (e->error_str[0] != '\0') {
+      if (err_rows > 0) {
         render_history_error_row(plane, theme, e, row_right + rows - err_rows,
                                  right_l, right_r);
       }
