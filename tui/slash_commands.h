@@ -9,10 +9,12 @@
 typedef enum {
   TUI_SLASH_COPY,
   TUI_SLASH_EXIT,
+  TUI_SLASH_KIBITZ,
   TUI_SLASH_NEW,
   TUI_SLASH_QUIT,
   TUI_SLASH_RESUME,
   TUI_SLASH_SETTINGS,
+  TUI_SLASH_SIM,
   TUI_SLASH_STOP,
   TUI_SLASH_COUNT,
 } TuiSlashCommandId;
@@ -23,7 +25,8 @@ typedef struct {
   const char *desc;
 } TuiSlashCommand;
 
-// Every command, alphabetically by name; `*count` receives the length.
+// Every command, alphabetically by name (aliases are separate entries
+// sharing an id); `*count` receives the length.
 const TuiSlashCommand *tui_slash_commands(int *count);
 
 // Whether `name` starts with the first `len` characters of `typed`.
