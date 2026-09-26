@@ -74,6 +74,9 @@ const char *tui_command_unavailable_reason(const TuiGameState *state,
   case TUI_SLASH_STOP:
     return tui_analysis_unavailable_reason(state, state->history_cursor,
                                            TUI_ANALYSIS_STOP);
+  case TUI_SLASH_SOLVE:
+    return tui_analysis_unavailable_reason(state, state->history_cursor,
+                                           TUI_ANALYSIS_SOLVE);
   default:
     return NULL;
   }
@@ -147,11 +150,18 @@ void tui_command_run(TuiGameState *state, TuiUiState *ui,
     break;
   case TUI_SLASH_RESUME:
   case TUI_SLASH_SIM:
+  case TUI_SLASH_SOLVE: {
+    TuiAnalysisAction action = TUI_ANALYSIS_SIM;
+    if (id == TUI_SLASH_RESUME) {
+      action = TUI_ANALYSIS_RESUME;
+    } else if (id == TUI_SLASH_SOLVE) {
+      action = TUI_ANALYSIS_SOLVE;
+    }
     pthread_mutex_lock(&state->mutex);
-    tui_analysis_worker_start(state, state->history_cursor,
-                              id == TUI_SLASH_SIM);
+    tui_analysis_worker_start(state, state->history_cursor, action);
     pthread_mutex_unlock(&state->mutex);
     break;
+  }
   case TUI_SLASH_KIBITZ:
     pthread_mutex_lock(&state->mutex);
     tui_analysis_kibitz(state, state->history_cursor);
