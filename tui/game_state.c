@@ -1,6 +1,7 @@
 #include "game_state.h"
 
 #include "../src/def/board_defs.h"
+#include "../src/def/config_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -180,10 +181,14 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
     return init_failed(err, out_state);
   }
 
-  // Win-percentage file is needed by the simulator. Failure to load is
-  // non-fatal: the bot worker falls back to equity-best moves in that
-  // case (no sim, no endgame). "winpct" is MAGPIE's bundled default.
-  out_state->win_pcts = win_pct_create(data_paths, "winpct", err);
+  // Win-percentage table for the simulator: the engine's default for the
+  // letter distribution (e.g. winpct_english). Failure to load is
+  // non-fatal: the computer players fall back to equity-best moves, and
+  // analysis can't simulate; both say why (tui_game_state_win_pct_missing).
+  (void)snprintf(out_state->win_pct_name, sizeof(out_state->win_pct_name),
+                 "%s%s", DEFAULT_WIN_PCT_PREFIX, ld_get_name(out_state->ld));
+  out_state->win_pcts =
+      win_pct_create(data_paths, out_state->win_pct_name, err);
   if (!error_stack_is_empty(err)) {
     error_stack_reset(err);
     out_state->win_pcts = NULL;
@@ -1635,6 +1640,17 @@ int tui_history_visible_count(const TuiGameState *state) {
     return cursor + 1;
   }
   return state->history_count;
+}
+
+const char *tui_game_state_win_pct_missing(const TuiGameState *state) {
+  static char message[128];
+  if (state->win_pcts != NULL) {
+    return NULL;
+  }
+  (void)snprintf(message, sizeof(message),
+                 "no %s win%% table - run ./download_data.sh",
+                 state->win_pct_name);
+  return message;
 }
 
 void tui_game_state_notice(TuiGameState *state, const char *message) {
