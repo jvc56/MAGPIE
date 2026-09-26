@@ -180,6 +180,13 @@ static void test_client_state(void) {
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
 
+  // An empty one still means none.
+  write_settings_file(path, "server https://birdtest.example\nuuid \n");
+  state = client_state_load(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(state->worker_uuid == NULL);
+  client_state_destroy(state);
+
   // A negative task count is refused rather than stopping after one task.
   write_settings_file(path, "server https://birdtest.example\nmaxtasks -1\n");
   assert(!client_state_load(path, error_stack));

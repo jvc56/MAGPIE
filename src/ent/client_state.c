@@ -113,12 +113,14 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
         // Held to the form the server issues: a line cut short when a full
         // disk interrupted its save was sent as the identity, refused by the
         // server, and every later run ended the same way.
-        if (!client_state_is_worker_uuid(value)) {
+        // An empty value still means none, as it always has.
+        if (value[0] != '\0' && !client_state_is_worker_uuid(value)) {
           error_stack_push(
               error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
-              get_formatted_string("%s line %d: 'uuid' is not a UUID; delete "
-                                   "the line to be issued a new one",
-                                   settings_path, line_number));
+              get_formatted_string(
+                  "%s line %d: 'uuid' is not a UUID (8-4-4-4-12 hex digits): "
+                  "correct it, or delete the line to be issued a new one",
+                  settings_path, line_number));
         }
         free(state->worker_uuid);
         state->worker_uuid = string_duplicate(value);
