@@ -242,7 +242,8 @@ const Move *pick_analysis_preview_move(const TuiGameState *state,
     // single move that was played. Surface it as the preview so
     // the board ghosts the played tiles when the cursor lands on
     // the "Plays" row.
-    if (hist_entry->loaded_move != NULL && idx == 0) {
+    if (hist_entry->loaded_move != NULL && idx == 0 &&
+        tui_history_spoiler(state, state->history_cursor) == TUI_SPOILER_NONE) {
       if (out_player_idx != NULL) {
         *out_player_idx = hist_entry->player_idx;
       }

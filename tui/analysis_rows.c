@@ -428,7 +428,8 @@ void populate_frame_analysis_rows(TuiGameState *state) {
   // "Analysis" row so the panel isn't blank while reviewing.
   if (state->last_rendered_analysis_row_count == 0 &&
       state->history_cursor >= 0 &&
-      state->history_cursor < state->history_count) {
+      state->history_cursor < state->history_count &&
+      tui_history_spoiler(state, state->history_cursor) == TUI_SPOILER_NONE) {
     const TuiHistoryEntry *e = &state->history[state->history_cursor];
     if (!e->pending && e->move_str[0] != '\0') {
       AnalysisRow *row = &state->last_rendered_analysis_rows[0];
