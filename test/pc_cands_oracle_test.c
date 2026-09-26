@@ -42,7 +42,8 @@
 // fixed per-move time budget on one thread, rollouts using the player's
 // rollout classes (tws,windows on 15x15). The chosen moves (plus the
 // static-best move) are then scored by one long oracle sim restricted to
-// them: 4 plies, every PAT class in rollouts, a fixed number of iterations
+// them: PCCANDS_ORACLE_PLIES plies (default 4), every PAT class in
+// rollouts, a fixed number of iterations
 // per move, and the same seed for every move so they see the same draws.
 //
 // Environment:
@@ -53,15 +54,25 @@
 //   PCC_BUDGET         seconds per PlayChooser move (default 13)
 //   PCC_ORACLE_ITERS   oracle iterations per move (default 2000)
 //   PCC_MAX_POSITIONS  stop after this position index (default 100000)
-//   PCC_PLIES          sim plies (default 4)
+//   PCC_PLIES          sim plies when PCCANDS_PLIES_LIST is unset (default 4)
 //   PCC_SEED           base seed (default 20260926)
+//   PCCANDS_K_LIST     comma-separated candidate counts (default
+//                      5,8,12,15,20,30,45)
+//   PCCANDS_PLIES_LIST comma-separated sim plies (default PCC_PLIES)
+//   PCCANDS_ORACLE_PLIES  oracle sim plies (default the first sim plies)
+//   PCCANDS_DEADLINE   same as PCC_DEADLINE, which it overrides
+//
+// Every (K, plies) pair is a setting. CSV columns are labeled k<K> when
+// only K varies, p<plies> when only plies vary, and k<K>p<plies> otherwise.
 
 enum {
   PCC_NUM_K = 7,
+  PCC_MAX_SETTINGS = 16,
+  PCC_LABEL_CAP = 16,
   PCC_MIN_BAG = 5,
   PCC_MAX_BAG = 80,
   PCC_MAX_GEN_TURNS = 60,
-  PCC_UNION_CAP = PCC_NUM_K + 1,
+  PCC_UNION_CAP = PCC_MAX_SETTINGS + 1,
   PCC_LINE_CAP = 1 << 16,
 };
 
@@ -75,6 +86,31 @@ static long pcc_env_long(const char *name, long default_value) {
 static double pcc_env_double(const char *name, double default_value) {
   const char *value = getenv(name);
   return value ? strtod(value, NULL) : default_value;
+}
+
+// Parses a comma-separated list of positive integers into values (at most
+// cap); falls back to defaults when the variable is unset. Returns the count.
+static int pcc_env_list(const char *name, const int *defaults, int num_defaults,
+                        int *values, int cap) {
+  const char *value = getenv(name);
+  if (!value) {
+    for (int idx = 0; idx < num_defaults; idx++) {
+      values[idx] = defaults[idx];
+    }
+    return num_defaults;
+  }
+  int count = 0;
+  const char *cursor = value;
+  while (*cursor != '\0' && count < cap) {
+    char *end = NULL;
+    const long parsed = strtol(cursor, &end, 10);
+    if (end == cursor || parsed <= 0) {
+      log_fatal("invalid %s: %s", name, value);
+    }
+    values[count++] = (int)parsed;
+    cursor = (*end == ',') ? end + 1 : end;
+  }
+  return count;
 }
 
 static uint64_t pcc_mix(uint64_t x) {
@@ -154,11 +190,45 @@ void test_pc_cands_oracle(void) {
   }
   const long worker = pcc_env_long("PCC_WORKER", 0);
   const long num_workers = pcc_env_long("PCC_NUM_WORKERS", 1);
-  const long deadline = pcc_env_long("PCC_DEADLINE", 0);
+  const long deadline =
+      pcc_env_long("PCCANDS_DEADLINE", pcc_env_long("PCC_DEADLINE", 0));
   const double budget = pcc_env_double("PCC_BUDGET", 13.0);
   const long oracle_iters = pcc_env_long("PCC_ORACLE_ITERS", 2000);
   const long max_positions = pcc_env_long("PCC_MAX_POSITIONS", 100000);
-  const int plies = (int)pcc_env_long("PCC_PLIES", 4);
+  const int default_plies = (int)pcc_env_long("PCC_PLIES", 4);
+  int k_list[PCC_MAX_SETTINGS];
+  const int num_k = pcc_env_list("PCCANDS_K_LIST", pcc_ks, PCC_NUM_K, k_list,
+                                 PCC_MAX_SETTINGS);
+  int plies_list[PCC_MAX_SETTINGS];
+  const int num_plies = pcc_env_list("PCCANDS_PLIES_LIST", &default_plies, 1,
+                                     plies_list, PCC_MAX_SETTINGS);
+  const int oracle_plies =
+      (int)pcc_env_long("PCCANDS_ORACLE_PLIES", plies_list[0]);
+  int setting_k[PCC_MAX_SETTINGS];
+  int setting_plies[PCC_MAX_SETTINGS];
+  char setting_label[PCC_MAX_SETTINGS][PCC_LABEL_CAP];
+  int num_settings = 0;
+  for (int k_idx = 0; k_idx < num_k; k_idx++) {
+    for (int plies_idx = 0; plies_idx < num_plies; plies_idx++) {
+      if (num_settings == PCC_MAX_SETTINGS) {
+        log_fatal("too many (K, plies) settings; the cap is %d",
+                  PCC_MAX_SETTINGS);
+      }
+      setting_k[num_settings] = k_list[k_idx];
+      setting_plies[num_settings] = plies_list[plies_idx];
+      if (num_plies == 1) {
+        (void)snprintf(setting_label[num_settings], PCC_LABEL_CAP, "k%d",
+                       k_list[k_idx]);
+      } else if (num_k == 1) {
+        (void)snprintf(setting_label[num_settings], PCC_LABEL_CAP, "p%d",
+                       plies_list[plies_idx]);
+      } else {
+        (void)snprintf(setting_label[num_settings], PCC_LABEL_CAP, "k%dp%d",
+                       k_list[k_idx], plies_list[plies_idx]);
+      }
+      num_settings++;
+    }
+  }
   const uint64_t base_seed = (uint64_t)pcc_env_long("PCC_SEED", 20260926);
 
   Config *config = config_create_or_die(
@@ -180,9 +250,10 @@ void test_pc_cands_oracle(void) {
   if (ftell(out) == 0) {
     fprintf(out, "pos,turn,bag,union,oracle_best_wp,oracle_best_eq,"
                  "static_move,static_wp,static_eq");
-    for (int k_idx = 0; k_idx < PCC_NUM_K; k_idx++) {
-      fprintf(out, ",k%d_cands,k%d_move,k%d_iters,k%d_wp,k%d_eq", pcc_ks[k_idx],
-              pcc_ks[k_idx], pcc_ks[k_idx], pcc_ks[k_idx], pcc_ks[k_idx]);
+    for (int setting_idx = 0; setting_idx < num_settings; setting_idx++) {
+      const char *label = setting_label[setting_idx];
+      fprintf(out, ",%s_cands,%s_move,%s_iters,%s_wp,%s_eq", label, label,
+              label, label, label);
     }
     fprintf(out, ",oracle_wp_sem_max,seconds\n");
     (void)fflush(out);
@@ -196,8 +267,8 @@ void test_pc_cands_oracle(void) {
   for (int move_idx = 0; move_idx < PCC_UNION_CAP; move_idx++) {
     union_moves[move_idx] = move_create();
   }
-  Move *chosen[PCC_NUM_K];
-  for (int k_idx = 0; k_idx < PCC_NUM_K; k_idx++) {
+  Move *chosen[PCC_MAX_SETTINGS];
+  for (int k_idx = 0; k_idx < num_settings; k_idx++) {
     chosen[k_idx] = move_create();
   }
   Move *static_move = move_create();
@@ -220,14 +291,14 @@ void test_pc_cands_oracle(void) {
     const int bag = bag_get_letters(game_get_bag(game));
     move_copy(static_move, get_top_equity_move(game, gen_list));
 
-    int num_cands[PCC_NUM_K];
-    uint64_t iters[PCC_NUM_K];
-    for (int k_idx = 0; k_idx < PCC_NUM_K; k_idx++) {
+    int num_cands[PCC_MAX_SETTINGS];
+    uint64_t iters[PCC_MAX_SETTINGS];
+    for (int k_idx = 0; k_idx < num_settings; k_idx++) {
       PlayChooserStrategy strategy = {
           .pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM,
           .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
-          .sim_plies = plies,
-          .sim_max_candidates = pcc_ks[k_idx],
+          .sim_plies = setting_plies[k_idx],
+          .sim_max_candidates = setting_k[k_idx],
           .fixed_seconds_per_move = budget,
           .win_pcts = win_pcts,
           .num_threads = 1,
@@ -250,7 +321,7 @@ void test_pc_cands_oracle(void) {
       play_chooser_benchmark_get(&after);
       iters[k_idx] = after.sim_iterations - before.sim_iterations;
       // The candidates PlayChooser had: the top K by static equity, or fewer.
-      MoveList *count_list = move_list_create(pcc_ks[k_idx]);
+      MoveList *count_list = move_list_create(setting_k[k_idx]);
       const MoveGenArgs count_args = {
           .game = game_copy,
           .move_list = count_list,
@@ -271,7 +342,7 @@ void test_pc_cands_oracle(void) {
     // The distinct moves to score: every K's choice plus the static best.
     int union_count = 0;
     move_copy(union_moves[union_count++], static_move);
-    for (int k_idx = 0; k_idx < PCC_NUM_K; k_idx++) {
+    for (int k_idx = 0; k_idx < num_settings; k_idx++) {
       if (pcc_find_move(union_moves, union_count, chosen[k_idx]) < 0) {
         move_copy(union_moves[union_count++], chosen[k_idx]);
       }
@@ -292,12 +363,12 @@ void test_pc_cands_oracle(void) {
       thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
       SimArgs sim_args = {0};
       sim_args_fill(
-          plies, union_list, union_count, NULL, win_pcts,
+          oracle_plies, union_list, union_count, NULL, win_pcts,
           /*inference_results=*/NULL, thread_control, game,
           /*sim_with_inference=*/false, /*use_heat_map=*/false,
           /*num_threads=*/1, /*print_interval=*/0,
           /*max_num_display_plays=*/union_count,
-          /*max_num_display_plies=*/plies,
+          /*max_num_display_plies=*/oracle_plies,
           /*seed=*/pcc_mix(base_seed + 104729 * (uint64_t)pos),
           /*max_iterations=*/(uint64_t)oracle_iters * (uint64_t)union_count,
           /*min_play_iterations=*/(uint64_t)oracle_iters, /*scond=*/100.0,
@@ -345,7 +416,7 @@ void test_pc_cands_oracle(void) {
                                         best_eq);
     pcc_add_move_string(sb, game, static_move);
     string_builder_add_formatted_string(sb, ",%.6f,%.4f", wp[0], eq[0]);
-    for (int k_idx = 0; k_idx < PCC_NUM_K; k_idx++) {
+    for (int k_idx = 0; k_idx < num_settings; k_idx++) {
       const int move_idx =
           pcc_find_move(union_moves, union_count, chosen[k_idx]);
       string_builder_add_formatted_string(sb, ",%d,", num_cands[k_idx]);
@@ -365,7 +436,7 @@ void test_pc_cands_oracle(void) {
   for (int move_idx = 0; move_idx < PCC_UNION_CAP; move_idx++) {
     move_destroy(union_moves[move_idx]);
   }
-  for (int k_idx = 0; k_idx < PCC_NUM_K; k_idx++) {
+  for (int k_idx = 0; k_idx < num_settings; k_idx++) {
     move_destroy(chosen[k_idx]);
   }
   move_destroy(static_move);
