@@ -38,7 +38,7 @@
 #include <stdlib.h>
 
 enum {
-  PLAY_CHOOSER_DEFAULT_SIM_PLIES = 2,
+  PLAY_CHOOSER_DEFAULT_SIM_PLIES = 4,
   PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES = 15,
   // Assume roughly four tiles per play across both players when splitting
   // the remaining clock into per-move budgets.

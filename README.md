@@ -127,7 +127,10 @@ magpie> autoplay games 100 -pc1 30000 -pc2 30000 -hr true
 ```
 
 PlayChooser selects its evaluation mode from the position, using simulation,
-pre-endgame, or endgame analysis as appropriate. Timed games deduct 10 points
+pre-endgame, or endgame analysis as appropriate. In the midgame it simulates
+its top 15 static candidates for 4 plies; `-pccands` and `-pcplies` change
+those (`-pccands1`/`-pcplies1` and `-pccands2`/`-pcplies2` for one player),
+for example `-pccands1 20 -pcplies1 3`. Timed games deduct 10 points
 per started minute of overtime by default. The penalty and period are
 configurable independently, so blitz runs can deduct one point per started
 second:
