@@ -31,9 +31,9 @@ void tui_play_setup_enabled_rows(UiOvertimeRule overtime_rule, int time_seconds,
 
 // Annotate-game setup modal; rows are TuiAnnotateSetupItem.
 void tui_game_render_annotate_setup(struct ncplane *plane, const Theme *theme,
-                                    int focus, const char *lexicon,
-                                    const char *p1_name, const char *p2_name,
-                                    int name_edit_pos);
+                                    int focus, const char *language,
+                                    const char *lexicon, const char *p1_name,
+                                    const char *p2_name, int name_edit_pos);
 
 // Main menu modal (Esc); items are TuiMenuItem.
 void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);
@@ -88,13 +88,22 @@ void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
 // TTF loaded. `premium_labels` selects the TW/tw/none labeling style
 // for premium squares. `blank_uppercase` controls whether played blanks
 // render uppercase (with blank_tile_fg) or lowercase (with tile_fg).
-void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
-                              int focus, int board_scale, bool antialias,
-                              TuiScoreSubscripts score_subscripts,
-                              int border_thickness, bool pixel_supported,
-                              bool font_available,
-                              TuiPremiumLabels premium_labels,
-                              bool blank_uppercase, TuiRackSort rack_sort,
-                              const char *lexicon, bool load_rit);
+void tui_game_render_settings(
+    struct ncplane *plane, const Theme *theme, int focus, int board_scale,
+    bool antialias, TuiScoreSubscripts score_subscripts, int border_thickness,
+    bool pixel_supported, bool font_available, TuiPremiumLabels premium_labels,
+    bool blank_uppercase, TuiRackSort rack_sort, bool load_rit);
+
+// One-line description of row `focus` in `modal`, shown on the
+// command-bar row while the dialog is open; NULL when there is none.
+const char *tui_modal_help(TuiModalState modal, int focus);
+
+// Which Settings rows are adjustable: Scale needs pixel graphics and
+// the bundled font, and Antialias / Subscript / Border apply only while
+// the board renders at 2x. Disabled rows render dimmed and are skipped
+// by cursor navigation / clicks, as in the setup dialogs.
+void tui_settings_enabled_rows(int board_scale, bool pixel_supported,
+                               bool font_available,
+                               bool out_enabled[TUI_SETTINGS_ITEM_COUNT]);
 
 #endif

@@ -316,16 +316,36 @@ static void tui_board_builder_extract_word(const TuiGameState *gs, char *out,
   }
 }
 
-// A fresh anchor always starts ACROSS — matching Woogles and every
-// mainstream Scrabble UI, and predictability beats cleverness here: an
-// earlier "whichever direction has the longer empty run" heuristic
-// meant the same click could anchor differently depending on nearby
-// tiles, which read as random. Down is one toggle away (click the
-// cell again, or Space/Tab).
+// True when the tiles from (row, col) onward in `dir` run to the board
+// edge, leaving no empty square to start typing on.
+static bool tiles_run_to_edge(const Board *brd, int row, int col,
+                              bool vertical) {
+  while (row < BOARD_DIM && col < BOARD_DIM) {
+    if (board_get_letter(brd, row, col) == ALPHABET_EMPTY_SQUARE_MARKER) {
+      return false;
+    }
+    if (vertical) {
+      row++;
+    } else {
+      col++;
+    }
+  }
+  return true;
+}
+
+// A fresh anchor starts ACROSS — matching Woogles and every mainstream
+// Scrabble UI, and predictability beats cleverness here: an earlier
+// "whichever direction has the longer empty run" heuristic meant the
+// same click could anchor differently depending on nearby tiles, which
+// read as random. Down is one toggle away (click the cell again, or
+// Space/Tab). The one exception is a tile whose across run reaches the
+// right edge, where across has nowhere to type.
 int tui_board_builder_default_dir(const TuiGameState *gs, int row, int col) {
-  (void)gs;
-  (void)row;
-  (void)col;
+  const Board *brd = gs->game != NULL ? game_get_board(gs->game) : NULL;
+  if (brd != NULL && tiles_run_to_edge(brd, row, col, false) &&
+      !tiles_run_to_edge(brd, row, col, true)) {
+    return BOARD_VERTICAL_DIRECTION;
+  }
   return BOARD_HORIZONTAL_DIRECTION;
 }
 
@@ -354,6 +374,20 @@ void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col, int dir) {
     anchor_row = pr;
     anchor_col = pc;
   }
+  // Typing starts at the first empty square at or after the origin: a
+  // click on a tile (or an arrow onto one) continues the word it belongs
+  // to rather than typing onto the tile.
+  int start_row = row;
+  int start_col = col;
+  while (brd != NULL && start_row < BOARD_DIM && start_col < BOARD_DIM &&
+         board_get_letter(brd, start_row, start_col) !=
+             ALPHABET_EMPTY_SQUARE_MARKER) {
+    if (vertical) {
+      start_row++;
+    } else {
+      start_col++;
+    }
+  }
   gs->board_anchor_row = anchor_row;
   gs->board_anchor_col = anchor_col;
   gs->board_dir = dir;
@@ -367,9 +401,8 @@ void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col, int dir) {
   gs->edit_leave_buf[0] = '\0';
   gs->edit_leave_len = 0;
   gs->edit_leave_cursor = 0;
-  // Seed the word with the leading playthrough letters (from the true
-  // anchor up to — but excluding — the clicked empty cell) so the typing
-  // cursor starts on the clicked cell.
+  // Seed the word with the playthrough letters from the true anchor up to
+  // (but excluding) the start square, so the typing cursor starts there.
   char coord[8];
   tui_board_builder_coord_token(gs, coord, sizeof(coord));
   char leading[48];
@@ -377,8 +410,8 @@ void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col, int dir) {
   {
     int r = anchor_row;
     int c = anchor_col;
-    while (!(r == row && c == col) && brd != NULL &&
-           li < (int)sizeof(leading) - 4) {
+    while (!(r == start_row && c == start_col) && brd != NULL &&
+           r < BOARD_DIM && c < BOARD_DIM && li < (int)sizeof(leading) - 4) {
       const MachineLetter ml = board_get_letter(brd, r, c);
       const char *hl = gs->ld != NULL ? gs->ld->ld_ml_to_hl[ml] : NULL;
       for (int k = 0;
