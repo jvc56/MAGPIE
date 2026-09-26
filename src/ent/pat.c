@@ -181,10 +181,6 @@ struct PATWeights {
   int version;
 };
 
-double pat_get_combine_gamma(const PATWeights *pat) {
-  return pat->combine_gamma;
-}
-
 void pat_set_combine_gamma(PATWeights *pat, double combine_gamma) {
   pat->combine_gamma = combine_gamma;
 }
@@ -214,8 +210,6 @@ bool pat_get_signed_through(const PATWeights *pat) {
   return pat->signed_through;
 }
 
-bool pat_get_prepared(const PATWeights *pat) { return pat->prepared; }
-
 // See PATWeights.prepared.
 static void pat_require_prepared(const PATWeights *pat) {
   if (pat != NULL && !pat->prepared) {
@@ -230,12 +224,6 @@ bool pat_get_fit_scaled_channels(const PATWeights *pat) {
 }
 
 bool pat_get_train_overlay(const PATWeights *pat) { return pat->train_overlay; }
-
-void pat_set_train_overlay(PATWeights *pat, bool train_overlay) {
-  pat->train_overlay = train_overlay;
-}
-
-bool pat_get_run_through(const PATWeights *pat) { return pat->run_through; }
 
 bool pat_get_fit_shrink(const PATWeights *pat) { return pat->fit_shrink; }
 
@@ -342,10 +330,6 @@ int pat_get_run_through_score(const PATWeights *pat, int word_end,
   }
   return pat->run_through_score[pat_run_through_index(pat, word_end, key,
                                                       key_len, word_length)];
-}
-
-bool pat_get_exact_created_hooks(const PATWeights *pat) {
-  return pat->exact_created_hooks;
 }
 
 void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks) {
@@ -1322,10 +1306,6 @@ int pat_get_through_count_end(const PATWeights *pat, int word_end,
   return (span < PAT_MAX_THROUGH_LEN)
              ? pat->through_count_end[word_end][ml][span]
              : 0;
-}
-
-int pat_get_through_score(const PATWeights *pat, MachineLetter ml, int span) {
-  return (span < PAT_MAX_THROUGH_LEN) ? pat->through_score[ml][span] : 0;
 }
 
 int pat_get_through_count(const PATWeights *pat, MachineLetter ml, int span) {

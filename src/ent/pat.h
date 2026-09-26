@@ -40,7 +40,6 @@ void pat_set_weight(PATWeights *pat, int feature_index, Equity weight);
 // (as the training loop does between generations) so any future cache keyed
 // on this object can detect staleness.
 // See PATWeights.combine_gamma.
-double pat_get_combine_gamma(const PATWeights *pat);
 void pat_set_combine_gamma(PATWeights *pat, double combine_gamma);
 // See PATWeights.own_asset_discount.
 double pat_get_own_asset_discount(const PATWeights *pat);
@@ -49,12 +48,9 @@ bool pat_get_lexicon_floaters(const PATWeights *pat);
 void pat_set_lexicon_floaters(PATWeights *pat, bool lexicon_floaters);
 bool pat_get_signed_through(const PATWeights *pat);
 void pat_set_signed_through(PATWeights *pat, bool signed_through);
-bool pat_get_prepared(const PATWeights *pat);
 bool pat_get_fit_scaled_channels(const PATWeights *pat);
 void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels);
 bool pat_get_train_overlay(const PATWeights *pat);
-void pat_set_train_overlay(PATWeights *pat, bool train_overlay);
-bool pat_get_run_through(const PATWeights *pat);
 void pat_set_run_through(PATWeights *pat, bool run_through);
 bool pat_get_fit_shrink(const PATWeights *pat);
 const char *pat_get_fit_fixed_zero(const PATWeights *pat);
@@ -86,7 +82,6 @@ int pat_get_run_through_count(const PATWeights *pat, int word_end,
 int pat_get_run_through_score(const PATWeights *pat, int word_end,
                               const MachineLetter *key, int key_len,
                               int word_length);
-bool pat_get_exact_created_hooks(const PATWeights *pat);
 void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
 bool pat_get_fit_residual(const PATWeights *pat);
 int pat_get_fit_residual_mode(const PATWeights *pat);
@@ -109,8 +104,6 @@ void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
                            const LetterDistribution *ld);
 // Returns the flexibility table entry for an (unblanked) machine letter.
 int pat_get_hook_flex(const PATWeights *pat, MachineLetter ml);
-// Entries of the floater through-table; see PATWeights.through_score.
-int pat_get_through_score(const PATWeights *pat, MachineLetter ml, int span);
 // The end-specific through tables: word_end 0 when ml is the word's first
 // letter, 1 when its last (see pat_walk_words).
 int pat_get_through_score_end(const PATWeights *pat, int word_end,
