@@ -3,7 +3,6 @@
 #include "config.h"
 #include "render_common.h"
 #include "render_hit_test.h"
-#include "render_layout.h"
 #include "render_planes.h"
 #include "theme.h"
 #include "time_picker.h"
@@ -1113,186 +1112,73 @@ void tui_game_render_play_setup(
                   disabled, cursor_cols, zone_starts, zone_widths,
                   TUI_PLAY_SETUP_ITEM_COUNT, focus, MODAL_WIDTH);
 }
-static const char *premium_labels_value(TuiPremiumLabels labels) {
-  switch (labels) {
-  case TUI_PREMIUM_LABELS_LOWERCASE:
-    return "lowercase";
-  case TUI_PREMIUM_LABELS_PUNCT:
-    return "punctuation";
-  case TUI_PREMIUM_LABELS_NONE:
-    return "none";
-  case TUI_PREMIUM_LABELS_UPPERCASE:
-  case TUI_PREMIUM_LABELS_COUNT:
-  default:
-    return "uppercase";
-  }
-}
-static const char *score_subscripts_value(TuiScoreSubscripts mode) {
-  switch (mode) {
-  case TUI_SCORE_SUBSCRIPTS_NONZERO:
-    return "nonzero";
-  case TUI_SCORE_SUBSCRIPTS_ALL:
-    return "all";
-  case TUI_SCORE_SUBSCRIPTS_OFF:
-  case TUI_SCORE_SUBSCRIPTS_COUNT:
-  default:
-    return "off";
-  }
-}
-// Display label for a rack-sort enum value. Concise on purpose so it
-// fits in the right-aligned value column of the Settings modal:
-//   "?+alpha" / "alpha+?" / "?+vow+con" / "vow+con+?"
-// Leading "?+" means blanks come first; the rest is the letter
-// ordering ("alpha" = alphabetical, "vow+con" = vowels then
-// consonants).
-static const char *rack_sort_value(TuiRackSort sort) {
-  switch (sort) {
-  case TUI_RACK_SORT_BLANKS_ALPHA:
-    return "?+alpha";
-  case TUI_RACK_SORT_BLANKS_VOWELS:
-    return "?+vow+con";
-  case TUI_RACK_SORT_VOWELS:
-    return "vow+con+?";
-  case TUI_RACK_SORT_ALPHA:
-  case TUI_RACK_SORT_COUNT:
-  default:
-    return "alpha+?";
-  }
-}
-void tui_settings_enabled_rows(int board_scale, bool pixel_supported,
-                               bool font_available,
-                               bool out_enabled[TUI_SETTINGS_ITEM_COUNT]) {
-  const bool scale_available = pixel_supported && font_available;
-  const bool effective_2x = scale_available && board_scale >= 2;
-  for (int item_idx = 0; item_idx < TUI_SETTINGS_ITEM_COUNT; item_idx++) {
-    out_enabled[item_idx] = true;
-  }
-  out_enabled[TUI_SETTINGS_SCALE] = scale_available;
-  out_enabled[TUI_SETTINGS_AA] = effective_2x;
-  out_enabled[TUI_SETTINGS_SUBSCRIPTS] = effective_2x;
-  out_enabled[TUI_SETTINGS_BORDER] = effective_2x;
-}
-
-void tui_game_render_settings(
-    struct ncplane *plane, const Theme *theme, int focus, int board_scale,
-    bool antialias, TuiScoreSubscripts score_subscripts, int border_thickness,
-    bool pixel_supported, bool font_available, TuiPremiumLabels premium_labels,
-    bool blank_uppercase, TuiRackSort rack_sort, bool load_rit) {
-  if (plane == NULL || theme == NULL) {
+void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
+                              const char *title, const char *const *labels,
+                              const char *const *values, const bool *heading,
+                              const bool *unavailable, int row_count, int focus,
+                              int *scroll) {
+  if (plane == NULL || theme == NULL || row_count <= 0) {
     return;
   }
   // Same layout as the setup dialogs: label left, value right-aligned,
-  // ◀ ▶ around the focused value, unavailable rows dimmed.
-  enum { MODAL_WIDTH = 56, CONTENT_W = MODAL_WIDTH - 4, ROW_BUF = 96 };
-  static char buf[TUI_SETTINGS_ITEM_COUNT][ROW_BUF];
-  const char *items[TUI_SETTINGS_ITEM_COUNT];
-  bool enabled[TUI_SETTINGS_ITEM_COUNT];
-  bool disabled[TUI_SETTINGS_ITEM_COUNT];
-  tui_settings_enabled_rows(board_scale, pixel_supported, font_available,
-                            enabled);
-  const bool scale_available = pixel_supported && font_available;
-  // Why a 2x-only row is unavailable: the terminal can't do 2x at all,
-  // or the board is at 1x.
-  const char *unavailable_2x = scale_available ? "n/a at 1x" : "unsupported";
-
-  // Scale. Even when 2x is supported the terminal may be too small to
-  // fit 2x cells; the setting stays editable (so the user can step back
-  // to 1x without resizing first) and the value says why the board is
-  // still at 1x.
-  char scale_value[32];
-  if (!scale_available) {
-    (void)snprintf(scale_value, sizeof(scale_value), "unsupported");
-  } else {
-    unsigned plane_rows = 0;
-    unsigned plane_cols = 0;
-    ncplane_dim_yx(plane, &plane_rows, &plane_cols);
-    const bool layout_fits_2x =
-        compute_effective_scale(2, plane_cols, plane_rows) >= 2;
-    if (board_scale >= 2 && !layout_fits_2x) {
-      (void)snprintf(scale_value, sizeof(scale_value), "2x (too small)");
-    } else {
-      (void)snprintf(scale_value, sizeof(scale_value), "%dx", board_scale);
-    }
-  }
-  char border_value[16];
-  if (border_thickness <= 0) {
-    (void)snprintf(border_value, sizeof(border_value), "off");
-  } else {
-    (void)snprintf(border_value, sizeof(border_value), "%dpx",
-                   border_thickness);
-  }
-  const char *values[TUI_SETTINGS_ITEM_COUNT] = {
-      [TUI_SETTINGS_SCALE] = scale_value,
-      [TUI_SETTINGS_AA] = antialias ? "on" : "off",
-      [TUI_SETTINGS_SUBSCRIPTS] = score_subscripts_value(score_subscripts),
-      [TUI_SETTINGS_BORDER] = border_value,
-      [TUI_SETTINGS_PREMIUM] = premium_labels_value(premium_labels),
-      [TUI_SETTINGS_BLANKS] = blank_uppercase ? "uppercase" : "lowercase",
-      [TUI_SETTINGS_RACK_SORT] = rack_sort_value(rack_sort),
-      [TUI_SETTINGS_RIT] = load_rit ? "on" : "off",
+  // ◀ ▶ around the focused value. Headings sit flush left over their
+  // indented settings; unavailable settings render dimmed.
+  enum {
+    MODAL_WIDTH = 56,
+    CONTENT_W = MODAL_WIDTH - 4,
+    INDENT = 2,
+    ROW_BUF = 96,
+    // Rows kept clear above and below the dialog when it must scroll.
+    SCREEN_MARGIN = 4,
   };
-  const char *labels[TUI_SETTINGS_ITEM_COUNT] = {
-      [TUI_SETTINGS_SCALE] = "Scale",
-      [TUI_SETTINGS_AA] = "Antialias",
-      [TUI_SETTINGS_SUBSCRIPTS] = "Subscripts",
-      [TUI_SETTINGS_BORDER] = "Border",
-      [TUI_SETTINGS_PREMIUM] = "Premium labels",
-      [TUI_SETTINGS_BLANKS] = "Blanks",
-      [TUI_SETTINGS_RACK_SORT] = "Rack sort",
-      [TUI_SETTINGS_RIT] = "RIT",
-  };
-  for (int item_idx = 0; item_idx < TUI_SETTINGS_ITEM_COUNT; item_idx++) {
-    disabled[item_idx] = !enabled[item_idx];
-    if (item_idx == TUI_SETTINGS_BACK) {
-      (void)snprintf(buf[item_idx], ROW_BUF, "Back");
-    } else {
-      const bool is_2x_only = item_idx == TUI_SETTINGS_AA ||
-                              item_idx == TUI_SETTINGS_SUBSCRIPTS ||
-                              item_idx == TUI_SETTINGS_BORDER;
-      const char *value = values[item_idx];
-      if (is_2x_only && !enabled[item_idx]) {
-        value = unavailable_2x;
-      }
-      format_setup_row(buf[item_idx], ROW_BUF, CONTENT_W, labels[item_idx],
-                       value, focus == item_idx && enabled[item_idx]);
-    }
-    items[item_idx] = buf[item_idx];
+  unsigned plane_rows = 0;
+  unsigned plane_cols = 0;
+  ncplane_dim_yx(plane, &plane_rows, &plane_cols);
+  int visible = (int)plane_rows - 2 - SCREEN_MARGIN;
+  visible = visible > MODAL_MAX_ITEMS ? MODAL_MAX_ITEMS : visible;
+  visible = visible > row_count ? row_count : visible;
+  if (visible <= 0) {
+    return;
   }
-  render_modal_ex(plane, theme, "Settings", items, /*shortcuts=*/NULL, disabled,
+  // Scroll just enough to keep the focused row in view.
+  if (*scroll > focus) {
+    *scroll = focus;
+  }
+  if (focus >= *scroll + visible) {
+    *scroll = focus - visible + 1;
+  }
+  if (*scroll > row_count - visible) {
+    *scroll = row_count - visible;
+  }
+  if (*scroll < 0) {
+    *scroll = 0;
+  }
+  static char buf[MODAL_MAX_ITEMS][ROW_BUF];
+  const char *items[MODAL_MAX_ITEMS];
+  bool disabled[MODAL_MAX_ITEMS];
+  for (int view_idx = 0; view_idx < visible; view_idx++) {
+    const int row = *scroll + view_idx;
+    disabled[view_idx] = heading[row] || unavailable[row];
+    if (heading[row] || values[row] == NULL) {
+      (void)snprintf(buf[view_idx], ROW_BUF, "%s", labels[row]);
+    } else {
+      char setting[ROW_BUF];
+      format_setup_row(setting, sizeof(setting), CONTENT_W - INDENT,
+                       labels[row], values[row],
+                       row == focus && !unavailable[row]);
+      (void)snprintf(buf[view_idx], ROW_BUF, "%*s%s", INDENT, "", setting);
+    }
+    items[view_idx] = buf[view_idx];
+  }
+  render_modal_ex(plane, theme, title, items, /*shortcuts=*/NULL, disabled,
                   /*cursor_cols=*/NULL, /*zone_starts=*/NULL,
-                  /*zone_widths=*/NULL, TUI_SETTINGS_ITEM_COUNT, focus,
-                  MODAL_WIDTH);
+                  /*zone_widths=*/NULL, visible, focus - *scroll, MODAL_WIDTH);
 }
 
 // One-line description of a dialog row, shown on the command-bar row
 // while the dialog is open. NULL when the modal or row has none.
 const char *tui_modal_help(TuiModalState modal, int focus) {
   switch (modal) {
-  case TUI_MODAL_SETTINGS:
-    switch (focus) {
-    case TUI_SETTINGS_SCALE:
-      return "Board size: 1x text, or 2x pixel tiles on terminals with "
-             "graphics.";
-    case TUI_SETTINGS_AA:
-      return "Smooth the edges of letters on 2x tiles.";
-    case TUI_SETTINGS_SUBSCRIPTS:
-      return "Show tile point values on 2x tiles: off, nonzero, or all.";
-    case TUI_SETTINGS_BORDER:
-      return "Width of the grid lines between 2x tiles.";
-    case TUI_SETTINGS_PREMIUM:
-      return "How premium squares are labeled: TW, tw, punctuation, or none.";
-    case TUI_SETTINGS_BLANKS:
-      return "Show played blanks as uppercase (tinted) or lowercase.";
-    case TUI_SETTINGS_RACK_SORT:
-      return "Tile order in racks and leaves; ? marks where blanks go.";
-    case TUI_SETTINGS_RIT:
-      return "Load the rack info table: faster move generation, more "
-             "memory. Applies from the next game.";
-    case TUI_SETTINGS_BACK:
-      return "Close Settings.";
-    default:
-      return NULL;
-    }
   case TUI_MODAL_WATCH_SETUP:
     switch (focus) {
     case TUI_WATCH_SETUP_TIME:
