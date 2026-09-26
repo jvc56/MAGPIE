@@ -554,6 +554,9 @@ typedef struct {
   bool pending_load_rit;
   // The theme the UI draws with; Settings can change it mid-session.
   ThemeName theme;
+  // Spoiler-free review: with the History cursor on a turn, that turn's
+  // move and every later turn stay hidden (tui_history_spoiler).
+  bool hide_spoilers;
 
   // Transient status-bar notice (e.g. "Copied CGP"). Rendered until
   // notice_expires_at (CLOCK_MONOTONIC); an all-zero timespec means
@@ -789,6 +792,23 @@ void tui_game_state_revalidate_history(TuiGameState *state);
 // none.
 void tui_history_move_to_engine(const char *display, char *out,
                                 size_t out_size);
+
+// What the spoiler setting hides of history entry `idx`: nothing, its
+// move (the turn under the History cursor: the rack shows, the play
+// doesn't), or all of it (turns after the cursor). Nothing is hidden
+// while following the live game (cursor on the badge), in annotation,
+// or with the setting off.
+typedef enum {
+  TUI_SPOILER_NONE,
+  TUI_SPOILER_MOVE,
+  TUI_SPOILER_ALL,
+} TuiSpoiler;
+
+TuiSpoiler tui_history_spoiler(const TuiGameState *state, int idx);
+
+// How many history entries to show: all of them, or up to and
+// including the cursor's when later ones are spoilers.
+int tui_history_visible_count(const TuiGameState *state);
 
 // Shows `message` in the status bar for a few seconds. Caller holds
 // state->mutex.

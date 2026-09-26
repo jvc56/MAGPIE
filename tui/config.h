@@ -175,6 +175,9 @@ typedef struct {
   bool sim_plies_set;
   int sim_candidates;
   bool sim_candidates_set;
+  // Spoiler-free History review.
+  bool hide_spoilers;
+  bool hide_spoilers_set;
 } TuiConfig;
 
 // Override the config file path. When set to a non-NULL, non-empty path,

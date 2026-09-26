@@ -132,6 +132,7 @@ bool tui_config_load(TuiConfig *config) {
   config->rack_sort_set = false;
   config->sim_plies_set = false;
   config->sim_candidates_set = false;
+  config->hide_spoilers_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -265,6 +266,9 @@ bool tui_config_load(TuiConfig *config) {
           config->sim_candidates_set = true;
         }
       }
+    } else if (strcmp(trimmed, "hide_spoilers") == 0) {
+      config->hide_spoilers = strcmp(value, "true") == 0;
+      config->hide_spoilers_set = true;
     } else if (strcmp(trimmed, "blank_uppercase") == 0) {
       if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
         config->blank_uppercase = true;
@@ -511,6 +515,10 @@ bool tui_config_save(const TuiConfig *config) {
   }
   if (config->load_rit_set) {
     (void)fprintf(file, "load_rit = %s\n", config->load_rit ? "true" : "false");
+  }
+  if (config->hide_spoilers_set) {
+    (void)fprintf(file, "hide_spoilers = %s\n",
+                  config->hide_spoilers ? "true" : "false");
   }
   if (config->sim_plies_set) {
     (void)fprintf(file, "sim_plies = %d\n", config->sim_plies);

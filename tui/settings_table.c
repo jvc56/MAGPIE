@@ -30,6 +30,7 @@ static const char *const blank_choices[] = {"lowercase", "uppercase"};
 // ("alpha" = alphabetical, "vow+con" = vowels then consonants).
 static const char *const rack_sort_choices[] = {"alpha+?", "?+alpha",
                                                 "vow+con+?", "?+vow+con"};
+static const char *const spoiler_choices[] = {"shown", "hidden"};
 // Indexed by ThemeName.
 static const char *const theme_choices[] = {"dark", "light", "dim",
                                             "high_contrast"};
@@ -58,6 +59,10 @@ static const TuiSettingDef setting_defs[] = {
     {TUI_SETTING_RACK_SORT, 2, "racksort", "Rack sort",
      "Tile order in racks and leaves; ? marks where blanks go.",
      TUI_SETTING_KIND_CHOICE, CHOICES(rack_sort_choices), 0, 3, 1, NULL, NULL},
+    {TUI_SETTING_SPOILERS, 4, "spoilers", "Upcoming moves",
+     "Hidden: stepping through History shows each turn's rack but not its "
+     "move, nor any later turn, until you step past it.",
+     TUI_SETTING_KIND_CHOICE, CHOICES(spoiler_choices), 0, 1, 1, NULL, NULL},
     {TUI_SETTING_SIM_PLIES, 5, "simplies", "Sim plies",
      "How many turns ahead each simulation looks.", TUI_SETTING_KIND_INT, NULL,
      0, 1, SIM_PLIES_MAX, 1, "plies", NULL},
@@ -149,6 +154,8 @@ int tui_setting_get(const TuiGameState *state, TuiSettingId id) {
     return state->blank_uppercase ? 1 : 0;
   case TUI_SETTING_RACK_SORT:
     return (int)state->rack_sort;
+  case TUI_SETTING_SPOILERS:
+    return state->hide_spoilers ? 1 : 0;
   case TUI_SETTING_SIM_PLIES:
     return state->sim_plies;
   case TUI_SETTING_SIM_CANDIDATES:
@@ -361,6 +368,11 @@ static void apply_setting(TuiGameState *state, TuiSession *session,
     state->rack_sort = (TuiRackSort)value;
     cfg->rack_sort = state->rack_sort;
     cfg->rack_sort_set = true;
+    break;
+  case TUI_SETTING_SPOILERS:
+    state->hide_spoilers = value != 0;
+    cfg->hide_spoilers = state->hide_spoilers;
+    cfg->hide_spoilers_set = true;
     break;
   case TUI_SETTING_SIM_PLIES:
     state->sim_plies = value;
