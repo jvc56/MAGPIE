@@ -526,7 +526,7 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
                                   TuiGlyphCache *glyph_cache_sub,
                                   TuiScoreSubscripts score_subscripts,
                                   bool antialias, const Theme *theme,
-                                  const LetterDistribution *ld, bool empty) {
+                                  const LetterDistribution *ld) {
   // Supersample: rasterize the glyph + composite the tile at SSx
   // the target pixel size, then box-average 2x2 down to the cell
   // pixel size the terminal expects. Sidesteps FT hinting that
@@ -557,22 +557,7 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
     bg = theme->bg;
     fg = (ThemeRgb){.r = 102, .g = 102, .b = 102};
   }
-  if (empty) {
-    // Concealed opponent tiles: a full-size tile-color square (matching
-    // the board / face-up rack tiles) framed by a thin panel-bg border
-    // on all four edges so a row of them reads as separate square tiles.
-    fill_tile_rect(buf_ss, tw, 0, 0, tw, th, bg);
-    int line = th / 24;
-    if (line < SS) {
-      line = SS;
-    }
-    fill_tile_rect(buf_ss, tw, 0, 0, tw, line, theme->bg);         // top
-    fill_tile_rect(buf_ss, tw, 0, th - line, tw, line, theme->bg); // bottom
-    fill_tile_rect(buf_ss, tw, 0, 0, line, th, theme->bg);         // left
-    fill_tile_rect(buf_ss, tw, tw - line, 0, line, th, theme->bg); // right
-  } else {
-    fill_tile_rect(buf_ss, tw, 0, 0, tw, th, bg);
-  }
+  fill_tile_rect(buf_ss, tw, 0, 0, tw, th, bg);
 
   const int sub_mode = (int)score_subscripts;
   const bool subs_on =
@@ -584,12 +569,7 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
     tui_glyph_cache_set_size(glyph_cache_sub, sub_px, antialias);
   }
 
-  // Concealed (opponent's hidden) tiles render as a bare tile box: the
-  // player-hued bg fill above, with no letter glyph and no score.
-  const char *ascii = "";
-  if (!empty) {
-    ascii = ml == 0 ? "?" : ld->ld_ml_to_hl[ml];
-  }
+  const char *ascii = ml == 0 ? "?" : ld->ld_ml_to_hl[ml];
   const TuiGlyph *g =
       (ascii != NULL && ascii[0] != '\0' && (unsigned char)ascii[0] < 0x80)
           ? tui_glyph_cache_get(glyph_cache, (uint32_t)ascii[0])
@@ -608,7 +588,7 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
       blit_glyph_into_buf(buf_ss, tw, th, 0, 0, tw, th, g, fg, bg);
     }
   }
-  if (subs_on && !ghost && !empty) {
+  if (subs_on && !ghost) {
     // Blanks always get a "0" subscript so their value is explicit.
     const bool show_subscript = (ml == 0) ||
                                 (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL) ||
