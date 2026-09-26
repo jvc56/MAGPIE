@@ -3,7 +3,9 @@
 #include "bot_worker.h"
 #include "game_state.h"
 #include "input_menus.h"
+#include "input_settings.h"
 #include "move_entry.h"
+#include "settings_table.h"
 #include "slash_commands.h"
 #include "time_picker.h"
 #include "tui_clipboard.h"
@@ -16,13 +18,188 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
+
+// Replaces the slash buffer's last word with
+// `text`, followed by a space when `then_space`. Caller holds
+// state->mutex.
+static void replace_last_slash_word(TuiGameState *state,
+                                    const TuiSlashWords *words,
+                                    const char *text, bool then_space) {
+  const int start = words->start[words->count - 1];
+  (void)snprintf(state->slash_buf + start,
+                 sizeof(state->slash_buf) - (size_t)start, "%s%s", text,
+                 then_space ? " " : "");
+  state->slash_len = (int)strlen(state->slash_buf);
+  state->slash_cursor = state->slash_len;
+}
+
+// Extends `typed` (its first `len` characters) to the longest prefix
+// every name starting with it shares, into `out`. Returns false when no
+// name starts with it.
+static bool common_completion(const char *const *names, int name_count,
+                              const char *typed, int len, char *out,
+                              size_t out_size) {
+  int common = -1;
+  const char *first = NULL;
+  for (int name_idx = 0; name_idx < name_count; name_idx++) {
+    const char *name = names[name_idx];
+    if ((int)strlen(name) < len || strncasecmp(name, typed, (size_t)len) != 0) {
+      continue;
+    }
+    if (first == NULL) {
+      first = name;
+      common = (int)strlen(name);
+      continue;
+    }
+    int shared = 0;
+    while (shared < common && name[shared] == first[shared]) {
+      shared++;
+    }
+    common = shared;
+  }
+  if (first == NULL) {
+    return false;
+  }
+  (void)snprintf(out, out_size, "%.*s", common, first);
+  return true;
+}
+
+// Tab in the command bar: completes the word being typed when it has
+// one match, or extends it as far as its matches agree. The command name comes
+// first; after "/set", the setting's name and then its value. Caller holds
+// state->mutex.
+static void complete_slash_word(TuiGameState *state) {
+  TuiSlashWords words;
+  tui_slash_split(state->slash_buf, state->slash_len, &words);
+  if (words.count == 0) {
+    return;
+  }
+  const char *buf = state->slash_buf;
+  const int last = words.count - 1;
+  const char *typed = buf + words.start[last];
+  const int typed_len = words.len[last];
+  const TuiSlashCommand *cmd =
+      tui_slash_command_resolve(buf + words.start[0], words.len[0]);
+  if (last == 0) {
+    if (cmd != NULL) {
+      replace_last_slash_word(state, &words, cmd->name,
+                              cmd->id == TUI_SLASH_SET);
+      return;
+    }
+    int cmd_count = 0;
+    const TuiSlashCommand *cmds = tui_slash_commands(&cmd_count);
+    const char *names[TUI_SLASH_COUNT * 2];
+    int name_count = 0;
+    for (int cmd_idx = 0; cmd_idx < cmd_count &&
+                          name_count < (int)(sizeof(names) / sizeof(names[0]));
+         cmd_idx++) {
+      names[name_count++] = cmds[cmd_idx].name;
+    }
+    char prefix[64];
+    if (common_completion(names, name_count, typed, typed_len, prefix,
+                          sizeof(prefix))) {
+      replace_last_slash_word(state, &words, prefix, false);
+    }
+    return;
+  }
+  if (cmd == NULL || cmd->id != TUI_SLASH_SET) {
+    return;
+  }
+  const TuiSettingDef *def =
+      tui_setting_resolve(buf + words.start[1], words.len[1]);
+  if (last == 1) {
+    if (def != NULL) {
+      replace_last_slash_word(state, &words, def->key, true);
+      return;
+    }
+    int def_count = 0;
+    const TuiSettingDef *defs = tui_setting_defs(&def_count);
+    const char *keys[TUI_SETTING_COUNT] = {NULL};
+    for (int def_idx = 0; def_idx < def_count; def_idx++) {
+      keys[def_idx] = defs[def_idx].key;
+    }
+    char prefix[64];
+    if (common_completion(keys, def_count, typed, typed_len, prefix,
+                          sizeof(prefix))) {
+      replace_last_slash_word(state, &words, prefix, false);
+    }
+    return;
+  }
+  if (last == 2 && def != NULL) {
+    const char *value = tui_setting_complete_value(def, typed, typed_len);
+    if (value != NULL) {
+      replace_last_slash_word(state, &words, value, false);
+    }
+  }
+}
+
+// "/set <name> <value>": changes a setting, reporting the result (or
+// what's wrong) in the status bar. "/set <name>" shows its value.
+static void run_set_command(TuiGameState *state, TuiSession *session,
+                            const TuiSlashWords *words) {
+  char message[sizeof(state->notice_buf)];
+  const char *buf = state->slash_buf;
+  const TuiSettingDef *def =
+      words->count > 1 && words->len[1] > 0
+          ? tui_setting_resolve(buf + words->start[1], words->len[1])
+          : NULL;
+  pthread_mutex_lock(&state->mutex);
+  if (words->count < 2 || words->len[1] == 0) {
+    tui_game_state_notice(state, "usage: /set <name> <value>");
+    pthread_mutex_unlock(&state->mutex);
+    return;
+  }
+  if (def == NULL) {
+    (void)snprintf(message, sizeof(message), "no setting \"%.*s\"",
+                   words->len[1], buf + words->start[1]);
+    tui_game_state_notice(state, message);
+    pthread_mutex_unlock(&state->mutex);
+    return;
+  }
+  char value_text[32];
+  if (words->count < 3 || words->len[2] == 0) {
+    char values[64];
+    tui_setting_format(def, tui_setting_get(state, def->id), value_text,
+                       sizeof(value_text));
+    tui_setting_describe_values(def, values, sizeof(values));
+    (void)snprintf(message, sizeof(message), "%s is %s (%s)", def->key,
+                   value_text, values);
+    tui_game_state_notice(state, message);
+    pthread_mutex_unlock(&state->mutex);
+    return;
+  }
+  const char *reason = tui_setting_unavailable_reason(state, session, def->id);
+  if (reason != NULL) {
+    tui_game_state_notice(state, reason);
+    pthread_mutex_unlock(&state->mutex);
+    return;
+  }
+  (void)snprintf(value_text, sizeof(value_text), "%.*s", words->len[2],
+                 buf + words->start[2]);
+  int value = 0;
+  if (!tui_setting_parse(def, value_text, &value, message, sizeof(message))) {
+    tui_game_state_notice(state, message);
+    pthread_mutex_unlock(&state->mutex);
+    return;
+  }
+  pthread_mutex_unlock(&state->mutex);
+  tui_setting_set(state, session, def->id, value);
+  pthread_mutex_lock(&state->mutex);
+  tui_setting_format(def, tui_setting_get(state, def->id), value_text,
+                     sizeof(value_text));
+  (void)snprintf(message, sizeof(message), "%s set to %s", def->key,
+                 value_text);
+  tui_game_state_notice(state, message);
+  pthread_mutex_unlock(&state->mutex);
+}
 
 // Game-screen keys when no modal or cell editor is open: panel focus
 // (0-5, Tab), Esc menu, CGP copy, board / Analysis / History navigation,
 // and the command bar with its slash commands. Returns true when consumed.
-bool tui_input_game(TuiGameState *state, TuiUiState *ui,
-                    const TuiSession *session, uint32_t key, ncinput input) {
+bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
+                    uint32_t key, ncinput input) {
   // Opening the history-cell editor from the History cursor: Enter on
   // any editable entry, and Tab / Right / Down too on the pending one
   // (the turn being entered, so any key toward it starts typing).
@@ -396,32 +573,30 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
         }
         pthread_mutex_unlock(&state->mutex);
       } else if (key == NCKEY_TAB || key == '\t') {
-        // Tab completes against the unique prefix match.
-        const TuiSlashCommand *match =
-            tui_slash_command_resolve(state->slash_buf, state->slash_len);
-        if (match != NULL) {
-          pthread_mutex_lock(&state->mutex);
-          (void)snprintf(state->slash_buf, sizeof(state->slash_buf), "%s",
-                         match->name);
-          state->slash_len = (int)strlen(match->name);
-          state->slash_cursor = state->slash_len;
-          pthread_mutex_unlock(&state->mutex);
-        }
+        pthread_mutex_lock(&state->mutex);
+        complete_slash_word(state);
+        pthread_mutex_unlock(&state->mutex);
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
         // Execute the typed command: an exact name, or a unique prefix
         // if the user pressed Enter without completing first.
+        TuiSlashWords words;
+        tui_slash_split(state->slash_buf, state->slash_len, &words);
         const TuiSlashCommand *cmd =
-            tui_slash_command_resolve(state->slash_buf, state->slash_len);
+            words.count > 0
+                ? tui_slash_command_resolve(state->slash_buf + words.start[0],
+                                            words.len[0])
+                : NULL;
         switch (cmd != NULL ? cmd->id : TUI_SLASH_COUNT) {
+        case TUI_SLASH_SET:
+          run_set_command(state, session, &words);
+          break;
         case TUI_SLASH_NEW:
           ui->modal = TUI_MODAL_TIME_PICKER;
           ui->time_focus = tui_time_picker_closest_index(session->chosen_time);
           ui->time_picker_return = TUI_MODAL_NONE;
           break;
         case TUI_SLASH_SETTINGS:
-          ui->modal = TUI_MODAL_SETTINGS;
-          ui->settings_focus = 0;
-          ui->settings_return = TUI_MODAL_NONE;
+          tui_open_settings(ui, TUI_MODAL_NONE);
           break;
         case TUI_SLASH_QUIT:
         case TUI_SLASH_EXIT:
@@ -457,9 +632,9 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
         state->slash_cursor = 0;
         state->slash_buf[0] = '\0';
         pthread_mutex_unlock(&state->mutex);
-      } else if ((key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z')) {
-        // Insert (lowercased) at the cursor position rather than
-        // always appending. Shifts the buffer tail right.
+      } else if (key >= ' ' && key < 0x7f) {
+        // Insert (letters lowercased) at the cursor position rather
+        // than always appending. Shifts the buffer tail right.
         const char ch =
             (char)((key >= 'A' && key <= 'Z') ? key + ('a' - 'A') : key);
         pthread_mutex_lock(&state->mutex);
@@ -478,9 +653,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       ui->quit_confirm_focus = 0;
       ui->quit_confirm_return = TUI_MODAL_NONE;
     } else if (key == 's' || key == 'S') {
-      ui->modal = TUI_MODAL_SETTINGS;
-      ui->settings_focus = 0;
-      ui->settings_return = TUI_MODAL_NONE;
+      tui_open_settings(ui, TUI_MODAL_NONE);
     } else if (key == 'n' || key == 'N') {
       ui->modal = TUI_MODAL_TIME_PICKER;
       ui->time_focus = tui_time_picker_closest_index(session->chosen_time);
