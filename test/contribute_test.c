@@ -196,10 +196,8 @@ static void test_client_state(void) {
       "server https://birdtest.example\nmaxtasks 0apikey bt_SECRETKEY123\n",
       "server https://birdtest.example apikey bt_SECRETKEY123\n",
       "server https://birdtest.example\nbt_SECRETKEY123\n",
-      "server https://birdtest.example\n# mineapikey bt_SECRETKEY123\n",
-      "server https://birdtest.example\n# my laptopapikey   bt_SECRETKEY123\n",
       "server https://birdtest.example\napikey bt_x server bt_SECRETKEY123\n",
-      "server https://birdtest.example\nmaxtasks -7 bt_SECRETKEY123\n",
+      "server https://birdtest.example\napikey bt_SECRETKEY123\xc2\xa0\n",
   };
   for (size_t i = 0; i < sizeof(leaks) / sizeof(leaks[0]); i++) {
     write_settings_file(path, leaks[i]);
@@ -228,13 +226,40 @@ static void test_client_state(void) {
   assert(strstr(lowercase, "settings are lowercase"));
   free(lowercase);
 
-  // A key commented out on purpose is a comment, as any `#` line is.
-  write_settings_file(path, "server https://birdtest.example\n"
-                            "# apikey bt_oldkey123 (laptop, deactivated)\n"
-                            "#apikey bt_older\n# apikey   bt_aligned\n");
+  // A negative task count is refused without quoting it.
+  write_settings_file(path, "server https://birdtest.example\nmaxtasks -7\n");
+  assert(!client_state_load(path, error_stack));
+  char *negative = error_stack_get_string_and_reset(error_stack);
+  assert(!strstr(negative, "-7"));
+  free(negative);
+
+  // Every `#` line is a comment, a key commented out on purpose included,
+  // and none is refused. One holding `apikey` then a key -- what appending
+  // the setting to a last comment line with no newline makes, whatever the
+  // comment ended in -- is recorded, so a run with no key can say where.
+  const char *commented[] = {
+      "# apikey bt_oldkey123 (laptop, deactivated)",
+      "#apikey bt_older",
+      "# my laptopapikey   bt_x",
+      "# my laptop apikey bt_x",
+      "##########apikey bt_x",
+      "#apikey\tbt_x",
+      "# paste yours as \"apikey bt_...\" below",
+  };
+  for (size_t i = 0; i < sizeof(commented) / sizeof(commented[0]); i++) {
+    char *contents = get_formatted_string(
+        "server https://birdtest.example\n%s\n", commented[i]);
+    write_settings_file(path, contents);
+    free(contents);
+    state = client_state_load(path, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(state->api_key == NULL);
+    assert(state->commented_key_line == 2);
+    client_state_destroy(state);
+  }
+  write_settings_file(path, "server https://birdtest.example\n# no key here\n");
   state = client_state_load(path, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(state->api_key == NULL);
+  assert(state->commented_key_line == 0);
   client_state_destroy(state);
 
   // An empty one still means none.

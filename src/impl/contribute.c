@@ -730,6 +730,13 @@ ContributeState *contribute_state_create(const char *settings_path,
   thread_control_print_formatted(
       thread_control, "contributing to %s as %s (%d threads)\n",
       client_state->server_url, identity_description, state->threads);
+  if (!client_state->api_key && client_state->commented_key_line) {
+    thread_control_print_formatted(
+        thread_control,
+        "%s line %d is a comment holding an apikey; if it is meant as the "
+        "setting, put it on a line of its own\n",
+        client_state->settings_path, client_state->commented_key_line);
+  }
   return state;
 }
 

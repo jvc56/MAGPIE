@@ -27,6 +27,11 @@ typedef struct ClientState {
   int max_tasks;
   int idle_wait_seconds;
   char *settings_path;
+  // The line of a comment that holds `apikey` then a key, or 0: what
+  // appending `apikey bt_...` to a last comment line with no newline makes.
+  // A comment is never refused -- a key may be commented out on purpose --
+  // but a run with no apikey set says which line to look at.
+  int commented_key_line;
 } ClientState;
 
 // Reads the settings file.
