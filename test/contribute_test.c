@@ -196,7 +196,8 @@ static void test_client_state(void) {
       "server https://birdtest.example\nmaxtasks 0apikey bt_SECRETKEY123\n",
       "server https://birdtest.example apikey bt_SECRETKEY123\n",
       "server https://birdtest.example\nbt_SECRETKEY123\n",
-      "server https://birdtest.example\n# mine apikey bt_SECRETKEY123\n",
+      "server https://birdtest.example\n# mineapikey bt_SECRETKEY123\n",
+      "server https://birdtest.example\n# my laptopapikey   bt_SECRETKEY123\n",
       "server https://birdtest.example\napikey bt_x server bt_SECRETKEY123\n",
       "server https://birdtest.example\nmaxtasks -7 bt_SECRETKEY123\n",
   };
@@ -226,6 +227,15 @@ static void test_client_state(void) {
   char *lowercase = error_stack_get_string_and_reset(error_stack);
   assert(strstr(lowercase, "settings are lowercase"));
   free(lowercase);
+
+  // A key commented out on purpose is a comment, as any `#` line is.
+  write_settings_file(path, "server https://birdtest.example\n"
+                            "# apikey bt_oldkey123 (laptop, deactivated)\n"
+                            "#apikey bt_older\n# apikey   bt_aligned\n");
+  state = client_state_load(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(state->api_key == NULL);
+  client_state_destroy(state);
 
   // An empty one still means none.
   write_settings_file(path, "server https://birdtest.example\nuuid \n");

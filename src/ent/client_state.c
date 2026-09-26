@@ -14,6 +14,26 @@ enum {
 
 // Parses an integer-valued setting, pushing a message naming the file, line
 // and key on failure rather than atoi's silent zero.
+// Whether a comment line holds `apikey` glued to the text before it, then
+// blanks and a key: what appending `apikey bt_...` to a last comment line with
+// no newline makes. A key commented out on purpose (`# apikey bt_...`) has a
+// blank or the `#` before it, and is left alone.
+static bool comment_swallows_a_key(const char *line) {
+  for (const char *at = strstr(line, "apikey"); at;
+       at = strstr(at + 1, "apikey")) {
+    const char before = at == line ? '#' : at[-1];
+    if (before == ' ' || before == '\t' || before == '#') {
+      continue;
+    }
+    const char *after = at + strlen("apikey");
+    const size_t blanks = strspn(after, " \t");
+    if (blanks > 0 && strncmp(after + blanks, "bt_", 3) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static int parse_setting_int(const char *value, const char *key,
                              const char *settings_path, int line_number,
                              ErrorStack *error_stack) {
@@ -28,7 +48,8 @@ static int parse_setting_int(const char *value, const char *key,
         error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
         // The value is not shown: a key appended to a last line that had no
         // newline ends up here, and would be printed (the audit's pass 16).
-        get_formatted_string("%s line %d: '%s' is not a whole number in range",
+        get_formatted_string("%s line %d: '%s' is not a whole number "
+                             "(at most 2147483647)",
                              settings_path, line_number, key));
     result = 0;
   }
@@ -110,11 +131,11 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
     char *line = trim(cursor);
     // A key appended to a last comment line with no newline was swallowed by
     // the comment, and the run went anonymous without a word.
-    if (*line == '#' && strstr(line, "apikey bt_")) {
+    if (*line == '#' && comment_swallows_a_key(line)) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
-          get_formatted_string("%s line %d: a comment holds an apikey setting; "
-                               "put it on a line of its own",
+          get_formatted_string("%s line %d: an apikey setting ran on from a "
+                               "comment; put it on a line of its own",
                                settings_path, line_number));
       free(contents);
       client_state_destroy(state);
