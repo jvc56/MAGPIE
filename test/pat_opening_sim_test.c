@@ -1,8 +1,9 @@
 #include "pat_opening_sim_test.h"
 
 #include "../src/def/board_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/rack_defs.h"
-#include "../src/ent/bag.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/sim_results.h"
@@ -15,6 +16,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -36,11 +38,13 @@
 // with the on-demand test
 // "patopeningsim:<lexicon>:<pat>[:<racks>[:<leaves>[:<ld>]]]"; the
 // ready-to-paste rows are printed at the end (see test/pat_build.sh).
-#define PAT_OPENING_SIM_NUM_RACKS 1000
-#define PAT_OPENING_SIM_NUM_PLAYS 12
-#define PAT_OPENING_SIM_PLIES 4
-#define PAT_OPENING_SIM_ITERATIONS_PER_PLAY 400
-#define PAT_OPENING_SIM_THREADS 10
+enum {
+  PAT_OPENING_SIM_NUM_RACKS = 1000,
+  PAT_OPENING_SIM_NUM_PLAYS = 12,
+  PAT_OPENING_SIM_PLIES = 4,
+  PAT_OPENING_SIM_ITERATIONS_PER_PLAY = 400,
+  PAT_OPENING_SIM_THREADS = 10,
+};
 #define PAT_OPENING_SIM_SEED_BASE 7300000000ULL
 
 typedef struct OpeningCandidate {
@@ -77,7 +81,11 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
   char *wit_path = get_formatted_string("./data/lexica/%s.wit", lexicon);
   // The tables in the data directory are the standard board's; another
   // board dimension plays without them.
-  const bool tables_ok = BOARD_DIM == DEFAULT_BOARD_DIM;
+#if BOARD_DIM == DEFAULT_BOARD_DIM
+  const bool tables_ok = true;
+#else
+  const bool tables_ok = false;
+#endif
   const bool have_wmp = tables_ok && access(wmp_path, R_OK) == 0;
   const bool have_rit = tables_ok && access(rit_path, R_OK) == 0;
   const bool have_wit = tables_ok && access(wit_path, R_OK) == 0;
@@ -163,7 +171,7 @@ void pat_opening_sim_run(const char *lexicon, const char *pat_name,
     }
     if ((attempt + 1) % 50 == 0) {
       printf("  %d racks simmed\n", attempt + 1);
-      fflush(stdout);
+      (void)fflush(stdout);
     }
   }
 
@@ -313,9 +321,16 @@ void pat_opening_sim_run_spec(const char *spec) {
               "got '%s'",
               spec);
   }
-  const int racks = (num_fields >= 3)
-                        ? atoi(string_splitter_get_item(fields, 2))
-                        : PAT_OPENING_SIM_NUM_RACKS;
+  int racks = PAT_OPENING_SIM_NUM_RACKS;
+  if (num_fields >= 3) {
+    ErrorStack *error_stack = error_stack_create();
+    racks = string_to_int(string_splitter_get_item(fields, 2), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      log_fatal("patopeningsim racks must be an integer, got '%s'",
+                string_splitter_get_item(fields, 2));
+    }
+    error_stack_destroy(error_stack);
+  }
   if (racks < 2) {
     log_fatal("patopeningsim needs at least 2 racks, got %d", racks);
   }

@@ -554,7 +554,8 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent,
                                 : 0.0;
       string_builder_add_formatted_string(
           sb, "  %d tiles: mean %.3f, SE %.3f (%llu games, %.1f%%)\n", tiles,
-          mean, se, (unsigned long long)n, 100.0 * (double)n / opening_samples);
+          mean, se, (unsigned long long)n,
+          100.0 * (double)n / (double)opening_samples);
     }
   }
   string_builder_add_string(sb, "\n");

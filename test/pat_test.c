@@ -3,11 +3,13 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
 #include "../src/def/equity_defs.h"
+#include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/pat_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/bonus_square.h"
@@ -31,11 +33,11 @@
 #include "test_util.h"
 #include <assert.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 // Creates a temporary data directory with a strategy/ subdirectory and
 // returns the path (owned by the caller).
@@ -72,7 +74,7 @@ static void write_pat_file_contents(const char *data_dir, const char *pat_name,
 }
 
 static void current_pat_header(char *buf, size_t buf_size) {
-  snprintf(buf, buf_size, "%s%d", PAT_MAGIC_PREFIX, PAT_VERSION);
+  (void)snprintf(buf, buf_size, "%s%d", PAT_MAGIC_PREFIX, PAT_VERSION);
 }
 
 static void assert_pat_create_fails(const char *data_dir, const char *pat_name,
@@ -974,9 +976,9 @@ void pat_run_through_table_check(const char *lexicon) {
         pat_test_count_key_words(kwg, kwg_get_dawg_root_node_index(kwg), 0,
                                  length, key, key_len, word_end, word, &count,
                                  &rest, ld);
-        const int expected_count = (int)(8.0 * log2(1.0 + count) + 0.5);
+        const int expected_count = (int)(8.0 * log2(1.0 + (double)count) + 0.5);
         const int expected_score =
-            count > 0 ? (int)((double)rest / count + 0.5) : 0;
+            count > 0 ? (int)((double)rest / (double)count + 0.5) : 0;
         const int table_count =
             pat_get_run_through_count(pat, word_end, key, key_len, length);
         const int table_score =
@@ -2434,7 +2436,7 @@ static void test_pat_movegen_integration(void) {
 
   // SortedMoveList aliases the MoveList's move pool, so snapshot the
   // equities before regenerating.
-  Equity zero_weight_equities[5];
+  Equity zero_weight_equities[5] = {0};
   generate_moves_for_game(&move_gen_args);
   SortedMoveList *sorted_moves = sorted_move_list_create(move_list);
   const int zero_weight_count = sorted_moves->count;
@@ -2447,6 +2449,8 @@ static void test_pat_movegen_integration(void) {
   // Zero weights must not change anything relative to no weights at all.
   players_data_set_data(config_get_players_data(config), PLAYERS_DATA_TYPE_PAT,
                         0, NULL);
+  // players_data no longer holds the zero weights, so free them here.
+  pat_destroy(pat);
   player_update(config_get_players_data(config), game_get_player(game, 0));
   generate_moves_for_game(&move_gen_args);
   sorted_moves = sorted_move_list_create(move_list);

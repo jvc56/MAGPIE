@@ -13,6 +13,7 @@
 #include "wmp.h"
 #include "word_info_table.h"
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 struct Player {

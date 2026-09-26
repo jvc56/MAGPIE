@@ -398,84 +398,84 @@ void pat_bump_mutation_counter(PATWeights *pat) { pat->mutation_counter++; }
 void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
   if (feature_index >= PAT_FEATURE_HOOK_START &&
       feature_index < PAT_FEATURE_FLOAT_FLEX_START) {
-    snprintf(buf, buf_size, "hook_d%d",
-             feature_index - PAT_FEATURE_HOOK_START + 1);
+    (void)snprintf(buf, buf_size, "hook_d%d",
+                   feature_index - PAT_FEATURE_HOOK_START + 1);
   } else if (feature_index < PAT_FEATURE_FLOAT_SCORE_START) {
-    snprintf(buf, buf_size, "float_flex_d%d",
-             feature_index - PAT_FEATURE_FLOAT_FLEX_START + 1);
+    (void)snprintf(buf, buf_size, "float_flex_d%d",
+                   feature_index - PAT_FEATURE_FLOAT_FLEX_START + 1);
   } else if (feature_index < PAT_FEATURE_FLOAT_THROUGH_SCORE_START) {
-    snprintf(buf, buf_size, "float_score_d%d",
-             feature_index - PAT_FEATURE_FLOAT_SCORE_START + 1);
+    (void)snprintf(buf, buf_size, "float_score_d%d",
+                   feature_index - PAT_FEATURE_FLOAT_SCORE_START + 1);
   } else if (feature_index < PAT_FEATURE_FLOAT_THROUGH_COUNT_START) {
-    snprintf(buf, buf_size, "float_through_score_d%d",
-             feature_index - PAT_FEATURE_FLOAT_THROUGH_SCORE_START + 1);
+    (void)snprintf(buf, buf_size, "float_through_score_d%d",
+                   feature_index - PAT_FEATURE_FLOAT_THROUGH_SCORE_START + 1);
   } else if (feature_index < PAT_FEATURE_HOOK_SCALED_START) {
-    snprintf(buf, buf_size, "float_through_count_d%d",
-             feature_index - PAT_FEATURE_FLOAT_THROUGH_COUNT_START + 1);
+    (void)snprintf(buf, buf_size, "float_through_count_d%d",
+                   feature_index - PAT_FEATURE_FLOAT_THROUGH_COUNT_START + 1);
   } else if (feature_index < PAT_FEATURE_FLOAT_FLEX_SCALED_START) {
-    snprintf(buf, buf_size, "hook_scaled_d%d",
-             feature_index - PAT_FEATURE_HOOK_SCALED_START + 1);
+    (void)snprintf(buf, buf_size, "hook_scaled_d%d",
+                   feature_index - PAT_FEATURE_HOOK_SCALED_START + 1);
   } else if (feature_index < PAT_FEATURE_HOOK_SCORE_START) {
-    snprintf(buf, buf_size, "float_flex_scaled_d%d",
-             feature_index - PAT_FEATURE_FLOAT_FLEX_SCALED_START + 1);
+    (void)snprintf(buf, buf_size, "float_flex_scaled_d%d",
+                   feature_index - PAT_FEATURE_FLOAT_FLEX_SCALED_START + 1);
   } else if (feature_index < PAT_FEATURE_DWS_HOOK_START) {
-    snprintf(buf, buf_size, "hook_score_d%d",
-             feature_index - PAT_FEATURE_HOOK_SCORE_START + 1);
+    (void)snprintf(buf, buf_size, "hook_score_d%d",
+                   feature_index - PAT_FEATURE_HOOK_SCORE_START + 1);
   } else if (feature_index < PAT_FEATURE_DWS_FLOAT_SCORE_START) {
-    snprintf(buf, buf_size, "dws_hook_d%d",
-             feature_index - PAT_FEATURE_DWS_HOOK_START + 1);
+    (void)snprintf(buf, buf_size, "dws_hook_d%d",
+                   feature_index - PAT_FEATURE_DWS_HOOK_START + 1);
   } else if (feature_index < PAT_FEATURE_TLS_HOOK_START) {
-    snprintf(buf, buf_size, "dws_float_score_d%d",
-             feature_index - PAT_FEATURE_DWS_FLOAT_SCORE_START + 1);
+    (void)snprintf(buf, buf_size, "dws_float_score_d%d",
+                   feature_index - PAT_FEATURE_DWS_FLOAT_SCORE_START + 1);
   } else if (feature_index < PAT_FEATURE_TLS_FLOAT_SCORE_START) {
-    snprintf(buf, buf_size, "tls_hook_d%d",
-             feature_index - PAT_FEATURE_TLS_HOOK_START + 1);
+    (void)snprintf(buf, buf_size, "tls_hook_d%d",
+                   feature_index - PAT_FEATURE_TLS_HOOK_START + 1);
   } else if (feature_index < PAT_FEATURE_DLS_HOOK_START) {
-    snprintf(buf, buf_size, "tls_float_score_d%d",
-             feature_index - PAT_FEATURE_TLS_FLOAT_SCORE_START + 1);
+    (void)snprintf(buf, buf_size, "tls_float_score_d%d",
+                   feature_index - PAT_FEATURE_TLS_FLOAT_SCORE_START + 1);
   } else if (feature_index < PAT_FEATURE_DLS_FLOAT_SCORE_START) {
-    snprintf(buf, buf_size, "dls_hook_d%d",
-             feature_index - PAT_FEATURE_DLS_HOOK_START + 1);
+    (void)snprintf(buf, buf_size, "dls_hook_d%d",
+                   feature_index - PAT_FEATURE_DLS_HOOK_START + 1);
   } else if (feature_index < PAT_FEATURE_QWS_HOOK_START) {
-    snprintf(buf, buf_size, "dls_float_score_d%d",
-             feature_index - PAT_FEATURE_DLS_FLOAT_SCORE_START + 1);
+    (void)snprintf(buf, buf_size, "dls_float_score_d%d",
+                   feature_index - PAT_FEATURE_DLS_FLOAT_SCORE_START + 1);
   } else if (feature_index < PAT_FEATURE_QWS_FLOAT_SCORE_START) {
-    snprintf(buf, buf_size, "qws_hook_d%d",
-             feature_index - PAT_FEATURE_QWS_HOOK_START + 1);
+    (void)snprintf(buf, buf_size, "qws_hook_d%d",
+                   feature_index - PAT_FEATURE_QWS_HOOK_START + 1);
   } else if (feature_index < PAT_FEATURE_QLS_HOOK_START) {
-    snprintf(buf, buf_size, "qws_float_score_d%d",
-             feature_index - PAT_FEATURE_QWS_FLOAT_SCORE_START + 1);
+    (void)snprintf(buf, buf_size, "qws_float_score_d%d",
+                   feature_index - PAT_FEATURE_QWS_FLOAT_SCORE_START + 1);
   } else if (feature_index < PAT_FEATURE_QLS_FLOAT_SCORE_START) {
-    snprintf(buf, buf_size, "qls_hook_d%d",
-             feature_index - PAT_FEATURE_QLS_HOOK_START + 1);
+    (void)snprintf(buf, buf_size, "qls_hook_d%d",
+                   feature_index - PAT_FEATURE_QLS_HOOK_START + 1);
   } else if (feature_index < PAT_FEATURE_TT_FLOATER) {
-    snprintf(buf, buf_size, "qls_float_score_d%d",
-             feature_index - PAT_FEATURE_QLS_FLOAT_SCORE_START + 1);
+    (void)snprintf(buf, buf_size, "qls_float_score_d%d",
+                   feature_index - PAT_FEATURE_QLS_FLOAT_SCORE_START + 1);
   } else if (feature_index == PAT_FEATURE_TT_FLOATER) {
-    snprintf(buf, buf_size, "tt_floater");
+    (void)snprintf(buf, buf_size, "tt_floater");
   } else if (feature_index == PAT_FEATURE_TT_HOOK_ONLY) {
-    snprintf(buf, buf_size, "tt_hook_only");
+    (void)snprintf(buf, buf_size, "tt_hook_only");
   } else if (feature_index < PAT_FEATURE_LM_SPAN_START) {
     static const char *const tier_names[PAT_WINDOW_TIER_COUNT] = {"dd", "w6",
                                                                   "w9", "w12"};
     static const char *const kind_names[PAT_WINDOW_FEATURES_PER_TIER] = {
         "floater", "hook_only", "tiles_saved"};
     const int offset = feature_index - PAT_FEATURE_WINDOW_START;
-    snprintf(buf, buf_size, "%s_%s",
-             tier_names[offset / PAT_WINDOW_FEATURES_PER_TIER],
-             kind_names[offset % PAT_WINDOW_FEATURES_PER_TIER]);
+    (void)snprintf(buf, buf_size, "%s_%s",
+                   tier_names[offset / PAT_WINDOW_FEATURES_PER_TIER],
+                   kind_names[offset % PAT_WINDOW_FEATURES_PER_TIER]);
   } else if (feature_index < PAT_FEATURE_LM_EXT_START) {
-    snprintf(buf, buf_size, "lm_span_d%d",
-             feature_index - PAT_FEATURE_LM_SPAN_START + 1);
+    (void)snprintf(buf, buf_size, "lm_span_d%d",
+                   feature_index - PAT_FEATURE_LM_SPAN_START + 1);
   } else if (feature_index < PAT_FEATURE_DWS_LM_SPAN_START) {
-    snprintf(buf, buf_size, "lm_ext_d%d",
-             feature_index - PAT_FEATURE_LM_EXT_START + 1);
+    (void)snprintf(buf, buf_size, "lm_ext_d%d",
+                   feature_index - PAT_FEATURE_LM_EXT_START + 1);
   } else if (feature_index < PAT_FEATURE_DWS_LM_EXT_START) {
-    snprintf(buf, buf_size, "dws_lm_span_d%d",
-             feature_index - PAT_FEATURE_DWS_LM_SPAN_START + 1);
+    (void)snprintf(buf, buf_size, "dws_lm_span_d%d",
+                   feature_index - PAT_FEATURE_DWS_LM_SPAN_START + 1);
   } else if (feature_index < PAT_NUM_FEATURES) {
-    snprintf(buf, buf_size, "dws_lm_ext_d%d",
-             feature_index - PAT_FEATURE_DWS_LM_EXT_START + 1);
+    (void)snprintf(buf, buf_size, "dws_lm_ext_d%d",
+                   feature_index - PAT_FEATURE_DWS_LM_EXT_START + 1);
   } else {
     log_fatal("invalid PAT feature index: %d", feature_index);
   }
@@ -1856,7 +1856,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     lm_ext_base = PAT_FEATURE_DWS_LM_EXT_START;
   }
   const bool lm_track = lm_span_base >= 0;
-  int8_t lm_entries[2][RACK_SIZE + 1];
+  int lm_entries[2][RACK_SIZE + 1];
   int lm_num_entries[2] = {1, 1};
   int8_t lm_route_bin[2][2 * RACK_SIZE + 2];
   int8_t lm_route_position[2][2 * RACK_SIZE + 2];
@@ -1892,7 +1892,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     return;
   }
   if (lm_track) {
-    lm_entries[0][0] = (int8_t)bonus_square_get_letter_multiplier(
+    lm_entries[0][0] = bonus_square_get_letter_multiplier(
         square_get_bonus_square(&lane[tws_idx]));
     lm_entries[1][0] = lm_entries[0][0];
   }
@@ -2031,7 +2031,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         }
         int run_flex;
         int scaled_run_flex;
-        if (run_has_fresh_tile) {
+        // A fresh tile implies an overlay; the check lets the analyzer
+        // see it.
+        if (run_has_fresh_tile && overlay != NULL) {
           // The run's real extension sets do not exist yet; approximate
           // with the two-letter-word flexibility of the tile facing the
           // TWS square.
@@ -2095,7 +2097,7 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       if (lm_track && lm_num_entries[lm_side] < RACK_SIZE + 1) {
         lm_entries[lm_side][lm_num_entries[lm_side]++] =
-            (int8_t)bonus_square_get_letter_multiplier(
+            bonus_square_get_letter_multiplier(
                 square_get_bonus_square(&lane[idx]));
       }
       if (full_channels && bonus_square_get_word_multiplier(
@@ -2644,7 +2646,7 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
 // triple-triple channels.
 static bool pat_class_is_weighted(const PATWeights *weights, int premium_class,
                                   uint32_t enabled_classes_mask) {
-  if (!(enabled_classes_mask & (1u << premium_class))) {
+  if (!(enabled_classes_mask & (1U << premium_class))) {
     return false;
   }
   int start = 0;
@@ -2770,7 +2772,7 @@ static void pat_eval_context_load_units(
   for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
        premium_class++) {
     if (pat_class_is_weighted(weights, premium_class, enabled_classes_mask)) {
-      pat_eval_ctx->active_classes_mask |= 1u << premium_class;
+      pat_eval_ctx->active_classes_mask |= 1U << premium_class;
     }
   }
   pat_eval_ctx->ld = ld;
@@ -3468,7 +3470,7 @@ uint32_t pat_parse_classes_mask(const char *value, ErrorStack *error_stack) {
     for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
          premium_class++) {
       if (strings_equal(item, pat_class_names[premium_class])) {
-        mask |= 1u << premium_class;
+        mask |= 1U << premium_class;
         matched = true;
         break;
       }
@@ -3496,7 +3498,7 @@ char *pat_classes_mask_to_string(uint32_t enabled_classes_mask) {
   bool first = true;
   for (int premium_class = 0; premium_class < PAT_NUM_PREMIUM_CLASSES;
        premium_class++) {
-    if (enabled_classes_mask & (1u << premium_class)) {
+    if (enabled_classes_mask & (1U << premium_class)) {
       if (!first) {
         string_builder_add_string(sb, ",");
       }
