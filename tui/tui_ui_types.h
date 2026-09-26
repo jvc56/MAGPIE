@@ -20,6 +20,7 @@ typedef enum {
   TUI_MODAL_ANNOTATE_SETUP = 9,
   TUI_MODAL_PLAY_SETUP = 10,
   TUI_MODAL_ANALYSIS_MENU = 11,
+  TUI_MODAL_PHONY_CONFIRM = 12,
 } TuiModalState;
 
 // Play-vs-computer setup modal. A single modal with everything: editable
@@ -101,6 +102,13 @@ typedef enum {
   TUI_ANALYSIS_MENU_BACK = 4,
   TUI_ANALYSIS_MENU_ITEM_COUNT = 5,
 } TuiAnalysisMenuItem;
+
+// Annotation's phony dialog: a play forms words not in the lexicon.
+typedef enum {
+  TUI_PHONY_CONFIRM_UNDO = 0,
+  TUI_PHONY_CONFIRM_KEEP = 1,
+  TUI_PHONY_CONFIRM_ITEM_COUNT = 2,
+} TuiPhonyConfirmItem;
 
 // Startup-menu modal. Shown at app launch (instead of jumping
 // directly into a bot-vs-bot game) and reachable from Esc → "New
