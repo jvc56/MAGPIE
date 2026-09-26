@@ -81,6 +81,9 @@ jobs:
       - name: Run no-PGO release tests
         run: ./bin/magpie_test
 
+      - name: Build and run TUI unit tests
+        run: make magpie_tui_test BUILD=no_pgo_release && ./bin/magpie_tui_test
+
   unit-tests-dev:
     name: unit-tests-dev (${{ matrix.shard }})
     runs-on: ubuntu-latest

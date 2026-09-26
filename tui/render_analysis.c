@@ -572,7 +572,7 @@ static void render_analysis_row(struct ncplane *plane, const Theme *theme,
   // Re-sort the candidate's leave per the user's rack-sort
   // preference so the leave column lines up with how rack
   // tiles are ordered elsewhere (rack panel, history).
-  char sorted_row_leave[24];
+  char sorted_row_leave[TUI_RACK_TEXT_MAX];
   if (rows[data_i].leave[0] != '\0' && state != NULL && state->ld != NULL) {
     format_alphagram_for_sort(rows[data_i].leave, state->ld, state->rack_sort,
                               sorted_row_leave, sizeof(sorted_row_leave));
