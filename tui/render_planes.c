@@ -35,6 +35,10 @@ void tui_planes_destroy_all(void) {
     tui_plane_destroy(grid_planes.modal);
     grid_planes.modal = NULL;
   }
+  if (grid_planes.palette != NULL) {
+    tui_plane_destroy(grid_planes.palette);
+    grid_planes.palette = NULL;
+  }
 }
 
 // Public accessor for the cached modal plane, shared across all modal
