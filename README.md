@@ -326,6 +326,36 @@ magpie> convert winpct CSW24_winpct_record winpct_english
 
 The recorder splits games into two independent samples, and `convert winpct` chooses how much to smooth by predicting each sample from the other; it prints that comparison.
 
+This directory also contains PAT weights, `<lexicon>.pat` for the 15x15 board and `<lexicon>_super21.pat` for the 21x21 board (see PAT below).
+
+## PAT
+
+PAT (positional adjustment term) adds a learned term to static equity for what a move leaves on the board: premium squares, hooks and word windows it opens to the opponent, weighted by the tiles still unseen, plus an opening-length table and a utility correction that reweights points by the current margin and stage (read off the distribution's `winpct_<letter_distribution>` table). It applies while tiles remain in the bag.
+
+PAT is off unless weights are loaded:
+
+```
+magpie> set -lex CSW24 -pat CSW24
+```
+
+`-pat` sets both players and `-pat1`/`-pat2` set one; `none` unloads. The other PAT settings also come in a form for both players and per-player forms ending in 1 or 2:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `patcand` | `true` | Use PAT in the player's own move generation: static play and the candidates a simulation starts from. |
+| `patclasses` | `all` | Which PAT classes that move generation uses: a comma-separated list from `tws`, `dws`, `tls`, `dls`, `qws`, `qls` and `windows`. |
+| `patrollout` | `true` | Use PAT in the rollouts of the player's simulations (both sides' plies, each with its own weights). |
+| `patrolloutclasses` | `all` | Which PAT classes the rollouts use, for example `tws,windows` for cheaper rollouts. |
+| `patcap` | `0` | The largest adjustment PAT can give a move, in points. The defense term and opening table are never positive, so this limits only how far the utility correction can raise a move; a large value such as `1000` leaves it unclipped. |
+
+For example, full PAT for the candidates and a cheaper subset in the rollouts, with the utility correction unclipped:
+
+```
+magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses tws,windows -patcap 1000
+```
+
+The shipped weights were trained and validated unclipped. `notes/pat_training.md` describes how they are trained (`test/pat_build.sh` and `test/pat_build_super.sh` run the whole process for a lexicon) and `notes/pat_utility_correction.md` the utility correction.
+
 ## Examples
 
 ### Annotating a game
