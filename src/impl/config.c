@@ -233,6 +233,12 @@ typedef enum {
   ARG_TOKEN_P2_TIME_LIMIT,
   ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
   ARG_TOKEN_P2_PLAY_CHOOSER_TIME,
+  ARG_TOKEN_PLAY_CHOOSER_SIM_PLIES,
+  ARG_TOKEN_P1_PLAY_CHOOSER_SIM_PLIES,
+  ARG_TOKEN_P2_PLAY_CHOOSER_SIM_PLIES,
+  ARG_TOKEN_PLAY_CHOOSER_SIM_CANDIDATES,
+  ARG_TOKEN_P1_PLAY_CHOOSER_SIM_CANDIDATES,
+  ARG_TOKEN_P2_PLAY_CHOOSER_SIM_CANDIDATES,
   ARG_TOKEN_OVERTIME_PENALTY_POINTS,
   ARG_TOKEN_OVERTIME_PERIOD,
   ARG_TOKEN_P1_THRESHOLD,
@@ -308,6 +314,13 @@ struct Config {
   // without a clock.
   double p1_play_chooser_time_ms;
   double p2_play_chooser_time_ms;
+  // PlayChooser's sim plies and candidates; 0 means PlayChooser's default.
+  int play_chooser_sim_plies;
+  int p1_play_chooser_sim_plies;
+  int p2_play_chooser_sim_plies;
+  int play_chooser_sim_candidates;
+  int p1_play_chooser_sim_candidates;
+  int p2_play_chooser_sim_candidates;
   double overtime_period_ms;
   double p1_utility_w_winpct;
   double p2_utility_w_winpct;
@@ -2225,6 +2238,28 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "Compare timed runs only against runs with the same -mtmode and "
              "-threads.";
       break;
+    case ARG_TOKEN_PLAY_CHOOSER_SIM_PLIES:
+    case ARG_TOKEN_P1_PLAY_CHOOSER_SIM_PLIES:
+    case ARG_TOKEN_P2_PLAY_CHOOSER_SIM_PLIES:
+      usages[0] = "<plies>";
+      examples[0] = "4";
+      examples[1] = "0";
+      text = "Specifies how many plies PlayChooser simulates its midgame "
+             "candidates for during autoplay; 0 uses PlayChooser's default "
+             "of 4. 'pcplies' sets both players; 'pcplies1' and 'pcplies2' "
+             "set one.";
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_SIM_CANDIDATES:
+    case ARG_TOKEN_P1_PLAY_CHOOSER_SIM_CANDIDATES:
+    case ARG_TOKEN_P2_PLAY_CHOOSER_SIM_CANDIDATES:
+      usages[0] = "<candidates>";
+      examples[0] = "15";
+      examples[1] = "0";
+      text = "Specifies how many of the top static candidates PlayChooser "
+             "simulates in the midgame during autoplay; 0 uses PlayChooser's "
+             "default of 15. 'pccands' sets both players; 'pccands1' and "
+             "'pccands2' set one.";
+      break;
     case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
       usages[0] = "<points>";
       examples[0] = "10";
@@ -2418,75 +2453,81 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
-        ARG_TOKEN_CUTOFF,                  /* cutoff */
-        ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
-        ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
-        ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
-        ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
-        ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
-        ARG_TOKEN_P1_INFERENCE_MARGIN,     /* im1 */
-        ARG_TOKEN_P2_INFERENCE_MARGIN,     /* im2 */
-        ARG_TOKEN_MAX_ITERATIONS,          /* iterations */
-        ARG_TOKEN_P1_MAX_ITERATIONS,       /* i1 */
-        ARG_TOKEN_P2_MAX_ITERATIONS,       /* i2 */
-        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
-        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
-        ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
-        ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
-        ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
-        ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
-        ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
-        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
-        ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
-        ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
-        ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
-        ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
-        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
-        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
-        ARG_TOKEN_PEG_NESTED,              /* pegnested */
-        ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
-        ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
-        ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
-        ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
-        ARG_TOKEN_PEG_STRIDE,              /* pegstride */
-        ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
-        ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
-        ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
-        ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
-        ARG_TOKEN_PLIES,                   /* plies */
-        ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
-        ARG_TOKEN_STOP_COND_PCT,           /* scondition */
-        ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
-        ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
-        ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
-        ARG_TOKEN_SAMPLING_RULE,           /* sr */
-        ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
-        ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
-        ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
-        ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
-        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
-        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
-        ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
-        ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
-        ARG_TOKEN_P1_THRESHOLD,            /* th1 */
-        ARG_TOKEN_P2_THRESHOLD,            /* th2 */
-        ARG_TOKEN_THRESHOLD,               /* threshold */
-        ARG_TOKEN_P1_TIME_LIMIT,           /* tl1 */
-        ARG_TOKEN_P2_TIME_LIMIT,           /* tl2 */
-        ARG_TOKEN_TIME_LIMIT,              /* tlim */
-        ARG_TOKEN_TT_FRACTION_OF_MEM,      /* ttfraction */
-        ARG_TOKEN_USE_HEAT_MAP,            /* useheatmap */
-        ARG_TOKEN_UTILITY_W_SPREAD,        /* uspread */
-        ARG_TOKEN_P1_UTILITY_W_SPREAD,     /* uspread1 */
-        ARG_TOKEN_P2_UTILITY_W_SPREAD,     /* uspread2 */
-        ARG_TOKEN_UTILITY_SPREAD_SCALE,    /* uspreadscale */
-        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, /* uspreadscale1 */
-        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, /* uspreadscale2 */
-        ARG_TOKEN_UTILITY_W_WINPCT,        /* uwin */
-        ARG_TOKEN_P1_UTILITY_W_WINPCT,     /* uwin1 */
-        ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
-        ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
-        ARG_TOKEN_WIN_PCT,                 /* winpct */
+        ARG_TOKEN_CUTOFF,                         /* cutoff */
+        ARG_TOKEN_ENDGAME_PLIES,                  /* eplies */
+        ARG_TOKEN_ENDGAME_TIME_LIMIT,             /* etlim */
+        ARG_TOKEN_ENDGAME_TOP_K,                  /* etopk */
+        ARG_TOKEN_USE_GAME_PAIRS,                 /* gp */
+        ARG_TOKEN_INFERENCE_MARGIN,               /* imargin */
+        ARG_TOKEN_P1_INFERENCE_MARGIN,            /* im1 */
+        ARG_TOKEN_P2_INFERENCE_MARGIN,            /* im2 */
+        ARG_TOKEN_MAX_ITERATIONS,                 /* iterations */
+        ARG_TOKEN_P1_MAX_ITERATIONS,              /* i1 */
+        ARG_TOKEN_P2_MAX_ITERATIONS,              /* i2 */
+        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,         /* mi1 */
+        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,         /* mi2 */
+        ARG_TOKEN_MIN_PLAY_ITERATIONS,            /* minplayiterations */
+        ARG_TOKEN_SHOW_MISTAKES,                  /* mistakes */
+        ARG_TOKEN_MOVEGEN_MARGIN,                 /* mmargin */
+        ARG_TOKEN_MULTI_THREADING_MODE,           /* mtmode */
+        ARG_TOKEN_NUMBER_OF_PLAYS,                /* numplays */
+        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,          /* numsmallplays */
+        ARG_TOKEN_P1_NUM_PLAYS,                   /* np1 */
+        ARG_TOKEN_P2_NUM_PLAYS,                   /* np2 */
+        ARG_TOKEN_OVERTIME_PENALTY_POINTS,        /* otpenalty */
+        ARG_TOKEN_OVERTIME_PERIOD,                /* otperiod */
+        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,           /* pc1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,           /* pc2 */
+        ARG_TOKEN_PLAY_CHOOSER_SIM_CANDIDATES,    /* pccands */
+        ARG_TOKEN_P1_PLAY_CHOOSER_SIM_CANDIDATES, /* pccands1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_SIM_CANDIDATES, /* pccands2 */
+        ARG_TOKEN_PLAY_CHOOSER_SIM_PLIES,         /* pcplies */
+        ARG_TOKEN_P1_PLAY_CHOOSER_SIM_PLIES,      /* pcplies1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_SIM_PLIES,      /* pcplies2 */
+        ARG_TOKEN_PEG_NESTED,                     /* pegnested */
+        ARG_TOKEN_PEG_OUTCOMES,                   /* pegoutcomes */
+        ARG_TOKEN_PEG_OUT_LINES,                  /* pegoutlines */
+        ARG_TOKEN_PEG_OUT_WIDTH,                  /* pegoutwidth */
+        ARG_TOKEN_PEG_PESSIMISTIC,                /* pegpess */
+        ARG_TOKEN_PEG_STRIDE,                     /* pegstride */
+        ARG_TOKEN_PEG_TIME_LIMIT,                 /* pegtlim */
+        ARG_TOKEN_PEG_TOP_K,                      /* pegtopk */
+        ARG_TOKEN_P1_SIM_PLIES,                   /* pl1 */
+        ARG_TOKEN_P2_SIM_PLIES,                   /* pl2 */
+        ARG_TOKEN_PLIES,                          /* plies */
+        ARG_TOKEN_PEG_NOPRUNE,                    /* pnoprune */
+        ARG_TOKEN_STOP_COND_PCT,                  /* scondition */
+        ARG_TOKEN_SIM_WITH_INFERENCE,             /* sinfer */
+        ARG_TOKEN_SIM_MARGIN_FORECAST,            /* smargin */
+        ARG_TOKEN_USE_SMALL_PLAYS,                /* sp */
+        ARG_TOKEN_SAMPLING_RULE,                  /* sr */
+        ARG_TOKEN_P1_STOP_COND_PCT,               /* sc1 */
+        ARG_TOKEN_P2_STOP_COND_PCT,               /* sc2 */
+        ARG_TOKEN_P1_SIM_WITH_INFERENCE,          /* si1 */
+        ARG_TOKEN_P2_SIM_WITH_INFERENCE,          /* si2 */
+        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,         /* sm1 */
+        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,         /* sm2 */
+        ARG_TOKEN_P1_SAMPLING_RULE,               /* sa1 */
+        ARG_TOKEN_P2_SAMPLING_RULE,               /* sa2 */
+        ARG_TOKEN_P1_THRESHOLD,                   /* th1 */
+        ARG_TOKEN_P2_THRESHOLD,                   /* th2 */
+        ARG_TOKEN_THRESHOLD,                      /* threshold */
+        ARG_TOKEN_P1_TIME_LIMIT,                  /* tl1 */
+        ARG_TOKEN_P2_TIME_LIMIT,                  /* tl2 */
+        ARG_TOKEN_TIME_LIMIT,                     /* tlim */
+        ARG_TOKEN_TT_FRACTION_OF_MEM,             /* ttfraction */
+        ARG_TOKEN_USE_HEAT_MAP,                   /* useheatmap */
+        ARG_TOKEN_UTILITY_W_SPREAD,               /* uspread */
+        ARG_TOKEN_P1_UTILITY_W_SPREAD,            /* uspread1 */
+        ARG_TOKEN_P2_UTILITY_W_SPREAD,            /* uspread2 */
+        ARG_TOKEN_UTILITY_SPREAD_SCALE,           /* uspreadscale */
+        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE,        /* uspreadscale1 */
+        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,        /* uspreadscale2 */
+        ARG_TOKEN_UTILITY_W_WINPCT,               /* uwin */
+        ARG_TOKEN_P1_UTILITY_W_WINPCT,            /* uwin1 */
+        ARG_TOKEN_P2_UTILITY_W_WINPCT,            /* uwin2 */
+        ARG_TOKEN_WRITE_BUFFER_SIZE,              /* wb */
+        ARG_TOKEN_WIN_PCT,                        /* winpct */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -3906,11 +3947,18 @@ void config_fill_autoplay_args(const Config *config,
                                     config->p2_utility_w_spread};
   const double utility_spread_scale[2] = {config->p1_utility_spread_scale,
                                           config->p2_utility_spread_scale};
+  const int play_chooser_sim_plies[2] = {config->p1_play_chooser_sim_plies,
+                                         config->p2_play_chooser_sim_plies};
+  const int play_chooser_sim_candidates[2] = {
+      config->p1_play_chooser_sim_candidates,
+      config->p2_play_chooser_sim_candidates};
   for (int player_index = 0; player_index < 2; player_index++) {
     autoplay_args->play_chooser_strategies[player_index] =
         (PlayChooserStrategy){
             .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
             .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+            .sim_plies = play_chooser_sim_plies[player_index],
+            .sim_max_candidates = play_chooser_sim_candidates[player_index],
             .win_pcts = config->win_pcts,
             .num_threads = num_worker_threads_per_sim,
             .peg_scenario_stride = config->peg_scenario_stride,
@@ -8093,6 +8141,49 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+
+  config_load_int(config, ARG_TOKEN_PLAY_CHOOSER_SIM_PLIES, 0, MAX_PLIES,
+                  &config->play_chooser_sim_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_PLAY_CHOOSER_SIM_PLIES, 0) !=
+      NULL) {
+    config->p1_play_chooser_sim_plies = config->play_chooser_sim_plies;
+    config->p2_play_chooser_sim_plies = config->play_chooser_sim_plies;
+  }
+  config_load_int(config, ARG_TOKEN_P1_PLAY_CHOOSER_SIM_PLIES, 0, MAX_PLIES,
+                  &config->p1_play_chooser_sim_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_P2_PLAY_CHOOSER_SIM_PLIES, 0, MAX_PLIES,
+                  &config->p2_play_chooser_sim_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_PLAY_CHOOSER_SIM_CANDIDATES, 0, INT_MAX,
+                  &config->play_chooser_sim_candidates, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_PLAY_CHOOSER_SIM_CANDIDATES, 0) !=
+      NULL) {
+    config->p1_play_chooser_sim_candidates =
+        config->play_chooser_sim_candidates;
+    config->p2_play_chooser_sim_candidates =
+        config->play_chooser_sim_candidates;
+  }
+  config_load_int(config, ARG_TOKEN_P1_PLAY_CHOOSER_SIM_CANDIDATES, 0, INT_MAX,
+                  &config->p1_play_chooser_sim_candidates, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_P2_PLAY_CHOOSER_SIM_CANDIDATES, 0, INT_MAX,
+                  &config->p2_play_chooser_sim_candidates, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   config_load_int(config, ARG_TOKEN_OVERTIME_PENALTY_POINTS, 0, INT_MAX,
                   &config->overtime_penalty_points, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -9596,6 +9687,12 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_P1_PLAY_CHOOSER_TIME, "pc1", 1, 1);
   arg(ARG_TOKEN_P2_PLAY_CHOOSER_TIME, "pc2", 1, 1);
+  arg(ARG_TOKEN_PLAY_CHOOSER_SIM_PLIES, "pcplies", 1, 1);
+  arg(ARG_TOKEN_P1_PLAY_CHOOSER_SIM_PLIES, "pcplies1", 1, 1);
+  arg(ARG_TOKEN_P2_PLAY_CHOOSER_SIM_PLIES, "pcplies2", 1, 1);
+  arg(ARG_TOKEN_PLAY_CHOOSER_SIM_CANDIDATES, "pccands", 1, 1);
+  arg(ARG_TOKEN_P1_PLAY_CHOOSER_SIM_CANDIDATES, "pccands1", 1, 1);
+  arg(ARG_TOKEN_P2_PLAY_CHOOSER_SIM_CANDIDATES, "pccands2", 1, 1);
   arg(ARG_TOKEN_OVERTIME_PENALTY_POINTS, "otpenalty", 1, 1);
   arg(ARG_TOKEN_OVERTIME_PERIOD, "otperiod", 1, 1);
   arg(ARG_TOKEN_P1_THRESHOLD, "th1", 1, 1);
@@ -9711,6 +9808,12 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_time_limit_seconds = config->time_limit_seconds;
   config->p1_play_chooser_time_ms = -1.0;
   config->p2_play_chooser_time_ms = -1.0;
+  config->play_chooser_sim_plies = 0;
+  config->p1_play_chooser_sim_plies = 0;
+  config->p2_play_chooser_sim_plies = 0;
+  config->play_chooser_sim_candidates = 0;
+  config->p1_play_chooser_sim_candidates = 0;
+  config->p2_play_chooser_sim_candidates = 0;
   config->overtime_penalty_points = 10;
   config->overtime_period_ms = 60000.0;
   config->p1_threshold = config->threshold;
@@ -10282,6 +10385,30 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_PLAY_CHOOSER_TIME:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->p2_play_chooser_time_ms);
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_SIM_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->play_chooser_sim_plies);
+      break;
+    case ARG_TOKEN_P1_PLAY_CHOOSER_SIM_PLIES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->p1_play_chooser_sim_plies);
+      break;
+    case ARG_TOKEN_P2_PLAY_CHOOSER_SIM_PLIES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->p2_play_chooser_sim_plies);
+      break;
+    case ARG_TOKEN_PLAY_CHOOSER_SIM_CANDIDATES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->play_chooser_sim_candidates);
+      break;
+    case ARG_TOKEN_P1_PLAY_CHOOSER_SIM_CANDIDATES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->p1_play_chooser_sim_candidates);
+      break;
+    case ARG_TOKEN_P2_PLAY_CHOOSER_SIM_CANDIDATES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->p2_play_chooser_sim_candidates);
       break;
     case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
