@@ -20,8 +20,10 @@ static int parse_setting_int(const char *value, const char *key,
   if (!error_stack_is_empty(conversion_errors)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
-        get_formatted_string("%s line %d: '%s' is not a valid integer for '%s'",
-                             settings_path, line_number, value, key));
+        // The value is not shown: a key appended to a last line that had no
+        // newline ends up here, and would be printed (the audit's pass 16).
+        get_formatted_string("%s line %d: '%s' is not a whole number",
+                             settings_path, line_number, key));
   }
   error_stack_destroy(conversion_errors);
   return result;
@@ -82,6 +84,8 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   state->settings_path = string_duplicate(settings_path);
 
   int line_number = 0;
+  // The last uuid line's, which is the one that counts.
+  int uuid_line = 0;
   char *cursor = contents;
   while (cursor && *cursor) {
     char *newline = strchr(cursor, '\n');
@@ -104,26 +108,25 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
       const char *const value = has_value ? trim(space + 1) : "";
 
       if (strings_equal(key, "server")) {
+        // A space is two settings on one line -- an `apikey` appended to a
+        // last line with no newline -- and would be printed as the server.
+        if (strpbrk(value, " \t")) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+              get_formatted_string("%s line %d: 'server' holds a space; put "
+                                   "each setting on a line of its own",
+                                   settings_path, line_number));
+        }
         free(state->server_url);
         state->server_url = string_duplicate(value);
       } else if (strings_equal(key, "apikey")) {
         free(state->api_key);
         state->api_key = string_duplicate(value);
       } else if (strings_equal(key, "uuid")) {
-        // Held to the form the server issues: a line cut short when a full
-        // disk interrupted its save was sent as the identity, refused by the
-        // server, and every later run ended the same way.
-        // An empty value still means none, as it always has.
-        if (value[0] != '\0' && !client_state_is_worker_uuid(value)) {
-          error_stack_push(
-              error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
-              get_formatted_string(
-                  "%s line %d: 'uuid' is not a UUID (8-4-4-4-12 hex digits): "
-                  "correct it, or delete the line to be issued a new one",
-                  settings_path, line_number));
-        }
+        // Checked once the file is read: the last one counts.
         free(state->worker_uuid);
         state->worker_uuid = string_duplicate(value);
+        uuid_line = line_number;
       } else if (strings_equal(key, "threads")) {
         state->threads = parse_setting_int(value, key, settings_path,
                                            line_number, error_stack);
@@ -143,12 +146,19 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
                                                      line_number, error_stack);
       } else {
         // A typo'd 'apikey' must not silently downgrade someone to anonymous.
+        // The word is shown only if it could be a setting's name: a pasted
+        // key alone on its line is not one, and was printed.
+        bool shown = strlen(key) <= 12;
+        for (const char *c = key; shown && *c; c++) {
+          shown = *c >= 'a' && *c <= 'z';
+        }
         error_stack_push(
             error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
             get_formatted_string(
-                "%s line %d: unknown setting '%s' (expected one of: server, "
+                "%s line %d: unknown setting%s%s%s (expected one of: server, "
                 "apikey, uuid, threads, maxtasks, idlewait)",
-                settings_path, line_number, key));
+                settings_path, line_number, shown ? " '" : "", shown ? key : "",
+                shown ? "'" : ""));
         free(contents);
         client_state_destroy(state);
         return NULL;
@@ -180,6 +190,20 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   if (state->worker_uuid && string_length(state->worker_uuid) == 0) {
     free(state->worker_uuid);
     state->worker_uuid = NULL;
+  }
+
+  // Held to the form the server issues: a line cut short when a full disk
+  // interrupted its save was sent as the identity, refused by the server, and
+  // every later run ended the same way. Empty still means none.
+  if (state->worker_uuid && !client_state_is_worker_uuid(state->worker_uuid)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+        get_formatted_string(
+            "%s line %d: 'uuid' is not a UUID (8-4-4-4-12 hex digits): "
+            "correct it, or delete the line to be issued a new one",
+            settings_path, uuid_line));
+    client_state_destroy(state);
+    return NULL;
   }
 
   if (state->idle_wait_seconds <= 0) {

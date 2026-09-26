@@ -180,6 +180,32 @@ static void test_client_state(void) {
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
 
+  // Only the last uuid line counts: a partial one followed by a whole one --
+  // what adding the line by hand after a failed save leaves -- loads.
+  write_settings_file(path, "server https://birdtest.example\nuuid 6f3d7198-1\n"
+                            "uuid 6f3d7198-178a-47c8-9ccc-6aa6995a5a9c\n");
+  state = client_state_load(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(state->worker_uuid,
+                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
+  client_state_destroy(state);
+
+  // No message quotes a value or an unknown word that could be a key: one
+  // appended to a last line with no newline, or pasted alone.
+  const char *leaks[] = {
+      "server https://birdtest.example\nmaxtasks 0apikey bt_SECRETKEY123\n",
+      "server https://birdtest.example apikey bt_SECRETKEY123\n",
+      "server https://birdtest.example\nbt_SECRETKEY123\n",
+  };
+  for (size_t i = 0; i < sizeof(leaks) / sizeof(leaks[0]); i++) {
+    write_settings_file(path, leaks[i]);
+    assert(!client_state_load(path, error_stack));
+    assert(!error_stack_is_empty(error_stack));
+    char *message = error_stack_get_string_and_reset(error_stack);
+    assert(!strstr(message, "SECRETKEY"));
+    free(message);
+  }
+
   // An empty one still means none.
   write_settings_file(path, "server https://birdtest.example\nuuid \n");
   state = client_state_load(path, error_stack);
