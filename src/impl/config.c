@@ -146,6 +146,7 @@ typedef enum {
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
+  ARG_TOKEN_PEG_MAX_BAG,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_NESTED,
@@ -354,6 +355,8 @@ struct Config {
   // default.
   int peg_num_stages;
   int peg_scenario_stride;
+  // Largest bag size PlayChooser runs PEG on; 0 = PEG_MAX_BAG.
+  int peg_max_bag;
   // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
   // the cell always fits the label + a worst-case token) and max wrapped lines
   // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
@@ -1725,6 +1728,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "'all'/0 "
           "or an integer >= 2.";
       break;
+    case ARG_TOKEN_PEG_MAX_BAG:
+      usages[0] = "<bag_size>";
+      examples[0] = "2";
+      examples[1] = "4";
+      text = "Largest bag size at which PlayChooser uses the pre-endgame "
+             "solver; above it PlayChooser sims (or plays statically). Must "
+             "be between 1 and the solver's own maximum; unset uses that "
+             "maximum.";
+      break;
     case ARG_TOKEN_PEG_STRIDE:
       usages[0] = "<stride>";
       examples[0] = "7";
@@ -2443,6 +2455,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
         ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
         ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
+        ARG_TOKEN_PEG_MAX_BAG,             /* pegmaxbag */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
         ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
@@ -3914,6 +3927,7 @@ void config_fill_autoplay_args(const Config *config,
             .win_pcts = config->win_pcts,
             .num_threads = num_worker_threads_per_sim,
             .peg_scenario_stride = config->peg_scenario_stride,
+            .peg_max_bag = config->peg_max_bag,
             .utility_w_winpct = utility_win_pct[player_index],
             .utility_w_spread = utility_spread[player_index],
             .utility_spread_scale = utility_spread_scale[player_index],
@@ -7368,6 +7382,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config_load_int(config, ARG_TOKEN_PEG_MAX_BAG, PEG_MIN_BAG, PEG_MAX_BAG,
+                  &config->peg_max_bag, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   config_load_int(config, ARG_TOKEN_PEG_OUT_WIDTH, 0, INT_MAX,
                   &config->peg_out_width, error_stack);
@@ -9538,6 +9557,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
+  arg(ARG_TOKEN_PEG_MAX_BAG, "pegmaxbag", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
   arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
@@ -9664,6 +9684,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_result.last_completed_stage = -1;
   config->peg_num_stages = 0;
   config->peg_scenario_stride = 0;
+  config->peg_max_bag = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;
   config->peg_show_outcomes = true;
@@ -10069,6 +10090,12 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_STRIDE:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->peg_scenario_stride);
+      break;
+    case ARG_TOKEN_PEG_MAX_BAG:
+      if (config->peg_max_bag > 0) {
+        config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                                 config->peg_max_bag);
+      }
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
