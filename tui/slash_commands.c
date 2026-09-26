@@ -29,6 +29,10 @@ static const TuiSlashCommand slash_commands[] = {
     {TUI_SLASH_SETTINGS, "settings", "Open settings", NULL},
     {TUI_SLASH_SIM, "sim", "Simulate the selected turn (continues a saved sim)",
      "Simulate"},
+    {TUI_SLASH_SOLVE, "solve",
+     "Solve the selected turn exactly: its endgame, or pre-endgame with a "
+     "few tiles left",
+     "Solve endgame / pre-endgame"},
     {TUI_SLASH_STOP, "stop", "Stop the running analysis", "Stop analysis"},
     {TUI_SLASH_WATCH_FROM, "watchfrom",
      "Let the computer play on from the selected turn", "Watch from here"},

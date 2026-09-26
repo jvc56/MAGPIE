@@ -1775,10 +1775,7 @@ void tui_game_state_destroy(TuiGameState *state) {
   memset(state, 0, sizeof(*state));
 }
 
-bool tui_position_in_peg_range(const struct Game *game) {
-  if (game == NULL) {
-    return false;
-  }
+int tui_position_effective_bag(const struct Game *game) {
   // Mirror peg_solve's own range check: the raw bag holds the real
   // remaining tiles plus the opponent's unknown holdings, so subtract
   // (RACK_SIZE - opp rack tiles) to get the effective bag size.
@@ -1786,7 +1783,14 @@ bool tui_position_in_peg_range(const struct Game *game) {
   const int mover_idx = game_get_player_on_turn_index(game);
   const Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
   const int opp_unknown = RACK_SIZE - (int)rack_get_total_letters(opp_rack);
-  const int effective_bag = raw_bag - opp_unknown;
+  return raw_bag - opp_unknown;
+}
+
+bool tui_position_in_peg_range(const struct Game *game) {
+  if (game == NULL) {
+    return false;
+  }
+  const int effective_bag = tui_position_effective_bag(game);
   return effective_bag >= PEG_MIN_BAG && effective_bag <= PEG_MAX_BAG;
 }
 
