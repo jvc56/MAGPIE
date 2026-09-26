@@ -20,15 +20,22 @@ typedef enum {
   TUI_SLASH_COUNT,
 } TuiSlashCommandId;
 
+// `menu_label` names a command in the panel menus (panel_menu.c lists
+// which panel shows it); NULL for commands no menu shows, and aliases.
 typedef struct {
   TuiSlashCommandId id;
   const char *name;
   const char *desc;
+  const char *menu_label;
 } TuiSlashCommand;
 
 // Every command, alphabetically by name (aliases are separate entries
 // sharing an id); `*count` receives the length.
 const TuiSlashCommand *tui_slash_commands(int *count);
+
+// The command `id` names: its menu entry when it has one, else its
+// first entry.
+const TuiSlashCommand *tui_slash_command(TuiSlashCommandId id);
 
 // Whether `name` starts with the first `len` characters of `typed`.
 bool tui_slash_command_matches(const TuiSlashCommand *cmd, const char *typed,

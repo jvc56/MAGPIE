@@ -401,23 +401,6 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
   render_modal(plane, theme, "Menu", items, shortcuts, TUI_MENU_ITEM_COUNT,
                focus, 28);
 }
-void tui_game_render_analysis_menu(struct ncplane *plane, const Theme *theme,
-                                   int focus, const bool *disabled,
-                                   bool sim_continues) {
-  if (plane == NULL || theme == NULL) {
-    return;
-  }
-  const char *items[TUI_ANALYSIS_MENU_ITEM_COUNT];
-  items[TUI_ANALYSIS_MENU_SIM] = sim_continues ? "Continue sim" : "Simulate";
-  items[TUI_ANALYSIS_MENU_KIBITZ] = "Kibitz (static eval)";
-  items[TUI_ANALYSIS_MENU_RESUME] = "Resume saved analysis";
-  items[TUI_ANALYSIS_MENU_STOP] = "Stop analysis";
-  items[TUI_ANALYSIS_MENU_BACK] = "Back";
-  render_modal_ex(plane, theme, "Analysis", items, /*shortcuts=*/NULL, disabled,
-                  /*cursor_cols=*/NULL, /*zone_starts=*/NULL,
-                  /*zone_widths=*/NULL, TUI_ANALYSIS_MENU_ITEM_COUNT, focus,
-                  32);
-}
 void tui_game_render_phony_confirm(struct ncplane *plane, const Theme *theme,
                                    int focus, const char *lexicon,
                                    const char *words) {
@@ -1239,21 +1222,6 @@ const char *tui_modal_help(TuiModalState modal, int focus) {
       return "Name shown in the history and score pills.";
     case TUI_ANNOTATE_SETUP_START:
       return "Start annotating.";
-    default:
-      return NULL;
-    }
-  case TUI_MODAL_ANALYSIS_MENU:
-    switch (focus) {
-    case TUI_ANALYSIS_MENU_SIM:
-      return "Simulate the turn selected in History, until you stop it.";
-    case TUI_ANALYSIS_MENU_KIBITZ:
-      return "Rank the turn's moves by static equity.";
-    case TUI_ANALYSIS_MENU_RESUME:
-      return "Continue the analysis this turn saved during the game.";
-    case TUI_ANALYSIS_MENU_STOP:
-      return "Stop the running analysis; its results stay on the turn.";
-    case TUI_ANALYSIS_MENU_BACK:
-      return "Close this menu.";
     default:
       return NULL;
     }

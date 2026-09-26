@@ -13,8 +13,10 @@
 #include "input_setup.h"
 #include "lexicon_picker.h"
 #include "onboarding.h"
+#include "panel_menu.h"
 #include "render_bars.h"
 #include "render_board.h"
+#include "render_hit_test.h"
 #include "render_layout.h"
 #include "render_modals.h"
 #include "render_rack.h"
@@ -194,8 +196,6 @@ static int modal_focus(const TuiUiState *ui) {
     return ui->play_setup_focus;
   case TUI_MODAL_ANNOTATE_SETUP:
     return ui->annotate_setup_focus;
-  case TUI_MODAL_ANALYSIS_MENU:
-    return ui->analysis_menu_focus;
   case TUI_MODAL_PHONY_CONFIRM:
     return ui->phony_confirm_focus;
   default:
@@ -203,8 +203,8 @@ static int modal_focus(const TuiUiState *ui) {
   }
 }
 
-// The open dialog's help line. The analysis menu's depends on the game:
-// a disabled item says why it can't run. Caller holds state->mutex.
+// The open dialog's help line. Settings' and the panel menus' depend on
+// the game: an unavailable item says why. Caller holds state->mutex.
 static const char *modal_help_line(const TuiGameState *state,
                                    const TuiUiState *ui,
                                    const TuiSession *session) {
@@ -222,12 +222,8 @@ static const char *modal_help_line(const TuiGameState *state,
         tui_setting_unavailable_reason(state, session, rows[focus].id);
     return reason != NULL ? reason : tui_setting_def(rows[focus].id)->help;
   }
-  if (ui->modal == TUI_MODAL_ANALYSIS_MENU) {
-    const char *reason =
-        tui_analysis_menu_reason(state, ui->analysis_menu_focus);
-    if (reason != NULL) {
-      return reason;
-    }
+  if (ui->modal == TUI_MODAL_PANEL_MENU) {
+    return tui_panel_menu_help(state, ui, session);
   }
   return tui_modal_help(ui->modal, modal_focus(ui));
 }
@@ -313,18 +309,8 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
     tui_game_render_time_picker(std_plane, theme, ui->time_focus);
   } else if (ui->modal == TUI_MODAL_QUIT_CONFIRM) {
     tui_game_render_quit_confirm(std_plane, theme, ui->quit_confirm_focus);
-  } else if (ui->modal == TUI_MODAL_ANALYSIS_MENU) {
-    bool disabled[TUI_ANALYSIS_MENU_ITEM_COUNT];
-    pthread_mutex_lock(&state->mutex);
-    for (int item = 0; item < TUI_ANALYSIS_MENU_ITEM_COUNT; item++) {
-      disabled[item] = tui_analysis_menu_reason(state, item) != NULL;
-    }
-    const int turn = state->history_cursor;
-    const bool sim_continues = turn >= 0 && turn < state->history_count &&
-                               state->history[turn].sim_results_saved != NULL;
-    pthread_mutex_unlock(&state->mutex);
-    tui_game_render_analysis_menu(std_plane, theme, ui->analysis_menu_focus,
-                                  disabled, sim_continues);
+  } else if (ui->modal == TUI_MODAL_PANEL_MENU) {
+    tui_render_panel_menu(std_plane, theme, state, ui, session);
   } else if (ui->modal == TUI_MODAL_PHONY_CONFIRM) {
     pthread_mutex_lock(&state->mutex);
     char words[sizeof(state->phony_confirm_words)];
@@ -582,6 +568,20 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
     }
   }
 
+  // Right-click on a panel focuses it and opens its menu.
+  if (key == NCKEY_BUTTON3 && ui->modal == TUI_MODAL_NONE) {
+    if (state->edit_history_idx < 0) {
+      const int panel = tui_game_panel_at(std_plane, state, input.y, input.x);
+      if (panel >= TUI_FOCUS_BOARD && panel <= TUI_FOCUS_ANALYSIS) {
+        pthread_mutex_lock(&state->mutex);
+        state->focused_panel = panel;
+        pthread_mutex_unlock(&state->mutex);
+        tui_open_panel_menu(state, ui, session, panel);
+      }
+    }
+    return;
+  }
+
   if (tui_input_mouse(state, std_plane, ui->modal, key, input)) {
     return;
   }
@@ -637,7 +637,7 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
     return;
   }
 
-  if (tui_input_analysis_menu(state, ui, key, input)) {
+  if (tui_input_panel_menu(state, ui, session, key, input)) {
     return;
   }
 
