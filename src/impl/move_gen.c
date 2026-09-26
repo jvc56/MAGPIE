@@ -28,6 +28,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat.h"
+#include "../ent/pat_eval.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"

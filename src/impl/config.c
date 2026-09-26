@@ -37,6 +37,8 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat.h"
+#include "../ent/pat_lexicon.h"
+#include "../ent/pat_utility.h"
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"

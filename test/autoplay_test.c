@@ -8,6 +8,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/pat.h"
+#include "../src/ent/pat_file.h"
 #include "../src/ent/players_data.h"
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"

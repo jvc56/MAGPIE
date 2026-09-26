@@ -11,6 +11,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat.h"
+#include "../ent/pat_eval.h"
 #include "../ent/rack.h"
 
 static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
