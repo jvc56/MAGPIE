@@ -1166,12 +1166,13 @@ static void test_pat_opening_penalty_gating(void) {
 
   // No PAT context: both axes apply, matching PAT-off behavior exactly.
   assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
-                              pat_eval_ctx_active_classes(NULL)) == -1050);
+                              pat_eval_context_get_active_classes(NULL)) ==
+         -1050);
   PATEvalContext disabled_ctx;
   pat_eval_context_disable(&disabled_ctx);
-  assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
-                              pat_eval_ctx_active_classes(&disabled_ctx)) ==
-         -1050);
+  assert(placement_adjustment(
+             ld, &move, word_penalties, letter_penalties,
+             pat_eval_context_get_active_classes(&disabled_ctx)) == -1050);
 
   // Only a letter-multiplier class (DLS) weighted: the letter axis is
   // suppressed, the word axis is untouched.
@@ -1180,7 +1181,7 @@ static void test_pat_opening_penalty_gating(void) {
   PATEvalContext ctx;
   pat_eval_context_load(&ctx, dls_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
                         RACK_SIZE);
-  const uint32_t dls_active = pat_eval_ctx_active_classes(&ctx);
+  const uint32_t dls_active = pat_eval_context_get_active_classes(&ctx);
   assert(dls_active & PAT_CLASS_MASK_LETTER_MULT);
   assert(!(dls_active & PAT_CLASS_MASK_WORD_MULT));
   assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
@@ -1193,7 +1194,7 @@ static void test_pat_opening_penalty_gating(void) {
   pat_set_weight(tws_only, PAT_FEATURE_HOOK_START, -5);
   pat_eval_context_load(&ctx, tws_only, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
                         RACK_SIZE);
-  const uint32_t tws_active = pat_eval_ctx_active_classes(&ctx);
+  const uint32_t tws_active = pat_eval_context_get_active_classes(&ctx);
   assert(tws_active & PAT_CLASS_MASK_WORD_MULT);
   assert(!(tws_active & PAT_CLASS_MASK_LETTER_MULT));
   assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
@@ -1208,7 +1209,7 @@ static void test_pat_opening_penalty_gating(void) {
   pat_set_weight(dls_weighted, PAT_FEATURE_DLS_HOOK_START, -5);
   pat_eval_context_load(&ctx, dls_weighted, lanes, ld, NULL,
                         PAT_CLASS_MASK_TWS_ONLY, RACK_SIZE);
-  const uint32_t masked_active = pat_eval_ctx_active_classes(&ctx);
+  const uint32_t masked_active = pat_eval_context_get_active_classes(&ctx);
   assert(!(masked_active & PAT_CLASS_MASK_LETTER_MULT));
   assert(placement_adjustment(ld, &move, word_penalties, letter_penalties,
                               masked_active) == -1050);
@@ -1321,8 +1322,8 @@ static void test_pat_dls_features_land_in_dls_channels(void) {
   pat_eval_context_load(&ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
                         RACK_SIZE);
   int num_dls = 0;
-  for (int tws_idx = 0; tws_idx < ctx.num_tws; tws_idx++) {
-    if (ctx.tws_classes[tws_idx] == PAT_PREMIUM_DLS) {
+  for (int premium_idx = 0; premium_idx < ctx.num_premium; premium_idx++) {
+    if (ctx.premium_classes[premium_idx] == PAT_PREMIUM_DLS) {
       num_dls++;
     }
   }
@@ -1521,12 +1522,13 @@ static void test_pat_unweighted_units_dropped(void) {
                         RACK_SIZE);
   PATEvalContext full_ctx;
   pat_eval_context_load_all_units(&full_ctx, pat, lanes, ld, NULL, RACK_SIZE);
-  assert(pruned_ctx.num_tws > 0);
-  assert(full_ctx.num_tws > pruned_ctx.num_tws);
+  assert(pruned_ctx.num_premium > 0);
+  assert(full_ctx.num_premium > pruned_ctx.num_premium);
   assert(full_ctx.num_dd > 0);
   assert(pruned_ctx.num_dd == 0);
-  for (int tws_idx = 0; tws_idx < pruned_ctx.num_tws; tws_idx++) {
-    assert(pruned_ctx.tws_classes[tws_idx] == PAT_PREMIUM_TWS);
+  for (int premium_idx = 0; premium_idx < pruned_ctx.num_premium;
+       premium_idx++) {
+    assert(pruned_ctx.premium_classes[premium_idx] == PAT_PREMIUM_TWS);
   }
 
   // Dropping them changes nothing the engine reads: the baseline, every
@@ -1560,8 +1562,9 @@ static void test_pat_unweighted_units_dropped(void) {
   pat_eval_context_load(&pruned_ctx, pat, lanes, ld, NULL, PAT_CLASS_MASK_ALL,
                         RACK_SIZE);
   int num_dws = 0;
-  for (int tws_idx = 0; tws_idx < pruned_ctx.num_tws; tws_idx++) {
-    if (pruned_ctx.tws_classes[tws_idx] == PAT_PREMIUM_DWS) {
+  for (int premium_idx = 0; premium_idx < pruned_ctx.num_premium;
+       premium_idx++) {
+    if (pruned_ctx.premium_classes[premium_idx] == PAT_PREMIUM_DWS) {
       num_dws++;
     }
   }

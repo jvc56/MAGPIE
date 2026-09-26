@@ -207,8 +207,9 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-      pat_eval_ctx_active_classes(&gen->pat_eval_ctx), &gen->pat_eval_ctx,
-      gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
+      pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
+      &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
+      gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
 
@@ -233,7 +234,7 @@ static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
       gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-      pat_eval_ctx_active_classes(&gen->pat_eval_ctx), NULL,
+      pat_eval_context_get_active_classes(&gen->pat_eval_ctx), NULL,
       gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
@@ -717,9 +718,9 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
     return static_eval_get_move_equity_with_leave_value(
         &gen->ld, move, &gen->leave, &gen->opponent_rack,
         gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
-        pat_eval_ctx_active_classes(&gen->pat_eval_ctx), &gen->pat_eval_ctx,
-        gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
-        leave_value);
+        pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
+        &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
+        gen->number_of_tiles_in_bag, leave_value);
   case MOVE_SORT_SCORE:
     return move_get_score(move);
   default:
@@ -851,8 +852,8 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                     &gen->ld, current_move, &gen->leave, &gen->opponent_rack,
                     gen->opening_move_word_penalties,
                     gen->opening_move_letter_penalties,
-                    pat_eval_ctx_active_classes(&gen->pat_eval_ctx), NULL,
-                    gen->board_number_of_tiles_played,
+                    pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
+                    NULL, gen->board_number_of_tiles_played,
                     gen->number_of_tiles_in_bag, leave_value);
       const Equity best_equity =
           move_get_equity(gen_get_readonly_best_move(gen));

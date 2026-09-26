@@ -23,13 +23,13 @@ static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
 // word_penalties and letter_penalties are the two halves of
 // Board.opening_move_word/letter_penalties, split by which square
 // multiplier drove each one (see update_opening_penalty). pat_active_classes
-// is the mover's live PAT_CLASS_MASK_* set (see pat_eval_ctx_active_classes):
-// a live class already prices its axis, so this skips that half rather than
-// double-charging the same square. Always the mover's true active set, even
-// from a caller that is about to omit the exact PAT term itself as a
-// (sound, since it is <= 0) fast-path overestimate -- see
-// gen_get_static_equity_without_pat -- so the two computations of the same
-// move's equity agree on everything except that term.
+// is the mover's live PAT_CLASS_MASK_* set (see
+// pat_eval_context_get_active_classes): a live class already prices its axis,
+// so this skips that half rather than double-charging the same square. Always
+// the mover's true active set, even from a caller that is about to omit the
+// exact PAT term itself as a (sound, since it is <= 0) fast-path overestimate
+// -- see gen_get_static_equity_without_pat -- so the two computations of the
+// same move's equity agree on everything except that term.
 static inline Equity placement_adjustment(const LetterDistribution *ld,
                                           const Move *move,
                                           const Equity *word_penalties,
