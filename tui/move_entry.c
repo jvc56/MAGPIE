@@ -20,6 +20,7 @@
 #include "bot_worker.h"
 #include "config.h"
 #include "game_state.h"
+#include "tile_input.h"
 #include <dirent.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -29,20 +30,6 @@
 #include <string.h>
 #include <time.h>
 
-// Machine letter for a single uppercase A-Z letter, or 0 if not found.
-static MachineLetter tui_ml_for_upper(const TuiGameState *gs, char up) {
-  if (gs->ld == NULL) {
-    return 0;
-  }
-  for (int ml = 1; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
-    const char *hl = gs->ld->ld_ml_to_hl[ml];
-    if (hl != NULL && hl[0] == up && hl[1] == '\0') {
-      return (MachineLetter)ml;
-    }
-  }
-  return 0;
-}
-
 // Resolve a typed letter against the human's live rack in
 // play-vs-computer: real tile, blank, or rejected. The rack is finite
 // and known — only allow a tile the rack still has AFTER accounting for
@@ -51,25 +38,30 @@ static MachineLetter tui_ml_for_upper(const TuiGameState *gs, char up) {
 // to retype). Unshifted letters fall back to a blank when the real tile
 // is exhausted but a blank remains; Shift+letter explicitly requests a
 // blank. Returns false to reject the keystroke (neither available).
-static bool tui_pvc_resolve_typed_letter(const TuiGameState *gs, char up,
+static bool tui_pvc_resolve_typed_letter(const TuiGameState *gs, int ml,
                                          bool shift, bool *out_blank) {
-  const MachineLetter ml = tui_ml_for_upper(gs, up);
   const Rack *rack =
       gs->game != NULL
           ? player_get_rack(game_get_player(gs->game, gs->human_player_idx))
           : NULL;
+  // Tiles the move already uses, from its inferred rack ("A[QU]?E").
   int placed_real = 0;
   int placed_blank = 0;
-  for (const char *p = gs->edit_move_inferred_rack; *p != '\0'; p++) {
-    if (*p == up) {
-      placed_real++;
-    } else if (*p == '?') {
+  for (const char *pos = gs->edit_move_inferred_rack; *pos != '\0';) {
+    const int len = tui_tile_token_len(pos);
+    char face[TUI_TILE_TEXT_MAX];
+    tui_tile_token_face(pos, len, face, sizeof(face));
+    if (strcmp(face, "?") == 0) {
       placed_blank++;
+    } else if (tui_tile_for_text(gs->ld, face) == ml) {
+      placed_real++;
     }
+    pos += len;
   }
-  const int avail_real = (rack != NULL && ml != 0)
-                             ? (int)rack_get_letter(rack, ml) - placed_real
-                             : 0;
+  const int avail_real =
+      (rack != NULL && ml > 0)
+          ? (int)rack_get_letter(rack, (MachineLetter)ml) - placed_real
+          : 0;
   const int avail_blank =
       rack != NULL
           ? (int)rack_get_letter(rack, BLANK_MACHINE_LETTER) - placed_blank
@@ -89,20 +81,18 @@ static bool tui_pvc_resolve_typed_letter(const TuiGameState *gs, char up,
   return true;
 }
 
-TuiTypedLetterAction tui_move_entry_resolve_letter(const TuiGameState *gs,
-                                                   char typed, bool shift,
-                                                   int land_row, int land_col,
-                                                   char *out_glyph) {
-  if (!((typed >= 'a' && typed <= 'z') || (typed >= 'A' && typed <= 'Z'))) {
+TuiTypedLetterAction tui_move_entry_resolve_tile(const TuiGameState *gs, int ml,
+                                                 bool shift, int land_row,
+                                                 int land_col, char *out_token,
+                                                 size_t token_size) {
+  if (gs->ld == NULL || ml <= 0) {
     return TUI_TYPED_LETTER_REJECT;
   }
-  const char up =
-      (char)((typed >= 'a' && typed <= 'z') ? typed - 'a' + 'A' : typed);
   const bool pvc = gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER;
-  // Occupied landing square: a matching letter is playthrough spelling
+  // Occupied landing square: a matching tile is playthrough spelling
   // (take the BOARD tile's notation case — lowercase when it's a
   // designated blank — so the buffer stays canonical); a mismatched
-  // letter is a collision, rejected where racks are real. Annotation
+  // tile is a collision, rejected where racks are real. Annotation
   // stays free-text on a mismatch: mid-edit states collide legitimately
   // while the user is still reshaping the move.
   if (gs->game != NULL && land_row >= 0 && land_row < BOARD_DIM &&
@@ -112,9 +102,10 @@ TuiTypedLetterAction tui_move_entry_resolve_letter(const TuiGameState *gs,
         brd != NULL ? board_get_letter(brd, land_row, land_col)
                     : ALPHABET_EMPTY_SQUARE_MARKER;
     if (board_ml != ALPHABET_EMPTY_SQUARE_MARKER) {
-      if (get_unblanked_machine_letter(board_ml) == tui_ml_for_upper(gs, up)) {
-        const char *hl = gs->ld != NULL ? gs->ld->ld_ml_to_hl[board_ml] : NULL;
-        *out_glyph = (char)((hl != NULL && hl[0] != '\0') ? hl[0] : up);
+      if (get_unblanked_machine_letter(board_ml) == (MachineLetter)ml) {
+        char *token = ld_ml_to_hl(gs->ld, board_ml);
+        (void)snprintf(out_token, token_size, "%s", token);
+        free(token);
         return TUI_TYPED_LETTER_PLAYTHROUGH;
       }
       if (pvc) {
@@ -122,15 +113,11 @@ TuiTypedLetterAction tui_move_entry_resolve_letter(const TuiGameState *gs,
       }
     }
   }
-  if (pvc) {
-    bool blank = false;
-    if (!tui_pvc_resolve_typed_letter(gs, up, shift, &blank)) {
-      return TUI_TYPED_LETTER_REJECT;
-    }
-    *out_glyph = (char)(blank ? up - 'A' + 'a' : up);
-    return TUI_TYPED_LETTER_PLACE;
+  bool blank = shift;
+  if (pvc && !tui_pvc_resolve_typed_letter(gs, ml, shift, &blank)) {
+    return TUI_TYPED_LETTER_REJECT;
   }
-  *out_glyph = (char)(shift ? up - 'A' + 'a' : up);
+  tui_tile_token(gs->ld, ml, blank, out_token, token_size);
   return TUI_TYPED_LETTER_PLACE;
 }
 
@@ -179,15 +166,12 @@ bool tui_move_entry_landing_square(const TuiGameState *gs, int *out_row,
   if (row < 0 || row >= BOARD_DIM || col < 0 || col >= BOARD_DIM) {
     return false;
   }
-  // Count word letters before the cursor.
-  int word_letters = 0;
+  // Count word tiles before the cursor ("[QU]" is one).
   const int word_start = (int)(space - buf) + 1;
-  for (int i = word_start; i < gs->edit_move_cursor && buf[i] != '\0'; i++) {
-    const char wc = buf[i];
-    if ((wc >= 'a' && wc <= 'z') || (wc >= 'A' && wc <= 'Z')) {
-      word_letters++;
-    }
-  }
+  const int word_letters =
+      gs->edit_move_cursor > word_start
+          ? tui_tile_count(buf + word_start, gs->edit_move_cursor - word_start)
+          : 0;
   *out_row = vertical ? row + word_letters : row;
   *out_col = vertical ? col : col + word_letters;
   return *out_row < BOARD_DIM && *out_col < BOARD_DIM;
@@ -219,10 +203,11 @@ void tui_autofill_playthrough(TuiGameState *gs) {
     if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
       break;
     }
-    // ld_ml_to_hl is already lowercase for blanked tiles, uppercase
-    // otherwise — exactly the move-notation convention.
-    const char *hl = gs->ld->ld_ml_to_hl[ml];
+    // ld_ml_to_hl gives the move notation: lowercase for a blanked
+    // tile, a multi-letter tile in brackets.
+    char *hl = ld_ml_to_hl(gs->ld, ml);
     if (hl == NULL || hl[0] == '\0') {
+      free(hl);
       break;
     }
     // The very first absorbed letter may arrive while the buffer is
@@ -234,12 +219,14 @@ void tui_autofill_playthrough(TuiGameState *gs) {
     const int hlen = (int)strlen(hl);
     if (gs->edit_move_len + hlen + (need_space ? 1 : 0) >=
         (int)sizeof(gs->edit_move_buf)) {
+      free(hl);
       break;
     }
     if (need_space) {
       gs->edit_move_buf[gs->edit_move_len++] = ' ';
     }
     memcpy(gs->edit_move_buf + gs->edit_move_len, hl, (size_t)hlen);
+    free(hl);
     gs->edit_move_len += hlen;
     gs->edit_move_buf[gs->edit_move_len] = '\0';
     gs->edit_move_cursor = gs->edit_move_len;
@@ -255,7 +242,26 @@ void tui_autofill_playthrough(TuiGameState *gs) {
   }
 }
 
-bool tui_move_entry_append_letter(TuiGameState *gs, char ch, bool shift) {
+// The byte offset of the last tile token in the MOVE buffer's word, or
+// -1 when the word is empty.
+static int last_word_token(const TuiGameState *gs) {
+  const char *space = strchr(gs->edit_move_buf, ' ');
+  if (space == NULL) {
+    return -1;
+  }
+  int last = -1;
+  for (int pos = (int)(space - gs->edit_move_buf) + 1;
+       pos < gs->edit_move_len;) {
+    last = pos;
+    pos += tui_tile_token_len(gs->edit_move_buf + pos);
+  }
+  return last;
+}
+
+// Adds a resolved tile for machine letter `ml` at the end of the MOVE
+// buffer (with the coord/word space when needed). Returns false when it
+// can't go there.
+static bool append_tile(TuiGameState *gs, int ml, bool shift) {
   int land_row = -1;
   int land_col = -1;
   // Pre-space (coord-only) buffers have no landing square yet; the
@@ -266,24 +272,97 @@ bool tui_move_entry_append_letter(TuiGameState *gs, char ch, bool shift) {
     land_row = -1;
     land_col = -1;
   }
-  char glyph = '\0';
-  if (tui_move_entry_resolve_letter(gs, ch, shift, land_row, land_col,
-                                    &glyph) == TUI_TYPED_LETTER_REJECT) {
+  char token[TUI_TILE_TEXT_MAX + 2];
+  if (tui_move_entry_resolve_tile(gs, ml, shift, land_row, land_col, token,
+                                  sizeof(token)) == TUI_TYPED_LETTER_REJECT) {
     return false;
   }
-  // Insert a space before the first word character (buffer is just the
-  // coord token after anchoring).
   const bool need_space = strchr(gs->edit_move_buf, ' ') == NULL;
-  const int extra = need_space ? 2 : 1;
-  if (gs->edit_move_len + extra >= (int)sizeof(gs->edit_move_buf)) {
+  const int token_len = (int)strlen(token);
+  if (gs->edit_move_len + token_len + (need_space ? 1 : 0) >=
+      (int)sizeof(gs->edit_move_buf)) {
     return false;
   }
   if (need_space) {
     gs->edit_move_buf[gs->edit_move_len++] = ' ';
   }
-  gs->edit_move_buf[gs->edit_move_len++] = glyph;
+  memcpy(gs->edit_move_buf + gs->edit_move_len, token, (size_t)token_len);
+  gs->edit_move_len += token_len;
   gs->edit_move_buf[gs->edit_move_len] = '\0';
   gs->edit_move_cursor = gs->edit_move_len;
+  return true;
+}
+
+bool tui_move_entry_append_key(TuiGameState *gs, const char *key, bool shift) {
+  if (gs->ld == NULL) {
+    return false;
+  }
+  // The previous tile can still become a multi-letter tile when the
+  // typist placed it (not a played-through board tile).
+  const int last = last_word_token(gs);
+  char last_face[TUI_TILE_TEXT_MAX] = "";
+  if (last >= 0) {
+    const int len = tui_tile_token_len(gs->edit_move_buf + last);
+    int land_row = -1;
+    int land_col = -1;
+    const int saved_cursor = gs->edit_move_cursor;
+    gs->edit_move_cursor = last;
+    const bool landed = tui_move_entry_landing_square(gs, &land_row, &land_col);
+    gs->edit_move_cursor = saved_cursor;
+    const Board *brd = gs->game != NULL ? game_get_board(gs->game) : NULL;
+    const bool played_through = landed && brd != NULL &&
+                                board_get_letter(brd, land_row, land_col) !=
+                                    ALPHABET_EMPTY_SQUARE_MARKER;
+    if (!played_through) {
+      tui_tile_token_face(gs->edit_move_buf + last, len, last_face,
+                          sizeof(last_face));
+    }
+  }
+  int ml = -1;
+  const TuiTileKeyAction action =
+      tui_tile_key(gs->ld, &gs->tile_keys, key,
+                   last_face[0] != '\0' ? last_face : NULL, &ml);
+  switch (action) {
+  case TUI_TILE_KEY_WAIT:
+  case TUI_TILE_KEY_ABSORBED:
+    return true;
+  case TUI_TILE_KEY_REJECT:
+    return false;
+  case TUI_TILE_KEY_REPLACE_LAST: {
+    // The last tile joins into a multi-letter one: take it back, keeping
+    // its blank-ness, then place the joined tile where it was.
+    const int last_len = tui_tile_token_len(gs->edit_move_buf + last);
+    char blank_token[TUI_TILE_TEXT_MAX + 2];
+    tui_tile_token(gs->ld, tui_tile_for_text(gs->ld, last_face), true,
+                   blank_token, sizeof(blank_token));
+    const bool was_blank =
+        (int)strlen(blank_token) == last_len &&
+        strncmp(gs->edit_move_buf + last, blank_token, (size_t)last_len) == 0;
+    char saved[sizeof(gs->edit_move_buf)];
+    (void)snprintf(saved, sizeof(saved), "%s", gs->edit_move_buf);
+    const int saved_len = gs->edit_move_len;
+    gs->edit_move_buf[last] = '\0';
+    gs->edit_move_len = last;
+    gs->edit_move_cursor = last;
+    tui_game_state_parse_edit_buf(gs);
+    if (!append_tile(gs, ml, shift || was_blank)) {
+      (void)snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s", saved);
+      gs->edit_move_len = saved_len;
+      gs->edit_move_cursor = saved_len;
+      tui_game_state_parse_edit_buf(gs);
+      tui_tile_key_reset(&gs->tile_keys);
+      return false;
+    }
+    break;
+  }
+  case TUI_TILE_KEY_PLACE:
+  default:
+    if (!append_tile(gs, ml, shift)) {
+      tui_tile_key_reset(&gs->tile_keys);
+      return false;
+    }
+    break;
+  }
   tui_game_state_parse_edit_buf(gs);
   tui_autofill_playthrough(gs);
   return true;
@@ -350,6 +429,7 @@ int tui_board_builder_default_dir(const TuiGameState *gs, int row, int col) {
 }
 
 void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col, int dir) {
+  tui_tile_key_reset(&gs->tile_keys);
   // The clicked cell is the ORIGIN — remembered so direction toggles
   // and arrow moves can re-derive everything from the user's cell. The
   // walked-back anchor below is a derived value.
@@ -442,53 +522,53 @@ void tui_board_builder_toggle_dir(TuiGameState *gs) {
   const Board *brd = gs->game != NULL ? game_get_board(gs->game) : NULL;
   char word[64];
   tui_board_builder_extract_word(gs, word, sizeof(word));
-  // Extract the user's placed tiles: skip word letters sitting on
+  // Extract the user's placed tiles: skip word tiles sitting on
   // occupied squares along the OLD direction (those are absorbed
   // playthrough, meaningless in the new direction — carrying them over
   // was the "direction is stuck horizontal after playthrough" bug).
-  char user_tiles[64];
+  enum { MAX_USER_TILES = 32 };
+  char user_tiles[MAX_USER_TILES][TUI_TILE_TEXT_MAX];
   int n_user = 0;
   const bool old_vertical = board_is_dir_vertical(gs->board_dir);
   int r = gs->board_anchor_row;
   int c = gs->board_anchor_col;
-  for (int i = 0; word[i] != '\0' && n_user < (int)sizeof(user_tiles) - 1;) {
+  for (int i = 0; word[i] != '\0' && n_user < MAX_USER_TILES;) {
+    const int len = tui_tile_token_len(word + i);
     const bool on_board =
         brd != NULL && r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM &&
         board_get_letter(brd, r, c) != ALPHABET_EMPTY_SQUARE_MARKER;
-    if (on_board) {
-      // Played-through square: its human-readable letter may span
-      // multiple word chars — skip them all.
-      const MachineLetter ml = board_get_letter(brd, r, c);
-      const char *hl = gs->ld != NULL ? gs->ld->ld_ml_to_hl[ml] : NULL;
-      int skip = hl != NULL ? (int)strlen(hl) : 1;
-      while (skip-- > 0 && word[i] != '\0') {
-        i++;
-      }
-    } else {
-      user_tiles[n_user++] = word[i++];
+    if (!on_board) {
+      (void)snprintf(user_tiles[n_user++], TUI_TILE_TEXT_MAX, "%.*s", len,
+                     word + i);
     }
+    i += len;
     if (old_vertical) {
       r++;
     } else {
       c++;
     }
   }
-  user_tiles[n_user] = '\0';
   const int new_dir =
       old_vertical ? BOARD_HORIZONTAL_DIRECTION : BOARD_VERTICAL_DIRECTION;
   tui_board_builder_set_anchor(gs, gs->board_origin_row, gs->board_origin_col,
                                new_dir);
-  // Retype the user's tiles so they re-place along the new direction
-  // (lowercase in the buffer = blank, retyped as Shift+letter).
-  for (int i = 0; i < n_user; i++) {
-    const char ch = user_tiles[i];
-    const bool was_blank = ch >= 'a' && ch <= 'z';
-    const char up = (char)(was_blank ? ch - 'a' + 'A' : ch);
-    tui_move_entry_append_letter(gs, up, was_blank);
+  // Re-place the user's tiles along the new direction, blanks as blanks.
+  for (int tile_idx = 0; tile_idx < n_user && gs->ld != NULL; tile_idx++) {
+    const char *token = user_tiles[tile_idx];
+    char face[TUI_TILE_TEXT_MAX];
+    tui_tile_token_face(token, (int)strlen(token), face, sizeof(face));
+    const int ml = tui_tile_for_text(gs->ld, face);
+    char blank_token[TUI_TILE_TEXT_MAX + 2];
+    tui_tile_token(gs->ld, ml, true, blank_token, sizeof(blank_token));
+    if (ml > 0 && append_tile(gs, ml, strcmp(token, blank_token) == 0)) {
+      tui_game_state_parse_edit_buf(gs);
+      tui_autofill_playthrough(gs);
+    }
   }
 }
 
 void tui_board_builder_cancel(TuiGameState *gs) {
+  tui_tile_key_reset(&gs->tile_keys);
   gs->board_entry_active = false;
   gs->edit_move_buf[0] = '\0';
   gs->edit_move_len = 0;
@@ -540,6 +620,7 @@ void tui_board_entry_begin_keyboard(TuiGameState *gs) {
 }
 
 void tui_board_entry_backspace(TuiGameState *gs) {
+  tui_tile_key_reset(&gs->tile_keys);
   const char *space = strchr(gs->edit_move_buf, ' ');
   const int word_off =
       space != NULL ? (int)(space - gs->edit_move_buf) + 1 : -1;
@@ -547,20 +628,28 @@ void tui_board_entry_backspace(TuiGameState *gs) {
   if (word_len > 0) {
     const Board *brd = game_get_board(gs->game);
     const bool vertical = board_is_dir_vertical(gs->board_dir);
-    // Each word char maps to cell anchor + index along the direction.
-    // Pop trailing played-through cells (occupied on the board), then
-    // pop one placed tile.
-    while (word_len > 0) {
-      const int r = gs->board_anchor_row + (vertical ? (word_len - 1) : 0);
-      const int c = gs->board_anchor_col + (vertical ? 0 : (word_len - 1));
+    // Tile tokens of the word, in order ("[QU]" is one).
+    int token_start[sizeof(gs->edit_move_buf)];
+    int tokens = 0;
+    for (int pos = word_off; pos < gs->edit_move_len;) {
+      token_start[tokens++] = pos;
+      pos += tui_tile_token_len(gs->edit_move_buf + pos);
+    }
+    // Each token maps to cell anchor + index along the direction. Pop
+    // trailing played-through cells (occupied on the board), then pop
+    // one placed tile.
+    while (tokens > 0) {
+      const int r = gs->board_anchor_row + (vertical ? (tokens - 1) : 0);
+      const int c = gs->board_anchor_col + (vertical ? 0 : (tokens - 1));
       const bool occupied =
           brd != NULL && r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM &&
           board_get_letter(brd, r, c) != ALPHABET_EMPTY_SQUARE_MARKER;
-      word_len--; // drop this char
+      tokens--; // drop this tile
       if (!occupied) {
         break; // it was a placed tile — stop here
       }
     }
+    word_len = tokens > 0 ? token_start[tokens] - word_off : 0;
     if (word_len <= 0) {
       gs->edit_move_buf[word_off - 1] = '\0'; // drop the space too
       gs->edit_move_len = word_off - 1;

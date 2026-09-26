@@ -34,6 +34,7 @@
 #include "../src/util/string_util.h"
 #include "config.h"
 #include "glyph_cache.h"
+#include "tile_input.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -357,13 +358,6 @@ static int playthrough_parens_to_dots(const char *src, char *out,
   return len;
 }
 
-static bool tok_is_rack_char(char c) {
-  return (c >= 'A' && c <= 'Z') || c == '?';
-}
-static bool tok_is_word_char(char c) {
-  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.';
-}
-
 // True if `s` (length `n`) is well-formed coord notation and the
 // row/column are inside BOARD_DIM. Accepts either order:
 //   <digits><letter>  e.g. "8H"   (row 8, col H)
@@ -454,18 +448,6 @@ static bool is_iequal(const char *s, int n, const char *target) {
   return true;
 }
 
-// Walks the played-letters portion of a move's word token,
-// extracting just the tiles that come off the rack: uppercase →
-// the letter itself, lowercase → '?' (a played blank), '.' →
-// skipped (playthrough). The result is sorted ascending (so '?'
-// comes first, then A..Z) — this matches the order
-// sort_rack_for_display would produce from a Rack count-table,
-// and format_alphagram_for_sort can rebucket from there into
-// whichever rack-sort the user picked without scrambling the
-// input.
-static int char_cmp(const void *a, const void *b) {
-  return *(const unsigned char *)a - *(const unsigned char *)b;
-}
 // Derive the rack-tile string a validated Move would consume,
 // EXCLUDING played-through tiles (which come from the board, not
 // the rack). Blank-designated tiles map back to '?'. Sorted so '?'
@@ -475,79 +457,28 @@ static int char_cmp(const void *a, const void *b) {
 // only one P from the rack, not two.
 static void infer_rack_from_move(const Move *m, const LetterDistribution *ld,
                                  char *out, size_t out_cap) {
-  size_t oi = 0;
+  char tiles[TUI_RACK_TEXT_MAX];
+  size_t used = 0;
+  tiles[0] = '\0';
   const int n = move_get_tiles_length(m);
-  for (int i = 0; i < n && oi + 1 < out_cap; i++) {
+  for (int i = 0; i < n; i++) {
     const MachineLetter ml = move_get_tile(m, i);
     if (ml == PLAYED_THROUGH_MARKER) {
       continue;
     }
-    if (get_is_blanked(ml)) {
-      out[oi++] = '?';
-      continue;
+    char token[TUI_TILE_TEXT_MAX + 2] = "?";
+    if (!get_is_blanked(ml)) {
+      tui_tile_token(ld, ml, false, token, sizeof(token));
     }
-    const char *hl = ld->ld_ml_to_hl[ml];
-    if (hl != NULL && hl[0] != '\0' && (unsigned char)hl[0] < 0x80) {
-      out[oi++] = hl[0];
+    const size_t len = strlen(token);
+    if (used + len + 1 > sizeof(tiles)) {
+      break;
     }
+    memcpy(tiles + used, token, len);
+    used += len;
+    tiles[used] = '\0';
   }
-  out[oi] = '\0';
-  if (oi > 1) {
-    qsort(out, oi, 1, char_cmp);
-  }
-}
-
-static void infer_rack_from_word(const char *word, int word_len, char *out,
-                                 size_t out_cap) {
-  size_t oi = 0;
-  for (int i = 0; i < word_len && oi + 1 < out_cap; i++) {
-    const char c = word[i];
-    if (c == '.') {
-      continue;
-    }
-    if (c >= 'a' && c <= 'z') {
-      out[oi++] = '?';
-    } else if (c >= 'A' && c <= 'Z') {
-      out[oi++] = c;
-    }
-  }
-  out[oi] = '\0';
-  if (oi > 1) {
-    qsort(out, oi, 1, char_cmp);
-  }
-}
-
-// Multiset subtraction of `played` from `full_rack`, producing
-// the leave (whatever tiles are left over) sorted ascending so
-// '?' comes first, then A..Z. Returns false (leaves out[0] = '\0')
-// when `played` contains a letter that isn't in `full_rack` —
-// i.e., the user typed a move whose tiles aren't a subset of
-// the typed rack. Callers gate leave display on a true return.
-static bool compute_leave(const char *full_rack, const char *played, char *out,
-                          size_t out_cap) {
-  if (out == NULL || out_cap == 0) {
-    return false;
-  }
-  out[0] = '\0';
-  int counts[256] = {0};
-  for (const char *p = full_rack; *p != '\0'; p++) {
-    counts[(unsigned char)*p]++;
-  }
-  for (const char *p = played; *p != '\0'; p++) {
-    counts[(unsigned char)*p]--;
-    if (counts[(unsigned char)*p] < 0) {
-      return false;
-    }
-  }
-  size_t oi = 0;
-  for (int c = 0; c < 256 && oi + 1 < out_cap; c++) {
-    while (counts[c] > 0 && oi + 1 < out_cap) {
-      out[oi++] = (char)c;
-      counts[c]--;
-    }
-  }
-  out[oi] = '\0';
-  return true;
+  tui_tiles_sort(ld, tiles, out, out_cap);
 }
 
 // True if every char in [s, s+n) is A-Z (no digits, no dots,
@@ -585,21 +516,10 @@ size_t tui_game_state_effective_editor_rack(const TuiGameState *state,
   //   4. the rack buffer as a last resort, again only when valid.
   if (!state->edit_rack_user_modified &&
       state->edit_rack_carryover[0] != '\0') {
-    char combined[32];
-    int oi = 0;
-    for (const char *p = state->edit_rack_carryover;
-         *p != '\0' && oi < (int)sizeof(combined) - 1; p++) {
-      combined[oi++] = *p;
-    }
-    for (const char *p = state->edit_move_inferred_rack;
-         *p != '\0' && oi < (int)sizeof(combined) - 1; p++) {
-      combined[oi++] = *p;
-    }
-    combined[oi] = '\0';
-    if (oi > 1) {
-      qsort(combined, (size_t)oi, 1, char_cmp);
-    }
-    (void)snprintf(out, out_size, "%s", combined);
+    char combined[TUI_RACK_TEXT_MAX * 2];
+    (void)snprintf(combined, sizeof(combined), "%s%s",
+                   state->edit_rack_carryover, state->edit_move_inferred_rack);
+    tui_tiles_sort(state->ld, combined, out, out_size);
   } else if (state->edit_rack_len > 0 && state->edit_rack_valid &&
              (state->edit_rack_user_modified ||
               state->edit_move_inferred_rack[0] == '\0')) {
@@ -651,28 +571,17 @@ static void sync_player_rack_to_editor(TuiGameState *state) {
   // identical combination for the engine rack.
   if (!state->edit_rack_user_modified &&
       state->edit_rack_carryover[0] != '\0') {
-    char carryover_combined[32];
-    int oi = 0;
-    for (const char *p = state->edit_rack_carryover;
-         *p != '\0' && oi < (int)sizeof(carryover_combined) - 1; p++) {
-      carryover_combined[oi++] = *p;
-    }
-    for (const char *p = state->edit_move_inferred_rack;
-         *p != '\0' && oi < (int)sizeof(carryover_combined) - 1; p++) {
-      carryover_combined[oi++] = *p;
-    }
-    carryover_combined[oi] = '\0';
-    if (oi > 1) {
-      qsort(carryover_combined, (size_t)oi, 1, char_cmp);
-    }
-    (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
-                   carryover_combined);
+    char carryover_combined[TUI_RACK_TEXT_MAX * 2];
+    (void)snprintf(carryover_combined, sizeof(carryover_combined), "%s%s",
+                   state->edit_rack_carryover, state->edit_move_inferred_rack);
+    tui_tiles_sort(state->ld, carryover_combined, state->edit_rack_buf,
+                   sizeof(state->edit_rack_buf));
     state->edit_rack_len = (int)strlen(state->edit_rack_buf);
     state->edit_rack_cursor = state->edit_rack_len;
   }
   // Single source of truth for which rack the pill shows — shared with the
   // renderer's history-cell rack row so the two can't drift.
-  char source[32];
+  char source[TUI_RACK_TEXT_MAX];
   const size_t source_len =
       tui_game_state_effective_editor_rack(state, source, sizeof(source), NULL);
   if (source_len > 0) {
@@ -910,17 +819,11 @@ static void parse_edit_move_buffer(TuiGameState *state) {
       tiles = t2;
       tiles_len = t2_len;
     }
-    if (tiles_len > 7) {
+    if (tui_tile_count(tiles, tiles_len) > RACK_SIZE ||
+        !tui_tiles_valid(state->ld, tiles, tiles_len, TUI_TILES_RACK)) {
       state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
       state->edit_move_valid = false;
       return;
-    }
-    for (int j = 0; j < tiles_len; j++) {
-      if (!tok_is_rack_char(tiles[j])) {
-        state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
-        state->edit_move_valid = false;
-        return;
-      }
     }
     state->edit_move_kind = TUI_EDIT_MOVE_KIND_EXCHANGE;
     // Canonical form for the engine: "ex <tiles>".
@@ -970,17 +873,11 @@ static void parse_edit_move_buffer(TuiGameState *state) {
       }
       // Fall through to the word-only / coord branches below.
     } else {
-      if (t2_len > 7) {
+      if (tui_tile_count(t2, t2_len) > RACK_SIZE ||
+          !tui_tiles_valid(state->ld, t2, t2_len, TUI_TILES_RACK)) {
         state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
         state->edit_move_valid = false;
         return;
-      }
-      for (int j = 0; j < t2_len; j++) {
-        if (!tok_is_rack_char(t2[j])) {
-          state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
-          state->edit_move_valid = false;
-          return;
-        }
       }
       state->edit_move_kind = TUI_EDIT_MOVE_KIND_EXCHANGE;
       (void)snprintf(state->edit_move_canonical,
@@ -1053,20 +950,18 @@ static void parse_edit_move_buffer(TuiGameState *state) {
       }
       return;
     }
-    // Word token must be all word-chars.
-    for (int j = 0; j < t2_len; j++) {
-      if (!tok_is_word_char(t2[j])) {
-        state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
-        state->edit_move_valid = false;
-        return;
-      }
+    // Word token must be all tiles (or "." playthrough).
+    if (!tui_tiles_valid(state->ld, t2, t2_len, TUI_TILES_WORD)) {
+      state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
+      state->edit_move_valid = false;
+      return;
     }
     state->edit_move_kind = TUI_EDIT_MOVE_KIND_PLACEMENT;
     (void)snprintf(state->edit_move_canonical,
                    sizeof(state->edit_move_canonical), "%.*s %.*s", t1_len, t1,
                    t2_len, t2);
-    infer_rack_from_word(t2, t2_len, state->edit_move_inferred_rack,
-                         sizeof(state->edit_move_inferred_rack));
+    tui_tiles_from_word(state->ld, t2, t2_len, state->edit_move_inferred_rack,
+                        sizeof(state->edit_move_inferred_rack));
     sync_player_rack_to_editor(state);
     // Capture the validated Move into edit_preview_move so the
     // board can ghost it as the user types. Only mark
@@ -1095,7 +990,7 @@ static void parse_edit_move_buffer(TuiGameState *state) {
       state->edit_preview_move_valid = true;
       // Re-derive the inferred rack from the VALIDATED move so
       // played-through tiles (already on the board) aren't counted
-      // as rack tiles. infer_rack_from_word above over-counts them;
+      // as rack tiles. tui_tiles_from_word above over-counts them;
       // the engine's Move marks them PLAYED_THROUGH_MARKER. Re-sync
       // so the rack panel and bag accounting see the correct tiles.
       infer_rack_from_move(state->edit_preview_move, state->ld,
@@ -1112,8 +1007,8 @@ static void parse_edit_move_buffer(TuiGameState *state) {
   // this out across the board on focus-away.
   if (t2_len == 0 && tok_is_all_uppercase(t1, t1_len)) {
     state->edit_move_kind = TUI_EDIT_MOVE_KIND_WORD_ONLY;
-    infer_rack_from_word(t1, t1_len, state->edit_move_inferred_rack,
-                         sizeof(state->edit_move_inferred_rack));
+    tui_tiles_from_word(state->ld, t1, t1_len, state->edit_move_inferred_rack,
+                        sizeof(state->edit_move_inferred_rack));
     sync_player_rack_to_editor(state);
     return;
   }
@@ -1149,15 +1044,11 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
 
   // ── Rack buffer: 1..7 chars of A-Z or ? ──────────────────
   {
-    bool ok = state->edit_rack_len <= 7;
-    if (state->edit_rack_len > 0) {
-      for (int j = 0; j < state->edit_rack_len && ok; j++) {
-        if (!tok_is_rack_char(state->edit_rack_buf[j])) {
-          ok = false;
-        }
-      }
-    }
-    state->edit_rack_valid = ok;
+    state->edit_rack_valid =
+        tui_tile_count(state->edit_rack_buf, state->edit_rack_len) <=
+            RACK_SIZE &&
+        tui_tiles_valid(state->ld, state->edit_rack_buf, state->edit_rack_len,
+                        TUI_TILES_RACK);
   }
   // Live leave preview. The leave is the rack buffer minus the
   // played tiles. We only compute it when both sides are valid
@@ -1166,7 +1057,7 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
   //
   // When the user hasn't authored the rack (edit_rack_user_modified
   // is false), the rack is logically just the move's inferred
-  // letters — so leave is empty by definition. Skip compute_leave
+  // letters — so leave is empty by definition. Skip tui_tiles_subtract
   // entirely; otherwise it'd diff the move against a stale
   // edit_rack_buf (still holding the prior move's auto-seed) and
   // surface phantom leave letters in row 1.
@@ -1176,12 +1067,12 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
               state->edit_move_kind == TUI_EDIT_MOVE_KIND_EXCHANGE) &&
              state->edit_rack_valid && state->edit_rack_len > 0 &&
              state->edit_move_inferred_rack[0] != '\0') {
-    char rack_buf[24];
+    char rack_buf[TUI_RACK_TEXT_MAX];
     (void)snprintf(rack_buf, sizeof(rack_buf), "%.*s", state->edit_rack_len,
                    state->edit_rack_buf);
-    char leave_buf[16];
-    if (compute_leave(rack_buf, state->edit_move_inferred_rack, leave_buf,
-                      sizeof(leave_buf))) {
+    char leave_buf[TUI_RACK_TEXT_MAX];
+    if (tui_tiles_subtract(state->ld, rack_buf, state->edit_move_inferred_rack,
+                           leave_buf, sizeof(leave_buf))) {
       (void)snprintf(state->edit_move_leave, sizeof(state->edit_move_leave),
                      "%s", leave_buf);
     }
