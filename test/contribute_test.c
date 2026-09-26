@@ -196,6 +196,9 @@ static void test_client_state(void) {
       "server https://birdtest.example\nmaxtasks 0apikey bt_SECRETKEY123\n",
       "server https://birdtest.example apikey bt_SECRETKEY123\n",
       "server https://birdtest.example\nbt_SECRETKEY123\n",
+      "server https://birdtest.example\n# mine apikey bt_SECRETKEY123\n",
+      "server https://birdtest.example\napikey bt_x server bt_SECRETKEY123\n",
+      "server https://birdtest.example\nmaxtasks -7 bt_SECRETKEY123\n",
   };
   for (size_t i = 0; i < sizeof(leaks) / sizeof(leaks[0]); i++) {
     write_settings_file(path, leaks[i]);
@@ -205,6 +208,24 @@ static void test_client_state(void) {
     assert(!strstr(message, "SECRETKEY"));
     free(message);
   }
+
+  // A byte-order mark is skipped; a count past an int's range is refused
+  // rather than truncated (4294967296 read as 0, "no limit"); a setting in
+  // the wrong case says so.
+  write_settings_file(path, "\xEF\xBB\xBFserver https://birdtest.example\n");
+  state = client_state_load(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(state->server_url, "https://birdtest.example");
+  client_state_destroy(state);
+  write_settings_file(path,
+                      "server https://birdtest.example\nmaxtasks 4294967296\n");
+  assert(!client_state_load(path, error_stack));
+  error_stack_reset(error_stack);
+  write_settings_file(path, "Server https://birdtest.example\n");
+  assert(!client_state_load(path, error_stack));
+  char *lowercase = error_stack_get_string_and_reset(error_stack);
+  assert(strstr(lowercase, "settings are lowercase"));
+  free(lowercase);
 
   // An empty one still means none.
   write_settings_file(path, "server https://birdtest.example\nuuid \n");

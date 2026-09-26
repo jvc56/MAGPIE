@@ -1,8 +1,8 @@
 # birdtest contract fixtures
 
-Copied verbatim from birdtest's `contract-fixtures/` -- every file, byte for
-byte; birdtest's CI copies its current set over this directory before running
-`magpie_test contribute`. The worker API is a cross-repo boundary, and these
+Copied verbatim from birdtest's `contract-fixtures/` -- every JSON file, byte
+for byte (this README is MAGPIE's own); birdtest's CI replaces this
+directory's JSON with its current set before running `magpie_test contribute`. The worker API is a cross-repo boundary, and these
 are the server's half of it: `test/contribute_test.c` asserts that
 
 - every key `config_contribute_*` and `contribute_claim_task` read is present

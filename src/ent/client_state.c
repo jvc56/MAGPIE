@@ -2,6 +2,8 @@
 
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,14 +18,19 @@ static int parse_setting_int(const char *value, const char *key,
                              const char *settings_path, int line_number,
                              ErrorStack *error_stack) {
   ErrorStack *conversion_errors = error_stack_create();
-  const int result = string_to_int(value, conversion_errors);
-  if (!error_stack_is_empty(conversion_errors)) {
+  int result = string_to_int(value, conversion_errors);
+  // string_to_int truncates a long: 4294967296 read as 0, "no limit".
+  errno = 0;
+  const long wide = strtol(value, NULL, 10);
+  const bool out_of_range = errno == ERANGE || wide > INT_MAX || wide < INT_MIN;
+  if (!error_stack_is_empty(conversion_errors) || out_of_range) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
         // The value is not shown: a key appended to a last line that had no
         // newline ends up here, and would be printed (the audit's pass 16).
-        get_formatted_string("%s line %d: '%s' is not a whole number",
+        get_formatted_string("%s line %d: '%s' is not a whole number in range",
                              settings_path, line_number, key));
+    result = 0;
   }
   error_stack_destroy(conversion_errors);
   return result;
@@ -87,6 +94,12 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   // The last uuid line's, which is the one that counts.
   int uuid_line = 0;
   char *cursor = contents;
+  // A UTF-8 byte-order mark, which some editors write first: read as part of
+  // the first word, it made `server` an unknown setting.
+  if ((unsigned char)cursor[0] == 0xEF && (unsigned char)cursor[1] == 0xBB &&
+      (unsigned char)cursor[2] == 0xBF) {
+    cursor += 3;
+  }
   while (cursor && *cursor) {
     char *newline = strchr(cursor, '\n');
     if (newline) {
@@ -95,6 +108,18 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
     line_number++;
 
     char *line = trim(cursor);
+    // A key appended to a last comment line with no newline was swallowed by
+    // the comment, and the run went anonymous without a word.
+    if (*line == '#' && strstr(line, "apikey bt_")) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+          get_formatted_string("%s line %d: a comment holds an apikey setting; "
+                               "put it on a line of its own",
+                               settings_path, line_number));
+      free(contents);
+      client_state_destroy(state);
+      return NULL;
+    }
     if (*line != '\0' && *line != '#') {
       char *space = line;
       while (*space && *space != ' ' && *space != '\t') {
@@ -120,6 +145,13 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
         free(state->server_url);
         state->server_url = string_duplicate(value);
       } else if (strings_equal(key, "apikey")) {
+        if (strpbrk(value, " \t")) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+              get_formatted_string("%s line %d: 'apikey' holds a space; put "
+                                   "each setting on a line of its own",
+                                   settings_path, line_number));
+        }
         free(state->api_key);
         state->api_key = string_duplicate(value);
       } else if (strings_equal(key, "uuid")) {
@@ -138,8 +170,8 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
           error_stack_push(
               error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
               get_formatted_string("%s line %d: 'maxtasks' must be 0 (no "
-                                   "limit) or more, got '%s'",
-                                   settings_path, line_number, value));
+                                   "limit) or more",
+                                   settings_path, line_number));
         }
       } else if (strings_equal(key, "idlewait")) {
         state->idle_wait_seconds = parse_setting_int(value, key, settings_path,
@@ -152,13 +184,22 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
         for (const char *c = key; shown && *c; c++) {
           shown = *c >= 'a' && *c <= 'z';
         }
+        // A setting's name in the wrong case is shown, with why.
+        static const char *const names[] = {"server",  "apikey",   "uuid",
+                                            "threads", "maxtasks", "idlewait"};
+        bool wrong_case = false;
+        for (size_t n = 0; n < sizeof(names) / sizeof(names[0]); n++) {
+          wrong_case = wrong_case || strings_iequal(key, names[n]);
+        }
+        shown = shown || wrong_case;
         error_stack_push(
             error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
             get_formatted_string(
-                "%s line %d: unknown setting%s%s%s (expected one of: server, "
+                "%s line %d: unknown setting%s%s%s%s (expected one of: server, "
                 "apikey, uuid, threads, maxtasks, idlewait)",
                 settings_path, line_number, shown ? " '" : "", shown ? key : "",
-                shown ? "'" : ""));
+                shown ? "'" : "",
+                wrong_case ? "; settings are lowercase" : ""));
         free(contents);
         client_state_destroy(state);
         return NULL;
