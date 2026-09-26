@@ -41,6 +41,7 @@ typedef enum {
   TUI_ANALYSIS_RESUME,
   TUI_ANALYSIS_KIBITZ,
   TUI_ANALYSIS_STOP,
+  TUI_ANALYSIS_SOLVE,
 } TuiAnalysisAction;
 
 // NULL when `action` can run on history entry `turn_idx` now; otherwise
@@ -51,18 +52,19 @@ const char *tui_analysis_unavailable_reason(const TuiGameState *state,
                                             TuiAnalysisAction action);
 
 // Start the analysis worker on history entry `turn_idx`, streaming
-// progress to the analysis panel until "/stop".
-//   request_sim (true, "/sim"): simulate the turn, continuing its saved
+// progress to the analysis panel until "/stop". `action`:
+//   TUI_ANALYSIS_SIM ("/sim"): simulate the turn, continuing its saved
 //     sim when it has one, else simming its top candidates plus the
 //     played move from scratch. Works on loaded and annotated games,
 //     not while a computer game is still in progress.
-//   request_sim (false, "/resume"): continue the turn's saved analysis
-//     from the game — its sim, or its endgame with the session's warm
-//     transposition table — once the game is over.
+//   TUI_ANALYSIS_RESUME ("/resume"): continue the turn's saved analysis
+//     from the game (its sim, PEG, or endgame) once the game is over.
+//   TUI_ANALYSIS_SOLVE ("/solve"): solve the turn exactly: the endgame
+//     solver when the bag is empty, PEG when it's nearly so.
 // Returns false (with a status-bar notice explaining why) when the
 // entry can't be analyzed. Caller must hold state->mutex.
 bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
-                               bool request_sim);
+                               TuiAnalysisAction action);
 
 // "/kibitz": rank the moves available at turn `turn_idx` (the position
 // before it was played) by static equity and store them as that turn's
