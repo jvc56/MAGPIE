@@ -1062,6 +1062,11 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     render_history_rack_editor(plane, theme, state, e, interior_left,
                                interior_right, clocks_active, ld, player_fg,
                                player_dim_fg, prefix, row2);
+    // The editor leaves its last colors applied (the rack cursor's black
+    // on white when RACK has focus), which hid the total drawn below;
+    // restore row 2's.
+    theme_apply_fg(plane, player_dim_fg);
+    theme_apply_bg(plane, theme->bg);
   }
 
   if (!e->pending) {
