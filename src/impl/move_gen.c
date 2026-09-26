@@ -3432,7 +3432,6 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                                 ~player_get_pat_disabled_classes_mask(player),
                             rack_get_total_letters(&gen->opponent_rack));
       pat_eval_context_set_kwg(&gen->pat_eval_ctx, gen->kwg);
-      pat_eval_context_set_cap(&gen->pat_eval_ctx, player_get_pat_cap(player));
       pat_eval_context_set_utility(
           &gen->pat_eval_ctx,
           equity_to_int(player_get_score(player) - player_get_score(opponent)),

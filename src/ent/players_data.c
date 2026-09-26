@@ -44,7 +44,6 @@ struct PlayersData {
   bool pat_rollout_disabled[2];
   uint32_t pat_rollout_disabled_classes_masks[2];
   // The largest PAT adjustment a move of the player's can get.
-  Equity pat_caps[2];
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -117,16 +116,6 @@ void players_data_set_pat_rollout_disabled_classes_mask(
 uint32_t players_data_get_pat_rollout_disabled_classes_mask(
     const PlayersData *players_data, int player_index) {
   return players_data->pat_rollout_disabled_classes_masks[player_index];
-}
-
-void players_data_set_pat_cap(PlayersData *players_data, int player_index,
-                              Equity cap) {
-  players_data->pat_caps[player_index] = cap;
-}
-
-Equity players_data_get_pat_cap(const PlayersData *players_data,
-                                int player_index) {
-  return players_data->pat_caps[player_index];
 }
 
 bool players_data_get_is_shared(const PlayersData *players_data,
@@ -356,7 +345,6 @@ PlayersData *players_data_create(bool use_wmp) {
     players_data_set_pat_rollout_disabled(players_data, player_index, false);
     players_data_set_pat_rollout_disabled_classes_mask(players_data,
                                                        player_index, 0);
-    players_data_set_pat_cap(players_data, player_index, 0);
   }
   return players_data;
 }
