@@ -260,6 +260,65 @@ void tui_format_alphagram_for_sort(const char *in,
   format_alphagram_for_sort(in, (const LetterDistribution *)ld, sort, out,
                             out_size);
 }
+// Copies up to `max_chars` UTF-8 characters of `text` into `out`,
+// reading "L·L" / "l·l" as "ĿL" / "ŀl" so the geminated L fits two
+// cells. Returns the characters copied.
+static int compact_face(const char *text, int max_chars, char *out,
+                        size_t out_size) {
+  static const char middle_dot[] = "\xc2\xb7";
+  size_t used = 0;
+  int chars = 0;
+  out[0] = '\0';
+  for (const char *pos = text; *pos != '\0' && chars < max_chars;) {
+    const char *piece = pos;
+    size_t piece_len = (size_t)tui_tile_token_len(pos);
+    const bool dotted_l =
+        (*pos == 'L' || *pos == 'l') &&
+        strncmp(pos + 1, middle_dot, sizeof(middle_dot) - 1) == 0;
+    if (dotted_l) {
+      piece = *pos == 'L' ? "\xc4\xbf" : "\xc5\x80"; // Ŀ / ŀ
+      piece_len = 2;
+      pos += 1 + sizeof(middle_dot) - 1;
+    } else {
+      pos += piece_len;
+    }
+    if (used + piece_len + 1 > out_size) {
+      break;
+    }
+    memcpy(out + used, piece, piece_len);
+    used += piece_len;
+    out[used] = '\0';
+    chars++;
+  }
+  return chars;
+}
+
+void tile_face_cells(const LetterDistribution *ld, MachineLetter ml,
+                     bool halfwidth, char *out, size_t out_size) {
+  const char *face = ml == 0 ? "?" : ld->ld_ml_to_hl[ml];
+  if (face == NULL || face[0] == '\0') {
+    (void)snprintf(out, out_size, "%s", halfwidth ? " " : "  ");
+    return;
+  }
+  if (is_human_readable_letter_multichar(face)) {
+    const int chars = compact_face(face, halfwidth ? 1 : 2, out, out_size);
+    if (!halfwidth && chars < 2) {
+      (void)snprintf(out + strlen(out), out_size - strlen(out), " ");
+    }
+    return;
+  }
+  if (halfwidth) {
+    (void)snprintf(out, out_size, "%s", face);
+    return;
+  }
+  const char *fullwidth = ml == 0 ? "" : ld->ld_ml_to_alt_hl[ml];
+  if (fullwidth[0] != '\0') {
+    (void)snprintf(out, out_size, "%s", fullwidth);
+  } else {
+    (void)snprintf(out, out_size, " %s", face);
+  }
+}
+
 // One tile of a rack being sorted for display: its move-text token
 // ("E", "Ç", "[QU]", "?"), its place in the letter distribution, and
 // whether it's a vowel or the blank.
