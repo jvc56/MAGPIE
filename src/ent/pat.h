@@ -220,10 +220,10 @@ typedef struct PATEvalContext {
   Equity pre_penalty;
   // The premium squares walked, in row-major order within each class, and
   // which class each belongs to.
-  int num_tws;
-  uint8_t tws_rows[PAT_MAX_PREMIUM];
-  uint8_t tws_cols[PAT_MAX_PREMIUM];
-  uint8_t tws_classes[PAT_MAX_PREMIUM];
+  int num_premium;
+  uint8_t premium_rows[PAT_MAX_PREMIUM];
+  uint8_t premium_cols[PAT_MAX_PREMIUM];
+  uint8_t premium_classes[PAT_MAX_PREMIUM];
   // Double-double windows: window i runs along lane dd_lanes[i] of
   // direction dd_dirs[i], from lane square dd_los[i] to dd_his[i], whose
   // squares are both double word squares.
@@ -302,7 +302,7 @@ typedef struct PATEvalContext {
   Equity utility_bound;
   // Bitmask of PAT_CLASS_MASK_* classes this context actually applies
   // (weighted in the file and not excluded by the runtime mask); see
-  // pat_eval_ctx_active_classes, the safe way to read this from outside
+  // pat_eval_context_get_active_classes, the safe way to read this from outside
   // pat.c since it is meaningless (and left unset) while weights is NULL.
   uint32_t active_classes_mask;
   // The opponent's rack SIZE only -- never their rack contents, which real
@@ -448,7 +448,7 @@ pat_eval_utility_bound(const PATEvalContext *pat_eval_ctx) {
 // skip whichever axis of the legacy opening penalty a live class already
 // prices.
 static inline uint32_t
-pat_eval_ctx_active_classes(const PATEvalContext *pat_eval_ctx) {
+pat_eval_context_get_active_classes(const PATEvalContext *pat_eval_ctx) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }

@@ -1805,9 +1805,9 @@ static PATCrossInfo pat_effective_cross_info(
 // zero whatever the features (see PATEvalContext.channel_flags).
 static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           const uint8_t *unseen_counts, const PATWeights *pat,
-                          int tws_row, int tws_col, int premium_class, int dir,
-                          const PATMoveOverlay *overlay, int32_t *features,
-                          int *extent_lo, int *extent_hi,
+                          int premium_row, int premium_col, int premium_class,
+                          int dir, const PATMoveOverlay *overlay,
+                          int32_t *features, int *extent_lo, int *extent_hi,
                           int opponent_rack_size, uint64_t *hook_letters_out,
                           bool lm_channels, bool score_channels) {
   const int max_reach =
@@ -1862,52 +1862,54 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   int lm_route_position[2][2 * RACK_SIZE + 2];
   int lm_num_routes[2] = {0, 0};
   const int lane_index =
-      (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
-  const int tws_idx = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_col : tws_row;
+      (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_row : premium_col;
+  const int premium_idx =
+      (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_col : premium_row;
   const Square *lane = board_get_row_cache(lanes, lane_index, dir);
   if (extent_lo) {
-    *extent_lo = tws_idx;
+    *extent_lo = premium_idx;
   }
   if (extent_hi) {
-    *extent_hi = tws_idx;
+    *extent_hi = premium_idx;
   }
 
-  if (pat_effective_letter(lane, tws_idx, overlay,
-                           pat_unit_row(dir, lane_index, tws_idx),
-                           pat_unit_col(dir, lane_index, tws_idx)) !=
+  if (pat_effective_letter(lane, premium_idx, overlay,
+                           pat_unit_row(dir, lane_index, premium_idx),
+                           pat_unit_col(dir, lane_index, premium_idx)) !=
       ALPHABET_EMPTY_SQUARE_MARKER) {
     // The TWS square is covered (by the board or by the move itself):
     // nothing along this lane can reach it. Covering a TWS is exactly the
     // blocking reward.
     return;
   }
-  const int premium_word_multiplier =
-      bonus_square_get_word_multiplier(square_get_bonus_square(&lane[tws_idx]));
-  const PATCrossInfo tws_info = pat_effective_cross_info(
-      lane, tws_idx, dir, overlay, pat_unit_row(dir, lane_index, tws_idx),
-      pat_unit_col(dir, lane_index, tws_idx), unseen_counts, hyper_scale,
+  const int premium_word_multiplier = bonus_square_get_word_multiplier(
+      square_get_bonus_square(&lane[premium_idx]));
+  const PATCrossInfo premium_info = pat_effective_cross_info(
+      lane, premium_idx, dir, overlay,
+      pat_unit_row(dir, lane_index, premium_idx),
+      pat_unit_col(dir, lane_index, premium_idx), unseen_counts, hyper_scale,
       hook_score_ld, premium_word_multiplier);
-  if (tws_info.dead) {
+  if (premium_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
   }
   if (lm_track) {
     lm_entries[0][0] = bonus_square_get_letter_multiplier(
-        square_get_bonus_square(&lane[tws_idx]));
+        square_get_bonus_square(&lane[premium_idx]));
     lm_entries[1][0] = lm_entries[0][0];
   }
-  if (tws_info.hooky) {
+  if (premium_info.hooky) {
     // A one-tile play on the TWS square itself completes a perpendicular
     // word at triple word score: hook access at d = 1.
-    features[hook_base] += tws_info.flex;
+    features[hook_base] += premium_info.flex;
     if (full_channels) {
-      features[PAT_FEATURE_HOOK_SCALED_START] += tws_info.scaled_flex;
-      features[PAT_FEATURE_HOOK_SCORE_START] += tws_info.score_exposure;
+      features[PAT_FEATURE_HOOK_SCALED_START] += premium_info.scaled_flex;
+      features[PAT_FEATURE_HOOK_SCORE_START] += premium_info.score_exposure;
     }
     if (hook_letters_out) {
-      *hook_letters_out |= tws_info.letter_set;
+      *hook_letters_out |= premium_info.letter_set;
     }
-    if (lm_track && tws_info.flex > 0) {
+    if (lm_track && premium_info.flex > 0) {
       // Contact at the premium itself; either side is its far side.
       lm_route_bin[0][0] = 1;
       lm_route_position[0][0] = 0;
@@ -1923,10 +1925,10 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     int empties_used = 1;
     bool span_has_floater = false;
     int span_floater_flex = 0;
-    bool span_has_hook = tws_info.hooky;
-    int prev_empty_idx = tws_idx;
-    int last_visited_idx = tws_idx;
-    int idx = tws_idx + side;
+    bool span_has_hook = premium_info.hooky;
+    int prev_empty_idx = premium_idx;
+    int last_visited_idx = premium_idx;
+    int idx = premium_idx + side;
     while (idx >= 0 && idx < BOARD_DIM) {
       last_visited_idx = idx;
       if (square_get_is_brick(&lane[idx])) {
@@ -2347,9 +2349,10 @@ static int pat_premium_class_of(const Square *square) {
 // (the truncation is deterministic, so training and evaluation always
 // agree). Bricked and occupied squares are excluded: a covered premium
 // square can never be uncovered by a move.
-static int pat_find_tws(const Square *lanes, uint8_t *tws_rows,
-                        uint8_t *tws_cols, uint8_t *tws_classes) {
-  int num_tws = 0;
+static int pat_find_premium_squares(const Square *lanes, uint8_t *premium_rows,
+                                    uint8_t *premium_cols,
+                                    uint8_t *premium_classes) {
+  int num_premium = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     const Square *lane =
         board_get_row_cache(lanes, row, BOARD_HORIZONTAL_DIRECTION);
@@ -2363,16 +2366,16 @@ static int pat_find_tws(const Square *lanes, uint8_t *tws_rows,
       if (premium_class < 0) {
         continue;
       }
-      if (num_tws == PAT_MAX_PREMIUM) {
-        return num_tws;
+      if (num_premium == PAT_MAX_PREMIUM) {
+        return num_premium;
       }
-      tws_rows[num_tws] = (uint8_t)row;
-      tws_cols[num_tws] = (uint8_t)col;
-      tws_classes[num_tws] = (uint8_t)premium_class;
-      num_tws++;
+      premium_rows[num_premium] = (uint8_t)row;
+      premium_cols[num_premium] = (uint8_t)col;
+      premium_classes[num_premium] = (uint8_t)premium_class;
+      num_premium++;
     }
   }
-  return num_tws;
+  return num_premium;
 }
 
 void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
@@ -2381,17 +2384,18 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
   memset(features, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
   pat_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
-  uint8_t tws_rows[PAT_MAX_PREMIUM];
-  uint8_t tws_cols[PAT_MAX_PREMIUM];
-  uint8_t tws_classes[PAT_MAX_PREMIUM];
-  const int num_tws = pat_find_tws(lanes, tws_rows, tws_cols, tws_classes);
-  for (int tws_idx = 0; tws_idx < num_tws; tws_idx++) {
-    pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
-                  tws_cols[tws_idx], tws_classes[tws_idx],
+  uint8_t premium_rows[PAT_MAX_PREMIUM];
+  uint8_t premium_cols[PAT_MAX_PREMIUM];
+  uint8_t premium_classes[PAT_MAX_PREMIUM];
+  const int num_premium = pat_find_premium_squares(
+      lanes, premium_rows, premium_cols, premium_classes);
+  for (int premium_idx = 0; premium_idx < num_premium; premium_idx++) {
+    pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
+                  premium_cols[premium_idx], premium_classes[premium_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
                   opponent_rack_size, NULL, true, true);
-    pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
-                  tws_cols[tws_idx], tws_classes[tws_idx],
+    pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
+                  premium_cols[premium_idx], premium_classes[premium_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
                   opponent_rack_size, NULL, true, true);
   }
@@ -2611,24 +2615,25 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                                   int32_t *features, int *dir_out,
                                   int *lane_out, int *extent_lo, int *extent_hi,
                                   uint64_t *hook_letters_out) {
-  const int num_tws_units = pat_eval_ctx->num_tws * 2;
-  if (unit_index < num_tws_units) {
-    const int tws_idx = unit_index / 2;
+  const int num_premium_units = pat_eval_ctx->num_premium * 2;
+  if (unit_index < num_premium_units) {
+    const int premium_idx = unit_index / 2;
     const int dir = unit_index % 2;
-    const int tws_row = pat_eval_ctx->tws_rows[tws_idx];
-    const int tws_col = pat_eval_ctx->tws_cols[tws_idx];
+    const int premium_row = pat_eval_ctx->premium_rows[premium_idx];
+    const int premium_col = pat_eval_ctx->premium_cols[premium_idx];
     *dir_out = dir;
-    *lane_out = (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
+    *lane_out = (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_row : premium_col;
     pat_scan_unit(
         pat_eval_ctx->lanes, pat_eval_ctx->ld, pat_eval_ctx->unseen_counts,
-        pat_eval_ctx->weights, tws_row, tws_col,
-        pat_eval_ctx->tws_classes[tws_idx], dir, overlay, features, extent_lo,
-        extent_hi, pat_eval_ctx->opponent_rack_size, hook_letters_out,
+        pat_eval_ctx->weights, premium_row, premium_col,
+        pat_eval_ctx->premium_classes[premium_idx], dir, overlay, features,
+        extent_lo, extent_hi, pat_eval_ctx->opponent_rack_size,
+        hook_letters_out,
         (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_LM) != 0,
         (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_HOOK_SCORE) != 0);
     return;
   }
-  const int dd_idx = unit_index - num_tws_units;
+  const int dd_idx = unit_index - num_premium_units;
   *dir_out = pat_eval_ctx->dd_dirs[dd_idx];
   *lane_out = pat_eval_ctx->dd_lanes[dd_idx];
   pat_scan_dd_unit(pat_eval_ctx->lanes, pat_eval_ctx->unseen_counts,
@@ -2723,16 +2728,18 @@ static void pat_drop_unweighted_units(PATEvalContext *pat_eval_ctx,
         pat_class_is_weighted(weights, premium_class, enabled_classes_mask);
   }
   int kept = 0;
-  for (int tws_idx = 0; tws_idx < pat_eval_ctx->num_tws; tws_idx++) {
-    if (!class_weighted[pat_eval_ctx->tws_classes[tws_idx]]) {
+  for (int premium_idx = 0; premium_idx < pat_eval_ctx->num_premium;
+       premium_idx++) {
+    if (!class_weighted[pat_eval_ctx->premium_classes[premium_idx]]) {
       continue;
     }
-    pat_eval_ctx->tws_rows[kept] = pat_eval_ctx->tws_rows[tws_idx];
-    pat_eval_ctx->tws_cols[kept] = pat_eval_ctx->tws_cols[tws_idx];
-    pat_eval_ctx->tws_classes[kept] = pat_eval_ctx->tws_classes[tws_idx];
+    pat_eval_ctx->premium_rows[kept] = pat_eval_ctx->premium_rows[premium_idx];
+    pat_eval_ctx->premium_cols[kept] = pat_eval_ctx->premium_cols[premium_idx];
+    pat_eval_ctx->premium_classes[kept] =
+        pat_eval_ctx->premium_classes[premium_idx];
     kept++;
   }
-  pat_eval_ctx->num_tws = kept;
+  pat_eval_ctx->num_premium = kept;
 
   bool tier_weighted[PAT_WINDOW_TIER_COUNT];
   for (int tier = 0; tier < PAT_WINDOW_TIER_COUNT; tier++) {
@@ -2779,16 +2786,17 @@ static void pat_eval_context_load_units(
   pat_eval_ctx->lanes = lanes;
   pat_compute_unseen_counts(lanes, ld, player_rack,
                             pat_eval_ctx->unseen_counts);
-  pat_eval_ctx->num_tws =
-      pat_find_tws(lanes, pat_eval_ctx->tws_rows, pat_eval_ctx->tws_cols,
-                   pat_eval_ctx->tws_classes);
+  pat_eval_ctx->num_premium = pat_find_premium_squares(
+      lanes, pat_eval_ctx->premium_rows, pat_eval_ctx->premium_cols,
+      pat_eval_ctx->premium_classes);
   pat_eval_ctx->num_dd = pat_find_dd(
       lanes, pat_eval_ctx->dd_dirs, pat_eval_ctx->dd_lanes,
       pat_eval_ctx->dd_los, pat_eval_ctx->dd_his, pat_eval_ctx->dd_tiers);
   if (drop_unweighted_units) {
     pat_drop_unweighted_units(pat_eval_ctx, weights, enabled_classes_mask);
   }
-  pat_eval_ctx->num_units = pat_eval_ctx->num_tws * 2 + pat_eval_ctx->num_dd;
+  pat_eval_ctx->num_units =
+      pat_eval_ctx->num_premium * 2 + pat_eval_ctx->num_dd;
   memset(pat_eval_ctx->unit_mask_by_row, 0,
          sizeof(pat_eval_ctx->unit_mask_by_row));
   memset(pat_eval_ctx->unit_mask_by_col, 0,
@@ -3387,10 +3395,11 @@ void pat_extract_features_combined(const Square *lanes,
   }
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
   pat_compute_unseen_counts(lanes, ld, player_rack, unseen_counts);
-  uint8_t tws_rows[PAT_MAX_PREMIUM];
-  uint8_t tws_cols[PAT_MAX_PREMIUM];
-  uint8_t tws_classes[PAT_MAX_PREMIUM];
-  const int num_tws = pat_find_tws(lanes, tws_rows, tws_cols, tws_classes);
+  uint8_t premium_rows[PAT_MAX_PREMIUM];
+  uint8_t premium_cols[PAT_MAX_PREMIUM];
+  uint8_t premium_classes[PAT_MAX_PREMIUM];
+  const int num_premium = pat_find_premium_squares(
+      lanes, premium_rows, premium_cols, premium_classes);
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
   uint8_t dd_los[PAT_MAX_DD];
@@ -3398,7 +3407,7 @@ void pat_extract_features_combined(const Square *lanes,
   uint8_t dd_tiers[PAT_MAX_DD];
   const int num_dd =
       pat_find_dd(lanes, dd_dirs, dd_lanes, dd_los, dd_his, dd_tiers);
-  const int num_units = num_tws * 2 + num_dd;
+  const int num_units = num_premium * 2 + num_dd;
 
   int32_t unit_features[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
   int worst_unit = -1;
@@ -3406,14 +3415,14 @@ void pat_extract_features_combined(const Square *lanes,
   for (int unit_index = 0; unit_index < num_units; unit_index++) {
     int32_t *row = unit_features[unit_index];
     memset(row, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
-    if (unit_index < num_tws * 2) {
-      const int tws_idx = unit_index / 2;
-      pat_scan_unit(lanes, ld, unseen_counts, pat, tws_rows[tws_idx],
-                    tws_cols[tws_idx], tws_classes[tws_idx], unit_index % 2,
-                    NULL, row, NULL, NULL, opponent_rack_size, NULL, true,
-                    true);
+    if (unit_index < num_premium * 2) {
+      const int premium_idx = unit_index / 2;
+      pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
+                    premium_cols[premium_idx], premium_classes[premium_idx],
+                    unit_index % 2, NULL, row, NULL, NULL, opponent_rack_size,
+                    NULL, true, true);
     } else {
-      const int dd_idx = unit_index - num_tws * 2;
+      const int dd_idx = unit_index - num_premium * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],
                        dd_los[dd_idx], dd_his[dd_idx], dd_tiers[dd_idx], NULL,
                        row, NULL, NULL, opponent_rack_size, NULL);

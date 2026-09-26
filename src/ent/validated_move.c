@@ -499,7 +499,7 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
               player_get_rack(game_get_player(game, 1 - player_index)),
               board_get_opening_move_word_penalties(board),
               board_get_opening_move_letter_penalties(board),
-              pat_eval_ctx_active_classes(&pat_eval_ctx), &pat_eval_ctx,
+              pat_eval_context_get_active_classes(&pat_eval_ctx), &pat_eval_ctx,
               board_get_tiles_played(board),
               bag_get_letters(game_get_bag(game))));
     } else {
