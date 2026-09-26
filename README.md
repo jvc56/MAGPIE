@@ -365,7 +365,7 @@ For example, full PAT everywhere, rollouts included:
 magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses all
 ```
 
-`notes/pat_training.md` describes how they are trained (`test/pat_build.sh` and `test/pat_build_super.sh` run the whole process for a lexicon) and `notes/pat_utility_correction.md` the utility correction.
+`test/pat_build.sh` and `test/pat_build_super.sh` run the whole process that trains and validates a lexicon's weights.
 
 ## Examples
 
