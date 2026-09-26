@@ -54,6 +54,7 @@
 #include "peg_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
+#include "policy_fidelity_test.h"
 #include "position_lengths_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -213,6 +214,7 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"pcbench", test_play_chooser_benchmark},
+    {"policyfid", test_policy_fidelity},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
     {"peg1pb", test_peg_1bag_pass_best},
