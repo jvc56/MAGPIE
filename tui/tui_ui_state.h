@@ -59,7 +59,9 @@ typedef struct {
   bool load_game_parse_ok;
   char load_game_error[160];
   int quit_confirm_focus;
-  int analysis_menu_focus;
+  int panel_menu_panel; // whose menu TUI_MODAL_PANEL_MENU shows
+  int panel_menu_focus;
+  int panel_menu_scroll;
   int phony_confirm_focus;
   TuiModalState quit_confirm_return;
   LexiconList *lexicon_list;
