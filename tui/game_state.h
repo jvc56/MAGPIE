@@ -864,4 +864,17 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed);
 // the slot can be reused.
 void tui_history_entry_release(TuiHistoryEntry *entry);
 
+// Why the game can't carry on from history entry `idx`, or NULL when
+// it can: it must be a played turn with a saved position.
+const char *tui_game_state_branch_reason(const TuiGameState *state, int idx);
+
+// Rewinds the game to the start of history entry `idx` so play can carry
+// on from there: loads the position saved with it (board, racks, bag,
+// scores, whose turn), fills a rack the record left short from the bag,
+// restores the clocks, and drops that turn and every later one along
+// with their analysis. Returns false, changing nothing, when the saved
+// position doesn't load. Caller holds state->mutex with the workers
+// stopped.
+bool tui_game_state_branch_at(TuiGameState *state, int idx);
+
 #endif
