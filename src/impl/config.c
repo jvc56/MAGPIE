@@ -1735,8 +1735,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "all";
       text = "Specifies which PAT classes apply in the rollouts of the "
              "player's simulations, independently of 'patclasses': for "
-             "example cheaper rollouts with tws,windows while the "
-             "candidates use every class. Defaults to all. "
+             "example cheaper rollouts while the candidates use every "
+             "class. Defaults to tws,windows (qws,tws,windows on 21x21 "
+             "boards), which keeps most of full PAT's value at a fraction "
+             "of its cost; all uses every class. "
              "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
              "and 'patrolloutclasses2' set one.";
       break;

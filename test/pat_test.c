@@ -1887,6 +1887,14 @@ static void test_pat_path_parity(void) {
 // The per-player PAT options land in players_data, and the global form sets
 // both players unless a per-player one overrides it.
 static void test_pat_usage_options(void) {
+  // Rollouts default to the cheaper class set for this board.
+  Config *default_config = config_create_or_die("set -lex CSW21");
+  for (int player_index = 0; player_index < 2; player_index++) {
+    assert(players_data_get_pat_rollout_disabled_classes_mask(
+               config_get_players_data(default_config), player_index) ==
+           (PAT_CLASS_MASK_ALL & ~PAT_CLASS_MASK_ROLLOUT_DEFAULT));
+  }
+  config_destroy(default_config);
   Config *config = config_create_or_die(
       "set -lex CSW21 -patcand false -patcand2 true -patrollout1 false "
       "-patclasses dws,tws -patrolloutclasses tws,windows "
