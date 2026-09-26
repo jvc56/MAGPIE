@@ -35,6 +35,7 @@
 #include "../src/impl/pat_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "pat_test_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <math.h>
@@ -42,41 +43,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-
-// Creates a temporary data directory with a strategy/ subdirectory and
-// returns the path (owned by the caller).
-static char *create_temp_pat_data_dir(void) {
-  char tmp_template[] = "/tmp/magpie_pat_XXXXXX";
-  const char *tmp_dir = mkdtemp(tmp_template);
-  assert(tmp_dir);
-  char *strategy_dir = get_formatted_string("%s/strategy", tmp_dir);
-  assert(mkdir(strategy_dir, 0755) == 0);
-  free(strategy_dir);
-  return string_duplicate(tmp_dir);
-}
-
-// A zeroed PATWeights with its lexicon tables prepared from the game's
-// data, ready for evaluation (an unprepared model is refused; see
-// PATWeights.prepared).
-static PATWeights *pat_test_create_prepared(const char *name,
-                                            const Game *game) {
-  PATWeights *pat = pat_create_zeroed(name);
-  pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
-                        game_get_ld(game));
-  return pat;
-}
-
-static void write_pat_file_contents(const char *data_dir, const char *pat_name,
-                                    const char *contents) {
-  ErrorStack *error_stack = error_stack_create();
-  char *filename =
-      get_formatted_string("%s/strategy/%s.pat", data_dir, pat_name);
-  write_string_to_file(filename, "w", contents, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  free(filename);
-  error_stack_destroy(error_stack);
-}
 
 static void current_pat_header(char *buf, size_t buf_size) {
   (void)snprintf(buf, buf_size, "%s%d", PAT_MAGIC_PREFIX, PAT_VERSION);
