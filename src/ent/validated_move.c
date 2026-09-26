@@ -19,6 +19,7 @@
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "move.h"
+#include "pat.h"
 #include "player.h"
 #include "rack.h"
 #include "static_eval.h"
@@ -472,12 +473,33 @@ void validated_move_load(ValidatedMove *vm, const Game *game, int player_index,
 
   if (move_type != GAME_EVENT_PASS) {
     if (player_get_move_sort_type(player) == MOVE_SORT_EQUITY) {
+      // Build the PAT context on the stack so validated moves get
+      // the same equity as movegen-recorded moves. Disabled when the
+      // player has no weights or the board state cannot support the scans.
+      PATEvalContext pat_eval_ctx;
+      pat_eval_context_disable(&pat_eval_ctx);
+      const PATWeights *pat = player_get_pat(player);
+      if (pat && bag_get_letters(game_get_bag(game)) > 0 &&
+          !board_get_transposed(board) && board_get_cross_sets_valid(board)) {
+        pat_eval_context_load(
+            &pat_eval_ctx, pat,
+            board_get_readonly_lanes(
+                board, board_get_cross_set_index(
+                           game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+                           player_index)),
+            ld, player_get_rack(player), PAT_CLASS_MASK_ALL,
+            rack_get_total_letters(
+                player_get_rack(game_get_player(game, 1 - player_index))));
+        pat_eval_context_set_kwg(&pat_eval_ctx, player_get_kwg(player));
+      }
       move_set_equity(
           vm->move,
           static_eval_get_move_equity(
               ld, klv, vm->move, vm->leave,
               player_get_rack(game_get_player(game, 1 - player_index)),
-              board_get_opening_move_penalties(board),
+              board_get_opening_move_word_penalties(board),
+              board_get_opening_move_letter_penalties(board),
+              pat_eval_ctx_active_classes(&pat_eval_ctx), &pat_eval_ctx,
               board_get_tiles_played(board),
               bag_get_letters(game_get_bag(game))));
     } else {

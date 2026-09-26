@@ -14,6 +14,7 @@
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/word_info_table.h"
@@ -121,7 +122,14 @@ typedef struct MoveGen {
   const uint32_t *const *wit_row_lane;
   const uint8_t *wit_len_lane;
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
-  Equity opening_move_penalties[(BOARD_DIM) * 2];
+  Equity opening_move_word_penalties[(BOARD_DIM) * 2];
+  Equity opening_move_letter_penalties[(BOARD_DIM) * 2];
+  // PAT evaluation state; disabled (weights NULL) unless the player
+  // has PAT weights loaded and the record/sort types use static equity.
+  PATEvalContext pat_eval_ctx;
+  // pat_eval_lane_penalty_bound for the lane the shadow phase is on, folded
+  // into every shadow equity bound recorded from it (zero when disabled).
+  Equity pat_lane_penalty_bound;
   int board_number_of_tiles_played;
   int cross_index;
   Move best_move_and_current_move[2];
@@ -291,6 +299,20 @@ typedef struct MoveGenArgs {
   // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
   // Movegen ORs further discoveries in. Default 0 (no known tiles).
   uint64_t initial_tiles_bv;
+  // Disables the PAT term even when the player has weights loaded.
+  // Set by the inference paths, which build their own equity thresholds
+  // from score plus leave and would misclassify moves whose recorded
+  // equities carried the defense term.
+  bool disable_pat;
+  // Which loaded PAT classes to suppress (bits from pat_premium_class_t
+  // and PAT_CLASS_MASK_WINDOWS; see PAT_CLASS_MASK_ALL), independent of
+  // disable_pat: 0, the default a caller gets by simply not mentioning
+  // this field, disables nothing and applies every class the weights
+  // have, exactly as before this field existed. Lets one loaded weights
+  // file serve a fast mode (e.g. TWS only, for rollouts) and a full mode
+  // (e.g. every class, for candidate selection) without switching files.
+  // Ignored when disable_pat is set.
+  uint32_t pat_disabled_classes_mask;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);

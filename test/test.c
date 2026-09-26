@@ -1,6 +1,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "alias_method_test.h"
 #include "alphabet_test.h"
 #include "analyze_test.h"
@@ -42,6 +43,8 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pat_opening_sim_test.h"
+#include "pat_test.h"
 #include "path_move_lists_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
@@ -142,6 +145,7 @@ static TestEntry test_table[] = {
     {"wmpmaker", test_wmp_maker},
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
+    {"pat", test_pat},
     {"winpctcoverage", test_win_pct_coverage},
     {"winpctstate", test_win_pct_state},
     {"winpctrecord", test_win_pct_record},
@@ -252,6 +256,14 @@ void run_test(const char *subtest) {
       return;
     }
   }
+  if (has_prefix("pattablecheck:", subtest)) {
+    pat_run_through_table_check(subtest + strlen("pattablecheck:"));
+    return;
+  }
+  if (has_prefix("patopeningsim:", subtest)) {
+    pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
+    return;
+  }
   log_fatal("unrecognized test: %s\n", subtest);
 }
 
@@ -275,12 +287,25 @@ int main(int argc, char *argv[]) {
       }
     }
   } else if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
-    if (argc > 1) {
-      log_warn("Ignoring test arguments when testing default super board "
-               "dimensions of %d.",
-               DEFAULT_SUPER_BOARD_DIM);
+    // The super suite is the default; a parameterized on-demand test
+    // (a "<name>:<spec>" argument, e.g. patopeningsim:CSW24:<pat>:300)
+    // runs on this board instead, so the board-dependent tooling is
+    // available under the 21x21 build.
+    bool ran_on_demand = false;
+    for (int i = 1; i < argc; i++) {
+      if (strchr(argv[i], ':') != NULL) {
+        run_test(argv[i]);
+        ran_on_demand = true;
+      }
     }
-    run_all_super();
+    if (!ran_on_demand) {
+      if (argc > 1) {
+        log_warn("Ignoring test arguments when testing default super board "
+                 "dimensions of %d.",
+                 DEFAULT_SUPER_BOARD_DIM);
+      }
+      run_all_super();
+    }
   } else {
     log_fatal(
         "Testing with unsupported board dimension of %d. Only %d and %d are "

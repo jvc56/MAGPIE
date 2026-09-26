@@ -4,6 +4,7 @@
 typedef enum {
   AUTOPLAY_TYPE_DEFAULT,
   AUTOPLAY_TYPE_LEAVE_GEN,
+  AUTOPLAY_TYPE_PAT_GEN,
 } autoplay_t;
 
 typedef enum {

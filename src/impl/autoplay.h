@@ -26,6 +26,13 @@ typedef struct AutoplayArgs {
   // inferred from force_racks_filename, since an unrestricted run could mean
   // dumping millions of rows.
   bool write_rack_equity_csv;
+  // Output name for the PAT weights trained by
+  // AUTOPLAY_TYPE_PAT_GEN; per-generation snapshots are written as
+  // <name>_gen_<N>.pat. Only meaningful for that autoplay type.
+  const char *pat_gen_output_name;
+  // Plies of net result a PAT training label spans; see
+  // PATPendingObservation.
+  int pat_label_plies;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;
