@@ -598,6 +598,16 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
         case TUI_SLASH_SET:
           run_set_command(state, session, &words);
           break;
+        case TUI_SLASH_SAVE: {
+          // Everything after "/save " is the file name, spaces included.
+          char path[sizeof(state->slash_buf)] = "";
+          if (words.count > 1) {
+            (void)snprintf(path, sizeof(path), "%s",
+                           state->slash_buf + words.start[1]);
+          }
+          tui_command_save(state, path);
+          break;
+        }
         case TUI_SLASH_COUNT:
           break;
         default:
@@ -611,10 +621,10 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
         state->slash_buf[0] = '\0';
         pthread_mutex_unlock(&state->mutex);
       } else if (key >= ' ' && key < 0x7f) {
-        // Insert (letters lowercased) at the cursor position rather
-        // than always appending. Shifts the buffer tail right.
-        const char ch =
-            (char)((key >= 'A' && key <= 'Z') ? key + ('a' - 'A') : key);
+        // Insert at the cursor position rather than always appending.
+        // Shifts the buffer tail right. Case is kept (a "/save" file
+        // name needs it); command and setting names match any case.
+        const char ch = (char)key;
         pthread_mutex_lock(&state->mutex);
         if (state->slash_len < (int)sizeof(state->slash_buf) - 1) {
           memmove(state->slash_buf + state->slash_cursor + 1,
