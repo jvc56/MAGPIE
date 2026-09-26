@@ -1,10 +1,10 @@
 #include "input_game.h"
 
-#include "bot_worker.h"
+#include "commands.h"
 #include "game_state.h"
-#include "input_menus.h"
 #include "input_settings.h"
 #include "move_entry.h"
+#include "panel_menu.h"
 #include "settings_table.h"
 #include "slash_commands.h"
 #include "time_picker.h"
@@ -198,6 +198,27 @@ static void run_set_command(TuiGameState *state, TuiSession *session,
 // Game-screen keys when no modal or cell editor is open: panel focus
 // (0-5, Tab), Esc menu, CGP copy, board / Analysis / History navigation,
 // and the command bar with its slash commands. Returns true when consumed.
+// Whether Space / Enter (`key`) on the focused panel opens its menu:
+// Space anywhere in Board, Rack, or Bag, and on the History / Analysis
+// badge (their cursor off the entries). Enter opens it too, except on
+// the Board outside Watch, where Enter starts keyboard move entry.
+static bool badge_opens_menu(const TuiGameState *state, uint32_t key) {
+  const bool space = key == ' ';
+  switch (state->focused_panel) {
+  case TUI_FOCUS_BOARD:
+    return space || state->app_mode == TUI_APP_MODE_WATCH;
+  case TUI_FOCUS_RACK:
+  case TUI_FOCUS_BAG:
+    return true;
+  case TUI_FOCUS_HISTORY:
+    return state->history_cursor < 0;
+  case TUI_FOCUS_ANALYSIS:
+    return state->analysis_cursor < 0;
+  default:
+    return false;
+  }
+}
+
 bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
                     uint32_t key, ncinput input) {
   // Opening the history-cell editor from the History cursor: Enter on
@@ -250,21 +271,8 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
   }
 
   if (ui->modal == TUI_MODAL_NONE && !state->slash_active &&
-      state->focused_panel == TUI_FOCUS_ANALYSIS &&
-      state->analysis_cursor < 0 &&
-      (key == ' ' || key == NCKEY_ENTER || key == '\r' || key == '\n')) {
-    // Space or Enter on the [5] badge opens the analysis menu for the
-    // turn selected in History, focused on its first available item.
-    ui->modal = TUI_MODAL_ANALYSIS_MENU;
-    ui->analysis_menu_focus = TUI_ANALYSIS_MENU_BACK;
-    pthread_mutex_lock(&state->mutex);
-    for (int item = 0; item < TUI_ANALYSIS_MENU_ITEM_COUNT; item++) {
-      if (tui_analysis_menu_reason(state, item) == NULL) {
-        ui->analysis_menu_focus = item;
-        break;
-      }
-    }
-    pthread_mutex_unlock(&state->mutex);
+      (key == ' ' || enter_key) && badge_opens_menu(state, key)) {
+    tui_open_panel_menu(state, ui, session, state->focused_panel);
     return true;
   }
 
@@ -590,40 +598,10 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
         case TUI_SLASH_SET:
           run_set_command(state, session, &words);
           break;
-        case TUI_SLASH_NEW:
-          ui->modal = TUI_MODAL_TIME_PICKER;
-          ui->time_focus = tui_time_picker_closest_index(session->chosen_time);
-          ui->time_picker_return = TUI_MODAL_NONE;
-          break;
-        case TUI_SLASH_SETTINGS:
-          tui_open_settings(ui, TUI_MODAL_NONE);
-          break;
-        case TUI_SLASH_QUIT:
-        case TUI_SLASH_EXIT:
-          ui->modal = TUI_MODAL_QUIT_CONFIRM;
-          ui->quit_confirm_focus = 0;
-          ui->quit_confirm_return = TUI_MODAL_NONE;
-          break;
-        case TUI_SLASH_COPY:
-          tui_copy_position_cgp(state);
-          break;
-        case TUI_SLASH_RESUME:
-        case TUI_SLASH_SIM:
-          pthread_mutex_lock(&state->mutex);
-          tui_analysis_worker_start(state, state->history_cursor,
-                                    cmd->id == TUI_SLASH_SIM);
-          pthread_mutex_unlock(&state->mutex);
-          break;
-        case TUI_SLASH_KIBITZ:
-          pthread_mutex_lock(&state->mutex);
-          tui_analysis_kibitz(state, state->history_cursor);
-          pthread_mutex_unlock(&state->mutex);
-          break;
-        case TUI_SLASH_STOP:
-          tui_analysis_worker_stop_and_join(state);
-          break;
         case TUI_SLASH_COUNT:
+          break;
         default:
+          tui_command_run(state, ui, session, cmd->id);
           break;
         }
         pthread_mutex_lock(&state->mutex);
