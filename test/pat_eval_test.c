@@ -23,7 +23,6 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
 #include "pat_test_util.h"
 #include "test_util.h"
 #include <assert.h>
