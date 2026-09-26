@@ -6,6 +6,7 @@
 #include "../util/string_util.h"
 #include "klv.h"
 #include "kwg.h"
+#include "pat.h"
 #include "rack_info_table.h"
 #include "wmp.h"
 #include "word_info_table.h"
@@ -13,7 +14,12 @@
 #include <stdlib.h>
 
 static const char *const players_data_type_names[] = {
-    "kwg", "klv", "wordmap", "rack info table", "word info table"};
+    "kwg",
+    "klv",
+    "wordmap",
+    "rack info table",
+    "word info table",
+    "positional adjustment table"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -25,6 +31,18 @@ struct PlayersData {
   bool use_when_available[(NUMBER_OF_DATA * 2)];
   move_sort_t move_sort_types[2];
   move_record_t move_record_types[2];
+  // How each player uses its PAT weights (see the pat* options in config.c).
+  // Which loaded PAT classes to suppress in the player's own move
+  // generation (see PAT_CLASS_MASK_ALL); 0 means none, i.e. every class the
+  // weights have.
+  uint32_t pat_disabled_classes_masks[2];
+  // Whether the player's own move generation (static play and the candidate
+  // list a sim starts from) leaves PAT out.
+  bool pat_candidates_disabled[2];
+  // The same two settings for the rollouts of the player's sims.
+  bool pat_rollout_disabled[2];
+  uint32_t pat_rollout_disabled_classes_masks[2];
+  // The largest PAT adjustment a move of the player's can get.
 };
 
 #define DEFAULT_MOVE_SORT_TYPE MOVE_SORT_EQUITY
@@ -55,6 +73,48 @@ void players_data_set_move_record_type(PlayersData *players_data,
 move_record_t players_data_get_move_record_type(const PlayersData *players_data,
                                                 int player_index) {
   return players_data->move_record_types[player_index];
+}
+
+void players_data_set_pat_disabled_classes_mask(PlayersData *players_data,
+                                                int player_index,
+                                                uint32_t mask) {
+  players_data->pat_disabled_classes_masks[player_index] = mask;
+}
+
+uint32_t
+players_data_get_pat_disabled_classes_mask(const PlayersData *players_data,
+                                           int player_index) {
+  return players_data->pat_disabled_classes_masks[player_index];
+}
+
+void players_data_set_pat_candidates_disabled(PlayersData *players_data,
+                                              int player_index, bool disabled) {
+  players_data->pat_candidates_disabled[player_index] = disabled;
+}
+
+bool players_data_get_pat_candidates_disabled(const PlayersData *players_data,
+                                              int player_index) {
+  return players_data->pat_candidates_disabled[player_index];
+}
+
+void players_data_set_pat_rollout_disabled(PlayersData *players_data,
+                                           int player_index, bool disabled) {
+  players_data->pat_rollout_disabled[player_index] = disabled;
+}
+
+bool players_data_get_pat_rollout_disabled(const PlayersData *players_data,
+                                           int player_index) {
+  return players_data->pat_rollout_disabled[player_index];
+}
+
+void players_data_set_pat_rollout_disabled_classes_mask(
+    PlayersData *players_data, int player_index, uint32_t mask) {
+  players_data->pat_rollout_disabled_classes_masks[player_index] = mask;
+}
+
+uint32_t players_data_get_pat_rollout_disabled_classes_mask(
+    const PlayersData *players_data, int player_index) {
+  return players_data->pat_rollout_disabled_classes_masks[player_index];
 }
 
 bool players_data_get_is_shared(const PlayersData *players_data,
@@ -119,6 +179,12 @@ WordInfoTable *players_data_get_word_info_table(const PlayersData *players_data,
       players_data, PLAYERS_DATA_TYPE_WIT, player_index);
 }
 
+PATWeights *players_data_get_pat(const PlayersData *players_data,
+                                 int player_index) {
+  return (PATWeights *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_PAT, player_index);
+}
+
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
@@ -152,6 +218,9 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_WIT:
     data = word_info_table_create(data_paths, data_name, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_PAT:
+    data = pat_create(data_paths, data_name, error_stack);
+    break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -180,6 +249,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_WIT:
       word_info_table_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_PAT:
+      pat_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -228,6 +300,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_WIT:
       data_name = word_info_table_get_name(players_data->data[data_index]);
       break;
+    case PLAYERS_DATA_TYPE_PAT:
+      data_name = pat_get_name(players_data->data[data_index]);
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -248,10 +323,13 @@ PlayersData *players_data_create(bool use_wmp) {
       if (data_index == PLAYERS_DATA_TYPE_WMP) {
         default_use = use_wmp;
       } else if (data_index == PLAYERS_DATA_TYPE_RIT ||
-                 data_index == PLAYERS_DATA_TYPE_WIT) {
+                 data_index == PLAYERS_DATA_TYPE_WIT ||
+                 data_index == PLAYERS_DATA_TYPE_PAT) {
         // RIT and WIT files are opt-in: callers must explicitly enable them
         // with -rit/-wit (or the per-player variants) since they are built by
-        // a convert command and may not exist for every lexicon.
+        // a convert command and may not exist for every lexicon. PAT
+        // weights are likewise opt-in: they load only when named explicitly
+        // with -pat (or -pat1/-pat2).
         default_use = false;
       }
       players_data_set_use_when_available(players_data, data_index,
@@ -261,6 +339,12 @@ PlayersData *players_data_create(bool use_wmp) {
                                     DEFAULT_MOVE_SORT_TYPE);
     players_data_set_move_record_type(players_data, player_index,
                                       DEFAULT_MOVE_RECORD_TYPE);
+    players_data_set_pat_disabled_classes_mask(players_data, player_index, 0);
+    players_data_set_pat_candidates_disabled(players_data, player_index, false);
+    players_data_set_pat_rollout_disabled(players_data, player_index, false);
+    players_data_set_pat_rollout_disabled_classes_mask(
+        players_data, player_index,
+        PAT_CLASS_MASK_ALL & ~PAT_CLASS_MASK_ROLLOUT_DEFAULT);
   }
   return players_data;
 }
@@ -285,7 +369,8 @@ void players_data_destroy(PlayersData *players_data) {
 bool players_data_type_is_nullable(players_data_t players_data_type) {
   return players_data_type == PLAYERS_DATA_TYPE_WMP ||
          players_data_type == PLAYERS_DATA_TYPE_RIT ||
-         players_data_type == PLAYERS_DATA_TYPE_WIT;
+         players_data_type == PLAYERS_DATA_TYPE_WIT ||
+         players_data_type == PLAYERS_DATA_TYPE_PAT;
 }
 
 void players_data_set(PlayersData *players_data,

@@ -81,6 +81,9 @@ typedef struct PlayChooserStrategy {
   // sampling (faster, approximate), 0 = the solver's per-bag default. Only
   // used by PLAY_CHOOSER_EVAL_PEG.
   int peg_scenario_stride;
+  // Largest bag size PEG handles; above it the pre-endgame falls back to
+  // SIM or STATIC as for any bag above PEG_MAX_BAG. 0 = PEG_MAX_BAG.
+  int peg_max_bag;
   // Score+win utility for valuing a branch, identical to the simmer's
   // sim_utility_blend (see sim_args.h): the branch value is
   //   (w_winpct * win% + w_spread * sigmoid(spread / spread_scale))
@@ -94,6 +97,10 @@ typedef struct PlayChooserStrategy {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // The player's rollout PAT settings for SIM evaluation (see
+  // SimArgs.pat_rollout_disabled). Zero/unset: PAT on, every class.
+  bool pat_rollout_disabled;
+  uint32_t pat_rollout_disabled_classes_mask;
   uint64_t seed;
 } PlayChooserStrategy;
 

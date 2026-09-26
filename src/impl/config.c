@@ -12,6 +12,7 @@
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../def/pat_defs.h"
 #include "../def/peg_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
@@ -32,8 +33,10 @@
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
+#include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat.h"
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
@@ -109,6 +112,7 @@ typedef enum {
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
+  ARG_TOKEN_PAT_GEN,
   ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
@@ -122,11 +126,21 @@ typedef enum {
   ARG_TOKEN_USE_MMAP_FOR_RIT,
   ARG_TOKEN_USE_WIT,
   ARG_TOKEN_LEAVES,
+  ARG_TOKEN_PAT,
+  ARG_TOKEN_PAT_CLASSES,
+  ARG_TOKEN_PAT_CANDIDATES,
+  ARG_TOKEN_PAT_ROLLOUT,
+  ARG_TOKEN_PAT_ROLLOUT_CLASSES,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_USE_RIT,
   ARG_TOKEN_P1_USE_WIT,
   ARG_TOKEN_P1_LEAVES,
+  ARG_TOKEN_P1_PAT,
+  ARG_TOKEN_P1_PAT_CLASSES,
+  ARG_TOKEN_P1_PAT_CANDIDATES,
+  ARG_TOKEN_P1_PAT_ROLLOUT,
+  ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
@@ -134,6 +148,11 @@ typedef enum {
   ARG_TOKEN_P2_USE_RIT,
   ARG_TOKEN_P2_USE_WIT,
   ARG_TOKEN_P2_LEAVES,
+  ARG_TOKEN_P2_PAT,
+  ARG_TOKEN_P2_PAT_CLASSES,
+  ARG_TOKEN_P2_PAT_CANDIDATES,
+  ARG_TOKEN_P2_PAT_ROLLOUT,
+  ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
@@ -146,6 +165,7 @@ typedef enum {
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
+  ARG_TOKEN_PEG_MAX_BAG,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_NESTED,
@@ -225,6 +245,8 @@ typedef enum {
   ARG_TOKEN_P2_MAX_ITERATIONS,
   ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
+  ARG_TOKEN_PAT_LABEL_PLIES,
+  ARG_TOKEN_PAT_COMBINE_GAMMA,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
   ARG_TOKEN_P1_SIM_MARGIN_FORECAST,
@@ -354,6 +376,8 @@ struct Config {
   // default.
   int peg_num_stages;
   int peg_scenario_stride;
+  // Largest bag size PlayChooser runs PEG on; 0 = PEG_MAX_BAG.
+  int peg_max_bag;
   // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
   // the cell always fits the label + a worst-case token) and max wrapped lines
   // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
@@ -414,6 +438,10 @@ struct Config {
   // rack_list_write_rack_equity_csv). Independent of whether a
   // forceracksfile restriction is in use.
   bool write_rack_equity_csv;
+  // Plies of net result a PAT training label spans.
+  int pat_label_plies;
+  // See PATWeights.combine_gamma; used when patgen bootstraps weights.
+  double pat_combine_gamma;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
   bool p1_sim_margin_forecast;
@@ -1055,6 +1083,111 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
   return NUMBER_OF_ARG_TOKENS;
 }
 
+// The help for the PAT options (see add_help_arg_to_string_builder).
+static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
+                             const char **examples, const char **text) {
+  switch (arg_token) {
+  case ARG_TOKEN_PAT_GEN:
+    usages[0] = "<gen1_games>,<gen2_games>,... [<output_name>]";
+    examples[0] = "50000,50000,50000";
+    examples[1] = "20000,20000 english_pat";
+    *text = "Trains PAT weights (see the 'pat' option) by self-play: "
+            "each generation plays the given number of games, recording the "
+            "post-move TWS access features of every move and the opponent's "
+            "reply score, then refits the weights by ridge regression and "
+            "continues with them live. Requires both players to share a "
+            "lexicon; if no 'pat' weights are loaded, training bootstraps from "
+            "zero weights (which play identically to no weights). Each "
+            "generation writes <output_name>_gen_<N>.pat and a _report.txt "
+            "with the fit; the final weights are also written under "
+            "<output_name>, which defaults to the loaded weights name.";
+    break;
+  case ARG_TOKEN_PAT:
+    usages[0] = "<pat>";
+    examples[0] = "english_pat";
+    examples[1] = "none";
+    *text = "Specifies the PAT weights for both players, unless "
+            "overridden by the 'pat1' or 'pat2' options. Use 'none' to "
+            "unload. PAT weights are off by default.";
+    break;
+  case ARG_TOKEN_P1_PAT:
+  case ARG_TOKEN_P2_PAT:
+    usages[0] = "<pat>";
+    examples[0] = "english_pat";
+    examples[1] = "none";
+    *text = "Specifies the PAT weights for the given player. This "
+            "can be used with the autoplay command to compare playing with "
+            "and without defense weights. Use 'none' to unload.";
+    break;
+  case ARG_TOKEN_PAT_CLASSES:
+  case ARG_TOKEN_P1_PAT_CLASSES:
+  case ARG_TOKEN_P2_PAT_CLASSES:
+    usages[0] = "<class>[,<class>...]";
+    examples[0] = "tws,windows";
+    examples[1] = "all";
+    *text = "Specifies which classes of the loaded PAT weights apply to "
+            "the player's own move generation (static play and the "
+            "candidates a simulation starts from): a comma-separated list "
+            "from tws, dws, tls, dls, qws, qls and windows, or 'all' (the "
+            "default). A class left out costs nothing to evaluate, as if "
+            "the weights scored it zero. 'patclasses' sets both players; "
+            "'patclasses1' and 'patclasses2' set one.";
+    break;
+  case ARG_TOKEN_PAT_CANDIDATES:
+  case ARG_TOKEN_P1_PAT_CANDIDATES:
+  case ARG_TOKEN_P2_PAT_CANDIDATES:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "Specifies whether the loaded PAT weights apply to the player's "
+            "own move generation: static play and the candidates a "
+            "simulation starts from. Defaults to true. 'patcand' sets both "
+            "players; 'patcand1' and 'patcand2' set one.";
+    break;
+  case ARG_TOKEN_PAT_ROLLOUT:
+  case ARG_TOKEN_P1_PAT_ROLLOUT:
+  case ARG_TOKEN_P2_PAT_ROLLOUT:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "Specifies whether PAT applies in the rollouts of the player's "
+            "simulations, to both sides' plies (each with its own "
+            "weights). Defaults to true. 'patrollout' sets both players; "
+            "'patrollout1' and 'patrollout2' set one.";
+    break;
+  case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+  case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
+  case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
+    usages[0] = "<class>[,<class>...]";
+    examples[0] = "tws,windows";
+    examples[1] = "all";
+    *text = "Specifies which PAT classes apply in the rollouts of the "
+            "player's simulations, independently of 'patclasses': for "
+            "example cheaper rollouts while the candidates use every "
+            "class. Defaults to tws,windows (qws,tws,windows on 21x21 "
+            "boards), which keeps most of full PAT's value at a fraction "
+            "of its cost; all uses every class. "
+            "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
+            "and 'patrolloutclasses2' set one.";
+    break;
+  case ARG_TOKEN_PAT_COMBINE_GAMMA:
+    usages[0] = "<gamma>";
+    *text = "Specifies how much a second route to danger counts once the "
+            "worst one is counted, when training PAT weights: 1 "
+            "adds every scan unit, 0 charges only the worst.";
+    break;
+  case ARG_TOKEN_PAT_LABEL_PLIES:
+    usages[0] = "<plies>";
+    *text = "Specifies how many plies of net result a PAT training "
+            "label spans: 1 is the opponent's reply score alone, and higher "
+            "values subtract what the observing player scores back and add "
+            "what the opponent scores after that.";
+    break;
+  default:
+    break;
+  }
+}
+
 // Help
 void add_help_arg_to_string_builder(const Config *config, int token,
                                     StringBuilder *sb,
@@ -1092,6 +1225,26 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     name = parg->name;
     shortest_unambiguous_name = parg->shortest_unambiguous_name;
     switch (arg_token) {
+    case ARG_TOKEN_PAT_GEN:
+    case ARG_TOKEN_PAT:
+    case ARG_TOKEN_P1_PAT:
+    case ARG_TOKEN_P2_PAT:
+    case ARG_TOKEN_PAT_CLASSES:
+    case ARG_TOKEN_P1_PAT_CLASSES:
+    case ARG_TOKEN_P2_PAT_CLASSES:
+    case ARG_TOKEN_PAT_CANDIDATES:
+    case ARG_TOKEN_P1_PAT_CANDIDATES:
+    case ARG_TOKEN_P2_PAT_CANDIDATES:
+    case ARG_TOKEN_PAT_ROLLOUT:
+    case ARG_TOKEN_P1_PAT_ROLLOUT:
+    case ARG_TOKEN_P2_PAT_ROLLOUT:
+    case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_PAT_COMBINE_GAMMA:
+    case ARG_TOKEN_PAT_LABEL_PLIES:
+      add_pat_help_arg(arg_token, usages, examples, &text);
+      break;
     case ARG_TOKEN_HELP:
       usages[0] = "[<command_or_arg>]";
       examples[0] = "";
@@ -1724,6 +1877,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "astronomically slow at higher bag counts. Each count must be "
           "'all'/0 "
           "or an integer >= 2.";
+      break;
+    case ARG_TOKEN_PEG_MAX_BAG:
+      usages[0] = "<bag_size>";
+      examples[0] = "2";
+      examples[1] = "4";
+      text = "Largest bag size at which PlayChooser uses the pre-endgame "
+             "solver; above it PlayChooser sims (or plays statically). Must "
+             "be between 1 and the solver's own maximum; unset uses that "
+             "maximum.";
       break;
     case ARG_TOKEN_PEG_STRIDE:
       usages[0] = "<stride>";
@@ -2377,6 +2539,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
         ARG_TOKEN_SNOPRUNE,             /* snoprune */
+        ARG_TOKEN_PAT_GEN,              /* patgen */
     };
     // Other Commands (alphabetical by name)
     static const arg_token_t other_cmds[] = {
@@ -2390,31 +2553,46 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Player Options (alphabetical by name)
     static const arg_token_t player_opts[] = {
-        ARG_TOKEN_BINGO_BONUS,         /* bb */
-        ARG_TOKEN_BOARD_LAYOUT,        /* bdn */
-        ARG_TOKEN_CHALLENGE_BONUS,     /* cb */
-        ARG_TOKEN_P1_LEAVES,           /* k1 */
-        ARG_TOKEN_P2_LEAVES,           /* k2 */
-        ARG_TOKEN_P1_LEXICON,          /* l1 */
-        ARG_TOKEN_P2_LEXICON,          /* l2 */
-        ARG_TOKEN_LETTER_DISTRIBUTION, /* ld */
-        ARG_TOKEN_LEAVES,              /* leaves */
-        ARG_TOKEN_LEXICON,             /* lex */
-        ARG_TOKEN_P1_MOVE_RECORD_TYPE, /* r1 */
-        ARG_TOKEN_P2_MOVE_RECORD_TYPE, /* r2 */
-        ARG_TOKEN_USE_RIT,             /* rit */
-        ARG_TOKEN_P1_USE_RIT,          /* rit1 */
-        ARG_TOKEN_P2_USE_RIT,          /* rit2 */
-        ARG_TOKEN_USE_MMAP_FOR_RIT,    /* ritmmap */
-        ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
-        ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
-        ARG_TOKEN_GAME_VARIANT,        /* var */
-        ARG_TOKEN_P1_USE_WMP,          /* w1 */
-        ARG_TOKEN_P2_USE_WMP,          /* w2 */
-        ARG_TOKEN_USE_WIT,             /* wit */
-        ARG_TOKEN_P1_USE_WIT,          /* wit1 */
-        ARG_TOKEN_P2_USE_WIT,          /* wit2 */
-        ARG_TOKEN_USE_WMP,             /* wmp */
+        ARG_TOKEN_BINGO_BONUS,            /* bb */
+        ARG_TOKEN_BOARD_LAYOUT,           /* bdn */
+        ARG_TOKEN_CHALLENGE_BONUS,        /* cb */
+        ARG_TOKEN_P1_LEAVES,              /* k1 */
+        ARG_TOKEN_P2_LEAVES,              /* k2 */
+        ARG_TOKEN_P1_LEXICON,             /* l1 */
+        ARG_TOKEN_P2_LEXICON,             /* l2 */
+        ARG_TOKEN_LETTER_DISTRIBUTION,    /* ld */
+        ARG_TOKEN_LEAVES,                 /* leaves */
+        ARG_TOKEN_LEXICON,                /* lex */
+        ARG_TOKEN_P1_MOVE_RECORD_TYPE,    /* r1 */
+        ARG_TOKEN_P2_MOVE_RECORD_TYPE,    /* r2 */
+        ARG_TOKEN_USE_RIT,                /* rit */
+        ARG_TOKEN_P1_USE_RIT,             /* rit1 */
+        ARG_TOKEN_P2_USE_RIT,             /* rit2 */
+        ARG_TOKEN_USE_MMAP_FOR_RIT,       /* ritmmap */
+        ARG_TOKEN_P1_MOVE_SORT_TYPE,      /* s1 */
+        ARG_TOKEN_P2_MOVE_SORT_TYPE,      /* s2 */
+        ARG_TOKEN_PAT,                    /* pat */
+        ARG_TOKEN_P1_PAT,                 /* pat1 */
+        ARG_TOKEN_P2_PAT,                 /* pat2 */
+        ARG_TOKEN_PAT_CANDIDATES,         /* patcand */
+        ARG_TOKEN_P1_PAT_CANDIDATES,      /* patcand1 */
+        ARG_TOKEN_P2_PAT_CANDIDATES,      /* patcand2 */
+        ARG_TOKEN_PAT_CLASSES,            /* patclasses */
+        ARG_TOKEN_P1_PAT_CLASSES,         /* patclasses1 */
+        ARG_TOKEN_P2_PAT_CLASSES,         /* patclasses2 */
+        ARG_TOKEN_PAT_ROLLOUT,            /* patrollout */
+        ARG_TOKEN_P1_PAT_ROLLOUT,         /* patrollout1 */
+        ARG_TOKEN_P2_PAT_ROLLOUT,         /* patrollout2 */
+        ARG_TOKEN_PAT_ROLLOUT_CLASSES,    /* patrolloutclasses */
+        ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, /* patrolloutclasses1 */
+        ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, /* patrolloutclasses2 */
+        ARG_TOKEN_GAME_VARIANT,           /* var */
+        ARG_TOKEN_P1_USE_WMP,             /* w1 */
+        ARG_TOKEN_P2_USE_WMP,             /* w2 */
+        ARG_TOKEN_USE_WIT,                /* wit */
+        ARG_TOKEN_P1_USE_WIT,             /* wit1 */
+        ARG_TOKEN_P2_USE_WIT,             /* wit2 */
+        ARG_TOKEN_USE_WMP,                /* wmp */
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
@@ -2443,6 +2621,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
         ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
         ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
+        ARG_TOKEN_PEG_MAX_BAG,             /* pegmaxbag */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
         ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
@@ -2462,6 +2641,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
         ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
+        ARG_TOKEN_PAT_LABEL_PLIES,         /* patplies */
+        ARG_TOKEN_PAT_COMBINE_GAMMA,       /* patgamma */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
         ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
         ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
@@ -2981,6 +3162,96 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
 
 // Sim
 
+// The value of a per-player option: the player's own one (e.g. patcand1)
+// when set, else the global one (e.g. patcand), else NULL.
+static const char *config_get_player_arg_value(const Config *config,
+                                               arg_token_t global_token,
+                                               arg_token_t p1_token,
+                                               arg_token_t p2_token,
+                                               int player_index) {
+  const arg_token_t player_token = player_index == 0 ? p1_token : p2_token;
+  if (config_get_parg_num_set_values(config, player_token) > 0) {
+    return config_get_parg_value(config, player_token, 0);
+  }
+  return config_get_parg_value(config, global_token, 0);
+}
+
+static bool config_parse_bool_arg(const char *value, const char *name,
+                                  bool *out, ErrorStack *error_stack) {
+  if (has_iprefix(value, "true")) {
+    *out = true;
+  } else if (has_iprefix(value, "false")) {
+    *out = false;
+  } else {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_BOOL_ARG,
+                     get_formatted_string(
+                         "failed to parse bool value for %s: %s", name, value));
+    return false;
+  }
+  return true;
+}
+
+// Loads one player's PAT usage options (patcand, patclasses, patrollout and
+// patrolloutclasses, each global or per player) into players_data.
+static void config_load_player_pat_usage(Config *config, int player_index,
+                                         ErrorStack *error_stack) {
+  PlayersData *players_data = config->players_data;
+  const char *value = config_get_player_arg_value(
+      config, ARG_TOKEN_PAT_CANDIDATES, ARG_TOKEN_P1_PAT_CANDIDATES,
+      ARG_TOKEN_P2_PAT_CANDIDATES, player_index);
+  bool enabled = false;
+  if (value) {
+    if (!config_parse_bool_arg(value, "patcand", &enabled, error_stack)) {
+      return;
+    }
+    players_data_set_pat_candidates_disabled(players_data, player_index,
+                                             !enabled);
+  }
+  value = config_get_player_arg_value(config, ARG_TOKEN_PAT_ROLLOUT,
+                                      ARG_TOKEN_P1_PAT_ROLLOUT,
+                                      ARG_TOKEN_P2_PAT_ROLLOUT, player_index);
+  if (value) {
+    if (!config_parse_bool_arg(value, "patrollout", &enabled, error_stack)) {
+      return;
+    }
+    players_data_set_pat_rollout_disabled(players_data, player_index, !enabled);
+  }
+  value = config_get_player_arg_value(config, ARG_TOKEN_PAT_CLASSES,
+                                      ARG_TOKEN_P1_PAT_CLASSES,
+                                      ARG_TOKEN_P2_PAT_CLASSES, player_index);
+  if (value) {
+    const uint32_t enabled_mask = pat_parse_classes_mask(value, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    players_data_set_pat_disabled_classes_mask(
+        players_data, player_index, PAT_CLASS_MASK_ALL & ~enabled_mask);
+  }
+  value = config_get_player_arg_value(
+      config, ARG_TOKEN_PAT_ROLLOUT_CLASSES, ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES,
+      ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, player_index);
+  if (value) {
+    const uint32_t enabled_mask = pat_parse_classes_mask(value, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    players_data_set_pat_rollout_disabled_classes_mask(
+        players_data, player_index, PAT_CLASS_MASK_ALL & ~enabled_mask);
+  }
+}
+
+// Copies the rollout PAT settings of the simming player (player_index) into
+// sim_args (see SimArgs.pat_rollout_disabled).
+static void config_set_sim_args_pat_rollout(const Config *config,
+                                            int player_index,
+                                            SimArgs *sim_args) {
+  sim_args->pat_rollout_disabled =
+      players_data_get_pat_rollout_disabled(config->players_data, player_index);
+  sim_args->pat_rollout_disabled_classes_mask =
+      players_data_get_pat_rollout_disabled_classes_mask(config->players_data,
+                                                         player_index);
+}
+
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           Rack *target_played_tiles,
                           Rack *nontarget_known_tiles,
@@ -3003,6 +3274,10 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sampling_rule, config->cutoff, config->utility_w_winpct,
       config->utility_w_spread, config->utility_spread_scale,
       config->sim_margin_forecast, &inference_args, sim_args);
+  if (config->game) {
+    config_set_sim_args_pat_rollout(
+        config, game_get_player_on_turn_index(config->game), sim_args);
+  }
 }
 
 // The win percentage table the config should use: the one named by
@@ -3888,8 +4163,8 @@ void config_fill_autoplay_args(const Config *config,
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
-      /*known_opp_rack=*/NULL, config->win_pcts, /*inference_results=*/NULL,
-      config->thread_control,
+      /*known_opp_rack=*/NULL, config->win_pcts,
+      /*inference_results=*/NULL, config->thread_control,
       /*game=*/NULL, config->p2_sim_with_inference, /*use_heat_map=*/false,
       /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
       config->p2_num_plays, config->shplies,
@@ -3899,6 +4174,11 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
       config->p2_utility_spread_scale, config->p2_sim_margin_forecast,
       &p2_inference_args, &autoplay_args->p2_sim_args);
+
+  config_set_sim_args_pat_rollout(config, 0, &autoplay_args->p1_sim_args);
+  config_set_sim_args_pat_rollout(config, 1, &autoplay_args->p2_sim_args);
+
+  autoplay_args->pat_label_plies = config->pat_label_plies;
 
   const double utility_win_pct[2] = {config->p1_utility_w_winpct,
                                      config->p2_utility_w_winpct};
@@ -3914,9 +4194,15 @@ void config_fill_autoplay_args(const Config *config,
             .win_pcts = config->win_pcts,
             .num_threads = num_worker_threads_per_sim,
             .peg_scenario_stride = config->peg_scenario_stride,
+            .peg_max_bag = config->peg_max_bag,
             .utility_w_winpct = utility_win_pct[player_index],
             .utility_w_spread = utility_spread[player_index],
             .utility_spread_scale = utility_spread_scale[player_index],
+            .pat_rollout_disabled = players_data_get_pat_rollout_disabled(
+                config->players_data, player_index),
+            .pat_rollout_disabled_classes_mask =
+                players_data_get_pat_rollout_disabled_classes_mask(
+                    config->players_data, player_index),
         };
   }
 }
@@ -3926,13 +4212,14 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
                      const char *force_racks_filename,
-                     ErrorStack *error_stack) {
+                     const char *pat_gen_output_name, ErrorStack *error_stack) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
   config_fill_autoplay_args(
       config, &args, autoplay_type, num_games_or_min_rack_targets,
       games_before_force_draw_start, force_racks_filename);
+  args.pat_gen_output_name = pat_gen_output_name;
   autoplay(&args, autoplay_results, error_stack);
 }
 
@@ -3964,7 +4251,8 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
       config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 1);
 
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_DEFAULT,
-                  num_games_str, 0, /*force_racks_filename=*/NULL, error_stack);
+                  num_games_str, 0, /*force_racks_filename=*/NULL,
+                  /*pat_gen_output_name=*/NULL, error_stack);
 }
 
 char *status_autoplay(Config *config) {
@@ -4055,7 +4343,73 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
 
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                   min_rack_targets_str, games_before_force_draw_start,
-                  force_racks_filename, error_stack);
+                  force_racks_filename, NULL, error_stack);
+}
+
+// PAT Gen
+
+void impl_pat_gen(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot generate PAT weights without lexicon"));
+    return;
+  }
+
+  // The feature scans read cross sets at cross index 0, which requires
+  // both players to share a lexicon; the trained weights object must also
+  // be shared so one regression trains one set of weights.
+  if (!players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KWG)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_PAT_GEN_UNSHARED_DATA,
+        string_duplicate("cannot generate PAT weights with different "
+                         "lexica for the players"));
+    return;
+  }
+
+  PATWeights *pat = players_data_get_pat(config->players_data, 0);
+  if (pat && pat != players_data_get_pat(config->players_data, 1)) {
+    error_stack_push(error_stack, ERROR_STATUS_PAT_GEN_UNSHARED_DATA,
+                     string_duplicate("cannot generate PAT weights when the "
+                                      "players have different weights loaded"));
+    return;
+  }
+  if (!pat) {
+    // Bootstrap from zero weights shared by both players. Ownership
+    // transfers to players_data.
+    char *bootstrap_name =
+        get_formatted_string("%s_pat", ld_get_name(config_get_ld(config)));
+    pat = pat_create_zeroed(bootstrap_name);
+    pat_set_combine_gamma(pat, config->pat_combine_gamma);
+    free(bootstrap_name);
+    players_data_set_data(config->players_data, PLAYERS_DATA_TYPE_PAT, 0, pat);
+    players_data_set_data(config->players_data, PLAYERS_DATA_TYPE_PAT, 1, pat);
+    players_data_set_is_shared(config->players_data, PLAYERS_DATA_TYPE_PAT,
+                               true);
+  }
+  pat_prepare_hook_flex(pat, players_data_get_kwg(config->players_data, 0),
+                        config_get_ld(config));
+  pat_prepare_utility(pat, config->data_paths, config_get_ld(config),
+                      error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  const char *games_per_gen_str =
+      config_get_parg_value(config, ARG_TOKEN_PAT_GEN, 0);
+  const char *output_name = config_get_parg_value(config, ARG_TOKEN_PAT_GEN, 1);
+  if (!output_name) {
+    output_name = pat_get_name(pat);
+  }
+
+  config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_PAT_GEN,
+                  games_per_gen_str, 0, NULL, output_name, error_stack);
 }
 
 // Create
@@ -7368,6 +7722,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config_load_int(config, ARG_TOKEN_PEG_MAX_BAG, PEG_MIN_BAG, PEG_MAX_BAG,
+                  &config->peg_max_bag, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   config_load_int(config, ARG_TOKEN_PEG_OUT_WIDTH, 0, INT_MAX,
                   &config->peg_out_width, error_stack);
@@ -8042,6 +8401,16 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->p1_sim_with_inference = config->sim_with_inference;
     config->p2_sim_with_inference = config->sim_with_inference;
   }
+  config_load_double(config, ARG_TOKEN_PAT_COMBINE_GAMMA, 0.0, 1.0,
+                     &config->pat_combine_gamma, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_PAT_LABEL_PLIES, 1, PAT_MAX_LABEL_PLIES,
+                  &config->pat_label_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   config_load_bool(config, ARG_TOKEN_P1_SIM_WITH_INFERENCE,
                    &config->p1_sim_with_inference, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8363,6 +8732,107 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     error_stack_destroy(coverage_errors);
     free(target_name);
   }
+
+  // Set the PAT weights - opt-in and per-player. The "pat1" and
+  // "pat2" args override the "pat" arg; "none" unloads. Unlike leaves, an
+  // unset arg means "keep whatever is currently loaded", which for a fresh
+  // config is nothing.
+  const char *new_pat_name = config_get_parg_value(config, ARG_TOKEN_PAT, 0);
+  const char *new_p1_pat_name = new_pat_name;
+  const char *new_p2_pat_name = new_pat_name;
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_PAT) > 0) {
+    new_p1_pat_name = config_get_parg_value(config, ARG_TOKEN_P1_PAT, 0);
+  }
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_PAT) > 0) {
+    new_p2_pat_name = config_get_parg_value(config, ARG_TOKEN_P2_PAT, 0);
+  }
+  if (new_p1_pat_name || new_p2_pat_name) {
+    char *updated_p1_pat_name = NULL;
+    if (new_p1_pat_name) {
+      updated_p1_pat_name = string_duplicate(new_p1_pat_name);
+    } else {
+      const char *existing_p1_pat_name = players_data_get_data_name(
+          config->players_data, PLAYERS_DATA_TYPE_PAT, 0);
+      if (existing_p1_pat_name) {
+        updated_p1_pat_name = string_duplicate(existing_p1_pat_name);
+      }
+    }
+    char *updated_p2_pat_name = NULL;
+    if (new_p2_pat_name) {
+      updated_p2_pat_name = string_duplicate(new_p2_pat_name);
+    } else {
+      const char *existing_p2_pat_name = players_data_get_data_name(
+          config->players_data, PLAYERS_DATA_TYPE_PAT, 1);
+      if (existing_p2_pat_name) {
+        updated_p2_pat_name = string_duplicate(existing_p2_pat_name);
+      }
+    }
+    const char *p1_pat_name_or_null = updated_p1_pat_name;
+    if (p1_pat_name_or_null && strings_iequal(p1_pat_name_or_null, "none")) {
+      p1_pat_name_or_null = NULL;
+    }
+    const char *p2_pat_name_or_null = updated_p2_pat_name;
+    if (p2_pat_name_or_null && strings_iequal(p2_pat_name_or_null, "none")) {
+      p2_pat_name_or_null = NULL;
+    }
+    players_data_set(config->players_data, PLAYERS_DATA_TYPE_PAT,
+                     config->data_paths, p1_pat_name_or_null,
+                     p2_pat_name_or_null, false, error_stack);
+    free(updated_p1_pat_name);
+    free(updated_p2_pat_name);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  // How each player uses its PAT weights. The global option sets both
+  // players and the per-player one overrides it; unset means "keep what is
+  // set", and a fresh config's defaults come from players_data_create.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    config_load_player_pat_usage(config, player_index, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  // The PAT's lexicon tables (hook flexibility, floater extension sets,
+  // through tables) belong to the lexicon, so rebuild them from each
+  // player's own KWG whenever data may have changed (cheap: one walk).
+  // One weights object cannot serve two lexica: its tables would be
+  // whichever player's was prepared last, silently wrong for the other,
+  // so that combination is refused rather than approximated.
+  if (config->ld) {
+    const PATWeights *p1_pat = players_data_get_pat(config->players_data, 0);
+    const PATWeights *p2_pat = players_data_get_pat(config->players_data, 1);
+    const KWG *p1_kwg = players_data_get_kwg(config->players_data, 0);
+    const KWG *p2_kwg = players_data_get_kwg(config->players_data, 1);
+    if (p1_pat && p1_pat == p2_pat && p1_kwg != p2_kwg) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+          get_formatted_string(
+              "PAT '%s' is shared by both players but the players use "
+              "different lexicons; a PAT's lexicon tables belong to one "
+              "lexicon, so give each player their own copy (e.g. the same "
+              "file under two names) or use one lexicon",
+              pat_get_name(p1_pat)));
+      return;
+    }
+    for (int player_index = 0; player_index < 2; player_index++) {
+      PATWeights *player_pat =
+          players_data_get_pat(config->players_data, player_index);
+      if (player_pat) {
+        pat_prepare_hook_flex(
+            player_pat,
+            players_data_get_kwg(config->players_data, player_index),
+            config->ld);
+        pat_prepare_utility(player_pat, config->data_paths, config->ld,
+                            error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          return;
+        }
+      }
+    }
+  }
 }
 
 // Parses the arguments given by the cmd string and updates the state of
@@ -8643,6 +9113,15 @@ void execute_leave_gen(Config *config, ErrorStack *error_stack) {
 
 char *str_api_leave_gen(Config *config, ErrorStack *error_stack) {
   impl_leave_gen(config, error_stack);
+  return empty_string();
+}
+
+void execute_pat_gen(Config *config, ErrorStack *error_stack) {
+  impl_pat_gen(config, error_stack);
+}
+
+char *str_api_pat_gen(Config *config, ErrorStack *error_stack) {
+  impl_pat_gen(config, error_stack);
   return empty_string();
 }
 
@@ -9494,6 +9973,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 3, leave_gen, generic, false);
+  cmd(ARG_TOKEN_PAT_GEN, "patgen", 1, 2, pat_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -9514,11 +9994,21 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_MMAP_FOR_RIT, "ritmmap", 1, 1);
   arg(ARG_TOKEN_USE_WIT, "wit", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
+  arg(ARG_TOKEN_PAT, "pat", 1, 1);
+  arg(ARG_TOKEN_PAT_CLASSES, "patclasses", 1, 1);
+  arg(ARG_TOKEN_PAT_CANDIDATES, "patcand", 1, 1);
+  arg(ARG_TOKEN_PAT_ROLLOUT, "patrollout", 1, 1);
+  arg(ARG_TOKEN_PAT_ROLLOUT_CLASSES, "patrolloutclasses", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WIT, "wit1", 1, 1);
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
+  arg(ARG_TOKEN_P1_PAT, "pat1", 1, 1);
+  arg(ARG_TOKEN_P1_PAT_CLASSES, "patclasses1", 1, 1);
+  arg(ARG_TOKEN_P1_PAT_CANDIDATES, "patcand1", 1, 1);
+  arg(ARG_TOKEN_P1_PAT_ROLLOUT, "patrollout1", 1, 1);
+  arg(ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, "patrolloutclasses1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -9526,6 +10016,11 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_USE_RIT, "rit2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WIT, "wit2", 1, 1);
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
+  arg(ARG_TOKEN_P2_PAT, "pat2", 1, 1);
+  arg(ARG_TOKEN_P2_PAT_CLASSES, "patclasses2", 1, 1);
+  arg(ARG_TOKEN_P2_PAT_CANDIDATES, "patcand2", 1, 1);
+  arg(ARG_TOKEN_P2_PAT_ROLLOUT, "patrollout2", 1, 1);
+  arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -9538,6 +10033,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
+  arg(ARG_TOKEN_PEG_MAX_BAG, "pegmaxbag", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
   arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
@@ -9588,6 +10084,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MAX_ITERATIONS, "i2", 1, 1);
   arg(ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, "mi1", 1, 1);
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
+  arg(ARG_TOKEN_PAT_LABEL_PLIES, "patplies", 1, 1);
+  arg(ARG_TOKEN_PAT_COMBINE_GAMMA, "patgamma", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_MARGIN_FORECAST, "sm1", 1, 1);
@@ -9664,6 +10162,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_result.last_completed_stage = -1;
   config->peg_num_stages = 0;
   config->peg_scenario_stride = 0;
+  config->peg_max_bag = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;
   config->peg_show_outcomes = true;
@@ -9692,6 +10191,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->human_readable = true;
   config->show_mistakes = false;
   config->sim_with_inference = true;
+  config->pat_label_plies = 1;
+  config->pat_combine_gamma = PAT_TRAINING_COMBINE_GAMMA;
   config->sim_margin_forecast = false;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
@@ -9864,6 +10365,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
+    case ARG_TOKEN_PAT_GEN:
     case ARG_TOKEN_CREATE_DATA:
     case ARG_TOKEN_ANALYZE:
     case ARG_TOKEN_LOAD:
@@ -9934,6 +10436,11 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_USE_RIT:
     case ARG_TOKEN_USE_WIT:
     case ARG_TOKEN_LEAVES:
+    case ARG_TOKEN_PAT:
+    case ARG_TOKEN_PAT_CLASSES:
+    case ARG_TOKEN_PAT_CANDIDATES:
+    case ARG_TOKEN_PAT_ROLLOUT:
+    case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
@@ -9970,6 +10477,48 @@ void config_add_settings_to_string_builder(const Config *config,
           players_data_get_data_name(config->players_data,
                                      PLAYERS_DATA_TYPE_KLV, 0));
       break;
+    case ARG_TOKEN_P1_PAT:
+      // Omitted when no weights are loaded; unloaded is the default.
+      if (players_data_get_pat(config->players_data, 0)) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token,
+            players_data_get_data_name(config->players_data,
+                                       PLAYERS_DATA_TYPE_PAT, 0));
+      }
+      break;
+    case ARG_TOKEN_P1_PAT_CLASSES: {
+      // Omitted when every class applies; that is the default.
+      const uint32_t mask =
+          players_data_get_pat_disabled_classes_mask(config->players_data, 0);
+      if (mask != 0) {
+        char *classes_str =
+            pat_classes_mask_to_string(PAT_CLASS_MASK_ALL & ~mask);
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    classes_str);
+        free(classes_str);
+      }
+      break;
+    }
+    case ARG_TOKEN_P1_PAT_CANDIDATES:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          !players_data_get_pat_candidates_disabled(config->players_data, 0));
+      break;
+    case ARG_TOKEN_P1_PAT_ROLLOUT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          !players_data_get_pat_rollout_disabled(config->players_data, 0));
+      break;
+    case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES: {
+      char *classes_str = pat_classes_mask_to_string(
+          PAT_CLASS_MASK_ALL &
+          ~players_data_get_pat_rollout_disabled_classes_mask(
+              config->players_data, 0));
+      config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                  classes_str);
+      free(classes_str);
+      break;
+    }
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
@@ -10012,6 +10561,48 @@ void config_add_settings_to_string_builder(const Config *config,
           players_data_get_data_name(config->players_data,
                                      PLAYERS_DATA_TYPE_KLV, 1));
       break;
+    case ARG_TOKEN_P2_PAT:
+      // Omitted when no weights are loaded; unloaded is the default.
+      if (players_data_get_pat(config->players_data, 1)) {
+        config_add_string_setting_to_string_builder(
+            config, sb, arg_token,
+            players_data_get_data_name(config->players_data,
+                                       PLAYERS_DATA_TYPE_PAT, 1));
+      }
+      break;
+    case ARG_TOKEN_P2_PAT_CLASSES: {
+      // Omitted when every class applies; that is the default.
+      const uint32_t mask =
+          players_data_get_pat_disabled_classes_mask(config->players_data, 1);
+      if (mask != 0) {
+        char *classes_str =
+            pat_classes_mask_to_string(PAT_CLASS_MASK_ALL & ~mask);
+        config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                    classes_str);
+        free(classes_str);
+      }
+      break;
+    }
+    case ARG_TOKEN_P2_PAT_CANDIDATES:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          !players_data_get_pat_candidates_disabled(config->players_data, 1));
+      break;
+    case ARG_TOKEN_P2_PAT_ROLLOUT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          !players_data_get_pat_rollout_disabled(config->players_data, 1));
+      break;
+    case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES: {
+      char *classes_str = pat_classes_mask_to_string(
+          PAT_CLASS_MASK_ALL &
+          ~players_data_get_pat_rollout_disabled_classes_mask(
+              config->players_data, 1));
+      config_add_string_setting_to_string_builder(config, sb, arg_token,
+                                                  classes_str);
+      free(classes_str);
+      break;
+    }
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
@@ -10069,6 +10660,12 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_STRIDE:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->peg_scenario_stride);
+      break;
+    case ARG_TOKEN_PEG_MAX_BAG:
+      if (config->peg_max_bag > 0) {
+        config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                                 config->peg_max_bag);
+      }
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
@@ -10202,6 +10799,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->sim_with_inference);
+      break;
+    case ARG_TOKEN_PAT_LABEL_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->pat_label_plies);
+      break;
+    case ARG_TOKEN_PAT_COMBINE_GAMMA:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->pat_combine_gamma);
       break;
     case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

@@ -326,6 +326,47 @@ magpie> convert winpct CSW24_winpct_record winpct_english
 
 The recorder splits games into two independent samples, and `convert winpct` chooses how much to smooth by predicting each sample from the other; it prints that comparison.
 
+This directory also contains PAT weights, `<lexicon>.pat` for the 15x15 board and `<lexicon>_super21.pat` for the 21x21 board (see PAT below).
+
+## PAT
+
+PAT (positional adjustment term) adds a learned term to static equity for what a move leaves on the board: premium squares, hooks and word windows it opens to the opponent, weighted by the tiles still unseen, plus an opening-length table and a utility correction that reweights points by the current margin and stage (read off the distribution's `winpct_<letter_distribution>` table). It applies while tiles remain in the bag.
+
+PAT is off unless weights are loaded:
+
+```
+magpie> set -lex CSW24 -pat CSW24
+```
+
+`-pat` sets both players and `-pat1`/`-pat2` set one; `none` unloads. The other PAT settings also come in a form for both players and per-player forms ending in 1 or 2:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `patcand` | `true` | Use PAT in the player's own move generation: static play and the candidates a simulation starts from. |
+| `patclasses` | `all` | Which PAT classes that move generation uses: a comma-separated list from `tws`, `dws`, `tls`, `dls`, `qws`, `qls` and `windows`. |
+| `patrollout` | `true` | Use PAT in the rollouts of the player's simulations (both sides' plies, each with its own weights). |
+| `patrolloutclasses` | `tws,windows` (`qws,tws,windows` on 21x21) | Which PAT classes the rollouts use; `all` uses every class. |
+
+Rollouts default to a cheaper subset of classes, because they generate many more positions than candidate selection does. The defaults keep most of full PAT's value at a fraction of its cost. These numbers are from CSW24 static self-play with the shipped weights; "vs full PAT" is full PAT's spread per game pair against the subset, head to head:
+
+| Board | Classes | Time vs no PAT | vs full PAT |
+|---|---|---|---|
+| 15x15 | `tws` | 1.35x | +2.03 ± 0.28 |
+| 15x15 | **`tws,windows`** (default) | 1.45x | +1.25 ± 0.27 |
+| 15x15 | `all` | 2.66x | — |
+| 21x21 | `tws` | 1.24x | +6.04 ± 0.70 |
+| 21x21 | `tws,windows` | 1.37x | +2.18 ± 0.67 |
+| 21x21 | **`qws,tws,windows`** (default) | 1.35x | +1.64 ± 0.67 |
+| 21x21 | `all` | 1.94x | — |
+
+For example, full PAT everywhere, rollouts included:
+
+```
+magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses all
+```
+
+`notes/pat_training.md` describes how they are trained (`test/pat_build.sh` and `test/pat_build_super.sh` run the whole process for a lexicon) and `notes/pat_utility_correction.md` the utility correction.
+
 ## Examples
 
 ### Annotating a game
