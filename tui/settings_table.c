@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "game_state.h"
+#include "lexicon_picker.h"
 #include "theme.h"
 #include "tui_ui_state.h"
 #include <pthread.h>
@@ -83,6 +84,13 @@ static const TuiSettingDef setting_defs[] = {
      "Stop a sim or solve after this many seconds; none runs until you "
      "stop it.",
      TUI_SETTING_KIND_INT, NULL, 0, 0, ANALYSIS_TIME_MAX, 10, "s", "none"},
+    {TUI_SETTING_LANGUAGE, TUI_SETTING_PANEL_GENERAL, "language", "Language",
+     "The language to play in; picks its first lexicon. Applies from the "
+     "next game.",
+     TUI_SETTING_KIND_LANGUAGE, NULL, 0, 0, 0, 1, NULL, NULL},
+    {TUI_SETTING_LEXICON, TUI_SETTING_PANEL_GENERAL, "lexicon", "Lexicon",
+     "The word list for the language. Applies from the next game.",
+     TUI_SETTING_KIND_LEXICON, NULL, 0, 0, 0, 1, NULL, NULL},
     {TUI_SETTING_THEME, TUI_SETTING_PANEL_GENERAL, "theme", "Theme",
      "Colors for the whole interface.", TUI_SETTING_KIND_CHOICE,
      CHOICES(theme_choices), 0, THEME_COUNT - 1, 1, NULL, NULL},
@@ -131,6 +139,23 @@ const char *tui_setting_panel_title(int panel) {
   default:
     return "General";
   }
+}
+
+// The lexica under data/lexica, grouped by language; loaded on first
+// use. NULL when there are none.
+static const LexiconList *installed_lexica(void) {
+  static LexiconList *lexica = NULL;
+  static bool loaded = false;
+  if (!loaded) {
+    lexica = tui_lexicon_list_load();
+    loaded = true;
+  }
+  return lexica;
+}
+
+static bool is_lexicon_kind(const TuiSettingDef *def) {
+  return def->kind == TUI_SETTING_KIND_LANGUAGE ||
+         def->kind == TUI_SETTING_KIND_LEXICON;
 }
 
 const TuiSettingDef *tui_setting_resolve(const char *typed, int len) {
@@ -183,6 +208,13 @@ int tui_setting_get(const TuiGameState *state, TuiSettingId id) {
     return state->analysis_time_limit;
   case TUI_SETTING_THREADS:
     return state->thread_limit;
+  case TUI_SETTING_LANGUAGE:
+  case TUI_SETTING_LEXICON: {
+    const LexiconList *lexica = installed_lexica();
+    return lexica != NULL
+               ? tui_lexicon_list_find(lexica, state->pending_lexicon)
+               : -1;
+  }
   case TUI_SETTING_THEME:
     return (int)state->theme;
   case TUI_SETTING_RIT:
@@ -211,19 +243,53 @@ const char *tui_setting_unavailable_reason(const TuiGameState *state,
     }
     return state->board_scale >= 2 ? NULL
                                    : "Only for 2x tiles; set Scale to 2x.";
+  case TUI_SETTING_LANGUAGE:
+  case TUI_SETTING_LEXICON:
+    return installed_lexica() == NULL ? "No lexica installed in data/lexica."
+                                      : NULL;
   default:
     return NULL;
   }
 }
 
-// A setting's value names: BOOL's off/on, or its CHOICE list.
-static const char *const *value_names(const TuiSettingDef *def, int *count) {
-  if (def->kind == TUI_SETTING_KIND_BOOL) {
-    *count = 2;
-    return bool_choices;
+void tui_setting_values(const TuiSettingDef *def, TuiSettingValues *out) {
+  out->count = 0;
+  if (def->kind == TUI_SETTING_KIND_INT) {
+    return;
   }
-  *count = def->choice_count;
-  return def->choices;
+  if (is_lexicon_kind(def)) {
+    const LexiconList *lexica = installed_lexica();
+    const int lexicon_count =
+        lexica != NULL ? tui_lexicon_list_count(lexica) : 0;
+    char last_language[TUI_SETTING_VALUE_NAME_MAX] = "";
+    for (int idx = 0;
+         idx < lexicon_count && out->count < TUI_SETTING_MAX_VALUES; idx++) {
+      char *name = out->names[out->count];
+      if (def->kind == TUI_SETTING_KIND_LEXICON) {
+        (void)tui_lexicon_list_name(lexica, idx, name,
+                                    TUI_SETTING_VALUE_NAME_MAX);
+      } else {
+        // Lexica of a language are contiguous; list each language once,
+        // as its first lexicon.
+        (void)tui_lexicon_list_language_name(lexica, idx, name,
+                                             TUI_SETTING_VALUE_NAME_MAX);
+        if (strcmp(name, last_language) == 0) {
+          continue;
+        }
+        (void)snprintf(last_language, sizeof(last_language), "%s", name);
+      }
+      out->values[out->count++] = idx;
+    }
+    return;
+  }
+  const bool is_bool = def->kind == TUI_SETTING_KIND_BOOL;
+  const int count = is_bool ? 2 : def->choice_count;
+  for (int idx = 0; idx < count && idx < TUI_SETTING_MAX_VALUES; idx++) {
+    (void)snprintf(out->names[idx], TUI_SETTING_VALUE_NAME_MAX, "%s",
+                   is_bool ? bool_choices[idx] : def->choices[idx]);
+    out->values[idx] = idx;
+  }
+  out->count = count;
 }
 
 void tui_setting_format(const TuiSettingDef *def, int value, char *out,
@@ -239,10 +305,23 @@ void tui_setting_format(const TuiSettingDef *def, int value, char *out,
     }
     return;
   }
-  int count = 0;
-  const char *const *names = value_names(def, &count);
-  (void)snprintf(out, out_size, "%s",
-                 value >= 0 && value < count ? names[value] : "?");
+  (void)snprintf(out, out_size, "?");
+  if (is_lexicon_kind(def)) {
+    const LexiconList *lexica = installed_lexica();
+    if (lexica != NULL) {
+      if (def->kind == TUI_SETTING_KIND_LEXICON) {
+        (void)tui_lexicon_list_name(lexica, value, out, out_size);
+      } else {
+        (void)tui_lexicon_list_language_name(lexica, value, out, out_size);
+      }
+    }
+    return;
+  }
+  TuiSettingValues values;
+  tui_setting_values(def, &values);
+  if (value >= 0 && value < values.count) {
+    (void)snprintf(out, out_size, "%s", values.names[value]);
+  }
 }
 
 void tui_setting_describe_values(const TuiSettingDef *def, char *out,
@@ -257,13 +336,25 @@ void tui_setting_describe_values(const TuiSettingDef *def, char *out,
                    def->unit != NULL ? def->unit : "", zero_note);
     return;
   }
-  int count = 0;
-  const char *const *names = value_names(def, &count);
+  // The installed lexica are too many to list inline; "/set lexicon "
+  // lists them as values.
+  if (def->kind == TUI_SETTING_KIND_LEXICON) {
+    (void)snprintf(out, out_size, "an installed lexicon");
+    return;
+  }
+  if (def->kind == TUI_SETTING_KIND_LANGUAGE) {
+    (void)snprintf(out, out_size, "an installed language");
+    return;
+  }
+  TuiSettingValues values;
+  tui_setting_values(def, &values);
   size_t used = 0;
   out[0] = '\0';
-  for (int name_idx = 0; name_idx < count && used < out_size; name_idx++) {
-    const int written = snprintf(out + used, out_size - used, "%s%s",
-                                 name_idx > 0 ? " | " : "", names[name_idx]);
+  for (int value_idx = 0; value_idx < values.count && used < out_size;
+       value_idx++) {
+    const int written =
+        snprintf(out + used, out_size - used, "%s%s",
+                 value_idx > 0 ? " | " : "", values.names[value_idx]);
     if (written < 0) {
       break;
     }
@@ -271,32 +362,42 @@ void tui_setting_describe_values(const TuiSettingDef *def, char *out,
   }
 }
 
+// The value whose name is `typed` (its first `len` characters, any case),
+// or else the only one it's a prefix of; -1 when none or several.
+static int find_value(const TuiSettingValues *values, const char *typed,
+                      size_t len) {
+  int match = -1;
+  int matches = 0;
+  for (int value_idx = 0; value_idx < values->count; value_idx++) {
+    const char *name = values->names[value_idx];
+    if (strlen(name) == len && strncasecmp(name, typed, len) == 0) {
+      return value_idx;
+    }
+    if (strlen(name) > len && strncasecmp(name, typed, len) == 0) {
+      match = value_idx;
+      matches++;
+    }
+  }
+  return matches == 1 ? match : -1;
+}
+
 const char *tui_setting_complete_value(const TuiSettingDef *def,
                                        const char *typed, int len) {
+  static TuiSettingValues values;
   if (def->kind == TUI_SETTING_KIND_INT) {
     return NULL;
   }
-  int count = 0;
-  const char *const *names = value_names(def, &count);
-  const char *match = NULL;
-  for (int name_idx = 0; name_idx < count; name_idx++) {
-    if ((int)strlen(names[name_idx]) >= len &&
-        strncasecmp(names[name_idx], typed, (size_t)len) == 0) {
-      if (match != NULL) {
-        return NULL;
-      }
-      match = names[name_idx];
-    }
-  }
-  return match;
+  tui_setting_values(def, &values);
+  const int found = find_value(&values, typed, (size_t)len);
+  return found >= 0 ? values.names[found] : NULL;
 }
 
 bool tui_setting_parse(const TuiSettingDef *def, const char *text,
                        int *out_value, char *err, size_t err_size) {
-  char values[96];
-  tui_setting_describe_values(def, values, sizeof(values));
+  char described[128];
+  tui_setting_describe_values(def, described, sizeof(described));
   if (text == NULL || text[0] == '\0') {
-    (void)snprintf(err, err_size, "%s: expected %s", def->key, values);
+    (void)snprintf(err, err_size, "%s: expected %s", def->key, described);
     return false;
   }
   if (def->kind == TUI_SETTING_KIND_INT) {
@@ -307,7 +408,7 @@ bool tui_setting_parse(const TuiSettingDef *def, const char *text,
     char *end = NULL;
     const long parsed = strtol(text, &end, 10);
     if (end == text || *end != '\0' || parsed < def->min || parsed > def->max) {
-      (void)snprintf(err, err_size, "%s: expected %s", def->key, values);
+      (void)snprintf(err, err_size, "%s: expected %s", def->key, described);
       return false;
     }
     *out_value = (int)parsed;
@@ -327,28 +428,15 @@ bool tui_setting_parse(const TuiSettingDef *def, const char *text,
         return true;
       }
     }
-    (void)snprintf(err, err_size, "%s: expected %s", def->key, values);
-    return false;
   }
-  const size_t len = strlen(text);
-  int match = -1;
-  int matches = 0;
-  for (int choice_idx = 0; choice_idx < def->choice_count; choice_idx++) {
-    const char *name = def->choices[choice_idx];
-    if (strcasecmp(name, text) == 0) {
-      *out_value = choice_idx;
-      return true;
-    }
-    if (strlen(name) > len && strncasecmp(name, text, len) == 0) {
-      match = choice_idx;
-      matches++;
-    }
-  }
-  if (matches == 1) {
-    *out_value = match;
+  TuiSettingValues values;
+  tui_setting_values(def, &values);
+  const int found = find_value(&values, text, strlen(text));
+  if (found >= 0) {
+    *out_value = values.values[found];
     return true;
   }
-  (void)snprintf(err, err_size, "%s: expected %s", def->key, values);
+  (void)snprintf(err, err_size, "%s: expected %s", def->key, described);
   return false;
 }
 
@@ -423,6 +511,23 @@ static void apply_setting(TuiGameState *state, TuiSession *session,
     cfg->thread_limit = value;
     cfg->thread_limit_set = true;
     break;
+  case TUI_SETTING_LANGUAGE:
+  case TUI_SETTING_LEXICON: {
+    // Takes effect from the next game ("Next game: lexicon A -> B").
+    char name[TUI_LEXICON_NAME_MAX];
+    const LexiconList *lexica = installed_lexica();
+    if (lexica == NULL ||
+        !tui_lexicon_list_name(lexica, value, name, sizeof(name))) {
+      break;
+    }
+    (void)snprintf(state->pending_lexicon, sizeof(state->pending_lexicon), "%s",
+                   name);
+    (void)snprintf(session->chosen_lexicon, sizeof(session->chosen_lexicon),
+                   "%s", name);
+    (void)snprintf(cfg->lexicon, sizeof(cfg->lexicon), "%s", name);
+    cfg->lexicon_set = true;
+    break;
+  }
   case TUI_SETTING_THEME:
     state->theme = (ThemeName)value;
     cfg->theme = state->theme;
@@ -450,6 +555,12 @@ void tui_setting_set(TuiGameState *state, TuiSession *session, TuiSettingId id,
   if (def->kind == TUI_SETTING_KIND_INT) {
     value = value < def->min ? def->min : value;
     value = value > def->max ? def->max : value;
+  } else if (is_lexicon_kind(def)) {
+    const LexiconList *lexica = installed_lexica();
+    if (lexica == NULL || value < 0 ||
+        value >= tui_lexicon_list_count(lexica)) {
+      return;
+    }
   } else if (value < def->min || value > def->max) {
     return;
   }
@@ -473,11 +584,21 @@ void tui_setting_step(TuiGameState *state, TuiSession *session, TuiSettingId id,
   pthread_mutex_lock(&state->mutex);
   const int current = tui_setting_get(state, id);
   pthread_mutex_unlock(&state->mutex);
-  const int count = def->max - def->min + 1;
-  const int next =
-      def->kind == TUI_SETTING_KIND_INT
-          ? current + dir * def->step
-          : def->min + ((current - def->min + dir) % count + count) % count;
+  int next = current + dir * def->step;
+  if (def->kind == TUI_SETTING_KIND_LANGUAGE ||
+      def->kind == TUI_SETTING_KIND_LEXICON) {
+    const LexiconList *lexica = installed_lexica();
+    if (lexica == NULL) {
+      return;
+    }
+    const int from = current >= 0 ? current : 0;
+    next = def->kind == TUI_SETTING_KIND_LANGUAGE
+               ? tui_lexicon_list_step_language(lexica, from, dir)
+               : tui_lexicon_list_step_same_language(lexica, from, dir);
+  } else if (def->kind != TUI_SETTING_KIND_INT) {
+    const int count = def->max - def->min + 1;
+    next = def->min + ((current - def->min + dir) % count + count) % count;
+  }
   tui_setting_set(state, session, id, next);
 }
 
