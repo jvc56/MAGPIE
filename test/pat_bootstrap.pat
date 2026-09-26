@@ -3,7 +3,6 @@ gamma,0.500000
 own_asset_discount,0.000000
 lexicon_floaters,1
 signed_through,1
-fit_scaled,0
 fit_residual,5
 exact_created_hooks,1
 # Zero weights: the starting point test/pat_build.sh and
@@ -43,20 +42,6 @@ float_through_count_d4,0
 float_through_count_d5,0
 float_through_count_d6,0
 float_through_count_d7,0
-hook_scaled_d1,0
-hook_scaled_d2,0
-hook_scaled_d3,0
-hook_scaled_d4,0
-hook_scaled_d5,0
-hook_scaled_d6,0
-hook_scaled_d7,0
-float_flex_scaled_d1,0
-float_flex_scaled_d2,0
-float_flex_scaled_d3,0
-float_flex_scaled_d4,0
-float_flex_scaled_d5,0
-float_flex_scaled_d6,0
-float_flex_scaled_d7,0
 dws_hook_d1,0
 dws_hook_d2,0
 dws_hook_d3,0

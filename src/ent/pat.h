@@ -44,13 +44,7 @@ bool pat_get_lexicon_floaters(const PATWeights *pat);
 void pat_set_lexicon_floaters(PATWeights *pat, bool lexicon_floaters);
 bool pat_get_signed_through(const PATWeights *pat);
 void pat_set_signed_through(PATWeights *pat, bool signed_through);
-bool pat_get_fit_scaled_channels(const PATWeights *pat);
-void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels);
-bool pat_get_train_overlay(const PATWeights *pat);
 void pat_set_run_through(PATWeights *pat, bool run_through);
-bool pat_get_fit_shrink(const PATWeights *pat);
-const char *pat_get_fit_fixed_zero(const PATWeights *pat);
-void pat_set_fit_shrink(PATWeights *pat, bool fit_shrink);
 // tiles is 1..RACK_SIZE; values are milli-equity <= 0 (see
 // PAT_OPENING_TILES_ROW_PREFIX).
 Equity pat_get_opening_tiles_adjustment(const PATWeights *pat, int tiles);
@@ -79,9 +73,9 @@ int pat_get_run_through_score(const PATWeights *pat, int word_end,
                               const MachineLetter *key, int key_len,
                               int word_length);
 void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
-bool pat_get_fit_residual(const PATWeights *pat);
-int pat_get_fit_residual_mode(const PATWeights *pat);
-void pat_set_fit_residual(PATWeights *pat, bool fit_residual);
+// A PAT_FIT_* value; see PAT_FIT_RESIDUAL_ROW_PREFIX.
+int pat_get_fit_residual(const PATWeights *pat);
+void pat_set_fit_residual(PATWeights *pat, int fit_residual);
 // Changes whenever the weights are rewritten in place (as training does
 // between generations), so a cache keyed on the object can detect staleness.
 uint64_t pat_get_mutation_counter(const PATWeights *pat);
@@ -241,9 +235,9 @@ typedef struct PATEvalContext {
   // only those; every other term is exactly zero.
   int nonzero_feature_index[PAT_NUM_FEATURES];
   int num_nonzero_features;
-  // Bit flags for optional scan work. Training rows enable both; runtime
-  // enables each only when a corresponding weight is nonzero.
-  uint8_t channel_flags;
+  // Whether scans compute the hook-score channels: always for training
+  // rows; at runtime only when a hook-score weight is nonzero.
+  bool score_channels;
   // The stage factor for this position (see PATWeights.stage_scale),
   // applied to every penalty and bound the context hands out; 1.0 unless
   // the file carries a stage row. The stage is read off the unseen
@@ -288,8 +282,7 @@ typedef struct PATEvalContext {
   // The opponent's rack size (public), never its contents. A route needing
   // more fresh tiles than the opponent holds cannot be played, so scans cap
   // distance at this. PAT only runs while the bag has tiles, when every rack
-  // is full, so this is RACK_SIZE today; the hypergeometric channels also
-  // read it.
+  // is full, so this is RACK_SIZE today.
   int opponent_rack_size;
   // Bit L of unit_hook_letters[u] is set when some live hook or floater
   // route found by unit u's baseline scan accepts machine letter L (blanks
@@ -338,9 +331,8 @@ void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const Rack *player_rack,
                            uint32_t enabled_classes_mask,
                            int opponent_rack_size);
-// The same context with every unit walked whatever its weights, for callers
-// that read per-move feature rows (pat_extract_move_features) and need the
-// channels the current weights leave at zero.
+// The same context with every unit walked whatever its weights: the
+// reference the pruned context is checked against.
 void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
                                      const PATWeights *weights,
                                      const Square *lanes,
@@ -432,11 +424,7 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
 // below one: gamma times every unit plus the remaining (1 - gamma) of the unit
 // the current weights rank worst, so its dot product with the weights is the
 // combined term. Iterating training generations converges on the fixed point.
-// features has PAT_NUM_FEATURES elements. This form builds the row for move
-// through the runtime overlay path from the pre-move context.
-void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
-                                        const Move *move, double *features);
-// The same row for the board as it stands.
+// features has PAT_NUM_FEATURES elements.
 void pat_extract_features_combined(const Square *lanes,
                                    const LetterDistribution *ld,
                                    const Rack *player_rack,

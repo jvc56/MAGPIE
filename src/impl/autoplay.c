@@ -415,96 +415,8 @@ void pat_postgen_prebroadcast_func(void *data) {
       pat_regression_installed_mse(&heldout_regression, pat);
   const double validation_baseline_mse =
       pat_regression_baseline_mse(&heldout_regression);
-  StringBuilder *shrink_sb = string_builder_create();
-  PATSolveResult solve_result;
-  memset(&solve_result, 0, sizeof(solve_result));
-  if (pat_get_fit_shrink(pat)) {
-    // Adapt the loaded weights: for each shrinkage strength (infinity
-    // being the incumbent itself), fit, score the installed candidate on
-    // the validation games, write the candidate, restore the loaded
-    // weights. The output stays the incumbent: validation reply error does
-    // not select a file; the candidates are for whole-game validation (see
-    // test/pat_build.sh) and the report is a diagnostic.
-    static const double strengths[] = {0.0,    1.0,     10.0,    100.0,
-                                       1000.0, 10000.0, 100000.0};
-    const int num_strengths = (int)(sizeof(strengths) / sizeof(strengths[0]));
-    Equity loaded[PAT_NUM_FEATURES];
-    for (int feature_idx = 0; feature_idx < PAT_NUM_FEATURES; feature_idx++) {
-      loaded[feature_idx] = pat_get_weight(pat, feature_idx);
-    }
-    string_builder_add_formatted_string(
-        shrink_sb,
-        "Validation observations: %llu\nValidation baseline MSE: %f\n"
-        "Validation MSE of the loaded weights (intercept refit): %f\n"
-        "shrink_lambda,fit_mse,validation_mse_refit_intercept,"
-        "validation_mse_fit_intercept,file\n",
-        (unsigned long long)heldout_regression.num_observations,
-        validation_baseline_mse, validation_loaded_mse);
-    for (int strength_idx = 0; strength_idx <= num_strengths; strength_idx++) {
-      const bool incumbent = (strength_idx == num_strengths);
-      PATSolveResult candidate;
-      if (incumbent) {
-        memset(&candidate, 0, sizeof(candidate));
-        candidate.solved = true;
-        candidate.mean_squared_error = 0.0;
-      } else {
-        candidate = pat_regression_solve_into_weights_shrunk(
-            &total_regression, PAT_GEN_RIDGE_LAMBDA, strengths[strength_idx],
-            pat);
-        if (!candidate.solved) {
-          continue;
-        }
-        if (strength_idx == 0) {
-          solve_result = candidate;
-        }
-      }
-      const double mse_refit =
-          pat_regression_installed_mse(&heldout_regression, pat);
-      const double mse_fit_intercept =
-          incumbent ? 0.0
-                    : pat_regression_installed_mse_with_intercept(
-                          &heldout_regression, pat, candidate.intercept);
-      char *candidate_name =
-          incumbent
-              ? get_formatted_string("%s_gen_%d_shrinkinf",
-                                     pat_gen_shared_data->output_name,
-                                     pat_gen_shared_data->gens_completed + 1)
-              : get_formatted_string("%s_gen_%d_shrink%g",
-                                     pat_gen_shared_data->output_name,
-                                     pat_gen_shared_data->gens_completed + 1,
-                                     strengths[strength_idx]);
-      ErrorStack *candidate_errors = error_stack_create();
-      pat_write(pat, pat_gen_shared_data->data_paths, candidate_name,
-                candidate_errors);
-      if (!error_stack_is_empty(candidate_errors)) {
-        error_stack_print_and_reset(candidate_errors);
-        log_fatal("patgen failed to write a shrink candidate");
-      }
-      error_stack_destroy(candidate_errors);
-      if (incumbent) {
-        string_builder_add_formatted_string(shrink_sb, "inf,-,%f,-,%s\n",
-                                            mse_refit, candidate_name);
-      } else {
-        string_builder_add_formatted_string(
-            shrink_sb, "%g,%f,%f,%f,%s\n", strengths[strength_idx],
-            candidate.mean_squared_error, mse_refit, mse_fit_intercept,
-            candidate_name);
-      }
-      free(candidate_name);
-      for (int feature_idx = 0; feature_idx < PAT_NUM_FEATURES; feature_idx++) {
-        pat_set_weight(pat, feature_idx, loaded[feature_idx]);
-      }
-    }
-    string_builder_add_string(
-        shrink_sb, "Installed: the loaded weights (inf); select among the "
-                   "candidates by whole-game play.\n");
-    // The coefficient table below is the full refit's (shrink 0), as the
-    // diagnostic; the installed weights are unchanged.
-    solve_result.num_observations = total_regression.num_observations;
-  } else {
-    solve_result = pat_regression_solve_into_weights_shrunk(
-        &total_regression, PAT_GEN_RIDGE_LAMBDA, 0.0, pat);
-  }
+  const PATSolveResult solve_result = pat_regression_solve_into_weights(
+      &total_regression, PAT_GEN_RIDGE_LAMBDA, pat);
   const double validation_fit_mse =
       pat_regression_installed_mse(&heldout_regression, pat);
 
@@ -539,9 +451,6 @@ void pat_postgen_prebroadcast_func(void *data) {
         solve_result.baseline_mean_squared_error,
         (unsigned long long)heldout_regression.num_observations,
         validation_baseline_mse, validation_loaded_mse, validation_fit_mse);
-    if (string_builder_length(shrink_sb) > 0) {
-      string_builder_add_string(report_sb, string_builder_peek(shrink_sb));
-    }
     string_builder_add_string(report_sb,
                               "\nfeature,raw_coefficient,applied_weight\n");
     char feature_name[64];
@@ -577,7 +486,6 @@ void pat_postgen_prebroadcast_func(void *data) {
   }
 
   string_builder_destroy(report_sb);
-  string_builder_destroy(shrink_sb);
   error_stack_destroy(error_stack);
 #undef total_regression
 #undef heldout_regression
@@ -841,11 +749,6 @@ typedef struct GameRunner {
   // most that many are ever in flight. Observations still unlabeled when
   // the game ends are dropped: their plies do not exist.
   PATPendingObservation pat_obs[PAT_MAX_LABEL_PLIES];
-  // For PATWeights.train_overlay: the pre-move context the runtime would
-  // build for this decision, and the row extracted from it before the
-  // move is played. Allocated only under patgen.
-  PATEvalContext *pat_train_ctx;
-  double pat_overlay_row[PAT_NUM_FEATURES];
   PlayChooser *play_choosers[2];
   GameTimer game_timer;
   AutoplayGameTiming timing;
@@ -877,10 +780,6 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
       0; // Will be set in game_runner_start if using pairs
   game_runner->play_choosers[0] = NULL;
   game_runner->play_choosers[1] = NULL;
-  game_runner->pat_train_ctx = NULL;
-  if (autoplay_worker->shared_data->pat_gen_shared_data) {
-    game_runner->pat_train_ctx = malloc_or_die(sizeof(PATEvalContext));
-  }
   game_timer_reset(&game_runner->game_timer, 0.0);
   game_runner->timing = (AutoplayGameTiming){0};
   return game_runner;
@@ -893,7 +792,6 @@ void game_runner_destroy(GameRunner *game_runner) {
   game_runner_destroy_play_choosers(game_runner);
   game_destroy(game_runner->game);
   game_destroy(game_runner->game_one_move_behind);
-  free(game_runner->pat_train_ctx);
   free(game_runner);
 }
 
@@ -1189,32 +1087,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
   const int pat_pre_move_bag_count =
       pat_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
-  // train_overlay: the row is what the runtime term is built from, so it
-  // has to be taken here, from the pre-move board and rack, before
-  // play_move changes both.
-  const bool pat_train_overlay =
-      pat_gen_shared_data && pat_pre_move_bag_count > 0 &&
-      pat_get_train_overlay(pat_gen_shared_data->pat);
-  if (pat_train_overlay) {
-    const int cross_set_index = board_get_cross_set_index(
-        game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
-        player_on_turn_index);
-    // Every unit, weighted or not: the runtime context drops units of
-    // classes with no weight (their term is zero either way), but a row
-    // built only from kept units could never let an unweighted class --
-    // every class, on the zero bootstrap -- gain weight from the fit.
-    pat_eval_context_load_all_units(
-        game_runner->pat_train_ctx, pat_gen_shared_data->pat,
-        board_get_readonly_lanes(game_get_board(game), cross_set_index),
-        game_get_ld(game), player_rack,
-        rack_get_total_letters(
-            player_get_rack(game_get_player(game, 1 - player_on_turn_index))));
-    pat_eval_context_set_kwg(
-        game_runner->pat_train_ctx,
-        player_get_kwg(game_get_player(game, player_on_turn_index)));
-    pat_extract_move_features_combined(game_runner->pat_train_ctx, move,
-                                       game_runner->pat_overlay_row);
-  }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, move, &rare_rack_or_move_leave);
@@ -1280,18 +1152,12 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       // dist - board_pre - rack_pre. The row is the one the live weights'
       // combination rule makes linear, so that fitting and evaluating
       // agree; with gamma 1 it is the plain sum.
-      if (pat_train_overlay) {
-        memcpy(observation->features, game_runner->pat_overlay_row,
-               sizeof(observation->features));
-      } else {
-        pat_extract_features_combined(
-            board_get_readonly_lanes(game_get_board(game), 0),
-            game_get_ld(game), &rare_rack_or_move_leave,
-            pat_gen_shared_data->pat,
-            rack_get_total_letters(player_get_rack(
-                game_get_player(game, 1 - player_on_turn_index))),
-            observation->features);
-      }
+      pat_extract_features_combined(
+          board_get_readonly_lanes(game_get_board(game), 0), game_get_ld(game),
+          &rare_rack_or_move_leave, pat_gen_shared_data->pat,
+          rack_get_total_letters(
+              player_get_rack(game_get_player(game, 1 - player_on_turn_index))),
+          observation->features);
       observation->plies_seen = 0;
       observation->label = 0.0;
       observation->valid = true;
