@@ -28,21 +28,13 @@ enum {
       PAT_FEATURE_FLOAT_SCORE_START + PAT_FLOATER_BIN_COUNT,
   PAT_FEATURE_FLOAT_THROUGH_COUNT_START =
       PAT_FEATURE_FLOAT_THROUGH_SCORE_START + PAT_FLOATER_BIN_COUNT,
-  // The hook and floater-flexibility sums scaled by the hypergeometric
-  // expectation opponent_rack_size / total_unseen, since most unseen tiles
-  // are in the bag rather than the opponent's rack while the bag is large.
-  // Triple word squares only.
-  PAT_FEATURE_HOOK_SCALED_START =
-      PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT,
-  PAT_FEATURE_FLOAT_FLEX_SCALED_START =
-      PAT_FEATURE_HOOK_SCALED_START + PAT_HOOK_BIN_COUNT,
   // Hook flexibility weighted by each admissible letter's immediate score:
   // the hooked word's score under the hook square's word multiplier plus the
   // letter's value under its letter multiplier, counted in the hook word and
   // in the lane word the premium multiplies (see pat_effective_cross_info),
   // divided by PAT_HOOK_SCORE_SCALE. Triple word squares only.
   PAT_FEATURE_HOOK_SCORE_START =
-      PAT_FEATURE_FLOAT_FLEX_SCALED_START + PAT_FLOATER_BIN_COUNT,
+      PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT,
   // Hook and floater-value channels for each other premium class, so the fit
   // says what each class is worth.
   PAT_FEATURE_DWS_HOOK_START =
@@ -83,21 +75,8 @@ enum {
   PAT_FEATURE_DD_FLOATER = PAT_FEATURE_WINDOW_START,
   PAT_FEATURE_DD_HOOK_ONLY = PAT_FEATURE_DD_FLOATER + 1,
   PAT_FEATURE_DD_TILES_SAVED = PAT_FEATURE_DD_HOOK_ONLY + 1,
-  // Letter multipliers along a reaching word: per route, the largest letter
-  // multiplier among the empty squares the word must cover adds word
-  // multiplier x (letter multiplier - 1), binned by the route's distance
-  // ("span"). A letter multiplier reachable only by extending past the
-  // contact or the premium, within the rack, is counted separately ("ext")
-  // when it beats the span's. Routes are counted only when some unseen tile
-  // fits. Triple and double word lanes have separate channels.
-  PAT_FEATURE_LM_SPAN_START =
-      PAT_FEATURE_WINDOW_START +
-      PAT_WINDOW_TIER_COUNT * PAT_WINDOW_FEATURES_PER_TIER,
-  PAT_FEATURE_LM_EXT_START = PAT_FEATURE_LM_SPAN_START + PAT_HOOK_BIN_COUNT,
-  PAT_FEATURE_DWS_LM_SPAN_START = PAT_FEATURE_LM_EXT_START + PAT_HOOK_BIN_COUNT,
-  PAT_FEATURE_DWS_LM_EXT_START =
-      PAT_FEATURE_DWS_LM_SPAN_START + PAT_HOOK_BIN_COUNT,
-  PAT_NUM_FEATURES = PAT_FEATURE_DWS_LM_EXT_START + PAT_HOOK_BIN_COUNT,
+  PAT_NUM_FEATURES = PAT_FEATURE_WINDOW_START +
+                     PAT_WINDOW_TIER_COUNT * PAT_WINDOW_FEATURES_PER_TIER,
 };
 
 // A training observation is labeled with the opponent's net gain over the
@@ -134,27 +113,16 @@ enum {
 #define PAT_SIGNED_THROUGH_ROW_PREFIX "signed_through,"
 #define PAT_DEFAULT_SIGNED_THROUGH false
 
-// Optional row (0 or 1): whether patgen fits the hypergeometric-scaled
-// channels or leaves them at zero (see PATWeights.fit_scaled_channels).
-// Absent means 1.
-#define PAT_FIT_SCALED_ROW_PREFIX "fit_scaled,"
-#define PAT_DEFAULT_FIT_SCALED true
-
-// Optional row (0 or 1): whether patgen builds training rows through the
-// runtime overlay path instead of scanning the post-move board (see
-// PATWeights.train_overlay). Absent means 0.
-#define PAT_TRAIN_OVERLAY_ROW_PREFIX "train_overlay,"
-#define PAT_DEFAULT_TRAIN_OVERLAY false
-
-// Optional row (0 to 5): which channels patgen fits, the rest keeping their
-// loaded values (see PATWeights.fit_residual). 1: the hook-score channels
-// (PAT_FEATURE_HOOK_SCORE_START onward, PAT_HOOK_BIN_COUNT of them); 2:
-// those and the triple word hook flexibility channels; 3: the floater
-// through channels; 4: the letter-multiplier channels
-// (PAT_FEATURE_LM_SPAN_START onward); 5: every channel, hook-score
-// included. Absent means 0: every channel but hook-score.
+// Optional row: which channels patgen fits, the rest keeping their loaded
+// values (see PATWeights.fit_residual). 0, or absent: every channel but the
+// hook-score ones; PAT_FIT_THROUGH: only the floater through channels;
+// PAT_FIT_ALL: every channel.
 #define PAT_FIT_RESIDUAL_ROW_PREFIX "fit_residual,"
-#define PAT_DEFAULT_FIT_RESIDUAL false
+enum {
+  PAT_FIT_DEFAULT = 0,
+  PAT_FIT_THROUGH = 3,
+  PAT_FIT_ALL = 5,
+};
 
 // Optional row (0 or 1): whether a hook the evaluated move creates is scored
 // from its real cross set, resolved on the GADDAG, instead of the two-letter
@@ -173,15 +141,6 @@ enum {
 // is a superset of the run's.
 #define PAT_RUN_THROUGH_MAX_KEY 3
 
-// Optional row (0 or 1): whether patgen, instead of refitting, writes one
-// candidate file per shrinkage strength, each pulling every free coefficient
-// toward its loaded value, with its held-out reply-prediction error. The
-// output file keeps the loaded weights, since prediction error does not
-// select playing strength; whole-game validation does. One game pair in
-// PAT_GEN_HELDOUT_EVERY is held out. Absent means 0.
-#define PAT_FIT_SHRINK_ROW_PREFIX "fit_shrink,"
-#define PAT_DEFAULT_FIT_SHRINK false
-
 // Optional row: utility_adjust,V (points squared, > 0) gives every move whose
 // PAT term is applied an extra
 //   0.5 * V * kappa(margin + score, unseen after the move)
@@ -193,15 +152,13 @@ enum {
 // other PAT terms it can be positive, so the context folds its maximum into
 // every movegen bound (see pat_eval_utility_bound). Absent means 0.
 #define PAT_UTILITY_ADJUST_ROW_PREFIX "utility_adjust,"
-// Training only: fit_fixed_zero,<prefix>|<prefix>|... holds every feature
-// whose name starts with one of the prefixes at zero in the fit, so a model
-// can be trained on a subset of premium classes. Absent means none.
-#define PAT_FIT_FIXED_ZERO_ROW_PREFIX "fit_fixed_zero,"
 // Margins beyond this are read at it; kappa is flat there.
 #define PAT_UTILITY_MARGIN_LIMIT 600
 // Finite-difference half-width, in points, for kappa: wide enough to smooth
 // the table's integer margin buckets.
 #define PAT_UTILITY_KAPPA_STEP 15
+// One game pair in this many is held out to report patgen's validation
+// error.
 #define PAT_GEN_HELDOUT_EVERY 10
 
 // Optional rows: an adjustment (milli-equity, <= 0) added to the defense
@@ -234,12 +191,14 @@ enum {
 #define PAT_HOOK_SCORE_SCALE 8
 
 // The header line is PAT_MAGIC_PREFIX followed by the format version, e.g.
-// "magpie_pat_v5". PAT_VERSION is what this build writes; an older version
-// lacks rows for the channels added after it, which read as zero.
+// "magpie_pat_v6". PAT_VERSION is what this build writes; an older version
+// lacks rows for the channels added after it, which read as zero. Versions
+// 3 to 5 also carry rows for channels and training flags that have since
+// been retired (see pat_row_is_retired); they are read only at zero.
 #define PAT_MAGIC_PREFIX "magpie_pat_v"
 enum {
   PAT_EARLIEST_SUPPORTED_VERSION = 1,
-  PAT_VERSION = 5,
+  PAT_VERSION = 6,
 };
 
 #endif

@@ -13,7 +13,7 @@ static_assert(PAT_FEATURE_HOOK_START == 0,
               "the TWS hook channels start the feature vector");
 
 // Floor on the per-feature variance the ridge penalty scales by (see
-// pat_regression_solve_into_weights_shrunk): keeps the diagonal strictly
+// pat_regression_solve_into_weights): keeps the diagonal strictly
 // positive for a feature with exactly zero empirical variance (e.g.
 // QWS/QLS on a board with no quad squares, whose xtx diagonal is itself
 // exactly zero), without meaningfully inflating the penalty for any
@@ -122,13 +122,6 @@ pat_cholesky_solve(const double a[PAT_REGRESSION_DIM][PAT_REGRESSION_DIM],
   }
 }
 
-PATSolveResult
-pat_regression_solve_into_weights(const PATRegression *regression,
-                                  double ridge_lambda, PATWeights *pat) {
-  return pat_regression_solve_into_weights_shrunk(regression, ridge_lambda, 0.0,
-                                                  pat);
-}
-
 // E[r^2] and E[r] for r = y - c.x with c the installed coefficients,
 // from the accumulated moments (row 0 of XtX holds the feature sums,
 // xty[0] the label sum).
@@ -165,18 +158,6 @@ static void pat_regression_residual_moments(const PATRegression *regression,
   *mean_r_out = sum_r / n;
 }
 
-double pat_regression_installed_mse_with_intercept(
-    const PATRegression *regression, const PATWeights *pat, double intercept) {
-  if (regression->num_observations == 0) {
-    return 0.0;
-  }
-  double mean_r2;
-  double mean_r;
-  pat_regression_residual_moments(regression, pat, &mean_r2, &mean_r);
-  // E[(r - b)^2] = E[r^2] - 2 b E[r] + b^2.
-  return mean_r2 - 2.0 * intercept * mean_r + intercept * intercept;
-}
-
 double pat_regression_installed_mse(const PATRegression *regression,
                                     const PATWeights *pat) {
   if (regression->num_observations == 0) {
@@ -197,9 +178,9 @@ double pat_regression_baseline_mse(const PATRegression *regression) {
   return regression->yty / n - mean_y * mean_y;
 }
 
-PATSolveResult pat_regression_solve_into_weights_shrunk(
-    const PATRegression *regression, double ridge_lambda, double shrink_lambda,
-    PATWeights *pat) {
+PATSolveResult
+pat_regression_solve_into_weights(const PATRegression *regression,
+                                  double ridge_lambda, PATWeights *pat) {
   PATSolveResult result;
   memset(&result, 0, sizeof(result));
   result.num_observations = regression->num_observations;
@@ -207,15 +188,6 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
     return result;
   }
   const double num_observations = (double)regression->num_observations;
-  // The loaded coefficients, the target the shrinkage pulls toward (the
-  // plain ridge pulls toward zero, shrink_lambda 0 leaves it at that).
-  double loaded[PAT_REGRESSION_DIM];
-  loaded[0] = 0.0;
-  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-       feature_index++) {
-    loaded[feature_index + 1] =
-        -equity_to_double(pat_get_weight(pat, feature_index));
-  }
 
   // Build the full symmetric ridge system from the accumulated upper
   // triangle. The ridge term scales with the number of observations so
@@ -240,130 +212,46 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
     const double effective_variance = variance_i > PAT_GEN_RIDGE_VARIANCE_FLOOR
                                           ? variance_i
                                           : PAT_GEN_RIDGE_VARIANCE_FLOOR;
-    a[i][i] +=
-        (ridge_lambda + shrink_lambda) * effective_variance * num_observations;
+    a[i][i] += ridge_lambda * effective_variance * num_observations;
   }
   // Features held fixed at a value: their contribution moves to the
   // right-hand side (xty_i -= sum_j XtX_ij c_j over fixed j, for every
   // free i), then their column is dropped from the solve by zeroing its
   // row and column with a unit diagonal, so the system stays positive
   // definite; the solution there is overwritten with the fixed value
-  // afterwards. Excluded features are the fixed-at-zero case.
+  // afterwards.
   bool fixed[PAT_REGRESSION_DIM] = {false};
   double fixed_value[PAT_REGRESSION_DIM] = {0.0};
-  // Experimental channels keep whatever the file carries unless the
-  // residual mode that studies them is on, so a default fit never spends
-  // mass on them: the premium-combination channels are free only in
-  // fit_residual 4, and the hook-score channels only in modes 1, 2 and 5
-  // (left free, a fit moves all hook mass onto them and plays worse than
-  // count-weighted hooks).
-  const int residual_mode = pat_get_fit_residual_mode(pat);
-  if (residual_mode != 4) {
-    for (int feature_index = PAT_FEATURE_LM_SPAN_START;
-         feature_index < PAT_NUM_FEATURES; feature_index++) {
+  // The hook-score channels are free only in a PAT_FIT_ALL fit: left free
+  // in an ordinary one, the fit moves all hook mass onto them and plays
+  // worse than count-weighted hooks. PAT_FIT_THROUGH frees only the
+  // floater through channels (for a change to what they measure). A fixed
+  // channel keeps its loaded weight, as the coefficient it corresponds to
+  // (weights are the negated coefficients, see the clamp below).
+  const int fit_residual = pat_get_fit_residual(pat);
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    const bool is_hook_score =
+        feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
+        feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT;
+    const bool is_through =
+        feature_index >= PAT_FEATURE_FLOAT_THROUGH_SCORE_START &&
+        feature_index <
+            PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT;
+    bool free_here = !is_hook_score;
+    if (fit_residual == PAT_FIT_ALL) {
+      free_here = true;
+    } else if (fit_residual == PAT_FIT_THROUGH) {
+      free_here = is_through;
+    }
+    if (!free_here) {
       fixed[feature_index + 1] = true;
       fixed_value[feature_index + 1] =
           -equity_to_double(pat_get_weight(pat, feature_index));
-    }
-  }
-  if (residual_mode != 1 && residual_mode != 2 && residual_mode != 5) {
-    for (int feature_index = PAT_FEATURE_HOOK_SCORE_START;
-         feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT;
-         feature_index++) {
-      fixed[feature_index + 1] = true;
-      fixed_value[feature_index + 1] =
-          -equity_to_double(pat_get_weight(pat, feature_index));
-    }
-  }
-  if (!pat_get_fit_scaled_channels(pat)) {
-    for (int feature_index = PAT_FEATURE_HOOK_SCALED_START;
-         feature_index < PAT_FEATURE_HOOK_SCORE_START; feature_index++) {
-      fixed[feature_index + 1] = true;
-    }
-  }
-  if (pat_get_fit_residual(pat) && residual_mode != 5) {
-    // Only the hook-score channels move -- and, with fit_residual 2, the
-    // triple-word hook flexibility channels they are collinear with, so
-    // the fit can shift mass between count-weighted and score-weighted
-    // hooks; everything else keeps the loaded weight, as the coefficient
-    // it corresponds to (weights are the negated coefficients, see the
-    // clamp below).
-    // Mode 3 frees the floater through channels instead (for a semantic
-    // change to what they measure), keeping every hook channel fixed;
-    // mode 4 only the premium-combination channels.
-    const int mode = pat_get_fit_residual_mode(pat);
-    const bool hooks_free = mode == 2;
-    const bool through_free = mode == 3;
-    const bool lm_free = mode == 4;
-    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-         feature_index++) {
-      const bool is_hook_score =
-          feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
-          feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT;
-      // The TWS hook channels come first (PAT_FEATURE_HOOK_START is 0).
-      const bool is_tws_hook =
-          feature_index < PAT_FEATURE_HOOK_START + PAT_HOOK_BIN_COUNT;
-      const bool is_through =
-          feature_index >= PAT_FEATURE_FLOAT_THROUGH_SCORE_START &&
-          feature_index <
-              PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT;
-      const bool is_lm = feature_index >= PAT_FEATURE_LM_SPAN_START;
-      bool free_here = is_hook_score || (hooks_free && is_tws_hook);
-      if (lm_free) {
-        free_here = is_lm;
-      } else if (through_free) {
-        free_here = is_through;
-      }
-      if (!free_here) {
-        fixed[feature_index + 1] = true;
-        fixed_value[feature_index + 1] =
-            -equity_to_double(pat_get_weight(pat, feature_index));
-      }
-    }
-  }
-  // fit_fixed_zero: features of the excluded classes stay at zero, whatever
-  // the mode above made of them.
-  const char *fixed_zero = pat_get_fit_fixed_zero(pat);
-  if (fixed_zero) {
-    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-         feature_index++) {
-      char name[64];
-      pat_feature_name(feature_index, name, sizeof(name));
-      const char *prefix = fixed_zero;
-      while (*prefix) {
-        const char *end = strchr(prefix, '|');
-        const size_t prefix_len = end ? (size_t)(end - prefix) : strlen(prefix);
-        if (prefix_len > 0 && strncmp(name, prefix, prefix_len) == 0) {
-          fixed[feature_index + 1] = true;
-          fixed_value[feature_index + 1] = 0.0;
-          break;
-        }
-        prefix += prefix_len;
-        if (*prefix == '|') {
-          prefix++;
-        }
-      }
     }
   }
   double xty[PAT_REGRESSION_DIM];
   memcpy(xty, regression->xty, sizeof(xty));
-  // Shrinkage toward the loaded coefficients: the penalty
-  // shrink_lambda * variance_i * N * (c - loaded)^2 adds the same
-  // variance-scaled strength to the diagonal (above) and to the loaded
-  // coefficient on the right-hand side.
-  if (shrink_lambda > 0.0) {
-    for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
-      const double mean_i = regression->xtx[0][i] / num_observations;
-      const double variance_i =
-          regression->xtx[i][i] / num_observations - mean_i * mean_i;
-      const double effective_variance =
-          variance_i > PAT_GEN_RIDGE_VARIANCE_FLOOR
-              ? variance_i
-              : PAT_GEN_RIDGE_VARIANCE_FLOOR;
-      xty[i] +=
-          shrink_lambda * effective_variance * num_observations * loaded[i];
-    }
-  }
   for (int i = 0; i < PAT_REGRESSION_DIM; i++) {
     if (fixed[i]) {
       continue;

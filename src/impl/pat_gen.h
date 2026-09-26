@@ -56,14 +56,6 @@ typedef struct PATSolveResult {
 PATSolveResult
 pat_regression_solve_into_weights(const PATRegression *regression,
                                   double ridge_lambda, PATWeights *pat);
-// The same solve with an extra per-feature penalty
-// shrink_lambda * variance_i * N * (c_i - c0_i)^2, pulling each free
-// coefficient toward its loaded value (c0_i). The variance floor matches
-// the ridge diagonal; shrink_lambda 0 is the plain solve.
-PATSolveResult
-pat_regression_solve_into_weights_shrunk(const PATRegression *regression,
-                                         double ridge_lambda,
-                                         double shrink_lambda, PATWeights *pat);
 // Mean squared error of the weights as installed in pat (clamped,
 // rounded) on the observations the regression accumulated, with the
 // intercept refit; and the intercept-only baseline. Both come straight
@@ -71,10 +63,6 @@ pat_regression_solve_into_weights_shrunk(const PATRegression *regression,
 // candidate without storing rows.
 double pat_regression_installed_mse(const PATRegression *regression,
                                     const PATWeights *pat);
-// The same with a given intercept (e.g. the one the training fit chose)
-// instead of the refit one: untouched out-of-sample error.
-double pat_regression_installed_mse_with_intercept(
-    const PATRegression *regression, const PATWeights *pat, double intercept);
 double pat_regression_baseline_mse(const PATRegression *regression);
 
 #endif

@@ -30,11 +30,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum {
-  PAT_CONTEXT_CHANNEL_LM = 1,
-  PAT_CONTEXT_CHANNEL_HOOK_SCORE = 2,
-};
-
 struct PATWeights {
   char *name;
   Equity weights[PAT_NUM_FEATURES];
@@ -83,21 +78,10 @@ struct PATWeights {
   // floater, by which side of the premium it lies on, instead of the
   // unsigned tables. Per file, like lexicon_floaters.
   bool signed_through;
-  // Whether patgen's regression fits the hypergeometric-scaled channels.
-  // They rescale the raw hook and floater channels, so ridge splits the
-  // fitted mass between the two under near-collinearity; false drops their
-  // columns from the solve. Evaluation is unaffected either way.
-  bool fit_scaled_channels;
-  // Whether patgen builds training rows through the runtime overlay path
-  // (pat_extract_move_features_combined) rather than by scanning the
-  // post-move board. They differ wherever the move creates a hook or
-  // floater, which the overlay approximates with the hook_flex table;
-  // training on overlay rows fits the measurement evaluation uses.
-  bool train_overlay;
-  // Whether patgen fits only some channels as a residual on top of every
-  // other weight as loaded (see fit_residual_mode), so a small new channel's
-  // effect is not swamped by the noise of a whole-vector refit.
-  bool fit_residual;
+  // Which channels patgen fits, the rest keeping their loaded weights
+  // (PAT_FIT_*; see PAT_FIT_RESIDUAL_ROW_PREFIX), so a refit of a few
+  // channels is not swamped by the noise of a whole-vector refit.
+  int fit_residual;
   // Whether hooks the evaluated move creates are scored exactly (see
   // pat_fresh_cross_set) rather than from the hook_flex approximation. Per
   // file, like the floater flags.
@@ -107,10 +91,6 @@ struct PATWeights {
   // single-letter log-count, which badly overstates runs like QI that few or
   // no words contain.
   bool run_through;
-  // See PAT_FIT_SHRINK_ROW_PREFIX.
-  bool fit_shrink;
-  // See PAT_FIT_FIXED_ZERO_ROW_PREFIX; owned, NULL when absent.
-  char *fit_fixed_zero;
   // See PAT_UTILITY_ADJUST_ROW_PREFIX. The tables are built from a win
   // percentage table by pat_prepare_utility (or pat_set_utility_adjust)
   // when utility_adjust is nonzero and are NULL otherwise, indexed
@@ -130,10 +110,6 @@ struct PATWeights {
   // opening exchange, milli-equity <= 0 (see PAT_OPENING_TILES_ROW_PREFIX).
   Equity opening_tiles[RACK_SIZE + 1];
   Equity opening_exchange;
-  // 1: only the hook-score channels are fitted; 2: the triple-word hook
-  // flexibility channels too; 3: only the floater through channels (see
-  // pat_regression_solve_into_weights).
-  int fit_residual_mode;
   // Set by pat_prepare_hook_flex. The lexicon tables are part of the model,
   // so evaluation and training refuse an unprepared one rather than scoring
   // with empty tables.
@@ -177,22 +153,6 @@ static void pat_require_prepared(const PATWeights *pat) {
               "(pat_prepare_hook_flex)",
               pat->name);
   }
-}
-
-bool pat_get_fit_scaled_channels(const PATWeights *pat) {
-  return pat->fit_scaled_channels;
-}
-
-bool pat_get_train_overlay(const PATWeights *pat) { return pat->train_overlay; }
-
-bool pat_get_fit_shrink(const PATWeights *pat) { return pat->fit_shrink; }
-
-const char *pat_get_fit_fixed_zero(const PATWeights *pat) {
-  return pat->fit_fixed_zero;
-}
-
-void pat_set_fit_shrink(PATWeights *pat, bool fit_shrink) {
-  pat->fit_shrink = fit_shrink;
 }
 
 Equity pat_get_opening_tiles_adjustment(const PATWeights *pat, int tiles) {
@@ -296,19 +256,10 @@ void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks) {
   pat->exact_created_hooks = exact_created_hooks;
 }
 
-bool pat_get_fit_residual(const PATWeights *pat) { return pat->fit_residual; }
+int pat_get_fit_residual(const PATWeights *pat) { return pat->fit_residual; }
 
-int pat_get_fit_residual_mode(const PATWeights *pat) {
-  return pat->fit_residual_mode;
-}
-
-void pat_set_fit_residual(PATWeights *pat, bool fit_residual) {
+void pat_set_fit_residual(PATWeights *pat, int fit_residual) {
   pat->fit_residual = fit_residual;
-  pat->fit_residual_mode = fit_residual ? 1 : 0;
-}
-
-void pat_set_fit_scaled_channels(PATWeights *pat, bool fit_scaled_channels) {
-  pat->fit_scaled_channels = fit_scaled_channels;
 }
 
 void pat_set_signed_through(PATWeights *pat, bool signed_through) {
@@ -353,15 +304,9 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
   } else if (feature_index < PAT_FEATURE_FLOAT_THROUGH_COUNT_START) {
     (void)snprintf(buf, buf_size, "float_through_score_d%d",
                    feature_index - PAT_FEATURE_FLOAT_THROUGH_SCORE_START + 1);
-  } else if (feature_index < PAT_FEATURE_HOOK_SCALED_START) {
+  } else if (feature_index < PAT_FEATURE_HOOK_SCORE_START) {
     (void)snprintf(buf, buf_size, "float_through_count_d%d",
                    feature_index - PAT_FEATURE_FLOAT_THROUGH_COUNT_START + 1);
-  } else if (feature_index < PAT_FEATURE_FLOAT_FLEX_SCALED_START) {
-    (void)snprintf(buf, buf_size, "hook_scaled_d%d",
-                   feature_index - PAT_FEATURE_HOOK_SCALED_START + 1);
-  } else if (feature_index < PAT_FEATURE_HOOK_SCORE_START) {
-    (void)snprintf(buf, buf_size, "float_flex_scaled_d%d",
-                   feature_index - PAT_FEATURE_FLOAT_FLEX_SCALED_START + 1);
   } else if (feature_index < PAT_FEATURE_DWS_HOOK_START) {
     (void)snprintf(buf, buf_size, "hook_score_d%d",
                    feature_index - PAT_FEATURE_HOOK_SCORE_START + 1);
@@ -399,7 +344,7 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
     (void)snprintf(buf, buf_size, "tt_floater");
   } else if (feature_index == PAT_FEATURE_TT_HOOK_ONLY) {
     (void)snprintf(buf, buf_size, "tt_hook_only");
-  } else if (feature_index < PAT_FEATURE_LM_SPAN_START) {
+  } else if (feature_index < PAT_NUM_FEATURES) {
     static const char *const tier_names[PAT_WINDOW_TIER_COUNT] = {"dd", "w6",
                                                                   "w9", "w12"};
     static const char *const kind_names[PAT_WINDOW_FEATURES_PER_TIER] = {
@@ -408,18 +353,6 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
     (void)snprintf(buf, buf_size, "%s_%s",
                    tier_names[offset / PAT_WINDOW_FEATURES_PER_TIER],
                    kind_names[offset % PAT_WINDOW_FEATURES_PER_TIER]);
-  } else if (feature_index < PAT_FEATURE_LM_EXT_START) {
-    (void)snprintf(buf, buf_size, "lm_span_d%d",
-                   feature_index - PAT_FEATURE_LM_SPAN_START + 1);
-  } else if (feature_index < PAT_FEATURE_DWS_LM_SPAN_START) {
-    (void)snprintf(buf, buf_size, "lm_ext_d%d",
-                   feature_index - PAT_FEATURE_LM_EXT_START + 1);
-  } else if (feature_index < PAT_FEATURE_DWS_LM_EXT_START) {
-    (void)snprintf(buf, buf_size, "dws_lm_span_d%d",
-                   feature_index - PAT_FEATURE_DWS_LM_SPAN_START + 1);
-  } else if (feature_index < PAT_NUM_FEATURES) {
-    (void)snprintf(buf, buf_size, "dws_lm_ext_d%d",
-                   feature_index - PAT_FEATURE_DWS_LM_EXT_START + 1);
   } else {
     log_fatal("invalid PAT feature index: %d", feature_index);
   }
@@ -432,14 +365,9 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->own_asset_discount = PAT_DEFAULT_OWN_ASSET_DISCOUNT;
   pat->lexicon_floaters = PAT_DEFAULT_LEXICON_FLOATERS;
   pat->signed_through = PAT_DEFAULT_SIGNED_THROUGH;
-  pat->fit_scaled_channels = PAT_DEFAULT_FIT_SCALED;
-  pat->train_overlay = PAT_DEFAULT_TRAIN_OVERLAY;
-  pat->fit_residual = PAT_DEFAULT_FIT_RESIDUAL;
-  pat->fit_residual_mode = 0;
+  pat->fit_residual = PAT_FIT_DEFAULT;
   pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
-  pat->fit_shrink = PAT_DEFAULT_FIT_SHRINK;
-  pat->fit_fixed_zero = NULL;
   pat->utility_adjust = 0.0;
   pat->utility_max_bag = 0;
   pat->utility_table = NULL;
@@ -581,7 +509,6 @@ void pat_destroy(PATWeights *pat) {
     return;
   }
   pat_clear_utility_tables(pat);
-  free(pat->fit_fixed_zero);
   free(pat->name);
   free(pat->run_through_count);
   free(pat->run_through_score);
@@ -595,6 +522,29 @@ void pat_destroy(PATWeights *pat) {
 //   "<feature_name>,<millipoints>" per feature that version has, in
 //   canonical feature order, every value <= 0. A version 1 file omits the
 //   double letter square rows added in version 2; those weights stay zero.
+// Rows that versions 3 to 5 wrote for channels and training flags retired
+// in version 6: the hypergeometric-scaled channels, the letter-multiplier
+// channels, and the fit_scaled, train_overlay and fit_shrink flags. Every
+// file trained with them left at zero plays the same without them, so a
+// zero row is skipped; a nonzero one describes a model this build cannot
+// evaluate and is rejected.
+static const char *const pat_retired_row_prefixes[] = {
+    "hook_scaled_d", "float_flex_scaled_d", "lm_span_d",
+    "lm_ext_d",      "dws_lm_span_d",       "dws_lm_ext_d",
+    "fit_scaled,",   "train_overlay,",      "fit_shrink,",
+};
+
+static bool pat_row_is_retired(const char *line) {
+  const int num_prefixes = (int)(sizeof(pat_retired_row_prefixes) /
+                                 sizeof(pat_retired_row_prefixes[0]));
+  for (int prefix_idx = 0; prefix_idx < num_prefixes; prefix_idx++) {
+    if (has_prefix(pat_retired_row_prefixes[prefix_idx], line)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static void pat_parse_contents(PATWeights *pat, const char *pat_name,
                                const StringSplitter *split_contents,
                                ErrorStack *error_stack) {
@@ -629,6 +579,15 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
             pat_name, version, PAT_EARLIEST_SUPPORTED_VERSION));
     return;
   }
+  if (version > PAT_VERSION) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_PAT_UNSUPPORTED_VERSION,
+        get_formatted_string(
+            "PAT file '%s' is version %d but this build reads versions up "
+            "to %d",
+            pat_name, version, PAT_VERSION));
+    return;
+  }
   pat->version = version;
   int feature_index = 0;
   char expected_name[64];
@@ -645,16 +604,23 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         feature_index < PAT_FEATURE_QWS_HOOK_START) {
       feature_index = PAT_FEATURE_QWS_HOOK_START;
     }
-    // A version below 3 has no hypergeometric-scaled rows: they were added
-    // in version 3. Same skip, same reasoning.
-    if (version < 3 && feature_index >= PAT_FEATURE_HOOK_SCALED_START &&
-        feature_index < PAT_FEATURE_HOOK_SCORE_START) {
-      feature_index = PAT_FEATURE_HOOK_SCORE_START;
-    }
     // A version below 4 has no hook-score rows: added in version 4.
     if (version < 4 && feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
         feature_index < PAT_FEATURE_DWS_HOOK_START) {
       feature_index = PAT_FEATURE_DWS_HOOK_START;
+    }
+    if (version < 6 && pat_row_is_retired(line)) {
+      const char *comma = strchr(line, ',');
+      const int value = comma ? string_to_int(comma + 1, error_stack) : -1;
+      if (!error_stack_is_empty(error_stack) || value != 0) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d is a retired row "
+                                 "with a value other than 0: '%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      continue;
     }
     if (has_prefix(PAT_GAMMA_ROW_PREFIX, line)) {
       const char *gamma_text = line + strlen(PAT_GAMMA_ROW_PREFIX);
@@ -729,47 +695,21 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->signed_through = (flag == 1);
       continue;
     }
-    if (has_prefix(PAT_FIT_SCALED_ROW_PREFIX, line)) {
-      const int flag =
-          string_to_int(line + strlen(PAT_FIT_SCALED_ROW_PREFIX), error_stack);
-      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
-            get_formatted_string("PAT file '%s' line %d has a fit_scaled "
-                                 "flag other than 0 or 1: '%s'",
-                                 pat_name, line_index + 1, line));
-        return;
-      }
-      pat->fit_scaled_channels = (flag == 1);
-      continue;
-    }
-    if (has_prefix(PAT_TRAIN_OVERLAY_ROW_PREFIX, line)) {
-      const int flag = string_to_int(
-          line + strlen(PAT_TRAIN_OVERLAY_ROW_PREFIX), error_stack);
-      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
-            get_formatted_string("PAT file '%s' line %d has a train_overlay "
-                                 "flag other than 0 or 1: '%s'",
-                                 pat_name, line_index + 1, line));
-        return;
-      }
-      pat->train_overlay = (flag == 1);
-      continue;
-    }
     if (has_prefix(PAT_FIT_RESIDUAL_ROW_PREFIX, line)) {
       const int flag = string_to_int(line + strlen(PAT_FIT_RESIDUAL_ROW_PREFIX),
                                      error_stack);
-      if (!error_stack_is_empty(error_stack) || flag < 0 || flag > 5) {
+      if (!error_stack_is_empty(error_stack) ||
+          (flag != PAT_FIT_DEFAULT && flag != PAT_FIT_THROUGH &&
+           flag != PAT_FIT_ALL)) {
         error_stack_push(
             error_stack, ERROR_STATUS_PAT_INVALID_ROW,
             get_formatted_string("PAT file '%s' line %d has a fit_residual "
-                                 "value other than 0 to 5: '%s'",
-                                 pat_name, line_index + 1, line));
+                                 "value other than %d, %d or %d: '%s'",
+                                 pat_name, line_index + 1, PAT_FIT_DEFAULT,
+                                 PAT_FIT_THROUGH, PAT_FIT_ALL, line));
         return;
       }
-      pat->fit_residual = (flag != 0);
-      pat->fit_residual_mode = flag;
+      pat->fit_residual = flag;
       continue;
     }
     if (has_prefix(PAT_EXACT_CREATED_HOOKS_ROW_PREFIX, line)) {
@@ -855,12 +795,6 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         continue;
       }
     }
-    if (has_prefix(PAT_FIT_FIXED_ZERO_ROW_PREFIX, line)) {
-      free(pat->fit_fixed_zero);
-      pat->fit_fixed_zero =
-          string_duplicate(line + strlen(PAT_FIT_FIXED_ZERO_ROW_PREFIX));
-      continue;
-    }
     if (has_prefix(PAT_UTILITY_ADJUST_ROW_PREFIX, line)) {
       const char *text = line + strlen(PAT_UTILITY_ADJUST_ROW_PREFIX);
       char *end = NULL;
@@ -874,20 +808,6 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
         return;
       }
       pat->utility_adjust = parsed;
-      continue;
-    }
-    if (has_prefix(PAT_FIT_SHRINK_ROW_PREFIX, line)) {
-      const int flag =
-          string_to_int(line + strlen(PAT_FIT_SHRINK_ROW_PREFIX), error_stack);
-      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
-            get_formatted_string("PAT file '%s' line %d has a fit_shrink "
-                                 "flag other than 0 or 1: '%s'",
-                                 pat_name, line_index + 1, line));
-        return;
-      }
-      pat->fit_shrink = (flag == 1);
       continue;
     }
     if (has_prefix(PAT_RUN_THROUGH_ROW_PREFIX, line)) {
@@ -952,11 +872,6 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
     pat->weights[feature_index] = weight;
     feature_index++;
   }
-  // A version below 5 has no premium-combination rows: added in version
-  // 5 at the end, so such a file simply stops before them.
-  if (version < 5 && feature_index == PAT_FEATURE_LM_SPAN_START) {
-    feature_index = PAT_NUM_FEATURES;
-  }
   if (feature_index != PAT_NUM_FEATURES) {
     error_stack_push(
         error_stack, ERROR_STATUS_PAT_WRONG_NUMBER_OF_ROWS,
@@ -1014,23 +929,13 @@ void pat_write(const PATWeights *pat, const char *data_paths,
                                       pat->lexicon_floaters ? 1 : 0);
   string_builder_add_formatted_string(
       sb, "%s%d\n", PAT_SIGNED_THROUGH_ROW_PREFIX, pat->signed_through ? 1 : 0);
-  string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SCALED_ROW_PREFIX,
-                                      pat->fit_scaled_channels ? 1 : 0);
-  string_builder_add_formatted_string(
-      sb, "%s%d\n", PAT_TRAIN_OVERLAY_ROW_PREFIX, pat->train_overlay ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_RESIDUAL_ROW_PREFIX,
-                                      pat->fit_residual_mode);
+                                      pat->fit_residual);
   string_builder_add_formatted_string(sb, "%s%d\n",
                                       PAT_EXACT_CREATED_HOOKS_ROW_PREFIX,
                                       pat->exact_created_hooks ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_RUN_THROUGH_ROW_PREFIX,
                                       pat->run_through ? 1 : 0);
-  string_builder_add_formatted_string(sb, "%s%d\n", PAT_FIT_SHRINK_ROW_PREFIX,
-                                      pat->fit_shrink ? 1 : 0);
-  if (pat->fit_fixed_zero) {
-    string_builder_add_formatted_string(
-        sb, "%s%s\n", PAT_FIT_FIXED_ZERO_ROW_PREFIX, pat->fit_fixed_zero);
-  }
   if (pat->utility_adjust > 0.0) {
     string_builder_add_formatted_string(
         sb, "%s%.6f\n", PAT_UTILITY_ADJUST_ROW_PREFIX, pat->utility_adjust);
@@ -1306,35 +1211,6 @@ static inline int pat_set_flex(const uint8_t *unseen_counts,
   return flex;
 }
 
-// The hypergeometric expectation of how many of the unseen pool's copies
-// of a given letter are already in the opponent's rack right now, as a
-// fraction: opponent_rack_size / total_unseen. Raw flex implicitly uses a
-// fraction of 1 (every unseen copy is treated as if it were already in
-// their hand), which is only right when the bag is empty; early on, most
-// of the unseen pool is still sitting in the bag, unreachable for many
-// turns, so raw flex overstates immediate risk. total_unseen of 0 means
-// nothing is left to fear either way, and dividing by it would be
-// meaningless, so that case scales to 0.
-static inline double pat_hyper_scale(const uint8_t *unseen_counts,
-                                     int opponent_rack_size) {
-  int total_unseen = 0;
-  for (int letter = 0; letter < MAX_ALPHABET_SIZE; letter++) {
-    total_unseen += unseen_counts[letter];
-  }
-  if (total_unseen <= 0) {
-    return 0.0;
-  }
-  return (double)opponent_rack_size / (double)total_unseen;
-}
-
-// pat_set_flex scaled by the hypergeometric fraction (see pat_hyper_scale),
-// rounded to the nearest integer so it stays comparable to the raw count
-// feature it sits beside.
-static inline int pat_set_flex_scaled(const uint8_t *unseen_counts,
-                                      uint64_t letter_set, double hyper_scale) {
-  return (int)lround(pat_set_flex(unseen_counts, letter_set) * hyper_scale);
-}
-
 // Fills unseen_counts (MAX_ALPHABET_SIZE entries) with the tiles that are
 // neither on the board nor on the evaluating player's rack, which is
 // exactly the pool the opponent draws from plus what they already hold.
@@ -1544,7 +1420,6 @@ typedef struct PATCrossInfo {
   bool dead;
   bool hooky;
   int flex;
-  int scaled_flex;
   // Sum over admissible letters of unseen count times the letter's
   // incremental immediate score at this square (see
   // pat_effective_cross_info), divided by PAT_HOOK_SCORE_SCALE.
@@ -1577,14 +1452,13 @@ static inline int pat_letter_score_exposure(int cross_score, int tile_score,
 // adjacent to the square, the real post-move cross set would require a KWG
 // traversal, so it is approximated with the per-letter hook_flex table; a
 // pre-move dead square is left dead even though a fresh adjacent tile
-// technically changes its perpendicular pattern. hyper_scale is only used
-// for scaled_flex (see pat_hyper_scale); pass 1.0 when the caller has no
-// use for that channel. ld and premium_word_multiplier feed
+// technically changes its perpendicular pattern. ld and
+// premium_word_multiplier feed
 // score_exposure only; a caller that never reads it may pass NULL and any
 // multiplier.
 static PATCrossInfo pat_effective_cross_info(
     const Square *lane, int idx, int dir, const PATMoveOverlay *overlay,
-    int row, int col, const uint8_t *unseen_counts, double hyper_scale,
+    int row, int col, const uint8_t *unseen_counts,
     const LetterDistribution *ld, int premium_word_multiplier) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   PATCrossInfo info;
@@ -1613,10 +1487,6 @@ static PATCrossInfo pat_effective_cross_info(
       info.dead = (cross_set == 0);
       info.hooky = !info.dead && (cross_set != TRIVIAL_CROSS_SET);
       info.flex = info.hooky ? pat_set_flex(unseen_counts, cross_set) : 0;
-      info.scaled_flex =
-          info.hooky
-              ? pat_set_flex_scaled(unseen_counts, cross_set, hyper_scale)
-              : 0;
       info.letter_set = info.hooky ? cross_set : 0;
       info.score_exposure = 0;
       if (info.hooky) {
@@ -1646,10 +1516,6 @@ static PATCrossInfo pat_effective_cross_info(
 
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
   info.flex = info.hooky ? pat_set_flex(unseen_counts, base_cross_set) : 0;
-  info.scaled_flex =
-      info.hooky
-          ? pat_set_flex_scaled(unseen_counts, base_cross_set, hyper_scale)
-          : 0;
   info.letter_set = info.hooky ? base_cross_set : 0;
   info.score_exposure = 0;
   const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
@@ -1703,10 +1569,6 @@ static PATCrossInfo pat_effective_cross_info(
     }
   }
   if (fresh_flex >= 0) {
-    const int scaled_fresh_flex = (int)lround(fresh_flex * hyper_scale);
-    info.scaled_flex = (info.hooky && info.scaled_flex < scaled_fresh_flex)
-                           ? info.scaled_flex
-                           : scaled_fresh_flex;
     info.flex = (info.hooky && info.flex < fresh_flex) ? info.flex : fresh_flex;
     // The hook the move itself creates has no real cross set or cross
     // score yet: the hooked word is approximated by the fresh tile facing
@@ -1737,19 +1599,18 @@ static PATCrossInfo pat_effective_cross_info(
 // the walk visited, including the square it broke on: a move can only change
 // this unit's features by placing a tile on one of those squares or directly
 // beside them.
-// lm_channels and score_channels say whether to compute the
-// letter-multiplier and hook-score channels; evaluation skips them when
-// their weights are all zero (see PATEvalContext.channel_flags).
+// score_channels says whether to compute the hook-score channels;
+// evaluation skips them when their weights are all zero (see
+// PATEvalContext.score_channels).
 static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           const uint8_t *unseen_counts, const PATWeights *pat,
                           int premium_row, int premium_col, int premium_class,
                           int dir, const PATMoveOverlay *overlay,
                           int32_t *features, int *extent_lo, int *extent_hi,
                           int opponent_rack_size, uint64_t *hook_letters_out,
-                          bool lm_channels, bool score_channels) {
+                          bool score_channels) {
   const int max_reach =
       (opponent_rack_size < RACK_SIZE) ? opponent_rack_size : RACK_SIZE;
-  const double hyper_scale = pat_hyper_scale(unseen_counts, opponent_rack_size);
   // Feature extraction needs every score channel even from a zero bootstrap.
   // Runtime scans with zero hook-score weights can skip the exposure work;
   // exact created hooks still need ld for their cross-set calculation.
@@ -1778,26 +1639,6 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     float_score_base = PAT_FEATURE_QLS_FLOAT_SCORE_START;
   }
   const bool full_channels = (premium_class == PAT_PREMIUM_TWS);
-  // Premium combinations (see PAT_FEATURE_LM_SPAN_START): the letter
-  // multiplier of every empty square the walk needs, in walk order per
-  // side (entry 0 is the premium itself), and each feasible route's bin
-  // and the entry it makes contact at, resolved after both sides are
-  // walked because a word may extend past the premium onto the far side.
-  int lm_span_base = -1;
-  int lm_ext_base = -1;
-  if (lm_channels && premium_class == PAT_PREMIUM_TWS) {
-    lm_span_base = PAT_FEATURE_LM_SPAN_START;
-    lm_ext_base = PAT_FEATURE_LM_EXT_START;
-  } else if (lm_channels && premium_class == PAT_PREMIUM_DWS) {
-    lm_span_base = PAT_FEATURE_DWS_LM_SPAN_START;
-    lm_ext_base = PAT_FEATURE_DWS_LM_EXT_START;
-  }
-  const bool lm_track = lm_span_base >= 0;
-  int lm_entries[2][RACK_SIZE + 1];
-  int lm_num_entries[2] = {1, 1};
-  int lm_route_bin[2][2 * RACK_SIZE + 2];
-  int lm_route_position[2][2 * RACK_SIZE + 2];
-  int lm_num_routes[2] = {0, 0};
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_row : premium_col;
   const int premium_idx =
@@ -1824,38 +1665,25 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   const PATCrossInfo premium_info = pat_effective_cross_info(
       lane, premium_idx, dir, overlay,
       pat_unit_row(dir, lane_index, premium_idx),
-      pat_unit_col(dir, lane_index, premium_idx), unseen_counts, hyper_scale,
-      hook_score_ld, premium_word_multiplier);
+      pat_unit_col(dir, lane_index, premium_idx), unseen_counts, hook_score_ld,
+      premium_word_multiplier);
   if (premium_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
-  }
-  if (lm_track) {
-    lm_entries[0][0] = bonus_square_get_letter_multiplier(
-        square_get_bonus_square(&lane[premium_idx]));
-    lm_entries[1][0] = lm_entries[0][0];
   }
   if (premium_info.hooky) {
     // A one-tile play on the TWS square itself completes a perpendicular
     // word at triple word score: hook access at d = 1.
     features[hook_base] += premium_info.flex;
     if (full_channels) {
-      features[PAT_FEATURE_HOOK_SCALED_START] += premium_info.scaled_flex;
       features[PAT_FEATURE_HOOK_SCORE_START] += premium_info.score_exposure;
     }
     if (hook_letters_out) {
       *hook_letters_out |= premium_info.letter_set;
     }
-    if (lm_track && premium_info.flex > 0) {
-      // Contact at the premium itself; either side is its far side.
-      lm_route_bin[0][0] = 1;
-      lm_route_position[0][0] = 0;
-      lm_num_routes[0] = 1;
-    }
   }
 
   for (int side = -1; side <= 1; side += 2) {
-    const int lm_side = (side < 0) ? 0 : 1;
     // Number of empty squares a word covering the span from the current
     // scan position through the TWS square must fill, i.e. the number of
     // tiles the opponent must play. The TWS square itself is the first.
@@ -1970,7 +1798,6 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                                         word_length);
         }
         int run_flex;
-        int scaled_run_flex;
         // A fresh tile implies an overlay; the check lets the analyzer
         // see it.
         if (run_has_fresh_tile && overlay != NULL) {
@@ -1979,7 +1806,6 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           // TWS square.
           run_flex =
               overlay->hook_flex[get_unblanked_machine_letter(facing_letter)];
-          scaled_run_flex = (int)lround(run_flex * hyper_scale);
         } else {
           // The letters that could extend this run toward the TWS square.
           // game_gen_cross_set stores a run's own extension sets on its
@@ -2002,24 +1828,12 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                     : square_get_left_extension_set(&lane[prev_empty_idx]);
           }
           run_flex = pat_set_flex(unseen_counts, extension_set);
-          scaled_run_flex =
-              pat_set_flex_scaled(unseen_counts, extension_set, hyper_scale);
           if (hook_letters_out) {
             *hook_letters_out |= extension_set;
           }
         }
         if (full_channels) {
           features[PAT_FEATURE_FLOAT_FLEX_START + distance_bin - 1] += run_flex;
-          features[PAT_FEATURE_FLOAT_FLEX_SCALED_START + distance_bin - 1] +=
-              scaled_run_flex;
-        }
-        if (lm_track && run_flex > 0 &&
-            lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
-          // Contact at the last empty before the run.
-          lm_route_bin[lm_side][lm_num_routes[lm_side]] = distance_bin;
-          lm_route_position[lm_side][lm_num_routes[lm_side]] =
-              (lm_num_entries[lm_side] - 1);
-          lm_num_routes[lm_side]++;
         }
         span_has_floater = true;
         span_floater_flex += run_flex;
@@ -2027,18 +1841,13 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       const PATCrossInfo info = pat_effective_cross_info(
           lane, idx, dir, overlay, square_row, square_col, unseen_counts,
-          hyper_scale, hook_score_ld, premium_word_multiplier);
+          hook_score_ld, premium_word_multiplier);
       if (info.dead) {
         break;
       }
       empties_used++;
       if (empties_used > max_reach) {
         break;
-      }
-      if (lm_track && lm_num_entries[lm_side] < RACK_SIZE + 1) {
-        lm_entries[lm_side][lm_num_entries[lm_side]++] =
-            bonus_square_get_letter_multiplier(
-                square_get_bonus_square(&lane[idx]));
       }
       if (full_channels && bonus_square_get_word_multiplier(
                                square_get_bonus_square(&lane[idx])) == 3) {
@@ -2054,21 +1863,11 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       if (info.hooky) {
         features[hook_base + empties_used - 1] += info.flex;
         if (full_channels) {
-          features[PAT_FEATURE_HOOK_SCALED_START + empties_used - 1] +=
-              info.scaled_flex;
           features[PAT_FEATURE_HOOK_SCORE_START + empties_used - 1] +=
               info.score_exposure;
         }
         if (hook_letters_out) {
           *hook_letters_out |= info.letter_set;
-        }
-        if (lm_track && info.flex > 0 &&
-            lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
-          // Contact at the hook square, the entry just recorded.
-          lm_route_bin[lm_side][lm_num_routes[lm_side]] = empties_used;
-          lm_route_position[lm_side][lm_num_routes[lm_side]] =
-              (lm_num_entries[lm_side] - 1);
-          lm_num_routes[lm_side]++;
         }
         span_has_hook = true;
       }
@@ -2079,53 +1878,6 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       *extent_lo = last_visited_idx;
     } else if (side > 0 && extent_hi) {
       *extent_hi = last_visited_idx;
-    }
-  }
-  if (!lm_track) {
-    return;
-  }
-  for (int lm_side = 0; lm_side < 2; lm_side++) {
-    const int other = 1 - lm_side;
-    const int num_entries = lm_num_entries[lm_side];
-    // Largest letter multiplier up to each entry (the span of a route
-    // contacting there) and from each entry on (its extension beyond).
-    int prefix_max[RACK_SIZE + 1];
-    int suffix_max[RACK_SIZE + 2];
-    prefix_max[0] = lm_entries[lm_side][0];
-    for (int entry_idx = 1; entry_idx < num_entries; entry_idx++) {
-      prefix_max[entry_idx] =
-          (lm_entries[lm_side][entry_idx] > prefix_max[entry_idx - 1])
-              ? lm_entries[lm_side][entry_idx]
-              : prefix_max[entry_idx - 1];
-    }
-    suffix_max[num_entries] = 1;
-    for (int entry_idx = num_entries - 1; entry_idx >= 0; entry_idx--) {
-      suffix_max[entry_idx] =
-          (lm_entries[lm_side][entry_idx] > suffix_max[entry_idx + 1])
-              ? lm_entries[lm_side][entry_idx]
-              : suffix_max[entry_idx + 1];
-    }
-    for (int route_idx = 0; route_idx < lm_num_routes[lm_side]; route_idx++) {
-      const int bin = lm_route_bin[lm_side][route_idx];
-      const int position = lm_route_position[lm_side][route_idx];
-      const int span_lm = prefix_max[position];
-      int ext_lm = suffix_max[position + 1];
-      // Past the premium onto the far side, with the tiles the route
-      // leaves in the rack (entry 0 there is the premium again).
-      const int budget = max_reach - bin;
-      for (int entry_idx = 1;
-           entry_idx <= budget && entry_idx < lm_num_entries[other];
-           entry_idx++) {
-        if (lm_entries[other][entry_idx] > ext_lm) {
-          ext_lm = lm_entries[other][entry_idx];
-        }
-      }
-      features[lm_span_base + bin - 1] +=
-          premium_word_multiplier * (span_lm - 1);
-      if (ext_lm > span_lm) {
-        features[lm_ext_base + bin - 1] +=
-            premium_word_multiplier * (ext_lm - 1);
-      }
     }
   }
 }
@@ -2173,11 +1925,11 @@ static void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
       has_floater = true;
       continue;
     }
-    // Never reads scaled_flex or score_exposure, so hyper_scale, ld and
-    // the premium multiplier are don't-cares here.
+    // Never reads score_exposure, so ld and the premium multiplier are
+    // don't-cares here.
     const PATCrossInfo info =
         pat_effective_cross_info(lane, idx, dir, overlay, square_row,
-                                 square_col, unseen_counts, 1.0, NULL, 2);
+                                 square_col, unseen_counts, NULL, 2);
     if (info.dead) {
       return;
     }
@@ -2335,11 +2087,11 @@ void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
     pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
                   premium_cols[premium_idx], premium_classes[premium_idx],
                   BOARD_HORIZONTAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true, true);
+                  opponent_rack_size, NULL, true);
     pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
                   premium_cols[premium_idx], premium_classes[premium_idx],
                   BOARD_VERTICAL_DIRECTION, NULL, features, NULL, NULL,
-                  opponent_rack_size, NULL, true, true);
+                  opponent_rack_size, NULL, true);
   }
   uint8_t dd_dirs[PAT_MAX_DD];
   uint8_t dd_lanes[PAT_MAX_DD];
@@ -2570,9 +2322,7 @@ static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
         pat_eval_ctx->weights, premium_row, premium_col,
         pat_eval_ctx->premium_classes[premium_idx], dir, overlay, features,
         extent_lo, extent_hi, pat_eval_ctx->opponent_rack_size,
-        hook_letters_out,
-        (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_LM) != 0,
-        (pat_eval_ctx->channel_flags & PAT_CONTEXT_CHANNEL_HOOK_SCORE) != 0);
+        hook_letters_out, pat_eval_ctx->score_channels);
     return;
   }
   const int dd_idx = unit_index - num_premium_units;
@@ -2771,22 +2521,16 @@ static void pat_eval_context_load_units(
         weights->stage_scale[pat_stage_for_bag(bag_count)];
   }
   pat_eval_ctx->num_nonzero_features = 0;
-  pat_eval_ctx->channel_flags =
-      drop_unweighted_units
-          ? 0
-          : PAT_CONTEXT_CHANNEL_LM | PAT_CONTEXT_CHANNEL_HOOK_SCORE;
+  pat_eval_ctx->score_channels = !drop_unweighted_units;
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     if (weights->weights[feature_index] != 0) {
       pat_eval_ctx
           ->nonzero_feature_index[pat_eval_ctx->num_nonzero_features++] =
           feature_index;
-      if (feature_index >= PAT_FEATURE_LM_SPAN_START) {
-        pat_eval_ctx->channel_flags |= PAT_CONTEXT_CHANNEL_LM;
-      } else if (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
-                 feature_index <
-                     PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT) {
-        pat_eval_ctx->channel_flags |= PAT_CONTEXT_CHANNEL_HOOK_SCORE;
+      if (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
+          feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT) {
+        pat_eval_ctx->score_channels = true;
       }
     }
   }
@@ -3219,94 +2963,6 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
       pat_combine(worst, sum, pat_eval_ctx->weights->combine_gamma));
 }
 
-// The training row for a candidate move built the way the runtime term is
-// built: the pre-move context's stored unit rows, with the units the move
-// geometrically touches rescanned through the move overlay, combined by
-// the same worst-unit / gamma rule pat_eval_move_penalty applies. A model
-// fitted on these rows is fitted on exactly what it is later evaluated
-// with (the overlay's approximations included), whereas
-// pat_extract_features_combined on the post-move board measures the
-// created hooks and floaters with their real cross and extension sets,
-// which the runtime never sees. Units the context dropped as unweighted
-// contribute nothing, so their classes cannot gain weight from rows built
-// this way; own-asset credit is not applied (training runs with no
-// discount). Non-placement moves get the baseline rows unchanged.
-void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
-                                        const Move *move, double *features) {
-  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-       feature_index++) {
-    features[feature_index] = 0.0;
-  }
-  if (!pat_eval_ctx || !pat_eval_ctx->weights || pat_eval_ctx->num_units == 0) {
-    return;
-  }
-  const int num_units = pat_eval_ctx->num_units;
-  uint64_t affected_units[PAT_MASK_WORDS];
-  pat_mask_clear(affected_units);
-  PATMoveOverlay overlay;
-  const bool is_placement =
-      move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
-  if (is_placement) {
-    const bool vertical = board_is_dir_vertical(move_get_dir(move));
-    const int row_start = move_get_row_start(move);
-    const int col_start = move_get_col_start(move);
-    const int tiles_length = move_get_tiles_length(move);
-    const int row_end = vertical ? row_start + tiles_length - 1 : row_start;
-    const int col_end = vertical ? col_start : col_start + tiles_length - 1;
-    pat_move_affected_units(pat_eval_ctx, row_start, row_end, col_start,
-                            col_end, affected_units);
-    overlay.move = move;
-    overlay.row_start = row_start;
-    overlay.col_start = col_start;
-    overlay.row_end = row_end;
-    overlay.col_end = col_end;
-    overlay.vertical = vertical;
-    overlay.hook_flex = pat_eval_ctx->weights->hook_flex;
-    overlay.kwg =
-        pat_eval_ctx->weights->exact_created_hooks ? pat_eval_ctx->kwg : NULL;
-    overlay.lanes = pat_eval_ctx->lanes;
-  }
-  int32_t unit_rows[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
-  int worst_unit = -1;
-  Equity worst_penalty = 0;
-  for (int unit_index = 0; unit_index < num_units; unit_index++) {
-    int32_t *row = unit_rows[unit_index];
-    Equity penalty;
-    if (is_placement && pat_mask_test(affected_units, unit_index)) {
-      memset(row, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
-      int scan_dir = 0;
-      int scan_lane = 0;
-      pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay, row, &scan_dir,
-                            &scan_lane, NULL, NULL, NULL);
-      penalty = pat_dot_ctx(pat_eval_ctx, row);
-    } else {
-      memcpy(row, pat_eval_ctx->unit_features[unit_index],
-             sizeof(int32_t) * PAT_NUM_FEATURES);
-      penalty = pat_eval_ctx->unit_penalty[unit_index];
-    }
-    if (penalty < worst_penalty) {
-      worst_penalty = penalty;
-      worst_unit = unit_index;
-    }
-  }
-  const double gamma =
-      (worst_unit >= 0) ? pat_eval_ctx->weights->combine_gamma : 1.0;
-  for (int unit_index = 0; unit_index < num_units; unit_index++) {
-    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-         feature_index++) {
-      features[feature_index] +=
-          gamma * (double)unit_rows[unit_index][feature_index];
-    }
-  }
-  if (worst_unit >= 0) {
-    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-         feature_index++) {
-      features[feature_index] +=
-          (1.0 - gamma) * (double)unit_rows[worst_unit][feature_index];
-    }
-  }
-}
-
 void pat_extract_features_combined(const Square *lanes,
                                    const LetterDistribution *ld,
                                    const Rack *player_rack,
@@ -3344,7 +3000,7 @@ void pat_extract_features_combined(const Square *lanes,
       pat_scan_unit(lanes, ld, unseen_counts, pat, premium_rows[premium_idx],
                     premium_cols[premium_idx], premium_classes[premium_idx],
                     unit_index % 2, NULL, row, NULL, NULL, opponent_rack_size,
-                    NULL, true, true);
+                    NULL, true);
     } else {
       const int dd_idx = unit_index - num_premium * 2;
       pat_scan_dd_unit(lanes, unseen_counts, dd_dirs[dd_idx], dd_lanes[dd_idx],

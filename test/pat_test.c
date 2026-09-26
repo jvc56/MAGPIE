@@ -120,7 +120,7 @@ static void test_pat_version1_has_no_dls(const char *data_dir) {
        feature_index++) {
     if ((feature_index >= PAT_FEATURE_DLS_HOOK_START &&
          feature_index < PAT_FEATURE_QWS_HOOK_START) ||
-        (feature_index >= PAT_FEATURE_HOOK_SCALED_START &&
+        (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
          feature_index < PAT_FEATURE_DWS_HOOK_START)) {
       continue;
     }
@@ -139,7 +139,7 @@ static void test_pat_version1_has_no_dls(const char *data_dir) {
        feature_index < PAT_FEATURE_QWS_HOOK_START; feature_index++) {
     assert(pat_get_weight(loaded, feature_index) == 0);
   }
-  for (int feature_index = PAT_FEATURE_HOOK_SCALED_START;
+  for (int feature_index = PAT_FEATURE_HOOK_SCORE_START;
        feature_index < PAT_FEATURE_DWS_HOOK_START; feature_index++) {
     assert(pat_get_weight(loaded, feature_index) == 0);
   }
@@ -150,42 +150,84 @@ static void test_pat_version1_has_no_dls(const char *data_dir) {
   pat_destroy(loaded);
 }
 
-// A version 2 file predates the hypergeometric-scaled channels: it has DLS
-// rows (added in version 2) but no rows for the scaled channels added in
-// version 3. Confirms they read back as zero and every other feature still
-// round-trips through the gap.
-static void test_pat_version2_has_no_scaled_channels(const char *data_dir) {
+// Versions 3 to 5 carry rows for channels and training flags retired in
+// version 6 (see pat_row_is_retired): hypergeometric-scaled rows between
+// the floater through counts and the hook-score rows, letter-multiplier
+// rows at the end, and three flag rows. At zero they are skipped and every
+// other row still lands on its feature; nonzero, or in a version 6 file,
+// the file is rejected.
+static void write_retired_rows_file(const char *data_dir, const char *name,
+                                    int version, int retired_value) {
   StringBuilder *sb = string_builder_create();
-  string_builder_add_string(sb, "magpie_pat_v2\n");
+  string_builder_add_formatted_string(sb, "magpie_pat_v%d\n", version);
+  string_builder_add_string(sb, "fit_scaled,0\ntrain_overlay,0\n");
+  string_builder_add_string(sb, "fit_residual,5\nfit_shrink,0\n");
   char feature_name[64];
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
-    if (feature_index >= PAT_FEATURE_HOOK_SCALED_START &&
-        feature_index < PAT_FEATURE_DWS_HOOK_START) {
-      continue;
+    if (feature_index == PAT_FEATURE_HOOK_SCORE_START) {
+      for (int bin = 1; bin <= PAT_HOOK_BIN_COUNT; bin++) {
+        string_builder_add_formatted_string(sb, "hook_scaled_d%d,%d\n", bin,
+                                            retired_value);
+      }
+      for (int bin = 1; bin <= PAT_FLOATER_BIN_COUNT; bin++) {
+        string_builder_add_formatted_string(sb, "float_flex_scaled_d%d,0\n",
+                                            bin);
+      }
     }
     pat_feature_name(feature_index, feature_name, sizeof(feature_name));
     string_builder_add_formatted_string(sb, "%s,%d\n", feature_name,
                                         -(feature_index + 1));
   }
-  write_pat_file_contents(data_dir, "v2_no_scaled", string_builder_peek(sb));
+  static const char *const lm_names[] = {"lm_span", "lm_ext", "dws_lm_span",
+                                         "dws_lm_ext"};
+  for (int lm_idx = 0; lm_idx < 4; lm_idx++) {
+    for (int bin = 1; bin <= PAT_HOOK_BIN_COUNT; bin++) {
+      string_builder_add_formatted_string(sb, "%s_d%d,0\n", lm_names[lm_idx],
+                                          bin);
+    }
+  }
+  write_pat_file_contents(data_dir, name, string_builder_peek(sb));
   string_builder_destroy(sb);
+}
 
+static void test_pat_retired_rows(const char *data_dir) {
+  write_retired_rows_file(data_dir, "v5_retired", 5, 0);
   ErrorStack *error_stack = error_stack_create();
-  PATWeights *loaded = pat_create(data_dir, "v2_no_scaled", error_stack);
+  PATWeights *loaded = pat_create(data_dir, "v5_retired", error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(loaded);
-  for (int feature_index = PAT_FEATURE_HOOK_SCALED_START;
-       feature_index < PAT_FEATURE_DWS_HOOK_START; feature_index++) {
-    assert(pat_get_weight(loaded, feature_index) == 0);
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    assert(pat_get_weight(loaded, feature_index) == -(feature_index + 1));
   }
-  assert(pat_get_weight(loaded, PAT_FEATURE_HOOK_START) == -1);
-  assert(pat_get_weight(loaded, PAT_FEATURE_DLS_HOOK_START) ==
-         -(PAT_FEATURE_DLS_HOOK_START + 1));
-  assert(pat_get_weight(loaded, PAT_FEATURE_DWS_HOOK_START) ==
-         -(PAT_FEATURE_DWS_HOOK_START + 1));
-  error_stack_destroy(error_stack);
+  assert(pat_get_fit_residual(loaded) == PAT_FIT_ALL);
+  // Rewritten, the file is version 6 without the retired rows.
+  pat_write(loaded, data_dir, "v5_retired_rewritten", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  PATWeights *rewritten =
+      pat_create(data_dir, "v5_retired_rewritten", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+       feature_index++) {
+    assert(pat_get_weight(rewritten, feature_index) ==
+           pat_get_weight(loaded, feature_index));
+  }
+  pat_destroy(rewritten);
   pat_destroy(loaded);
+
+  write_retired_rows_file(data_dir, "v5_retired_nonzero", 5, -1);
+  loaded = pat_create(data_dir, "v5_retired_nonzero", error_stack);
+  assert(!loaded);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PAT_INVALID_ROW);
+  error_stack_reset(error_stack);
+
+  write_retired_rows_file(data_dir, "v6_retired", PAT_VERSION, 0);
+  loaded = pat_create(data_dir, "v6_retired", error_stack);
+  assert(!loaded);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_PAT_INVALID_ROW);
+  error_stack_reset(error_stack);
+  error_stack_destroy(error_stack);
 }
 
 static void test_pat_round_trip(const char *data_dir) {
@@ -377,18 +419,13 @@ static void test_pat_lexicon_floaters(const char *data_dir) {
   assert(lexicon_features[PAT_FEATURE_FLOAT_FLEX_START + 4] == unseen_e_and_s);
   assert(lexicon_features[PAT_FEATURE_FLOAT_FLEX_START + 6] ==
          2 * unseen_nonblank);
-  // Only the floater flexibility channels (and their scaled variants)
-  // read the extension set, and the premium-combination channels count a
-  // floater route only when that flexibility is nonzero; everything else
-  // is identical.
-  for (int feature_index = 0; feature_index < PAT_FEATURE_LM_SPAN_START;
+  // Only the floater flexibility channels read the extension set;
+  // everything else is identical.
+  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     const bool is_float_flex =
-        (feature_index >= PAT_FEATURE_FLOAT_FLEX_START &&
-         feature_index < PAT_FEATURE_FLOAT_FLEX_START + PAT_HOOK_BIN_COUNT) ||
-        (feature_index >= PAT_FEATURE_FLOAT_FLEX_SCALED_START &&
-         feature_index <
-             PAT_FEATURE_FLOAT_FLEX_SCALED_START + PAT_HOOK_BIN_COUNT);
+        feature_index >= PAT_FEATURE_FLOAT_FLEX_START &&
+        feature_index < PAT_FEATURE_FLOAT_FLEX_START + PAT_HOOK_BIN_COUNT;
     if (!is_float_flex) {
       assert(lexicon_features[feature_index] == legacy_features[feature_index]);
     }
@@ -529,120 +566,13 @@ static void test_pat_version3_has_no_hook_score_channels(const char *data_dir) {
        feature_index < PAT_FEATURE_DWS_HOOK_START; feature_index++) {
     assert(pat_get_weight(loaded, feature_index) == 0);
   }
-  assert(pat_get_weight(loaded, PAT_FEATURE_FLOAT_FLEX_SCALED_START) ==
-         -(PAT_FEATURE_FLOAT_FLEX_SCALED_START + 1));
+  assert(pat_get_weight(loaded, PAT_FEATURE_HOOK_SCORE_START - 1) ==
+         -PAT_FEATURE_HOOK_SCORE_START);
   assert(pat_get_weight(loaded, PAT_FEATURE_DWS_HOOK_START) ==
          -(PAT_FEATURE_DWS_HOOK_START + 1));
   assert(pat_get_weight(loaded, PAT_NUM_FEATURES - 1) == -PAT_NUM_FEATURES);
   error_stack_destroy(error_stack);
   pat_destroy(loaded);
-}
-
-static void test_pat_version4_has_no_lm_channels(const char *data_dir) {
-  StringBuilder *sb = string_builder_create();
-  string_builder_add_string(sb, "magpie_pat_v4\n");
-  char feature_name[64];
-  for (int feature_index = 0; feature_index < PAT_FEATURE_LM_SPAN_START;
-       feature_index++) {
-    pat_feature_name(feature_index, feature_name, sizeof(feature_name));
-    string_builder_add_formatted_string(sb, "%s,%d\n", feature_name,
-                                        -(feature_index + 1));
-  }
-  write_pat_file_contents(data_dir, "v4_no_lm", string_builder_peek(sb));
-  string_builder_destroy(sb);
-  ErrorStack *error_stack = error_stack_create();
-  PATWeights *loaded = pat_create(data_dir, "v4_no_lm", error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(loaded);
-  for (int feature_index = PAT_FEATURE_LM_SPAN_START;
-       feature_index < PAT_NUM_FEATURES; feature_index++) {
-    assert(pat_get_weight(loaded, feature_index) == 0);
-  }
-  assert(pat_get_weight(loaded, PAT_FEATURE_LM_SPAN_START - 1) ==
-         -PAT_FEATURE_LM_SPAN_START);
-  // Rewritten, it carries the rows and reads back the same.
-  pat_write(loaded, data_dir, "v4_no_lm_rewritten", error_stack);
-  assert(error_stack_is_empty(error_stack));
-  PATWeights *rewritten =
-      pat_create(data_dir, "v4_no_lm_rewritten", error_stack);
-  assert(error_stack_is_empty(error_stack));
-  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-       feature_index++) {
-    assert(pat_get_weight(rewritten, feature_index) ==
-           pat_get_weight(loaded, feature_index));
-  }
-  pat_destroy(rewritten);
-  error_stack_destroy(error_stack);
-  pat_destroy(loaded);
-}
-
-// A vertical AT on D2-D3, worked by hand against the standard board's
-// premium layout (D1 and L1 double letters on row 1; F2/J2 triple letters
-// on row 2; G3/I3, A4/H4, C7 and D8 double letters):
-//   - D1 hooks ?AT from both row-1 triples: four tiles from A1, five from
-//     H1, and the D1 double letter is in the span both ways: lm_span_d4
-//     and lm_span_d5 each get 3 x (2 - 1).
-//   - No triple lane has a letter multiplier only in an extension.
-//   - Double-word lanes never cover a letter multiplier on the way to a
-//     contact here, but six routes could extend onto one: B2's row
-//     floater at D2 (two tiles, past the run to the F2 triple letter:
-//     2 x 2), C3's row floater at D3 (one tile, on to G3: 2 x 1), C3
-//     itself as a column hook (?T; one tile, down to C7: 2 x 1), C3's
-//     column hook at C2 (?A; two tiles, past C3 down to C7: 2 x 1), the
-//     D4 hook itself on row 4 (AT?; one tile, out to A4: 2 x 1), and
-//     D4's column floater through TA (one tile, on to D1 or down to D8:
-//     2 x 1). So dws_lm_ext_d1 = 8 and dws_lm_ext_d2 = 6.
-//   Covering D1 with a C (CAT) spends the double letter: both triple
-//   spans go to zero while the double-word extensions are unchanged.
-static void test_pat_lm_channels(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
-  load_and_exec_config_or_die(
-      config, "cgp 15/3A11/3T11/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  const Game *game = config_get_game(config);
-  const LetterDistribution *ld = game_get_ld(game);
-  PATWeights *pat = pat_test_create_prepared("lm", game);
-  int32_t features[PAT_NUM_FEATURES];
-  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
-                       NULL, pat, RACK_SIZE, features);
-  for (int bin = 0; bin < PAT_HOOK_BIN_COUNT; bin++) {
-    assert(features[PAT_FEATURE_LM_SPAN_START + bin] ==
-           ((bin == 3 || bin == 4) ? 3 : 0));
-    assert(features[PAT_FEATURE_LM_EXT_START + bin] == 0);
-    assert(features[PAT_FEATURE_DWS_LM_SPAN_START + bin] == 0);
-    assert(features[PAT_FEATURE_DWS_LM_EXT_START + bin] == (bin == 0   ? 8
-                                                            : bin == 1 ? 6
-                                                                       : 0));
-  }
-  // The same through the lexicon floater semantics: every route here
-  // has real extensions, so nothing changes.
-  pat_set_lexicon_floaters(pat, true);
-  int32_t lexicon_features[PAT_NUM_FEATURES];
-  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
-                       NULL, pat, RACK_SIZE, lexicon_features);
-  for (int feature_index = PAT_FEATURE_LM_SPAN_START;
-       feature_index < PAT_NUM_FEATURES; feature_index++) {
-    assert(lexicon_features[feature_index] == features[feature_index]);
-  }
-
-  load_and_exec_config_or_die(
-      config, "cgp 3C11/3A11/3T11/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  game = config_get_game(config);
-  pat_extract_features(board_get_readonly_lanes(game_get_board(game), 0), ld,
-                       NULL, pat, RACK_SIZE, features);
-  for (int bin = 0; bin < PAT_HOOK_BIN_COUNT; bin++) {
-    assert(features[PAT_FEATURE_LM_SPAN_START + bin] == 0);
-    assert(features[PAT_FEATURE_LM_EXT_START + bin] == 0);
-    assert(features[PAT_FEATURE_DWS_LM_SPAN_START + bin] == 0);
-    assert(features[PAT_FEATURE_DWS_LM_EXT_START + bin] == (bin == 0   ? 8
-                                                            : bin == 1 ? 6
-                                                                       : 0));
-  }
-
-  // The runtime overlay sees the same thing: evaluating CAT's C from the
-  // AT position as a move must match the post-move board.
-  pat_destroy(pat);
-  config_destroy(config);
 }
 
 // AT on D2-E2: the only hook squares on any triple lane are D1 (a DLS,
@@ -1334,42 +1264,6 @@ static void test_pat_dls_features_land_in_dls_channels(void) {
   config_destroy(config);
 }
 
-// A Q directly above an open TWS makes it hooky (CSW21's only completion is
-// QI), giving both the raw and hypergeometric-scaled hook channels a real,
-// nonzero value to compare on an otherwise near-empty board, where the
-// unseen pool is far larger than RACK_SIZE.
-static void test_pat_hook_scaled_channel(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 15");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/Q14/15/15/15/15/15/15/15/15 / 0/0 0");
-  const Game *game = config_get_game(config);
-  const Board *board = game_get_board(game);
-  const LetterDistribution *ld = game_get_ld(game);
-  const Square *lanes = board_get_readonly_lanes(board, 0);
-
-  int32_t features[PAT_NUM_FEATURES];
-  pat_extract_features(lanes, ld, NULL, NULL, RACK_SIZE, features);
-
-  const int32_t raw_hook = features[PAT_FEATURE_HOOK_START];
-  const int32_t scaled_hook = features[PAT_FEATURE_HOOK_SCALED_START];
-  assert(raw_hook > 0);
-  // The unseen pool on a near-empty board is far larger than RACK_SIZE, so
-  // the hypergeometric fraction is well under 1: the scaled channel must be
-  // strictly smaller than the raw count, never equal to or exceeding it,
-  // and never negative.
-  assert(scaled_hook >= 0);
-  assert(scaled_hook < raw_hook);
-  // Every other hook bin (no hook there) and DWS/TLS/DLS/QWS/QLS's own
-  // hook channels (TWS-only feature) stay at zero in both forms.
-  for (int bin = 1; bin < PAT_HOOK_BIN_COUNT; bin++) {
-    assert(features[PAT_FEATURE_HOOK_START + bin] == 0);
-    assert(features[PAT_FEATURE_HOOK_SCALED_START + bin] == 0);
-  }
-
-  config_destroy(config);
-}
-
 // The bound argument for pat_eval_move_penalty_bound depends on the
 // discount staying in [0, 1] for every value a PATWeights could ever
 // carry, not just the ones a file happens to pass through pat_parse_contents
@@ -1705,10 +1599,9 @@ static void pat_path_parity_run(double utility_adjust) {
   MoveList *all_list_no_wmp = move_list_create(3000);
   MoveList *within_list = move_list_create(3000);
   PATEvalContext *parity_ctx = malloc_or_die(sizeof(PATEvalContext));
-  double *parity_row = malloc_or_die(sizeof(double) * PAT_NUM_FEATURES);
   int positions_checked = 0;
   int moves_checked = 0;
-  int rows_checked = 0;
+  int utility_checked = 0;
   int utility_nonzero = 0;
   for (int attempt = 0; attempt < 40; attempt++) {
     // Positions from seeded self-play in the WMP config, mirrored into
@@ -1793,9 +1686,9 @@ static void pat_path_parity_run(double utility_adjust) {
         moves_checked++;
       }
     }
-    // The overlay training row dotted with the weights must reproduce
-    // the runtime term for the same move (the same units, overlay and
-    // combination), to milli-equity rounding.
+    // The utility correction: each move's correction is the difference
+    // between the term with and without it, and it never exceeds the
+    // position's bound or the move's own bound.
     {
       const int mover_index = game_get_player_on_turn_index(game_wmp);
       const Player *mover = game_get_player(game_wmp, mover_index);
@@ -1810,24 +1703,6 @@ static void pat_path_parity_run(double utility_adjust) {
               player_get_rack(game_get_player(game_wmp, 1 - mover_index))));
       pat_eval_context_set_kwg(parity_ctx, player_get_kwg(mover));
       const int num_top = move_list_get_count(all_list_wmp);
-      for (int i = 0; i < num_top && i < 20; i++) {
-        const Move *move = move_list_get_move(all_list_wmp, i);
-        Rack leave;
-        get_leave_for_move(move, game_wmp, &leave);
-        const double runtime =
-            equity_to_double(pat_eval_move_penalty(parity_ctx, move, &leave));
-        pat_extract_move_features_combined(parity_ctx, move, parity_row);
-        double dot = 0.0;
-        for (int f = 0; f < PAT_NUM_FEATURES; f++) {
-          dot += equity_to_double(pat_get_weight(pats[0], f)) * parity_row[f];
-        }
-        assert(fabs(dot - runtime) < 0.002);
-        rows_checked++;
-      }
-      // The utility correction is not a feature, so the rows above are
-      // checked without it. Here: each move's correction is the difference
-      // between the term with and without it, and it never exceeds the
-      // position's bound or the move's own bound.
       const int margin = equity_to_int(
           player_get_score(mover) -
           player_get_score(game_get_player(game_wmp, 1 - mover_index)));
@@ -1853,6 +1728,7 @@ static void pat_path_parity_run(double utility_adjust) {
         if (with_utility != without_utility[i]) {
           utility_nonzero++;
         }
+        utility_checked++;
       }
     }
     // WMP on and off: identical exhaustive lists, move for move.
@@ -1866,14 +1742,13 @@ static void pat_path_parity_run(double utility_adjust) {
     }
   }
   printf("PAT path parity (utility %.0f): %d positions, %d within-margin "
-         "moves, %d overlay training rows checked, %d moves corrected\n",
-         utility_adjust, positions_checked, moves_checked, rows_checked,
+         "moves, %d utility moves checked, %d moves corrected\n",
+         utility_adjust, positions_checked, moves_checked, utility_checked,
          utility_nonzero);
   assert(positions_checked >= 30);
-  assert(rows_checked >= 300);
+  assert(utility_checked >= 300);
   assert((utility_adjust > 0.0) == (utility_nonzero > 0));
   free(parity_ctx);
-  free(parity_row);
   move_list_destroy(best_list);
   move_list_destroy(all_list_wmp);
   move_list_destroy(all_list_no_wmp);
@@ -2309,105 +2184,55 @@ static void test_pat_opening_adjustments(const char *data_dir) {
   test_pat_opening_adjustments_with_wmp(data_dir, false);
 }
 
-// Default fits never spend mass on the experimental channels: with
-// hook_d1 and hook_score_d1 as identical columns the whole coefficient
-// must land on hook_d1 under fit_residual 0 (hook_score fixed at its
-// loaded zero), on hook_score_d1 alone under fit_residual 1, and be
-// shared under 2; the premium-combination channel likewise stays zero
-// unless fit_residual is 4. Mode 5 frees both hook families in a full fit.
-// A zeroed file is the bootstrap every recipe
-// starts from, so this is the case that matters.
-static void test_pat_gen_experimental_channels_fixed(void) {
+// Default fits never spend mass on the hook-score channels: with hook_d1
+// and hook_score_d1 as identical columns the whole coefficient must land on
+// hook_d1 under PAT_FIT_DEFAULT (hook_score fixed at its loaded zero) and be
+// shared under PAT_FIT_ALL. PAT_FIT_THROUGH moves only the floater through
+// channels, leaving both hook channels at their loaded values. A zeroed file
+// is the bootstrap every recipe starts from, so this is the case that
+// matters.
+static void test_pat_gen_fit_residual_modes(void) {
   PATRegression *regression = malloc_or_die(sizeof(PATRegression));
   pat_regression_reset(regression);
   int32_t features[PAT_NUM_FEATURES];
   for (int i = 0; i < 400; i++) {
     memset(features, 0, sizeof(features));
     const int x = 1 + (i % 5);
+    const int y = 1 + (i % 7);
     features[PAT_FEATURE_HOOK_START] = x;
     features[PAT_FEATURE_HOOK_SCORE_START] = x;
-    features[PAT_FEATURE_LM_SPAN_START] = x;
-    // Reply score 3 points per unit, plus a little noise so the system
-    // is not degenerate beyond the collinear columns.
+    features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START] = y;
+    // Reply score 3 points per hook unit and 2 per through unit, plus a
+    // little noise so the system is not degenerate beyond the collinear
+    // columns.
     pat_regression_add_observation(regression, features,
-                                   3.0 * x + ((i % 3) - 1) * 0.01);
+                                   3.0 * x + 2.0 * y + ((i % 3) - 1) * 0.01);
   }
-  const int modes[4] = {0, 1, 2, 5};
-  for (int m = 0; m < 4; m++) {
+  const int modes[3] = {PAT_FIT_DEFAULT, PAT_FIT_THROUGH, PAT_FIT_ALL};
+  for (int mode_idx = 0; mode_idx < 3; mode_idx++) {
     PATWeights *pat = pat_create_zeroed("gen_fixed");
-    if (modes[m] != 0) {
-      // Set the residual mode through the file rows.
-      pat_set_fit_residual(pat, true);
-    }
-    // Modes 2 and 5 need the mode itself; pat_set_fit_residual only
-    // knows 0/1, so write and reread through the parser.
-    if (modes[m] == 2 || modes[m] == 5) {
-      char *data_dir = create_temp_pat_data_dir();
-      pat_destroy(pat);
-      char header[64];
-      current_pat_header(header, sizeof(header));
-      StringBuilder *sb = string_builder_create();
-      string_builder_add_formatted_string(sb, "%s\nfit_residual,%d\n", header,
-                                          modes[m]);
-      char feature_name[64];
-      for (int f = 0; f < PAT_NUM_FEATURES; f++) {
-        pat_feature_name(f, feature_name, sizeof(feature_name));
-        string_builder_add_formatted_string(sb, "%s,0\n", feature_name);
-      }
-      write_pat_file_contents(data_dir, "gen_fixed_mode2",
-                              string_builder_peek(sb));
-      string_builder_destroy(sb);
-      ErrorStack *error_stack = error_stack_create();
-      pat = pat_create(data_dir, "gen_fixed_mode2", error_stack);
-      assert(error_stack_is_empty(error_stack));
-      error_stack_destroy(error_stack);
-      free(data_dir);
-    }
-    assert(pat_get_fit_residual_mode(pat) == modes[m]);
+    pat_set_fit_residual(pat, modes[mode_idx]);
     const PATSolveResult result =
         pat_regression_solve_into_weights(regression, 1.0 / 400.0, pat);
     assert(result.solved);
     const Equity hook = pat_get_weight(pat, PAT_FEATURE_HOOK_START);
     const Equity hook_score = pat_get_weight(pat, PAT_FEATURE_HOOK_SCORE_START);
-    assert(pat_get_weight(pat, PAT_FEATURE_LM_SPAN_START) == 0);
-    if (modes[m] == 0) {
+    const Equity through =
+        pat_get_weight(pat, PAT_FEATURE_FLOAT_THROUGH_SCORE_START);
+    assert(through < 0);
+    if (modes[mode_idx] == PAT_FIT_DEFAULT) {
       assert(hook_score == 0);
       assert(hook < -2900 && hook > -3100);
-    } else if (modes[m] == 1) {
-      assert(hook == 0);
-      assert(hook_score < -2900 && hook_score > -3100);
+      assert(through < -1900 && through > -2100);
+    } else if (modes[mode_idx] == PAT_FIT_THROUGH) {
+      assert(hook == 0 && hook_score == 0);
     } else {
       assert(hook < 0 && hook_score < 0);
       assert(hook + hook_score < -2900 && hook + hook_score > -3100);
+      assert(through < -1900 && through > -2100);
     }
     pat_destroy(pat);
   }
-  free(regression);
-}
-
-// Shrinkage toward loaded weights must use the same feature-variance scale
-// on both sides of the normal equations. A low-variance feature exposes a
-// mismatch: the unscaled right-hand side would amplify its weight hugely.
-static void test_pat_gen_shrink_variance_scale(void) {
-  PATRegression *regression = malloc_or_die(sizeof(PATRegression));
-  pat_regression_reset(regression);
-  double features[PAT_NUM_FEATURES] = {0};
-  for (int observation_index = 0; observation_index < 400;
-       observation_index++) {
-    features[PAT_FEATURE_HOOK_SCORE_START] =
-        observation_index % 2 == 0 ? 0.0 : 0.01;
-    pat_regression_add_observation_double(
-        regression, features, features[PAT_FEATURE_HOOK_SCORE_START]);
-  }
-  PATWeights *pat = pat_create_zeroed("shrink_variance_scale");
-  pat_set_fit_residual(pat, true);
-  pat_set_weight(pat, PAT_FEATURE_HOOK_SCORE_START, -1000);
-  const PATSolveResult result =
-      pat_regression_solve_into_weights_shrunk(regression, 1.0, 100.0, pat);
-  assert(result.solved);
-  const Equity weight = pat_get_weight(pat, PAT_FEATURE_HOOK_SCORE_START);
-  assert(weight < -900 && weight > -1100);
-  pat_destroy(pat);
   free(regression);
 }
 
@@ -2501,15 +2326,12 @@ void test_pat(void) {
   test_pat_invalid_files(data_dir);
   test_pat_comments_and_blank_lines(data_dir);
   test_pat_version1_has_no_dls(data_dir);
-  test_pat_version2_has_no_scaled_channels(data_dir);
+  test_pat_retired_rows(data_dir);
   test_pat_version3_has_no_hook_score_channels(data_dir);
-  test_pat_version4_has_no_lm_channels(data_dir);
   test_pat_hook_score_channel();
-  test_pat_lm_channels();
   test_pat_stage_scale(data_dir);
   test_pat_opening_adjustments(data_dir);
-  test_pat_gen_experimental_channels_fixed();
-  test_pat_gen_shrink_variance_scale();
+  test_pat_gen_fit_residual_modes();
   test_pat_transposition_invariance();
   test_pat_blank_floater();
   test_pat_run_through_table();
@@ -2520,7 +2342,6 @@ void test_pat(void) {
   test_pat_scan_reach_capped_by_opponent_rack_size();
   test_pat_move_penalty();
   test_pat_dls_features_land_in_dls_channels();
-  test_pat_hook_scaled_channel();
   test_pat_own_asset_discount_clamped();
   test_pat_own_asset_discount();
   test_pat_opening_penalty_gating();
