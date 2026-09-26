@@ -20,6 +20,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum { FACE_MAX_CODEPOINTS = 4 };
+
+// A multi-letter tile face ("QU", "L·L") fills at most this much of the
+// tile's width, with its letters this fraction of the letter size apart.
+static const double FACE_WIDTH_FRAC = 0.84;
+static const double FACE_GAP_FRAC = 0.06;
+
 // 2x pixel-composite render. Builds one RGBA image covering the whole
 // board area in a single child plane and ncblit_rgba's it. Each tile is
 // (4 * cdx) × (2 * cdy) pixels: filled with the cell's bg, then the
@@ -90,6 +97,174 @@ static void blit_glyph_into_buf(uint8_t *buf, int buf_w, int buf_h, int tx,
   const int glyph_left = tx + (tile_w - g->width) / 2;
   blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, fg, bg);
 }
+
+// The codepoints of a tile face ("A", "Ç", "QU", "L·L"), up to
+// FACE_MAX_CODEPOINTS. Returns the count; 0 for an empty or malformed
+// face.
+static int face_codepoints(const char *face,
+                           uint32_t out[FACE_MAX_CODEPOINTS]) {
+  int count = 0;
+  if (face == NULL) {
+    return 0;
+  }
+  const unsigned char *pos = (const unsigned char *)face;
+  while (*pos != '\0' && count < FACE_MAX_CODEPOINTS) {
+    int extra = 0;
+    uint32_t codepoint = *pos;
+    if (codepoint >= 0xF0) {
+      extra = 3;
+      codepoint &= 0x07;
+    } else if (codepoint >= 0xE0) {
+      extra = 2;
+      codepoint &= 0x0F;
+    } else if (codepoint >= 0xC0) {
+      extra = 1;
+      codepoint &= 0x1F;
+    } else if (codepoint >= 0x80) {
+      return 0;
+    }
+    pos++;
+    for (int byte_idx = 0; byte_idx < extra; byte_idx++, pos++) {
+      if ((*pos & 0xC0) != 0x80) {
+        return 0;
+      }
+      codepoint = (codepoint << 6) | (*pos & 0x3F);
+    }
+    out[count++] = codepoint;
+  }
+  return count;
+}
+
+// Blits `g` squeezed horizontally by `scale` (0 < scale <= 1), its ink's
+// left edge at `ink_left` and its origin's baseline at `baseline`. Each
+// destination column averages the source columns it covers, so thin
+// stems stay even instead of dropping out.
+static void blit_glyph_squeezed(uint8_t *buf, int buf_w, int buf_h,
+                                double ink_left, int baseline,
+                                const TuiGlyph *g, double scale, ThemeRgb fg,
+                                ThemeRgb bg) {
+  if (g == NULL || g->width <= 0 || g->height <= 0) {
+    return;
+  }
+  const double ink_width = g->width * scale;
+  const int first_col = (int)ink_left;
+  const int last_col = (int)(ink_left + ink_width);
+  const int glyph_top = baseline - g->bearing_y;
+  for (int dst_x = first_col; dst_x <= last_col; dst_x++) {
+    if (dst_x < 0 || dst_x >= buf_w) {
+      continue;
+    }
+    // The source span this column covers, clipped to the glyph.
+    double span_start = (dst_x - ink_left) / scale;
+    double span_end = (dst_x + 1 - ink_left) / scale;
+    if (span_start < 0) {
+      span_start = 0;
+    }
+    if (span_end > g->width) {
+      span_end = g->width;
+    }
+    if (span_end <= span_start) {
+      continue;
+    }
+    const double pixel_span = 1.0 / scale;
+    for (int row = 0; row < g->height; row++) {
+      const int dst_y = glyph_top + row;
+      if (dst_y < 0 || dst_y >= buf_h) {
+        continue;
+      }
+      const unsigned char *src = g->alpha + (size_t)row * g->width;
+      double sum = 0;
+      for (int src_x = (int)span_start; src_x < g->width && src_x < span_end;
+           src_x++) {
+        double lo = span_start > src_x ? span_start : src_x;
+        double hi = span_end < src_x + 1 ? span_end : src_x + 1;
+        sum += src[src_x] * (hi - lo);
+      }
+      const unsigned int alpha = (unsigned int)(sum / pixel_span + 0.5);
+      if (alpha == 0) {
+        continue;
+      }
+      const unsigned int a = alpha > 255 ? 255 : alpha;
+      uint8_t *dst = buf + ((size_t)dst_y * buf_w + (size_t)dst_x) * 4;
+      dst[0] = (uint8_t)((dst[0] * (255 - a) + fg.r * a) / 255);
+      dst[1] = (uint8_t)((dst[1] * (255 - a) + fg.g * a) / 255);
+      dst[2] = (uint8_t)((dst[2] * (255 - a) + fg.b * a) / 255);
+      dst[3] = 255;
+    }
+  }
+  (void)bg;
+}
+
+// Draws a tile face of several letters ("QU", "NY", "L·L") in one tile:
+// the letters' ink set side by side `gap` pixels apart, squeezed
+// horizontally (never stretched) to fit between `left` and `right`,
+// and centered there. The letters keep their full height, so a
+// two-letter tile reads at the same size as its neighbors, only
+// narrower.
+static void blit_face_squeezed(uint8_t *buf, int buf_w, int buf_h,
+                               TuiGlyphCache *cache, bool bold,
+                               const uint32_t *codepoints, int count,
+                               double left, double right, int baseline,
+                               double gap, ThemeRgb fg, ThemeRgb bg) {
+  const TuiGlyph *glyphs[FACE_MAX_CODEPOINTS];
+  double ink_total = 0;
+  int inked = 0;
+  for (int cp_idx = 0; cp_idx < count; cp_idx++) {
+    glyphs[cp_idx] = bold ? tui_glyph_cache_get_bold(cache, codepoints[cp_idx])
+                          : tui_glyph_cache_get(cache, codepoints[cp_idx]);
+    if (glyphs[cp_idx] != NULL && glyphs[cp_idx]->width > 0) {
+      ink_total += glyphs[cp_idx]->width;
+      inked++;
+    }
+  }
+  if (inked == 0) {
+    return;
+  }
+  const double natural = ink_total + gap * (inked - 1);
+  const double max_width = right - left;
+  const double scale = natural > max_width ? max_width / natural : 1.0;
+  double pen = (left + right - natural * scale) / 2;
+  for (int cp_idx = 0; cp_idx < count; cp_idx++) {
+    const TuiGlyph *g = glyphs[cp_idx];
+    if (g == NULL || g->width <= 0) {
+      continue;
+    }
+    blit_glyph_squeezed(buf, buf_w, buf_h, pen, baseline, g, scale, fg, bg);
+    pen += (g->width + gap) * scale;
+  }
+}
+
+// Where the score subscript's ink starts: the digits of `score` set
+// right-aligned against the tile's right margin, as the subscript loops
+// below draw them. `tile_w` when there's nothing to draw.
+static int subscript_left(TuiGlyphCache *cache_sub, bool bold, int score,
+                          int tile_w) {
+  char digits[8];
+  (void)snprintf(digits, sizeof(digits), "%d", score);
+  int pen_right = tile_w - (int)((double)tile_w * 0.12);
+  for (int digit_idx = (int)strlen(digits) - 1; digit_idx >= 0; digit_idx--) {
+    const uint32_t codepoint = (uint32_t)digits[digit_idx];
+    const TuiGlyph *gd = bold ? tui_glyph_cache_get_bold(cache_sub, codepoint)
+                              : tui_glyph_cache_get(cache_sub, codepoint);
+    if (gd == NULL || gd->width <= 0) {
+      continue;
+    }
+    pen_right -= gd->width + 1;
+  }
+  return pen_right;
+}
+
+// The span a multi-letter face may use: the tile less its side margins,
+// and, beside a score subscript, only the part left of it.
+static void face_span(int tile_w, int sub_left, double *left, double *right) {
+  const double margin = tile_w * (1.0 - FACE_WIDTH_FRAC) / 2;
+  *left = margin;
+  *right = tile_w - margin;
+  if (sub_left < tile_w && sub_left - margin < *right) {
+    *right = sub_left - margin;
+  }
+}
+
 void fill_tile_rect(uint8_t *buf, int buf_w, int tx, int ty, int tile_w,
                     int tile_h, ThemeRgb color) {
   for (int row = 0; row < tile_h; row++) {
@@ -428,16 +603,28 @@ uint8_t *compose_tile_pixels(MachineLetter ml, int owner, bool blank_uppercase,
     tui_glyph_cache_set_size(glyph_cache_sub, sub_px, antialias);
   }
 
-  const char *ascii = ld->ld_ml_to_hl[glyph_ml];
-  uint32_t glyph_codepoint = 0;
-  if (ascii != NULL && ascii[0] != '\0' && (unsigned char)ascii[0] < 0x80) {
-    glyph_codepoint = (uint32_t)ascii[0];
-  }
+  uint32_t codepoints[FACE_MAX_CODEPOINTS];
+  const int codepoint_count =
+      face_codepoints(ld->ld_ml_to_hl[glyph_ml], codepoints);
+  const uint32_t glyph_codepoint = codepoint_count == 1 ? codepoints[0] : 0;
   const int tile_score = equity_to_int(ld_get_score(ld, ml));
   const bool show_subscript =
       subs_on && (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL || tile_score != 0);
 
-  if (glyph_codepoint != 0) {
+  if (codepoint_count > 1) {
+    const int baseline =
+        (int)(tile_h * 0.72) - (subs_on ? (int)((double)tile_h * 0.08) : 0);
+    double left = 0;
+    double right = 0;
+    face_span(tile_w,
+              show_subscript ? subscript_left(glyph_cache_sub, is_preview,
+                                              tile_score, tile_w)
+                             : tile_w,
+              &left, &right);
+    blit_face_squeezed(buf, tile_w, tile_h, glyph_cache, is_preview, codepoints,
+                       codepoint_count, left, right, baseline,
+                       letter_px * FACE_GAP_FRAC, fg, bg);
+  } else if (glyph_codepoint != 0) {
     // Preview tiles pull from the bold cache so FreeType emboldens the
     // outline before rasterization — that gives a real bold stroke
     // weight, not a bitmap dilation of the regular glyph.
@@ -569,13 +756,31 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
     tui_glyph_cache_set_size(glyph_cache_sub, sub_px, antialias);
   }
 
-  const char *ascii = ml == 0 ? "?" : ld->ld_ml_to_hl[ml];
-  const TuiGlyph *g =
-      (ascii != NULL && ascii[0] != '\0' && (unsigned char)ascii[0] < 0x80)
-          ? tui_glyph_cache_get(glyph_cache, (uint32_t)ascii[0])
-          : NULL;
+  uint32_t codepoints[FACE_MAX_CODEPOINTS];
+  const int codepoint_count =
+      face_codepoints(ml == 0 ? "?" : ld->ld_ml_to_hl[ml], codepoints);
+  const TuiGlyph *g = codepoint_count == 1
+                          ? tui_glyph_cache_get(glyph_cache, codepoints[0])
+                          : NULL;
   const int tile_score = (ml == 0) ? 0 : equity_to_int(ld_get_score(ld, ml));
-  if (g != NULL && g->width > 0 && g->height > 0) {
+  // Blanks always get a "0" subscript so their value is explicit.
+  const bool show_subscript =
+      subs_on && !ghost &&
+      (ml == 0 || sub_mode == TUI_SCORE_SUBSCRIPTS_ALL || tile_score != 0);
+  if (codepoint_count > 1) {
+    const int baseline =
+        (int)(th * 0.72) - (subs_on ? (int)((double)th * 0.08) : 0);
+    double left = 0;
+    double right = 0;
+    face_span(tw,
+              show_subscript ? subscript_left(glyph_cache_sub, /*bold=*/false,
+                                              tile_score, tw)
+                             : tw,
+              &left, &right);
+    blit_face_squeezed(buf_ss, tw, th, glyph_cache, /*bold=*/false, codepoints,
+                       codepoint_count, left, right, baseline,
+                       letter_px * FACE_GAP_FRAC, fg, bg);
+  } else if (g != NULL && g->width > 0 && g->height > 0) {
     if (subs_on) {
       const double shift_x_frac = (tile_score >= 10) ? 0.07 : 0.03;
       const int shift_x = (int)((double)tw * shift_x_frac);
@@ -588,29 +793,23 @@ uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx, bool ghost,
       blit_glyph_into_buf(buf_ss, tw, th, 0, 0, tw, th, g, fg, bg);
     }
   }
-  if (subs_on && !ghost) {
-    // Blanks always get a "0" subscript so their value is explicit.
-    const bool show_subscript = (ml == 0) ||
-                                (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL) ||
-                                (tile_score != 0);
-    if (show_subscript) {
-      char digits[8];
-      (void)snprintf(digits, sizeof(digits), "%d", tile_score);
-      const int margin_x = (int)((double)tw * 0.12);
-      const int margin_y = (int)((double)th * 0.16);
-      const int digit_bottom = th - margin_y;
-      int pen_right = tw - margin_x;
-      for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
-        const TuiGlyph *gd =
-            tui_glyph_cache_get(glyph_cache_sub, (uint32_t)digits[i]);
-        if (gd == NULL || gd->width <= 0) {
-          continue;
-        }
-        const int gleft = pen_right - gd->width;
-        const int gtop = digit_bottom - gd->height;
-        blit_glyph_at(buf_ss, tw, th, gleft, gtop, gd, fg, bg);
-        pen_right = gleft - 1;
+  if (show_subscript) {
+    char digits[8];
+    (void)snprintf(digits, sizeof(digits), "%d", tile_score);
+    const int margin_x = (int)((double)tw * 0.12);
+    const int margin_y = (int)((double)th * 0.16);
+    const int digit_bottom = th - margin_y;
+    int pen_right = tw - margin_x;
+    for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
+      const TuiGlyph *gd =
+          tui_glyph_cache_get(glyph_cache_sub, (uint32_t)digits[i]);
+      if (gd == NULL || gd->width <= 0) {
+        continue;
       }
+      const int gleft = pen_right - gd->width;
+      const int gtop = digit_bottom - gd->height;
+      blit_glyph_at(buf_ss, tw, th, gleft, gtop, gd, fg, bg);
+      pen_right = gleft - 1;
     }
   }
   // Downsample SSxSS box average to (tile_w x tile_h). Alpha is

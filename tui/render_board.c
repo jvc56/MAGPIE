@@ -17,6 +17,7 @@
 #include "render_planes.h"
 #include "render_view.h"
 #include "theme.h"
+#include "tile_input.h"
 #include "tui_ui_types.h"
 #include <dirent.h>
 #include <notcurses/notcurses.h>
@@ -159,19 +160,9 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       const ThemeRgb tile_bg = theme_tile_bg(theme, owner);
       theme_apply_fg(plane, is_blank ? theme->blank_tile_fg : tile_fg);
       theme_apply_bg(plane, tile_bg);
-      if (halfwidth) {
-        const char *ascii = ld->ld_ml_to_hl[glyph_ml];
-        ncplane_putstr_yx(plane, screen_row, screen_col,
-                          ascii[0] != '\0' ? ascii : " ");
-      } else {
-        const char *fullwidth = ld->ld_ml_to_alt_hl[glyph_ml];
-        if (fullwidth[0] != '\0') {
-          ncplane_putstr_yx(plane, screen_row, screen_col, fullwidth);
-        } else {
-          ncplane_putstr_yx(plane, screen_row, screen_col, " ");
-          ncplane_putstr(plane, ld->ld_ml_to_hl[glyph_ml]);
-        }
-      }
+      char face[TUI_TILE_TEXT_MAX];
+      tile_face_cells(ld, glyph_ml, halfwidth, face, sizeof(face));
+      ncplane_putstr_yx(plane, screen_row, screen_col, face);
     }
   }
 }
@@ -706,20 +697,9 @@ void render_board(struct ncplane *plane, const Theme *theme,
         ncplane_set_styles(plane, NCSTYLE_BOLD);
         const int screen_row = CELL_ROW_BASE + row;
         const int screen_col = CELL_COL_BASE + col * L->board_cell_w;
-        if (halfwidth) {
-          const char *ascii = state->ld->ld_ml_to_hl[ml];
-          ncplane_putstr_yx(plane, screen_row, screen_col,
-                            ascii[0] != '\0' ? ascii : " ");
-        } else {
-          const char *fullwidth = state->ld->ld_ml_to_alt_hl[ml];
-          if (fullwidth[0] != '\0') {
-            ncplane_putstr_yx(plane, screen_row, screen_col, fullwidth);
-          } else {
-            const char *ascii = state->ld->ld_ml_to_hl[ml];
-            ncplane_putstr_yx(plane, screen_row, screen_col, " ");
-            ncplane_putstr(plane, ascii);
-          }
-        }
+        char face[TUI_TILE_TEXT_MAX];
+        tile_face_cells(state->ld, ml, halfwidth, face, sizeof(face));
+        ncplane_putstr_yx(plane, screen_row, screen_col, face);
         ncplane_set_styles(plane, 0);
       }
     }
