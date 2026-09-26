@@ -23,6 +23,8 @@ typedef enum {
   TUI_SETTING_SIM_CANDIDATES,
   TUI_SETTING_AUTO_ANALYZE,
   TUI_SETTING_ANALYSIS_TIME,
+  TUI_SETTING_LANGUAGE,
+  TUI_SETTING_LEXICON,
   TUI_SETTING_THEME,
   TUI_SETTING_RIT,
   TUI_SETTING_THREADS,
@@ -37,6 +39,11 @@ typedef enum {
   TUI_SETTING_KIND_BOOL,   // off / on
   TUI_SETTING_KIND_CHOICE, // one of `choices`, stored as its index
   TUI_SETTING_KIND_INT,    // min..max
+  // An installed lexicon, stored as its index in the lexicon list (the
+  // one data/lexica holds); LANGUAGE steps between languages, choosing
+  // each one's first lexicon.
+  TUI_SETTING_KIND_LANGUAGE,
+  TUI_SETTING_KIND_LEXICON,
 } TuiSettingKind;
 
 typedef struct {
@@ -78,12 +85,24 @@ const char *tui_setting_unavailable_reason(const TuiGameState *state,
                                            const TuiSession *session,
                                            TuiSettingId id);
 
+enum { TUI_SETTING_MAX_VALUES = 256, TUI_SETTING_VALUE_NAME_MAX = 32 };
+
+// A non-INT setting's values in order, with their names: off/on, the
+// choices, the installed languages or lexicons.
+typedef struct {
+  int count;
+  int values[TUI_SETTING_MAX_VALUES];
+  char names[TUI_SETTING_MAX_VALUES][TUI_SETTING_VALUE_NAME_MAX];
+} TuiSettingValues;
+
+void tui_setting_values(const TuiSettingDef *def, TuiSettingValues *out);
+
 // `value` as the dialogs show it: "on", "2x", "3px", "off", "4 plies".
 void tui_setting_format(const TuiSettingDef *def, int value, char *out,
                         size_t out_size);
 
 // The values the setting accepts, for autocomplete: "on | off",
-// "1x | 2x", "0-6 px (0 = off)".
+// "1x | 2x", "0-6 px (0 = off)", "an installed lexicon".
 void tui_setting_describe_values(const TuiSettingDef *def, char *out,
                                  size_t out_size);
 
