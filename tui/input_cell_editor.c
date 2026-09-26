@@ -3,6 +3,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -13,14 +14,33 @@
 #include "game_state.h"
 #include "move_entry.h"
 #include "render_common.h"
+#include "tile_input.h"
 #include "tui_history_edit.h"
 #include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+// Whether `key` is text to type (a printable character, ASCII or not)
+// rather than a control or special key.
+static bool is_typed_text(uint32_t key) {
+  return (key >= 0x20 && key < 0x7f) ||
+         (key >= 0xa0 && !nckey_synthesized_p(key));
+}
+
+// The UTF-8 text of a typed key.
+static void key_text(uint32_t key, const ncinput *input, char *out,
+                     size_t out_size) {
+  if (input->utf8[0] != '\0') {
+    (void)snprintf(out, out_size, "%s", input->utf8);
+  } else {
+    (void)snprintf(out, out_size, "%c", (char)key);
+  }
+}
 
 // Annotation: holds back committing turn `idx` when its play forms
 // words not in the lexicon, until the annotator answers the phony
@@ -110,15 +130,15 @@ static bool cell_editor_board_entry_key(TuiGameState *state, uint32_t key,
     pthread_mutex_unlock(&state->mutex);
     return true;
   }
-  if (key >= 0x20 && key < 0x7f) {
-    const char ch = (char)key;
-    if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
-      pthread_mutex_lock(&state->mutex);
-      tui_move_entry_append_letter(state, ch, ncinput_shift_p(input));
-      pthread_mutex_unlock(&state->mutex);
-    }
-    // Swallow other printables (digits, punctuation) in board
-    // mode so they don't leak into the coord token.
+  if (is_typed_text(key)) {
+    // Letters, and the brackets / dots of multi-letter tiles; other
+    // printables (digits, punctuation) don't make a tile and are dropped
+    // so they don't leak into the coord token.
+    char text[TUI_TILE_TEXT_MAX];
+    key_text(key, input, text, sizeof(text));
+    pthread_mutex_lock(&state->mutex);
+    tui_move_entry_append_key(state, text, ncinput_shift_p(input));
+    pthread_mutex_unlock(&state->mutex);
     return true;
   }
   // Swallow anything else while board entry is active.
@@ -171,8 +191,8 @@ static bool cell_editor_back_to_move(TuiGameState *state, int idx) {
   // Only the sort order (state->rack_sort) can change it
   // from here on.
   if (state->edit_rack_valid && state->edit_rack_len > 0) {
-    char sorted_rack[24];
-    char raw[24];
+    char sorted_rack[TUI_RACK_TEXT_MAX];
+    char raw[TUI_RACK_TEXT_MAX];
     const int n_raw = state->edit_rack_len < (int)sizeof(raw) - 1
                           ? state->edit_rack_len
                           : (int)sizeof(raw) - 1;
@@ -246,7 +266,7 @@ static bool cell_editor_advance_to_rack(TuiGameState *state, int idx) {
       // computed against the old buffer and is stale by now).
       if (!state->edit_rack_user_modified) {
         if (state->edit_move_inferred_rack[0] != '\0') {
-          char sorted[24];
+          char sorted[TUI_RACK_TEXT_MAX];
           tui_format_alphagram_for_sort(state->edit_move_inferred_rack,
                                         state->ld, state->rack_sort, sorted,
                                         sizeof(sorted));
@@ -285,7 +305,7 @@ static bool cell_editor_advance_to_rack(TuiGameState *state, int idx) {
   // appends raw to the seeded form (and a focus-leave will
   // re-sort if needed).
   if (state->edit_rack_len == 0 && state->edit_move_inferred_rack[0] != '\0') {
-    char sorted_seed[24];
+    char sorted_seed[TUI_RACK_TEXT_MAX];
     tui_format_alphagram_for_sort(state->edit_move_inferred_rack, state->ld,
                                   state->rack_sort, sorted_seed,
                                   sizeof(sorted_seed));
@@ -394,8 +414,8 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
       // rather than the raw typed order. Matches the Tab/Up
       // path's behavior.
       if (state->edit_rack_valid && state->edit_rack_len > 0) {
-        char sorted_rack[24];
-        char raw[24];
+        char sorted_rack[TUI_RACK_TEXT_MAX];
+        char raw[TUI_RACK_TEXT_MAX];
         const int n_raw = state->edit_rack_len < (int)sizeof(raw) - 1
                               ? state->edit_rack_len
                               : (int)sizeof(raw) - 1;
@@ -587,88 +607,76 @@ static bool cell_editor_type_char(TuiGameState *state, uint32_t key,
                                   char *buf, int *plen, int *pcur,
                                   size_t buf_cap) {
   pthread_mutex_lock(&state->mutex);
-  // RACK field caps at 7 tiles regardless of buffer size —
-  // a Scrabble rack never holds more than that, and the
-  // visible zone in the cell is 7 + 1 (cursor) cells wide.
-  // Hitting the cap leaves the cursor parked in the 8th
-  // cell as a visual "no room" signal.
-  const int per_field_cap = field_move ? (int)buf_cap - 1 : 7;
-  if (*plen < per_field_cap && *plen + 1 < (int)buf_cap) {
-    // Default: uppercase letters in both fields. Space is
-    // meaningful in MOVE (between coord and word) but not
-    // in RACK.
-    // In the MOVE field, a Shift+letter on a real key
-    // (i.e., the terminal delivers an uppercase ASCII
-    // letter, not a lowercase one) means "this tile is a
-    // played blank designated as that letter". Store the
-    // glyph as LOWERCASE so it parses as a blank in the
-    // engine's move notation, which is the same convention
-    // GCG / CGP / sim outputs use. The parser turns each
-    // lowercase letter in the word into a '?' for the
-    // inferred rack — so the rack panel correctly shows
-    // one blank tile per played blank.
-    char ch = (char)key;
-    if (!field_move && ch == ' ') {
+  char text[TUI_TILE_TEXT_MAX + 2];
+  key_text(key, input, text, sizeof(text));
+  const bool shift = ncinput_shift_p(input);
+  const bool space = strcmp(text, " ") == 0;
+  // Space is meaningful in MOVE (between coord and word) but not in RACK.
+  // A second space is never meaningful (the one space separates coord
+  // from word), and autofill may have already supplied it when it
+  // absorbed a leading played-through letter right after the coord —
+  // swallow dupes so "8H<space>" out of habit can't split the word token.
+  if (space && (!field_move || strchr(buf, ' ') != NULL)) {
+    pthread_mutex_unlock(&state->mutex);
+    return true;
+  }
+  // Coord-token letters (before the first space, e.g. the F in
+  // "8F ...") are positions, not tiles — only the word part goes
+  // through tile resolution.
+  const bool typing_word = field_move && !space && *pcur > 0 &&
+                           memchr(buf, ' ', (size_t)*pcur) != NULL;
+  if (typing_word) {
+    // Word keys go through the shared move-entry path (multi-letter
+    // tiles, rack gating + blank fallback in play-vs-computer,
+    // playthrough pass-through with canonical casing in every mode) so
+    // the cell and the board surfaces can't drift. With the cursor at
+    // the end this is the whole keystroke (append + re-parse + absorb);
+    // a mid-text key that is a tile by itself is resolved here and
+    // inserted below, and anything else is inserted as typed.
+    if (*pcur == *plen) {
+      tui_move_entry_append_key(state, text, shift);
       pthread_mutex_unlock(&state->mutex);
       return true;
     }
-    // MOVE field: a second space is never meaningful (the one
-    // space separates coord from word), and autofill may have
-    // already supplied it when it absorbed a leading played-
-    // through letter right after the coord — swallow dupes so
-    // "8H<space>" out of habit can't split the word token.
-    if (field_move && ch == ' ' && strchr(buf, ' ') != NULL) {
-      pthread_mutex_unlock(&state->mutex);
-      return true;
-    }
-    const bool is_letter = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
-    // Coord-token letters (before the first space, e.g. the F
-    // in "8F ...") are positions, not tiles — only letters in
-    // the word part go through rack resolution.
-    const bool typing_word =
-        *pcur > 0 && memchr(buf, ' ', (size_t)*pcur) != NULL;
-    if (field_move && is_letter && typing_word) {
-      // Word letters go through the shared move-entry resolver
-      // (rack gating + blank fallback in play-vs-computer,
-      // playthrough pass-through with canonical casing in
-      // every mode) so the cell and the board surfaces can't
-      // drift — that divergence was the TUI's biggest bug
-      // farm. With the cursor at the end this is the whole
-      // shared keystroke path (append + re-parse + absorb);
-      // mid-text edits resolve the glyph here and fall
-      // through to the generic insert-at-cursor below.
-      if (*pcur == *plen) {
-        tui_move_entry_append_letter(state, ch, ncinput_shift_p(input));
-        pthread_mutex_unlock(&state->mutex);
-        return true;
-      }
+    const int ml = state->ld != NULL ? tui_tile_for_text(state->ld, text) : -1;
+    if (ml > 0) {
       int land_row = -1;
       int land_col = -1;
       if (!tui_move_entry_landing_square(state, &land_row, &land_col)) {
         land_row = -1;
         land_col = -1;
       }
-      char glyph = '\0';
-      if (tui_move_entry_resolve_letter(state, ch, ncinput_shift_p(input),
-                                        land_row, land_col,
-                                        &glyph) == TUI_TYPED_LETTER_REJECT) {
+      if (tui_move_entry_resolve_tile(state, ml, shift, land_row, land_col,
+                                      text, sizeof(text)) ==
+          TUI_TYPED_LETTER_REJECT) {
         pthread_mutex_unlock(&state->mutex);
         return true;
       }
-      ch = glyph;
-    } else if (field_move && is_letter && ncinput_shift_p(input)) {
-      // Shift+letter on MOVE → played blank (lowercase).
-      if (ch >= 'A' && ch <= 'Z') {
-        ch = (char)(ch - 'A' + 'a');
-      }
-    } else if (ch >= 'a' && ch <= 'z') {
-      // Default: case-fold lowercase up to uppercase.
-      ch = (char)(ch - 'a' + 'A');
     }
-    memmove(&buf[*pcur + 1], &buf[*pcur], (size_t)(*plen - *pcur) + 1);
-    buf[*pcur] = ch;
-    (*pcur)++;
-    (*plen)++;
+  } else if (text[1] == '\0' && text[0] >= 'a' && text[0] <= 'z') {
+    // Letters are uppercase; in the MOVE field, Shift+letter marks a
+    // played blank, stored lowercase as in the engine's move notation.
+    const bool blank_letter = field_move && shift;
+    if (!blank_letter) {
+      text[0] = (char)(text[0] - 'a' + 'A');
+    }
+  } else if (field_move && shift && text[1] == '\0' && text[0] >= 'A' &&
+             text[0] <= 'Z') {
+    text[0] = (char)(text[0] - 'A' + 'a');
+  }
+  // A rack holds seven tiles, however many letters they spell ("[QU]" is
+  // one); a bracket still open adds to the tile being typed.
+  const bool bracket_open =
+      strrchr(buf, '[') != NULL &&
+      (strrchr(buf, ']') == NULL || strrchr(buf, ']') < strrchr(buf, '['));
+  const bool rack_full =
+      !field_move && !bracket_open && tui_tile_count(buf, *plen) >= RACK_SIZE;
+  const int text_len = (int)strlen(text);
+  if (!rack_full && *plen + text_len < (int)buf_cap) {
+    memmove(&buf[*pcur + text_len], &buf[*pcur], (size_t)(*plen - *pcur) + 1);
+    memcpy(&buf[*pcur], text, (size_t)text_len);
+    *pcur += text_len;
+    *plen += text_len;
     if (!field_move) {
       // User typed into the RACK field — the buffer is now
       // theirs; the rack should NOT snap back to whatever
@@ -815,7 +823,7 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   if (key == NCKEY_LEFT) {
     pthread_mutex_lock(&state->mutex);
     if (*pcur > 0) {
-      (*pcur)--;
+      *pcur = tui_tile_prev_boundary(buf, *pcur);
     } else if (field_leave) {
       // LEAVE start → RACK end of same turn.
       state->edit_field = TUI_EDIT_FIELD_RACK;
@@ -838,7 +846,7 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   if (key == NCKEY_RIGHT) {
     pthread_mutex_lock(&state->mutex);
     if (*pcur < *plen) {
-      (*pcur)++;
+      *pcur = tui_tile_next_boundary(buf, *pcur);
     } else if (field_move) {
       // MOVE end → RACK start of same turn.
       state->edit_field = TUI_EDIT_FIELD_RACK;
@@ -873,9 +881,12 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
     pthread_mutex_lock(&state->mutex);
     if (*pcur > 0) {
-      memmove(&buf[*pcur - 1], &buf[*pcur], (size_t)(*plen - *pcur) + 1);
-      (*pcur)--;
-      (*plen)--;
+      // Whole tiles: "[QU]" or a two-byte "Ç" goes at once.
+      const int start = tui_tile_prev_boundary(buf, *pcur);
+      memmove(&buf[start], &buf[*pcur], (size_t)(*plen - *pcur) + 1);
+      *plen -= *pcur - start;
+      *pcur = start;
+      tui_tile_key_reset(&state->tile_keys);
       if (!field_move) {
         state->edit_rack_user_modified = true;
         state->edit_rack_carryover[0] = '\0';
@@ -888,8 +899,10 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   if (key == NCKEY_DEL) {
     pthread_mutex_lock(&state->mutex);
     if (*pcur < *plen) {
-      memmove(&buf[*pcur], &buf[*pcur + 1], (size_t)(*plen - *pcur));
-      (*plen)--;
+      const int end = tui_tile_next_boundary(buf, *pcur);
+      memmove(&buf[*pcur], &buf[end], (size_t)(*plen - end) + 1);
+      *plen -= end - *pcur;
+      tui_tile_key_reset(&state->tile_keys);
       if (!field_move) {
         state->edit_rack_user_modified = true;
         state->edit_rack_carryover[0] = '\0';
@@ -899,7 +912,7 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
     pthread_mutex_unlock(&state->mutex);
     return true;
   }
-  if (key >= 0x20 && key < 0x7f) {
+  if (is_typed_text(key)) {
     return cell_editor_type_char(state, key, &input, field_move, buf, plen,
                                  pcur, buf_cap);
   }
