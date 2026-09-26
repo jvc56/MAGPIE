@@ -281,19 +281,13 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui, TuiSession *session,
     // (handled with the rest of the slash input below).
     ui->modal = TUI_MODAL_MAIN_MENU;
     ui->main_menu_focus = 0;
-  } else if (key >= '0' && key <= '5') {
+  } else if (key >= '0' && key <= '5' && !state->slash_active) {
     // Direct panel focus hotkeys (no modal). '0' focuses the
     // command bar; '1'-'5' focus the corresponding panel. These
-    // work globally regardless of which panel is currently
-    // focused — typing digits never gets captured by a panel.
+    // work regardless of which panel is focused; only a command
+    // being typed takes digits (as "/set" values).
     pthread_mutex_lock(&state->mutex);
     const int new_focus = (int)(key - '0');
-    if (new_focus != 0 && state->slash_active) {
-      state->slash_active = false;
-      state->slash_len = 0;
-      state->slash_cursor = 0;
-      state->slash_buf[0] = '\0';
-    }
     state->focused_panel = new_focus;
     // "5" lands on the analysis panel's [5] badge, where Space or Enter
     // opens its menu; the arrows move down into the rows.
