@@ -4,7 +4,6 @@
 #include "../def/players_data_defs.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "equity.h"
 #include "klv.h"
 #include "kwg.h"
 #include "pat.h"

@@ -323,10 +323,12 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
           feature_index <
               PAT_FEATURE_FLOAT_THROUGH_COUNT_START + PAT_FLOATER_BIN_COUNT;
       const bool is_lm = feature_index >= PAT_FEATURE_LM_SPAN_START;
-      const bool free_here =
-          lm_free        ? is_lm
-          : through_free ? is_through
-                         : (is_hook_score || (hooks_free && is_tws_hook));
+      bool free_here = is_hook_score || (hooks_free && is_tws_hook);
+      if (lm_free) {
+        free_here = is_lm;
+      } else if (through_free) {
+        free_here = is_through;
+      }
       if (!free_here) {
         fixed[feature_index + 1] = true;
         fixed_value[feature_index + 1] =

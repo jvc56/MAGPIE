@@ -50,6 +50,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Benchmark instrumentation: accumulates total sim iterations across all
 // turns in all games. Read/reset via autoplay_get_total_sim_iterations().

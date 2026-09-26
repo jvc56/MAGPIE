@@ -33,6 +33,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
+#include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/pat.h"
@@ -1082,6 +1083,111 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
   return NUMBER_OF_ARG_TOKENS;
 }
 
+// The help for the PAT options (see add_help_arg_to_string_builder).
+static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
+                             const char **examples, const char **text) {
+  switch (arg_token) {
+  case ARG_TOKEN_PAT_GEN:
+    usages[0] = "<gen1_games>,<gen2_games>,... [<output_name>]";
+    examples[0] = "50000,50000,50000";
+    examples[1] = "20000,20000 english_pat";
+    *text = "Trains PAT weights (see the 'pat' option) by self-play: "
+            "each generation plays the given number of games, recording the "
+            "post-move TWS access features of every move and the opponent's "
+            "reply score, then refits the weights by ridge regression and "
+            "continues with them live. Requires both players to share a "
+            "lexicon; if no 'pat' weights are loaded, training bootstraps from "
+            "zero weights (which play identically to no weights). Each "
+            "generation writes <output_name>_gen_<N>.pat and a _report.txt "
+            "with the fit; the final weights are also written under "
+            "<output_name>, which defaults to the loaded weights name.";
+    break;
+  case ARG_TOKEN_PAT:
+    usages[0] = "<pat>";
+    examples[0] = "english_pat";
+    examples[1] = "none";
+    *text = "Specifies the PAT weights for both players, unless "
+            "overridden by the 'pat1' or 'pat2' options. Use 'none' to "
+            "unload. PAT weights are off by default.";
+    break;
+  case ARG_TOKEN_P1_PAT:
+  case ARG_TOKEN_P2_PAT:
+    usages[0] = "<pat>";
+    examples[0] = "english_pat";
+    examples[1] = "none";
+    *text = "Specifies the PAT weights for the given player. This "
+            "can be used with the autoplay command to compare playing with "
+            "and without defense weights. Use 'none' to unload.";
+    break;
+  case ARG_TOKEN_PAT_CLASSES:
+  case ARG_TOKEN_P1_PAT_CLASSES:
+  case ARG_TOKEN_P2_PAT_CLASSES:
+    usages[0] = "<class>[,<class>...]";
+    examples[0] = "tws,windows";
+    examples[1] = "all";
+    *text = "Specifies which classes of the loaded PAT weights apply to "
+            "the player's own move generation (static play and the "
+            "candidates a simulation starts from): a comma-separated list "
+            "from tws, dws, tls, dls, qws, qls and windows, or 'all' (the "
+            "default). A class left out costs nothing to evaluate, as if "
+            "the weights scored it zero. 'patclasses' sets both players; "
+            "'patclasses1' and 'patclasses2' set one.";
+    break;
+  case ARG_TOKEN_PAT_CANDIDATES:
+  case ARG_TOKEN_P1_PAT_CANDIDATES:
+  case ARG_TOKEN_P2_PAT_CANDIDATES:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "Specifies whether the loaded PAT weights apply to the player's "
+            "own move generation: static play and the candidates a "
+            "simulation starts from. Defaults to true. 'patcand' sets both "
+            "players; 'patcand1' and 'patcand2' set one.";
+    break;
+  case ARG_TOKEN_PAT_ROLLOUT:
+  case ARG_TOKEN_P1_PAT_ROLLOUT:
+  case ARG_TOKEN_P2_PAT_ROLLOUT:
+    usages[0] = "<true_or_false>";
+    examples[0] = "true";
+    examples[1] = "false";
+    *text = "Specifies whether PAT applies in the rollouts of the player's "
+            "simulations, to both sides' plies (each with its own "
+            "weights). Defaults to true. 'patrollout' sets both players; "
+            "'patrollout1' and 'patrollout2' set one.";
+    break;
+  case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+  case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
+  case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
+    usages[0] = "<class>[,<class>...]";
+    examples[0] = "tws,windows";
+    examples[1] = "all";
+    *text = "Specifies which PAT classes apply in the rollouts of the "
+            "player's simulations, independently of 'patclasses': for "
+            "example cheaper rollouts while the candidates use every "
+            "class. Defaults to tws,windows (qws,tws,windows on 21x21 "
+            "boards), which keeps most of full PAT's value at a fraction "
+            "of its cost; all uses every class. "
+            "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
+            "and 'patrolloutclasses2' set one.";
+    break;
+  case ARG_TOKEN_PAT_COMBINE_GAMMA:
+    usages[0] = "<gamma>";
+    *text = "Specifies how much a second route to danger counts once the "
+            "worst one is counted, when training PAT weights: 1 "
+            "adds every scan unit, 0 charges only the worst.";
+    break;
+  case ARG_TOKEN_PAT_LABEL_PLIES:
+    usages[0] = "<plies>";
+    *text = "Specifies how many plies of net result a PAT training "
+            "label spans: 1 is the opponent's reply score alone, and higher "
+            "values subtract what the observing player scores back and add "
+            "what the opponent scores after that.";
+    break;
+  default:
+    break;
+  }
+}
+
 // Help
 void add_help_arg_to_string_builder(const Config *config, int token,
                                     StringBuilder *sb,
@@ -1119,6 +1225,26 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     name = parg->name;
     shortest_unambiguous_name = parg->shortest_unambiguous_name;
     switch (arg_token) {
+    case ARG_TOKEN_PAT_GEN:
+    case ARG_TOKEN_PAT:
+    case ARG_TOKEN_P1_PAT:
+    case ARG_TOKEN_P2_PAT:
+    case ARG_TOKEN_PAT_CLASSES:
+    case ARG_TOKEN_P1_PAT_CLASSES:
+    case ARG_TOKEN_P2_PAT_CLASSES:
+    case ARG_TOKEN_PAT_CANDIDATES:
+    case ARG_TOKEN_P1_PAT_CANDIDATES:
+    case ARG_TOKEN_P2_PAT_CANDIDATES:
+    case ARG_TOKEN_PAT_ROLLOUT:
+    case ARG_TOKEN_P1_PAT_ROLLOUT:
+    case ARG_TOKEN_P2_PAT_ROLLOUT:
+    case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
+    case ARG_TOKEN_PAT_COMBINE_GAMMA:
+    case ARG_TOKEN_PAT_LABEL_PLIES:
+      add_pat_help_arg(arg_token, usages, examples, &text);
+      break;
     case ARG_TOKEN_HELP:
       usages[0] = "[<command_or_arg>]";
       examples[0] = "";
@@ -1302,22 +1428,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "dump each generation's rack data to a CSV. Rack info tables are "
           "automatically disabled because they cache leave values that become "
           "stale during generation.";
-      break;
-    case ARG_TOKEN_PAT_GEN:
-      usages[0] = "<gen1_games>,<gen2_games>,... [<output_name>]";
-      examples[0] = "50000,50000,50000";
-      examples[1] = "20000,20000 english_pat";
-      text =
-          "Trains PAT weights (see the 'pat' option) by self-play: "
-          "each generation plays the given number of games, recording the "
-          "post-move TWS access features of every move and the opponent's "
-          "reply score, then refits the weights by ridge regression and "
-          "continues with them live. Requires both players to share a "
-          "lexicon; if no 'pat' weights are loaded, training bootstraps from "
-          "zero weights (which play identically to no weights). Each "
-          "generation writes <output_name>_gen_<N>.pat and a _report.txt "
-          "with the fit; the final weights are also written under "
-          "<output_name>, which defaults to the loaded weights name.";
       break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
@@ -1673,74 +1783,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "TWL98";
       text = "Specifies the leaves for the given player, This can can be used "
              "with the autoplay command to compare different leaves.";
-      break;
-    case ARG_TOKEN_PAT:
-      usages[0] = "<pat>";
-      examples[0] = "english_pat";
-      examples[1] = "none";
-      text = "Specifies the PAT weights for both players, unless "
-             "overridden by the 'pat1' or 'pat2' options. Use 'none' to "
-             "unload. PAT weights are off by default.";
-      break;
-    case ARG_TOKEN_P1_PAT:
-    case ARG_TOKEN_P2_PAT:
-      usages[0] = "<pat>";
-      examples[0] = "english_pat";
-      examples[1] = "none";
-      text = "Specifies the PAT weights for the given player. This "
-             "can be used with the autoplay command to compare playing with "
-             "and without defense weights. Use 'none' to unload.";
-      break;
-    case ARG_TOKEN_PAT_CLASSES:
-    case ARG_TOKEN_P1_PAT_CLASSES:
-    case ARG_TOKEN_P2_PAT_CLASSES:
-      usages[0] = "<class>[,<class>...]";
-      examples[0] = "tws,windows";
-      examples[1] = "all";
-      text = "Specifies which classes of the loaded PAT weights apply to "
-             "the player's own move generation (static play and the "
-             "candidates a simulation starts from): a comma-separated list "
-             "from tws, dws, tls, dls, qws, qls and windows, or 'all' (the "
-             "default). A class left out costs nothing to evaluate, as if "
-             "the weights scored it zero. 'patclasses' sets both players; "
-             "'patclasses1' and 'patclasses2' set one.";
-      break;
-    case ARG_TOKEN_PAT_CANDIDATES:
-    case ARG_TOKEN_P1_PAT_CANDIDATES:
-    case ARG_TOKEN_P2_PAT_CANDIDATES:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether the loaded PAT weights apply to the player's "
-             "own move generation: static play and the candidates a "
-             "simulation starts from. Defaults to true. 'patcand' sets both "
-             "players; 'patcand1' and 'patcand2' set one.";
-      break;
-    case ARG_TOKEN_PAT_ROLLOUT:
-    case ARG_TOKEN_P1_PAT_ROLLOUT:
-    case ARG_TOKEN_P2_PAT_ROLLOUT:
-      usages[0] = "<true_or_false>";
-      examples[0] = "true";
-      examples[1] = "false";
-      text = "Specifies whether PAT applies in the rollouts of the player's "
-             "simulations, to both sides' plies (each with its own "
-             "weights). Defaults to true. 'patrollout' sets both players; "
-             "'patrollout1' and 'patrollout2' set one.";
-      break;
-    case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
-    case ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES:
-    case ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES:
-      usages[0] = "<class>[,<class>...]";
-      examples[0] = "tws,windows";
-      examples[1] = "all";
-      text = "Specifies which PAT classes apply in the rollouts of the "
-             "player's simulations, independently of 'patclasses': for "
-             "example cheaper rollouts while the candidates use every "
-             "class. Defaults to tws,windows (qws,tws,windows on 21x21 "
-             "boards), which keeps most of full PAT's value at a fraction "
-             "of its cost; all uses every class. "
-             "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
-             "and 'patrolloutclasses2' set one.";
       break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
@@ -2305,19 +2347,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<min_play_iterations>";
       text = "Specifies the minimum number of iterations per play for player "
              "1 or 2 during autoplay simulation.";
-      break;
-    case ARG_TOKEN_PAT_COMBINE_GAMMA:
-      usages[0] = "<gamma>";
-      text = "Specifies how much a second route to danger counts once the "
-             "worst one is counted, when training PAT weights: 1 "
-             "adds every scan unit, 0 charges only the worst.";
-      break;
-    case ARG_TOKEN_PAT_LABEL_PLIES:
-      usages[0] = "<plies>";
-      text = "Specifies how many plies of net result a PAT training "
-             "label spans: 1 is the opponent's reply score alone, and higher "
-             "values subtract what the observing player scores back and add "
-             "what the opponent scores after that.";
       break;
     case ARG_TOKEN_P1_SIM_WITH_INFERENCE:
     case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
