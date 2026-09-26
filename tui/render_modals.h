@@ -39,6 +39,13 @@ void tui_game_render_annotate_setup(struct ncplane *plane, const Theme *theme,
 void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);
 
 // Startup menu modal; items are TuiStartupItem.
+// The analysis panel's menu; rows are TuiAnalysisMenuItem. `disabled`
+// dims the items that can't run now; `sim_continues` labels the first
+// item "Continue sim" instead of "Simulate".
+void tui_game_render_analysis_menu(struct ncplane *plane, const Theme *theme,
+                                   int focus, const bool *disabled,
+                                   bool sim_continues);
+
 void tui_game_render_startup_menu(struct ncplane *plane, const Theme *theme,
                                   int focus);
 
