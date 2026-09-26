@@ -130,7 +130,6 @@ typedef enum {
   ARG_TOKEN_PAT_CANDIDATES,
   ARG_TOKEN_PAT_ROLLOUT,
   ARG_TOKEN_PAT_ROLLOUT_CLASSES,
-  ARG_TOKEN_PAT_CAP,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_USE_RIT,
@@ -141,7 +140,6 @@ typedef enum {
   ARG_TOKEN_P1_PAT_CANDIDATES,
   ARG_TOKEN_P1_PAT_ROLLOUT,
   ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES,
-  ARG_TOKEN_P1_PAT_CAP,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
@@ -154,7 +152,6 @@ typedef enum {
   ARG_TOKEN_P2_PAT_CANDIDATES,
   ARG_TOKEN_P2_PAT_ROLLOUT,
   ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES,
-  ARG_TOKEN_P2_PAT_CAP,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
@@ -1743,20 +1740,6 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "'patrolloutclasses' sets both players; 'patrolloutclasses1' "
              "and 'patrolloutclasses2' set one.";
       break;
-    case ARG_TOKEN_PAT_CAP:
-    case ARG_TOKEN_P1_PAT_CAP:
-    case ARG_TOKEN_P2_PAT_CAP:
-      usages[0] = "<points>";
-      examples[0] = "0";
-      examples[1] = "10";
-      text = "Specifies the largest adjustment PAT can give one of the "
-             "player's moves, in points, in move generation and rollouts "
-             "alike. The defense term and opening adjustments are never "
-             "positive, so the cap only limits how far the utility "
-             "correction can raise a move. Defaults to 0; a large value "
-             "such as 1000 leaves the adjustment unclipped. 'patcap' sets "
-             "both players; 'patcap1' and 'patcap2' set one.";
-      break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       usages[0] = "<sort_type>";
@@ -2563,9 +2546,6 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PAT_CANDIDATES,         /* patcand */
         ARG_TOKEN_P1_PAT_CANDIDATES,      /* patcand1 */
         ARG_TOKEN_P2_PAT_CANDIDATES,      /* patcand2 */
-        ARG_TOKEN_PAT_CAP,                /* patcap */
-        ARG_TOKEN_P1_PAT_CAP,             /* patcap1 */
-        ARG_TOKEN_P2_PAT_CAP,             /* patcap2 */
         ARG_TOKEN_PAT_CLASSES,            /* patclasses */
         ARG_TOKEN_P1_PAT_CLASSES,         /* patclasses1 */
         ARG_TOKEN_P2_PAT_CLASSES,         /* patclasses2 */
@@ -3151,8 +3131,8 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
 
 // Sim
 
-// The value of a per-player option: the player's own one (e.g. patcap1)
-// when set, else the global one (e.g. patcap), else NULL.
+// The value of a per-player option: the player's own one (e.g. patcand1)
+// when set, else the global one (e.g. patcand), else NULL.
 static const char *config_get_player_arg_value(const Config *config,
                                                arg_token_t global_token,
                                                arg_token_t p1_token,
@@ -3180,9 +3160,8 @@ static bool config_parse_bool_arg(const char *value, const char *name,
   return true;
 }
 
-// Loads one player's PAT usage options (patcand, patclasses, patrollout,
-// patrolloutclasses and patcap, each global or per player) into
-// players_data.
+// Loads one player's PAT usage options (patcand, patclasses, patrollout and
+// patrolloutclasses, each global or per player) into players_data.
 static void config_load_player_pat_usage(Config *config, int player_index,
                                          ErrorStack *error_stack) {
   PlayersData *players_data = config->players_data;
@@ -3227,20 +3206,6 @@ static void config_load_player_pat_usage(Config *config, int player_index,
     }
     players_data_set_pat_rollout_disabled_classes_mask(
         players_data, player_index, PAT_CLASS_MASK_ALL & ~enabled_mask);
-  }
-  value = config_get_player_arg_value(config, ARG_TOKEN_PAT_CAP,
-                                      ARG_TOKEN_P1_PAT_CAP,
-                                      ARG_TOKEN_P2_PAT_CAP, player_index);
-  if (value) {
-    const double cap = string_to_double(value, error_stack);
-    if (!error_stack_is_empty(error_stack) || !isfinite(cap) || cap < 0.0) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
-          get_formatted_string(
-              "patcap must be a number of points >= 0, got '%s'", value));
-      return;
-    }
-    players_data_set_pat_cap(players_data, player_index, double_to_equity(cap));
   }
 }
 
@@ -10003,7 +9968,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PAT_CANDIDATES, "patcand", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT, "patrollout", 1, 1);
   arg(ARG_TOKEN_PAT_ROLLOUT_CLASSES, "patrolloutclasses", 1, 1);
-  arg(ARG_TOKEN_PAT_CAP, "patcap", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
@@ -10014,7 +9978,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_PAT_CANDIDATES, "patcand1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT, "patrollout1", 1, 1);
   arg(ARG_TOKEN_P1_PAT_ROLLOUT_CLASSES, "patrolloutclasses1", 1, 1);
-  arg(ARG_TOKEN_P1_PAT_CAP, "patcap1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
@@ -10027,7 +9990,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_PAT_CANDIDATES, "patcand2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT, "patrollout2", 1, 1);
   arg(ARG_TOKEN_P2_PAT_ROLLOUT_CLASSES, "patrolloutclasses2", 1, 1);
-  arg(ARG_TOKEN_P2_PAT_CAP, "patcap2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
@@ -10448,7 +10410,6 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PAT_CANDIDATES:
     case ARG_TOKEN_PAT_ROLLOUT:
     case ARG_TOKEN_PAT_ROLLOUT_CLASSES:
-    case ARG_TOKEN_PAT_CAP:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
@@ -10527,11 +10488,6 @@ void config_add_settings_to_string_builder(const Config *config,
       free(classes_str);
       break;
     }
-    case ARG_TOKEN_P1_PAT_CAP:
-      config_add_double_setting_to_string_builder(
-          config, sb, arg_token,
-          equity_to_double(players_data_get_pat_cap(config->players_data, 0)));
-      break;
     case ARG_TOKEN_P1_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);
@@ -10616,11 +10572,6 @@ void config_add_settings_to_string_builder(const Config *config,
       free(classes_str);
       break;
     }
-    case ARG_TOKEN_P2_PAT_CAP:
-      config_add_double_setting_to_string_builder(
-          config, sb, arg_token,
-          equity_to_double(players_data_get_pat_cap(config->players_data, 1)));
-      break;
     case ARG_TOKEN_P2_MOVE_SORT_TYPE:
       string_builder_add_formatted_string(sb, " -%s ",
                                           config->pargs[arg_token]->name);

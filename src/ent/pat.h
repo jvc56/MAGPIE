@@ -290,9 +290,6 @@ typedef struct PATEvalContext {
   // get this position (folded into every movegen bound).
   Equity utility_non_placement;
   Equity utility_bound;
-  // The largest adjustment a move gets (see pat_eval_context_set_cap):
-  // every penalty and bound the context hands out is clipped to it.
-  Equity cap;
   // Bitmask of PAT_CLASS_MASK_* classes this context actually applies
   // (weighted in the file and not excluded by the runtime mask); see
   // pat_eval_ctx_active_classes, the safe way to read this from outside
@@ -380,11 +377,6 @@ void pat_prepare_utility(PATWeights *pat, const char *data_paths,
 void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
                                   int bag);
 void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg);
-// Clips the adjustment of every move (defense term, opening adjustment and
-// utility correction together) to at most cap, and every bound with it.
-// Clipping is monotone, so a clipped upper bound still bounds the clipped
-// adjustment. Loading a context leaves it unclipped (EQUITY_MAX_VALUE).
-void pat_eval_context_set_cap(PATEvalContext *pat_eval_ctx, Equity cap);
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
@@ -421,17 +413,12 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
 // The defense term of every non-placement move (exchange or pass): the
 // position baseline, exactly, since they leave the board unchanged. Zero
 // when the context is NULL or disabled.
-static inline Equity pat_eval_capped(const PATEvalContext *pat_eval_ctx,
-                                     Equity adjustment) {
-  return adjustment > pat_eval_ctx->cap ? pat_eval_ctx->cap : adjustment;
-}
 static inline Equity
 pat_eval_non_placement_penalty(const PATEvalContext *pat_eval_ctx) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
-  return pat_eval_capped(pat_eval_ctx, pat_eval_ctx->pre_penalty +
-                                           pat_eval_ctx->utility_non_placement);
+  return pat_eval_ctx->pre_penalty + pat_eval_ctx->utility_non_placement;
 }
 // The largest utility correction (see PAT_UTILITY_ADJUST_ROW_PREFIX) any
 // move can get at this position: every other PAT term is <= 0, so an
@@ -443,7 +430,7 @@ pat_eval_utility_bound(const PATEvalContext *pat_eval_ctx) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
-  return pat_eval_capped(pat_eval_ctx, pat_eval_ctx->utility_bound);
+  return pat_eval_ctx->utility_bound;
 }
 // Bitmask of PAT_CLASS_MASK_* classes this context actually applies, or 0
 // when the context is NULL or disabled. See placement_adjustment, which
@@ -477,9 +464,8 @@ pat_eval_lane_penalty_bound(const PATEvalContext *pat_eval_ctx, int dir,
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
-  return pat_eval_capped(pat_eval_ctx,
-                         pat_eval_ctx->lane_penalty_bound[dir][lane] +
-                             pat_eval_ctx->utility_bound);
+  return pat_eval_ctx->lane_penalty_bound[dir][lane] +
+         pat_eval_ctx->utility_bound;
 }
 // Extracts the feature vector for the board as it stands (no move overlay).
 // Used for the context baseline and, exactly as-is, by the training loop on

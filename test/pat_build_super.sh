@@ -17,7 +17,6 @@ threads=10
 utility=350
 racks=300
 validate_pairs=500000
-cap="-patcap 1000"
 board="-ld $ld -bdn standard21 -leaves $leaves -wmp false"
 mkdir -p "$log_dir"
 mg() { rm -f settings.txt; ./bin_b21/magpie "$@"; }
@@ -27,13 +26,13 @@ log() { echo "[$(date +%H:%M:%S)] $lex: $*"; }
 cp test/pat_bootstrap.pat "$strategy/${name}_bootstrap.pat"
 log "iterative training"
 mg patgen 30000,30000,30000,30000,30000 "${name}_v3" -lex "$lex" $board \
-  -gp true -threads $threads -seed "$train_seed" $cap -pat "${name}_bootstrap" \
+  -gp true -threads $threads -seed "$train_seed" -pat "${name}_bootstrap" \
   > "$log_dir/train.txt" 2>&1
 sed -e 's/^run_through,0$/run_through,1/' -e 's/^fit_residual,5$/fit_residual,3/' \
   "$strategy/${name}_v3.pat" > "$strategy/${name}_v3_runres.pat"
 log "through refit"
 mg patgen 150000 "${name}_v4" -lex "$lex" $board -gp true -threads $threads \
-  -seed 4242 $cap -pat "${name}_v3_runres" > "$log_dir/refit.txt" 2>&1
+  -seed 4242 -pat "${name}_v3_runres" > "$log_dir/refit.txt" 2>&1
 sed -i.bak 's/^fit_residual,3$/fit_residual,0/' "$strategy/${name}_v4.pat"
 rm -f "$strategy/${name}_v4.pat.bak"
 
@@ -54,7 +53,7 @@ log "candidate: $strategy/$name.pat"
 
 log "validation vs $incumbent ($validate_pairs pairs)"
 mg autoplay games $validate_pairs -lex "$lex" $board -gp true -threads $threads \
-  -seed "$validate_seed" $cap -pat "$incumbent" -pat1 "$name" -pat2 "$incumbent" \
+  -seed "$validate_seed" -pat "$incumbent" -pat1 "$name" -pat2 "$incumbent" \
   > "$log_dir/validate.txt" 2>&1
 log "validation: $(grep -m1 'mirrored pair' "$log_dir/validate.txt")"
 rm -f "$strategy/${name}_bootstrap.pat" "$strategy/${name}_v3_runres.pat"

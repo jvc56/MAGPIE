@@ -6,9 +6,6 @@ runs the 21x21 build for one lexicon per language. This note explains the steps 
 Every step is a magpie command, run from the repository root with release builds
 (`make magpie magpie_test BUILD=no_pgo_release`, with `BOARD_DIM=21` for the super board).
 
-Training and validation pass `-patcap 1000`, which leaves the PAT adjustment unclipped; that is
-how the shipped weights were built and validated. Play defaults to `-patcap 0` (see README).
-
 ## 0. Bootstrap
 
 `test/pat_bootstrap.pat` is an all-zero file carrying the option rows the recipe trains under:
@@ -28,7 +25,7 @@ them. The file is lexicon-independent.
 ## 1. Iterative training
 
     ./bin/magpie patgen 30000,30000,30000,30000,30000 NAME_v3 -lex LEX -leaves LEAVES \
-      -gp true -threads 10 -seed SEED -wmp true -patcap 1000 -pat NAME_bootstrap
+      -gp true -threads 10 -seed SEED -wmp true -pat NAME_bootstrap
 
 Five generations of 30K game pairs, each generation's self-play under the previous
 generation's weights; the label is the opponent's reply score; ridge with lambda =
@@ -42,7 +39,7 @@ disagreement, so compare seeds with whole-game validation if it matters.
 Copy `NAME_v3.pat` to `NAME_v3_runres.pat` with `run_through,1` and `fit_residual,3`, then
 
     ./bin/magpie patgen 150000 NAME_v4 -lex LEX -leaves LEAVES -gp true -threads 10 \
-      -seed 4242 -wmp true -patcap 1000 -pat NAME_v3_runres
+      -seed 4242 -wmp true -pat NAME_v3_runres
 
 One generation of 150K game pairs under the v3 weights (frozen), refitting only the
 `float_through_*` weights against the run-keyed table. In the output, set `fit_residual,0`
@@ -69,7 +66,7 @@ are loaded.
 Whole-game mirrored pairs are the arbiter:
 
     ./bin/magpie autoplay games 500000 -lex LEX -leaves LEAVES -gp true -threads 10 \
-      -seed SEED -wmp true -patcap 1000 -pat LEX -pat1 NAME -pat2 LEX
+      -seed SEED -wmp true -pat LEX -pat1 NAME -pat2 LEX
 
 Read the `Player 1 spread per mirrored pair` line (mean, SE, 95% CI). Use 1M pairs for
 effects near 0.1 points per pair.

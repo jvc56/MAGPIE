@@ -14,9 +14,7 @@ term:
 The term is exactly zero without the row, and it is bag-gated like the rest of PAT. The shipped
 `<LEX>.pat` and `<LEX>_super21.pat` files carry `utility_adjust,350`.
 
-It is the only PAT term that can be positive, so the `patcap` option (default 0) clips it: with
-the default, the correction can lower a move's equity but not raise it. The validation below
-was run unclipped (`-patcap 1000`).
+It is the only PAT term that can be positive.
 
 ## What it does
 
@@ -49,8 +47,7 @@ sign. V = -173 lost -0.34pp of win share, so do not read V as a variance.
   - the lane bound, which feeds the shadow and anchor bounds;
   - the three WMP precomputed-equity skips.
 
-  The per-move bound carries the exact value. `patcap` clips the adjustment and every bound
-  alike, so the bounds stay valid.
+  The per-move bound carries the exact value.
 - **Parity test.** `test_pat_path_parity` also runs with V = 2000 to stress every bound.
   Best, exhaustive and within-margin agree, WMP on and off agree, and every move's term stays
   within both bounds.
@@ -106,5 +103,5 @@ The correction costs about 3% on top of PAT.
 make magpie BUILD=no_pgo_release
 grep -v '^utility_adjust,' data/strategy/CSW21.pat > data/strategy/CSW21_no_utility.pat
 ./bin/magpie autoplay games 1000000 -lex CSW21 -gp true -threads 10 -wmp true \
-  -patcap 1000 -pat CSW21 -pat1 CSW21 -pat2 CSW21_no_utility -seed 97200004
+  -pat CSW21 -pat1 CSW21 -pat2 CSW21_no_utility -seed 97200004
 ```

@@ -31,10 +31,8 @@ const RackInfoTable *player_get_rack_info_table(const Player *player);
 const WordInfoTable *player_get_word_info_table(const Player *player);
 const PATWeights *player_get_pat(const Player *player);
 uint32_t player_get_pat_disabled_classes_mask(const Player *player);
-// Whether this player's move generation leaves PAT out, and the largest
-// adjustment PAT can give one of its moves (see pat_eval_context_set_cap).
+// Whether this player's move generation leaves PAT out.
 bool player_get_pat_disabled(const Player *player);
-Equity player_get_pat_cap(const Player *player);
 
 void player_set_score(Player *player, Equity score);
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type);

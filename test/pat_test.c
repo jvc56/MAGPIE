@@ -1648,9 +1648,8 @@ static void test_pat_opening_and_hook_flex(void) {
 // utility_adjust > 0 also puts the utility correction (see
 // PAT_UTILITY_ADJUST_ROW_PREFIX) on the weights: it is the one PAT term
 // that can be positive, so every pruning bound has to carry it for the
-// paths to keep agreeing. cap_points is the players' patcap: the paths must
-// also agree once the cap clips the term and its bounds.
-static void pat_path_parity_run(double utility_adjust, double cap_points) {
+// paths to keep agreeing.
+static void pat_path_parity_run(double utility_adjust) {
   const char *set_cmd =
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
       "-winpct winpct_english ";
@@ -1662,14 +1661,9 @@ static void pat_path_parity_run(double utility_adjust, double cap_points) {
   PATWeights *pats[2];
   for (int c = 0; c < 2; c++) {
     PATWeights *pat = pat_create_zeroed("path_parity");
-    // Under a finite cap, zero defense weights, so that the utility
-    // correction lifts some moves above the cap and the clip is exercised.
-    const int weight_base = cap_points < 1000.0 ? 0 : -40;
-    const int weight_step = cap_points < 1000.0 ? 0 : 3;
     for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
          feature_index++) {
-      pat_set_weight(pat, feature_index,
-                     weight_base - weight_step * (feature_index % 7));
+      pat_set_weight(pat, feature_index, -40 - 3 * (feature_index % 7));
     }
     pat_set_combine_gamma(pat, 0.5);
     pat_set_lexicon_floaters(pat, true);
@@ -1682,10 +1676,6 @@ static void pat_path_parity_run(double utility_adjust, double cap_points) {
                           PLAYERS_DATA_TYPE_PAT, 1, pat);
     players_data_set_is_shared(config_get_players_data(configs[c]),
                                PLAYERS_DATA_TYPE_PAT, true);
-    for (int player_index = 0; player_index < 2; player_index++) {
-      players_data_set_pat_cap(config_get_players_data(configs[c]),
-                               player_index, double_to_equity(cap_points));
-    }
     pats[c] = pat;
   }
   load_and_exec_config_or_die(
@@ -1702,8 +1692,6 @@ static void pat_path_parity_run(double utility_adjust, double cap_points) {
     for (int player_index = 0; player_index < 2; player_index++) {
       player_update(config_get_players_data(configs[c]),
                     game_get_player(game, player_index));
-      assert(player_get_pat_cap(game_get_player(game, player_index)) ==
-             double_to_equity(cap_points));
     }
     assert(player_get_pat(game_get_player(game, 0)) == pats[c]);
   }
@@ -1718,7 +1706,6 @@ static void pat_path_parity_run(double utility_adjust, double cap_points) {
   int moves_checked = 0;
   int rows_checked = 0;
   int utility_nonzero = 0;
-  int above_cap = 0;
   for (int attempt = 0; attempt < 40; attempt++) {
     // Positions from seeded self-play in the WMP config, mirrored into
     // the other config through their CGP.
@@ -1862,9 +1849,6 @@ static void pat_path_parity_run(double utility_adjust, double cap_points) {
         if (with_utility != without_utility[i]) {
           utility_nonzero++;
         }
-        if (with_utility > double_to_equity(cap_points)) {
-          above_cap++;
-        }
       }
     }
     // WMP on and off: identical exhaustive lists, move for move.
@@ -1877,16 +1861,13 @@ static void pat_path_parity_run(double utility_adjust, double cap_points) {
       assert(move_get_equity(m1) == move_get_equity(m2));
     }
   }
-  printf("PAT path parity (utility %.0f, cap %.0f): %d positions, %d "
-         "within-margin moves, %d overlay training rows checked, %d moves "
-         "corrected, %d above the cap\n",
-         utility_adjust, cap_points, positions_checked, moves_checked,
-         rows_checked, utility_nonzero, above_cap);
+  printf("PAT path parity (utility %.0f): %d positions, %d within-margin "
+         "moves, %d overlay training rows checked, %d moves corrected\n",
+         utility_adjust, positions_checked, moves_checked, rows_checked,
+         utility_nonzero);
   assert(positions_checked >= 30);
   assert(rows_checked >= 300);
   assert((utility_adjust > 0.0) == (utility_nonzero > 0));
-  // A finite cap has to bind somewhere, or the clipped paths go untested.
-  assert(cap_points >= 1000.0 || above_cap > 0);
   free(parity_ctx);
   free(parity_row);
   move_list_destroy(best_list);
@@ -1898,13 +1879,9 @@ static void pat_path_parity_run(double utility_adjust, double cap_points) {
 }
 
 static void test_pat_path_parity(void) {
-  // Unclipped.
-  pat_path_parity_run(0.0, 1000.0);
+  pat_path_parity_run(0.0);
   // Far stronger than any file uses, to stress every bound it enters.
-  pat_path_parity_run(2000.0, 1000.0);
-  // The same, clipped by the cap at the default and just above it.
-  pat_path_parity_run(2000.0, 0.0);
-  pat_path_parity_run(2000.0, 5.0);
+  pat_path_parity_run(2000.0);
 }
 
 // The per-player PAT options land in players_data, and the global form sets
@@ -1913,7 +1890,7 @@ static void test_pat_usage_options(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -patcand false -patcand2 true -patrollout1 false "
       "-patclasses dws,tws -patrolloutclasses tws,windows "
-      "-patrolloutclasses2 all -patcap 7.5 -patcap2 0");
+      "-patrolloutclasses2 all");
   const PlayersData *players_data = config_get_players_data(config);
   assert(players_data_get_pat_candidates_disabled(players_data, 0));
   assert(!players_data_get_pat_candidates_disabled(players_data, 1));
@@ -1930,20 +1907,16 @@ static void test_pat_usage_options(void) {
           ~((1U << PAT_PREMIUM_TWS) | PAT_CLASS_MASK_WINDOWS)));
   assert(players_data_get_pat_rollout_disabled_classes_mask(players_data, 1) ==
          0);
-  assert(players_data_get_pat_cap(players_data, 0) == double_to_equity(7.5));
-  assert(players_data_get_pat_cap(players_data, 1) == 0);
-  assert_config_exec_status(config, "set -patcap -1",
-                            ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS);
   config_destroy(config);
 }
 
-// Every move's PAT adjustment under patcap c is its unclipped adjustment
-// clipped to c, and patcand false is the same as no weights at all.
-static void test_pat_cap(void) {
+// patcand false is the same as no weights at all, and with it on the weights
+// do change equities.
+static void test_pat_candidates_option(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
       "-wmp true -winpct winpct_english");
-  PATWeights *pat = pat_create_zeroed("cap_test");
+  PATWeights *pat = pat_create_zeroed("candidates_test");
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     pat_set_weight(pat, feature_index, -30 - 2 * (feature_index % 5));
@@ -1958,14 +1931,14 @@ static void test_pat_cap(void) {
   rack_set_to_string(game_get_ld(game),
                      player_get_rack(game_get_player(game, 0)), "AEINRST");
   Player *player = game_get_player(game, 0);
-  enum { NUM_CAP_RUNS = 4 };
-  // No PAT (candidates off), unclipped, clipped at 0 and at 5 points.
-  const bool disabled[NUM_CAP_RUNS] = {true, false, false, false};
-  const double caps[NUM_CAP_RUNS] = {0.0, 1000.0, 0.0, 5.0};
-  MoveList *lists[NUM_CAP_RUNS];
-  for (int run = 0; run < NUM_CAP_RUNS; run++) {
-    players_data_set_pat_candidates_disabled(players_data, 0, disabled[run]);
-    players_data_set_pat_cap(players_data, 0, double_to_equity(caps[run]));
+  enum { NUM_CANDIDATE_RUNS = 3 };
+  // patcand false, patcand true, and no weights at all.
+  MoveList *lists[NUM_CANDIDATE_RUNS];
+  for (int run = 0; run < NUM_CANDIDATE_RUNS; run++) {
+    if (run == 2) {
+      players_data_set_data(players_data, PLAYERS_DATA_TYPE_PAT, 0, NULL);
+    }
+    players_data_set_pat_candidates_disabled(players_data, 0, run == 0);
     player_update(players_data, player);
     lists[run] = move_list_create(3000);
     const MoveGenArgs args = {
@@ -1980,59 +1953,31 @@ static void test_pat_cap(void) {
     };
     generate_moves(&args);
   }
-  // The same weights with patcand false match no weights at all.
-  players_data_set_data(players_data, PLAYERS_DATA_TYPE_PAT, 0, NULL);
-  players_data_set_pat_candidates_disabled(players_data, 0, false);
-  player_update(players_data, player);
-  MoveList *no_pat_list = move_list_create(3000);
-  const MoveGenArgs no_pat_args = {
-      .game = game,
-      .move_list = no_pat_list,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-  };
-  generate_moves(&no_pat_args);
   const int num_moves = move_list_get_count(lists[0]);
-  assert(num_moves == move_list_get_count(no_pat_list));
-  int positive = 0;
+  assert(num_moves == move_list_get_count(lists[1]));
+  assert(num_moves == move_list_get_count(lists[2]));
+  int changed = 0;
   for (int move_idx = 0; move_idx < num_moves; move_idx++) {
-    const Move *base = move_list_get_move(lists[0], move_idx);
-    assert(move_get_equity(base) ==
-           move_get_equity(move_list_get_move(no_pat_list, move_idx)));
-    const Move *matched[NUM_CAP_RUNS] = {base, NULL, NULL, NULL};
-    for (int run = 1; run < NUM_CAP_RUNS; run++) {
-      const int count = move_list_get_count(lists[run]);
-      assert(count == num_moves);
-      for (int other_idx = 0; other_idx < count; other_idx++) {
-        const Move *other = move_list_get_move(lists[run], other_idx);
-        if (compare_moves_without_equity(base, other, true) == -1) {
-          matched[run] = other;
-          break;
+    const Move *disabled_move = move_list_get_move(lists[0], move_idx);
+    assert(move_get_equity(disabled_move) ==
+           move_get_equity(move_list_get_move(lists[2], move_idx)));
+    for (int other_idx = 0; other_idx < num_moves; other_idx++) {
+      const Move *enabled_move = move_list_get_move(lists[1], other_idx);
+      if (compare_moves_without_equity(disabled_move, enabled_move, true) ==
+          -1) {
+        if (move_get_equity(enabled_move) != move_get_equity(disabled_move)) {
+          changed++;
         }
+        break;
       }
-      assert(matched[run]);
-    }
-    const Equity unclipped =
-        move_get_equity(matched[1]) - move_get_equity(base);
-    if (unclipped > 0) {
-      positive++;
-    }
-    for (int run = 2; run < NUM_CAP_RUNS; run++) {
-      const Equity cap = double_to_equity(caps[run]);
-      const Equity expected = unclipped > cap ? cap : unclipped;
-      assert(move_get_equity(matched[run]) - move_get_equity(base) == expected);
     }
   }
-  // The utility correction has to raise some moves, or the cap is untested.
-  assert(positive > 0);
-  for (int run = 0; run < NUM_CAP_RUNS; run++) {
+  assert(changed > 0);
+  for (int run = 0; run < NUM_CANDIDATE_RUNS; run++) {
     move_list_destroy(lists[run]);
   }
-  move_list_destroy(no_pat_list);
+  // Unset above, so players_data no longer holds it.
+  pat_destroy(pat);
   config_destroy(config);
 }
 
@@ -2570,6 +2515,6 @@ void test_pat(void) {
   test_pat_movegen_integration();
   test_pat_path_parity();
   test_pat_usage_options();
-  test_pat_cap();
+  test_pat_candidates_option();
   free(data_dir);
 }

@@ -36,7 +36,6 @@ struct Player {
   // rollouts (see player_set_pat_usage).
   bool pat_disabled;
   uint32_t pat_disabled_classes_mask;
-  Equity pat_cap;
 };
 
 void player_reset(Player *player) {
@@ -62,7 +61,6 @@ void player_update(const PlayersData *players_data, Player *player) {
       players_data_get_pat_candidates_disabled(players_data, player->index);
   player->pat_disabled_classes_mask =
       players_data_get_pat_disabled_classes_mask(players_data, player->index);
-  player->pat_cap = players_data_get_pat_cap(players_data, player->index);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -94,7 +92,6 @@ Player *player_duplicate(const Player *player) {
   new_player->pat = player->pat;
   new_player->pat_disabled = player->pat_disabled;
   new_player->pat_disabled_classes_mask = player->pat_disabled_classes_mask;
-  new_player->pat_cap = player->pat_cap;
   return new_player;
 }
 
@@ -113,7 +110,6 @@ void player_copy(Player *dst, const Player *src) {
   dst->pat = src->pat;
   dst->pat_disabled = src->pat_disabled;
   dst->pat_disabled_classes_mask = src->pat_disabled_classes_mask;
-  dst->pat_cap = src->pat_cap;
 }
 
 void player_destroy(Player *player) {
@@ -166,8 +162,6 @@ uint32_t player_get_pat_disabled_classes_mask(const Player *player) {
 bool player_get_pat_disabled(const Player *player) {
   return player->pat_disabled;
 }
-
-Equity player_get_pat_cap(const Player *player) { return player->pat_cap; }
 
 void player_set_score(Player *player, Equity score) { player->score = score; }
 

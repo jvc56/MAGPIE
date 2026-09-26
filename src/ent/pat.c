@@ -2546,10 +2546,6 @@ static Equity pat_units_penalty_bound(const PATEvalContext *pat_eval_ctx,
   return pat_combine(worst, sum, pat_eval_ctx->weights->combine_gamma);
 }
 
-void pat_eval_context_set_cap(PATEvalContext *pat_eval_ctx, Equity cap) {
-  pat_eval_ctx->cap = cap;
-}
-
 void pat_eval_context_disable(PATEvalContext *pat_eval_ctx) {
   pat_eval_ctx->weights = NULL;
   pat_eval_ctx->utility_row = NULL;
@@ -2766,8 +2762,6 @@ static void pat_eval_context_load_units(
   pat_eval_ctx->utility_row = NULL;
   pat_eval_ctx->utility_bound = 0;
   pat_eval_ctx->utility_non_placement = 0;
-  // Unclipped until pat_eval_context_set_cap says otherwise.
-  pat_eval_ctx->cap = EQUITY_MAX_VALUE;
   if (!weights) {
     return;
   }
@@ -3101,9 +3095,7 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   // as is rather than bounding it.
   const Equity utility = pat_eval_utility_adjustment(pat_eval_ctx, move);
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    return pat_eval_capped(
-        pat_eval_ctx,
-        pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty) + utility);
+    return pat_eval_scaled(pat_eval_ctx, pat_eval_ctx->pre_penalty) + utility;
   }
   const bool vertical = board_is_dir_vertical(move_get_dir(move));
   const int row_start = move_get_row_start(move);
@@ -3126,11 +3118,9 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
   for (int word = 0; word < PAT_MASK_WORDS; word++) {
     combined_units[word] = affected_units[word] | leave_units[word];
   }
-  return pat_eval_capped(
-      pat_eval_ctx,
-      pat_eval_scaled(pat_eval_ctx,
-                      pat_units_penalty_bound(pat_eval_ctx, combined_units)) +
-          utility);
+  return pat_eval_scaled(pat_eval_ctx, pat_units_penalty_bound(
+                                           pat_eval_ctx, combined_units)) +
+         utility;
 }
 
 // The opening adjustment for a move on an empty board (see
@@ -3164,10 +3154,9 @@ Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
   // The opening adjustment is <= 0 like everything else here, so every
   // bound on the term stays a bound without knowing about it. The utility
   // correction is not; see pat_eval_utility_bound.
-  return pat_eval_capped(
-      pat_eval_ctx, pat_eval_move_penalty_scaled(pat_eval_ctx, move, leave) +
-                        pat_opening_adjustment(pat_eval_ctx, move) +
-                        pat_eval_utility_adjustment(pat_eval_ctx, move));
+  return pat_eval_move_penalty_scaled(pat_eval_ctx, move, leave) +
+         pat_opening_adjustment(pat_eval_ctx, move) +
+         pat_eval_utility_adjustment(pat_eval_ctx, move);
 }
 
 static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
