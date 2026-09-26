@@ -334,6 +334,8 @@ typedef struct {
   // the file couldn't be loaded — in that case the bot worker falls
   // back to plain equity-best moves.
   struct WinPct *win_pcts;
+  // The table win_pcts loads (or failed to): winpct_<distribution>.
+  char win_pct_name[64];
 
   // Sim results, allocated once and reused across turns. The bot
   // worker populates this on each sim turn and the analysis panel
@@ -827,6 +829,10 @@ TuiSpoiler tui_history_spoiler(const TuiGameState *state, int idx);
 // How many history entries to show: all of them, or up to and
 // including the cursor's when later ones are spoilers.
 int tui_history_visible_count(const TuiGameState *state);
+
+// Why sims can't run (the win% table didn't load, naming it and how to
+// get it), or NULL when they can.
+const char *tui_game_state_win_pct_missing(const TuiGameState *state);
 
 // Shows `message` in the status bar for a few seconds. Caller holds
 // state->mutex.
