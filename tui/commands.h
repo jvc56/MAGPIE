@@ -19,4 +19,10 @@ const char *tui_command_unavailable_reason(const TuiGameState *state,
 void tui_command_run(TuiGameState *state, TuiUiState *ui,
                      const TuiSession *session, TuiSlashCommandId id);
 
+// "/save [path]": writes the game as GCG to `path` ("~/" means the home
+// directory), or to a fresh magpie-<time>.gcg in the working directory
+// when it's NULL or empty, and says where in the status bar. Caller doesn't
+// hold state->mutex.
+void tui_command_save(TuiGameState *state, const char *path);
+
 #endif
