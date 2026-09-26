@@ -4,6 +4,7 @@
 #include "../src/def/contribute_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/autoplay_results.h"
+#include "../src/ent/bonus_square.h"
 #include "../src/ent/client_state.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/klv.h"
@@ -172,6 +173,12 @@ static void test_client_state(void) {
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
 
+  // A negative task count is refused rather than stopping after one task.
+  write_settings_file(path, "server https://birdtest.example\nmaxtasks -1\n");
+  assert(!client_state_load(path, error_stack));
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_reset(error_stack);
+
   // So is a missing server.
   write_settings_file(path, "apikey bt_x\n");
   assert(!client_state_load(path, error_stack));
@@ -182,6 +189,35 @@ static void test_client_state(void) {
   assert(!client_state_load("contribute_test_does_not_exist.txt", error_stack));
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
+
+  // What the server sends as an identity is taken only in canonical form: it
+  // becomes a header and a settings line, and a newline in it wrote a
+  // `server` line every later run obeyed.
+  assert(client_state_is_worker_uuid("6f3d7198-178a-47c8-9ccc-6aa6995a5a9c"));
+  assert(client_state_is_worker_uuid("6F3D7198-178A-47C8-9CCC-6AA6995A5A9C"));
+  assert(!client_state_is_worker_uuid(NULL));
+  assert(!client_state_is_worker_uuid(""));
+  assert(!client_state_is_worker_uuid("u-1\nserver http://127.0.0.1:1/x"));
+  assert(
+      !client_state_is_worker_uuid("6f3d7198-178a-47c8-9ccc-6aa6995a5a9c\n"));
+  assert(!client_state_is_worker_uuid("6f3d7198-178a-47c8-9ccc-6aa6995a5a9"));
+  assert(!client_state_is_worker_uuid("6f3d7198x178a-47c8-9ccc-6aa6995a5a9c"));
+  assert(!client_state_is_worker_uuid("6f3d7198-178a-47c8-9ccc-6aa6995a5a9g"));
+  assert(!client_state_is_worker_uuid("6f3d7198-178a-47c8-9ccc\r6aa6995a5a9c"));
+
+  // A settings file that cannot be written is reported, not passed over: the
+  // identity would last one run and every restart would be a new worker.
+  write_settings_file(path, "server https://birdtest.example\n");
+  state = client_state_load(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  free(state->settings_path);
+  state->settings_path =
+      string_duplicate("contribute_test_no_such_dir/contribute.txt");
+  assert(!client_state_set_worker_uuid(state,
+                                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c"));
+  assert_strings_equal(state->worker_uuid,
+                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
+  client_state_destroy(state);
 
   (void)remove(path);
   error_stack_destroy(error_stack);
@@ -1435,7 +1471,17 @@ static void test_a_simulating_rack_analysis_ranks_every_play(void) {
   config_destroy(config);
 }
 
+// A layout comes from the server's data; a byte above 0x7f was a negative
+// index into the square table, and `\xc3` read as a square.
+static void test_a_high_byte_is_not_a_bonus_square(void) {
+  for (int byte = 0x80; byte <= 0xff; byte++) {
+    assert(bonus_square_is_invalid(bonus_square_from_char((char)byte)));
+  }
+  assert(!bonus_square_is_invalid(bonus_square_from_char('=')));
+}
+
 void test_contribute(void) {
+  test_a_high_byte_is_not_a_bonus_square();
   test_a_simulating_rack_analysis_ranks_every_play();
   test_contribute_runs_in_a_config_of_its_own();
   test_http_retries_outlast_a_server_deployment();

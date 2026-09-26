@@ -518,7 +518,15 @@ void contribute_record_derived_mismatch(ContributeState *state,
 // server mints one and hands it back the first time it actually assigns a
 // task. This persists that assignment for the rest of the run and to the
 // settings file for every run after.
+//
+// Only a UUID in canonical form is taken: anything else would go into a
+// request header and a line of the settings file as it came, and a newline in
+// it added settings of the server's choosing that every later run obeyed. One
+// that is not is ignored, and the next claim asks again. One the settings file
+// will not take is used for this run and said so, since a run that cannot save
+// it becomes a new anonymous worker every time it starts.
 static void adopt_server_assigned_uuid(ContributeState *state,
+                                       ThreadControl *thread_control,
                                        const JsonValue *assignment) {
   ClientState *client_state = state->client_state;
   if (client_state->api_key || client_state->worker_uuid) {
@@ -528,7 +536,20 @@ static void adopt_server_assigned_uuid(ContributeState *state,
   if (!worker_uuid) {
     return;
   }
-  client_state_set_worker_uuid(client_state, worker_uuid);
+  if (!client_state_is_worker_uuid(worker_uuid)) {
+    thread_control_print_formatted(
+        thread_control,
+        "the server sent a worker identity that is not a UUID; ignoring it\n");
+    return;
+  }
+  if (!client_state_set_worker_uuid(client_state, worker_uuid)) {
+    thread_control_print_formatted(
+        thread_control,
+        "could not save this worker's identity to %s; add the line\n"
+        "  uuid %s\n"
+        "to it yourself, or every run will be a new anonymous worker\n",
+        client_state->settings_path, worker_uuid);
+  }
   http_client_set_worker_uuid(state->http_client, worker_uuid);
 }
 
@@ -975,7 +996,7 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
     return CONTRIBUTE_CLAIM_SHUTDOWN;
   }
 
-  adopt_server_assigned_uuid(state, state->assignment);
+  adopt_server_assigned_uuid(state, thread_control, state->assignment);
 
   const char *claim_token =
       json_get_string(state->assignment, "claim_token", error_stack);

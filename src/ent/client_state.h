@@ -10,6 +10,7 @@
 // directory.
 
 #include "../util/io_util.h"
+#include <stdbool.h>
 
 #define CONTRIBUTE_SETTINGS_DEFAULT_FILENAME "contribute.txt"
 
@@ -32,10 +33,19 @@ typedef struct ClientState {
 ClientState *client_state_load(const char *path, ErrorStack *error_stack);
 void client_state_destroy(ClientState *state);
 
+// Whether `uuid` is a UUID in its canonical form: 36 characters, hex digits in
+// groups of 8-4-4-4-12 separated by hyphens. What the server sends is checked
+// against this before it is used or written anywhere -- it becomes a request
+// header and a line of the settings file, and a newline in it wrote settings
+// of the server's choosing (a `server` line every later run obeyed).
+bool client_state_is_worker_uuid(const char *uuid);
+
 // Records a worker UUID the server assigned during this run: updates the
 // in-memory state and appends a single `uuid <value>` line to the settings
 // file so later runs send it back. The file is otherwise never rewritten, so
-// the contributor's comments, ordering and formatting survive.
-void client_state_set_worker_uuid(ClientState *state, const char *uuid);
+// the contributor's comments, ordering and formatting survive. The caller has
+// checked `uuid` with client_state_is_worker_uuid. Returns false when the
+// file could not be written: the identity then lasts only this run.
+bool client_state_set_worker_uuid(ClientState *state, const char *uuid);
 
 #endif

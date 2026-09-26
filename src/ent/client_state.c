@@ -27,13 +27,31 @@ static int parse_setting_int(const char *value, const char *key,
   return result;
 }
 
-static void append_uuid_line(const char *path, const char *uuid) {
+static bool append_uuid_line(const char *path, const char *uuid) {
   FILE *stream = fopen(path, "ae");
   if (!stream) {
-    return;
+    return false;
   }
-  (void)fprintf(stream, "\nuuid %s\n", uuid);
-  (void)fclose(stream);
+  const bool written = fprintf(stream, "\nuuid %s\n", uuid) > 0;
+  return fclose(stream) == 0 && written;
+}
+
+bool client_state_is_worker_uuid(const char *uuid) {
+  if (!uuid || strlen(uuid) != 36) {
+    return false;
+  }
+  for (int i = 0; i < 36; i++) {
+    const char c = uuid[i];
+    if (i == 8 || i == 13 || i == 18 || i == 23) {
+      if (c != '-') {
+        return false;
+      }
+    } else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                 (c >= 'A' && c <= 'F'))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
@@ -100,6 +118,15 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
       } else if (strings_equal(key, "maxtasks")) {
         state->max_tasks = parse_setting_int(value, key, settings_path,
                                              line_number, error_stack);
+        // 0 is "no limit"; a negative count stopped the run after one task.
+        if (state->max_tasks < 0) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+              get_formatted_string("%s line %d: 'maxtasks' must be 0 (no "
+                                   "limit) or more, got %d",
+                                   settings_path, line_number,
+                                   state->max_tasks));
+        }
       } else if (strings_equal(key, "idlewait")) {
         state->idle_wait_seconds = parse_setting_int(value, key, settings_path,
                                                      line_number, error_stack);
@@ -151,12 +178,12 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   return state;
 }
 
-void client_state_set_worker_uuid(ClientState *state, const char *uuid) {
+bool client_state_set_worker_uuid(ClientState *state, const char *uuid) {
   free(state->worker_uuid);
   state->worker_uuid = string_duplicate(uuid);
   // Appended rather than rewritten so the contributor's comments, ordering
   // and formatting survive.
-  append_uuid_line(state->settings_path, uuid);
+  return append_uuid_line(state->settings_path, uuid);
 }
 
 void client_state_destroy(ClientState *state) {
