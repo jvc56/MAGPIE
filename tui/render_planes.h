@@ -26,6 +26,10 @@ typedef struct {
   // pixel composite. A dedicated top-most modal plane keeps both the
   // board and the menu visible at once.
   struct ncplane *modal;
+  // The command bar's autocomplete popup, likewise above the pixel
+  // tiles so they don't paint over it. Exists only while typing a
+  // command.
+  struct ncplane *palette;
 } TuiGridPlanes;
 
 // Destroys `plane`, first dropping any pixels the frame dump recorded
