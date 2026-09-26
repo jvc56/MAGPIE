@@ -547,7 +547,8 @@ static void adopt_server_assigned_uuid(ContributeState *state,
         thread_control,
         "could not save this worker's identity to %s; add the line\n"
         "  uuid %s\n"
-        "to it yourself, or every run will be a new anonymous worker\n",
+        "to it yourself (replacing any part of it left at the end), or every "
+        "run will be a new anonymous worker\n",
         client_state->settings_path, worker_uuid);
   }
   http_client_set_worker_uuid(state->http_client, worker_uuid);

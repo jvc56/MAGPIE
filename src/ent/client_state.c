@@ -110,6 +110,16 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
         free(state->api_key);
         state->api_key = string_duplicate(value);
       } else if (strings_equal(key, "uuid")) {
+        // Held to the form the server issues: a line cut short when a full
+        // disk interrupted its save was sent as the identity, refused by the
+        // server, and every later run ended the same way.
+        if (!client_state_is_worker_uuid(value)) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+              get_formatted_string("%s line %d: 'uuid' is not a UUID; delete "
+                                   "the line to be issued a new one",
+                                   settings_path, line_number));
+        }
         free(state->worker_uuid);
         state->worker_uuid = string_duplicate(value);
       } else if (strings_equal(key, "threads")) {
@@ -123,9 +133,8 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
           error_stack_push(
               error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
               get_formatted_string("%s line %d: 'maxtasks' must be 0 (no "
-                                   "limit) or more, got %d",
-                                   settings_path, line_number,
-                                   state->max_tasks));
+                                   "limit) or more, got '%s'",
+                                   settings_path, line_number, value));
         }
       } else if (strings_equal(key, "idlewait")) {
         state->idle_wait_seconds = parse_setting_int(value, key, settings_path,

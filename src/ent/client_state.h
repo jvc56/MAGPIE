@@ -33,11 +33,12 @@ typedef struct ClientState {
 ClientState *client_state_load(const char *path, ErrorStack *error_stack);
 void client_state_destroy(ClientState *state);
 
-// Whether `uuid` is a UUID in its canonical form: 36 characters, hex digits in
-// groups of 8-4-4-4-12 separated by hyphens. What the server sends is checked
-// against this before it is used or written anywhere -- it becomes a request
-// header and a line of the settings file, and a newline in it wrote settings
-// of the server's choosing (a `server` line every later run obeyed).
+// Whether `uuid` is a UUID in its canonical form: 36 characters, hex digits
+// (either case) in groups of 8-4-4-4-12 separated by hyphens. What the server
+// sends is checked against this before it is used or written anywhere -- it
+// becomes a request header and a line of the settings file, and a newline in it
+// wrote settings of the server's choosing (a `server` line every later run
+// obeyed).
 bool client_state_is_worker_uuid(const char *uuid);
 
 // Records a worker UUID the server assigned during this run: updates the
