@@ -1858,8 +1858,8 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   const bool lm_track = lm_span_base >= 0;
   int lm_entries[2][RACK_SIZE + 1];
   int lm_num_entries[2] = {1, 1};
-  int8_t lm_route_bin[2][2 * RACK_SIZE + 2];
-  int8_t lm_route_position[2][2 * RACK_SIZE + 2];
+  int lm_route_bin[2][2 * RACK_SIZE + 2];
+  int lm_route_position[2][2 * RACK_SIZE + 2];
   int lm_num_routes[2] = {0, 0};
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? tws_row : tws_col;
@@ -2076,9 +2076,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         if (lm_track && run_flex > 0 &&
             lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
           // Contact at the last empty before the run.
-          lm_route_bin[lm_side][lm_num_routes[lm_side]] = (int8_t)distance_bin;
+          lm_route_bin[lm_side][lm_num_routes[lm_side]] = distance_bin;
           lm_route_position[lm_side][lm_num_routes[lm_side]] =
-              (int8_t)(lm_num_entries[lm_side] - 1);
+              (lm_num_entries[lm_side] - 1);
           lm_num_routes[lm_side]++;
         }
         span_has_floater = true;
@@ -2125,9 +2125,9 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         if (lm_track && info.flex > 0 &&
             lm_num_routes[lm_side] < 2 * RACK_SIZE + 2) {
           // Contact at the hook square, the entry just recorded.
-          lm_route_bin[lm_side][lm_num_routes[lm_side]] = (int8_t)empties_used;
+          lm_route_bin[lm_side][lm_num_routes[lm_side]] = empties_used;
           lm_route_position[lm_side][lm_num_routes[lm_side]] =
-              (int8_t)(lm_num_entries[lm_side] - 1);
+              (lm_num_entries[lm_side] - 1);
           lm_num_routes[lm_side]++;
         }
         span_has_hook = true;
