@@ -305,13 +305,9 @@ typedef struct MoveGenArgs {
   // equities carried the defense term.
   bool disable_pat;
   // Which loaded PAT classes to suppress (bits from pat_premium_class_t
-  // and PAT_CLASS_MASK_WINDOWS; see PAT_CLASS_MASK_ALL), independent of
-  // disable_pat: 0, the default a caller gets by simply not mentioning
-  // this field, disables nothing and applies every class the weights
-  // have, exactly as before this field existed. Lets one loaded weights
-  // file serve a fast mode (e.g. TWS only, for rollouts) and a full mode
-  // (e.g. every class, for candidate selection) without switching files.
-  // Ignored when disable_pat is set.
+  // and PAT_CLASS_MASK_WINDOWS; see PAT_CLASS_MASK_ALL). 0 applies every
+  // class the weights have, so one weights file can serve both a fast
+  // rollout mode and a full mode. Ignored when disable_pat is set.
   uint32_t pat_disabled_classes_mask;
 } MoveGenArgs;
 

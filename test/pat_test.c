@@ -1423,8 +1423,7 @@ static void test_pat_own_asset_discount(void) {
                         RACK_SIZE);
   assert(ctx.pre_penalty < 0);
   // Never touches (7,0) or its halo, so with no leave (or one that cannot
-  // exploit the hook) the term is exactly the baseline, same as before this
-  // feature existed.
+  // exploit the hook) the term is exactly the baseline.
   assert(pat_eval_move_penalty(&ctx, &far_move, NULL) == ctx.pre_penalty);
   assert(pat_eval_move_penalty(&ctx, &far_move, leave_without_i) ==
          ctx.pre_penalty);
