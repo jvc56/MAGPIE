@@ -251,6 +251,11 @@ typedef struct {
   // stopped sim / endgame solve can continue on the exact position —
   // board and racks alone wouldn't pin down the bag or the scores.
   char cgp_before[512];
+  // Tiles left in the bag at cgp_before, not counting the opponent's
+  // rack (PEG's "effective bag"; 0 or less is an endgame). Valid when
+  // bag_before_known.
+  int bag_before;
+  bool bag_before_known;
   // Owned, deep-copied Move that this turn played, for loaded
   // GCG entries that don't carry a sim/endgame leaderboard. Lets
   // the board renderer ghost the played tiles when the user
@@ -432,9 +437,9 @@ typedef struct {
   char phony_confirm_words[64];
   int phony_confirmed_idx;
   char phony_confirmed_move[64];
-  // true: "/sim" (simulate the turn, fresh or continuing its saved sim);
-  // false: "/resume" (continue whatever analysis the turn saved).
-  bool analysis_request_sim;
+  // What the analysis worker was started to do (TuiAnalysisAction):
+  // simulate, resume the saved analysis, or solve the endgame / PEG.
+  int analysis_request;
   // Scratch game positioned at the resumed turn (reloaded from the
   // entry's cgp_before). Owned by the worker; non-NULL only while a
   // resume is running. The analysis row builder and snapshot capture
@@ -842,6 +847,11 @@ void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap);
 // holdings (RACK_SIZE - opp rack tiles), matching peg_solve's own
 // check — is within [PEG_MIN_BAG, PEG_MAX_BAG]. NULL game is false.
 bool tui_position_in_peg_range(const struct Game *game);
+
+// The bag's tile count less what the opponent's rack is missing (the
+// tiles still to be drawn beyond both racks); 0 or less when the
+// position is an endgame.
+int tui_position_effective_bag(const struct Game *game);
 
 // Set the per-side time budget. Call once after init, before the bot
 // worker starts. Resets the on-turn player's turn_started to "now".

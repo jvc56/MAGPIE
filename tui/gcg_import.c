@@ -407,6 +407,8 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
         (void)snprintf(entry->cgp_before, sizeof(entry->cgp_before), "%s", cgp);
         free(cgp);
       }
+      entry->bag_before = tui_position_effective_bag(state->game);
+      entry->bag_before_known = true;
     }
     // Opponent's rack at this moment is approximated by
     // the rack the opponent had at THEIR next move (they

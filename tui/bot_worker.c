@@ -154,6 +154,8 @@ int tui_bot_worker_append_pending_history(TuiGameState *state, int player_idx,
   // CGP of this position (on-turn rack first) so the "/resume"
   // analysis worker can rebuild the exact game — board, racks, bag,
   // and scores — to keep sampling on after the game ends.
+  entry->bag_before = tui_position_effective_bag(state->game);
+  entry->bag_before_known = true;
   char *cgp = game_get_cgp(state->game, true);
   if (cgp != NULL) {
     copy_str(entry->cgp_before, sizeof(entry->cgp_before), cgp);
@@ -1500,9 +1502,10 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
 // solve; the entry's snapshot + saved leaderboard are refreshed when
 // it stops.
 static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
-                                    int turn_idx, const Game *position) {
+                                    int turn_idx, const Game *position,
+                                    const char *start_notice) {
   pthread_mutex_lock(&state->mutex);
-  tui_game_state_notice(state, "resuming endgame solve - /stop to pause");
+  tui_game_state_notice(state, start_notice);
   state->analysis_game = (struct Game *)position;
   pthread_mutex_unlock(&state->mutex);
 
@@ -1549,9 +1552,10 @@ static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
 // panel through the poll; the entry's snapshot is refreshed when it
 // stops.
 static void analysis_resume_peg(TuiGameState *state, TuiHistoryEntry *entry,
-                                int turn_idx, const Game *position) {
+                                int turn_idx, const Game *position,
+                                const char *start_notice) {
   pthread_mutex_lock(&state->mutex);
-  tui_game_state_notice(state, "resuming peg solve - /stop to pause");
+  tui_game_state_notice(state, start_notice);
   state->analysis_game = (struct Game *)position;
   pthread_mutex_unlock(&state->mutex);
 
@@ -1576,7 +1580,7 @@ static void *analysis_thread_main(void *arg) {
     entry = &state->history[turn_idx];
   }
   Game *position = NULL;
-  const bool request_sim = state->analysis_request_sim;
+  const int action = state->analysis_request;
   bool is_sim = false;
   bool is_peg = false;
   if (entry != NULL && entry->cgp_before[0] != '\0') {
@@ -1608,13 +1612,31 @@ static void *analysis_thread_main(void *arg) {
     return NULL;
   }
 
-  // "/sim" always simulates; "/resume" continues whatever was saved.
-  if (!request_sim && is_peg) {
-    analysis_resume_peg(state, entry, turn_idx, position);
-  } else if (request_sim || is_sim) {
+  // "/sim" always simulates; "/solve" runs the exact solver the
+  // position calls for; "/resume" continues whatever was saved.
+  const bool endgame = tui_position_effective_bag(position) <= 0;
+  if (endgame) {
+    // A loaded GCG records only the mover's rack; in an endgame the
+    // opponent holds exactly the unseen tiles.
+    const int mover_idx = game_get_player_on_turn_index(position);
+    draw_to_full_rack(position, 1 - mover_idx);
+  }
+  if (action == TUI_ANALYSIS_SOLVE) {
+    if (endgame) {
+      analysis_resume_endgame(state, entry, turn_idx, position,
+                              "solving endgame - /stop to pause");
+    } else {
+      analysis_resume_peg(state, entry, turn_idx, position,
+                          "solving pre-endgame - /stop to pause");
+    }
+  } else if (action == TUI_ANALYSIS_RESUME && is_peg) {
+    analysis_resume_peg(state, entry, turn_idx, position,
+                        "resuming peg solve - /stop to pause");
+  } else if (action == TUI_ANALYSIS_SIM || is_sim) {
     analysis_resume_sim(state, entry, turn_idx, position);
   } else {
-    analysis_resume_endgame(state, entry, turn_idx, position);
+    analysis_resume_endgame(state, entry, turn_idx, position,
+                            "resuming endgame solve - /stop to pause");
   }
 
   pthread_mutex_lock(&state->mutex);
@@ -1744,7 +1766,8 @@ const char *tui_analysis_unavailable_reason(const TuiGameState *state,
   if (action == TUI_ANALYSIS_RESUME && !play_over) {
     return "available once the game is over";
   }
-  if (action == TUI_ANALYSIS_SIM && !play_over && state->bot_started) {
+  if ((action == TUI_ANALYSIS_SIM || action == TUI_ANALYSIS_SOLVE) &&
+      !play_over && state->bot_started) {
     return "not while a game against the computer is in progress";
   }
   if (running) {
@@ -1756,6 +1779,15 @@ const char *tui_analysis_unavailable_reason(const TuiGameState *state,
   const TuiHistoryEntry *entry = &state->history[turn_idx];
   if (entry->pending || entry->cgp_before[0] == '\0') {
     return "this turn has no position to analyze";
+  }
+  if (action == TUI_ANALYSIS_SOLVE) {
+    if (!entry->bag_before_known || entry->bag_before > PEG_MAX_BAG) {
+      return "solve is for endgames and pre-endgames - use Simulate";
+    }
+  }
+  if (action == TUI_ANALYSIS_SIM && entry->bag_before_known &&
+      entry->bag_before <= 0) {
+    return "the bag is empty - use Solve";
   }
   if (action == TUI_ANALYSIS_RESUME) {
     if (!entry->analysis_snapshot.valid || entry->analysis_snapshot.is_static) {
@@ -1769,12 +1801,11 @@ const char *tui_analysis_unavailable_reason(const TuiGameState *state,
 }
 
 bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
-                               bool request_sim) {
+                               TuiAnalysisAction action) {
   if (state == NULL) {
     return false;
   }
-  const char *reason = tui_analysis_unavailable_reason(
-      state, turn_idx, request_sim ? TUI_ANALYSIS_SIM : TUI_ANALYSIS_RESUME);
+  const char *reason = tui_analysis_unavailable_reason(state, turn_idx, action);
   if (reason != NULL) {
     tui_game_state_notice(state, reason);
     return false;
@@ -1786,7 +1817,7 @@ bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
   }
   atomic_store(&state->analysis_stop, false);
   state->analysis_resume_turn_idx = turn_idx;
-  state->analysis_request_sim = request_sim;
+  state->analysis_request = (int)action;
   atomic_store(&state->analysis_running, true);
   if (pthread_create(&state->analysis_thread, NULL, analysis_thread_main,
                      state) != 0) {
