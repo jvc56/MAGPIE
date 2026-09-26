@@ -42,21 +42,18 @@ struct PATWeights {
   // flexibility approximation for hooks and floaters the evaluated move
   // itself creates (see pat_prepare_hook_flex).
   uint8_t hook_flex[MAX_ALPHABET_SIZE];
-  // What a floater is worth to whoever plays through it, from the lexicon
-  // alone. through_score[ml][len] is the mean total tile value the rest of
-  // a len-letter word carries when ml sits at one end of it, and
-  // through_count[ml][len] is how many such words there are, log-scaled so
-  // a common letter does not swamp the fit. Both are indexed by the span a
-  // word must cover to run from the floater to the triple.
+  // What a floater is worth to whoever plays through it, from the lexicon.
+  // through_score[ml][len] is the mean tile value the rest of a len-letter
+  // word carries when ml sits at one end of it, and through_count[ml][len]
+  // is how many such words there are, log-scaled. Indexed by the span a word
+  // must cover to run from the floater to the premium.
   uint8_t through_score[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
   uint8_t through_count[MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
-  // The same statistics kept separately for the letter being the word's
-  // first letter ([0]) or its last ([1]). A floater beyond the premium is
-  // the LAST letter of the word that reaches the premium from it, a
-  // floater before the premium the FIRST, and for letters like J
-  // (thousands of words start with it, a handful end with it) or Y
-  // (the reverse) the two differ enormously; the unsigned tables above
-  // sum both ends into one figure. Used only when signed_through is set.
+  // The same statistics kept separately for the letter being the word's first
+  // letter ([0]) or its last ([1]): a floater beyond the premium ends the
+  // word that reaches it, a floater before it starts it, and letters like J
+  // and Y differ enormously between the two. Used only when signed_through
+  // is set.
   uint8_t through_score_end[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
   uint8_t through_count_end[2][MAX_ALPHABET_SIZE][PAT_MAX_THROUGH_LEN];
   // Run-keyed through tables: for a key of 1..PAT_RUN_THROUGH_MAX_KEY
@@ -66,81 +63,49 @@ struct PATWeights {
   uint8_t *run_through_count;
   uint8_t *run_through_score;
   int run_through_alphabet_size;
-  // How much a second route to danger counts once the worst one is already
-  // counted. The opponent plays one move, so the threats a board offers do
-  // not simply add: 0 charges only the worst scan unit, 1 charges every
-  // unit in full (the original behaviour), and values between allow for a
-  // rack that cannot use the worst route. See pat_combine_unit_penalties.
+  // How much a second route to danger counts once the worst is counted. The
+  // opponent plays one move, so threats do not simply add: 0 charges only
+  // the worst scan unit, 1 charges every unit in full, and values between
+  // allow for a rack that cannot use the worst route. See
+  // pat_combine_unit_penalties.
   double combine_gamma;
   // Fraction of a unit's penalty credited back when the move's own leave
-  // holds a letter that could exploit that exact unit itself, whether or
-  // not the move's placement touches it. 0 (the default for every file
-  // that predates this, and the default pat_create_zeroed writes) is
-  // exactly today's behavior: no credit, penalty unchanged. Clamped to
-  // [0, 1] on read (see pat_parse_contents) so the adjusted penalty
-  // p * (1 - discount) always stays in [p, 0]: it can only shrink a
-  // penalty toward zero, never flip its sign, so no new shadow-pruning
-  // bound is needed for it (see pat_eval_move_penalty).
+  // holds a letter that could exploit that unit, whether or not the move
+  // touches it; 0 means no credit. Clamped to [0, 1] so the adjusted penalty
+  // p * (1 - discount) stays in [p, 0] and the shadow bounds stay valid.
   double own_asset_discount;
   // Whether a floater run's flexibility counts only the unseen tiles the
-  // lexicon actually lets extend that run toward the premium (the run's
-  // real extension set), or every unseen tile. false is what every file
-  // before this row was trained under: pat_scan_unit read the extension
-  // set from fields game_gen_cross_set never writes on an empty square
-  // (an empty square's right_extension_set) or writes for the run on its
-  // other side (its left_extension_set), so it always saw the trivial
-  // all-letters set and float_flex_dN reduced to "floater runs at
-  // distance N, times tiles unseen". The measured gap is large -- a
-  // quarter of floater runs cannot be extended toward their premium at
-  // all, and real flexibility totals about half of the trivial figure --
-  // but earlier weights' float_flex weights were fitted to the trivial
-  // figure, so the two semantics are different models, selectable per file
-  // rather than switched globally.
+  // lexicon lets extend the run toward the premium (its real extension set)
+  // or every unseen tile. The two are different models, so weights fitted
+  // under one must be evaluated under the same one; hence a per-file flag.
   bool lexicon_floaters;
-  // Whether pat_scan_unit reads the end-specific through tables
-  // (through_score_end / through_count_end) for a floater, by which side
-  // of the premium it lies on, instead of the unsigned tables. false is
-  // what every file before this row was trained under. Same reasoning as
-  // lexicon_floaters for keeping it per file.
+  // Whether pat_scan_unit reads the end-specific through tables for a
+  // floater, by which side of the premium it lies on, instead of the
+  // unsigned tables. Per file, like lexicon_floaters.
   bool signed_through;
-  // Whether patgen's regression fits the hypergeometric-scaled channels
-  // at all. They are deterministic rescalings of the raw hook/floater
-  // channels, so ridge splits the fitted mass between the two under
-  // near-collinearity, and under iterative training the split drifted
-  // (a five-generation retrain with them lost to weights trained without
-  // them). false drops their columns from the solve so a file trained this
-  // way carries exactly that feature set; evaluation is unaffected either
-  // way (zero weights are zero).
+  // Whether patgen's regression fits the hypergeometric-scaled channels.
+  // They rescale the raw hook and floater channels, so ridge splits the
+  // fitted mass between the two under near-collinearity; false drops their
+  // columns from the solve. Evaluation is unaffected either way.
   bool fit_scaled_channels;
   // Whether patgen builds training rows through the runtime overlay path
   // (pat_extract_move_features_combined) rather than by scanning the
-  // post-move board. The two differ wherever the move creates a hook or
-  // floater: the overlay approximates those with the hook_flex table,
-  // the post-move scan measures them with real cross and extension sets
-  // (mean absolute difference 0.66 equity over a version-3 file's top
-  // candidates). Training on the overlay rows makes fitting and evaluation
-  // see the same measurement.
+  // post-move board. They differ wherever the move creates a hook or
+  // floater, which the overlay approximates with the hook_flex table;
+  // training on overlay rows fits the measurement evaluation uses.
   bool train_overlay;
-  // Whether patgen fits only the hook-score channels, as a residual on
-  // top of every other weight exactly as loaded. A whole-vector refit
-  // re-randomizes everything (identical-recipe seeds differ by 0.2-0.4
-  // equity per disagreement on the move-choice harness), which would
-  // swamp a small new channel's effect; the residual fit isolates it.
+  // Whether patgen fits only some channels as a residual on top of every
+  // other weight as loaded (see fit_residual_mode), so a small new channel's
+  // effect is not swamped by the noise of a whole-vector refit.
   bool fit_residual;
   // Whether hooks the evaluated move creates are scored exactly (see
-  // pat_fresh_cross_set) rather than from the hook_flex approximation.
-  // A runtime semantic, per file like the floater flags, and opt-in: a
-  // file fitted on exact post-move rows but evaluated with the
-  // approximation can still play better than one evaluated exactly, and
-  // only whole-game play can say.
+  // pat_fresh_cross_set) rather than from the hook_flex approximation. Per
+  // file, like the floater flags.
   bool exact_created_hooks;
   // Whether floater through channels use the run-keyed tables (see
   // pat_scan_unit). The per-tile sum they replace adds each tile's
-  // single-letter log-count, i.e. the log of a product of unrelated
-  // numbers: for AT four squares from a triple it claims ~169 units
-  // against an actual 48.7 (67 words), for QI 121 against 0 (no word of
-  // length six ends in QI), for NARCEIN 560 against 0. Opt-in, like the
-  // other semantic flags, until a file using it is validated.
+  // single-letter log-count, which badly overstates runs like QI that few or
+  // no words contain.
   bool run_through;
   // See PAT_FIT_SHRINK_ROW_PREFIX.
   bool fit_shrink;
@@ -169,12 +134,9 @@ struct PATWeights {
   // flexibility channels too; 3: only the floater through channels (see
   // pat_regression_solve_into_weights).
   int fit_residual_mode;
-  // Set by pat_prepare_hook_flex. The lexicon tables (hook_flex,
-  // through_score, through_count) are part of the model: a file loaded
-  // without them evaluates differently (it disagreed with the same
-  // weights prepared on 12% of positions in one measurement), so the
-  // evaluation and training entry points refuse an unprepared model
-  // instead of quietly scoring with empty tables.
+  // Set by pat_prepare_hook_flex. The lexicon tables are part of the model,
+  // so evaluation and training refuse an unprepared one rather than scoring
+  // with empty tables.
   bool prepared;
   uint64_t mutation_counter;
   // The version named on the file's header line (see PAT_VERSION).
@@ -190,10 +152,8 @@ double pat_get_own_asset_discount(const PATWeights *pat) {
 }
 
 void pat_set_own_asset_discount(PATWeights *pat, double own_asset_discount) {
-  // Clamped here, not just at the file-parsing boundary: a search over
-  // candidate discounts (e.g. a 1D fit) mutates a PATWeights directly, and
-  // the bound argument in pat_eval_move_penalty_bound depends on this
-  // invariant holding for every value this object could ever carry.
+  // Clamped here too, not only when parsing: pat_eval_move_penalty_bound
+  // relies on the discount staying in [0, 1].
   if (own_asset_discount < 0.0) {
     own_asset_discount = 0.0;
   } else if (own_asset_discount > 1.0) {
@@ -286,15 +246,15 @@ static int pat_run_through_index(const PATWeights *pat, int word_end,
   const int n = pat->run_through_alphabet_size;
   int block_start = 0;
   int block = 1;
-  for (int k = 1; k < key_len; k++) {
+  for (int key_idx = 1; key_idx < key_len; key_idx++) {
     block *= n;
     block_start += block;
   }
   // block_start now holds n + n^2 + ... + n^(key_len-1); add the key's
   // base-n value.
   int within = 0;
-  for (int k = 0; k < key_len; k++) {
-    within = within * n + key[k];
+  for (int key_idx = 0; key_idx < key_len; key_idx++) {
+    within = within * n + key[key_idx];
   }
   return ((block_start + within) * PAT_MAX_THROUGH_LEN + word_length) * 2 +
          word_end;
@@ -303,7 +263,7 @@ static int pat_run_through_index(const PATWeights *pat, int word_end,
 static int pat_run_through_rows(int alphabet_size) {
   int rows = 0;
   int block = 1;
-  for (int k = 1; k <= PAT_RUN_THROUGH_MAX_KEY; k++) {
+  for (int key_len = 1; key_len <= PAT_RUN_THROUGH_MAX_KEY; key_len++) {
     block *= alphabet_size;
     rows += block;
   }
@@ -1152,10 +1112,10 @@ static void pat_walk_words(const KWG *kwg, const LetterDistribution *ld,
            key_len++) {
         int prefix_score = 0;
         int suffix_score = 0;
-        for (int k = 0; k < key_len; k++) {
-          prefix_score += equity_to_int(ld_get_score(ld, word[k]));
-          suffix_score +=
-              equity_to_int(ld_get_score(ld, word[word_length - key_len + k]));
+        for (int key_idx = 0; key_idx < key_len; key_idx++) {
+          prefix_score += equity_to_int(ld_get_score(ld, word[key_idx]));
+          suffix_score += equity_to_int(
+              ld_get_score(ld, word[word_length - key_len + key_idx]));
         }
         const int prefix_index =
             pat_run_through_index(stats->pat, 0, word, key_len, word_length);
@@ -1329,13 +1289,11 @@ static inline int pat_ctz(uint64_t bits) {
 #endif
 }
 
-// The blank marker occupies bit 0 of cross and extension sets; flexibility
-// counts real letters only.
 // The flexibility of a hook or extension point: how many tiles the opponent
-// could still hold that fit it. Counting unseen tiles rather than the
-// letters the set admits makes a hook needing a J the near-nothing it
-// usually is, and makes a hook only the evaluating player can fill (its
-// letters all sitting on their own rack) score as no threat at all.
+// could still hold that fit it. Counting unseen tiles rather than admitted
+// letters makes a hook needing a J the near-nothing it usually is, and one
+// only the evaluating player can fill no threat at all. Bit 0 of a cross or
+// extension set is the blank marker, which is skipped.
 static inline int pat_set_flex(const uint8_t *unseen_counts,
                                uint64_t letter_set) {
   int flex = 0;
@@ -1517,8 +1475,8 @@ static uint64_t pat_fresh_cross_set(const KWG *kwg,
   uint64_t extension_set = 0;
   if (num_before == 0) {
     uint32_t node = root;
-    for (int k = num_after - 1; k >= 0; k--) {
-      node = kwg_get_next_node_index(kwg, node, after[k]);
+    for (int after_idx = num_after - 1; after_idx >= 0; after_idx--) {
+      node = kwg_get_next_node_index(kwg, node, after[after_idx]);
       if (node == 0) {
         return 0;
       }
@@ -1526,8 +1484,8 @@ static uint64_t pat_fresh_cross_set(const KWG *kwg,
     return kwg_get_letter_sets(kwg, node, &extension_set) & ~(uint64_t)1;
   }
   uint32_t node = root;
-  for (int k = 0; k < num_before; k++) {
-    node = kwg_get_next_node_index(kwg, node, before[k]);
+  for (int before_idx = 0; before_idx < num_before; before_idx++) {
+    node = kwg_get_next_node_index(kwg, node, before[before_idx]);
     if (node == 0) {
       return 0;
     }
@@ -1541,14 +1499,14 @@ static uint64_t pat_fresh_cross_set(const KWG *kwg,
     return kwg_get_letter_sets(kwg, separated, &extension_set) & ~(uint64_t)1;
   }
   uint64_t cross_set = 0;
-  for (uint32_t i = separated;; i++) {
-    const uint32_t arc = kwg_node(kwg, i);
+  for (uint32_t node_idx = separated;; node_idx++) {
+    const uint32_t arc = kwg_node(kwg, node_idx);
     const MachineLetter ml = (MachineLetter)kwg_node_tile(arc);
     if (ml != SEPARATION_MACHINE_LETTER) {
       uint32_t cur = kwg_node_arc_index_prefetch(arc, kwg);
       bool ok = cur != 0;
-      for (int k = 0; ok && k < num_after - 1; k++) {
-        cur = kwg_get_next_node_index(kwg, cur, after[k]);
+      for (int after_idx = 0; ok && after_idx < num_after - 1; after_idx++) {
+        cur = kwg_get_next_node_index(kwg, cur, after[after_idx]);
         ok = cur != 0;
       }
       if (ok && kwg_in_letter_set(kwg, after[num_after - 1], cur)) {
@@ -1769,20 +1727,19 @@ static PATCrossInfo pat_effective_cross_info(
   return info;
 }
 
-// Scans one (TWS, dir) unit: walks outward from the empty TWS square along
-// its lane on both sides, accumulating hook, floater, and triple-triple
-// features binned by the number of tiles a word reaching the TWS must play.
-// A triple-triple span is counted from both of its endpoint TWS squares;
-// the double counting is consistent between training and evaluation, so the
-// trained weight absorbs it.
+// Scans one (premium square, dir) unit: walks outward from the empty premium
+// square along its lane on both sides, accumulating hook, floater, and
+// triple-triple features binned by the number of tiles a word reaching the
+// square must play. A triple-triple span is counted from both of its
+// endpoints; training and evaluation count it the same way, so the weight
+// absorbs the double count.
 // extent_lo/extent_hi (optional) receive the lowest and highest lane index
-// the walk visited, including the square it broke on: a move can only
-// change this unit's features by placing a tile on one of those squares or
-// directly beside them in the perpendicular direction.
-// lm_channels: whether to do the premium-combination bookkeeping at all.
-// Training rows always want it; evaluation skips it when every weight
-// on those channels is zero, since their dot product is then exactly
-// zero whatever the features (see PATEvalContext.channel_flags).
+// the walk visited, including the square it broke on: a move can only change
+// this unit's features by placing a tile on one of those squares or directly
+// beside them.
+// lm_channels and score_channels say whether to compute the
+// letter-multiplier and hook-score channels; evaluation skips them when
+// their weights are all zero (see PATEvalContext.channel_flags).
 static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                           const uint8_t *unseen_counts, const PATWeights *pat,
                           int premium_row, int premium_col, int premium_class,
@@ -1995,13 +1952,14 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                                   ? run_length
                                   : PAT_RUN_THROUGH_MAX_KEY;
           MachineLetter key[PAT_RUN_THROUGH_MAX_KEY];
-          for (int k = 0; k < key_len; k++) {
+          for (int key_idx = 0; key_idx < key_len; key_idx++) {
             // Far-end letters in word order: beyond the premium the far end
             // is the last encountered and word order is encounter order;
             // before it, word order is reversed, so the word's first
             // letters are the last encountered, read backwards.
-            key[k] = (side > 0) ? run_letters[run_length - key_len + k]
-                                : run_letters[run_length - 1 - k];
+            key[key_idx] = (side > 0)
+                               ? run_letters[run_length - key_len + key_idx]
+                               : run_letters[run_length - 1 - key_idx];
           }
           const int word_end = (side > 0) ? 1 : 0;
           features[PAT_FEATURE_FLOAT_THROUGH_SCORE_START + distance_bin - 1] +=
@@ -2134,28 +2092,32 @@ static void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     int prefix_max[RACK_SIZE + 1];
     int suffix_max[RACK_SIZE + 2];
     prefix_max[0] = lm_entries[lm_side][0];
-    for (int k = 1; k < num_entries; k++) {
-      prefix_max[k] = (lm_entries[lm_side][k] > prefix_max[k - 1])
-                          ? lm_entries[lm_side][k]
-                          : prefix_max[k - 1];
+    for (int entry_idx = 1; entry_idx < num_entries; entry_idx++) {
+      prefix_max[entry_idx] =
+          (lm_entries[lm_side][entry_idx] > prefix_max[entry_idx - 1])
+              ? lm_entries[lm_side][entry_idx]
+              : prefix_max[entry_idx - 1];
     }
     suffix_max[num_entries] = 1;
-    for (int k = num_entries - 1; k >= 0; k--) {
-      suffix_max[k] = (lm_entries[lm_side][k] > suffix_max[k + 1])
-                          ? lm_entries[lm_side][k]
-                          : suffix_max[k + 1];
+    for (int entry_idx = num_entries - 1; entry_idx >= 0; entry_idx--) {
+      suffix_max[entry_idx] =
+          (lm_entries[lm_side][entry_idx] > suffix_max[entry_idx + 1])
+              ? lm_entries[lm_side][entry_idx]
+              : suffix_max[entry_idx + 1];
     }
-    for (int r = 0; r < lm_num_routes[lm_side]; r++) {
-      const int bin = lm_route_bin[lm_side][r];
-      const int position = lm_route_position[lm_side][r];
+    for (int route_idx = 0; route_idx < lm_num_routes[lm_side]; route_idx++) {
+      const int bin = lm_route_bin[lm_side][route_idx];
+      const int position = lm_route_position[lm_side][route_idx];
       const int span_lm = prefix_max[position];
       int ext_lm = suffix_max[position + 1];
       // Past the premium onto the far side, with the tiles the route
       // leaves in the rack (entry 0 there is the premium again).
       const int budget = max_reach - bin;
-      for (int k = 1; k <= budget && k < lm_num_entries[other]; k++) {
-        if (lm_entries[other][k] > ext_lm) {
-          ext_lm = lm_entries[other][k];
+      for (int entry_idx = 1;
+           entry_idx <= budget && entry_idx < lm_num_entries[other];
+           entry_idx++) {
+        if (lm_entries[other][entry_idx] > ext_lm) {
+          ext_lm = lm_entries[other][entry_idx];
         }
       }
       features[lm_span_base + bin - 1] +=
@@ -2588,8 +2550,8 @@ pat_eval_utility_adjustment(const PATEvalContext *pat_eval_ctx,
 
 // Scans one of the context's units into `features`, reporting the lane it
 // walks and the span of lane squares that walk could read. Units 2*i and
-// 2*i+1 are TWS i's horizontal and vertical walks; the units after those are
-// the double-double windows.
+// 2*i+1 are premium i's horizontal and vertical walks; the units after those
+// are the double-double windows.
 static void pat_scan_context_unit(const PATEvalContext *pat_eval_ctx,
                                   int unit_index, const PATMoveOverlay *overlay,
                                   int32_t *features, int *dir_out,
@@ -3060,22 +3022,12 @@ static void pat_leave_affected_units(const PATEvalContext *pat_eval_ctx,
                              leave_units_out);
 }
 
-// Bounds pat_eval_move_penalty(move, leave) without rescanning: besides the
-// units the move's placement can reach, the units its own leave could
-// exploit (see pat_leave_affected_units) can also move all the way to 0 in
-// the best case (own_asset_discount capping at 1), so both sets are zeroed
-// for the bound exactly as pat_units_penalty_bound already zeros a
-// geometrically reached unit.
-//
-// A NULL leave does NOT mean "assume no credit": that would make the bound
-// too small when the move's actual (unknown to this call) leave would have
-// qualified, which is the unsound direction for an upper bound -- the real
-// pat_eval_move_penalty could then exceed what this claimed to bound.
-// Every real move-generation caller has the actual leave in hand and passes
-// it, so this only matters for a caller with none to offer; that caller
-// gets pat_eval_ctx->worst_case_leave_units, the same conservative
-// rack-wide superset lane_penalty_bound already uses for exactly this
-// reason (every leave is a subset of the current starting rack).
+// Bounds pat_eval_move_penalty(move, leave) without rescanning: the units the
+// move can reach and the units its leave could exploit (see
+// pat_leave_affected_units) can each move all the way to 0 at best, so both
+// sets are zeroed for the bound. A NULL leave uses
+// worst_case_leave_units, since assuming no credit would make the bound too
+// small.
 Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
                                    const Move *move, const Rack *leave) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
@@ -3114,14 +3066,10 @@ Equity pat_eval_move_penalty_bound(const PATEvalContext *pat_eval_ctx,
 }
 
 // The opening adjustment for a move on an empty board (see
-// PAT_OPENING_TILES_ROW_PREFIX): a placement's entry for its tile count,
-// and the exchange entry for BOTH an exchange and a pass, which leave
-// the board empty alike (a pass is an exchange that draws nothing, and
-// the two tie statically on a hopeless rack: the table must not break
-// that tie toward the pass). Applies to every decision while the board
-// is empty, either player's, including the ones that follow an opening
-// exchange or pass -- the same empty-board situation the table was
-// measured on. Zero once a tile is down.
+// PAT_OPENING_TILES_ROW_PREFIX): a placement's entry for its tile count, and
+// the exchange entry for both an exchange and a pass, which leave the board
+// empty alike (so the table cannot break a static tie between them). Applies
+// to either player while the board is empty; zero once a tile is down.
 static inline Equity pat_opening_adjustment(const PATEvalContext *pat_eval_ctx,
                                             const Move *move) {
   if (!pat_eval_ctx->board_is_empty) {
@@ -3167,15 +3115,11 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
   uint64_t affected_units[PAT_MASK_WORDS];
   pat_move_affected_units(pat_eval_ctx, row_start, row_end, col_start, col_end,
                           affected_units);
-  // Units the move's own leave could exploit itself, whether or not its
-  // placement geometrically touches them (see unit_hook_letters). Empty
-  // whenever the file carries no discount, so that case runs the exact
-  // byte-for-byte loop every earlier file already ran. This uses the
-  // baseline (pre-move) reverse index, which is exactly right for a unit
-  // the move's placement never touches -- but a unit the placement DOES
-  // touch may have gained or lost hook letters the move itself created or
-  // destroyed, so that case is re-checked below against a fresh, overlay-
-  // aware scan instead of trusting this baseline membership test.
+  // Units the move's own leave could exploit, whether or not its placement
+  // touches them (see unit_hook_letters); empty when the file carries no
+  // discount. This uses the pre-move index, which is right for a unit the
+  // move does not touch; a touched unit may have gained or lost hook letters,
+  // so it is rechecked below against its overlay rescan.
   const double discount = pat_eval_ctx->weights->own_asset_discount;
   bool leave_has_blank = false;
   const uint64_t leave_mask =

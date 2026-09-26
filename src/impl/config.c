@@ -1093,7 +1093,8 @@ static void add_pat_help_arg(arg_token_t arg_token, const char **usages,
     examples[1] = "20000,20000 english_pat";
     *text = "Trains PAT weights (see the 'pat' option) by self-play: "
             "each generation plays the given number of games, recording the "
-            "post-move TWS access features of every move and the opponent's "
+            "post-move premium-square access features of every move and the "
+            "opponent's "
             "reply score, then refits the weights by ridge regression and "
             "continues with them live. Requires both players to share a "
             "lexicon; if no 'pat' weights are loaded, training bootstraps from "

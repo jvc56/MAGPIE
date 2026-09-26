@@ -15,13 +15,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Trained PAT (Positional Adjustment Table) weights: a small vector of
-// penalties applied to static move equity based on the opponent's post-move
-// access to triple word squares. Every applied weight is <= 0. This sign
-// convention is load-bearing:
-// the defense term is deliberately omitted from the shadow equity upper bound
-// (see static_eval_get_shadow_equity), which is only sound for terms that can
-// never increase a move's equity. The loader and setters enforce it.
+// Trained PAT (Positional Adjustment Term) weights: penalties applied to static
+// move equity for the opponent's post-move access to premium squares. Every
+// weight is <= 0, which the loader and setters enforce: the defense term is
+// left out of the shadow equity upper bound (see
+// static_eval_get_shadow_equity), which is only sound for terms that never
+// raise a move's equity.
 typedef struct PATWeights PATWeights;
 
 // Loads weights from data/strategy/<pat_name>.pat. Returns NULL and pushes to
@@ -36,9 +35,6 @@ const char *pat_get_name(const PATWeights *pat);
 Equity pat_get_weight(const PATWeights *pat, int feature_index);
 // weight must be <= 0.
 void pat_set_weight(PATWeights *pat, int feature_index, Equity weight);
-// The mutation counter changes whenever the weights are rewritten in place
-// (as the training loop does between generations) so any future cache keyed
-// on this object can detect staleness.
 // See PATWeights.combine_gamma.
 void pat_set_combine_gamma(PATWeights *pat, double combine_gamma);
 // See PATWeights.own_asset_discount.
@@ -86,6 +82,8 @@ void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
 bool pat_get_fit_residual(const PATWeights *pat);
 int pat_get_fit_residual_mode(const PATWeights *pat);
 void pat_set_fit_residual(PATWeights *pat, bool fit_residual);
+// Changes whenever the weights are rewritten in place (as training does
+// between generations), so a cache keyed on the object can detect staleness.
 uint64_t pat_get_mutation_counter(const PATWeights *pat);
 void pat_bump_mutation_counter(PATWeights *pat);
 // Writes the weights to data/strategy/<pat_name>.pat.
@@ -110,6 +108,8 @@ int pat_get_through_score_end(const PATWeights *pat, int word_end,
                               MachineLetter ml, int span);
 int pat_get_through_count_end(const PATWeights *pat, int word_end,
                               MachineLetter ml, int span);
+// Entries of the unsigned floater through-table; see
+// PATWeights.through_count.
 int pat_get_through_count(const PATWeights *pat, MachineLetter ml, int span);
 
 // The premium squares a lane walk can be anchored on. Each is worth
@@ -140,11 +140,8 @@ enum {
       PAT_CLASS_MASK_WINDOWS | ((1u << PAT_NUM_PREMIUM_CLASSES) - 1),
   PAT_CLASS_MASK_TWS_ONLY = 1u << PAT_PREMIUM_TWS,
   // The classes sim rollouts use unless -patrolloutclasses says otherwise:
-  // the triple-word (and on 21x21 quad-word) squares plus windows. They keep
-  // most of full PAT's value at a fraction of its cost: on CSW24 static
-  // play, full PAT costs 2.7x no PAT on 15x15 and 1.9x on 21x21, these
-  // 1.45x and 1.35x, and full PAT beats them by only 1.3 and 1.6 points per
-  // game pair.
+  // triple word (and on 21x21 quad word) squares plus windows, which keep
+  // most of full PAT's value at a fraction of its cost.
   PAT_CLASS_MASK_ROLLOUT_DEFAULT =
       (1u << PAT_PREMIUM_TWS) | PAT_CLASS_MASK_WINDOWS |
       (BOARD_DIM >= 21 ? (1u << PAT_PREMIUM_QWS) : 0),
@@ -163,16 +160,10 @@ enum {
 };
 
 enum {
-  // The standard 15x15 board has 61 premium squares of the four classes
-  // walked (8 triple word, 17 double word, 12 triple letter, 24 double
-  // letter) and the 21x21 super board has 125. Truncation past the cap is
-  // deterministic (row-major) but it is also a defect: the trainer lists
-  // squares on the post-move board and the engine on the pre-move board,
-  // so a covered square near the cap shifts which squares each side sees.
-  // Keep the cap above every layout that is built.
-  // The super board walks 125 premium squares (4 quad word, 16 triple
-  // word, 41 double word, 8 quad letter, 20 triple letter, 36 double
-  // letter) and has 72 windows.
+  // The standard board has 61 premium squares and the 21x21 board 125. Keep
+  // the cap above every layout: the trainer lists squares on the post-move
+  // board and the engine on the pre-move board, so truncation near the cap
+  // would shift which squares each side sees.
   PAT_MAX_PREMIUM = 132,
   // The standard board has 16 double-double windows (8 in rows and 8 in
   // columns) and the super board 40. Windows are found horizontally first,
@@ -181,7 +172,6 @@ enum {
   // The unit masks are 64-bit, so this is the hard ceiling (see the
   // static_assert in pat.c).
   PAT_MAX_SCAN_UNITS = PAT_MAX_PREMIUM * 2 + PAT_MAX_DD,
-  // The affected-unit set no longer fits one word.
   PAT_MASK_WORDS = (PAT_MAX_SCAN_UNITS + 63) / 64,
   // Double word squares further apart than this cannot be joined by one
   // word even with playthrough, so they are not a window.
@@ -190,13 +180,11 @@ enum {
 
 // Per-position evaluation state, rebuilt by each movegen position load (and
 // on the stack for validated moves). Holds the position-constant part of the
-// defense term (pre_penalty, the penalty for the opponent's TWS access on
-// the board as it stands) plus what the per-move delta needs to stay off
-// the hot path: per scan unit (one TWS row or column walk), the baseline
-// feature vector and the extent of squares the walk actually visited, so a
-// candidate move rescans a unit only when it places a tile on or directly
-// beside a square that walk could see, and rescans it exactly once (the
-// baseline side is cached).
+// defense term (pre_penalty, the penalty for the board as it stands) plus
+// what the per-move delta needs to stay off the hot path: per scan unit (a
+// premium square's row or column walk, or a window), the baseline features
+// and the squares the walk visited, so a candidate move rescans a unit only
+// when it places a tile on or beside a square that walk could see.
 //
 // The lanes pointer is only valid while the board is alive, untransposed,
 // and unmutated, which holds for the duration of a move generation call and
@@ -227,7 +215,7 @@ typedef struct PATEvalContext {
   uint8_t dd_his[PAT_MAX_DD];
   // Which product tier each window's two multipliers put it in.
   uint8_t dd_tiers[PAT_MAX_DD];
-  // Units 2*i and 2*i+1 are TWS i's horizontal and vertical walks; the
+  // Units 2*i and 2*i+1 are premium i's horizontal and vertical walks; the
   // num_dd units after those are the double-double windows in order.
   int num_units;
   // How many tiles of each letter the opponent could still be holding: the
@@ -254,8 +242,7 @@ typedef struct PATEvalContext {
   int nonzero_feature_index[PAT_NUM_FEATURES];
   int num_nonzero_features;
   // Bit flags for optional scan work. Training rows enable both; runtime
-  // enables each only when a corresponding weight is nonzero. Reuses the
-  // byte previously occupied by lm_channels, with no per-unit storage.
+  // enables each only when a corresponding weight is nonzero.
   uint8_t channel_flags;
   // The stage factor for this position (see PATWeights.stage_scale),
   // applied to every penalty and bound the context hands out; 1.0 unless
@@ -298,77 +285,34 @@ typedef struct PATEvalContext {
   // pat_eval_context_get_active_classes, the safe way to read this from outside
   // pat.c since it is meaningless (and left unset) while weights is NULL.
   uint32_t active_classes_mask;
-  // The opponent's rack SIZE only -- never their rack contents, which real
-  // play never has visibility into. A route needing more fresh tiles than
-  // the opponent currently holds cannot be played regardless of which
-  // letters admit it, so scans cap distance at this rather than always at
-  // RACK_SIZE. Defaults to RACK_SIZE when a caller has no better estimate
-  // (e.g. training, which observes a specific player but not turn parity
-  // detail beyond that).
-  //
-  // Every current caller is bag-gated (see pat_eval_context_load's own
-  // callers in move_gen.c and validated_move.c, and the training gate in
-  // autoplay.c), and the opponent's rack can only fall below RACK_SIZE once
-  // the bag is empty: whichever player's draw first comes up short is the
-  // one that empties it, so bag_get_letters(...) > 0 implies every rack
-  // still on the board is full. This field is therefore always exactly
-  // RACK_SIZE at every current call site -- confirmed empirically (zero
-  // engagements over 4000 self-played games with instrumentation). It is
-  // still correct and load-bearing as the plumbing pat_scan_unit's
-  // hypergeometric reweighting (unseen_counts scaled by
-  // opponent_rack_size / total_unseen, which DOES vary while the bag has
-  // tiles) needs through the same call chain; keeping the cap live now
-  // means it activates for free the day PAT's own bag-empty gate loosens.
+  // The opponent's rack size (public), never its contents. A route needing
+  // more fresh tiles than the opponent holds cannot be played, so scans cap
+  // distance at this. PAT only runs while the bag has tiles, when every rack
+  // is full, so this is RACK_SIZE today; the hypergeometric channels also
+  // read it.
   int opponent_rack_size;
   // Bit L of unit_hook_letters[u] is set when some live hook or floater
-  // route this unit's baseline scan found would accept machine letter L
-  // (blanks excluded, matching pat_set_flex's own convention). Lets a
-  // move's own leave be checked against exactly the letters that would
-  // let it exploit this unit itself, entirely independent of whether the
-  // move's placement geometrically touches the unit -- unlike
-  // unit_mask_by_row/col, which only ever answer the geometric question.
-  // Computed once per position load, from the same overlay-free baseline
-  // walk that fills unit_penalty; never updated for a per-move overlay
-  // rescan.
+  // route found by unit u's baseline scan accepts machine letter L (blanks
+  // excluded, as in pat_set_flex), so a move's leave can be checked against
+  // the letters that would let it exploit the unit whether or not the move
+  // touches it. Computed once per position load.
   uint64_t unit_hook_letters[PAT_MAX_SCAN_UNITS];
-  // Reverse index of the above: bit u of units_by_hook_letter[L] is set
-  // exactly when unit_hook_letters[u] has bit L set. A move's leave has at
-  // most RACK_SIZE distinct letters, so ORing this in for each one finds
-  // every unit the move's own leave could exploit in a handful of array
-  // reads, without rescanning a single unit the move's placement did not
-  // already touch.
+  // Reverse index of the above: bit u of units_by_hook_letter[L] is set when
+  // unit_hook_letters[u] has bit L, so the units a leave could exploit are a
+  // few array reads away.
   uint64_t units_by_hook_letter[MAX_ALPHABET_SIZE][PAT_MASK_WORDS];
-  // Units reachable through some letter the player's STARTING rack holds
-  // right now (or every unit with any live route at all, if the rack has a
-  // blank) -- a conservative, position-level superset of what any single
-  // move's own leave could end up eligible for, since every leave is a
-  // subset of this same rack. Empty whenever the file carries no discount.
-  // Used both to widen lane_penalty_bound uniformly (a per-lane bound
-  // computed before any specific move's leave exists) and as the fallback
-  // pat_eval_move_penalty_bound takes when a caller has no specific leave
-  // to offer: omitting leave information must never make a claimed upper
-  // bound smaller than the true value could reach, so the fallback has to
-  // be a safe superset, not empty.
+  // Units reachable through some letter the player's rack holds (every unit
+  // with a live route, if the rack has a blank): a superset of what any
+  // move's leave could exploit, since every leave is a subset of the rack.
+  // Empty when the file carries no discount. It widens lane_penalty_bound
+  // and is pat_eval_move_penalty_bound's fallback when a caller has no leave,
+  // so a bound without leave information is never too small.
   uint64_t worst_case_leave_units[PAT_MASK_WORDS];
 } PATEvalContext;
 
 void pat_eval_context_disable(PATEvalContext *pat_eval_ctx);
-// Builds the context static evaluation uses. Premium squares whose class
-// has no nonzero weight, or that enabled_classes_mask excludes, and
-// windows whose tier has none or that the mask's PAT_CLASS_MASK_WINDOWS
-// bit excludes, are not walked: their penalty would be exactly zero, so
-// leaving them out changes no result and only saves the scans. Pass
-// PAT_CLASS_MASK_ALL for ordinary use. opponent_rack_size is the tile
-// COUNT only (public information), never rack contents; pass RACK_SIZE if
-// unknown. Training never comes through here (it extracts every feature
-// from the board directly), so a class the weights have not learned yet
-// still reaches the fit.
-// Sets the position the utility correction (see
-// PAT_UTILITY_ADJUST_ROW_PREFIX) reads: the mover's lead before the move,
-// in points, and the tiles in the bag. A no-op when the loaded weights carry
-// no correction; every load or disable clears it.
-// Sets the utility correction (see PAT_UTILITY_ADJUST_ROW_PREFIX) and
-// builds its tables from win_pcts; 0 removes it.
+// Sets the utility correction (see PAT_UTILITY_ADJUST_ROW_PREFIX) and builds
+// its tables from win_pcts; 0 removes it.
 void pat_set_utility_adjust(PATWeights *pat, double utility_adjust,
                             const WinPct *win_pcts);
 // Builds the utility correction's tables (see PAT_UTILITY_ADJUST_ROW_PREFIX)
@@ -377,9 +321,17 @@ void pat_set_utility_adjust(PATWeights *pat, double utility_adjust,
 // pat_prepare_hook_flex whenever the weights are used with a distribution.
 void pat_prepare_utility(PATWeights *pat, const char *data_paths,
                          const LetterDistribution *ld, ErrorStack *error_stack);
+// Sets the position the utility correction reads: the mover's lead before
+// the move, in points, and the tiles in the bag. A no-op when the weights
+// carry no correction; every load or disable clears it.
 void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
                                   int bag);
 void pat_eval_context_set_kwg(PATEvalContext *pat_eval_ctx, const KWG *kwg);
+// Builds the context static evaluation uses. Premium squares whose class has
+// no nonzero weight or that enabled_classes_mask excludes, and windows whose
+// tier has none or whose PAT_CLASS_MASK_WINDOWS bit is clear, are not walked:
+// their penalty would be zero. opponent_rack_size is the tile count only;
+// pass RACK_SIZE if unknown.
 void pat_eval_context_load(PATEvalContext *pat_eval_ctx,
                            const PATWeights *weights, const Square *lanes,
                            const LetterDistribution *ld,
@@ -395,14 +347,12 @@ void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
                                      const LetterDistribution *ld,
                                      const Rack *player_rack,
                                      int opponent_rack_size);
-// Returns the defense term for the move: the penalty for the opponent's TWS
-// access after the move is played, which is always <= 0. Returns 0 when the
-// context is NULL or disabled. Non-placement moves return the position
-// baseline (their play leaves the board unchanged). leave is the tiles the
-// move would keep, used only to credit units its own leave could exploit
-// itself (see PATWeights.own_asset_discount and unit_hook_letters in the
-// context above); pass NULL if unavailable, which simply forgoes the
-// credit.
+// Returns the PAT term for the move: the defense penalty for the opponent's
+// access after the move (always <= 0) plus any opening adjustment and utility
+// correction. Returns 0 when the context is NULL or disabled. Non-placement
+// moves get the position baseline. leave is the tiles the move keeps, used
+// only to credit units the leave could exploit (see
+// PATWeights.own_asset_discount); NULL forgoes the credit.
 Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
                              const Move *move, const Rack *leave);
 // Returns an upper bound on pat_eval_move_penalty for the move without any
@@ -470,29 +420,23 @@ pat_eval_lane_penalty_bound(const PATEvalContext *pat_eval_ctx, int dir,
   return pat_eval_ctx->lane_penalty_bound[dir][lane] +
          pat_eval_ctx->utility_bound;
 }
-// Extracts the feature vector for the board as it stands (no move overlay).
-// Used for the context baseline and, exactly as-is, by the training loop on
-// post-move boards. features must have PAT_NUM_FEATURES elements.
-// pat supplies the per-letter tables the floater channels read and may be
-// NULL, which zeroes those channels. opponent_rack_size is the tile COUNT
-// only (public information); pass RACK_SIZE if unknown.
+// Extracts the feature vector for the board as it stands (no move overlay),
+// for the context baseline and for training on post-move boards. features has
+// PAT_NUM_FEATURES elements. pat supplies the per-letter tables the floater
+// channels read; NULL zeroes those channels. opponent_rack_size is the tile
+// count only; pass RACK_SIZE if unknown.
 void pat_extract_features(const Square *lanes, const LetterDistribution *ld,
                           const Rack *player_rack, const PATWeights *pat,
                           int opponent_rack_size, int32_t *features);
-// The feature row to regress on when per-unit penalties are combined with a
-// gamma below one. Because the combination charges the worst unit in full
-// and the rest at gamma, the row whose dot product with the weights equals
-// the combined term is gamma times every unit plus the remaining (1 - gamma)
-// of whichever unit the CURRENT weights rank worst. Training on this row and
-// evaluating with the same combination is one round of the obvious
-// fixed-point iteration, which the generation loop already provides. Falls
-// back to the plain sum when the weights combine at gamma 1 or rank every
-// unit equally. features has PAT_NUM_FEATURES elements.
-// See pat.c: the training row for move built through the runtime overlay
-// path from the (pre-move) context, so that fitting and evaluation see the
-// same measurement.
+// The feature row to regress on when per-unit penalties combine with a gamma
+// below one: gamma times every unit plus the remaining (1 - gamma) of the unit
+// the current weights rank worst, so its dot product with the weights is the
+// combined term. Iterating training generations converges on the fixed point.
+// features has PAT_NUM_FEATURES elements. This form builds the row for move
+// through the runtime overlay path from the pre-move context.
 void pat_extract_move_features_combined(const PATEvalContext *pat_eval_ctx,
                                         const Move *move, double *features);
+// The same row for the board as it stands.
 void pat_extract_features_combined(const Square *lanes,
                                    const LetterDistribution *ld,
                                    const Rack *player_rack,

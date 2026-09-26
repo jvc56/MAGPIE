@@ -230,17 +230,9 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
   // Ridge on standardized features: the penalty for feature i scales with
   // that feature's own empirical variance (row 0 of XtX/xty holds the
   // feature sums, so mean_i = xtx[0][i]/N and variance_i =
-  // xtx[i][i]/N - mean_i^2) rather than a flat per-observation constant.
-  // A flat penalty implicitly assumes every feature has unit variance;
-  // premium classes with a smaller natural scale or a lower occurrence
-  // rate than TWS (which is what every non-TWS class is, by construction
-  // -- see pat_defs.h) would otherwise absorb a disproportionately larger
-  // *relative* shrinkage than TWS's own channels for the exact same
-  // ridge_lambda, which is the standard ridge-regression pathology of
-  // penalizing unstandardized features with a single lambda. Scaling by
-  // each feature's own variance removes that asymmetry: a reference
-  // feature with variance 1 gets exactly the old behavior, so
-  // ridge_lambda's calibrated scale carries over unchanged.
+  // xtx[i][i]/N - mean_i^2), so classes with a smaller natural scale or a
+  // lower occurrence rate than TWS are not shrunk disproportionately. A
+  // feature with variance 1 gets the flat per-observation penalty.
   for (int i = 1; i < PAT_REGRESSION_DIM; i++) {
     const double mean_i = regression->xtx[0][i] / num_observations;
     const double variance_i =
@@ -259,19 +251,12 @@ PATSolveResult pat_regression_solve_into_weights_shrunk(
   // afterwards. Excluded features are the fixed-at-zero case.
   bool fixed[PAT_REGRESSION_DIM] = {false};
   double fixed_value[PAT_REGRESSION_DIM] = {0.0};
-  // Experimental channels keep whatever the file carries (zero for every
-  // file so far) unless the residual mode that studies them is on, so a
-  // default fit never spends mass on them:
-  //   - the premium-combination channels (fit_residual 4): a residual on
-  //     v4 was null;
-  //   - the hook-score channels (fit_residual 1 or 2): left free, a fit
-  //     moves every bit of hook mass onto them (hook_d* all zero,
-  //     hook_score_d1 about -130) and that model loses about 2.6 points
-  //     a pair to count-weighted hooks in whole-game play. Mode 5 explicitly
-  //     frees them in a full experimental fit. CSW21's v3
-  //     predates these channels; a lexicon trained after them was first
-  //     built that way by mistake (2026-09-14) and came out at a third
-  //     of the strength.
+  // Experimental channels keep whatever the file carries unless the
+  // residual mode that studies them is on, so a default fit never spends
+  // mass on them: the premium-combination channels are free only in
+  // fit_residual 4, and the hook-score channels only in modes 1, 2 and 5
+  // (left free, a fit moves all hook mass onto them and plays worse than
+  // count-weighted hooks).
   const int residual_mode = pat_get_fit_residual_mode(pat);
   if (residual_mode != 4) {
     for (int feature_index = PAT_FEATURE_LM_SPAN_START;

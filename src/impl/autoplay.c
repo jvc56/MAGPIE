@@ -137,8 +137,8 @@ typedef struct PATPendingObservation {
 } PATPendingObservation;
 
 typedef struct PATGenSharedData {
-  // Plies of net result the label spans (1 reproduces the original
-  // opponent-reply-score label).
+  // Plies of net result the label spans (1 is the opponent's reply score
+  // alone).
   int label_plies;
   int num_gens;
   int gens_completed;
@@ -378,8 +378,7 @@ static bool pat_gen_pair_is_validation(uint64_t game_number) {
 }
 
 // Per-observation ridge strength for the PAT regression, in
-// (points per feature unit)^2. Tuned conservatively; revisit once real
-// training runs exist.
+// (points per feature unit)^2.
 static const double PAT_GEN_RIDGE_LAMBDA = 1.0;
 
 // Runs single-threaded at the PAT generation boundary while every
@@ -423,16 +422,15 @@ void pat_postgen_prebroadcast_func(void *data) {
     // Adapt the loaded weights: for each shrinkage strength (infinity
     // being the incumbent itself), fit, score the installed candidate on
     // the validation games, write the candidate, restore the loaded
-    // weights. The OUTPUT stays the incumbent: validation reply error
-    // does not select a file (a better reply predictor played worse on
-    // NWL23, monotonically); the candidates are for whole-game validation
-    // (see test/pat_build.sh) and the report is a diagnostic.
+    // weights. The output stays the incumbent: validation reply error does
+    // not select a file; the candidates are for whole-game validation (see
+    // test/pat_build.sh) and the report is a diagnostic.
     static const double strengths[] = {0.0,    1.0,     10.0,    100.0,
                                        1000.0, 10000.0, 100000.0};
     const int num_strengths = (int)(sizeof(strengths) / sizeof(strengths[0]));
     Equity loaded[PAT_NUM_FEATURES];
-    for (int f = 0; f < PAT_NUM_FEATURES; f++) {
-      loaded[f] = pat_get_weight(pat, f);
+    for (int feature_idx = 0; feature_idx < PAT_NUM_FEATURES; feature_idx++) {
+      loaded[feature_idx] = pat_get_weight(pat, feature_idx);
     }
     string_builder_add_formatted_string(
         shrink_sb,
@@ -442,8 +440,8 @@ void pat_postgen_prebroadcast_func(void *data) {
         "validation_mse_fit_intercept,file\n",
         (unsigned long long)heldout_regression.num_observations,
         validation_baseline_mse, validation_loaded_mse);
-    for (int k = 0; k <= num_strengths; k++) {
-      const bool incumbent = (k == num_strengths);
+    for (int strength_idx = 0; strength_idx <= num_strengths; strength_idx++) {
+      const bool incumbent = (strength_idx == num_strengths);
       PATSolveResult candidate;
       if (incumbent) {
         memset(&candidate, 0, sizeof(candidate));
@@ -451,11 +449,12 @@ void pat_postgen_prebroadcast_func(void *data) {
         candidate.mean_squared_error = 0.0;
       } else {
         candidate = pat_regression_solve_into_weights_shrunk(
-            &total_regression, PAT_GEN_RIDGE_LAMBDA, strengths[k], pat);
+            &total_regression, PAT_GEN_RIDGE_LAMBDA, strengths[strength_idx],
+            pat);
         if (!candidate.solved) {
           continue;
         }
-        if (k == 0) {
+        if (strength_idx == 0) {
           solve_result = candidate;
         }
       }
@@ -470,9 +469,10 @@ void pat_postgen_prebroadcast_func(void *data) {
               ? get_formatted_string("%s_gen_%d_shrinkinf",
                                      pat_gen_shared_data->output_name,
                                      pat_gen_shared_data->gens_completed + 1)
-              : get_formatted_string(
-                    "%s_gen_%d_shrink%g", pat_gen_shared_data->output_name,
-                    pat_gen_shared_data->gens_completed + 1, strengths[k]);
+              : get_formatted_string("%s_gen_%d_shrink%g",
+                                     pat_gen_shared_data->output_name,
+                                     pat_gen_shared_data->gens_completed + 1,
+                                     strengths[strength_idx]);
       ErrorStack *candidate_errors = error_stack_create();
       pat_write(pat, pat_gen_shared_data->data_paths, candidate_name,
                 candidate_errors);
@@ -486,13 +486,13 @@ void pat_postgen_prebroadcast_func(void *data) {
                                             mse_refit, candidate_name);
       } else {
         string_builder_add_formatted_string(
-            shrink_sb, "%g,%f,%f,%f,%s\n", strengths[k],
+            shrink_sb, "%g,%f,%f,%f,%s\n", strengths[strength_idx],
             candidate.mean_squared_error, mse_refit, mse_fit_intercept,
             candidate_name);
       }
       free(candidate_name);
-      for (int f = 0; f < PAT_NUM_FEATURES; f++) {
-        pat_set_weight(pat, f, loaded[f]);
+      for (int feature_idx = 0; feature_idx < PAT_NUM_FEATURES; feature_idx++) {
+        pat_set_weight(pat, feature_idx, loaded[feature_idx]);
       }
     }
     string_builder_add_string(
@@ -1274,16 +1274,12 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         continue;
       }
       // The features come from the post-move board, so the rack excluded
-      // from the unseen pool is the move's LEAVE: the played tiles are
+      // from the unseen pool is the move's leave: the played tiles are
       // already off the pool as board tiles, and dist - board_post - leave
       // is exactly what move evaluation computes at decision time as
-      // dist - board_pre - rack_pre. Excluding the post-draw rack instead
-      // (as earlier weights were trained) hides tiles the mover could not
-      // have known about; excluding the pre-move rack (an earlier revision
-      // here) subtracts the played letters' remaining copies a second
-      // time. The row is the one the live weights' combination rule makes
-      // linear, so that fitting and evaluating agree; with gamma 1 it is
-      // the plain sum.
+      // dist - board_pre - rack_pre. The row is the one the live weights'
+      // combination rule makes linear, so that fitting and evaluating
+      // agree; with gamma 1 it is the plain sum.
       if (pat_train_overlay) {
         memcpy(observation->features, game_runner->pat_overlay_row,
                sizeof(observation->features));

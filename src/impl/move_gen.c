@@ -213,22 +213,18 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
       leave_map_get_current_value(&gen->leave_map));
 }
 
-// Best-move recording computes the PAT term lazily: because the
-// term is always <= 0, a candidate whose equity WITHOUT it is already
-// strictly below the best move's full equity cannot become the best move,
-// so the (comparatively expensive) per-move lane rescans run only for
-// genuine contenders. Exact, not approximate: the stored equity of a
-// skipped candidate is an overestimate, but it is only ever used in a
-// comparison it strictly loses.
+// Best-move recording computes the PAT term lazily: a candidate whose
+// equity without it, plus pat_eval_move_penalty_bound, is already strictly
+// below the best move's full equity cannot become the best move, so the
+// per-move lane rescans run only for genuine contenders. The stored equity
+// of a skipped candidate is an overestimate used only in a comparison it
+// strictly loses.
 static inline bool gen_pat_is_active(const MoveGen *gen) {
   return gen->pat_eval_ctx.weights != NULL;
 }
 
-// Passes the mover's real active PAT classes (cheap: a field read, not a
-// scan) even though pat_eval_ctx itself is NULL here to skip the expensive
-// per-move term, so this and gen_get_static_equity agree on the legacy
-// opening-penalty gating and differ only in that (sound, since it is <= 0)
-// omitted term.
+// Static equity without the PAT term. Passes the mover's real active PAT
+// classes, so this and gen_get_static_equity differ only by that term.
 static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
                                                        const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
