@@ -98,9 +98,9 @@ static void test_pat_eval_hand_position(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, PAT_EVAL_Q_CGP);
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
-  Player *player = game_get_player(game, 0);
+  const Player *player = game_get_player(game, 0);
   rack_set_to_string(ld, player_get_rack(player), "IIAEORS");
   PATWeights *pat = pat_test_create_prepared("eval_hand", game);
   pat_set_weight(pat, PAT_FEATURE_HOOK_START, PAT_EVAL_TEST_HOOK_WEIGHT);
