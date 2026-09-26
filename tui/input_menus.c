@@ -3,6 +3,7 @@
 #include "bot_worker.h"
 #include "config.h"
 #include "game_state.h"
+#include "input_cell_editor.h"
 #include "list_nav.h"
 #include "render_hit_test.h"
 #include "time_picker.h"
@@ -82,6 +83,35 @@ bool tui_input_analysis_menu(TuiGameState *state, TuiUiState *ui, uint32_t key,
       }
       pthread_mutex_unlock(&state->mutex);
     }
+  }
+  return true;
+}
+
+bool tui_input_phony_confirm(TuiGameState *state, TuiUiState *ui, uint32_t key,
+                             ncinput input) {
+  if (ui->modal != TUI_MODAL_PHONY_CONFIRM) {
+    return false;
+  }
+  if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
+    const int hit = tui_modal_item_at(input.y, input.x);
+    if (hit < 0 || hit >= TUI_PHONY_CONFIRM_ITEM_COUNT) {
+      return true;
+    }
+    ui->phony_confirm_focus = hit;
+    key = NCKEY_ENTER;
+  }
+  const int nav = tui_list_nav(key, &input, ui->phony_confirm_focus,
+                               TUI_PHONY_CONFIRM_ITEM_COUNT, NULL,
+                               TUI_LIST_NAV_HOME_END | TUI_LIST_NAV_VI);
+  if (nav >= 0) {
+    ui->phony_confirm_focus = nav;
+  } else if (key == NCKEY_ESC) {
+    ui->modal = TUI_MODAL_NONE;
+    tui_cell_editor_phony_resolve(state, /*keep=*/false);
+  } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+    ui->modal = TUI_MODAL_NONE;
+    tui_cell_editor_phony_resolve(state, ui->phony_confirm_focus ==
+                                             TUI_PHONY_CONFIRM_KEEP);
   }
   return true;
 }
