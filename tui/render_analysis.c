@@ -1318,8 +1318,11 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   // Title varies by mode.
   char title[64];
   if (use_static) {
-    // "Static · played #4 (-6.2)" — where the played move ranks.
-    if (snap->static_played_rank > 0) {
+    // "Static · played #4 (-6.2)" — where the played move ranks; the
+    // top move reads "(best)".
+    if (snap->static_played_rank == 1) {
+      (void)snprintf(title, sizeof(title), "Static \xc2\xb7 played #1 (best)");
+    } else if (snap->static_played_rank > 0) {
       (void)snprintf(title, sizeof(title), "Static \xc2\xb7 played #%d (%+.1f)",
                      snap->static_played_rank,
                      -snap->static_played_equity_loss);

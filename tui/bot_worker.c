@@ -1652,6 +1652,10 @@ static void take_string(StringBuilder *sb, char *out, size_t out_size) {
   string_builder_destroy(sb);
 }
 
+// Whether `eq` is a real value rather than a sentinel (a pass's
+// EQUITY_PASS_VALUE, say), which equity_to_double refuses.
+static bool equity_has_value(Equity eq) { return eq > EQUITY_PASS_VALUE; }
+
 bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
   if (atomic_load(&state->analysis_running)) {
     set_analysis_notice(state, "analysis running - /stop first");
@@ -1686,8 +1690,17 @@ bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
   const Rack *rack = player_get_rack(game_get_player(position, on_turn));
   const Board *board = game_get_board(position);
   const int count = move_list_get_count(moves);
-  const double best_equity =
-      equity_to_double(move_get_equity(move_list_get_move(moves, 0)));
+  // The top ranked move with a real equity (a sentinel, like a pass's,
+  // sorts last).
+  double best_equity = 0.0;
+  bool have_best = false;
+  for (int move_idx = 0; move_idx < count && !have_best; move_idx++) {
+    const Equity eq = move_get_equity(move_list_get_move(moves, move_idx));
+    if (equity_has_value(eq)) {
+      best_equity = equity_to_double(eq);
+      have_best = true;
+    }
+  }
   for (int move_idx = 0; move_idx < count && move_idx < ANALYSIS_ROW_CAP;
        move_idx++) {
     const Move *move = move_list_get_move(moves, move_idx);
@@ -1698,17 +1711,24 @@ bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
     StringBuilder *lsb = string_builder_create();
     string_builder_add_move_leave(lsb, rack, move, state->ld);
     take_string(lsb, row->leave, sizeof(row->leave));
-    row->score_value = equity_to_int(move_get_score(move));
+    const Equity score = move_get_score(move);
+    row->score_value = equity_has_value(score) ? equity_to_int(score) : 0;
     (void)snprintf(row->score, sizeof(row->score), "%d", row->score_value);
-    row->secondary_value = equity_to_double(move_get_equity(move));
-    (void)snprintf(row->secondary, sizeof(row->secondary), "%+.1f",
-                   row->secondary_value);
+    // A move whose equity is a sentinel shows no equity.
+    const Equity equity = move_get_equity(move);
+    const bool has_equity = equity_has_value(equity);
+    row->secondary_value = has_equity ? equity_to_double(equity) : 0.0;
+    if (has_equity) {
+      (void)snprintf(row->secondary, sizeof(row->secondary), "%+.1f",
+                     row->secondary_value);
+    }
     row->candidate_player_idx = on_turn;
     row->valid = true;
     if (entry->loaded_move != NULL && snap->static_played_rank == 0 &&
         compare_moves_without_equity(move, entry->loaded_move, true) == -1) {
       snap->static_played_rank = move_idx + 1;
-      snap->static_played_equity_loss = best_equity - row->secondary_value;
+      snap->static_played_equity_loss =
+          has_equity && have_best ? best_equity - row->secondary_value : 0.0;
     }
   }
   snap->num_rows = count < ANALYSIS_ROW_CAP ? count : ANALYSIS_ROW_CAP;
