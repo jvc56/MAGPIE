@@ -346,15 +346,14 @@ magpie> set -lex CSW24 -pat CSW24
 | `patclasses` | `all` | Which PAT classes that move generation uses: a comma-separated list from `tws`, `dws`, `tls`, `dls`, `qws`, `qls` and `windows`. |
 | `patrollout` | `true` | Use PAT in the rollouts of the player's simulations (both sides' plies, each with its own weights). |
 | `patrolloutclasses` | `all` | Which PAT classes the rollouts use, for example `tws,windows` for cheaper rollouts. |
-| `patcap` | `0` | The largest adjustment PAT can give a move, in points. The defense term and opening table are never positive, so this limits only how far the utility correction can raise a move; a large value such as `1000` leaves it unclipped. |
 
-For example, full PAT for the candidates and a cheaper subset in the rollouts, with the utility correction unclipped:
+For example, full PAT for the candidates and a cheaper subset in the rollouts:
 
 ```
-magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses tws,windows -patcap 1000
+magpie> set -lex CSW24 -pat CSW24 -patrolloutclasses tws,windows
 ```
 
-The shipped weights were trained and validated unclipped. `notes/pat_training.md` describes how they are trained (`test/pat_build.sh` and `test/pat_build_super.sh` run the whole process for a lexicon) and `notes/pat_utility_correction.md` the utility correction.
+`notes/pat_training.md` describes how they are trained (`test/pat_build.sh` and `test/pat_build_super.sh` run the whole process for a lexicon) and `notes/pat_utility_correction.md` the utility correction.
 
 ## Examples
 

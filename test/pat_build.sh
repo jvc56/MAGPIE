@@ -11,8 +11,7 @@
 # read off the distribution's winpct_<ld> table), then 500K validation pairs.
 # Builds the lexicon's WMP when missing, and its RIT when missing (deleted
 # again at the end: a RIT is about 1.9 GB). Tables only change speed, never
-# results. Training and validation use -patcap 1000, which leaves the
-# adjustment unclipped; that is how the shipped weights were built.
+# results.
 set -eu
 lex="$1"; leaves="$2"; incumbent="$3"; name="$4"; log_dir="$5"
 train_seed="$6"; validate_seed="$7"
@@ -21,7 +20,6 @@ lexica=data/lexica
 threads=10
 utility=350
 validate_pairs=500000
-cap="-patcap 1000"
 mkdir -p "$log_dir"
 mg() { rm -f settings.txt; ./bin/magpie "$@"; }
 mgt() { rm -f settings.txt; ./bin/magpie_test "$@"; }
@@ -51,13 +49,13 @@ log "tables: $tables"
 cp test/pat_bootstrap.pat "$strategy/${name}_bootstrap.pat"
 log "iterative training"
 mg patgen 30000,30000,30000,30000,30000 "${name}_v3" -lex "$lex" -leaves "$leaves" \
-  -gp true -threads $threads -seed "$train_seed" $tables $cap \
+  -gp true -threads $threads -seed "$train_seed" $tables \
   -pat "${name}_bootstrap" > "$log_dir/train.txt" 2>&1
 sed -e 's/^run_through,0$/run_through,1/' -e 's/^fit_residual,5$/fit_residual,3/' \
   "$strategy/${name}_v3.pat" > "$strategy/${name}_v3_runres.pat"
 log "through refit"
 mg patgen 150000 "${name}_v4" -lex "$lex" -leaves "$leaves" -gp true -threads $threads \
-  -seed 4242 $tables $cap -pat "${name}_v3_runres" > "$log_dir/refit.txt" 2>&1
+  -seed 4242 $tables -pat "${name}_v3_runres" > "$log_dir/refit.txt" 2>&1
 sed -i.bak 's/^fit_residual,3$/fit_residual,0/' "$strategy/${name}_v4.pat"
 rm -f "$strategy/${name}_v4.pat.bak"
 
@@ -77,7 +75,7 @@ log "candidate: $strategy/$name.pat"
 
 log "validation vs $incumbent ($validate_pairs pairs)"
 mg autoplay games $validate_pairs -lex "$lex" -leaves "$leaves" -gp true -threads $threads \
-  -seed "$validate_seed" $tables $cap -pat "$incumbent" -pat1 "$name" \
+  -seed "$validate_seed" $tables -pat "$incumbent" -pat1 "$name" \
   -pat2 "$incumbent" > "$log_dir/validate.txt" 2>&1
 log "validation: $(grep -m1 'mirrored pair' "$log_dir/validate.txt")"
 rm -f "$strategy/${name}_bootstrap.pat" "$strategy/${name}_v3_runres.pat"

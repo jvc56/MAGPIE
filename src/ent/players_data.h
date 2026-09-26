@@ -62,12 +62,6 @@ void players_data_set_pat_rollout_disabled_classes_mask(
     PlayersData *players_data, int player_index, uint32_t mask);
 uint32_t players_data_get_pat_rollout_disabled_classes_mask(
     const PlayersData *players_data, int player_index);
-// The largest PAT adjustment a move of the player's can get (see
-// pat_eval_context_set_cap). Defaults to 0.
-void players_data_set_pat_cap(PlayersData *players_data, int player_index,
-                              Equity cap);
-Equity players_data_get_pat_cap(const PlayersData *players_data,
-                                int player_index);
 void *players_data_get_data(const PlayersData *players_data,
                             players_data_t players_data_type, int player_index);
 bool players_data_get_is_shared(const PlayersData *players_data,
