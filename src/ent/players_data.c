@@ -343,8 +343,9 @@ PlayersData *players_data_create(bool use_wmp) {
     players_data_set_pat_disabled_classes_mask(players_data, player_index, 0);
     players_data_set_pat_candidates_disabled(players_data, player_index, false);
     players_data_set_pat_rollout_disabled(players_data, player_index, false);
-    players_data_set_pat_rollout_disabled_classes_mask(players_data,
-                                                       player_index, 0);
+    players_data_set_pat_rollout_disabled_classes_mask(
+        players_data, player_index,
+        PAT_CLASS_MASK_ALL & ~PAT_CLASS_MASK_ROLLOUT_DEFAULT);
   }
   return players_data;
 }

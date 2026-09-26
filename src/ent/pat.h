@@ -1,6 +1,7 @@
 #ifndef PAT_H
 #define PAT_H
 
+#include "../def/board_defs.h"
 #include "../def/pat_defs.h"
 #include "../util/io_util.h"
 #include "board.h"
@@ -145,6 +146,15 @@ enum {
   PAT_CLASS_MASK_ALL =
       PAT_CLASS_MASK_WINDOWS | ((1u << PAT_NUM_PREMIUM_CLASSES) - 1),
   PAT_CLASS_MASK_TWS_ONLY = 1u << PAT_PREMIUM_TWS,
+  // The classes sim rollouts use unless -patrolloutclasses says otherwise:
+  // the triple-word (and on 21x21 quad-word) squares plus windows. They keep
+  // most of full PAT's value at a fraction of its cost: on CSW24 static
+  // play, full PAT costs 2.7x no PAT on 15x15 and 1.9x on 21x21, these
+  // 1.45x and 1.35x, and full PAT beats them by only 1.3 and 1.6 points per
+  // game pair.
+  PAT_CLASS_MASK_ROLLOUT_DEFAULT =
+      (1u << PAT_PREMIUM_TWS) | PAT_CLASS_MASK_WINDOWS |
+      (BOARD_DIM >= 21 ? (1u << PAT_PREMIUM_QWS) : 0),
   // Which square-multiplier axis each premium class draws its
   // opening_move_word_penalties/opening_move_letter_penalties contribution
   // from (see placement_adjustment and board.h's update_opening_penalty):
