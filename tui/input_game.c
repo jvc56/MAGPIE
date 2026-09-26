@@ -3,6 +3,7 @@
 #include "bot_worker.h"
 #include "game_state.h"
 #include "move_entry.h"
+#include "slash_commands.h"
 #include "time_picker.h"
 #include "tui_clipboard.h"
 #include "tui_history_edit.h"
@@ -369,95 +370,52 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
         pthread_mutex_unlock(&state->mutex);
       } else if (key == NCKEY_TAB || key == '\t') {
         // Tab completes against the unique prefix match.
-        static const char *cmd_names[] = {"copy",   "exit",     "new", "quit",
-                                          "resume", "settings", "stop"};
-        static const int n_cmds =
-            (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
-        const char *match = NULL;
-        int n_match = 0;
-        for (int i = 0; i < n_cmds; i++) {
-          if ((int)strlen(cmd_names[i]) >= state->slash_len &&
-              strncmp(cmd_names[i], state->slash_buf,
-                      (size_t)state->slash_len) == 0) {
-            match = cmd_names[i];
-            n_match++;
-          }
-        }
-        if (n_match == 1 && match != NULL) {
+        const TuiSlashCommand *match =
+            tui_slash_command_resolve(state->slash_buf, state->slash_len);
+        if (match != NULL) {
           pthread_mutex_lock(&state->mutex);
           (void)snprintf(state->slash_buf, sizeof(state->slash_buf), "%s",
-                         match);
-          state->slash_len = (int)strlen(match);
+                         match->name);
+          state->slash_len = (int)strlen(match->name);
           state->slash_cursor = state->slash_len;
           pthread_mutex_unlock(&state->mutex);
         }
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-        // Execute the typed-or-completed command. Fall back to a
-        // unique prefix match if user pressed Enter without
-        // completing first.
-        char cmd[64];
-        (void)snprintf(cmd, sizeof(cmd), "%s", state->slash_buf);
-        if (strcmp(cmd, "new") == 0 || strcmp(cmd, "n") == 0) {
+        // Execute the typed command: an exact name, or a unique prefix
+        // if the user pressed Enter without completing first.
+        const TuiSlashCommand *cmd =
+            tui_slash_command_resolve(state->slash_buf, state->slash_len);
+        switch (cmd != NULL ? cmd->id : TUI_SLASH_COUNT) {
+        case TUI_SLASH_NEW:
           ui->modal = TUI_MODAL_TIME_PICKER;
           ui->time_focus = tui_time_picker_closest_index(session->chosen_time);
           ui->time_picker_return = TUI_MODAL_NONE;
-        } else if (strcmp(cmd, "settings") == 0) {
+          break;
+        case TUI_SLASH_SETTINGS:
           ui->modal = TUI_MODAL_SETTINGS;
           ui->settings_focus = 0;
           ui->settings_return = TUI_MODAL_NONE;
-        } else if (strcmp(cmd, "quit") == 0 || strcmp(cmd, "exit") == 0) {
+          break;
+        case TUI_SLASH_QUIT:
+        case TUI_SLASH_EXIT:
           ui->modal = TUI_MODAL_QUIT_CONFIRM;
           ui->quit_confirm_focus = 0;
           ui->quit_confirm_return = TUI_MODAL_NONE;
-        } else if (strcmp(cmd, "copy") == 0) {
+          break;
+        case TUI_SLASH_COPY:
           tui_copy_position_cgp(state);
-        } else if (strcmp(cmd, "resume") == 0) {
+          break;
+        case TUI_SLASH_RESUME:
           pthread_mutex_lock(&state->mutex);
           tui_analysis_worker_start(state, state->history_cursor);
           pthread_mutex_unlock(&state->mutex);
-        } else if (strcmp(cmd, "stop") == 0) {
+          break;
+        case TUI_SLASH_STOP:
           tui_analysis_worker_stop_and_join(state);
-        } else {
-          // Try a unique prefix match.
-          static const char *cmd_names[] = {"copy",   "exit",     "new", "quit",
-                                            "resume", "settings", "stop"};
-          static const int n_cmds =
-              (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
-          const char *match = NULL;
-          int n_match = 0;
-          for (int i = 0; i < n_cmds; i++) {
-            if ((int)strlen(cmd_names[i]) >= state->slash_len &&
-                strncmp(cmd_names[i], state->slash_buf,
-                        (size_t)state->slash_len) == 0) {
-              match = cmd_names[i];
-              n_match++;
-            }
-          }
-          if (n_match == 1 && match != NULL) {
-            if (strcmp(match, "new") == 0) {
-              ui->modal = TUI_MODAL_TIME_PICKER;
-              ui->time_focus =
-                  tui_time_picker_closest_index(session->chosen_time);
-              ui->time_picker_return = TUI_MODAL_NONE;
-            } else if (strcmp(match, "settings") == 0) {
-              ui->modal = TUI_MODAL_SETTINGS;
-              ui->settings_focus = 0;
-              ui->settings_return = TUI_MODAL_NONE;
-            } else if (strcmp(match, "quit") == 0 ||
-                       strcmp(match, "exit") == 0) {
-              ui->modal = TUI_MODAL_QUIT_CONFIRM;
-              ui->quit_confirm_focus = 0;
-              ui->quit_confirm_return = TUI_MODAL_NONE;
-            } else if (strcmp(match, "copy") == 0) {
-              tui_copy_position_cgp(state);
-            } else if (strcmp(match, "resume") == 0) {
-              pthread_mutex_lock(&state->mutex);
-              tui_analysis_worker_start(state, state->history_cursor);
-              pthread_mutex_unlock(&state->mutex);
-            } else if (strcmp(match, "stop") == 0) {
-              tui_analysis_worker_stop_and_join(state);
-            }
-          }
+          break;
+        case TUI_SLASH_COUNT:
+        default:
+          break;
         }
         pthread_mutex_lock(&state->mutex);
         state->slash_active = false;
