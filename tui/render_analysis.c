@@ -441,7 +441,7 @@ static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
                                    const Layout *L,
                                    const AnalysisColumns *columns,
                                    int title_end_col, bool has_primary_label,
-                                   bool has_secondary_label) {
+                                   const char *secondary_label) {
   // Find the leftmost col any header would touch (the "leave"
   // header is the leftmost; if no leave column, "sc" or "win%").
   int leftmost_header_col = INT_MAX;
@@ -538,14 +538,13 @@ static int render_analysis_headers(struct ncplane *plane, const Theme *theme,
     const int col = columns->prim_col + columns->primary_w - len;
     ncplane_putstr_yx(plane, header_row, col, win_label);
   }
-  if (has_secondary_label) {
-    const char *sprd_label = "sprd";
-    const int len = (int)strlen(sprd_label);
+  if (secondary_label != NULL) {
+    const int len = (int)strlen(secondary_label);
     // Right-align inside the secondary column's slot, not against
     // interior_right — when the avg block is on, sec_col has
     // shifted left to make room for the avgs further right.
     const int col = columns->sec_col + columns->secondary_w - len;
-    ncplane_putstr_yx(plane, header_row, col, sprd_label);
+    ncplane_putstr_yx(plane, header_row, col, secondary_label);
   }
   ncplane_set_styles(plane, 0);
   return list_top;
@@ -939,7 +938,8 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
                                  TuiGameState *state, const Layout *L,
                                  AnalysisRow *rows, int visible, int primary_w,
                                  int secondary_w, int primary_secondary_gap,
-                                 bool primary_bold, int title_end_col) {
+                                 bool primary_bold, int title_end_col,
+                                 const char *secondary_label) {
   TuiHitMaps *hit = tui_hit_maps();
   const int interior_left = L->analysis_left + 1;
   const int interior_right_full = L->analysis_right - 1;
@@ -1138,7 +1138,10 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   // W/T/L + spread labels don't fit the strip's style. Each header
   // right-aligns at the same edge as the column it labels.
   const bool has_primary_label = primary_w >= 4;
-  const bool has_secondary_label = secondary_w >= 4;
+  // The secondary column's header ("sprd", or "eq" for a static
+  // ranking); NULL leaves it unlabeled.
+  const char *secondary_header = secondary_w >= 4 ? secondary_label : NULL;
+  const bool has_secondary_label = secondary_header != NULL;
   // The strip goes on the panel's top border (sharing the row with the
   // title) when there's room, else on the first interior row; the
   // on-border placement gives the data one extra row.
@@ -1148,7 +1151,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int list_top =
       show_headers
           ? render_analysis_headers(plane, theme, L, &columns, title_end_col,
-                                    has_primary_label, has_secondary_label)
+                                    has_primary_label, secondary_header)
           : interior_top;
 
   // Resolve the effective cursor row for this frame. RANK column
@@ -1300,19 +1303,30 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   const Game *src_game = analysis_source_game(state);
   const bool bag_empty =
       src_game != NULL && bag_get_letters(game_get_bag(src_game)) == 0;
+  // A "/kibitz" static ranking: move, leave, score, and equity.
+  const bool use_static = snap != NULL && snap->is_static;
   const bool use_endgame = snap != NULL
-                               ? (!snap->is_sim && !snap->is_peg)
+                               ? (!use_static && !snap->is_sim && !snap->is_peg)
                                : (bag_empty && state->endgame_snapshot.valid &&
                                   state->endgame_snapshot.num_entries > 0);
   const bool use_peg =
-      snap != NULL ? snap->is_peg
+      snap != NULL ? (!use_static && snap->is_peg)
                    : (!use_endgame && tui_position_in_peg_range(src_game) &&
                       state->peg_poll != NULL &&
                       atomic_load(&state->peg_results_turn_idx) >= 0);
 
   // Title varies by mode.
   char title[64];
-  if (use_peg) {
+  if (use_static) {
+    // "Static · played #4 (-6.2)" — where the played move ranks.
+    if (snap->static_played_rank > 0) {
+      (void)snprintf(title, sizeof(title), "Static \xc2\xb7 played #%d (%+.1f)",
+                     snap->static_played_rank,
+                     -snap->static_played_equity_loss);
+    } else {
+      (void)snprintf(title, sizeof(title), "Static");
+    }
+  } else if (use_peg) {
     // "PEG (2p 5/16)" — fidelity (plies) of the ranking shown, plus
     // done/field progress through the current stage. The live meta
     // was refreshed by this frame's row build from the same poll
@@ -1478,7 +1492,12 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   int secondary_w;
   int primary_secondary_gap;
   bool primary_bold;
-  if (use_endgame) {
+  if (use_static) {
+    primary_w = 0;             // no win% column
+    secondary_w = 6;           // "%+.1f" equity, e.g. " +32.5"
+    primary_secondary_gap = 0; // the leading pad provides the gap
+    primary_bold = false;
+  } else if (use_endgame) {
     primary_w = 0;             // no W/T/L column
     secondary_w = 4;           // "+999" / "-100"
     primary_secondary_gap = 0; // no primary, no inter-column gap
@@ -1527,5 +1546,5 @@ void render_analysis_panel(struct ncplane *plane, const Theme *theme,
          sizeof(AnalysisRow) * (size_t)total_rows);
   render_analysis_rows(plane, theme, state, L, rows, visible, primary_w,
                        secondary_w, primary_secondary_gap, primary_bold,
-                       title_end_col);
+                       title_end_col, use_static ? "eq" : "sprd");
 }

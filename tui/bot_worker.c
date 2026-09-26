@@ -43,6 +43,8 @@
 
 enum {
   SIM_CANDIDATES = 50,
+  // "/kibitz" lists at most this many moves, best static equity first.
+  KIBITZ_MAX_MOVES = 100,
   SIM_PLIES = 4,
   ENDGAME_PLIES = 25,
   // Effective "run until /stop" budget for resumed analysis. Large
@@ -1368,19 +1370,56 @@ static MoveList *move_list_from_sim_results(const SimResults *results) {
   return list;
 }
 
-// Continue sampling a saved sim directly on the entry's own
-// SimResults: the live display pointer is swapped to it for the
-// duration (the analysis panel renders it ticking in real time) and
-// the accumulated samples stay owned by the entry afterward — the
-// next "/resume" keeps adding on.
+// The top sim candidates at `position`, with the move actually played
+// (`played`, when known) swapped in for the last one if it didn't make
+// the cut, so the sim always says how the played move compares.
+static MoveList *sim_candidates_with_played(const Game *position,
+                                            const Move *played, int n) {
+  MoveList *candidates = generate_top_candidates(position, n);
+  if (candidates == NULL || played == NULL) {
+    return candidates;
+  }
+  move_list_sort_moves(candidates);
+  const int count = move_list_get_count(candidates);
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    if (compare_moves_without_equity(move_list_get_move(candidates, move_idx),
+                                     played, true) == -1) {
+      return candidates;
+    }
+  }
+  move_copy(move_list_get_move(candidates, count - 1), played);
+  return candidates;
+}
+
+// Simulate a turn: continue sampling its saved sim when it has one, else
+// start a fresh sim on the top candidates (plus the played move). The
+// live display pointer is swapped to the results for the duration (the
+// analysis panel renders them ticking in real time), and they're owned
+// by the entry afterward, so the next "/sim" or "/resume" keeps adding
+// on.
 static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
                                 int turn_idx, Game *position) {
-  SimResults *results = entry->sim_results_saved;
-  MoveList *candidates = move_list_from_sim_results(results);
-  if (candidates == NULL) {
+  const bool fresh = entry->sim_results_saved == NULL;
+  const int fresh_plies = state->sim_plies > 0 ? state->sim_plies : SIM_PLIES;
+  const int fresh_cands =
+      state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
+  SimResults *results =
+      fresh ? sim_results_create(0.005) : entry->sim_results_saved;
+  MoveList *candidates = fresh ? sim_candidates_with_played(
+                                     position, entry->loaded_move, fresh_cands)
+                               : move_list_from_sim_results(results);
+  if (candidates == NULL || move_list_get_count(candidates) < 2) {
     pthread_mutex_lock(&state->mutex);
-    set_analysis_notice(state, "resume failed: empty saved sim");
+    set_analysis_notice(state, fresh ? "nothing to sim: fewer than 2 moves"
+                                     : "resume failed: empty saved sim");
     pthread_mutex_unlock(&state->mutex);
+    if (candidates != NULL) {
+      moves_for_move_list_destroy(candidates);
+      free(candidates);
+    }
+    if (fresh) {
+      sim_results_destroy(results);
+    }
     return;
   }
 
@@ -1391,7 +1430,8 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   state->analysis_game = position;
   atomic_store(&state->sim_results_turn_idx, turn_idx);
   atomic_store(&state->sim_results_active, true);
-  set_analysis_notice(state, "resuming sim - /stop to pause");
+  set_analysis_notice(state, fresh ? "simming - /stop to pause"
+                                   : "resuming sim - /stop to pause");
   pthread_mutex_unlock(&state->mutex);
 
   ThreadControl *tc = thread_control_create();
@@ -1405,7 +1445,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   const int hw_cores = get_num_cores();
   const int num_threads = hw_cores > 2 ? hw_cores - 1 : hw_cores;
   SimArgs args = {0};
-  args.num_plies = sim_results_get_num_plies(results);
+  args.num_plies = fresh ? fresh_plies : sim_results_get_num_plies(results);
   args.move_list = candidates;
   args.num_plays = move_list_get_count(candidates);
   args.known_opp_rack = NULL;
@@ -1415,7 +1455,8 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   args.inference_results = NULL;
   args.num_threads = num_threads;
   args.print_interval = 0;
-  args.max_num_display_plays = sim_results_get_number_of_plays(results);
+  args.max_num_display_plays = fresh ? move_list_get_count(candidates)
+                                     : sim_results_get_number_of_plays(results);
   args.max_num_display_plies = args.num_plies;
   args.seed = (uint64_t)time(NULL);
   args.thread_control = tc;
@@ -1431,7 +1472,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   args.bai_options.num_arm_avoid_prune = 0;
   args.bai_options.delta = 1.0;
   args.game = position;
-  args.resume_results = true;
+  args.resume_results = !fresh;
 
   ErrorStack *sim_err = error_stack_create();
   simulate_without_ctx(&args, results, sim_err);
@@ -1445,7 +1486,10 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
 
   pthread_mutex_lock(&state->mutex);
   atomic_store(&state->sim_results_active, false);
-  // Refresh the entry's static snapshot from the accumulated samples
+  if (fresh) {
+    entry->sim_results_saved = results;
+  }
+  // Refresh the entry's snapshot from the accumulated samples
   // (the capture reads state->sim_results — currently the entry's own
   // results — and formats against analysis_game).
   tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
@@ -1543,6 +1587,7 @@ static void *analysis_thread_main(void *arg) {
     entry = &state->history[turn_idx];
   }
   Game *position = NULL;
+  const bool request_sim = state->analysis_request_sim;
   bool is_sim = false;
   bool is_peg = false;
   if (entry != NULL && entry->cgp_before[0] != '\0') {
@@ -1574,9 +1619,10 @@ static void *analysis_thread_main(void *arg) {
     return NULL;
   }
 
-  if (is_peg) {
+  // "/sim" always simulates; "/resume" continues whatever was saved.
+  if (!request_sim && is_peg) {
     analysis_resume_peg(state, entry, turn_idx, position);
-  } else if (is_sim) {
+  } else if (request_sim || is_sim) {
     analysis_resume_sim(state, entry, turn_idx, position);
   } else {
     analysis_resume_endgame(state, entry, turn_idx, position);
@@ -1592,12 +1638,110 @@ static void *analysis_thread_main(void *arg) {
   return NULL;
 }
 
-bool tui_analysis_worker_start(TuiGameState *state, int turn_idx) {
+// Copies a StringBuilder's contents into `out` (truncating) and frees it.
+static void take_string(StringBuilder *sb, char *out, size_t out_size) {
+  size_t len = 0;
+  char *dump = string_builder_dump(sb, &len);
+  out[0] = '\0';
+  if (dump != NULL) {
+    const size_t copy = len < out_size ? len : out_size - 1;
+    memcpy(out, dump, copy);
+    out[copy] = '\0';
+    free(dump);
+  }
+  string_builder_destroy(sb);
+}
+
+bool tui_analysis_kibitz(TuiGameState *state, int turn_idx) {
+  if (atomic_load(&state->analysis_running)) {
+    set_analysis_notice(state, "analysis running - /stop first");
+    return false;
+  }
+  if (turn_idx < 0 || turn_idx >= state->history_count) {
+    set_analysis_notice(state, "select a turn in History to kibitz");
+    return false;
+  }
+  TuiHistoryEntry *entry = &state->history[turn_idx];
+  if (entry->pending || entry->cgp_before[0] == '\0') {
+    set_analysis_notice(state, "no position to kibitz for this turn");
+    return false;
+  }
+  Game *position = game_duplicate(state->game);
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(position, entry->cgp_before, err);
+  const bool position_ok = error_stack_is_empty(err);
+  error_stack_destroy(err);
+  MoveList *moves =
+      position_ok ? generate_top_candidates(position, KIBITZ_MAX_MOVES) : NULL;
+  if (moves == NULL) {
+    game_destroy(position);
+    set_analysis_notice(state, "kibitz failed: no moves for this position");
+    return false;
+  }
+  move_list_sort_moves(moves);
+
+  TuiAnalysisSnapshot *snap = &entry->analysis_snapshot;
+  memset(snap, 0, sizeof(*snap));
+  const int on_turn = game_get_player_on_turn_index(position);
+  const Rack *rack = player_get_rack(game_get_player(position, on_turn));
+  const Board *board = game_get_board(position);
+  const int count = move_list_get_count(moves);
+  const double best_equity =
+      equity_to_double(move_get_equity(move_list_get_move(moves, 0)));
+  for (int move_idx = 0; move_idx < count && move_idx < ANALYSIS_ROW_CAP;
+       move_idx++) {
+    const Move *move = move_list_get_move(moves, move_idx);
+    AnalysisRow *row = &snap->rows[move_idx];
+    StringBuilder *msb = string_builder_create();
+    string_builder_add_move(msb, board, move, state->ld, false);
+    take_string(msb, row->move, sizeof(row->move));
+    StringBuilder *lsb = string_builder_create();
+    string_builder_add_move_leave(lsb, rack, move, state->ld);
+    take_string(lsb, row->leave, sizeof(row->leave));
+    row->score_value = equity_to_int(move_get_score(move));
+    (void)snprintf(row->score, sizeof(row->score), "%d", row->score_value);
+    row->secondary_value = equity_to_double(move_get_equity(move));
+    (void)snprintf(row->secondary, sizeof(row->secondary), "%+.1f",
+                   row->secondary_value);
+    row->candidate_player_idx = on_turn;
+    row->valid = true;
+    if (entry->loaded_move != NULL && snap->static_played_rank == 0 &&
+        compare_moves_without_equity(move, entry->loaded_move, true) == -1) {
+      snap->static_played_rank = move_idx + 1;
+      snap->static_played_equity_loss = best_equity - row->secondary_value;
+    }
+  }
+  snap->num_rows = count < ANALYSIS_ROW_CAP ? count : ANALYSIS_ROW_CAP;
+  snap->is_static = true;
+  snap->valid = true;
+  // Keep the moves for the board preview, in row order.
+  free(entry->static_moves_saved);
+  entry->static_moves_saved =
+      malloc_or_die(sizeof(Move) * (size_t)snap->num_rows);
+  for (int move_idx = 0; move_idx < snap->num_rows; move_idx++) {
+    move_copy(&entry->static_moves_saved[move_idx],
+              move_list_get_move(moves, move_idx));
+  }
+  entry->static_moves_saved_count = snap->num_rows;
+  moves_for_move_list_destroy(moves);
+  free(moves);
+  game_destroy(position);
+  atomic_fetch_add(&state->render_version, 1);
+  return true;
+}
+
+bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
+                               bool request_sim) {
   if (state == NULL) {
     return false;
   }
-  if (!tui_game_state_play_over(state)) {
-    set_analysis_notice(state, "/resume is available once the game is over");
+  const char *cmd = request_sim ? "/sim" : "/resume";
+  char notice[96];
+  if (request_sim ? (!tui_game_state_play_over(state) && state->bot_started)
+                  : !tui_game_state_play_over(state)) {
+    (void)snprintf(notice, sizeof(notice),
+                   "%s is available once the game is over", cmd);
+    set_analysis_notice(state, notice);
     return false;
   }
   if (atomic_load(&state->analysis_running)) {
@@ -1605,21 +1749,25 @@ bool tui_analysis_worker_start(TuiGameState *state, int turn_idx) {
     return false;
   }
   if (turn_idx < 0 || turn_idx >= state->history_count) {
-    set_analysis_notice(state, "park the History cursor on a turn to resume");
+    (void)snprintf(notice, sizeof(notice), "select a turn in History to %s",
+                   cmd + 1);
+    set_analysis_notice(state, notice);
     return false;
   }
   const TuiHistoryEntry *entry = &state->history[turn_idx];
-  if (entry->pending || !entry->analysis_snapshot.valid) {
-    set_analysis_notice(state, "no saved analysis for this turn");
-    return false;
-  }
-  if (entry->analysis_snapshot.is_sim && entry->sim_results_saved == NULL) {
-    set_analysis_notice(state, "no saved sim for this turn");
-    return false;
-  }
-  if (entry->cgp_before[0] == '\0') {
+  if (entry->pending || entry->cgp_before[0] == '\0') {
     set_analysis_notice(state, "no position snapshot for this turn");
     return false;
+  }
+  if (!request_sim) {
+    if (!entry->analysis_snapshot.valid || entry->analysis_snapshot.is_static) {
+      set_analysis_notice(state, "no saved analysis to resume - try /sim");
+      return false;
+    }
+    if (entry->analysis_snapshot.is_sim && entry->sim_results_saved == NULL) {
+      set_analysis_notice(state, "no saved sim for this turn");
+      return false;
+    }
   }
   // Reap a previously finished worker before reusing the handle.
   if (state->analysis_started) {
@@ -1628,6 +1776,7 @@ bool tui_analysis_worker_start(TuiGameState *state, int turn_idx) {
   }
   atomic_store(&state->analysis_stop, false);
   state->analysis_resume_turn_idx = turn_idx;
+  state->analysis_request_sim = request_sim;
   atomic_store(&state->analysis_running, true);
   if (pthread_create(&state->analysis_thread, NULL, analysis_thread_main,
                      state) != 0) {

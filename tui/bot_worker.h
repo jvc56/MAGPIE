@@ -34,15 +34,26 @@ void tui_bot_worker_append_clock_event(TuiGameState *state, int kind,
                                        int player_idx, int adjustment,
                                        int cumulative_after);
 
-// Start the post-game analysis-resume worker ("/resume") for history
-// entry `turn_idx`: continues the turn's saved sim — accumulating
-// onto the samples gathered during the game — or re-solves its
-// endgame with the session's warm transposition table, streaming
-// progress to the analysis panel until "/stop". Returns false (with a
-// status-bar notice explaining why) when the entry can't be resumed:
-// game still in progress, no saved analysis, no position snapshot, or
-// a resume already running. Caller must hold state->mutex.
-bool tui_analysis_worker_start(TuiGameState *state, int turn_idx);
+// Start the analysis worker on history entry `turn_idx`, streaming
+// progress to the analysis panel until "/stop".
+//   request_sim (true, "/sim"): simulate the turn, continuing its saved
+//     sim when it has one, else simming its top candidates plus the
+//     played move from scratch. Works on loaded and annotated games,
+//     not while a computer game is still in progress.
+//   request_sim (false, "/resume"): continue the turn's saved analysis
+//     from the game — its sim, or its endgame with the session's warm
+//     transposition table — once the game is over.
+// Returns false (with a status-bar notice explaining why) when the
+// entry can't be analyzed. Caller must hold state->mutex.
+bool tui_analysis_worker_start(TuiGameState *state, int turn_idx,
+                               bool request_sim);
+
+// "/kibitz": rank the moves available at turn `turn_idx` (the position
+// before it was played) by static equity and store them as that turn's
+// analysis snapshot, marking where the played move ranks. Synchronous
+// (movegen only). Caller holds state->mutex. Returns false and posts a
+// notice when the turn can't be analyzed.
+bool tui_analysis_kibitz(TuiGameState *state, int turn_idx);
 
 // Interrupt the analysis worker (if any) and join its thread. The
 // accumulated samples are saved back into the entry before the worker

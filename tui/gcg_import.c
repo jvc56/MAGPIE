@@ -9,8 +9,10 @@
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
 #include "../src/ent/move.h"
+#include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/gameplay.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
@@ -389,6 +391,22 @@ void tui_gcg_import_history(TuiGameState *state, GameHistory *history) {
     const Rack *evt_rack = game_event_get_const_rack(event);
     if (evt_rack != NULL && !rack_is_empty(evt_rack)) {
       entry->rack_before = rack_duplicate(evt_rack);
+    }
+    // CGP of this position (on-turn rack first) so "/sim" and
+    // "/kibitz" can rebuild it. The replay game's on-turn rack gets the
+    // event's rack first, for the reason above; the replay is rebuilt
+    // from scratch on every pass, so overwriting it here is harmless.
+    const int on_turn = game_get_player_on_turn_index(state->game);
+    if (on_turn == meta->player_idx) {
+      if (entry->rack_before != NULL) {
+        rack_copy(player_get_rack(game_get_player(state->game, on_turn)),
+                  entry->rack_before);
+      }
+      char *cgp = game_get_cgp(state->game, true);
+      if (cgp != NULL) {
+        (void)snprintf(entry->cgp_before, sizeof(entry->cgp_before), "%s", cgp);
+        free(cgp);
+      }
     }
     // Opponent's rack at this moment is approximated by
     // the rack the opponent had at THEIR next move (they
