@@ -43,8 +43,13 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pat_eval_test.h"
+#include "pat_features_test.h"
+#include "pat_file_test.h"
+#include "pat_lexicon_test.h"
 #include "pat_opening_sim_test.h"
 #include "pat_test.h"
+#include "pat_utility_test.h"
 #include "path_move_lists_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
@@ -146,6 +151,11 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"pat", test_pat},
+    {"patfile", test_pat_file},
+    {"patlexicon", test_pat_lexicon},
+    {"patutility", test_pat_utility},
+    {"patfeatures", test_pat_features},
+    {"pateval", test_pat_eval},
     {"winpctcoverage", test_win_pct_coverage},
     {"winpctstate", test_win_pct_state},
     {"winpctrecord", test_win_pct_record},
@@ -272,6 +282,7 @@ void run_all_super(void) {
   test_position_lengths();
   test_bit_rack();
   test_board_layout_super();
+  test_pat_rollout_default_classes();
 }
 
 int main(int argc, char *argv[]) {
