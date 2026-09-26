@@ -220,6 +220,50 @@ static ThemeRgb history_edit_row_bg(ThemeRgb player_fg) {
   }
   return row_bg;
 }
+// Bytes in the UTF-8 character at `text` (1 for ASCII); 0 at the end.
+static int utf8_char_len(const char *text) {
+  const unsigned char lead = (unsigned char)text[0];
+  if (lead == 0) {
+    return 0;
+  }
+  int len = 1;
+  if ((lead & 0xe0) == 0xc0) {
+    len = 2;
+  } else if ((lead & 0xf0) == 0xe0) {
+    len = 3;
+  } else if ((lead & 0xf8) == 0xf0) {
+    len = 4;
+  }
+  int available = 0;
+  while (available < len && text[available] != '\0') {
+    available++;
+  }
+  return available;
+}
+
+// Screen columns the first `len` bytes of `text` take: one per UTF-8
+// character (the edit fields hold letters, digits, and · — all narrow).
+static int utf8_columns(const char *text, int len) {
+  int cols = 0;
+  for (int pos = 0; pos < len && text[pos] != '\0';) {
+    pos += utf8_char_len(text + pos);
+    cols++;
+  }
+  return cols;
+}
+
+// Draws the first `len` bytes of `text` from column `col`, one UTF-8
+// character per cell, stopping after `max_col`.
+static void draw_utf8_cells(struct ncplane *plane, int row, int col,
+                            const char *text, int len, int max_col) {
+  for (int pos = 0; pos < len && text[pos] != '\0' && col <= max_col; col++) {
+    const int char_len = utf8_char_len(text + pos);
+    char cell[8];
+    (void)snprintf(cell, sizeof(cell), "%.*s", char_len, text + pos);
+    ncplane_putstr_yx(plane, row, col, cell);
+    pos += char_len;
+  }
+}
 
 // Draws row 1 of the entry being edited: the tinted selection bar with
 // its move and leave input zones, the score, and the text cursor.
@@ -263,7 +307,7 @@ static void render_history_move_editor(
   // empty so the cursor lands on a visible zone.
   const bool leave_user_typed = state->edit_leave_len > 0;
   const bool leave_focused = state->edit_field == TUI_EDIT_FIELD_LEAVE;
-  char leave_disp[24];
+  char leave_disp[TUI_RACK_TEXT_MAX];
   leave_disp[0] = '\0';
   if (leave_user_typed || leave_focused) {
     const int copy = state->edit_leave_len < (int)sizeof(leave_disp) - 1
@@ -278,7 +322,7 @@ static void render_history_move_editor(
   const bool leave_empty = leave_disp[0] == '\0';
   // Focused but not typed in: the derived leave shows dim as a
   // placeholder, which typing replaces (an empty field keeps it).
-  char leave_placeholder[24];
+  char leave_placeholder[TUI_RACK_TEXT_MAX];
   leave_placeholder[0] = '\0';
   if (leave_focused && state->edit_leave_len == 0 &&
       state->edit_move_leave[0] != '\0') {
@@ -333,21 +377,15 @@ static void render_history_move_editor(
   const int buf_len = state->edit_move_len;
   const ThemeRgb move_txt_fg =
       state->edit_move_valid ? player_fg : theme->error_fg;
-  for (int j = 0; j < buf_len; j++) {
-    const int col = move_zone_left + j;
-    if (col > move_zone_right) {
-      break;
-    }
-    theme_apply_fg(plane, move_txt_fg);
-    theme_apply_bg(plane, zone_bg);
-    char ch[2] = {buf[j], '\0'};
-    ncplane_putstr_yx(plane, row, col, ch);
-  }
+  theme_apply_fg(plane, move_txt_fg);
+  theme_apply_bg(plane, zone_bg);
+  draw_utf8_cells(plane, row, move_zone_left, buf, buf_len, move_zone_right);
   // Leave input rectangle (also recessed black). Width was
   // already sized to fit the alphagrammed leave; render its
   // letters left-justified inside the zone. Empty leave shows
-  // the "·" placeholder in a single-cell zone.
-  if (leave_zone_left > move_zone_right) {
+  // the "·" placeholder in a single-cell zone. (The move zone always
+  // ends two cells left of it.)
+  {
     theme_apply_bg(plane, zone_bg);
     theme_apply_fg(plane, player_dim_fg);
     for (int c = leave_zone_left; c <= leave_zone_right; c++) {
@@ -358,26 +396,13 @@ static void render_history_move_editor(
       // placeholder "·" only shows when the field is empty AND
       // not focused. An untyped focused field shows the derived
       // leave dim instead.
-      for (int j = 0; j < placeholder_len; j++) {
-        const int col = leave_zone_left + j;
-        if (col > leave_zone_right) {
-          break;
-        }
-        char ch[2] = {leave_placeholder[j], '\0'};
-        theme_apply_bg(plane, zone_bg);
-        theme_apply_fg(plane, theme->dim_fg);
-        ncplane_putstr_yx(plane, row, col, ch);
-      }
-      for (int j = 0; j < state->edit_leave_len; j++) {
-        const int col = leave_zone_left + j;
-        if (col > leave_zone_right) {
-          break;
-        }
-        char ch[2] = {state->edit_leave_buf[j], '\0'};
-        theme_apply_bg(plane, zone_bg);
-        theme_apply_fg(plane, player_dim_fg);
-        ncplane_putstr_yx(plane, row, col, ch);
-      }
+      theme_apply_bg(plane, zone_bg);
+      theme_apply_fg(plane, theme->dim_fg);
+      draw_utf8_cells(plane, row, leave_zone_left, leave_placeholder,
+                      placeholder_len, leave_zone_right);
+      theme_apply_fg(plane, player_dim_fg);
+      draw_utf8_cells(plane, row, leave_zone_left, state->edit_leave_buf,
+                      state->edit_leave_len, leave_zone_right);
     } else if (!leave_empty) {
       ncplane_putstr_yx(plane, row, leave_zone_left, leave_disp);
     } else {
@@ -386,14 +411,20 @@ static void render_history_move_editor(
   }
   // White cursor block when LEAVE has focus — mirrors the MOVE
   // cursor block rendered below.
-  if (leave_focused && leave_zone_left > move_zone_right) {
-    const int cur_col = leave_zone_left + state->edit_leave_cursor;
+  if (leave_focused) {
+    const int cursor = state->edit_leave_cursor;
+    const int cur_col =
+        leave_zone_left + utf8_columns(state->edit_leave_buf, cursor);
     if (cur_col >= leave_zone_left && cur_col <= leave_zone_right) {
-      char ch[2] = {' ', '\0'};
-      if (state->edit_leave_cursor < state->edit_leave_len) {
-        ch[0] = state->edit_leave_buf[state->edit_leave_cursor];
-      } else if (state->edit_leave_cursor < placeholder_len) {
-        ch[0] = leave_placeholder[state->edit_leave_cursor];
+      char ch[8] = " ";
+      if (cursor < state->edit_leave_len) {
+        (void)snprintf(ch, sizeof(ch), "%.*s",
+                       utf8_char_len(state->edit_leave_buf + cursor),
+                       state->edit_leave_buf + cursor);
+      } else if (cursor < placeholder_len) {
+        (void)snprintf(ch, sizeof(ch), "%.*s",
+                       utf8_char_len(leave_placeholder + cursor),
+                       leave_placeholder + cursor);
       }
       theme_apply_fg(plane, theme->bg);
       theme_apply_bg(plane, white_bg);
@@ -417,11 +448,13 @@ static void render_history_move_editor(
   }
   // White block cursor, only when MOVE has focus.
   if (state->edit_field == TUI_EDIT_FIELD_MOVE) {
-    const int cur_col = move_zone_left + state->edit_move_cursor;
+    const int cursor = state->edit_move_cursor;
+    const int cur_col = move_zone_left + utf8_columns(buf, cursor);
     if (cur_col >= move_zone_left && cur_col <= move_zone_right) {
-      char ch[2] = {' ', '\0'};
-      if (state->edit_move_cursor < buf_len) {
-        ch[0] = buf[state->edit_move_cursor];
+      char ch[8] = " ";
+      if (cursor < buf_len) {
+        (void)snprintf(ch, sizeof(ch), "%.*s", utf8_char_len(buf + cursor),
+                       buf + cursor);
       }
       theme_apply_fg(plane, theme->bg);
       theme_apply_bg(plane, white_bg);
@@ -514,7 +547,7 @@ static void render_history_rack_editor(
     // single source of truth, so the cell's rack row and the player pill
     // can't disagree (the bug where an invalid-but-present buffer showed
     // in one place but not the other).
-    char eff[24];
+    char eff[TUI_RACK_TEXT_MAX];
     if (tui_game_state_effective_editor_rack(state, eff, sizeof(eff), NULL) >
         0) {
       format_alphagram_for_sort(eff, state->ld, state->rack_sort, display_buf,
@@ -524,22 +557,16 @@ static void render_history_rack_editor(
   const int display_len = (int)strlen(display_buf);
   const ThemeRgb rack_fg =
       state->edit_rack_valid ? player_dim_fg : theme->error_fg;
-  for (int j = 0; j < display_len; j++) {
-    const int col = rack_zone_left + j;
-    if (col > rack_zone_right) {
-      break;
-    }
-    theme_apply_fg(plane, rack_fg);
-    theme_apply_bg(plane, zone_bg);
-    char ch[2] = {display_buf[j], '\0'};
-    ncplane_putstr_yx(plane, row2, col, ch);
-  }
+  theme_apply_fg(plane, rack_fg);
+  theme_apply_bg(plane, zone_bg);
+  draw_utf8_cells(plane, row2, rack_zone_left, display_buf, display_len,
+                  rack_zone_right);
   if (state->edit_field == TUI_EDIT_FIELD_RACK && !pvc_readonly) {
     // Cursor sits at the buffer's end position. With input
     // capped at 7 tiles, the cursor reaches column 7 (the
     // 8th cell) when the rack is full — a visual signal that
     // further keypresses won't add tiles.
-    int cur_off = display_len;
+    int cur_off = utf8_columns(display_buf, display_len);
     if (cur_off > 7) {
       cur_off = 7;
     }
@@ -618,7 +645,7 @@ static void render_history_end_bonus_rows(
       e->player_idx == 1 ? theme->history_p1_fg : theme->history_p2_fg;
   char bonus_left[48];
   if (e->end_rack_str[0] != '\0') {
-    char sorted_end[24];
+    char sorted_end[TUI_RACK_TEXT_MAX];
     if (ld != NULL) {
       format_alphagram_for_sort(e->end_rack_str, ld, rack_sort, sorted_end,
                                 sizeof(sorted_end));
@@ -738,7 +765,7 @@ render_history_played_move(struct ncplane *plane, const Theme *theme,
   // reads as belonging to that player.
   if (leave_col_w > 0) {
     const bool empty = e->leave_str[0] == '\0';
-    char sorted_leave[24];
+    char sorted_leave[TUI_RACK_TEXT_MAX];
     if (!empty && ld != NULL) {
       format_alphagram_for_sort(e->leave_str, ld, rack_sort, sorted_leave,
                                 sizeof(sorted_leave));
@@ -830,7 +857,7 @@ static void render_history_committed_move(
   // bingo glyph; otherwise the alphagrammed leave.
   {
     const bool empty = e->leave_str[0] == '\0';
-    char sorted_leave[24];
+    char sorted_leave[TUI_RACK_TEXT_MAX];
     if (!empty && ld != NULL) {
       format_alphagram_for_sort(e->leave_str, ld, rack_sort, sorted_leave,
                                 sizeof(sorted_leave));
@@ -1071,7 +1098,7 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   char left_line[48];
   // Resort the rack alphagram per the user's preference so it
   // matches what their rack panel shows for the same letters.
-  char sorted_rack[24];
+  char sorted_rack[TUI_RACK_TEXT_MAX];
   if (e->rack_str[0] != '\0' && ld != NULL) {
     format_alphagram_for_sort(e->rack_str, ld, rack_sort, sorted_rack,
                               sizeof(sorted_rack));

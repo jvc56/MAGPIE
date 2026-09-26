@@ -247,7 +247,8 @@ TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_SAN)
 
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
 	pgo_toolchain_check \
-	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples magpie_tui
+	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples magpie_tui \
+	magpie_tui_test
 
 all: magpie magpie_test
 
@@ -305,6 +306,18 @@ else ifeq ($(strip $(FREETYPE_CFLAGS)),)
 else
 	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) -lz -o $(BIN_DIR)/$@
 endif
+
+# Unit tests for the TUI's notcurses-free modules. Run from the repo root.
+TUI_TEST_SRC := $(wildcard $(TUI_DIR)/test/*.c)
+TUI_TEST_OBJ := $(TUI_TEST_SRC:$(TUI_DIR)/%.c=$(TUI_OBJ_DIR)/$(TUI_DIR)/%.o)
+TUI_TESTED_OBJ := $(TUI_OBJ_DIR)/$(TUI_DIR)/tile_input.o
+
+magpie_tui_test: $(TUI_OBJ_SRC) $(TUI_TESTED_OBJ) $(TUI_TEST_OBJ) | $(BIN_DIR)
+	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+
+$(TUI_OBJ_DIR)/$(TUI_DIR)/test/%.o: $(TUI_DIR)/test/%.c | $(TUI_OBJ_DIR)/$(TUI_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(TUI_CFLAGS) -c $< -o $@
 
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
