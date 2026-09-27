@@ -493,11 +493,14 @@ void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col, int dir) {
     while (!(r == start_row && c == start_col) && brd != NULL &&
            r < BOARD_DIM && c < BOARD_DIM && li < (int)sizeof(leading) - 4) {
       const MachineLetter ml = board_get_letter(brd, r, c);
-      const char *hl = gs->ld != NULL ? gs->ld->ld_ml_to_hl[ml] : NULL;
+      // Move text: a multi-letter tile in brackets ("[NY]"), a blank
+      // lowercase.
+      char *hl = gs->ld != NULL ? ld_ml_to_hl(gs->ld, ml) : NULL;
       for (int k = 0;
            hl != NULL && hl[k] != '\0' && li < (int)sizeof(leading) - 1; k++) {
         leading[li++] = hl[k];
       }
+      free(hl);
       if (vertical) {
         r++;
       } else {
