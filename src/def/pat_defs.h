@@ -131,6 +131,14 @@ enum {
 #define PAT_EXACT_CREATED_HOOKS_ROW_PREFIX "exact_created_hooks,"
 #define PAT_DEFAULT_EXACT_CREATED_HOOKS false
 
+// Optional row (0 or 1): whether a floater run the evaluated move places a
+// tile in is scored from its real extension set toward the premium,
+// resolved on the GADDAG, instead of the two-letter word approximation (see
+// PATWeights.exact_fresh_runs). Absent means 0. Needs the context's KWG
+// (pat_eval_context_set_kwg).
+#define PAT_EXACT_FRESH_RUNS_ROW_PREFIX "exact_fresh_runs,"
+#define PAT_DEFAULT_EXACT_FRESH_RUNS false
+
 // Optional row (0 or 1): whether the floater through channels score a run of
 // tiles by the words containing the whole run at the required end, up to
 // PAT_RUN_THROUGH_MAX_KEY letters, instead of summing each tile's

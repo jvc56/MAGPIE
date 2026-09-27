@@ -778,6 +778,8 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
       .kwg =
           pat_eval_ctx->weights->exact_created_hooks ? pat_eval_ctx->kwg : NULL,
       .lanes = pat_eval_ctx->lanes,
+      .run_kwg =
+          pat_eval_ctx->weights->exact_fresh_runs ? pat_eval_ctx->kwg : NULL,
   };
   // Rescan only the units the move can reach (geometrically, or through
   // its own leave) and combine the whole set: the units in neither set

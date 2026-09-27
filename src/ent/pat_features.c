@@ -203,6 +203,44 @@ static uint64_t pat_fresh_cross_set(const KWG *kwg,
   return cross_set;
 }
 
+// The extension set a floater run holding a fresh tile will have toward the
+// premium once the move is on the board: what pat_scan_unit reads off the
+// pre-move board for an existing run under lexicon_floaters, resolved on the
+// GADDAG from the whole post-move run. run_letters is the run in encounter
+// order from the premium's side, unblanked. A run beyond the premium
+// (side > 0) is read backwards from its last letter and the set is the
+// letters that can precede it in some word (its left extension set); a run
+// before the premium (side < 0) is already reversed in encounter order and
+// the set is the letters that can follow it in a word it begins (its right
+// extension set). 0 when the run is in no word. As on the board, bit 0 is set
+// when any letter fits. Like the board's sets it looks one letter deep, which
+// is what every distance bin reads: MACHERS admits O, the letter before it in
+// STOMACHERS. Which words of which lengths reach the premium exactly is the
+// WordInfoTable's to answer, for existing runs as much as fresh ones.
+static uint64_t pat_fresh_run_extension_set(const KWG *kwg,
+                                            const MachineLetter *run_letters,
+                                            int run_length, int side) {
+  uint32_t node = kwg_get_root_node_index(kwg);
+  for (int letter_idx = 0; letter_idx < run_length; letter_idx++) {
+    const MachineLetter ml = (side > 0)
+                                 ? run_letters[run_length - 1 - letter_idx]
+                                 : run_letters[letter_idx];
+    node = kwg_get_next_node_index(kwg, node, ml);
+    if (node == 0) {
+      return 0;
+    }
+  }
+  if (side < 0) {
+    node = kwg_get_next_node_index(kwg, node, SEPARATION_MACHINE_LETTER);
+    if (node == 0) {
+      return 0;
+    }
+  }
+  uint64_t extension_set = 0;
+  kwg_get_letter_sets(kwg, node, &extension_set);
+  return extension_set + !!extension_set;
+}
+
 // Returns true and sets *fresh_letter_out if the move places a fresh tile
 // on (row, col). Played-through positions fall through to the board.
 static inline int pat_unit_row(int dir, int lane_index, int idx) {
@@ -522,6 +560,8 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         int run_length = 0;
         const bool run_through =
             pat != NULL && pat->run_through && full_channels;
+        const bool collect_run_letters =
+            run_through || (overlay != NULL && overlay->run_kwg != NULL);
         while (idx >= 0 && idx < BOARD_DIM &&
                !square_get_is_brick(&lane[idx])) {
           const int run_row = pat_unit_row(dir, lane_index, idx);
@@ -545,7 +585,7 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           // the way to the triple. The span it must cover is the empties
           // between the two plus both endpoints; a blank contributes
           // nothing to score above but reaches whatever its letter reaches.
-          if (run_through && run_length < BOARD_DIM) {
+          if (collect_run_letters && run_length < BOARD_DIM) {
             run_letters[run_length++] =
                 get_unblanked_machine_letter(run_letter);
           }
@@ -606,10 +646,18 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         int run_flex;
         // A fresh tile implies an overlay; the check lets the analyzer
         // see it.
-        if (run_has_fresh_tile && overlay != NULL) {
+        if (run_has_fresh_tile && overlay != NULL && overlay->run_kwg != NULL) {
+          const uint64_t extension_set = pat_fresh_run_extension_set(
+              overlay->run_kwg, run_letters, run_length, side);
+          run_flex = pat_set_flex(unseen_counts, extension_set);
+          if (hook_letters_out) {
+            *hook_letters_out |= extension_set;
+          }
+        } else if (run_has_fresh_tile && overlay != NULL) {
           // The run's real extension sets do not exist yet; approximate
           // with the two-letter-word flexibility of the tile facing the
-          // TWS square.
+          // TWS square. That counts letters that fit beside it across the
+          // lane, not along it; exact_fresh_runs replaces it.
           run_flex =
               overlay->hook_flex[get_unblanked_machine_letter(facing_letter)];
         } else {

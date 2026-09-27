@@ -75,6 +75,12 @@ struct PATWeights {
   // pat_fresh_cross_set) rather than from the hook_flex approximation. Per
   // file, like the floater flags.
   bool exact_created_hooks;
+  // Whether a floater run holding a tile the evaluated move places is scored
+  // from the run's real extension set toward the premium (see
+  // pat_fresh_run_extension_set) rather than from the hook_flex of the tile
+  // facing the premium, which counts two-letter words across the lane
+  // instead of extensions along it. Per file, like the floater flags.
+  bool exact_fresh_runs;
   // Whether floater through channels use the run-keyed tables (see
   // pat_scan_unit). The per-tile sum they replace adds each tile's
   // single-letter log-count, which badly overstates runs like QI that few or
@@ -144,6 +150,7 @@ static inline int pat_stage_for_bag(int bag_count) {
   return (bag_count >= PAT_STAGE_MID_MIN_BAG) ? PAT_STAGE_MID : PAT_STAGE_LATE;
 }
 void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
+void pat_set_exact_fresh_runs(PATWeights *pat, bool exact_fresh_runs);
 // A PAT_FIT_* value; see PAT_FIT_RESIDUAL_ROW_PREFIX.
 int pat_get_fit_residual(const PATWeights *pat);
 void pat_set_fit_residual(PATWeights *pat, int fit_residual);

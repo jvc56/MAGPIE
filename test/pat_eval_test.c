@@ -16,9 +16,11 @@
 #include "../src/ent/move.h"
 #include "../src/ent/pat.h"
 #include "../src/ent/pat_eval.h"
+#include "../src/ent/pat_lexicon.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
@@ -40,6 +42,10 @@ enum {
   PAT_EVAL_TEST_HOOK_WEIGHT = -1000,
   PAT_EVAL_TEST_MOVE_CAPACITY = 3000,
   PAT_EVAL_TEST_A8_ROW = 7,
+  // One point per unseen tile that could extend a floater run toward a
+  // triple word square.
+  PAT_EVAL_TEST_FLOAT_WEIGHT = -1000,
+  PAT_EVAL_TEST_FLOAT_D3 = 2,
 };
 
 static MoveList *pat_eval_test_generate(const Game *game) {
@@ -334,6 +340,83 @@ static void test_pat_eval_usage_options(void) {
   config_destroy(config);
 }
 
+// The penalty of the move on an empty CSW24 board, from player 0's rack
+// ACEHMRS, under the given float_flex weights and exact_fresh_runs setting.
+static Equity pat_eval_test_fresh_run_penalty(const char *move_string,
+                                              bool exact_fresh_runs,
+                                              int float_flex_d1,
+                                              int float_flex_d3) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "new");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  rack_set_to_string(ld, player_get_rack(player), "ACEHMRS");
+  PATWeights *pat = pat_test_create_prepared("eval_fresh_runs", game);
+  pat_set_lexicon_floaters(pat, true);
+  pat_set_exact_fresh_runs(pat, exact_fresh_runs);
+  pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START, float_flex_d1);
+  pat_set_weight(pat, PAT_FEATURE_FLOAT_FLEX_START + PAT_EVAL_TEST_FLOAT_D3,
+                 float_flex_d3);
+  PATEvalContext *pat_eval_ctx = malloc_or_die(sizeof(PATEvalContext));
+  pat_eval_context_load(pat_eval_ctx, pat,
+                        board_get_readonly_lanes(game_get_board(game), 0), ld,
+                        player_get_rack(player), PAT_CLASS_MASK_ALL, RACK_SIZE);
+  pat_eval_context_set_kwg(pat_eval_ctx, player_get_kwg(player));
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, move_string, false, false, ERROR_STATUS_SUCCESS);
+  const Move *move = validated_moves_get_move(vms, 0);
+  Rack leave;
+  get_leave_for_move(move, game, &leave);
+  const Equity penalty = pat_eval_move_penalty(pat_eval_ctx, move, &leave);
+  assert(penalty <= pat_eval_move_penalty_bound(pat_eval_ctx, move, &leave));
+  validated_moves_destroy(vms);
+  free(pat_eval_ctx);
+  pat_destroy(pat);
+  config_destroy(config);
+  return penalty;
+}
+
+// A floater run the move places is priced by the letters that extend the
+// whole run toward the triple, not by the two-letter words of the tile
+// facing it. From ACEHMRS on an empty board, with 8 As, 11 Es, 9 Is and 8
+// Os unseen: 8H MACHERS ends beside O8 but takes no back hook; 8H MARCHES
+// does (MARCHESA, MARCHESE, MARCHESI); 8D MACHERS leaves A8 three squares away
+// with O the one letter that precedes it (STOMACHERS). With the flag off the
+// facing tile's two-letter word count is charged as before.
+static void test_pat_eval_exact_fresh_runs(void) {
+  const int unseen_a = 8;
+  const int unseen_e = 11;
+  const int unseen_i = 9;
+  const int unseen_o = 8;
+  assert(pat_eval_test_fresh_run_penalty("8H MACHERS", true,
+                                         PAT_EVAL_TEST_FLOAT_WEIGHT, 0) == 0);
+  assert(pat_eval_test_fresh_run_penalty("8H MARCHES", true,
+                                         PAT_EVAL_TEST_FLOAT_WEIGHT, 0) ==
+         (unseen_a + unseen_e + unseen_i) * PAT_EVAL_TEST_FLOAT_WEIGHT);
+  assert(pat_eval_test_fresh_run_penalty("8D MACHERS", true, 0,
+                                         PAT_EVAL_TEST_FLOAT_WEIGHT) ==
+         unseen_o * PAT_EVAL_TEST_FLOAT_WEIGHT);
+
+  Config *config = config_create_or_die("set -lex CSW24");
+  load_and_exec_config_or_die(config, "new");
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  PATWeights *pat = pat_test_create_prepared("eval_fresh_runs_flex", game);
+  const int s_flex = pat_get_hook_flex(pat, ld_hl_to_ml(ld, "S"));
+  const int m_flex = pat_get_hook_flex(pat, ld_hl_to_ml(ld, "M"));
+  pat_destroy(pat);
+  config_destroy(config);
+  assert(s_flex > 0);
+  assert(pat_eval_test_fresh_run_penalty("8H MACHERS", false,
+                                         PAT_EVAL_TEST_FLOAT_WEIGHT, 0) ==
+         s_flex * PAT_EVAL_TEST_FLOAT_WEIGHT);
+  assert(pat_eval_test_fresh_run_penalty("8D MACHERS", false, 0,
+                                         PAT_EVAL_TEST_FLOAT_WEIGHT) ==
+         m_flex * PAT_EVAL_TEST_FLOAT_WEIGHT);
+}
+
 void test_pat_rollout_default_classes(void) {
   PlayersData *players_data = players_data_create(false);
   const char *expected = BOARD_DIM >= 21 ? "tws,qws,windows" : "tws,windows";
@@ -355,4 +438,5 @@ void test_pat_eval(void) {
   test_pat_eval_class_names();
   test_pat_eval_usage_options();
   test_pat_rollout_default_classes();
+  test_pat_eval_exact_fresh_runs();
 }
