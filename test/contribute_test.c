@@ -247,10 +247,10 @@ static void test_client_state(void) {
       "# paste yours as \"apikey bt_...\" below",
   };
   for (size_t i = 0; i < sizeof(commented) / sizeof(commented[0]); i++) {
-    char *contents = get_formatted_string(
+    char *settings_text = get_formatted_string(
         "server https://birdtest.example\n%s\n", commented[i]);
-    write_settings_file(path, contents);
-    free(contents);
+    write_settings_file(path, settings_text);
+    free(settings_text);
     state = client_state_load(path, error_stack);
     assert(error_stack_is_empty(error_stack));
     assert(state->api_key == NULL);
