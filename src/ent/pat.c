@@ -97,6 +97,10 @@ void pat_set_exact_fresh_runs(PATWeights *pat, bool exact_fresh_runs) {
   pat->exact_fresh_runs = exact_fresh_runs;
 }
 
+void pat_set_hook_score_prob(PATWeights *pat, bool hook_score_prob) {
+  pat->hook_score_prob = hook_score_prob;
+}
+
 int pat_get_fit_residual(const PATWeights *pat) { return pat->fit_residual; }
 
 void pat_set_fit_residual(PATWeights *pat, int fit_residual) {
@@ -209,6 +213,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->fit_residual = PAT_FIT_DEFAULT;
   pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
   pat->exact_fresh_runs = PAT_DEFAULT_EXACT_FRESH_RUNS;
+  pat->hook_score_prob = PAT_DEFAULT_HOOK_SCORE_PROB;
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
   pat->utility_adjust = 0.0;
   pat->utility_max_bag = 0;

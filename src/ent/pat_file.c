@@ -240,6 +240,21 @@ static void pat_parse_contents(PATWeights *pat, const char *pat_name,
       pat->exact_fresh_runs = (flag == 1);
       continue;
     }
+    if (has_prefix(PAT_HOOK_SCORE_PROB_ROW_PREFIX, line)) {
+      const int flag = string_to_int(
+          line + strlen(PAT_HOOK_SCORE_PROB_ROW_PREFIX), error_stack);
+      if (!error_stack_is_empty(error_stack) || (flag != 0 && flag != 1)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_PAT_INVALID_ROW,
+            get_formatted_string("PAT file '%s' line %d has a "
+                                 "hook_score_prob flag other than 0 or 1: "
+                                 "'%s'",
+                                 pat_name, line_index + 1, line));
+        return;
+      }
+      pat->hook_score_prob = (flag == 1);
+      continue;
+    }
     if (has_prefix(PAT_OPENING_TILES_ROW_PREFIX, line) ||
         has_prefix(PAT_OPENING_EXCHANGE_ROW_PREFIX, line)) {
       const bool is_exchange =
@@ -450,6 +465,9 @@ void pat_write(const PATWeights *pat, const char *data_paths,
   string_builder_add_formatted_string(sb, "%s%d\n",
                                       PAT_EXACT_FRESH_RUNS_ROW_PREFIX,
                                       pat->exact_fresh_runs ? 1 : 0);
+  string_builder_add_formatted_string(sb, "%s%d\n",
+                                      PAT_HOOK_SCORE_PROB_ROW_PREFIX,
+                                      pat->hook_score_prob ? 1 : 0);
   string_builder_add_formatted_string(sb, "%s%d\n", PAT_RUN_THROUGH_ROW_PREFIX,
                                       pat->run_through ? 1 : 0);
   if (pat->utility_adjust > 0.0) {

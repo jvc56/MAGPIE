@@ -139,6 +139,13 @@ enum {
 #define PAT_EXACT_FRESH_RUNS_ROW_PREFIX "exact_fresh_runs,"
 #define PAT_DEFAULT_EXACT_FRESH_RUNS false
 
+// Optional row (0 or 1): whether a triple word hook's score exposure is the
+// chance the opponent holds a tile that fits it, blanks included, times the
+// best fitting letter's score, instead of the sum over unseen fitting tiles
+// (see PATWeights.hook_score_prob). Absent means 0.
+#define PAT_HOOK_SCORE_PROB_ROW_PREFIX "hook_score_prob,"
+#define PAT_DEFAULT_HOOK_SCORE_PROB false
+
 // Optional row (0 or 1): whether the floater through channels score a run of
 // tiles by the words containing the whole run at the required end, up to
 // PAT_RUN_THROUGH_MAX_KEY letters, instead of summing each tile's

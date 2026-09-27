@@ -30,6 +30,7 @@ static void test_pat_file_round_trip_all_rows(const char *data_dir) {
   pat_set_fit_residual(pat, PAT_FIT_THROUGH);
   pat_set_exact_created_hooks(pat, !PAT_DEFAULT_EXACT_CREATED_HOOKS);
   pat_set_exact_fresh_runs(pat, !PAT_DEFAULT_EXACT_FRESH_RUNS);
+  pat_set_hook_score_prob(pat, !PAT_DEFAULT_HOOK_SCORE_PROB);
   pat_set_run_through(pat, !PAT_DEFAULT_RUN_THROUGH);
   // Written whenever positive; its tables are built only when the weights
   // meet a letter distribution (see pat_prepare_utility).
@@ -60,6 +61,7 @@ static void test_pat_file_round_trip_all_rows(const char *data_dir) {
   assert(pat_get_fit_residual(loaded) == PAT_FIT_THROUGH);
   assert(loaded->exact_created_hooks == !PAT_DEFAULT_EXACT_CREATED_HOOKS);
   assert(loaded->exact_fresh_runs == !PAT_DEFAULT_EXACT_FRESH_RUNS);
+  assert(loaded->hook_score_prob == !PAT_DEFAULT_HOOK_SCORE_PROB);
   assert(loaded->run_through == !PAT_DEFAULT_RUN_THROUGH);
   assert(fabs(loaded->utility_adjust - 1500.0) < 1e-9);
   assert(loaded->utility_table == NULL);
