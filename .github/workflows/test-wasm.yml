@@ -35,7 +35,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-wasm-30
+          key: downloaded-data-files-wasm-31
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
