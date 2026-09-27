@@ -59,11 +59,14 @@
 //   PCCANDS_K_LIST     comma-separated candidate counts (default
 //                      5,8,12,15,20,30,45)
 //   PCCANDS_PLIES_LIST comma-separated sim plies (default PCC_PLIES)
+//   PCCANDS_MINP_LIST  comma-separated minimum samples per candidate
+//                      (default 1)
 //   PCCANDS_ORACLE_PLIES  oracle sim plies (default the first sim plies)
 //   PCCANDS_DEADLINE   same as PCC_DEADLINE, which it overrides
 //
-// Every (K, plies) pair is a setting. CSV columns are labeled k<K> when
-// only K varies, p<plies> when only plies vary, and k<K>p<plies> otherwise.
+// Every (K, plies, minimum samples) triple is a setting. CSV columns are
+// labeled by the dimensions that vary: k<K>, p<plies>, m<minimum samples>
+// (k<K> when none vary).
 
 enum {
   PCC_NUM_K = 7,
@@ -204,29 +207,43 @@ void test_pc_cands_oracle(void) {
                                      plies_list, PCC_MAX_SETTINGS);
   const int oracle_plies =
       (int)pcc_env_long("PCCANDS_ORACLE_PLIES", plies_list[0]);
+  const int default_minp = 1;
+  int minp_list[PCC_MAX_SETTINGS];
+  const int num_minp = pcc_env_list("PCCANDS_MINP_LIST", &default_minp, 1,
+                                    minp_list, PCC_MAX_SETTINGS);
   int setting_k[PCC_MAX_SETTINGS];
   int setting_plies[PCC_MAX_SETTINGS];
+  int setting_minp[PCC_MAX_SETTINGS];
   char setting_label[PCC_MAX_SETTINGS][PCC_LABEL_CAP];
   int num_settings = 0;
   for (int k_idx = 0; k_idx < num_k; k_idx++) {
     for (int plies_idx = 0; plies_idx < num_plies; plies_idx++) {
-      if (num_settings == PCC_MAX_SETTINGS) {
-        log_fatal("too many (K, plies) settings; the cap is %d",
-                  PCC_MAX_SETTINGS);
+      for (int minp_idx = 0; minp_idx < num_minp; minp_idx++) {
+        if (num_settings == PCC_MAX_SETTINGS) {
+          log_fatal("too many (K, plies, minimum samples) settings; the cap "
+                    "is %d",
+                    PCC_MAX_SETTINGS);
+        }
+        setting_k[num_settings] = k_list[k_idx];
+        setting_plies[num_settings] = plies_list[plies_idx];
+        setting_minp[num_settings] = minp_list[minp_idx];
+        char *label = setting_label[num_settings];
+        label[0] = '\0';
+        size_t used = 0;
+        if (num_k > 1 || (num_plies == 1 && num_minp == 1)) {
+          used += (size_t)snprintf(label + used, PCC_LABEL_CAP - used, "k%d",
+                                   k_list[k_idx]);
+        }
+        if (num_plies > 1) {
+          used += (size_t)snprintf(label + used, PCC_LABEL_CAP - used, "p%d",
+                                   plies_list[plies_idx]);
+        }
+        if (num_minp > 1) {
+          (void)snprintf(label + used, PCC_LABEL_CAP - used, "m%d",
+                         minp_list[minp_idx]);
+        }
+        num_settings++;
       }
-      setting_k[num_settings] = k_list[k_idx];
-      setting_plies[num_settings] = plies_list[plies_idx];
-      if (num_plies == 1) {
-        (void)snprintf(setting_label[num_settings], PCC_LABEL_CAP, "k%d",
-                       k_list[k_idx]);
-      } else if (num_k == 1) {
-        (void)snprintf(setting_label[num_settings], PCC_LABEL_CAP, "p%d",
-                       plies_list[plies_idx]);
-      } else {
-        (void)snprintf(setting_label[num_settings], PCC_LABEL_CAP, "k%dp%d",
-                       k_list[k_idx], plies_list[plies_idx]);
-      }
-      num_settings++;
     }
   }
   const uint64_t base_seed = (uint64_t)pcc_env_long("PCC_SEED", 20260926);
@@ -299,6 +316,7 @@ void test_pc_cands_oracle(void) {
           .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
           .sim_plies = setting_plies[k_idx],
           .sim_max_candidates = setting_k[k_idx],
+          .sim_min_play_iterations = (uint64_t)setting_minp[k_idx],
           .fixed_seconds_per_move = budget,
           .win_pcts = win_pcts,
           .num_threads = 1,
