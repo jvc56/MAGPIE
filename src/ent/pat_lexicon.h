@@ -2,6 +2,7 @@
 #define PAT_LEXICON_H
 
 #include "../def/letter_distribution_defs.h"
+#include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "pat.h"
@@ -18,6 +19,12 @@
 // NULL, which zeroes the table.
 void pat_prepare_hook_flex(PATWeights *pat, const KWG *kwg,
                            const LetterDistribution *ld);
+// Fills PATWeights.hook_leave_value: each tile's value as a one-tile leave
+// under klv (NULL zeroes it), what an opponent gives up by spending it on a
+// hook. Must be called with the evaluating player's leaves before
+// hook_value weights are used.
+void pat_prepare_hook_leaves(PATWeights *pat, const KLV *klv,
+                             const LetterDistribution *ld);
 // Returns the flexibility table entry for an (unblanked) machine letter.
 int pat_get_hook_flex(const PATWeights *pat, MachineLetter ml);
 // The end-specific through tables: word_end 0 when ml is the word's first

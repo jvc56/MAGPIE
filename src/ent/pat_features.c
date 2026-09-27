@@ -267,8 +267,12 @@ typedef struct PATCrossInfo {
   int flex;
   // Sum over admissible letters of unseen count times the letter's
   // incremental immediate score at this square (see
-  // pat_effective_cross_info), divided by PAT_HOOK_SCORE_SCALE.
+  // pat_effective_cross_info), divided by PAT_HOOK_SCORE_SCALE; or what
+  // pat_hook_score_exposure makes of it under hook_score_prob or
+  // hook_value.
   int score_exposure;
+  // Under hook_value, the part above PAT_HOOK_EXCESS_THRESHOLD; 0 otherwise.
+  int score_excess;
   // The real cross-set this hook or floater route needs, valid only when
   // hooky; 0 otherwise. Blank stays at bit 0, same convention as every
   // other cross/extension set (see pat_set_flex).
@@ -291,24 +295,65 @@ static inline int pat_letter_score_exposure(int cross_score, int tile_score,
              (word_multiplier + premium_word_multiplier);
 }
 
-// A hook's score exposure: what the opponent could score by filling it. With
-// prob_rack_size 0 it is the sum over admissible letters of unseen count
+// How a triple word hook's score channels measure it (see
+// pat_hook_score_exposure). NULL, the default, keeps the unseen-count sum.
+typedef struct PATHookScoreArgs {
+  const PATWeights *pat;
+  // The opponent's rack size, the draw the probabilities are over.
+  int rack_size;
+  // Length of the shortest lane word through the hook square that covers
+  // the premium, for the lexicon's through table.
+  int span;
+} PATHookScoreArgs;
+
+// P(a rack_size draw from unseen_total tiles misses all of fitting).
+static double pat_hook_miss_probability(int unseen_total, int fitting,
+                                        int rack_size) {
+  double miss = 1.0;
+  for (int draw_idx = 0; draw_idx < rack_size && miss > 0.0; draw_idx++) {
+    const int left = unseen_total - draw_idx;
+    miss = (left <= fitting) ? 0.0
+                             : miss * (double)(left - fitting) / (double)left;
+  }
+  return miss;
+}
+
+// A hook's score exposure: what the opponent could score by filling it.
+// With args NULL it is the sum over admissible letters of unseen count
 // times the letter's exposure, divided by PAT_HOOK_SCORE_SCALE. That grows
-// with every tile that fits although the opponent plays one, so it overstates
-// a hook many tiles fill and understates one only a few do (a seven-letter
-// word's S hook onto a triple). With prob_rack_size the opponent's rack size
-// (see PATWeights.hook_score_prob) it is instead the chance a rack that size
-// drawn from the unseen pool holds a tile that fits, blanks included, times
-// the best admissible letter's exposure, in points.
+// with every tile that fits although the opponent plays one, so it
+// overstates a hook many tiles fill and understates one only a few do (a
+// seven-letter word's S hook onto a triple).
+//
+// Under hook_score_prob it is instead the chance the opponent's rack holds
+// a tile that fits, blanks included, times the best admissible letter's
+// exposure, in points.
+//
+// Under hook_value each fitting tile (a blank as its best letter, scoring
+// nothing itself) is valued by its exposure, plus what the lane word through
+// the premium lays down besides it (the premium's word multiplier times the
+// through table's mean rest-of-word value for args->span, when such words
+// exist), less its value kept as a one-tile leave. The exposure is the
+// expected best of those values over the opponent's rack, each tile taken
+// when the rack holds it and nothing better; *excess_out is the same
+// expectation of the part above PAT_HOOK_EXCESS_THRESHOLD. Both in points.
 static int pat_hook_score_exposure(const uint8_t *unseen_counts,
                                    const LetterDistribution *ld,
                                    uint64_t cross_set, int cross_score,
                                    int letter_multiplier, int word_multiplier,
                                    int premium_word_multiplier,
-                                   int prob_rack_size) {
+                                   const PATHookScoreArgs *args,
+                                   int *excess_out) {
+  *excess_out = 0;
   int64_t exposure = 0;
   int best_exposure = 0;
   int fitting = 0;
+  // Per fitting letter (and the blank last): its count and value.
+  int counts[MAX_ALPHABET_SIZE];
+  double values[MAX_ALPHABET_SIZE];
+  int num_values = 0;
+  double best_flex = 0.0;
+  const bool hook_value = args != NULL && args->pat->hook_value;
   uint64_t remaining = cross_set & ~(uint64_t)1;
   while (remaining) {
     const int machine_letter = pat_ctz(remaining);
@@ -324,11 +369,28 @@ static int pat_hook_score_exposure(const uint8_t *unseen_counts,
     if (letter_exposure > best_exposure) {
       best_exposure = letter_exposure;
     }
+    if (hook_value) {
+      double flex = 0.0;
+      if (args->span < PAT_MAX_THROUGH_LEN &&
+          args->pat->through_count[machine_letter][args->span] > 0) {
+        flex = (double)premium_word_multiplier *
+               (double)args->pat->through_score[machine_letter][args->span];
+      }
+      if (flex > best_flex) {
+        best_flex = flex;
+      }
+      counts[num_values] = unseen_counts[machine_letter];
+      values[num_values] =
+          (double)letter_exposure + flex -
+          equity_to_double(args->pat->hook_leave_value[machine_letter]);
+      num_values++;
+    }
   }
-  if (prob_rack_size == 0) {
+  if (args == NULL) {
     return (int)(exposure / PAT_HOOK_SCORE_SCALE);
   }
-  if (unseen_counts[BLANK_MACHINE_LETTER] > 0 && (cross_set & ~(uint64_t)1)) {
+  const int blanks = unseen_counts[BLANK_MACHINE_LETTER];
+  if (blanks > 0 && (cross_set & ~(uint64_t)1)) {
     // A blank fills the hook as any admissible letter, scoring nothing
     // itself.
     const int blank_exposure =
@@ -337,7 +399,14 @@ static int pat_hook_score_exposure(const uint8_t *unseen_counts,
     if (blank_exposure > best_exposure) {
       best_exposure = blank_exposure;
     }
-    fitting += unseen_counts[BLANK_MACHINE_LETTER];
+    fitting += blanks;
+    if (hook_value) {
+      counts[num_values] = blanks;
+      values[num_values] =
+          (double)blank_exposure + best_flex -
+          equity_to_double(args->pat->hook_leave_value[BLANK_MACHINE_LETTER]);
+      num_values++;
+    }
   }
   if (fitting == 0) {
     return 0;
@@ -347,14 +416,44 @@ static int pat_hook_score_exposure(const uint8_t *unseen_counts,
        machine_letter++) {
     unseen_total += unseen_counts[machine_letter];
   }
-  // P(no fitting tile among prob_rack_size drawn without replacement).
-  double miss = 1.0;
-  for (int draw_idx = 0; draw_idx < prob_rack_size && miss > 0.0; draw_idx++) {
-    const int left = unseen_total - draw_idx;
-    miss = (left <= fitting) ? 0.0
-                             : miss * (double)(left - fitting) / (double)left;
+  if (!hook_value) {
+    const double hit =
+        1.0 - pat_hook_miss_probability(unseen_total, fitting, args->rack_size);
+    return (int)(hit * (double)best_exposure + 0.5);
   }
-  return (int)((1.0 - miss) * (double)best_exposure + 0.5);
+  // Best value first: tile i is what the opponent plays when the rack holds
+  // one and none of the tiles before it, P = miss(before) - miss(through i).
+  for (int sorted = 1; sorted < num_values; sorted++) {
+    const double value = values[sorted];
+    const int count = counts[sorted];
+    int slot = sorted;
+    while (slot > 0 && values[slot - 1] < value) {
+      values[slot] = values[slot - 1];
+      counts[slot] = counts[slot - 1];
+      slot--;
+    }
+    values[slot] = value;
+    counts[slot] = count;
+  }
+  double expected = 0.0;
+  double expected_excess = 0.0;
+  double miss_before = 1.0;
+  int taken = 0;
+  for (int value_idx = 0; value_idx < num_values && values[value_idx] > 0.0;
+       value_idx++) {
+    taken += counts[value_idx];
+    const double miss_through =
+        pat_hook_miss_probability(unseen_total, taken, args->rack_size);
+    const double chance = miss_before - miss_through;
+    expected += chance * values[value_idx];
+    if (values[value_idx] > PAT_HOOK_EXCESS_THRESHOLD) {
+      expected_excess +=
+          chance * (values[value_idx] - PAT_HOOK_EXCESS_THRESHOLD);
+    }
+    miss_before = miss_through;
+  }
+  *excess_out = (int)(expected_excess + 0.5);
+  return (int)(expected + 0.5);
 }
 
 // The perpendicular constraint at an empty square: dead (no letter can be
@@ -367,12 +466,11 @@ static int pat_hook_score_exposure(const uint8_t *unseen_counts,
 // premium_word_multiplier feed
 // score_exposure only; a caller that never reads it may pass NULL and any
 // multiplier.
-static PATCrossInfo
-pat_effective_cross_info(const Square *lane, int idx, int dir,
-                         const PATMoveOverlay *overlay, int row, int col,
-                         const uint8_t *unseen_counts,
-                         const LetterDistribution *ld,
-                         int premium_word_multiplier, int prob_rack_size) {
+static PATCrossInfo pat_effective_cross_info(
+    const Square *lane, int idx, int dir, const PATMoveOverlay *overlay,
+    int row, int col, const uint8_t *unseen_counts,
+    const LetterDistribution *ld, int premium_word_multiplier,
+    const PATHookScoreArgs *score_args) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   PATCrossInfo info;
   // Exact created hooks: if a fresh tile sits perpendicular-adjacent,
@@ -402,13 +500,14 @@ pat_effective_cross_info(const Square *lane, int idx, int dir,
       info.flex = info.hooky ? pat_set_flex(unseen_counts, cross_set) : 0;
       info.letter_set = info.hooky ? cross_set : 0;
       info.score_exposure = 0;
+      info.score_excess = 0;
       if (info.hooky) {
         const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
-        info.score_exposure =
-            pat_hook_score_exposure(unseen_counts, ld, cross_set, cross_score,
-                                    bonus_square_get_letter_multiplier(bonus),
-                                    bonus_square_get_word_multiplier(bonus),
-                                    premium_word_multiplier, prob_rack_size);
+        info.score_exposure = pat_hook_score_exposure(
+            unseen_counts, ld, cross_set, cross_score,
+            bonus_square_get_letter_multiplier(bonus),
+            bonus_square_get_word_multiplier(bonus), premium_word_multiplier,
+            score_args, &info.score_excess);
       }
       return info;
     }
@@ -419,6 +518,7 @@ pat_effective_cross_info(const Square *lane, int idx, int dir,
   info.flex = info.hooky ? pat_set_flex(unseen_counts, base_cross_set) : 0;
   info.letter_set = info.hooky ? base_cross_set : 0;
   info.score_exposure = 0;
+  info.score_excess = 0;
   const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
   const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
   const int word_multiplier = bonus_square_get_word_multiplier(bonus);
@@ -426,7 +526,8 @@ pat_effective_cross_info(const Square *lane, int idx, int dir,
     info.score_exposure = pat_hook_score_exposure(
         unseen_counts, ld, base_cross_set,
         equity_to_int(square_get_cross_score(&lane[idx])), letter_multiplier,
-        word_multiplier, premium_word_multiplier, prob_rack_size);
+        word_multiplier, premium_word_multiplier, score_args,
+        &info.score_excess);
   }
   if (!overlay || info.dead) {
     return info;
@@ -504,12 +605,15 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   // exact created hooks still need ld for their cross-set calculation.
   const LetterDistribution *hook_score_ld =
       score_channels || (overlay != NULL && overlay->kwg != NULL) ? ld : NULL;
-  // The rack the hook-score probability draws (see pat_hook_score_exposure);
-  // 0 keeps the unseen-count sum. The opponent always holds tiles while any
-  // remain in the bag, so the fallback to a full rack never decides a move.
-  int prob_rack_size = 0;
-  if (pat != NULL && pat->hook_score_prob) {
-    prob_rack_size = (max_reach > 0) ? max_reach : RACK_SIZE;
+  // How the hook-score channels measure a hook (see pat_hook_score_exposure);
+  // NULL keeps the unseen-count sum. The opponent always holds tiles while
+  // any remain in the bag, so the fallback to a full rack never decides a
+  // move. The span starts at 2: a word through the premium itself.
+  PATHookScoreArgs score_args = {.pat = pat, .rack_size = 0, .span = 2};
+  const PATHookScoreArgs *score_args_ptr = NULL;
+  if (pat != NULL && (pat->hook_score_prob || pat->hook_value)) {
+    score_args.rack_size = (max_reach > 0) ? max_reach : RACK_SIZE;
+    score_args_ptr = &score_args;
   }
   // Each premium class writes its own hook and floater-value channels. The
   // richer channels (floater flexibility, the lexicon through-table, and
@@ -561,7 +665,7 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       lane, premium_idx, dir, overlay,
       pat_unit_row(dir, lane_index, premium_idx),
       pat_unit_col(dir, lane_index, premium_idx), unseen_counts, hook_score_ld,
-      premium_word_multiplier, prob_rack_size);
+      premium_word_multiplier, score_args_ptr);
   if (premium_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -572,6 +676,7 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
     features[hook_base] += premium_info.flex;
     if (full_channels) {
       features[PAT_FEATURE_HOOK_SCORE_START] += premium_info.score_exposure;
+      features[PAT_FEATURE_HOOK_EXCESS_START] += premium_info.score_excess;
     }
     if (hook_letters_out) {
       *hook_letters_out |= premium_info.letter_set;
@@ -744,9 +849,12 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         span_floater_flex += run_flex;
         continue;
       }
+      // A hook here would be bin empties_used + 1, and the shortest word
+      // through it covering the premium one longer.
+      score_args.span = empties_used + 2;
       const PATCrossInfo info = pat_effective_cross_info(
           lane, idx, dir, overlay, square_row, square_col, unseen_counts,
-          hook_score_ld, premium_word_multiplier, prob_rack_size);
+          hook_score_ld, premium_word_multiplier, score_args_ptr);
       if (info.dead) {
         break;
       }
@@ -770,6 +878,8 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         if (full_channels) {
           features[PAT_FEATURE_HOOK_SCORE_START + empties_used - 1] +=
               info.score_exposure;
+          features[PAT_FEATURE_HOOK_EXCESS_START + empties_used - 1] +=
+              info.score_excess;
         }
         if (hook_letters_out) {
           *hook_letters_out |= info.letter_set;

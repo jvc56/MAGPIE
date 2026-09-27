@@ -101,6 +101,10 @@ void pat_set_hook_score_prob(PATWeights *pat, bool hook_score_prob) {
   pat->hook_score_prob = hook_score_prob;
 }
 
+void pat_set_hook_value(PATWeights *pat, bool hook_value) {
+  pat->hook_value = hook_value;
+}
+
 int pat_get_fit_residual(const PATWeights *pat) { return pat->fit_residual; }
 
 void pat_set_fit_residual(PATWeights *pat, int fit_residual) {
@@ -189,7 +193,11 @@ void pat_feature_name(int feature_index, char *buf, size_t buf_size) {
     (void)snprintf(buf, buf_size, "tt_floater");
   } else if (feature_index == PAT_FEATURE_TT_HOOK_ONLY) {
     (void)snprintf(buf, buf_size, "tt_hook_only");
-  } else if (feature_index < PAT_NUM_FEATURES) {
+  } else if (feature_index >= PAT_FEATURE_HOOK_EXCESS_START &&
+             feature_index < PAT_NUM_FEATURES) {
+    (void)snprintf(buf, buf_size, "hook_excess_d%d",
+                   feature_index - PAT_FEATURE_HOOK_EXCESS_START + 1);
+  } else if (feature_index < PAT_FEATURE_HOOK_EXCESS_START) {
     static const char *const tier_names[PAT_WINDOW_TIER_COUNT] = {"dd", "w6",
                                                                   "w9", "w12"};
     static const char *const kind_names[PAT_WINDOW_FEATURES_PER_TIER] = {
@@ -214,6 +222,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->exact_created_hooks = PAT_DEFAULT_EXACT_CREATED_HOOKS;
   pat->exact_fresh_runs = PAT_DEFAULT_EXACT_FRESH_RUNS;
   pat->hook_score_prob = PAT_DEFAULT_HOOK_SCORE_PROB;
+  pat->hook_value = PAT_DEFAULT_HOOK_VALUE;
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
   pat->utility_adjust = 0.0;
   pat->utility_max_bag = 0;

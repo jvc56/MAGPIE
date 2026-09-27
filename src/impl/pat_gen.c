@@ -232,8 +232,9 @@ pat_regression_solve_into_weights(const PATRegression *regression,
   for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
        feature_index++) {
     const bool is_hook_score =
-        feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
-        feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT;
+        (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
+         feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT) ||
+        feature_index >= PAT_FEATURE_HOOK_EXCESS_START;
     const bool is_through =
         feature_index >= PAT_FEATURE_FLOAT_THROUGH_SCORE_START &&
         feature_index <

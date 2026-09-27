@@ -88,6 +88,17 @@ struct PATWeights {
   // over it underprices a hook few tiles fill. Per file, like the floater
   // flags.
   bool hook_score_prob;
+  // Whether a triple word hook's score channels weigh each fitting letter by
+  // its net value to the opponent: the hook exposure, plus what the lane
+  // word through the premium lays down besides it (the lexicon's through
+  // table for the shortest covering word), less the letter's value kept on
+  // the rack (hook_leave_value). hook_score is the expected best such value
+  // over the racks the opponent might hold, hook_excess its part above
+  // PAT_HOOK_EXCESS_THRESHOLD. Per file, like the floater flags.
+  bool hook_value;
+  // Each tile's value as a one-tile leave under the player's leaves, blank
+  // at BLANK_MACHINE_LETTER; set by pat_prepare_hook_leaves.
+  Equity hook_leave_value[MAX_ALPHABET_SIZE];
   // Whether floater through channels use the run-keyed tables (see
   // pat_scan_unit). The per-tile sum they replace adds each tile's
   // single-letter log-count, which badly overstates runs like QI that few or
@@ -159,6 +170,7 @@ static inline int pat_stage_for_bag(int bag_count) {
 void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
 void pat_set_exact_fresh_runs(PATWeights *pat, bool exact_fresh_runs);
 void pat_set_hook_score_prob(PATWeights *pat, bool hook_score_prob);
+void pat_set_hook_value(PATWeights *pat, bool hook_value);
 // A PAT_FIT_* value; see PAT_FIT_RESIDUAL_ROW_PREFIX.
 int pat_get_fit_residual(const PATWeights *pat);
 void pat_set_fit_residual(PATWeights *pat, int fit_residual);

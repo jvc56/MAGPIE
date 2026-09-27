@@ -418,8 +418,9 @@ static void pat_eval_context_load_units(
       pat_eval_ctx
           ->nonzero_feature_index[pat_eval_ctx->num_nonzero_features++] =
           feature_index;
-      if (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
-          feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT) {
+      if ((feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
+           feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT) ||
+          feature_index >= PAT_FEATURE_HOOK_EXCESS_START) {
         pat_eval_ctx->score_channels = true;
       }
     }

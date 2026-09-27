@@ -4368,6 +4368,8 @@ void impl_pat_gen(Config *config, ErrorStack *error_stack) {
   }
   pat_prepare_hook_flex(pat, players_data_get_kwg(config->players_data, 0),
                         config_get_ld(config));
+  pat_prepare_hook_leaves(pat, players_data_get_klv(config->players_data, 0),
+                          config_get_ld(config));
   pat_prepare_utility(pat, config->data_paths, config_get_ld(config),
                       error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8792,6 +8794,10 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         pat_prepare_hook_flex(
             player_pat,
             players_data_get_kwg(config->players_data, player_index),
+            config->ld);
+        pat_prepare_hook_leaves(
+            player_pat,
+            players_data_get_klv(config->players_data, player_index),
             config->ld);
         pat_prepare_utility(player_pat, config->data_paths, config->ld,
                             error_stack);

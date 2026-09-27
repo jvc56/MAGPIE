@@ -6,7 +6,8 @@ signed_through,1
 fit_residual,5
 exact_created_hooks,1
 exact_fresh_runs,1
-hook_score_prob,1
+hook_score_prob,0
+hook_value,1
 # Zero weights: the starting point test/pat_build.sh and
 # test/pat_build_super.sh train from.
 hook_d1,0

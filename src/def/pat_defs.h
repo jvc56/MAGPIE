@@ -75,8 +75,15 @@ enum {
   PAT_FEATURE_DD_FLOATER = PAT_FEATURE_WINDOW_START,
   PAT_FEATURE_DD_HOOK_ONLY = PAT_FEATURE_DD_FLOATER + 1,
   PAT_FEATURE_DD_TILES_SAVED = PAT_FEATURE_DD_HOOK_ONLY + 1,
-  PAT_NUM_FEATURES = PAT_FEATURE_WINDOW_START +
-                     PAT_WINDOW_TIER_COUNT * PAT_WINDOW_FEATURES_PER_TIER,
+  // Under hook_value, the part of a triple word hook's expected best fill
+  // above PAT_HOOK_EXCESS_THRESHOLD points (see pat_hook_score_exposure). An
+  // open hook costs only when filling it beats the opponent's other plays,
+  // so the cost is near zero for most hooks and steep for a few; one linear
+  // hook-score weight averages the two and underprices the steep ones.
+  PAT_FEATURE_HOOK_EXCESS_START =
+      PAT_FEATURE_WINDOW_START +
+      PAT_WINDOW_TIER_COUNT * PAT_WINDOW_FEATURES_PER_TIER,
+  PAT_NUM_FEATURES = PAT_FEATURE_HOOK_EXCESS_START + PAT_HOOK_BIN_COUNT,
 };
 
 // A training observation is labeled with the opponent's net gain over the
@@ -146,6 +153,13 @@ enum {
 #define PAT_HOOK_SCORE_PROB_ROW_PREFIX "hook_score_prob,"
 #define PAT_DEFAULT_HOOK_SCORE_PROB false
 
+// Optional row (0 or 1): whether a triple word hook's score channels value
+// each fitting letter by what filling the hook with it is worth to the
+// opponent, net of keeping the tile, and fill the hook_excess channels (see
+// PATWeights.hook_value). Absent means 0.
+#define PAT_HOOK_VALUE_ROW_PREFIX "hook_value,"
+#define PAT_DEFAULT_HOOK_VALUE false
+
 // Optional row (0 or 1): whether the floater through channels score a run of
 // tiles by the words containing the whole run at the required end, up to
 // PAT_RUN_THROUGH_MAX_KEY letters, instead of summing each tile's
@@ -205,15 +219,20 @@ enum {
 // lands near the flexibility channels' magnitude.
 #define PAT_HOOK_SCORE_SCALE 8
 
+// Points of a hook's fill value below which the hook_excess channels see
+// nothing: roughly what the opponent scores anyway.
+#define PAT_HOOK_EXCESS_THRESHOLD 30.0
+
 // The header line is PAT_MAGIC_PREFIX followed by the format version, e.g.
 // "magpie_pat_v6". PAT_VERSION is what this build writes; an older version
-// lacks rows for the channels added after it, which read as zero. Versions
-// 3 to 5 also carry rows for channels and training flags that have since
-// been retired (see pat_row_is_retired); they are read only at zero.
+// lacks rows for the channels added after it, which read as zero (version 7
+// added hook_excess_d*). Versions 3 to 5 also carry rows for channels and
+// training flags that have since been retired (see pat_row_is_retired); they
+// are read only at zero.
 #define PAT_MAGIC_PREFIX "magpie_pat_v"
 enum {
   PAT_EARLIEST_SUPPORTED_VERSION = 1,
-  PAT_VERSION = 6,
+  PAT_VERSION = 7,
 };
 
 #endif

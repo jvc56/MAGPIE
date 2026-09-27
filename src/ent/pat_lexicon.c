@@ -5,9 +5,11 @@
 #include "../def/pat_defs.h"
 #include "../util/io_util.h"
 #include "equity.h"
+#include "klv.h"
 #include "kwg.h"
 #include "letter_distribution.h"
 #include "pat.h"
+#include "rack.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -274,6 +276,22 @@ int pat_get_through_count_end(const PATWeights *pat, int word_end,
 
 int pat_get_through_count(const PATWeights *pat, MachineLetter ml, int span) {
   return (span < PAT_MAX_THROUGH_LEN) ? pat->through_count[ml][span] : 0;
+}
+
+void pat_prepare_hook_leaves(PATWeights *pat, const KLV *klv,
+                             const LetterDistribution *ld) {
+  memset(pat->hook_leave_value, 0, sizeof(pat->hook_leave_value));
+  if (klv == NULL) {
+    return;
+  }
+  const int ld_size = ld_get_size(ld);
+  Rack leave;
+  rack_set_dist_size(&leave, ld_size);
+  for (int ml = 0; ml < ld_size; ml++) {
+    rack_reset(&leave);
+    rack_add_letter(&leave, (MachineLetter)ml);
+    pat->hook_leave_value[ml] = klv_get_leave_value(klv, &leave);
+  }
 }
 
 int pat_get_hook_flex(const PATWeights *pat, MachineLetter ml) {
