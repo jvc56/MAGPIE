@@ -32,7 +32,7 @@ static inline int pat_ctz(uint64_t bits) {
 // Overlay describing the candidate move's fresh tiles on top of the
 // pre-move board. hook_flex approximates the flexibility of hooks and
 // floaters the move itself creates, whose real cross and extension sets do
-// not exist yet.
+// not exist yet, unless kwg (hooks) or run_kwg (floater runs) resolves them.
 typedef struct PATMoveOverlay {
   const Move *move;
   int row_start;
@@ -45,6 +45,9 @@ typedef struct PATMoveOverlay {
   // pat_fresh_cross_set); the lane cache goes with it.
   const KWG *kwg;
   const Square *lanes;
+  // Non-NULL when floater runs the move places a tile in are to be resolved
+  // exactly (see PATWeights.exact_fresh_runs).
+  const KWG *run_kwg;
 } PATMoveOverlay;
 
 // Fills unseen_counts (MAX_ALPHABET_SIZE entries) with the tiles neither on
