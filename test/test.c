@@ -51,6 +51,7 @@
 #include "pat_position_check_test.h"
 #include "pat_sim_diff_test.h"
 #include "pat_test.h"
+#include "pat_threat_test.h"
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
 #include "peg_oracle_test.h"
@@ -179,6 +180,7 @@ static TestEntry test_table[] = {
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
     {"patsimdiff", test_pat_sim_diff},
+    {"patthreat", test_pat_threat},
     {"pathmovelists", test_path_move_lists},
     {"egincremental", test_incremental_movegen_identical},
     {"pegspeedbench1", test_peg_speed_bench_1},
