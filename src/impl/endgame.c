@@ -96,6 +96,9 @@ enum {
 static_assert(PATH_MOVE_LISTS_MAX_PATH > 2 * MAX_SEARCH_DEPTH + 1,
               "incremental lists' path too short for the greedy playout");
 
+// Salt for the transposition-table key of a capped leaf; see leaf_tt_key.
+static const uint64_t CAPPED_LEAF_KEY_SALT = 0x9E3779B97F4A7C15ULL;
+
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
 // all). A tile is "stuck" if no legal move plays that tile type.
 // tiles_played_bv: bitvector where bit i is set if machine letter i appears in
@@ -1915,6 +1918,24 @@ static int derive_playout_plays(EndgameCtxWorker *worker,
 // pick best (with conservation bonus), compute final spread with rack
 // adjustments, unplay moves, store in TT. Returns evaluation from
 // on_turn's perspective.
+// Through iterative-deepening depth 1 (the root sweep and the depth-1 search)
+// a leaf plays one greedy move before the rack adjustment instead of playing
+// out: at those depths it chooses better. From depth 2 the full playout is
+// better.
+static inline bool leaf_playout_is_capped(const EndgameCtxWorker *worker) {
+  return worker->current_iterative_deepening_depth <= 1;
+}
+
+// The same position gets a different leaf value capped and uncapped, and with
+// several threads both kinds are in flight at once (helpers start at depth 2
+// or deeper while thread 0 runs depth 1). Capped leaf values live under a
+// salted key so an uncapped leaf never reads one, and vice versa.
+static inline uint64_t leaf_tt_key(const EndgameCtxWorker *worker,
+                                   uint64_t node_key) {
+  return leaf_playout_is_capped(worker) ? node_key ^ CAPPED_LEAF_KEY_SALT
+                                        : node_key;
+}
+
 static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                                            uint64_t node_key, int on_turn_idx,
                                            int32_t on_turn_spread, PVLine *pv,
@@ -1930,6 +1951,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // its moves onto the incremental lists' path, on top of up to 2 * plies
   // negamax and bypass moves, so it also stops where the path is full.
   int max_playout = EG_MAX_LEAF_PLAYOUT;
+  if (leaf_playout_is_capped(worker)) {
+    max_playout = 1;
+  }
   if (use_path_lists) {
     const int path_room =
         PATH_MOVE_LISTS_MAX_PATH - 1 - worker->path_lists->length;
@@ -2217,8 +2241,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // Store greedy playout result in TT at depth 0.
   // Only store if no deeper entry exists (prefer deeper negamax results).
   if (worker->solver->transposition_table_optim) {
+    const uint64_t leaf_key = leaf_tt_key(worker, node_key);
     TTEntry existing = transposition_table_lookup(
-        worker->solver->transposition_table, node_key);
+        worker->solver->transposition_table, leaf_key);
     if (!ttentry_valid(existing) || ttentry_depth(existing) == 0) {
       int32_t greedy_result =
           (on_turn_idx == solving_player) ? greedy_spread : -greedy_spread;
@@ -2226,7 +2251,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       TTEntry entry_to_store = {.score = tt_score,
                                 .flag_and_depth = (TT_EXACT << 6),
                                 .tiny_move = INVALID_TINY_MOVE};
-      transposition_table_store(worker->solver->transposition_table, node_key,
+      transposition_table_store(worker->solver->transposition_table, leaf_key,
                                 entry_to_store);
     }
   }
@@ -2602,8 +2627,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   uint64_t tt_move = INVALID_TINY_MOVE;
 
   if (worker->solver->transposition_table_optim) {
+    // A depth-0 node's entry is its leaf value, stored under leaf_tt_key.
+    const uint64_t probe_key =
+        depth == 0 ? leaf_tt_key(worker, node_key) : node_key;
     TTEntry tt_entry = transposition_table_lookup(
-        worker->solver->transposition_table, node_key);
+        worker->solver->transposition_table, probe_key);
     if (ttentry_valid(tt_entry) && ttentry_depth(tt_entry) >= (uint8_t)depth) {
       int16_t score = ttentry_score(tt_entry);
       uint8_t flag = ttentry_flag(tt_entry);
