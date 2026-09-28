@@ -2224,6 +2224,23 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   return -greedy_spread;
 }
 
+// The value of a depth-0 node, or of a node where the game has ended, from the
+// on-turn player's perspective: the greedy playout when heuristics are on and
+// the game continues, otherwise the current spread. The root sweep uses this
+// too, so the values it stores in the transposition table are exactly the ones
+// depth 1 would compute.
+static int32_t negamax_leaf_value(EndgameCtxWorker *worker, uint64_t node_key,
+                                  int on_turn_idx, int32_t on_turn_spread,
+                                  PVLine *pv, float opp_stuck_frac) {
+  if (worker->solver->use_heuristics &&
+      game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
+    return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
+                                       on_turn_spread, pv, opp_stuck_frac);
+  }
+  pv->negamax_depth = 0;
+  return on_turn_spread;
+}
+
 // Compute TT flag (UPPER/LOWER/EXACT) and store entry at end of search.
 static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
                              int depth, int32_t best_value, int32_t alpha_orig,
@@ -2637,13 +2654,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       transposition_table_leave_node(worker->solver->transposition_table,
                                      node_key);
     }
-    if (worker->solver->use_heuristics &&
-        game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
-      return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
-                                         on_turn_spread, pv, opp_stuck_frac);
-    }
-    pv->negamax_depth = 0;
-    return on_turn_spread;
+    return negamax_leaf_value(worker, node_key, on_turn_idx, on_turn_spread, pv,
+                              opp_stuck_frac);
   }
 
   PVLine child_pv;
@@ -3148,10 +3160,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 // Every worker takes part, claiming moves from a shared index, so a short
 // budget reaches as many of the top moves as possible; each worker offers its
 // best line and the results keep the highest. Each move is played exactly as
-// the depth-1 search plays a root move (same undo slot, same path push), so
-// the leaf sees the same position and its playout is stored under the
-// child's key: depth 1 then finds it in the transposition table instead of
-// playing it out again.
+// the depth-1 search plays a root move (same undo slot, same path push) and
+// valued by the same leaf evaluation (negamax_leaf_value), so a playout is
+// stored under the child's key: depth 1 then finds it in the transposition
+// table instead of playing it out again.
 //
 // first_win_optim only needs win/loss, not the best move, and its depth-1
 // search is cheap, so sweeping all root candidates (often 1000+ at a 7-tile
@@ -3222,7 +3234,7 @@ static void root_greedy_sweep(EndgameCtxWorker *worker, uint64_t root_key,
     child_pv.game = worker->game_copy;
     child_pv.num_moves = 0;
     child_pv.negamax_depth = 0;
-    const int32_t leaf_val = negamax_greedy_leaf_playout(
+    const int32_t leaf_val = negamax_leaf_value(
         worker, child_key, post_on_turn, post_on_turn_spread, &child_pv, 0.0F);
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
     if (worker->path_lists != NULL) {
