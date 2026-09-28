@@ -4,6 +4,7 @@
 #include "../src/def/config_defs.h"
 #include "../src/def/contribute_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/bonus_square.h"
 #include "../src/ent/client_state.h"
