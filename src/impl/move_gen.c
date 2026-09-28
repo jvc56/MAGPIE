@@ -474,11 +474,32 @@ static inline void update_best_move_or_insert_into_movelist(
   }
 }
 
+// Whether a play spanning [leftstrip, rightstrip] in the current lane puts a
+// tile on a square MoveGenArgs.lane_cover_masks requires; the squares in the
+// span that are empty are exactly the ones it fills.
+static inline bool gen_play_meets_cover(const MoveGen *gen, int leftstrip,
+                                        int rightstrip) {
+  const uint32_t cover =
+      gen->lane_cover_masks[BOARD_DIM * gen->dir + gen->current_row_index];
+  const uint32_t span = (uint32_t)(((uint64_t)1 << (rightstrip + 1)) -
+                                   ((uint64_t)1 << leftstrip));
+  for (uint32_t bits = cover & span; bits != 0; bits &= bits - 1) {
+    if (gen_cache_is_empty(gen, __builtin_ctz(bits))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
                                               int rightstrip,
                                               int main_word_score,
                                               int word_multiplier,
                                               Equity cross_score) {
+  if (gen->lane_cover_masks != NULL &&
+      !gen_play_meets_cover(gen, leftstrip, rightstrip)) {
+    return;
+  }
   const int start_row = gen->current_row_index;
   const int start_col = leftstrip;
   const int tiles_played = gen->tiles_played;
@@ -904,6 +925,11 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
 
 void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  if (gen->lane_cover_masks != NULL &&
+      !gen_play_meets_cover(gen, start_col,
+                            start_col + wgen->word_length - 1)) {
+    return;
+  }
   const Equity bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
   Equity played_score_total = 0;
@@ -3180,6 +3206,9 @@ void shadow_by_orientation(MoveGen *gen) {
     if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
       continue;
     }
+    if (((gen->lane_mask >> (BOARD_DIM * gen->dir + row)) & 1) == 0) {
+      continue;
+    }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
     gen->row_squares =
         board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
@@ -3209,6 +3238,9 @@ void shadow_by_orientation_small(MoveGen *gen) {
   for (int row = 0; row < BOARD_DIM; row++) {
     gen->current_row_index = row;
     if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+      continue;
+    }
+    if (((gen->lane_mask >> (BOARD_DIM * gen->dir + row)) & 1) == 0) {
       continue;
     }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
@@ -3386,6 +3418,14 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
   gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
   gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
+  if (args->use_best_floor) {
+    assert(gen->move_record_type == MOVE_RECORD_BEST);
+    Move *floor_move = gen_get_best_move(gen);
+    move_set_as_pass(floor_move);
+    move_set_equity(floor_move, args->best_floor);
+    gen->best_move_equity_or_score = args->best_floor;
+    gen->cutoff_equity_or_score = args->best_floor;
+  }
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
@@ -3444,6 +3484,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
   gen->threshold_exceeded = false;
   gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
+  gen->lane_mask = (args->lane_mask != 0) ? args->lane_mask : ~(uint64_t)0;
+  gen->lane_cover_masks = args->lane_cover_masks;
 }
 
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
@@ -3671,7 +3713,8 @@ gen_record_scoring_plays_unordered(MoveGen *gen, bool record_small) {
       if (gen->threshold_exceeded) {
         return;
       }
-      if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0) {
+      if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0 ||
+          ((gen->lane_mask >> (BOARD_DIM * dir + row)) & 1) == 0) {
         continue;
       }
       gen_record_lane_plays_unordered(gen, row, kwg_root_node_index,

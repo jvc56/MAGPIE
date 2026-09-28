@@ -147,6 +147,10 @@ typedef struct MoveGen {
   Equity target_equity_cutoff;
   int target_leave_size;
   bool stop_on_threshold;
+  // See MoveGenArgs.lane_mask (all ones when unrestricted) and
+  // MoveGenArgs.lane_cover_masks.
+  uint64_t lane_mask;
+  const uint32_t *lane_cover_masks;
   bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
@@ -300,6 +304,21 @@ typedef struct MoveGenArgs {
   // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
   // Movegen ORs further discoveries in. Default 0 (no known tiles).
   uint64_t initial_tiles_bv;
+  // Restricts generation to the lanes whose bit is set (bit dir * BOARD_DIM
+  // + row_or_col, as in generate_small_moves_in_lanes); 0, the default,
+  // generates every lane.
+  uint64_t lane_mask;
+  // When non-NULL, indexed like lane_mask: a tile placement is recorded
+  // only if it puts a tile on a square whose bit (by index along the lane)
+  // is set for its lane, e.g. to find the best play covering a premium
+  // square. NULL, the default, records every play.
+  const uint32_t *lane_cover_masks;
+  // MOVE_RECORD_BEST only: when set, generation starts as if a play worth
+  // best_floor (by the sort type) had been found, so anchors that cannot beat
+  // it are pruned and no play at or below it is recorded. The result is then a
+  // pass when nothing beat the floor.
+  bool use_best_floor;
+  Equity best_floor;
   // Disables the PAT term even when the player has weights loaded.
   // Set by the inference paths, which build their own equity thresholds
   // from score plus leave and would misclassify moves whose recorded

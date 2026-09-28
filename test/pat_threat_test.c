@@ -5,6 +5,7 @@
 #include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/board.h"
+#include "../src/ent/bonus_square.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
@@ -25,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 // Research harness for a threat check: for each candidate a patsimdiff run
 // simmed, the opponent's best reply to it, averaged over racks dealt from
@@ -50,6 +52,7 @@ enum {
   PTH_MAX_CANDS = 64,
   PTH_MOVE_CAP = 64,
   PTH_POOL_CAP = 128,
+  PTH_MAX_RACKS = 1024,
 };
 
 static long pth_env_long(const char *name, long default_value) {
@@ -65,9 +68,11 @@ static uint64_t pth_next(uint64_t *state) {
   return x ^ (x >> 31);
 }
 
-// The best move for the player on turn by the given sort, into best.
+// The best move for the player on turn by the given sort, into best,
+// restricted to lane_mask and lane_cover_masks when set (see MoveGenArgs).
 static bool pth_best(const Game *game, move_sort_t sort, MoveList *list,
-                     Move *best) {
+                     Move *best, uint64_t lane_mask,
+                     const uint32_t *lane_cover_masks) {
   move_list_reset(list);
   const MoveGenArgs args = {
       .game = game,
@@ -78,6 +83,8 @@ static bool pth_best(const Game *game, move_sort_t sort, MoveList *list,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .lane_mask = lane_mask,
+      .lane_cover_masks = lane_cover_masks,
   };
   generate_moves(&args);
   if (move_list_get_count(list) == 0) {
@@ -93,7 +100,9 @@ void test_pat_threat(void) {
   if (!in_path || !out_path) {
     log_fatal("set PTH_IN and PTH_OUT");
   }
-  const int num_racks = (int)pth_env_long("PTH_RACKS", 64);
+  const int num_racks = (int)pth_env_long("PTH_RACKS", 64) < PTH_MAX_RACKS
+                            ? (int)pth_env_long("PTH_RACKS", 64)
+                            : PTH_MAX_RACKS;
   const int min_bag = (int)pth_env_long("PTH_MIN_BAG", 15);
   const long worker = pth_env_long("PTH_WORKER", 0);
   const long num_workers = pth_env_long("PTH_NUM_WORKERS", 1);
@@ -106,7 +115,14 @@ void test_pat_threat(void) {
   assert(cgp_in && in);
   FILE *out = fopen(out_path, "w");
   assert(out);
-  fprintf(out, "pos,move,reply_score,reply_equity_pick_score\n");
+  fprintf(out, "pos,move,reply_score,reply_equity_pick_score,partial_score,"
+               "partial_hinge_score\n");
+  const bool full = pth_env_long("PTH_FULL", 1) != 0;
+  double full_seconds = 0.0;
+  double partial_seconds = 0.0;
+  double baseline_seconds = 0.0;
+  long partial_calls = 0;
+  long full_calls = 0;
 
   Config *config = config_create_or_die(
       "set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity -r1 all "
@@ -195,36 +211,135 @@ void test_pat_threat(void) {
               rack_add_letter(&racks[rack_idx], tile);
             }
           }
+          // Pass 1: the candidates, and the premium units any of them
+          // reaches: an empty double or triple word square with a fresh
+          // tile in its lane, or one lane over, within RACK_SIZE squares.
+          Move *moves[PTH_MAX_CANDS];
+          int num_valid = 0;
+          int valid_idx[PTH_MAX_CANDS];
+          uint64_t lane_mask = 0;
+          uint32_t cover[2 * BOARD_DIM] = {0};
+          const Board *board = game_get_board(game);
           for (int cand_idx = 0; cand_idx < num_cands; cand_idx++) {
             ErrorStack *error_stack = error_stack_create();
             ValidatedMoves *vms = validated_moves_create(
                 game, 0, cand_move[cand_idx], false, true, error_stack);
-            if (!error_stack_is_empty(error_stack) ||
-                validated_moves_get_number_of_moves(vms) != 1) {
-              validated_moves_destroy(vms);
-              error_stack_destroy(error_stack);
+            if (error_stack_is_empty(error_stack) &&
+                validated_moves_get_number_of_moves(vms) == 1) {
+              moves[num_valid] = move_create();
+              move_copy(moves[num_valid], validated_moves_get_move(vms, 0));
+              valid_idx[num_valid++] = cand_idx;
+            }
+            validated_moves_destroy(vms);
+            error_stack_destroy(error_stack);
+          }
+          for (int valid = 0; valid < num_valid; valid++) {
+            const Move *move = moves[valid];
+            if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
               continue;
             }
-            error_stack_destroy(error_stack);
+            const bool vertical = board_is_dir_vertical(move_get_dir(move));
+            for (int tile_idx = 0; tile_idx < move_get_tiles_length(move);
+                 tile_idx++) {
+              if (move_get_tile(move, tile_idx) == PLAYED_THROUGH_MARKER) {
+                continue;
+              }
+              const int tile_row =
+                  move_get_row_start(move) + (vertical ? tile_idx : 0);
+              const int tile_col =
+                  move_get_col_start(move) + (vertical ? 0 : tile_idx);
+              for (int row = 0; row < BOARD_DIM; row++) {
+                for (int col = 0; col < BOARD_DIM; col++) {
+                  if (!board_is_empty(board, row, col) ||
+                      bonus_square_get_word_multiplier(
+                          board_get_bonus_square(board, row, col)) < 2) {
+                    continue;
+                  }
+                  // Horizontal unit: lane row, position col.
+                  if (abs(tile_row - row) <= 1 &&
+                      abs(tile_col - col) <= RACK_SIZE) {
+                    lane_mask |= (uint64_t)1 << row;
+                    cover[row] |= (uint32_t)1 << col;
+                  }
+                  // Vertical unit: lane col, position row.
+                  if (abs(tile_col - col) <= 1 &&
+                      abs(tile_row - row) <= RACK_SIZE) {
+                    lane_mask |= (uint64_t)1 << (BOARD_DIM + col);
+                    cover[BOARD_DIM + col] |= (uint32_t)1 << row;
+                  }
+                }
+              }
+            }
+          }
+          // B: each rack's best score on the unchanged board (after a pass,
+          // so the opponent is on turn).
+          double baseline[PTH_MAX_RACKS];
+          {
+            Game *passed = game_duplicate(game);
+            Move *pass = move_create();
+            move_set_as_pass(pass);
+            play_move(pass, passed, NULL);
+            move_destroy(pass);
+            Player *opponent =
+                game_get_player(passed, game_get_player_on_turn_index(passed));
+            const clock_t start = clock();
+            for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+              rack_copy(player_get_rack(opponent), &racks[rack_idx]);
+              baseline[rack_idx] =
+                  pth_best(passed, MOVE_SORT_SCORE, list, reply, 0, NULL)
+                      ? equity_to_double(move_get_score(reply))
+                      : 0.0;
+            }
+            baseline_seconds += (double)(clock() - start) / CLOCKS_PER_SEC;
+            game_destroy(passed);
+          }
+          // Pass 2: per candidate, the full reply and the premium-connected
+          // one.
+          for (int valid = 0; valid < num_valid; valid++) {
             Game *after = game_duplicate(game);
-            play_move(validated_moves_get_move(vms, 0), after, NULL);
-            validated_moves_destroy(vms);
+            play_move(moves[valid], after, NULL);
             Player *opponent =
                 game_get_player(after, game_get_player_on_turn_index(after));
             double score_sum = 0.0;
             double pick_sum = 0.0;
+            double partial_sum = 0.0;
+            double hinge_sum = 0.0;
             for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
               rack_copy(player_get_rack(opponent), &racks[rack_idx]);
-              if (pth_best(after, MOVE_SORT_SCORE, list, reply)) {
-                score_sum += equity_to_double(move_get_score(reply));
+              if (full) {
+                const clock_t start = clock();
+                if (pth_best(after, MOVE_SORT_SCORE, list, reply, 0, NULL)) {
+                  score_sum += equity_to_double(move_get_score(reply));
+                }
+                full_seconds += (double)(clock() - start) / CLOCKS_PER_SEC;
+                full_calls++;
+                if (pth_best(after, MOVE_SORT_EQUITY, list, reply, 0, NULL)) {
+                  pick_sum += equity_to_double(move_get_score(reply));
+                }
               }
-              if (pth_best(after, MOVE_SORT_EQUITY, list, reply)) {
-                pick_sum += equity_to_double(move_get_score(reply));
+              double partial = 0.0;
+              if (lane_mask != 0) {
+                const clock_t start = clock();
+                if (pth_best(after, MOVE_SORT_SCORE, list, reply, lane_mask,
+                             cover) &&
+                    move_get_type(reply) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+                  partial = equity_to_double(move_get_score(reply));
+                }
+                partial_seconds += (double)(clock() - start) / CLOCKS_PER_SEC;
+                partial_calls++;
               }
+              partial_sum += partial;
+              hinge_sum +=
+                  partial > baseline[rack_idx] ? partial : baseline[rack_idx];
             }
-            fprintf(out, "%ld,%s,%.3f,%.3f\n", current_pos, cand_move[cand_idx],
-                    score_sum / num_racks, pick_sum / num_racks);
+            fprintf(out, "%ld,%s,%.3f,%.3f,%.3f,%.3f\n", current_pos,
+                    cand_move[valid_idx[valid]], score_sum / num_racks,
+                    pick_sum / num_racks, partial_sum / num_racks,
+                    hinge_sum / num_racks);
             game_destroy(after);
+          }
+          for (int valid = 0; valid < num_valid; valid++) {
+            move_destroy(moves[valid]);
           }
           (void)fflush(out);
           free(racks);
@@ -242,6 +357,14 @@ void test_pat_threat(void) {
     }
   }
   (void)cand_pos;
+  fprintf(stderr,
+          "timing: full %.3f s over %ld calls (%.1f us each); partial %.3f s "
+          "over %ld calls (%.1f us each); baseline %.3f s\n",
+          full_seconds, full_calls,
+          full_calls ? 1e6 * full_seconds / (double)full_calls : 0.0,
+          partial_seconds, partial_calls,
+          partial_calls ? 1e6 * partial_seconds / (double)partial_calls : 0.0,
+          baseline_seconds);
   move_destroy(reply);
   move_list_destroy(list);
   config_destroy(config);

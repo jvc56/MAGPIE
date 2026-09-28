@@ -51,6 +51,7 @@
 #include "pat_position_check_test.h"
 #include "pat_sim_diff_test.h"
 #include "pat_test.h"
+#include "pat_threat_games_test.h"
 #include "pat_threat_test.h"
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
@@ -181,6 +182,7 @@ static TestEntry test_table[] = {
 static TestEntry on_demand_test_table[] = {
     {"patsimdiff", test_pat_sim_diff},
     {"patthreat", test_pat_threat},
+    {"patthreatgames", test_pat_threat_games},
     {"pathmovelists", test_path_move_lists},
     {"egincremental", test_incremental_movegen_identical},
     {"pegspeedbench1", test_peg_speed_bench_1},
