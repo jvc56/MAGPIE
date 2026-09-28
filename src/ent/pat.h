@@ -81,6 +81,13 @@ struct PATWeights {
   // facing the premium, which counts two-letter words across the lane
   // instead of extensions along it. Per file, like the floater flags.
   bool exact_fresh_runs;
+  // Whether hook_score channels measure a hook by the chance the opponent
+  // can fill it times the best fill's score (see pat_hook_score_exposure)
+  // rather than by the sum over every unseen tile that fits. The sum grows
+  // with each fitting tile though the opponent plays one, so a linear fit
+  // over it underprices a hook few tiles fill. Per file, like the floater
+  // flags.
+  bool hook_score_prob;
   // Whether floater through channels use the run-keyed tables (see
   // pat_scan_unit). The per-tile sum they replace adds each tile's
   // single-letter log-count, which badly overstates runs like QI that few or
@@ -151,6 +158,7 @@ static inline int pat_stage_for_bag(int bag_count) {
 }
 void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
 void pat_set_exact_fresh_runs(PATWeights *pat, bool exact_fresh_runs);
+void pat_set_hook_score_prob(PATWeights *pat, bool hook_score_prob);
 // A PAT_FIT_* value; see PAT_FIT_RESIDUAL_ROW_PREFIX.
 int pat_get_fit_residual(const PATWeights *pat);
 void pat_set_fit_residual(PATWeights *pat, int fit_residual);

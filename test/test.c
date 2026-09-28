@@ -48,6 +48,7 @@
 #include "pat_file_test.h"
 #include "pat_lexicon_test.h"
 #include "pat_opening_sim_test.h"
+#include "pat_position_check_test.h"
 #include "pat_test.h"
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
@@ -268,6 +269,10 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("pattablecheck:", subtest)) {
     pat_run_through_table_check(subtest + strlen("pattablecheck:"));
+    return;
+  }
+  if (has_prefix("patpositions:", subtest)) {
+    pat_position_check_run(subtest + strlen("patpositions:"));
     return;
   }
   if (has_prefix("patopeningsim:", subtest)) {

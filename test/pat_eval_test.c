@@ -46,6 +46,8 @@ enum {
   // triple word square.
   PAT_EVAL_TEST_FLOAT_WEIGHT = -1000,
   PAT_EVAL_TEST_FLOAT_D3 = 2,
+  // One point per unit of triple word hook-score exposure.
+  PAT_EVAL_TEST_HOOK_SCORE_WEIGHT = -1000,
 };
 
 static MoveList *pat_eval_test_generate(const Game *game) {
@@ -417,6 +419,54 @@ static void test_pat_eval_exact_fresh_runs(void) {
          m_flex * PAT_EVAL_TEST_FLOAT_WEIGHT);
 }
 
+// The penalty of 8H PRETZEL on an empty CSW24 board from EELPRTZ with only
+// hook_score_d1 weighted, under the given hook_score_prob setting.
+static Equity pat_eval_test_pretzel_penalty(bool hook_score_prob) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  load_and_exec_config_or_die(config, "new");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  rack_set_to_string(ld, player_get_rack(player), "EELPRTZ");
+  PATWeights *pat = pat_test_create_prepared("eval_hook_score_prob", game);
+  pat_set_exact_created_hooks(pat, true);
+  pat_set_hook_score_prob(pat, hook_score_prob);
+  pat_set_weight(pat, PAT_FEATURE_HOOK_SCORE_START,
+                 PAT_EVAL_TEST_HOOK_SCORE_WEIGHT);
+  PATEvalContext *pat_eval_ctx = malloc_or_die(sizeof(PATEvalContext));
+  pat_eval_context_load(pat_eval_ctx, pat,
+                        board_get_readonly_lanes(game_get_board(game), 0), ld,
+                        player_get_rack(player), PAT_CLASS_MASK_ALL, RACK_SIZE);
+  pat_eval_context_set_kwg(pat_eval_ctx, player_get_kwg(player));
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "8H PRETZEL", false, false, ERROR_STATUS_SUCCESS);
+  const Move *move = validated_moves_get_move(vms, 0);
+  Rack leave;
+  get_leave_for_move(move, game, &leave);
+  const Equity penalty = pat_eval_move_penalty(pat_eval_ctx, move, &leave);
+  assert(penalty <= pat_eval_move_penalty_bound(pat_eval_ctx, move, &leave));
+  validated_moves_destroy(vms);
+  free(pat_eval_ctx);
+  pat_destroy(pat);
+  config_destroy(config);
+  return penalty;
+}
+
+// 8H PRETZEL leaves O8 hookable only by S (PRETZELS). Filling it scores the
+// hooked word tripled plus the S counted in both words: 3 * 18 + 1 * (3 + 3)
+// = 60. By the unseen-count sum the four unseen Ss make it 4 * 60 /
+// PAT_HOOK_SCORE_SCALE = 30. By hook_score_prob it is the chance a seven-tile
+// rack from the 93 unseen holds one of the 4 Ss or 2 blanks, 1 - (87 * 86 *
+// ... * 81) / (93 * 92 * ... * 87) = 0.383, times the best fill's 60 (a
+// blank's is 54): 23.
+static void test_pat_eval_hook_score_prob(void) {
+  assert(pat_eval_test_pretzel_penalty(false) ==
+         30 * PAT_EVAL_TEST_HOOK_SCORE_WEIGHT);
+  assert(pat_eval_test_pretzel_penalty(true) ==
+         23 * PAT_EVAL_TEST_HOOK_SCORE_WEIGHT);
+}
+
 void test_pat_rollout_default_classes(void) {
   PlayersData *players_data = players_data_create(false);
   const char *expected = BOARD_DIM >= 21 ? "tws,qws,windows" : "tws,windows";
@@ -439,4 +489,5 @@ void test_pat_eval(void) {
   test_pat_eval_usage_options();
   test_pat_rollout_default_classes();
   test_pat_eval_exact_fresh_runs();
+  test_pat_eval_hook_score_prob();
 }

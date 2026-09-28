@@ -291,6 +291,80 @@ static inline int pat_letter_score_exposure(int cross_score, int tile_score,
              (word_multiplier + premium_word_multiplier);
 }
 
+// A hook's score exposure: what the opponent could score by filling it. With
+// prob_rack_size 0 it is the sum over admissible letters of unseen count
+// times the letter's exposure, divided by PAT_HOOK_SCORE_SCALE. That grows
+// with every tile that fits although the opponent plays one, so it overstates
+// a hook many tiles fill and understates one only a few do (a seven-letter
+// word's S hook onto a triple). With prob_rack_size the opponent's rack size
+// (see PATWeights.hook_score_prob) it is instead the chance a rack that size
+// drawn from the unseen pool holds a tile that fits, blanks included, times
+// the best admissible letter's exposure, in points.
+static int pat_hook_score_exposure(const uint8_t *unseen_counts,
+                                   const LetterDistribution *ld,
+                                   uint64_t cross_set, int cross_score,
+                                   int letter_multiplier, int word_multiplier,
+                                   int premium_word_multiplier,
+                                   int prob_rack_size) {
+  uint64_t remaining = cross_set & ~(uint64_t)1;
+  if (prob_rack_size == 0) {
+    int64_t exposure = 0;
+    while (remaining) {
+      const int machine_letter = pat_ctz(remaining);
+      remaining &= remaining - 1;
+      if (unseen_counts[machine_letter] == 0) {
+        continue;
+      }
+      exposure +=
+          (int64_t)unseen_counts[machine_letter] *
+          pat_letter_score_exposure(
+              cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
+              letter_multiplier, word_multiplier, premium_word_multiplier);
+    }
+    return (int)(exposure / PAT_HOOK_SCORE_SCALE);
+  }
+  if (remaining == 0) {
+    return 0;
+  }
+  // A blank fills the hook as any admissible letter, scoring nothing itself.
+  int fitting = unseen_counts[BLANK_MACHINE_LETTER];
+  int best_exposure =
+      (fitting > 0)
+          ? pat_letter_score_exposure(cross_score, 0, letter_multiplier,
+                                      word_multiplier, premium_word_multiplier)
+          : 0;
+  while (remaining) {
+    const int machine_letter = pat_ctz(remaining);
+    remaining &= remaining - 1;
+    if (unseen_counts[machine_letter] == 0) {
+      continue;
+    }
+    fitting += unseen_counts[machine_letter];
+    const int letter_exposure = pat_letter_score_exposure(
+        cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
+        letter_multiplier, word_multiplier, premium_word_multiplier);
+    if (letter_exposure > best_exposure) {
+      best_exposure = letter_exposure;
+    }
+  }
+  if (fitting == 0) {
+    return 0;
+  }
+  int unseen_total = 0;
+  for (int machine_letter = 0; machine_letter < ld_get_size(ld);
+       machine_letter++) {
+    unseen_total += unseen_counts[machine_letter];
+  }
+  // P(no fitting tile among prob_rack_size drawn without replacement).
+  double miss = 1.0;
+  for (int draw_idx = 0; draw_idx < prob_rack_size && miss > 0.0; draw_idx++) {
+    const int left = unseen_total - draw_idx;
+    miss = (left <= fitting) ? 0.0
+                             : miss * (double)(left - fitting) / (double)left;
+  }
+  return (int)((1.0 - miss) * (double)best_exposure + 0.5);
+}
+
 // The perpendicular constraint at an empty square: dead (no letter can be
 // placed), hooky (constrained by an adjacent perpendicular word, i.e. a
 // real hook), or unconstrained. When the move places a tile perpendicular-
@@ -300,11 +374,14 @@ static inline int pat_letter_score_exposure(int cross_score, int tile_score,
 // technically changes its perpendicular pattern. ld and
 // premium_word_multiplier feed
 // score_exposure only; a caller that never reads it may pass NULL and any
-// multiplier.
-static PATCrossInfo pat_effective_cross_info(
-    const Square *lane, int idx, int dir, const PATMoveOverlay *overlay,
-    int row, int col, const uint8_t *unseen_counts,
-    const LetterDistribution *ld, int premium_word_multiplier) {
+// multiplier. prob_rack_size selects how score_exposure is measured (see
+// pat_hook_score_exposure).
+static PATCrossInfo
+pat_effective_cross_info(const Square *lane, int idx, int dir,
+                         const PATMoveOverlay *overlay, int row, int col,
+                         const uint8_t *unseen_counts,
+                         const LetterDistribution *ld,
+                         int premium_word_multiplier, int prob_rack_size) {
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   PATCrossInfo info;
   // Exact created hooks: if a fresh tile sits perpendicular-adjacent,
@@ -336,23 +413,11 @@ static PATCrossInfo pat_effective_cross_info(
       info.score_exposure = 0;
       if (info.hooky) {
         const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
-        const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
-        const int word_multiplier = bonus_square_get_word_multiplier(bonus);
-        int64_t exposure = 0;
-        uint64_t remaining = cross_set & ~(uint64_t)1;
-        while (remaining) {
-          const int machine_letter = pat_ctz(remaining);
-          remaining &= remaining - 1;
-          if (unseen_counts[machine_letter] == 0) {
-            continue;
-          }
-          exposure +=
-              (int64_t)unseen_counts[machine_letter] *
-              pat_letter_score_exposure(
-                  cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
-                  letter_multiplier, word_multiplier, premium_word_multiplier);
-        }
-        info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
+        info.score_exposure =
+            pat_hook_score_exposure(unseen_counts, ld, cross_set, cross_score,
+                                    bonus_square_get_letter_multiplier(bonus),
+                                    bonus_square_get_word_multiplier(bonus),
+                                    premium_word_multiplier, prob_rack_size);
       }
       return info;
     }
@@ -367,22 +432,10 @@ static PATCrossInfo pat_effective_cross_info(
   const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
   const int word_multiplier = bonus_square_get_word_multiplier(bonus);
   if (info.hooky && ld != NULL) {
-    const int cross_score = equity_to_int(square_get_cross_score(&lane[idx]));
-    int64_t exposure = 0;
-    uint64_t remaining = base_cross_set & ~(uint64_t)1;
-    while (remaining) {
-      const int machine_letter = pat_ctz(remaining);
-      remaining &= remaining - 1;
-      if (unseen_counts[machine_letter] == 0) {
-        continue;
-      }
-      exposure +=
-          (int64_t)unseen_counts[machine_letter] *
-          pat_letter_score_exposure(
-              cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
-              letter_multiplier, word_multiplier, premium_word_multiplier);
-    }
-    info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
+    info.score_exposure = pat_hook_score_exposure(
+        unseen_counts, ld, base_cross_set,
+        equity_to_int(square_get_cross_score(&lane[idx])), letter_multiplier,
+        word_multiplier, premium_word_multiplier, prob_rack_size);
   }
   if (!overlay || info.dead) {
     return info;
@@ -460,6 +513,13 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   // exact created hooks still need ld for their cross-set calculation.
   const LetterDistribution *hook_score_ld =
       score_channels || (overlay != NULL && overlay->kwg != NULL) ? ld : NULL;
+  // The rack the hook-score probability draws (see pat_hook_score_exposure);
+  // 0 keeps the unseen-count sum. The opponent always holds tiles while any
+  // remain in the bag, so the fallback to a full rack never decides a move.
+  int prob_rack_size = 0;
+  if (pat != NULL && pat->hook_score_prob) {
+    prob_rack_size = (max_reach > 0) ? max_reach : RACK_SIZE;
+  }
   // Each premium class writes its own hook and floater-value channels. The
   // richer channels (floater flexibility, the lexicon through-table, and
   // the triple-triple pair) stay exclusive to triple word squares, which
@@ -510,7 +570,7 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       lane, premium_idx, dir, overlay,
       pat_unit_row(dir, lane_index, premium_idx),
       pat_unit_col(dir, lane_index, premium_idx), unseen_counts, hook_score_ld,
-      premium_word_multiplier);
+      premium_word_multiplier, prob_rack_size);
   if (premium_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -695,7 +755,7 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       const PATCrossInfo info = pat_effective_cross_info(
           lane, idx, dir, overlay, square_row, square_col, unseen_counts,
-          hook_score_ld, premium_word_multiplier);
+          hook_score_ld, premium_word_multiplier, prob_rack_size);
       if (info.dead) {
         break;
       }
@@ -782,7 +842,7 @@ void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
     // don't-cares here.
     const PATCrossInfo info =
         pat_effective_cross_info(lane, idx, dir, overlay, square_row,
-                                 square_col, unseen_counts, NULL, 2);
+                                 square_col, unseen_counts, NULL, 2, 0);
     if (info.dead) {
       return;
     }
