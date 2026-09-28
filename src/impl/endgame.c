@@ -535,6 +535,7 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
 }
 
 static bool iterative_deepening_should_stop(EndgameCtx *solver);
+static bool check_depth_deadline(EndgameCtxWorker *worker);
 
 // Returns the pruned KWG for the given player index.
 // In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
@@ -1928,6 +1929,12 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                                            uint64_t node_key, int on_turn_idx,
                                            int32_t on_turn_spread, PVLine *pv,
                                            float opp_stuck_frac) {
+  // Negamax checks the deadline only every DEPTH_DEADLINE_CHECK_INTERVAL
+  // nodes, which at shallow depths, where every node is a playout, can be a
+  // large share of a short budget. A clock read is cheap next to a playout.
+  if (check_depth_deadline(worker)) {
+    return ABDADA_INTERRUPTED;
+  }
   int solving_player = worker->solver->solving_player;
   int plies = worker->solver->requested_plies;
   int playout_depth = 0;
@@ -3217,7 +3224,10 @@ static void root_greedy_sweep(EndgameCtxWorker *worker, uint64_t root_key,
   d0_pv.game = worker->game_copy;
   d0_pv.num_moves = 0;
   d0_pv.negamax_depth = 0;
-  while (!iterative_deepening_should_stop(solver)) {
+  // Each playout can take tens of microseconds and no worker is in negamax
+  // yet, so check the caller's deadline per move here.
+  while (!iterative_deepening_should_stop(solver) &&
+         !check_depth_deadline(worker)) {
     const int move_idx = atomic_fetch_add(&solver->root_sweep_next, 1);
     if (move_idx >= count) {
       break;
