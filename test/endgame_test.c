@@ -270,15 +270,21 @@ void test_pass_first(void) {
   // This endgame's first move must be a pass, otherwise Nigel can set up
   // an unblockable ZA. Exact value is -63 (verified at 25-ply with and
   // without heuristics). The optimal PV is 10 moves with 4 passes, so
-  // 7-ply relies on greedy playout for the tail.
-  test_single_endgame(
-      "set -s1 score -s2 score -threads 6 -eplies 7",
+  // 7-ply relies on greedy playout for the tail. That tail values the
+  // position at -60: in the exact line Nigel builds Z(E) -> (ZE)D -> (ZED)A,
+  // and a greedy tail that takes the out bonus goes out first. 8-ply finds
+  // the exact value.
+  const char *cgp =
       "cgp "
       "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
       "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
-      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21",
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, ERROR_STATUS_SUCCESS, -63, true,
-      0);
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21";
+  test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 7", cgp,
+                      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                      ERROR_STATUS_SUCCESS, -60, true, 0);
+  test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 8", cgp,
+                      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                      ERROR_STATUS_SUCCESS, -63, true, 0);
 }
 
 // Drives endgame_add_worker from inside the running solve: the per-ply
@@ -560,7 +566,8 @@ void test_ctx_reuse(void) {
 // closed (alpha >= beta) kept searching: its children ran with inverted
 // windows, their beta cutoffs were stored as upper bounds, and a later
 // aspiration re-search that trusted one of those bounds published a wrong
-// "exact" root value (here 10 with a 4-point one-tile play instead of 8).
+// "exact" root value (here 10 with a 4-point one-tile play instead of 8, the
+// 2-ply value before greedy leaf playouts took the out bonus; it is now 16).
 // The trigger is a nine-thread race that hit roughly 4-6% of depth-2 solves
 // of this position before the fix and never at one thread, so this test
 // repeats the solve and is on-demand only (egttpvbound).
@@ -579,7 +586,7 @@ void test_endgame_tt_pv_bound_repeat(void) {
   EndgameCtx *endgame_ctx = NULL;
 
   const int num_solves = 400;
-  const int expected_score = 8;
+  const int expected_score = 16;
   for (int solve_idx = 0; solve_idx < num_solves; solve_idx++) {
     EndgameArgs endgame_args = {0};
     endgame_args.thread_control = config_get_thread_control(config);
@@ -1672,6 +1679,86 @@ static void test_root_pvs_actual_pass(void) {
   config_destroy(config);
 }
 
+typedef struct StopAfterDepth {
+  ThreadControl *thread_control;
+  int depth;
+} StopAfterDepth;
+
+// Interrupts the solve once iterative deepening completes stop->depth.
+static void stop_after_depth_callback(int depth, int32_t value,
+                                      const PVLine *pv_line, const Game *game,
+                                      const PVLine *ranked_pvs,
+                                      int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  const StopAfterDepth *stop = (const StopAfterDepth *)user_data;
+  if (depth >= stop->depth) {
+    thread_control_set_status(stop->thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+}
+
+// A time-limited solve requests MAX_SEARCH_DEPTH plies and lets the clock stop
+// iterative deepening, so its leaves sit far above the requested depth. They
+// must still play out to the end of the game, valuing a play that goes out at
+// its score plus twice the opponent's rack. When the leaf playout was capped at
+// MAX_SEARCH_DEPTH + 1 - plies moves (one), this position's 2-ply answer was a
+// move worth -7; three moves are worth +21 (exact values from full-depth
+// solves). The solve here stops after depth 2 through the per-ply callback
+// instead of a clock, so it is deterministic.
+static void test_time_limited_leaf_playout(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "W5JOE3V2/O5AMNIONIC1/WRiNKLY5B2/S6QUELLS2/10A4/5fATIGUE1UT/"
+              "4POZ3R2NA/3CEBOID1E2GI/3A6A2IT/3P6T2R1/3R6EH1D1/3O7UGS1/"
+              "3A7MA2/3T2LIEF1FE2/3E1HINDERS3 INOORTY/ADEEVX 372/532 0 "
+              "-lex CSW21;");
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  StopAfterDepth stop = {.thread_control = thread_control, .depth = 2};
+
+  EndgameArgs args = {0};
+  args.thread_control = thread_control;
+  args.game = game;
+  args.plies = MAX_SEARCH_DEPTH;
+  // Small enough that every desktop build gets the minimum table size.
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.num_top_moves = 1;
+  args.incremental_movegen = true;
+  args.per_ply_callback = stop_after_depth_callback;
+  args.per_ply_callback_data = &stop;
+  args.seed = 42;
+
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&endgame_ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 2);
+
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  assert(pv->num_moves >= 1);
+  // The three moves worth +21, by tiny_move code: 15A TOR(E), J9 TIRO and
+  // 15A ROT(E). The capped playout chose G5 R(AZO)O, worth -7.
+  const uint64_t chosen = pv->moves[0].tiny_move;
+  assert(chosen == 78337016704ULL || chosen == 4201102967315ULL ||
+         chosen == 86924854144ULL);
+
+  endgame_ctx_destroy(endgame_ctx);
+  endgame_results_destroy(results);
+  error_stack_destroy(error_stack);
+  thread_control_destroy(thread_control);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
   test_root_pvs_actual_pass();
   test_before_search_callback();
@@ -1688,6 +1775,7 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
+  test_time_limited_leaf_playout();
   // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
   // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only
   // — viamover re-solves plies 1..3 with display (~14s) and viastress runs 100
