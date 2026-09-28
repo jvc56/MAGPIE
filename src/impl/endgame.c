@@ -156,6 +156,14 @@ struct EndgameCtx {
   TranspositionTable *transposition_table;
   bool tt_is_external; // true when using a caller-provided shared TT
 
+  // Depth-0 root sweep shared by every worker (see root_greedy_sweep): the
+  // root moves in thread 0's static-estimate order, published once per solve
+  // (root_sweep_count stays -1 until then), and the next index to claim.
+  SmallMove *root_sweep_moves;
+  int root_sweep_capacity;
+  atomic_int root_sweep_count;
+  atomic_int root_sweep_next;
+
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
   // Per-depth deadline: absolute CLOCK_MONOTONIC nanoseconds; 0 = disabled.
@@ -798,6 +806,9 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
     }
   }
 
+  atomic_store(&es->root_sweep_count, -1);
+  atomic_store(&es->root_sweep_next, 0);
+
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
   atomic_store(&es->depth_deadline_ns, 0);
@@ -1092,6 +1103,7 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
   kwg_destroy(ctx->pruned_kwgs[0]);
   kwg_destroy(ctx->pruned_kwgs[1]);
   game_destroy(ctx->ext_game);
+  free(ctx->root_sweep_moves);
   free(ctx);
 }
 
@@ -3127,6 +3139,119 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   return best_value;
 }
 
+// Depth-0 fallback: before the IDS loop runs depth 1, greedy-evaluate the
+// root moves in thread 0's static-estimate order and publish the best as a
+// depth-0 result. If the IDS is interrupted before depth 1 completes even
+// once, the caller gets the best greedy play among the moves the sweep
+// reached instead of the default "no result / pass / value=0".
+//
+// Every worker takes part, claiming moves from a shared index, so a short
+// budget reaches as many of the top moves as possible; each worker offers its
+// best line and the results keep the highest. Each move is played exactly as
+// the depth-1 search plays a root move (same undo slot, same path push), so
+// the leaf sees the same position and its playout is stored under the
+// child's key: depth 1 then finds it in the transposition table instead of
+// playing it out again.
+//
+// first_win_optim only needs win/loss, not the best move, and its depth-1
+// search is cheap, so sweeping all root candidates (often 1000+ at a 7-tile
+// endgame root) is almost pure overhead. Cap it to the top few moves by
+// estimate (the moves are already sorted) so the interrupt fallback is still
+// present but ~100x cheaper. The result is unchanged whenever IDS completes
+// (the common case), since depth-1+ overwrites the depth-0 value.
+static void root_greedy_sweep(EndgameCtxWorker *worker, uint64_t root_key,
+                              int initial_move_count) {
+  EndgameCtx *solver = worker->solver;
+  if (worker->ordinal == 0) {
+    // first_win_fallback_moves: 0 = use FIRST_WIN_D0_FALLBACK_MOVES default,
+    // <0 = skip the sweep, >0 = explicit cap.
+    int fw_fallback_cap = FIRST_WIN_D0_FALLBACK_MOVES;
+    if (solver->first_win_fallback_moves > 0) {
+      fw_fallback_cap = solver->first_win_fallback_moves;
+    } else if (solver->first_win_fallback_moves < 0) {
+      fw_fallback_cap = 0; // skip the sweep entirely
+    }
+    const int count = solver->first_win_optim
+                          ? MIN(initial_move_count, fw_fallback_cap)
+                          : initial_move_count;
+    if (count > solver->root_sweep_capacity) {
+      free(solver->root_sweep_moves);
+      solver->root_sweep_moves =
+          malloc_or_die(sizeof(SmallMove) * (size_t)count);
+      solver->root_sweep_capacity = count;
+    }
+    if (count > 0) {
+      memcpy(solver->root_sweep_moves, worker->small_move_arena->memory,
+             sizeof(SmallMove) * (size_t)count);
+    }
+    atomic_store_explicit(&solver->root_sweep_count, count,
+                          memory_order_release);
+  }
+  // Other workers generate their own roots concurrently; wait for thread 0's
+  // order, which is only a root generation away.
+  int count;
+  while ((count = atomic_load_explicit(&solver->root_sweep_count,
+                                       memory_order_acquire)) < 0) {
+    if (iterative_deepening_should_stop(solver)) {
+      return;
+    }
+    compat_sched_yield();
+  }
+
+  const int undo_index = solver->requested_plies - 1;
+  int32_t best_root_value = -LARGE_VALUE;
+  bool have_root_best = false;
+  PVLine d0_pv;
+  d0_pv.game = worker->game_copy;
+  d0_pv.num_moves = 0;
+  d0_pv.negamax_depth = 0;
+  while (!iterative_deepening_should_stop(solver)) {
+    const int move_idx = atomic_fetch_add(&solver->root_sweep_next, 1);
+    if (move_idx >= count) {
+      break;
+    }
+    const SmallMove sm = solver->root_sweep_moves[move_idx];
+    const uint64_t child_key = play_small_move_and_hash(
+        worker, &sm, root_key, &worker->move_undos[undo_index]);
+    // Leaf value from the perspective of the post-move player on turn.
+    const int post_on_turn = game_get_player_on_turn_index(worker->game_copy);
+    const int32_t post_on_turn_spread = equity_to_int(
+        player_get_score(game_get_player(worker->game_copy, post_on_turn)) -
+        player_get_score(game_get_player(worker->game_copy, 1 - post_on_turn)));
+    PVLine child_pv;
+    child_pv.game = worker->game_copy;
+    child_pv.num_moves = 0;
+    child_pv.negamax_depth = 0;
+    const int32_t leaf_val = negamax_greedy_leaf_playout(
+        worker, child_key, post_on_turn, post_on_turn_spread, &child_pv, 0.0F);
+    unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_index]);
+    if (worker->path_lists != NULL) {
+      path_move_lists_pop(worker->path_lists);
+    }
+    if (leaf_val == ABDADA_INTERRUPTED) {
+      break;
+    }
+    // Negamax convention: the root mover's value for this move = -leaf_val.
+    const int32_t root_val = -leaf_val;
+    if (root_val > best_root_value) {
+      best_root_value = root_val;
+      d0_pv.moves[0] = sm;
+      for (int j = 0; j < child_pv.num_moves && j + 1 < MAX_VARIANT_LENGTH;
+           j++) {
+        d0_pv.moves[j + 1] = child_pv.moves[j];
+      }
+      d0_pv.num_moves = (child_pv.num_moves + 1 < MAX_VARIANT_LENGTH)
+                            ? child_pv.num_moves + 1
+                            : MAX_VARIANT_LENGTH;
+      have_root_best = true;
+    }
+  }
+  if (have_root_best) {
+    d0_pv.score = best_root_value - solver->initial_spread;
+    endgame_results_offer_best_pvline(solver->results, &d0_pv, d0_pv.score, 0);
+  }
+}
+
 static bool iterative_deepening_should_stop(EndgameCtx *solver) {
   return atomic_load(&solver->search_complete) != 0 ||
          thread_control_get_status(solver->thread_control) ==
@@ -3324,97 +3449,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     start = plies;
   }
 
-  // Depth-0 fallback (thread 0 only): before the IDS loop runs depth-1+,
-  // do a greedy-leaf evaluation of EACH root candidate and store the best
-  // as a depth-0 result. If the IDS is interrupted before depth-1 completes
-  // even once, the caller gets the best-from-static-greedy answer instead
-  // of the default "no result / pass / value=0".
-  //
-  // first_win_optim only needs win/loss, not the best move, and its depth-1
-  // search is cheap, so sweeping all root candidates (often 1000+ at a 7-tile
-  // endgame root) is almost pure overhead. Cap it to the top few moves by
-  // estimate (the moves are already sorted) so the interrupt fallback is still
-  // present but ~100x cheaper. The result is unchanged whenever IDS completes
-  // (the common case), since depth-1+ overwrites the depth-0 value.
-  if (worker->ordinal == 0) {
-    int32_t best_root_value = -LARGE_VALUE;
-    SmallMove best_root_move;
-    bool have_root_best = false;
-    PVLine d0_pv;
-    d0_pv.game = worker->game_copy;
-    d0_pv.num_moves = 0;
-    d0_pv.negamax_depth = 0;
-
-    // first_win_fallback_moves: 0 = use FIRST_WIN_D0_FALLBACK_MOVES default,
-    // <0 = skip the sweep, >0 = explicit cap.
-    int fw_fallback_cap = FIRST_WIN_D0_FALLBACK_MOVES;
-    if (worker->solver->first_win_fallback_moves > 0) {
-      fw_fallback_cap = worker->solver->first_win_fallback_moves;
-    } else if (worker->solver->first_win_fallback_moves < 0) {
-      fw_fallback_cap = 0; // skip the sweep entirely
-    }
-    const int d0_move_count = worker->solver->first_win_optim
-                                  ? MIN(initial_move_count, fw_fallback_cap)
-                                  : initial_move_count;
-    for (int i = 0; i < d0_move_count; i++) {
-      if (iterative_deepening_should_stop(worker->solver)) {
-        break;
-      }
-      // negamax_greedy_leaf_playout below can grow (realloc) small_move_arena,
-      // which moves its backing buffer. Re-read the base each iteration and
-      // copy the candidate by value so nothing dereferences a pointer into a
-      // freed buffer after the leaf call.
-      const SmallMove *initial_moves =
-          (const SmallMove *)(worker->small_move_arena->memory);
-      const SmallMove sm = initial_moves[i];
-      small_move_to_move(worker->move_list->spare_move, &sm,
-                         game_get_board(worker->game_copy));
-      // Slot 0 — the root play. Negamax's IDS will reuse this slot for
-      // its own play at depth=requested_plies; the depth-0 sweep finishes
-      // (play + leaf + unplay) before IDS starts, so the slot is free.
-      play_move_incremental(worker->move_list->spare_move, worker->game_copy,
-                            &worker->move_undos[0]);
-      // Compute leaf value from the perspective of the post-move
-      // player-on-turn (= mover, since we just played opp's move at root).
-      const int post_on_turn = game_get_player_on_turn_index(worker->game_copy);
-      const int32_t post_on_turn_spread = equity_to_int(
-          player_get_score(game_get_player(worker->game_copy, post_on_turn)) -
-          player_get_score(
-              game_get_player(worker->game_copy, 1 - post_on_turn)));
-      PVLine child_pv;
-      child_pv.game = worker->game_copy;
-      child_pv.num_moves = 0;
-      child_pv.negamax_depth = 0;
-      int32_t leaf_val = negamax_greedy_leaf_playout(
-          worker, 0, post_on_turn, post_on_turn_spread, &child_pv, 0.0F);
-      unplay_move_incremental(worker->game_copy, &worker->move_undos[0]);
-      if (leaf_val == ABDADA_INTERRUPTED) {
-        break;
-      }
-      // Negamax convention: opp's value for this move = -leaf_val.
-      int32_t opp_val = -leaf_val;
-      if (opp_val > best_root_value) {
-        best_root_value = opp_val;
-        best_root_move = sm;
-        d0_pv.moves[0] = sm;
-        for (int j = 0; j < child_pv.num_moves && j + 1 < MAX_VARIANT_LENGTH;
-             j++) {
-          d0_pv.moves[j + 1] = child_pv.moves[j];
-        }
-        d0_pv.num_moves = (child_pv.num_moves + 1 < MAX_VARIANT_LENGTH)
-                              ? child_pv.num_moves + 1
-                              : MAX_VARIANT_LENGTH;
-        d0_pv.negamax_depth = 0;
-        have_root_best = true;
-      }
-    }
-    if (have_root_best) {
-      d0_pv.score = best_root_value - worker->solver->initial_spread;
-      endgame_results_set_best_pvline(worker->solver->results, &d0_pv,
-                                      d0_pv.score, 0);
-    }
-    (void)best_root_move;
-  }
+  root_greedy_sweep(worker, initial_hash_key, initial_move_count);
 
   // ABDADA depth jitter: spread threads across different starting depths
   // so they don't all compete on the same shallow levels simultaneously.
