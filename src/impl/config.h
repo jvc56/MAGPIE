@@ -138,6 +138,8 @@ void config_set_human_readable(Config *config, bool human_readable);
 bool config_get_show_mistakes(const Config *config);
 bool config_get_show_prompt(const Config *config);
 bool config_get_save_settings(const Config *config);
+// Whether a rack info table this config loads is memory-mapped (-ritmmap).
+bool config_get_use_mmap_for_rit(const Config *config);
 bool config_get_fg_required(const Config *config);
 bool config_get_loaded_settings(const Config *config);
 void config_set_loaded_settings(Config *config, const bool value);

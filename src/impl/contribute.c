@@ -14,8 +14,12 @@
 #include "../util/io_util.h"
 #include "../util/json.h"
 #include "../util/string_util.h"
+#include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 enum {
   HEARTBEAT_INTERVAL_SECONDS = 30,
@@ -446,6 +450,47 @@ static bool expected_data_matches(ContributeState *state,
 char *contribute_hash_file(ContributeState *state, const char *path,
                            ErrorStack *error_stack) {
   return hash_with_cache(state, path, error_stack);
+}
+
+int contribute_lock_build(const char *output_path, const char *what,
+                          ThreadControl *thread_control,
+                          ErrorStack *error_stack) {
+  char *lock_path = get_formatted_string("%s.lock", output_path);
+  const int lock_fd = open(lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+  free(lock_path);
+  if (lock_fd < 0) {
+    return -1;
+  }
+  bool said_waiting = false;
+  while (flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
+    if (errno != EWOULDBLOCK && errno != EINTR) {
+      // A filesystem without locks: build unserialised, as before.
+      close(lock_fd);
+      return -1;
+    }
+    if (!said_waiting && thread_control) {
+      thread_control_print_formatted(
+          thread_control,
+          "waiting for another MAGPIE process to finish building %s\n", what);
+      said_waiting = true;
+    }
+    if (contribute_interrupted(thread_control)) {
+      close(lock_fd);
+      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_INTERRUPTED,
+                       get_formatted_string(
+                           "stopped while waiting for %s to be built", what));
+      return -1;
+    }
+    ctime_nap(1.0);
+  }
+  return lock_fd;
+}
+
+void contribute_unlock_build(int lock_fd) {
+  if (lock_fd >= 0) {
+    // Closing releases the flock.
+    close(lock_fd);
+  }
 }
 
 bool contribute_find_derived(const ContributeState *state, const char *role,

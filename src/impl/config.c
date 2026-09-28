@@ -2,6 +2,7 @@
 
 #include "../compat/chttp.h"
 #include "../compat/ctime.h"
+#include "../compat/endian_conv.h"
 #include "../compat/memory_info.h"
 #include "../def/autoplay_defs.h"
 #include "../def/bai_defs.h"
@@ -652,6 +653,10 @@ bool config_get_show_prompt(const Config *config) {
 
 bool config_get_save_settings(const Config *config) {
   return config->save_settings;
+}
+
+bool config_get_use_mmap_for_rit(const Config *config) {
+  return config->use_mmap_for_rit;
 }
 
 bool config_get_fg_required(const Config *config) {
@@ -1311,7 +1316,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "reached. Settings (server, apikey, threads, ...) come from the "
           "given file, or contribute.txt in the working directory if no path "
           "is given -- never from the command line, since an API key there "
-          "ends up in shell history and ps output.";
+          "ends up in shell history and ps output. Rack info tables are "
+          "memory-mapped unless -ritmmap false is given here, so workers "
+          "sharing a data directory share one copy.";
       break;
     case ARG_TOKEN_CONVERT:
       usages[0] = "<type> <name_without_extension> [<letter_distribution>] "
@@ -7342,112 +7349,115 @@ static void contribute_convert(Config *config, const char *conversion_type,
   convert(&args, config->conversion_results, error_stack);
 }
 
-// Makes a wordmap for `lexicon` available, building it if what is on disk is
-// absent or does not match.
-//
-// Wordmaps are never transmitted -- roughly ten times the size of everything
-// else MAGPIE ships -- so the client derives them from the .kwg it already
-// has, which costs about a second per lexicon, once. Only a lexicon some
-// player's settings actually asked to use a wordmap for reaches this.
-//
-// When the claim pins the wordmap's SHA-256, that is the check: build if the
-// file on disk does not have that hash, and if the rebuilt file still does
-// not, record the mismatch and give up rather than playing with bytes the
-// server did not mean. When it does not -- an older server, or a CLI-style
-// run -- fall back to the .kwg sidecar, which is what this did before.
-//
-// `ld_name` is the letter distribution the job pins. It is passed rather than
-// inferred from the lexicon's name because a wordmap is built against a letter
-// distribution, and inferring one is how a worker builds a different file from
-// the server's for the same lexicon.
-static void config_contribute_ensure_wordmap(Config *config,
-                                             ContributeState *state,
-                                             const char *lexicon,
-                                             const char *ld_name,
-                                             ErrorStack *error_stack) {
+// Whether the derived file `name` of `type` on disk has the SHA-256 `sha256`.
+static bool config_contribute_derived_matches(const Config *config,
+                                              ContributeState *state,
+                                              const char *name,
+                                              data_filepath_t type,
+                                              const char *sha256) {
+  char *actual = contribute_derived_digest(config, state, name, type);
+  const bool matches = actual && strings_equal(actual, sha256);
+  free(actual);
+  return matches;
+}
+
+// Takes the build lock (contribute_lock_build) for the derived file `name` of
+// `type`, at the path its build writes. -1 holds nothing, as there.
+static int config_contribute_lock_build(Config *config, const char *name,
+                                        data_filepath_t type, const char *what,
+                                        ErrorStack *error_stack) {
+  ErrorStack *errors = error_stack_create();
+  char *path = data_filepaths_get_writable_filename(config->data_paths, name,
+                                                    type, errors);
+  const bool have_path = error_stack_is_empty(errors);
+  error_stack_destroy(errors);
+  int lock_fd = -1;
+  if (have_path) {
+    lock_fd =
+        contribute_lock_build(path, what, config->thread_control, error_stack);
+  }
+  free(path);
+  return lock_fd;
+}
+
+// Whether the wordmap on disk for `lexicon` was built from the .kwg whose
+// digest is `kwg_digest`: the check when the claim pins no hash.
+static bool config_contribute_wordmap_current(const Config *config,
+                                              const char *lexicon,
+                                              const char *kwg_digest) {
+  ErrorStack *errors = error_stack_create();
+  char *wmp_path = data_filepaths_get_readable_filename(
+      config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
+  const bool current =
+      error_stack_is_empty(errors) && wordmap_is_current(wmp_path, kwg_digest);
+  error_stack_destroy(errors);
+  free(wmp_path);
+  return current;
+}
+
+// Builds the wordmap for `lexicon` with no pinned hash to check, and records
+// the .kwg digest it was built from beside it.
+static void config_contribute_build_unpinned_wordmap(Config *config,
+                                                     const char *lexicon,
+                                                     const char *ld_name,
+                                                     const char *kwg_digest,
+                                                     ErrorStack *error_stack) {
   const char *data_paths = config_get_data_paths(config);
-
-  ContributeDerived pinned;
-  const bool have_pin = contribute_find_derived(state, "wmp", lexicon, &pinned);
-
-  if (have_pin) {
-    char *actual = contribute_derived_digest(config, state, lexicon,
-                                             DATA_FILEPATH_TYPE_WORDMAP);
-    const bool matches = actual && strings_equal(actual, pinned.sha256);
-    free(actual);
-    if (matches) {
-      return;
-    }
-  } else {
-    // The digest of the lexicon the wordmap must match. Missing is not an
-    // error here: without a .kwg there is nothing to build from either, and
-    // the conversion below reports that far better than this could.
-    char *kwg_path = data_filepaths_get_readable_filename(
-        data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, error_stack);
-    char *kwg_digest = NULL;
-    if (error_stack_is_empty(error_stack)) {
-      kwg_digest = sha256_hash_file(kwg_path, error_stack);
-    }
-    error_stack_reset(error_stack);
-    free(kwg_path);
-
-    char *wmp_path = data_filepaths_get_readable_filename(
-        data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
-    const bool current = error_stack_is_empty(error_stack) &&
-                         wordmap_is_current(wmp_path, kwg_digest);
-    error_stack_reset(error_stack);
-    free(wmp_path);
-    if (current) {
-      free(kwg_digest);
-      return;
-    }
-    // Built from a lexicon that is no longer here, or never built. Rebuilding
-    // costs about a second; playing with it costs a corrupt contribution
-    // nobody would catch.
-    contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
-                       /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      free(kwg_digest);
-      return;
-    }
-    // Written only now, *after* the wordmap itself is in place: a sidecar
-    // written first and then interrupted claims a wordmap that does not
-    // exist, and the next run would trust it.
-    char *built_path = data_filepaths_get_readable_filename(
-        data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_reset(error_stack);
-      free(kwg_digest);
-      free(built_path);
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
-          get_formatted_string(
-              "could not build a wordmap for %s. The data directory must be "
-              "writable; this job's settings ask for a wordmap.",
-              lexicon));
-      return;
-    }
-    if (kwg_digest) {
-      char *src_path = wordmap_source_path(built_path);
-      ErrorStack *sidecar_errors = error_stack_create();
-      write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
-      // A missing sidecar only costs one rebuild next time, which is not
-      // worth failing a task over.
-      error_stack_reset(sidecar_errors);
-      error_stack_destroy(sidecar_errors);
-      free(src_path);
-    }
-    free(kwg_digest);
-    free(built_path);
+  // Built from a lexicon that is no longer here, or never built. Rebuilding
+  // costs about a second; playing with it costs a corrupt contribution
+  // nobody would catch.
+  thread_control_print_formatted(config->thread_control,
+                                 "building the wordmap for %s\n", lexicon);
+  contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
+                     /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  // Written only now, *after* the wordmap itself is in place: a sidecar
+  // written first and then interrupted claims a wordmap that does not
+  // exist, and the next run would trust it.
+  char *built_path = data_filepaths_get_readable_filename(
+      data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_reset(error_stack);
+    free(built_path);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
+        get_formatted_string(
+            "could not build a wordmap for %s. The data directory must be "
+            "writable; this job's settings ask for a wordmap.",
+            lexicon));
+    return;
+  }
+  if (kwg_digest) {
+    char *src_path = wordmap_source_path(built_path);
+    ErrorStack *sidecar_errors = error_stack_create();
+    write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
+    // A missing sidecar only costs one rebuild next time, which is not
+    // worth failing a task over.
+    error_stack_reset(sidecar_errors);
+    error_stack_destroy(sidecar_errors);
+    free(src_path);
+  }
+  free(built_path);
+}
 
-  // Pinned, and what is on disk is not it. Build from the .kwg this task's
-  // expected_data has already verified, and check the result.
+// Builds the wordmap for `lexicon` and checks it against the hash the claim
+// pins.
+static void
+config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
+                                       const char *lexicon, const char *ld_name,
+                                       const ContributeDerived *pinned,
+                                       ErrorStack *error_stack) {
+  const char *data_paths = config_get_data_paths(config);
+  // Build from the .kwg this task's expected_data has already verified, and
+  // check the result.
   //
   // `dawg2wordmap` rather than the `dawg2text` + `text2wordmap` pair this used
   // to run: the two produce identical bytes, this is the one the server builds
   // its reference copy with, and it writes no intermediate .txt.
+  thread_control_print_formatted(config->thread_control,
+                                 "building the wordmap for %s\n", lexicon);
   contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
                      /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7455,7 +7465,7 @@ static void config_contribute_ensure_wordmap(Config *config,
   }
   char *built = contribute_derived_digest(config, state, lexicon,
                                           DATA_FILEPATH_TYPE_WORDMAP);
-  if (built && strings_equal(built, pinned.sha256)) {
+  if (built && strings_equal(built, pinned->sha256)) {
     // The sidecar is redundant next to a pinned hash, but a later task on a
     // server that pins nothing reads it, so keep it accurate.
     ErrorStack *sidecar_errors = error_stack_create();
@@ -7483,7 +7493,7 @@ static void config_contribute_ensure_wordmap(Config *config,
     return;
   }
 
-  contribute_record_derived_mismatch(state, "wmp", lexicon, pinned.sha256,
+  contribute_record_derived_mismatch(state, "wmp", lexicon, pinned->sha256,
                                      built);
   free(built);
   error_stack_push(
@@ -7491,8 +7501,92 @@ static void config_contribute_ensure_wordmap(Config *config,
       get_formatted_string(
           "the wordmap built here for %s is not the one this job pins "
           "(builder %s, target %s)",
-          lexicon, pinned.builder ? pinned.builder : "unstated",
-          pinned.build_target ? pinned.build_target : "unstated"));
+          lexicon, pinned->builder ? pinned->builder : "unstated",
+          pinned->build_target ? pinned->build_target : "unstated"));
+}
+
+// Makes a wordmap for `lexicon` available, building it if what is on disk is
+// absent or does not match.
+//
+// Wordmaps are never transmitted -- roughly ten times the size of everything
+// else MAGPIE ships -- so the client derives them from the .kwg it already
+// has, which costs about a second per lexicon, once. Only a lexicon some
+// player's settings actually asked to use a wordmap for reaches this.
+//
+// When the claim pins the wordmap's SHA-256, that is the check: build if the
+// file on disk does not have that hash, and if the rebuilt file still does
+// not, record the mismatch and give up rather than playing with bytes the
+// server did not mean. When it does not -- an older server, or a CLI-style
+// run -- fall back to the .kwg sidecar, which is what this did before.
+//
+// `ld_name` is the letter distribution the job pins. It is passed rather than
+// inferred from the lexicon's name because a wordmap is built against a letter
+// distribution, and inferring one is how a worker builds a different file from
+// the server's for the same lexicon.
+//
+// A build holds the file's build lock, and the check is made again once it is
+// held: another worker sharing this data directory may have built the file
+// while this one waited.
+static void config_contribute_ensure_wordmap(Config *config,
+                                             ContributeState *state,
+                                             const char *lexicon,
+                                             const char *ld_name,
+                                             ErrorStack *error_stack) {
+  const char *data_paths = config_get_data_paths(config);
+
+  ContributeDerived pinned;
+  const bool have_pin = contribute_find_derived(state, "wmp", lexicon, &pinned);
+
+  if (have_pin) {
+    if (config_contribute_derived_matches(config, state, lexicon,
+                                          DATA_FILEPATH_TYPE_WORDMAP,
+                                          pinned.sha256)) {
+      return;
+    }
+    char *what = get_formatted_string("the wordmap for %s", lexicon);
+    const int lock_fd = config_contribute_lock_build(
+        config, lexicon, DATA_FILEPATH_TYPE_WORDMAP, what, error_stack);
+    free(what);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    if (!config_contribute_derived_matches(config, state, lexicon,
+                                           DATA_FILEPATH_TYPE_WORDMAP,
+                                           pinned.sha256)) {
+      config_contribute_build_pinned_wordmap(config, state, lexicon, ld_name,
+                                             &pinned, error_stack);
+    }
+    contribute_unlock_build(lock_fd);
+    return;
+  }
+
+  // The digest of the lexicon the wordmap must match. Missing is not an
+  // error here: without a .kwg there is nothing to build from either, and
+  // the conversion reports that far better than this could.
+  char *kwg_path = data_filepaths_get_readable_filename(
+      data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, error_stack);
+  char *kwg_digest = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    kwg_digest = sha256_hash_file(kwg_path, error_stack);
+  }
+  error_stack_reset(error_stack);
+  free(kwg_path);
+
+  if (config_contribute_wordmap_current(config, lexicon, kwg_digest)) {
+    free(kwg_digest);
+    return;
+  }
+  char *what = get_formatted_string("the wordmap for %s", lexicon);
+  const int lock_fd = config_contribute_lock_build(
+      config, lexicon, DATA_FILEPATH_TYPE_WORDMAP, what, error_stack);
+  free(what);
+  if (error_stack_is_empty(error_stack) &&
+      !config_contribute_wordmap_current(config, lexicon, kwg_digest)) {
+    config_contribute_build_unpinned_wordmap(config, lexicon, ld_name,
+                                             kwg_digest, error_stack);
+  }
+  contribute_unlock_build(lock_fd);
+  free(kwg_digest);
 }
 
 // Makes the rack info table `table_name` available, building it if what is on
@@ -7533,11 +7627,9 @@ static void config_contribute_ensure_rack_info_table(
     return;
   }
 
-  char *actual = contribute_derived_digest(config, state, table_name,
-                                           DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
-  const bool matches = actual && strings_equal(actual, pinned.sha256);
-  free(actual);
-  if (matches) {
+  if (config_contribute_derived_matches(config, state, table_name,
+                                        DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+                                        pinned.sha256)) {
     return;
   }
 
@@ -7549,6 +7641,23 @@ static void config_contribute_ensure_rack_info_table(
     return;
   }
 
+  // Held for the build, and the table checked again once it is: a worker
+  // sharing this data directory has usually just built it.
+  char *what = get_formatted_string("the rack info table %s", table_name);
+  const int lock_fd = config_contribute_lock_build(
+      config, table_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE, what,
+      error_stack);
+  free(what);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_contribute_derived_matches(config, state, table_name,
+                                        DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+                                        pinned.sha256)) {
+    contribute_unlock_build(lock_fd);
+    return;
+  }
+
   // One to three minutes and about 2.4 GB of memory, once per (.kwg, .klv2)
   // pair. The heartbeat is already running by the time a task executes, which
   // is why this can take that long without the claim lapsing.
@@ -7557,15 +7666,24 @@ static void config_contribute_ensure_rack_info_table(
   // file changed anyway, but only after this build -- the old 1.9 GB table
   // and the build's 2.4 GB at once, which is more than many contributors'
   // machines have.
+  thread_control_print_formatted(
+      config->thread_control,
+      "building the rack info table %s: one to three minutes and about 2.4 GB "
+      "of memory, once\n",
+      table_name);
   players_data_evict(config->players_data, PLAYERS_DATA_TYPE_RIT);
   contribute_convert(config, "klvwmp2rit", table_name, ld_name, leaves, lexicon,
                      error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    contribute_unlock_build(lock_fd);
     return;
   }
   char *built = contribute_derived_digest(config, state, table_name,
                                           DATA_FILEPATH_TYPE_RACK_INFO_TABLE);
+  contribute_unlock_build(lock_fd);
   if (built && strings_equal(built, pinned.sha256)) {
+    thread_control_print_formatted(
+        config->thread_control, "built the rack info table %s\n", table_name);
     free(built);
     return;
   }
@@ -9195,9 +9313,18 @@ Config *config_create_for_contribute(Config *parent, ErrorStack *error_stack) {
     return NULL;
   }
   task_config->save_settings = false;
-  // How this machine reads a rack info table, not what a task computes: a
-  // contributor who asked for -ritmmap has too little memory to read one in.
-  task_config->use_mmap_for_rit = parent->use_mmap_for_rit;
+  // How this machine reads a rack info table, not what a task computes: the
+  // bytes are the same either way. A contributor maps it unless its own
+  // command says `-ritmmap false`: mapped, workers sharing a data directory
+  // share one copy of a 1.9 GB table in the page cache instead of holding
+  // one each, and under memory pressure its pages are dropped and read again
+  // rather than swapped. Only the contribute command's own argument counts:
+  // a saved settings file always records `-ritmmap false`, and would turn it
+  // off for everyone who had ever saved one. (Mapping is little-endian only.)
+  task_config->use_mmap_for_rit =
+      config_get_parg_value(parent, ARG_TOKEN_USE_MMAP_FOR_RIT, 0)
+          ? parent->use_mmap_for_rit
+          : IS_LITTLE_ENDIAN;
   thread_control_destroy(task_config->thread_control);
   task_config->thread_control = parent->thread_control;
   return task_config;

@@ -1,5 +1,6 @@
 #include "contribute_test.h"
 
+#include "../src/compat/endian_conv.h"
 #include "../src/def/config_defs.h"
 #include "../src/def/contribute_defs.h"
 #include "../src/def/players_data_defs.h"
@@ -1541,6 +1542,72 @@ static void test_contribute_runs_in_a_config_of_its_own(void) {
   config_destroy(config);
 }
 
+// contribute maps a rack info table unless its own command says not to. A
+// saved settings file's `-ritmmap false` -- which every saved one records --
+// does not count: only the contribute command's argument does.
+static void test_contribute_maps_rack_info_tables_unless_told_not_to(void) {
+  Config *config = config_create_default_test();
+  // What loading a saved settings.txt does.
+  load_and_exec_config_or_die(config, "set -ritmmap false");
+  ErrorStack *error_stack = error_stack_create();
+
+  config_load_command(config, "contribute unused.txt", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  Config *task_config = config_create_for_contribute(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(config_get_use_mmap_for_rit(task_config) == IS_LITTLE_ENDIAN);
+  config_destroy_for_contribute(task_config);
+
+  config_load_command(config, "contribute unused.txt -ritmmap false",
+                      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  task_config = config_create_for_contribute(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!config_get_use_mmap_for_rit(task_config));
+  config_destroy_for_contribute(task_config);
+
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Workers sharing a data directory build a derived file one at a time: a
+// second build of the same file waits for the first, and a stop request ends
+// the wait rather than the build going ahead.
+static void test_a_derived_build_is_held_by_one_process(void) {
+  const char *output_path = "contribute_test_build.rit";
+  char *lock_path = get_formatted_string("%s.lock", output_path);
+  ErrorStack *error_stack = error_stack_create();
+  ThreadControl *thread_control = thread_control_create();
+
+  const int held = contribute_lock_build(output_path, "the test table",
+                                         thread_control, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(held >= 0);
+
+  // A second open of the lock is another holder, as another process is.
+  thread_control_set_status(thread_control,
+                            THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  const int waited = contribute_lock_build(output_path, "the test table",
+                                           thread_control, error_stack);
+  assert(waited == -1);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_CONTRIBUTE_INTERRUPTED);
+  error_stack_reset(error_stack);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+
+  contribute_unlock_build(held);
+  const int again = contribute_lock_build(output_path, "the test table",
+                                          thread_control, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(again >= 0);
+  contribute_unlock_build(again);
+  contribute_unlock_build(-1);
+
+  thread_control_destroy(thread_control);
+  error_stack_destroy(error_stack);
+  (void)remove(lock_path);
+  free(lock_path);
+}
+
 // A simulating player ranks every play up to its num_plays, whatever its
 // recorder -- as autoplay's simulating player does. The case this pins: an
 // opening-rack job's simulating player with a `best` recorder (birdtest takes
@@ -1602,6 +1669,8 @@ void test_contribute(void) {
   test_a_rewritten_klv_is_read_again();
   test_an_abandoned_temporary_is_removed();
   test_a_runs_state_starts_clean();
+  test_contribute_maps_rack_info_tables_unless_told_not_to();
+  test_a_derived_build_is_held_by_one_process();
   test_a_runs_threads_are_capped();
   test_a_set_aside_job_is_left_out_of_claims_for_a_while();
   test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job();

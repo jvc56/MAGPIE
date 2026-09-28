@@ -289,6 +289,9 @@ typedef enum {
   // fine, this build cannot reproduce the file, and the server needs to see
   // both hashes.
   ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+  // A stop request arrived while this worker waited for another process to
+  // finish building a derived file it needs. The task is handed back.
+  ERROR_STATUS_CONTRIBUTE_INTERRUPTED,
 } error_code_t;
 
 typedef enum {

@@ -143,6 +143,28 @@ typedef struct ContributeDerived {
 bool contribute_find_derived(const ContributeState *state, const char *role,
                              const char *name, ContributeDerived *out);
 
+// Holds the build of the derived file at `output_path` for this process, so
+// contributors that share a data directory -- several workers on one machine,
+// all reading one MAGPIE's data/ -- build a file once between them instead of
+// all at once: a rack info table is minutes of every core and about 2.4 GB of
+// memory, and four simultaneous builds of the same table took a 16 GB machine
+// into swap. A worker that finds the lock held says so and waits; the caller
+// then checks the file again before building, since the holder has usually
+// just built it.
+//
+// The lock is an flock on `<output_path>.lock`, so a process that dies holding
+// it releases it. Returns the descriptor to pass to contribute_unlock_build, or
+// -1 holding nothing: when the lock file cannot be opened (a data directory
+// this worker cannot write, whose build then fails with its own message), and
+// on a stop request while waiting, which pushes
+// ERROR_STATUS_CONTRIBUTE_INTERRUPTED.
+int contribute_lock_build(const char *output_path, const char *what,
+                          ThreadControl *thread_control,
+                          ErrorStack *error_stack);
+
+// Releases what contribute_lock_build returned; -1 is a no-op.
+void contribute_unlock_build(int lock_fd);
+
 // The SHA-256 of `path`, from the run's digest cache when the file has not
 // changed. Hashing a 1.9 GB rack info table takes about nine seconds, so the
 // cache is what keeps that a once-per-file cost rather than a once-per-task
