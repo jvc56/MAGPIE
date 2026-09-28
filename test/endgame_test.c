@@ -144,6 +144,9 @@ static void *timeout_thread_function(void *arg) {
   return NULL;
 }
 
+// Pass as test_single_endgame's expected_score to check only the first move.
+enum { ENDGAME_TEST_ANY_SCORE = INT32_MIN };
+
 void test_single_endgame(const char *config_settings, const char *cgp,
                          int initial_small_move_arena_size,
                          error_code_t expected_error_code,
@@ -222,7 +225,8 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   if (actual_error_code == ERROR_STATUS_SUCCESS && timeout == 0) {
     const PVLine *pv_line =
         endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
-    assert(pv_line->score == expected_score);
+    assert(expected_score == ENDGAME_TEST_ANY_SCORE ||
+           pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
     printf(
         "Endgame solved successfully with expected score %d and is_pass=%d\n",
@@ -270,10 +274,12 @@ void test_pass_first(void) {
   // This endgame's first move must be a pass, otherwise Nigel can set up
   // an unblockable ZA. Exact value is -63 (verified at 25-ply with and
   // without heuristics). The optimal PV is 10 moves with 4 passes, so
-  // 7-ply relies on greedy playout for the tail. That tail values the
-  // position at -60: in the exact line Nigel builds Z(E) -> (ZE)D -> (ZED)A,
-  // and a greedy tail that takes the out bonus goes out first. 8-ply finds
-  // the exact value.
+  // 7-ply relies on greedy playout for the tail, so only the pass is checked
+  // there: the tail usually values the position at -60 (in the exact line
+  // Nigel builds Z(E) -> (ZE)D -> (ZED)A, and a greedy tail that takes the out
+  // bonus goes out first), but which transposition-table entries survive
+  // depends on thread timing, and with the small WASM table some runs reach
+  // -63 already. 8-ply converges to the exact value.
   const char *cgp =
       "cgp "
       "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
@@ -281,7 +287,7 @@ void test_pass_first(void) {
       "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21";
   test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 7", cgp,
                       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                      ERROR_STATUS_SUCCESS, -60, true, 0);
+                      ERROR_STATUS_SUCCESS, ENDGAME_TEST_ANY_SCORE, true, 0);
   test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 8", cgp,
                       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                       ERROR_STATUS_SUCCESS, -63, true, 0);
