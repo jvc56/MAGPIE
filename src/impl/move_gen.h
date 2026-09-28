@@ -96,6 +96,11 @@ typedef struct MoveGen {
   bool wmp_prune_subracks_by_leave;
   int player_index;
   Equity bingo_bonus;
+  // MOVE_RECORD_BEST_SMALL only: added to the ranking value (not the recorded
+  // score) of a play of best_small_out_rack_size tiles, i.e. one that uses the
+  // whole rack.
+  Equity best_small_out_bonus;
+  int best_small_out_rack_size;
   bool kwgs_are_shared;
   bool is_wordsmog;
   Rack player_rack;
@@ -291,6 +296,10 @@ typedef struct MoveGenArgs {
   // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
   // Movegen ORs further discoveries in. Default 0 (no known tiles).
   uint64_t initial_tiles_bv;
+  // MOVE_RECORD_BEST_SMALL only: rank a play that uses the whole rack by its
+  // score plus this bonus, e.g. twice the opponent's rack for going out in an
+  // endgame. The recorded play keeps its real score. Default 0.
+  Equity best_small_out_bonus;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);

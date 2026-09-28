@@ -85,12 +85,19 @@ enum {
   // Default cap on the depth-0 interrupt-fallback sweep when first_win_optim is
   // set: 0 = use this default, <0 = skip the sweep, >0 = explicit cap.
   FIRST_WIN_D0_FALLBACK_MOVES = 12,
+  // Most moves a greedy leaf playout plays; in practice the game ends first.
+  EG_MAX_LEAF_PLAYOUT = MAX_SEARCH_DEPTH + 1,
 };
 
 // A stuck-tile greedy playout extends the incremental lists' path past the
-// negamax leaf; see negamax_greedy_leaf_playout's max_playout.
+// negamax leaf and stops where the path is full; see
+// negamax_greedy_leaf_playout's max_playout. Leave room for at least one move
+// past the deepest negamax and bypass path.
 static_assert(PATH_MOVE_LISTS_MAX_PATH > 2 * MAX_SEARCH_DEPTH + 1,
               "incremental lists' path too short for the greedy playout");
+
+// Salt for the transposition-table key of a capped leaf; see leaf_tt_key.
+static const uint64_t CAPPED_LEAF_KEY_SALT = 0x9E3779B97F4A7C15ULL;
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
 // all). A tile is "stuck" if no legal move plays that tile type.
@@ -241,14 +248,13 @@ struct EndgameCtxWorker {
   PathMoveLists *path_lists_storage;
   EndgameCtx *solver;
   int current_iterative_deepening_depth;
-  // Array of MoveUndo structures for incremental play/unplay. Sized at
-  // MAX_SEARCH_DEPTH + 1 so the greedy leaf playout has at least one slot
-  // available past negamax's deepest move when requested_plies ==
-  // MAX_SEARCH_DEPTH. Without this slack the greedy `while` loop never runs
-  // at full-depth IDS and the leaf returns the static rack-adjusted spread,
-  // producing wildly wrong values (e.g. +31 instead of -78) for positions
-  // where the greedy needs to play one final bingo to terminate the game.
-  MoveUndo move_undos[MAX_SEARCH_DEPTH + 1];
+  // Array of MoveUndo structures for incremental play/unplay. Negamax's moves
+  // occupy the slots below requested_plies; the greedy leaf playout continues
+  // from slot requested_plies. Sized so the playout always has
+  // EG_MAX_LEAF_PLAYOUT slots, whatever the requested depth: a time-limited
+  // solve requests MAX_SEARCH_DEPTH plies and stops iterative deepening on
+  // the clock, and its leaves must still play out to the end of the game.
+  MoveUndo move_undos[MAX_SEARCH_DEPTH + EG_MAX_LEAF_PLAYOUT];
   // Per-depth MoveUndo for forced-pass bypass. Pass recurses at the same depth
   // so it cannot share move_undos[]; indexed by the depth parameter (0..25).
   MoveUndo pass_undos[MAX_SEARCH_DEPTH + 1];
@@ -1912,6 +1918,24 @@ static int derive_playout_plays(EndgameCtxWorker *worker,
 // pick best (with conservation bonus), compute final spread with rack
 // adjustments, unplay moves, store in TT. Returns evaluation from
 // on_turn's perspective.
+// Through iterative-deepening depth 1 (the root sweep and the depth-1 search)
+// a leaf plays one greedy move before the rack adjustment instead of playing
+// out: at those depths it chooses better. From depth 2 the full playout is
+// better.
+static inline bool leaf_playout_is_capped(const EndgameCtxWorker *worker) {
+  return worker->current_iterative_deepening_depth <= 1;
+}
+
+// The same position gets a different leaf value capped and uncapped, and with
+// several threads both kinds are in flight at once (helpers start at depth 2
+// or deeper while thread 0 runs depth 1). Capped leaf values live under a
+// salted key so an uncapped leaf never reads one, and vice versa.
+static inline uint64_t leaf_tt_key(const EndgameCtxWorker *worker,
+                                   uint64_t node_key) {
+  return leaf_playout_is_capped(worker) ? node_key ^ CAPPED_LEAF_KEY_SALT
+                                        : node_key;
+}
+
 static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                                            uint64_t node_key, int on_turn_idx,
                                            int32_t on_turn_spread, PVLine *pv,
@@ -1919,19 +1943,24 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   int solving_player = worker->solver->solving_player;
   int plies = worker->solver->requested_plies;
   int playout_depth = 0;
-  // +1 because move_undos[] is now sized MAX_SEARCH_DEPTH+1 specifically so
-  // the greedy can claim at least one slot past the deepest negamax-used
-  // slot. Without this, full-depth IDS (plies == MAX_SEARCH_DEPTH) gives
-  // greedy 0 plies and leaks the static rack-adjusted spread instead of
-  // playing a terminating move.
-  // A stuck playout pushes each of its moves onto the incremental lists'
-  // path, on top of up to 2 * plies negamax and bypass moves; the total,
-  // plies + MAX_SEARCH_DEPTH + 1, must stay within PATH_MOVE_LISTS_MAX_PATH.
-  int max_playout = MAX_SEARCH_DEPTH + 1 - plies;
   // The incremental lists can follow the playout only from a leaf reached
   // along a pushed path (never from the root itself).
   const bool use_path_lists =
       worker->path_lists != NULL && worker->path_lists->length >= 1;
+  // The playout runs to the end of the game. A stuck playout pushes each of
+  // its moves onto the incremental lists' path, on top of up to 2 * plies
+  // negamax and bypass moves, so it also stops where the path is full.
+  int max_playout = EG_MAX_LEAF_PLAYOUT;
+  if (leaf_playout_is_capped(worker)) {
+    max_playout = 1;
+  }
+  if (use_path_lists) {
+    const int path_room =
+        PATH_MOVE_LISTS_MAX_PATH - 1 - worker->path_lists->length;
+    if (path_room < max_playout) {
+      max_playout = path_room;
+    }
+  }
   // The side to move's derived list at the leaf, when it was materialized
   // for the stuck fraction; the first playout step reuses it.
   const SmallMove *leaf_plays = NULL;
@@ -2034,10 +2063,15 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       worker->move_list->count = 1;
       nplays = 1;
     } else if (opp_stuck_frac == 0.0F) {
-      // No stuck tiles: only the highest-scoring play is needed.
+      // No stuck tiles: only the best play is needed, ranked by score plus
+      // twice the opponent's rack for going out.
       // MOVE_RECORD_BEST_SMALL prunes during generation via shadow upper
       // bounds, producing a SmallMove directly without full enumeration.
+      const Rack *opp_rack_p =
+          player_get_rack(game_get_player(worker->game_copy, 1 - stm_idx_p));
       const MoveGenArgs pargs = {
+          .best_small_out_bonus = calculate_end_rack_points(
+              opp_rack_p, game_get_ld(worker->game_copy)),
           .game = worker->game_copy,
           .move_list = worker->move_list,
           .move_record_type = MOVE_RECORD_BEST_SMALL,
@@ -2111,10 +2145,26 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
                 opp_stuck_frac);
     }
 
+    // Going out also earns twice the opponent's rack, which the highest-
+    // scoring play can walk past. (Conservation picks keep their own
+    // valuation.)
+    int go_out_bonus = 0;
+    if (!conserve) {
+      const Rack *opp_rack = player_get_rack(
+          game_get_player(worker->game_copy, 1 - playout_on_turn));
+      go_out_bonus = equity_to_int(
+          calculate_end_rack_points(opp_rack, game_get_ld(worker->game_copy)));
+    }
+    const int stm_tiles = stm_rack_p->number_of_letters;
+
     int best_adj = INT32_MIN;
     for (int j = 0; j < nplays; j++) {
       const SmallMove *sm = worker->move_list->small_moves[j];
       int score = small_move_get_score(sm);
+      if (go_out_bonus > 0 && !small_move_is_pass(sm) &&
+          small_move_get_tiles_played(sm) == stm_tiles) {
+        score += go_out_bonus;
+      }
       int adj;
       if (conserve) {
         if (small_move_is_pass(sm)) {
@@ -2191,8 +2241,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   // Store greedy playout result in TT at depth 0.
   // Only store if no deeper entry exists (prefer deeper negamax results).
   if (worker->solver->transposition_table_optim) {
+    const uint64_t leaf_key = leaf_tt_key(worker, node_key);
     TTEntry existing = transposition_table_lookup(
-        worker->solver->transposition_table, node_key);
+        worker->solver->transposition_table, leaf_key);
     if (!ttentry_valid(existing) || ttentry_depth(existing) == 0) {
       int32_t greedy_result =
           (on_turn_idx == solving_player) ? greedy_spread : -greedy_spread;
@@ -2200,7 +2251,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       TTEntry entry_to_store = {.score = tt_score,
                                 .flag_and_depth = (TT_EXACT << 6),
                                 .tiny_move = INVALID_TINY_MOVE};
-      transposition_table_store(worker->solver->transposition_table, node_key,
+      transposition_table_store(worker->solver->transposition_table, leaf_key,
                                 entry_to_store);
     }
   }
@@ -2576,8 +2627,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   uint64_t tt_move = INVALID_TINY_MOVE;
 
   if (worker->solver->transposition_table_optim) {
+    // A depth-0 node's entry is its leaf value, stored under leaf_tt_key.
+    const uint64_t probe_key =
+        depth == 0 ? leaf_tt_key(worker, node_key) : node_key;
     TTEntry tt_entry = transposition_table_lookup(
-        worker->solver->transposition_table, node_key);
+        worker->solver->transposition_table, probe_key);
     if (ttentry_valid(tt_entry) && ttentry_depth(tt_entry) >= (uint8_t)depth) {
       int16_t score = ttentry_score(tt_entry);
       uint8_t flag = ttentry_flag(tt_entry);

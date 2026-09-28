@@ -395,6 +395,9 @@ static inline void update_best_move_or_insert_into_movelist(
     set_small_play_for_record(best_sm, move_type, leftstrip, rightstrip, score,
                               start_row, start_col, tiles_played, dir, strip);
     move_equity_or_score = score;
+    if (tiles_played == gen->best_small_out_rack_size) {
+      move_equity_or_score += gen->best_small_out_bonus;
+    }
     if (move_equity_or_score > gen->best_move_equity_or_score) {
       need_to_update_best_move_equity_or_score = true;
       gen->best_move_equity_or_score = move_equity_or_score;
@@ -1937,8 +1940,14 @@ static inline void shadow_record_small(MoveGen *gen) {
       tiles_played_score +
       (gen->shadow_mainword_restricted_score * gen->shadow_word_multiplier) +
       gen->shadow_perpendicular_additional_score + bingo_bonus;
-  if (score > gen->highest_shadow_score) {
-    gen->highest_shadow_score = score;
+  // Bound the ranking value, which includes the out bonus only for plays that
+  // use the whole rack.
+  Equity bound = score;
+  if (gen->tiles_played == gen->best_small_out_rack_size) {
+    bound += gen->best_small_out_bonus;
+  }
+  if (bound > gen->highest_shadow_score) {
+    gen->highest_shadow_score = bound;
   }
   if (gen->tiles_played > gen->max_tiles_to_play) {
     gen->max_tiles_to_play = gen->tiles_played;
@@ -3125,11 +3134,14 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->eq_margin_movegen = args->eq_margin_movegen;
   gen->target_equity_cutoff = args->target_equity;
   gen->target_leave_size = args->target_leave_size_for_exchange_cutoff;
+  gen->best_small_out_bonus = args->best_small_out_bonus;
 
   gen->board = game_get_board(game);
   gen->player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, gen->player_index);
   const Player *opponent = game_get_player(game, 1 - gen->player_index);
+  gen->best_small_out_rack_size =
+      rack_get_total_letters(player_get_rack(player));
 
   // gen->ld is a by-value copy and the per-thread MoveGen is reused across
   // every node of a solve with a stable game->ld, so skip the ~3.4 KB memcpy
