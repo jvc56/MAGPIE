@@ -834,6 +834,7 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
                                             int col, int last_anchor_col,
                                             int dir,
                                             Equity inference_cutoff_equity,
+                                            uint32_t tiles_played_mask,
                                             AnchorHeap *anchor_heap) {
   for (int word_idx = 0; word_idx < WMP_ANCHOR_MASK_WORDS; word_idx++) {
     uint64_t touched = wmp_move_gen->touched_anchor_masks[word_idx];
@@ -845,8 +846,9 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
       // Skip subanchors whose highest possible equity is below the cutoff
       // threshold. This is safe when cutoff_equity is fixed (as in inference
       // with stop_on_threshold).
-      if (inference_cutoff_equity == EQUITY_MAX_VALUE ||
-          anchor->highest_possible_equity >= inference_cutoff_equity) {
+      if (((tiles_played_mask >> anchor->tiles_to_play) & 1) != 0 &&
+          (inference_cutoff_equity == EQUITY_MAX_VALUE ||
+           anchor->highest_possible_equity >= inference_cutoff_equity)) {
         assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
         assert(anchor->word_length <= wmp_move_gen->wmp->board_dim);
         anchor_heap_add_unheaped_wmp_anchor(

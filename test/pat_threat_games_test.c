@@ -92,6 +92,10 @@ static void ptg_generate(const Game *game, MoveList *list, move_record_t record,
       .lane_cover_masks = cover,
       .use_best_floor = use_floor,
       .best_floor = floor,
+      // Threat searches (by score) never want the opponent's exchanges,
+      // which do not depend on our move; skipping their leave walk halves
+      // the search. The player's own ranking (by equity) keeps them.
+      .skip_exchanges = sort == MOVE_SORT_SCORE,
   };
   generate_moves(&args);
 }
@@ -142,6 +146,11 @@ typedef struct PTGSettings {
   // as the better of the best pre-move play the candidate does not disturb
   // and the best play touching the candidate (see ptg_fast_full_threats).
   bool fast_full;
+  // Racks dealt disjointly from one shuffle of the pool (see ptg_choose)
+  // rather than drawn independently.
+  bool partition;
+  // The check runs only while the bag holds at least this many tiles.
+  int min_bag;
   double weight;
   int k;
   int r;
@@ -222,6 +231,7 @@ static void ptg_fast_full_threats(const Game *game, const Move *const *cands,
         .eq_margin_movegen = int_to_equity(PTG_PRE_MARGIN),
         .target_equity = EQUITY_MAX_VALUE,
         .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        .skip_exchanges = true,
     };
     generate_moves(&args);
     move_list_sort_moves(pre_list);
@@ -328,7 +338,8 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
   move_list_sort_moves(top_list);
   const Move *best = move_list_get_move(top_list, 0);
   move_copy(chosen, best);
-  if (bag_get_letters(game_get_bag(game)) == 0 ||
+  const int bag = bag_get_letters(game_get_bag(game));
+  if (bag == 0 || bag < settings->min_bag ||
       move_get_type(best) == GAME_EVENT_PASS) {
     return false;
   }
@@ -368,17 +379,45 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
   const int rack_size = pool_size < RACK_SIZE ? pool_size : RACK_SIZE;
   Rack racks[PTG_MAX_R];
   uint64_t rng = rng_seed;
-  for (int rack_idx = 0; rack_idx < settings->r; rack_idx++) {
-    MachineLetter shuffled[PTG_POOL_CAP];
-    memcpy(shuffled, pool, sizeof(MachineLetter) * (size_t)pool_size);
-    rack_set_dist_size_and_reset(&racks[rack_idx], ld_get_size(ld));
-    for (int draw_idx = 0; draw_idx < rack_size; draw_idx++) {
-      const int pick =
-          draw_idx + (int)(ptg_next(&rng) % (uint64_t)(pool_size - draw_idx));
-      const MachineLetter tile = shuffled[pick];
-      shuffled[pick] = shuffled[draw_idx];
-      shuffled[draw_idx] = tile;
-      rack_add_letter(&racks[rack_idx], tile);
+  int num_racks = settings->r;
+  if (settings->partition) {
+    // Disjoint deals: each shuffle of the pool is dealt into as many racks
+    // as fill, so each unseen tile lands in at most one rack per deal, and
+    // deals repeat until settings->r racks are dealt.
+    int rack_idx = 0;
+    while (rack_idx < num_racks) {
+      MachineLetter shuffled[PTG_POOL_CAP];
+      memcpy(shuffled, pool, sizeof(MachineLetter) * (size_t)pool_size);
+      for (int draw_idx = 0; draw_idx < pool_size - 1; draw_idx++) {
+        const int pick =
+            draw_idx + (int)(ptg_next(&rng) % (uint64_t)(pool_size - draw_idx));
+        const MachineLetter tile = shuffled[pick];
+        shuffled[pick] = shuffled[draw_idx];
+        shuffled[draw_idx] = tile;
+      }
+      for (int start = 0;
+           start + rack_size <= pool_size && rack_idx < num_racks;
+           start += rack_size) {
+        rack_set_dist_size_and_reset(&racks[rack_idx], ld_get_size(ld));
+        for (int tile_idx = 0; tile_idx < rack_size; tile_idx++) {
+          rack_add_letter(&racks[rack_idx], shuffled[start + tile_idx]);
+        }
+        rack_idx++;
+      }
+    }
+  } else {
+    for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+      MachineLetter shuffled[PTG_POOL_CAP];
+      memcpy(shuffled, pool, sizeof(MachineLetter) * (size_t)pool_size);
+      rack_set_dist_size_and_reset(&racks[rack_idx], ld_get_size(ld));
+      for (int draw_idx = 0; draw_idx < rack_size; draw_idx++) {
+        const int pick =
+            draw_idx + (int)(ptg_next(&rng) % (uint64_t)(pool_size - draw_idx));
+        const MachineLetter tile = shuffled[pick];
+        shuffled[pick] = shuffled[draw_idx];
+        shuffled[draw_idx] = tile;
+        rack_add_letter(&racks[rack_idx], tile);
+      }
     }
   }
   uint64_t lane_mask = 0;
@@ -398,7 +437,7 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
     move_destroy(pass);
     Player *opponent =
         game_get_player(passed, game_get_player_on_turn_index(passed));
-    for (int rack_idx = 0; rack_idx < settings->r; rack_idx++) {
+    for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
       rack_copy(player_get_rack(opponent), &racks[rack_idx]);
       ptg_generate(passed, reply_list, MOVE_RECORD_BEST, MOVE_SORT_SCORE, 0,
                    NULL, false, 0);
@@ -411,8 +450,8 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
   }
   double fast_full_threats[PTG_MAX_K];
   if (settings->fast_full) {
-    ptg_fast_full_threats(game, cands, num_cands, racks, settings->r,
-                          reply_list, pre_list, getenv("PTG_VERIFY") != NULL,
+    ptg_fast_full_threats(game, cands, num_cands, racks, num_racks, reply_list,
+                          pre_list, getenv("PTG_VERIFY") != NULL,
                           fast_full_threats);
   }
   int best_idx = 0;
@@ -433,7 +472,7 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
         play_move(cands[cand_idx], after, NULL);
         opponent = game_get_player(after, game_get_player_on_turn_index(after));
       }
-      for (int rack_idx = 0; rack_idx < settings->r; rack_idx++) {
+      for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
         Equity value = baseline[rack_idx];
         if (after != NULL) {
           rack_copy(player_get_rack(opponent), &racks[rack_idx]);
@@ -469,7 +508,7 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
       if (after != NULL) {
         game_destroy(after);
       }
-      threat /= settings->r;
+      threat /= num_racks;
     } else if (move_get_type(cands[cand_idx]) ==
                    GAME_EVENT_TILE_PLACEMENT_MOVE &&
                (!settings->partial || lane_mask != 0)) {
@@ -477,7 +516,7 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
       play_move(cands[cand_idx], after, NULL);
       Player *opponent =
           game_get_player(after, game_get_player_on_turn_index(after));
-      for (int rack_idx = 0; rack_idx < settings->r; rack_idx++) {
+      for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
         rack_copy(player_get_rack(opponent), &racks[rack_idx]);
         if (settings->partial) {
           ptg_generate(after, reply_list, MOVE_RECORD_BEST, MOVE_SORT_SCORE,
@@ -494,14 +533,14 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
         }
       }
       game_destroy(after);
-      threat /= settings->r;
+      threat /= num_racks;
     } else if (!settings->partial) {
       // A non-placement leaves the board as it is: the full reply there.
       Game *after = game_duplicate(game);
       play_move(cands[cand_idx], after, NULL);
       Player *opponent =
           game_get_player(after, game_get_player_on_turn_index(after));
-      for (int rack_idx = 0; rack_idx < settings->r; rack_idx++) {
+      for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
         rack_copy(player_get_rack(opponent), &racks[rack_idx]);
         ptg_generate(after, reply_list, MOVE_RECORD_BEST, MOVE_SORT_SCORE, 0,
                      NULL, false, 0);
@@ -511,7 +550,7 @@ static bool ptg_choose(const Game *game, const PTGSettings *settings,
         }
       }
       game_destroy(after);
-      threat /= settings->r;
+      threat /= num_racks;
     }
     const double value = equity_to_double(move_get_equity(cands[cand_idx])) -
                          settings->weight * threat;
@@ -566,6 +605,8 @@ void test_pat_threat_games(void) {
       .partial = strcmp(mode, "full") != 0,
       .fast = strcmp(mode, "fast") == 0,
       .fast_full = strcmp(mode, "fastfull") == 0,
+      .partition = ptg_env_long("PTG_PARTITION", 0) != 0,
+      .min_bag = (int)ptg_env_long("PTG_MIN_BAG", 1),
       .weight = weight_text ? strtod(weight_text, NULL) : 0.3,
       .k = (int)ptg_env_long("PTG_K", 5),
       .r = (int)ptg_env_long("PTG_R", 32),

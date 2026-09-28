@@ -105,7 +105,7 @@ void test_sparse_anchor_slot_order_and_reset(void) {
                            /*last_anchor_col=*/0,
                            /*dir=*/BOARD_HORIZONTAL_DIRECTION,
                            /*inference_cutoff_equity=*/EQUITY_MAX_VALUE,
-                           &anchor_heap);
+                           /*tiles_played_mask=*/~(uint32_t)0, &anchor_heap);
   assert(anchor_heap.count == 3);
   assert(anchor_heap.anchors[0].playthrough_blocks == 0);
   assert(anchor_heap.anchors[1].playthrough_blocks == 1);

@@ -500,6 +500,9 @@ static inline void record_tile_placement_move(MoveGen *gen, int leftstrip,
       !gen_play_meets_cover(gen, leftstrip, rightstrip)) {
     return;
   }
+  if (((gen->tiles_played_mask >> gen->tiles_played) & 1) == 0) {
+    return;
+  }
   const int start_row = gen->current_row_index;
   const int start_col = leftstrip;
   const int tiles_played = gen->tiles_played;
@@ -3150,7 +3153,8 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
     // empty touched mask is already a no-op.
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
                              gen->last_anchor_col, gen->dir,
-                             gen->target_equity_cutoff, &gen->anchor_heap);
+                             gen->target_equity_cutoff, gen->tiles_played_mask,
+                             &gen->anchor_heap);
     return;
   }
   if (gen->max_tiles_to_play == 0) {
@@ -3485,6 +3489,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->threshold_exceeded = false;
   gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
   gen->lane_mask = (args->lane_mask != 0) ? args->lane_mask : ~(uint64_t)0;
+  gen->tiles_played_mask =
+      (args->tiles_played_mask != 0) ? args->tiles_played_mask : ~(uint32_t)0;
+  gen->skip_exchanges = args->skip_exchanges;
   gen->lane_cover_masks = args->lane_cover_masks;
 }
 
@@ -3506,9 +3513,11 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
                             (gen->move_sort_type != MOVE_SORT_SCORE);
 
   // Assumes the player has drawn a full rack but not the opponent.
-  const bool add_exchange = gen->number_of_tiles_in_bag +
-                                rack_get_total_letters(&gen->opponent_rack) >=
-                            (RACK_SIZE * 2);
+  const bool add_exchange =
+      !gen->skip_exchanges &&
+      gen->number_of_tiles_in_bag +
+              rack_get_total_letters(&gen->opponent_rack) >=
+          (RACK_SIZE * 2);
 
   // Try to use the pre-computed rack info table for full racks.
   const bool has_full_rack =
@@ -3918,9 +3927,10 @@ void generate_moves(const MoveGenArgs *args) {
       // add_exchange=true iff there are enough unseen tiles for the
       // exchange walk to make sense.
       const bool add_exchange =
+          !gen->skip_exchanges &&
           gen->number_of_tiles_in_bag +
-              rack_get_total_letters(&gen->opponent_rack) >=
-          (RACK_SIZE * 2);
+                  rack_get_total_letters(&gen->opponent_rack) >=
+              (RACK_SIZE * 2);
       const bool leaves_are_populated =
           (gen->rit_entry != NULL) || check_leaves || add_exchange;
       const uint32_t subrack_slot = bit_rack_get_bucket_index(

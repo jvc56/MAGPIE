@@ -151,6 +151,10 @@ typedef struct MoveGen {
   // MoveGenArgs.lane_cover_masks.
   uint64_t lane_mask;
   const uint32_t *lane_cover_masks;
+  // See MoveGenArgs.tiles_played_mask (all ones when unrestricted) and
+  // MoveGenArgs.skip_exchanges.
+  uint32_t tiles_played_mask;
+  bool skip_exchanges;
   bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
@@ -319,6 +323,12 @@ typedef struct MoveGenArgs {
   // pass when nothing beat the floor.
   bool use_best_floor;
   Equity best_floor;
+  // Bit n set allows plays of n rack tiles; 0, the default, allows every
+  // count. On the word map path the other counts are never generated.
+  uint32_t tiles_played_mask;
+  // Records no exchanges (their leave walk still runs when leaves are
+  // needed).
+  bool skip_exchanges;
   // Disables the PAT term even when the player has weights loaded.
   // Set by the inference paths, which build their own equity thresholds
   // from score plus leave and would misclassify moves whose recorded

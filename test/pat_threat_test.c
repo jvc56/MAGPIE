@@ -70,6 +70,11 @@ static uint64_t pth_next(uint64_t *state) {
 
 // The best move for the player on turn by the given sort, into best,
 // restricted to lane_mask and lane_cover_masks when set (see MoveGenArgs).
+// The tile-count mask and exchange skipping pth_best passes (see
+// MoveGenArgs); set per variant by the PTH_VARIANTS timing mode.
+static uint32_t pth_tiles_played_mask = 0;
+static bool pth_skip_exchanges = false;
+
 static bool pth_best(const Game *game, move_sort_t sort, MoveList *list,
                      Move *best, uint64_t lane_mask,
                      const uint32_t *lane_cover_masks) {
@@ -85,6 +90,8 @@ static bool pth_best(const Game *game, move_sort_t sort, MoveList *list,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .lane_mask = lane_mask,
       .lane_cover_masks = lane_cover_masks,
+      .tiles_played_mask = pth_tiles_played_mask,
+      .skip_exchanges = pth_skip_exchanges,
   };
   generate_moves(&args);
   if (move_list_get_count(list) == 0) {
@@ -118,6 +125,37 @@ void test_pat_threat(void) {
   fprintf(out, "pos,move,reply_score,reply_equity_pick_score,partial_score,"
                "partial_hinge_score\n");
   const bool full = pth_env_long("PTH_FULL", 1) != 0;
+  // PTH_VARIANTS: comma-separated search variants timed against each other
+  // on every candidate and rack (full board, best by score): "all" (every
+  // play and exchanges), "noexch" (every play), or tile counts such as
+  // "1267" (only those counts, no exchanges). The first is the reference
+  // the others' best scores are checked against.
+  enum { PTH_MAX_VARIANTS = 16 };
+  char variant_names[PTH_MAX_VARIANTS][16];
+  uint32_t variant_masks[PTH_MAX_VARIANTS];
+  bool variant_skip[PTH_MAX_VARIANTS];
+  double variant_seconds[PTH_MAX_VARIANTS] = {0};
+  long variant_matches[PTH_MAX_VARIANTS] = {0};
+  double variant_deficit[PTH_MAX_VARIANTS] = {0};
+  long variant_calls = 0;
+  int num_variants = 0;
+  if (getenv("PTH_VARIANTS")) {
+    char list_text[256];
+    (void)snprintf(list_text, sizeof(list_text), "%s", getenv("PTH_VARIANTS"));
+    for (char *token = strtok(list_text, ",");
+         token != NULL && num_variants < PTH_MAX_VARIANTS;
+         token = strtok(NULL, ",")) {
+      (void)snprintf(variant_names[num_variants], 16, "%s", token);
+      variant_masks[num_variants] = 0;
+      variant_skip[num_variants] = strcmp(token, "all") != 0;
+      if (strcmp(token, "all") != 0 && strcmp(token, "noexch") != 0) {
+        for (const char *digit = token; *digit; digit++) {
+          variant_masks[num_variants] |= (uint32_t)1 << (*digit - '0');
+        }
+      }
+      num_variants++;
+    }
+  }
   double full_seconds = 0.0;
   double partial_seconds = 0.0;
   double baseline_seconds = 0.0;
@@ -306,6 +344,31 @@ void test_pat_threat(void) {
             double hinge_sum = 0.0;
             for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
               rack_copy(player_get_rack(opponent), &racks[rack_idx]);
+              if (num_variants > 0) {
+                Equity reference = 0;
+                for (int variant = 0; variant < num_variants; variant++) {
+                  pth_tiles_played_mask = variant_masks[variant];
+                  pth_skip_exchanges = variant_skip[variant];
+                  const clock_t start = clock();
+                  Equity score = 0;
+                  if (pth_best(after, MOVE_SORT_SCORE, list, reply, 0, NULL) &&
+                      move_get_type(reply) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+                    score = move_get_score(reply);
+                  }
+                  variant_seconds[variant] +=
+                      (double)(clock() - start) / CLOCKS_PER_SEC;
+                  if (variant == 0) {
+                    reference = score;
+                  }
+                  variant_matches[variant] += (score == reference) ? 1 : 0;
+                  variant_deficit[variant] +=
+                      equity_to_double(reference - score);
+                }
+                pth_tiles_played_mask = 0;
+                pth_skip_exchanges = false;
+                variant_calls++;
+                continue;
+              }
               if (full) {
                 const clock_t start = clock();
                 if (pth_best(after, MOVE_SORT_SCORE, list, reply, 0, NULL)) {
@@ -357,6 +420,15 @@ void test_pat_threat(void) {
     }
   }
   (void)cand_pos;
+  for (int variant = 0; variant < num_variants; variant++) {
+    fprintf(stderr,
+            "variant %-8s %8.2f us/call  matches reference %6.2f%%  mean "
+            "shortfall %.3f pts\n",
+            variant_names[variant],
+            1e6 * variant_seconds[variant] / (double)variant_calls,
+            100.0 * (double)variant_matches[variant] / (double)variant_calls,
+            variant_deficit[variant] / (double)variant_calls);
+  }
   fprintf(stderr,
           "timing: full %.3f s over %ld calls (%.1f us each); partial %.3f s "
           "over %ld calls (%.1f us each); baseline %.3f s\n",
