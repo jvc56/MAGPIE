@@ -327,12 +327,13 @@ static void inject_worker_per_ply(int depth, int32_t value,
 // Exercised for both endgame_solve (master is a spawned thread) and
 // endgame_solve_inline (master runs in the calling thread — the path PEG uses,
 // where injected helpers cooperate while the caller's own core keeps solving).
-// 6 plies is the shallowest depth that reaches the converged -63 (5 gives -60),
-// and still injects one worker per IDS depth — the value-determinism property
-// is what the test checks, not the search depth.
+// 8 plies is the shallowest depth that reaches the converged -63 (6 and 7 give
+// -60 since greedy leaf playouts take the out bonus), and still injects one
+// worker per IDS depth — the value-determinism property is what the test
+// checks, not the search depth.
 static void run_injection_case(bool use_inline) {
   Config *config =
-      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 8");
   load_and_exec_config_or_die(
       config,
       "cgp "
@@ -395,7 +396,7 @@ void test_endgame_dynamic_worker_injection(void) {
 // first_win uses a narrow [-1,+1] window to resolve win/loss/draw cheaply (the
 // path pessimistic PEG uses), and caps the depth-0 interrupt fallback to the
 // top few root moves. It must agree in SIGN with the exact full-spread solve.
-// This position is a converged 63-point loss for the player on turn at 6 plies:
+// This position is a converged 63-point loss for the player on turn at 8 plies:
 // full-spread must report exactly -63, first_win a loss (strictly negative).
 void test_endgame_first_win_sign(void) {
   const char *cgp =
@@ -413,7 +414,7 @@ void test_endgame_first_win_sign(void) {
   } cases[] = {{false, 0}, {true, 0}, {true, -1}};
   for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ci++) {
     Config *config =
-        config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
+        config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 8");
     load_and_exec_config_or_die(config, cgp);
     Game *game = config_get_game(config);
     EndgameResults *results = config_get_endgame_results(config);
