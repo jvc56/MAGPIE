@@ -7157,9 +7157,10 @@ static bool contribute_is_safe_data_name(const char *name) {
 
 // A lexicon belongs to a *player*, not to a job: MAGPIE takes -l1 and -l2
 // independently, and a job may deliberately pit two lexicons against each
-// other. So only leave_generation -- which has a single bot and no player
-// object to hold one -- sends a top-level "lexicon". For every other job type
-// this is NULL here and each player's own field supplies it.
+// other. So only leave_generation -- whose one player plays both seats, and
+// whose fetched KLV is named after and loaded with that player's lexicon --
+// sends a top-level "lexicon" as well. For every other job type this is NULL
+// here and each player's own field supplies it.
 //
 // The variant is genuinely job-wide (two players cannot play different rules)
 // and stays required.
@@ -7250,10 +7251,9 @@ static const char *contribute_shared_lexicon(const char *lexicon,
 
 // True if the settings the server sent ask for a wordmap. Wordmaps are not
 // assumed: a job that does not ask for one runs without it, so a worker
-// neither builds nor loads one. `settings` is the object carrying the
-// use_wordmap flag (a "player1"/"player2"/"player" object for the job types
-// that have one, the request itself for leave_generation); a NULL object or
-// an absent flag both mean "no wordmap".
+// neither builds nor loads one. `settings` is the "player1"/"player2"/
+// "player" object carrying the use_wordmap flag; a NULL object or an absent
+// flag both mean "no wordmap".
 static bool contribute_wants_wordmap(const JsonValue *settings) {
   return json_get_bool_or(settings, CONTRIBUTE_KEY_USE_WORDMAP, false);
 }
@@ -9068,9 +9068,11 @@ static char *config_contribute_leave_gen(Config *config,
     return NULL;
   }
 
-  // Leave generation has one bot, not a player1/player2 pair, so its
-  // use_wordmap sits on the request itself rather than on a player object.
-  const bool use_wordmap = contribute_wants_wordmap(request);
+  // One player, playing both seats, as for an opening rack. Its leaves are
+  // never loaded: the bot plays with the KLV fetched below, whose values are
+  // what the task is measuring.
+  const JsonValue *player = json_object_get(request, CONTRIBUTE_KEY_PLAYER);
+  const bool use_wordmap = contribute_wants_wordmap(player);
   if (use_wordmap) {
     config_contribute_ensure_wordmap(config, state, lexicon,
                                      letter_distribution, error_stack);
@@ -9200,12 +9202,14 @@ static char *config_contribute_leave_gen(Config *config,
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
-  // The leave-generating bot plays statically, on MAGPIE's default static
-  // settings. Nothing in the request states them, so they are reset rather
-  // than inherited: a simming games task earlier in this run would otherwise
-  // leave the bot simulating every move of every leavegen game.
+  // Both seats are the job's player, applied the way the opening-rack
+  // executor applies its one: on top of the reset, so nothing an earlier task
+  // left -- a simming games task's plies, say -- plays a leavegen game.
+  // birdtest only accepts a static player sorting on equity for this job type;
+  // its leaves, rack info table and movegen margin are not read here.
   for (int player_index = 0; player_index < 2; player_index++) {
-    config_contribute_reset_player_settings(config, player_index, error_stack);
+    config_contribute_apply_player_settings(config, player, player_index,
+                                            error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }

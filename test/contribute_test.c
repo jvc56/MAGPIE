@@ -602,8 +602,8 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
       CONTRIBUTE_KEY_NUM_GAMES,
       CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY,
       CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_SHA256,
-      CONTRIBUTE_KEY_USE_WORDMAP,
       CONTRIBUTE_KEY_BINGO_BONUS,
+      CONTRIBUTE_KEY_PLAYER,
   };
   assert_fixture_has_keys(request, leave_keys,
                           sizeof(leave_keys) / sizeof(leave_keys[0]),
@@ -611,6 +611,14 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   // The generation's rack target is server-only state; a client that
   // required it would fail every leave_generation task.
   assert(!json_object_get(request, "target_rack_count"));
+  assert(!json_object_get(request, "target_rack_counts"));
+  // Both seats are the job's player, applied as the other executors apply
+  // theirs, so it states every key they read. Its wordmap flag is the one the
+  // executor reads: the request no longer carries one of its own.
+  assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER),
+                          player_keys, num_player_keys,
+                          "leave_generation player");
+  assert(!json_object_get(request, CONTRIBUTE_KEY_USE_WORDMAP));
   json_destroy(leave);
 
   // A game_pairs task is run by the games executor, told apart only by its

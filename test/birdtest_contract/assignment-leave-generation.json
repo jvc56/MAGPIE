@@ -56,7 +56,33 @@
     "previous_artifact_key": "leaves/9c2f1a48-5f3b-4c2a-8a7d-1b0e3f7c9d20/generation-0.klv2",
     "previous_artifact_sha256": "5b1c0f3e9a2d47c8b6e1f0a3d5c7e9b2a4f6d8c0e2b4a6c8d0f2e4a6b8c0d2e4",
     "num_games": 10000,
-    "use_wordmap": true,
-    "bingo_bonus": 50
+    "bingo_bonus": 50,
+    "player": {
+      "name": "static-NWL23@20251004",
+      "recorder_type": "best",
+      "sort_strategy": "equity",
+      "lexicon": "NWL23",
+      "leaves": "NWL23",
+      "max_iterations": null,
+      "num_plies": 0,
+      "num_plies_recorded": 2,
+      "num_plays": 100,
+      "num_plays_recorded": 10,
+      "stopping_pct": null,
+      "use_inference": null,
+      "time_limit_secs": null,
+      "use_wordmap": true,
+      "use_rit": false,
+      "rit_name": null,
+      "min_play_iterations": null,
+      "threshold": null,
+      "sampling_rule": null,
+      "inference_margin": null,
+      "utility_w_winpct": null,
+      "utility_w_spread": null,
+      "utility_spread_scale": null,
+      "win_pct_model": null,
+      "movegen_margin": 5.0
+    }
   }
 }
