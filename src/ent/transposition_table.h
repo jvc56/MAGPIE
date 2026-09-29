@@ -42,13 +42,13 @@ typedef struct TTEntry {
 static_assert(sizeof(TTEntry) == TTENTRY_SIZE_BYTES,
               "TTEntry must be exactly 16 bytes for lockless hashing");
 
-inline static uint64_t ttentry_full_hash(TTEntry t, uint64_t index,
-                                         int size_power) {
-  // Reconstruct hash from 40 stored bits + index bits.
-  // On large tables (size_power >= 24) all 64 bits are recovered.
-  // On smaller tables a few high bits are lost, which is acceptable.
-  uint64_t stored_hash = ((uint64_t)(t.top_4_bytes) << 8) | t.fifth_byte;
-  return (stored_hash << size_power) | index;
+// Only 40 bits of the hash are stored (the bits above the index). A table with
+// fewer than 2^24 entries (WASM) has more than 40 such bits, so the entry
+// matches when it holds the low 40 of them.
+#define TT_STORED_HASH_MASK ((1ULL << 40) - 1)
+
+inline static uint64_t ttentry_stored_hash(TTEntry t) {
+  return ((uint64_t)(t.top_4_bytes) << 8) | t.fifth_byte;
 }
 
 inline static uint8_t ttentry_flag(TTEntry t) { return t.flag_and_depth >> 6; }
@@ -165,8 +165,8 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
   memcpy(&entry, &key_half, 8);
   entry.tiny_move = data;
 
-  uint64_t full_hash = ttentry_full_hash(entry, idx, tt->size_power_of_2);
-  if (full_hash != zval) {
+  const uint64_t want = (zval >> tt->size_power_of_2) & TT_STORED_HASH_MASK;
+  if (ttentry_stored_hash(entry) != want) {
     if (ttentry_valid(entry)) {
       // There is another unrelated node at this position. This is a
       // type 2 collision.
@@ -187,7 +187,7 @@ static inline void transposition_table_store(TranspositionTable *tt,
                                              uint64_t zval, TTEntry tentry) {
   uint64_t idx = zval & tt->size_mask;
   // Store top 40 bits of hash (shift right by size_power to remove index bits)
-  uint64_t stored_hash = zval >> tt->size_power_of_2;
+  uint64_t stored_hash = (zval >> tt->size_power_of_2) & TT_STORED_HASH_MASK;
   tentry.top_4_bytes = (uint32_t)(stored_hash >> 8);
   tentry.fifth_byte = (uint8_t)(stored_hash & 0xFF);
   atomic_fetch_add(&tt->created, 1);
