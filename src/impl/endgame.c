@@ -256,6 +256,11 @@ struct EndgameCtxWorker {
   PathMoveLists *path_lists_storage;
   EndgameCtx *solver;
   int current_iterative_deepening_depth;
+  // Counts heuristic events (depth-limited leaf evaluations and hits on
+  // transposition entries that are not pure). A search during which the count
+  // does not move proved its value from terminal positions only, so the value
+  // holds at any depth.
+  uint64_t impure_events;
   // Array of MoveUndo structures for incremental play/unplay. Negamax's moves
   // occupy the slots below requested_plies; the greedy leaf playout continues
   // from slot requested_plies. Sized so the playout always has
@@ -539,6 +544,10 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
   pv_line->num_moves = num_moves;
   small_move_list_destroy(move_list);
 }
+
+// TT depth stored for entries whose proof contains no heuristic leaf; it
+// satisfies every depth check, and 63 is the largest the entry can hold.
+enum { TT_PURE_DEPTH = 63 };
 
 static bool iterative_deepening_should_stop(EndgameCtx *solver);
 static bool check_depth_deadline(EndgameCtxWorker *worker);
@@ -2303,7 +2312,7 @@ static int32_t negamax_leaf_value(EndgameCtxWorker *worker, uint64_t node_key,
 static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
                              int depth, int32_t best_value, int32_t alpha_orig,
                              int32_t beta, int32_t on_turn_spread,
-                             uint64_t best_tiny_move) {
+                             uint64_t best_tiny_move, bool pure) {
   int16_t score = (int16_t)(best_value - on_turn_spread);
   uint8_t flag;
   TTEntry entry_to_store = {.score = score};
@@ -2314,7 +2323,8 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
   } else {
     flag = TT_EXACT;
   }
-  entry_to_store.flag_and_depth = (flag << 6) + (uint8_t)depth;
+  entry_to_store.flag_and_depth =
+      (flag << 6) + (uint8_t)(pure ? TT_PURE_DEPTH : depth);
   entry_to_store.tiny_move = best_tiny_move;
   transposition_table_store(worker->solver->transposition_table, node_key,
                             entry_to_store);
@@ -2652,6 +2662,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   }
 
   int32_t alpha_orig = alpha;
+  const uint64_t impure_at_entry = worker->impure_events;
 
   int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
   const Player *player_on_turn =
@@ -2669,6 +2680,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
     TTEntry tt_entry = transposition_table_lookup(
         worker->solver->transposition_table, probe_key);
     if (ttentry_valid(tt_entry) && ttentry_depth(tt_entry) >= (uint8_t)depth) {
+      if (ttentry_depth(tt_entry) != TT_PURE_DEPTH) {
+        worker->impure_events++;
+      }
       int16_t score = ttentry_score(tt_entry);
       uint8_t flag = ttentry_flag(tt_entry);
       // add spread back in; we subtract it when storing.
@@ -2710,6 +2724,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
   if (depth == 0 ||
       game_get_game_end_reason(worker->game_copy) != GAME_END_REASON_NONE) {
+    if (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
+      worker->impure_events++;
+    }
     // ABDADA: leave node before returning
     if (abdada_active) {
       transposition_table_leave_node(worker->solver->transposition_table,
@@ -2819,7 +2836,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
       if (worker->solver->transposition_table_optim) {
         negamax_tt_store(worker, node_key, depth, pass_best, alpha_orig, beta,
-                         on_turn_spread, pass_move.tiny_move);
+                         on_turn_spread, pass_move.tiny_move,
+                         worker->impure_events == impure_at_entry);
       }
 
       return pass_best;
@@ -2853,7 +2871,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
       if (worker->solver->transposition_table_optim) {
         negamax_tt_store(worker, node_key, depth, leaf_value, alpha_orig, beta,
-                         on_turn_spread, only_sm->tiny_move);
+                         on_turn_spread, only_sm->tiny_move,
+                         worker->impure_events == impure_at_entry);
       }
 
       arena_dealloc(worker->small_move_arena, sizeof(SmallMove));
@@ -3196,7 +3215,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   if (worker->solver->transposition_table_optim &&
       best_value != ABDADA_INTERRUPTED) {
     negamax_tt_store(worker, node_key, depth, best_value, alpha_orig, beta,
-                     on_turn_spread, best_tiny_move);
+                     on_turn_spread, best_tiny_move,
+                     worker->impure_events == impure_at_entry);
   }
 
   if (arena_alloced) {
@@ -3585,6 +3605,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // prior depth — otherwise prev_value is uninitialized and the window
     // is bogus. With ABDADA depth-jitter, threads with thread_index > 0
     // can start at depth > 1, so checking `ply > 1` is insufficient.
+    uint64_t impure_before_root = 0;
     if (use_aspiration && ply > start && !worker->solver->first_win_optim &&
         !worker->solver->initial_window_optim) {
       int32_t window = ASPIRATION_WINDOW;
@@ -3599,6 +3620,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
           break;
         }
 
+        impure_before_root = worker->impure_events;
         val = abdada_negamax(worker, initial_hash_key, ply, alpha, beta, &pv,
                              true, false, initial_opp_stuck_frac);
 
@@ -3622,6 +3644,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       }
     } else {
       // Full window search for depth 1 or when aspiration disabled
+      impure_before_root = worker->impure_events;
       val = abdada_negamax(worker, initial_hash_key, ply, alpha, beta, &pv,
                            true, false, initial_opp_stuck_frac);
     }
@@ -3632,6 +3655,10 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       break;
     }
 
+    // No heuristic leaf and no impure TT hit anywhere in this root search: the
+    // value is the game's exact minimax value, so deeper iterations would
+    // return the same thing.
+    const bool root_pure = worker->impure_events == impure_before_root;
     prev_value = val;
 
     // sort initial moves by valuation for next time.
@@ -3647,8 +3674,10 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     worker->best_pv = pv;
     worker->completed_depth = ply;
 
+    // A pure root search proves the value at every depth, so it is reported
+    // at the requested depth.
     endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
-                                    ply);
+                                    root_pure ? plies : ply);
 
     // Call per-ply callback (only this solver's main worker, ordinal 0, to
     // avoid race conditions).
@@ -3739,7 +3768,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
 
     // Signal other threads to stop when we complete the full search
-    if (ply == plies) {
+    if (ply == plies || root_pure) {
       atomic_store(&worker->solver->search_complete, 1);
     }
   }
