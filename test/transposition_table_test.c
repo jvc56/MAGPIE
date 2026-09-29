@@ -10,9 +10,9 @@ void test_transposition_table(void) {
   TranspositionTable *tt = transposition_table_create(0);
   assert(tt->size_power_of_2 == TT_MIN_SIZE_POWER);
 
-  // Use a hash < 2^61 so all stored bits survive the round-trip on both
-  // native (size_power=24, 0 bits lost) and WASM (size_power=21, 3 bits lost).
-  const uint64_t base_hash = 1234567890123456789ULL;
+  // The top bits are set: on small tables (WASM, size_power=21) they are not
+  // stored, and a lookup must still find the entry.
+  const uint64_t base_hash = 0xF234567890ABCDEFULL;
 
   TTEntry entry;
   ttentry_reset(&entry);
