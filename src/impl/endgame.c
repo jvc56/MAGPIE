@@ -547,7 +547,7 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
 
 // TT depth stored for entries whose proof contains no heuristic leaf; it
 // satisfies every depth check, and 63 is the largest the entry can hold.
-#define TT_PURE_DEPTH 63
+enum { TT_PURE_DEPTH = 63 };
 
 static bool iterative_deepening_should_stop(EndgameCtx *solver);
 static bool check_depth_deadline(EndgameCtxWorker *worker);
