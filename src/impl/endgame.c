@@ -350,6 +350,28 @@ static bool solver_needs_exact_root_values(const EndgameCtx *solver) {
          solver->per_root_move_callback != NULL;
 }
 
+// A solve with a real target depth, no clock and no consumer of intermediate
+// depths only needs the target: iterations of the other parity are skipped
+// (see iterative_deepening_skips_ply). A solve asked for MAX_SEARCH_DEPTH is
+// "as deep as it can get", and one under a time limit falls back to its last
+// completed depth, so both keep every iteration.
+static bool solver_steps_depth_by_two(const EndgameCtx *solver, int plies) {
+  return plies < MAX_SEARCH_DEPTH && solver->soft_time_limit <= 0.0 &&
+         solver->hard_time_limit <= 0.0 &&
+         !solver_needs_exact_root_values(solver) && !solver->first_win_optim &&
+         !solver->initial_window_optim;
+}
+
+// Iterations cost in pairs: depth 2k+1 and 2k+2 search about the same number of
+// nodes, and each pair costs roughly ten times the one before. The iteration
+// that does not share the target's parity mostly seeds the transposition table
+// for the next one, so stepping by two from the target is cheaper overall and
+// returns the same value. Depth 1 is always searched; it is nearly free and
+// orders the root moves.
+static bool iterative_deepening_skips_ply(int ply, int plies) {
+  return ply > 1 && ply < plies && ((plies - ply) & 1) != 0;
+}
+
 // Insert a value into a sorted (descending) top-K array.
 // Returns the Kth-best value (or -LARGE_VALUE if fewer than K values stored).
 static inline int32_t topk_insert(int32_t *topk, int *n, int k, int32_t val) {
@@ -3539,6 +3561,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
   }
 
+  const bool steps_by_two = solver_steps_depth_by_two(worker->solver, plies);
   worker->current_iterative_deepening_depth = 1;
   int start = 1;
   if (!worker->solver->iterative_deepening_optim) {
@@ -3564,6 +3587,9 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   }
 
   for (int ply = start; ply <= plies; ply++) {
+    if (steps_by_two && iterative_deepening_skips_ply(ply, plies)) {
+      continue;
+    }
     // Check if another thread has completed the full search
     if (iterative_deepening_should_stop(worker->solver)) {
       break;

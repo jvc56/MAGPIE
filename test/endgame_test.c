@@ -637,6 +637,98 @@ static void test_exhausted_tree_stops_early(void) {
   }
 }
 
+static void record_depth_mask_callback(int depth, int32_t value,
+                                       const PVLine *pv_line, const Game *game,
+                                       const PVLine *ranked_pvs,
+                                       int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  *(uint32_t *)user_data |= 1U << depth;
+}
+
+// Solves to a fixed depth. With a callback registered the solver must report
+// every depth; without one it may skip iterations of the other parity.
+static int solve_fixed_depth(const char *cgp, int plies, int threads,
+                             bool with_callback, uint32_t *depth_mask,
+                             int *reported_depth) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = config_get_game(config);
+  endgame_args.plies = plies;
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = threads;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.num_top_moves = 1;
+  if (with_callback) {
+    endgame_args.enable_pv_display = true;
+    endgame_args.per_ply_callback = record_depth_mask_callback;
+    endgame_args.per_ply_callback_data = depth_mask;
+  }
+  endgame_args.seed = 42;
+  *depth_mask = 0;
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const int score =
+      endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST)->score;
+  *reported_depth =
+      endgame_results_get_depth(endgame_results, ENDGAME_RESULT_BEST);
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+  return score;
+}
+
+// A fixed-depth solve with no callback steps by two from its target depth; it
+// must return the same score and report the target depth, and a solve with a
+// single-thread solve with a per-ply callback must still visit every depth.
+static void test_fixed_depth_stepping(void) {
+  const char *cgps[] = {
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20",
+      "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
+      "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
+      "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24"};
+  const int thread_counts[] = {1, 4};
+  for (int cgp_idx = 0; cgp_idx < 2; cgp_idx++) {
+    for (int plies = 4; plies <= 6; plies++) {
+      for (int thread_idx = 0; thread_idx < 2; thread_idx++) {
+        uint32_t plain_mask;
+        uint32_t stepped_mask;
+        int plain_depth;
+        int stepped_depth;
+        const int plain_score = solve_fixed_depth(
+            cgps[cgp_idx], plies, thread_counts[thread_idx],
+            /*with_callback=*/true, &plain_mask, &plain_depth);
+        const int stepped_score = solve_fixed_depth(
+            cgps[cgp_idx], plies, thread_counts[thread_idx],
+            /*with_callback=*/false, &stepped_mask, &stepped_depth);
+        assert(plain_score == stepped_score);
+        assert(plain_depth == plies);
+        assert(stepped_depth == plies);
+        // With several threads another worker can finish a depth first, so
+        // only a single-thread solve is guaranteed to report every depth.
+        for (int depth = 1; thread_counts[thread_idx] == 1 && depth <= plies;
+             depth++) {
+          assert((plain_mask & (1U << depth)) != 0);
+        }
+      }
+    }
+  }
+}
+
 // Regression for transposition-table bound handling at PV nodes in
 // abdada_negamax. Before the fix, a PV node whose window a stored bound had
 // closed (alpha >= beta) kept searching: its children ran with inverted
@@ -1841,6 +1933,7 @@ void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
   test_exhausted_tree_stops_early();
+  test_fixed_depth_stepping();
   test_solve_standard();
   test_incremental_movegen_identical();
   test_path_move_lists();
