@@ -155,6 +155,7 @@ typedef struct MoveGen {
   // MoveGenArgs.skip_exchanges.
   uint32_t tiles_played_mask;
   bool skip_exchanges;
+  Equity best_slack;
   bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
@@ -329,6 +330,8 @@ typedef struct MoveGenArgs {
   // Records no exchanges (their leave walk still runs when leaves are
   // needed).
   bool skip_exchanges;
+  // Inexact search: prune bounds within this much above the best found.
+  Equity best_slack;
   // Disables the PAT term even when the player has weights loaded.
   // Set by the inference paths, which build their own equity thresholds
   // from score plus leave and would misclassify moves whose recorded

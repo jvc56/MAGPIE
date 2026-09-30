@@ -541,7 +541,7 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   if (cutoff == EQUITY_MAX_VALUE) {
     return false;
   }
-  return highest_possible_value < cutoff;
+  return highest_possible_value < cutoff + gen->best_slack;
 }
 
 static inline void record_exchange(MoveGen *gen) {
@@ -3492,6 +3492,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->tiles_played_mask =
       (args->tiles_played_mask != 0) ? args->tiles_played_mask : ~(uint32_t)0;
   gen->skip_exchanges = args->skip_exchanges;
+  gen->best_slack = args->best_slack;
   gen->lane_cover_masks = args->lane_cover_masks;
 }
 

@@ -123,7 +123,7 @@ void test_pat_threat(void) {
   FILE *out = fopen(out_path, "w");
   assert(out);
   fprintf(out, "pos,move,reply_score,reply_equity_pick_score,partial_score,"
-               "partial_hinge_score\n");
+               "partial_hinge_score,offense_null,offense_after,offense_base\n");
   const bool full = pth_env_long("PTH_FULL", 1) != 0;
   // PTH_VARIANTS: comma-separated search variants timed against each other
   // on every candidate and rack (full board, best by score): "all" (every
@@ -247,6 +247,24 @@ void test_pat_threat(void) {
               shuffled[pick] = shuffled[draw_idx];
               shuffled[draw_idx] = tile;
               rack_add_letter(&racks[rack_idx], tile);
+            }
+          }
+          // Offense: our follow-up racks are the candidate's leave plus a
+          // prefix of a shuffled unseen pool, the same shuffle per rack for
+          // every candidate of the position.
+          const bool offense = pth_env_long("PTH_OFFENSE", 1) != 0;
+          MachineLetter(*draw_pool)[PTH_POOL_CAP] = malloc_or_die(
+              sizeof(MachineLetter) * PTH_POOL_CAP * (size_t)num_racks);
+          for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+            memcpy(draw_pool[rack_idx], pool,
+                   sizeof(MachineLetter) * (size_t)pool_size);
+            for (int draw_idx = 0; draw_idx < pool_size - 1; draw_idx++) {
+              const int pick =
+                  draw_idx +
+                  (int)(pth_next(&rng) % (uint64_t)(pool_size - draw_idx));
+              const MachineLetter tile = draw_pool[rack_idx][pick];
+              draw_pool[rack_idx][pick] = draw_pool[rack_idx][draw_idx];
+              draw_pool[rack_idx][draw_idx] = tile;
             }
           }
           // Pass 1: the candidates, and the premium units any of them
@@ -395,10 +413,94 @@ void test_pat_threat(void) {
               hinge_sum +=
                   partial > baseline[rack_idx] ? partial : baseline[rack_idx];
             }
-            fprintf(out, "%ld,%s,%.3f,%.3f,%.3f,%.3f\n", current_pos,
-                    cand_move[valid_idx[valid]], score_sum / num_racks,
-                    pick_sum / num_racks, partial_sum / num_racks,
-                    hinge_sum / num_racks);
+            double null_sum = 0.0;
+            double after_sum = 0.0;
+            double base_sum = 0.0;
+            if (offense && num_variants == 0) {
+              const int our_idx = game_get_player_on_turn_index(game);
+              Rack leave;
+              rack_copy(&leave,
+                        player_get_rack(game_get_player(game, our_idx)));
+              for (int tile_idx = 0;
+                   tile_idx < move_get_tiles_length(moves[valid]); tile_idx++) {
+                MachineLetter tile = move_get_tile(moves[valid], tile_idx);
+                if (tile == PLAYED_THROUGH_MARKER) {
+                  continue;
+                }
+                rack_take_letter(
+                    &leave, get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile);
+              }
+              const int leave_size = rack_get_total_letters(&leave);
+              const int draw_count = RACK_SIZE - leave_size < pool_size
+                                         ? RACK_SIZE - leave_size
+                                         : pool_size;
+              pth_skip_exchanges = true;
+              Game *null_game = game_duplicate(after);
+              Move *pass_move = move_create();
+              move_set_as_pass(pass_move);
+              play_move(pass_move, null_game, NULL);
+              for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+                Rack *our_rack =
+                    player_get_rack(game_get_player(null_game, our_idx));
+                rack_copy(our_rack, &leave);
+                for (int draw_idx = 0; draw_idx < draw_count; draw_idx++) {
+                  rack_add_letter(our_rack, draw_pool[rack_idx][draw_idx]);
+                }
+                if (pth_best(null_game, MOVE_SORT_SCORE, list, reply, 0,
+                             NULL) &&
+                    move_get_type(reply) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+                  null_sum += equity_to_double(move_get_score(reply));
+                }
+                Game *reply_game = game_duplicate(after);
+                rack_copy(
+                    player_get_rack(game_get_player(
+                        reply_game, game_get_player_on_turn_index(reply_game))),
+                    &racks[rack_idx]);
+                if (pth_best(reply_game, MOVE_SORT_SCORE, list, reply, 0,
+                             NULL) &&
+                    move_get_type(reply) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+                  play_move(reply, reply_game, NULL);
+                } else {
+                  play_move(pass_move, reply_game, NULL);
+                }
+                our_rack =
+                    player_get_rack(game_get_player(reply_game, our_idx));
+                rack_copy(our_rack, &leave);
+                for (int draw_idx = 0; draw_idx < draw_count; draw_idx++) {
+                  rack_add_letter(our_rack, draw_pool[rack_idx][draw_idx]);
+                }
+                if (pth_best(reply_game, MOVE_SORT_SCORE, list, reply, 0,
+                             NULL) &&
+                    move_get_type(reply) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+                  after_sum += equity_to_double(move_get_score(reply));
+                }
+                game_destroy(reply_game);
+              }
+              Game *base_game = game_duplicate(game);
+              for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+                Rack *our_rack =
+                    player_get_rack(game_get_player(base_game, our_idx));
+                rack_copy(our_rack, &leave);
+                for (int draw_idx = 0; draw_idx < draw_count; draw_idx++) {
+                  rack_add_letter(our_rack, draw_pool[rack_idx][draw_idx]);
+                }
+                if (pth_best(base_game, MOVE_SORT_SCORE, list, reply, 0,
+                             NULL) &&
+                    move_get_type(reply) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+                  base_sum += equity_to_double(move_get_score(reply));
+                }
+              }
+              game_destroy(base_game);
+              pth_skip_exchanges = false;
+              move_destroy(pass_move);
+              game_destroy(null_game);
+            }
+            fprintf(out, "%ld,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+                    current_pos, cand_move[valid_idx[valid]],
+                    score_sum / num_racks, pick_sum / num_racks,
+                    partial_sum / num_racks, hinge_sum / num_racks,
+                    null_sum / num_racks, after_sum / num_racks,
+                    base_sum / num_racks);
             game_destroy(after);
           }
           for (int valid = 0; valid < num_valid; valid++) {
@@ -406,6 +508,7 @@ void test_pat_threat(void) {
           }
           (void)fflush(out);
           free(racks);
+          free(draw_pool);
         }
       }
       position_index++;

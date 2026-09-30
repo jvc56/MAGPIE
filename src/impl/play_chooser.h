@@ -45,6 +45,14 @@ typedef struct PlayChooserStrategy {
   play_chooser_eval_t endgame_eval;
   int sim_plies;          // 0 = default
   int sim_max_candidates; // 0 = default
+  // Optional candidate source for SIM: called with the position and an empty
+  // list of capacity sim_max_candidates, it fills the list and returns true,
+  // or returns false to fall back to the top sim_max_candidates by equity.
+  bool (*sim_candidates_fn)(void *context, Game *game, MoveList *out_list);
+  void *sim_candidates_context;
+  // Samples each candidate gets before the sim starts focusing on the
+  // leaders; 0 = default.
+  int sim_min_play_iterations;
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;

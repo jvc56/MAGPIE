@@ -38,8 +38,12 @@
 #include <stdlib.h>
 
 enum {
-  PLAY_CHOOSER_DEFAULT_SIM_PLIES = 2,
+  PLAY_CHOOSER_DEFAULT_SIM_PLIES = 4,
   PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES = 15,
+  // With a single sample per candidate, top-two sampling can settle on a
+  // lucky early leader and starve the best play; a short uniform warm-up
+  // avoids that at a negligible share of the budget.
+  PLAY_CHOOSER_DEFAULT_SIM_MIN_PLAY_ITERATIONS = 30,
   // Assume roughly four tiles per play across both players when splitting
   // the remaining clock into per-move budgets.
   PLAY_CHOOSER_TILES_PER_PLAY_PAIR = 8,
@@ -448,19 +452,26 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
   MoveList *move_list = play_chooser->move_list;
   move_list_reset(move_list);
-  const MoveGenArgs gen_args = {
-      .game = game,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .move_list = move_list,
-      .tiles_played_bv = NULL,
-      .initial_tiles_bv = 0,
-  };
-  generate_moves(&gen_args);
+  const bool custom_candidates =
+      strategy->sim_candidates_fn != NULL &&
+      strategy->sim_candidates_fn(strategy->sim_candidates_context, game,
+                                  move_list);
+  if (!custom_candidates) {
+    move_list_reset(move_list);
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        .move_list = move_list,
+        .tiles_played_bv = NULL,
+        .initial_tiles_bv = 0,
+    };
+    generate_moves(&gen_args);
+  }
   const int num_candidates = move_list_get_count(move_list);
   if (num_candidates == 0) {
     return false;
@@ -471,6 +482,10 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   }
 
   const int num_threads = play_chooser_get_num_threads(strategy);
+  const int min_play_iterations =
+      strategy->sim_min_play_iterations > 0
+          ? strategy->sim_min_play_iterations
+          : PLAY_CHOOSER_DEFAULT_SIM_MIN_PLAY_ITERATIONS;
   const int sim_plies = strategy->sim_plies > 0
                             ? strategy->sim_plies
                             : PLAY_CHOOSER_DEFAULT_SIM_PLIES;
@@ -492,7 +507,8 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*max_num_display_plays=*/num_candidates,
       /*max_num_display_plies=*/sim_plies, strategy->seed,
       /*max_iterations=*/(uint64_t)1e15,
-      /*min_play_iterations=*/1, /*scond=*/0.0, BAI_THRESHOLD_NONE,
+      /*min_play_iterations=*/(uint64_t)min_play_iterations, /*scond=*/0.0,
+      BAI_THRESHOLD_NONE,
       /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
