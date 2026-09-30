@@ -10,8 +10,9 @@ void test_transposition_table(void) {
   TranspositionTable *tt = transposition_table_create(0);
   assert(tt->size_power_of_2 == TT_MIN_SIZE_POWER);
 
-  // The top bits are set: on small tables (WASM, size_power=21) they are not
-  // stored, and a lookup must still find the entry.
+  // The top bits are set so this hash would be lost if the stored bits were
+  // reconstructed and compared in full: only 40 hash bits are stored, so
+  // small tables (WASM, size_power=21) drop the top bits of the hash.
   const uint64_t base_hash = 0xF234567890ABCDEFULL;
 
   TTEntry entry;
@@ -46,6 +47,54 @@ void test_transposition_table(void) {
   assert(te2.tiny_move == 0);
   assert(atomic_load(&tt->t2_collisions) == 1);
   assert(atomic_load(&tt->lookups) == 3);
+
+  // Entries whose hashes share a bucket but differ in the stored bits coexist,
+  // up to the bucket size.
+  const uint64_t bucket_bits = 0x5A5A5AULL & tt->bucket_mask;
+  uint64_t bucket_hashes[TT_BUCKET_SIZE + 1];
+  for (int i = 0; i <= TT_BUCKET_SIZE; i++) {
+    bucket_hashes[i] = ((uint64_t)(i + 1) << tt->index_bits) | bucket_bits;
+  }
+  for (int i = 0; i < TT_BUCKET_SIZE; i++) {
+    TTEntry e;
+    ttentry_reset(&e);
+    e.score = (int16_t)i;
+    e.flag_and_depth = (uint8_t)((TT_EXACT << 6) + 5 * (i + 1));
+    transposition_table_store(tt, bucket_hashes[i], e);
+  }
+  for (int i = 0; i < TT_BUCKET_SIZE; i++) {
+    const TTEntry e = transposition_table_lookup(tt, bucket_hashes[i]);
+    assert(ttentry_valid(e));
+    assert(ttentry_score(e) == i);
+    assert(ttentry_depth(e) == 5 * (i + 1));
+  }
+
+  // Storing the same position again replaces its entry in place.
+  TTEntry same;
+  ttentry_reset(&same);
+  same.score = 99;
+  same.flag_and_depth = (TT_LOWER << 6) + 1;
+  transposition_table_store(tt, bucket_hashes[1], same);
+  const TTEntry same_lu = transposition_table_lookup(tt, bucket_hashes[1]);
+  assert(ttentry_score(same_lu) == 99);
+  assert(ttentry_depth(same_lu) == 1);
+  assert(ttentry_valid(transposition_table_lookup(tt, bucket_hashes[0])));
+
+  // A new position in a full bucket evicts the shallowest entry (now the one
+  // that was just overwritten with depth 1) and keeps the deeper ones.
+  TTEntry extra;
+  ttentry_reset(&extra);
+  extra.score = 77;
+  extra.flag_and_depth = (TT_EXACT << 6) + 30;
+  transposition_table_store(tt, bucket_hashes[TT_BUCKET_SIZE], extra);
+  assert(ttentry_score(transposition_table_lookup(
+             tt, bucket_hashes[TT_BUCKET_SIZE])) == 77);
+  assert(!ttentry_valid(transposition_table_lookup(tt, bucket_hashes[1])));
+  for (int i = 0; i < TT_BUCKET_SIZE; i++) {
+    if (i != 1) {
+      assert(ttentry_valid(transposition_table_lookup(tt, bucket_hashes[i])));
+    }
+  }
 
   transposition_table_destroy(tt);
 }
