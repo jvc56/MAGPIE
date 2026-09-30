@@ -1,0 +1,10 @@
+{
+  "positions": 400,
+  "finished_epoch": 1790789431.860363,
+  "page": "/Users/olaugh/Documents/ChatGPT/Magpie/blocking-ahead-40-80-20260930/candidate-pools-debug.html",
+  "report": "/Users/olaugh/Documents/ChatGPT/Magpie/blocking-ahead-40-80-20260930/REPORT.html",
+  "reviewed_postprocessing_complete": true,
+  "reviewed_epoch": 1790789460.4295528,
+  "browser_verified": true,
+  "final_audit_epoch": 1790789889.225804
+}

@@ -1,0 +1,91 @@
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805241
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805242
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/DEILNOR 0/0 0 -lex CSW21;
+seed: 1790805243
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805241
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805242
+loaded config with command: cgp 15/15/15/15/15/15/15/7AT6/15/15/15/15/15/15/15 AEQ/IZ 0/0 0 -lex CSW21;
+seed: 1790805243
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805242
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805243
+loaded config with command: cgp 15/15/10FOLD1/15/15/15/15/15/15/15/15/15/15/15/15 DEGUUVW/AINRRST 0/0 0 -lex CSW21;
+seed: 1790805244
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805244
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805245
+loaded config with command: cgp 12E2/12J2/12Q2/12V2/15/15/15/15/15/15/15/15/15/5V9/8MM5 AABDDET/CCH 300/300 0 -lex CSW21;
+seed: 1790805246
+[2026-09-30 14:54:03] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 1 (T) stuck tiles: T
+[2026-09-30 14:54:04] WARN  src/impl/endgame.c:2314: Stuck-tile mode (67%): Player 1 (LLN) stuck tiles: LL
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805245
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805246
+loaded config with command: cgp 15/15/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 IFFGWWY/TRANQ 300/300 0 -lex CSW21;
+seed: 1790805247
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (36%): Player 1 (FFGWWY) stuck tiles: WW
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 1 (FFGIWWY) stuck tiles: FFGIWWY
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 1 (FFGIWWY) stuck tiles: FFGIWWY
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805246
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805247
+loaded config with command: cgp 15/15/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 ZFFWW/AT 300/300 0 -lex CSW21;
+seed: 1790805248
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 1 (FFWWZ) stuck tiles: FFWWZ
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 1 (FFWW) stuck tiles: FFWW
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805246
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805247
+loaded config with command: cgp 15/7A7/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 ZC/QC 300/300 0 -lex CSW21;
+seed: 1790805248
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 1 (C) stuck tiles: C
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 1 (C) stuck tiles: C
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805246
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805247
+loaded config with command: cgp 15/7A7/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 ZC/QC 300/300 0 -lex CSW21;
+seed: 1790805248
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (77%): Player 2 (CQ) stuck tiles: Q
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 2 (CQ) stuck tiles: CQ
+[2026-09-30 14:54:05] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 2 (CQ) stuck tiles: CQ
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805246
+loaded config with command: set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805247
+loaded config with command: cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24;
+seed: 1790805248
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805254
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1
+seed: 1790805255
+loaded config with command: cgp 15/15/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 IFFGWWY/AEILNOT 300/300 0 -lex CSW21;
+seed: 1790805256
+loaded config with command: cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24;
+seed: 1790805257
+loaded config with command: cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/12NaM/12ATE/13ST/14H ACEINO/DEIINOS 361/397 0 -lex CSW24;
+seed: 1790805258
+loaded config with command: cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/12NaM/12ATE/13ST/14H ACEINO/DEIINOS 361/397 0 -lex CSW24;
+seed: 1790805259
+loaded config with command: cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24;
+seed: 1790805260
+[2026-09-30 14:54:21] WARN  src/impl/endgame.c:2314: Stuck-tile mode (100%): Player 1 (K) stuck tiles: K
+loaded config with command: cgp 15/15/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 IFFGWWY/AEILNOT 300/300 0 -lex CSW21;
+seed: 1790805261
+[2026-09-30 14:54:22] WARN  src/impl/endgame.c:2314: Stuck-tile mode (61%): Player 1 (FFGIWWY) stuck tiles: GWWY
+[2026-09-30 14:54:22] WARN  src/impl/endgame.c:2314: Stuck-tile mode (91%): Player 1 (FFGWWY) stuck tiles: FFWWY
+loaded config with command: cgp 15/15/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 IFFGWWY/AEILNOT 300/300 0 -lex CSW21;
+seed: 1790805262
+[2026-09-30 14:54:24] WARN  src/impl/endgame.c:2314: Stuck-tile mode (91%): Player 1 (FFGWWY) stuck tiles: FFWWY
+[2026-09-30 14:54:25] WARN  src/impl/endgame.c:2314: Stuck-tile mode (61%): Player 1 (FFGIWWY) stuck tiles: GWWY
+loaded config with command: cgp 15/15/15/15/5VMV7/6Y8/15/15/15/15/15/15/15/15/15 IFFGWWY/AEILNOT 300/300 0 -lex CSW21;
+seed: 1790805263

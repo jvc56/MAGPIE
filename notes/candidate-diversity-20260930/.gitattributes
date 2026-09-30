@@ -1,0 +1,5 @@
+# Keep original evidence bytes and terminal transcripts intact.
+*.csv -text whitespace=cr-at-eol
+*.log -text -diff
+*.patch -text -diff
+*.tar.gz -text -diff

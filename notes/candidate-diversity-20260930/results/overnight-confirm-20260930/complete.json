@@ -1,0 +1,11 @@
+{
+  "finished_epoch": 1790769033.423893,
+  "paired_positions": 1200,
+  "full_confirmation_sample": true,
+  "deep_references": 47,
+  "report": "/Users/olaugh/Documents/ChatGPT/Magpie/overnight-confirm-20260930/REPORT.html",
+  "page": "/Users/olaugh/Documents/ChatGPT/Magpie/overnight-confirm-20260930/candidate-pools-debug.html",
+  "analysis_and_browser_verified": true,
+  "finalized_after_io_recovery": true,
+  "finalizer_pid": 36409
+}

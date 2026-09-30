@@ -1,0 +1,25 @@
+{
+  "exit_code": 0,
+  "arms": [
+    "reference",
+    "static25",
+    "static_blocking_count",
+    "threat_wide"
+  ],
+  "counts": {
+    "static_blocking_count": [
+      40
+    ],
+    "threat_wide": [
+      40
+    ],
+    "reference": [
+      120
+    ],
+    "static25": [
+      25
+    ]
+  },
+  "rows": 225,
+  "purpose": "Separate 200ms plumbing smoke test; completed study results unchanged."
+}

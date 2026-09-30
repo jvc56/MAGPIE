@@ -1,0 +1,48 @@
+{
+  "authorized": "User chose Extend overnight, through 7am September 30 Pacific, 1200 independent positions.",
+  "deadline_epoch": 1790776800,
+  "deadline_local": "2026-09-30 07:00 America/Los_Angeles",
+  "locked_epoch": 1790734451.268372,
+  "planned_positions": 1200,
+  "one_position_per_independent_game": true,
+  "population": "CSW24 no-PAT static autoplay; occupied board; bag >=7; at least 50 static candidates.",
+  "strata": {
+    "early_bag_60_plus": 400,
+    "middle_bag_30_59": 400,
+    "late_bag_7_29": 400
+  },
+  "sampling": "Game index assigns stratum in rotation. Uniform randomized order of positions in that stratum; first eligible position. No sim outcomes used. Fresh reserve games replace missing strata.",
+  "primary": "setup_wide versus static_setup_count, exactly equal candidate counts; paired selected-play win probability difference in an independent 60-second 4-ply reference.",
+  "analysis": "All 1200 positions including unchanged choices. Two-sided paired t test alpha 0.05, 95% position bootstrap, phase estimates exploratory. Report incomplete if deadline prevents full sample.",
+  "interpretation": "Balanced position-level sim-policy study, not natural turn-weighting or full played-game strength.",
+  "selection_ms": 15000,
+  "selection_cutoff": "disabled; identical pools reuse the same completed full-budget result",
+  "reference_ms": 60000,
+  "plies": 4,
+  "rollout": "no-PAT static",
+  "rack_samples": 64,
+  "blocking": "1.4 * mean(opponent best placement score after pass minus after candidate), paired racks",
+  "setup": "0.75 * mean(our best next-turn placement after candidate/opponent reply minus after pass/opponent reply); same candidate leave/refill; opponent terminal reply gives next-turn score zero",
+  "conditioned_refills": "Exclude sampled opponent rack; same refill in both setup branches",
+  "pool": "Top 120 static plus up to 5 exchange candidates within 35 points of the top play",
+  "admission": "Static top25 union adjusted top25 for blocking/setup; raw top5 per signal within25; combined union; adaptive counts",
+  "exploratory": [
+    "blocking/exchange/raw/combined vs static25",
+    "combined vs same count where enough static candidates",
+    "up to80 novel-choice positions, hash-selected without reference gains, 600s16ply validation"
+  ],
+  "deep_selection": "Any primary or matched policy selects outside static25. Up to80 positions by SHA256(seed,pos), outcome blind. Validate all matched static-prefix candidates and all selected plays.",
+  "deadline_policy": "Main waits for prior rerun completion, stops starting positions 2h before deadline. Matched stops starting positions 15min before deadline. Only complete-position intersection analyzed if incomplete. Deep waves start only if 11min remain.",
+  "seeds": {
+    "games": 202609300700,
+    "sample": 202609300701,
+    "sim": 202609300702,
+    "deep": 202609300703
+  },
+  "binary_sha256": "c4daae223b33dae7ea12fe6c1eb24eeef25d58f88e2d56c71294264a53084677",
+  "harness_sha256": "1066598f611a96bf458bb2f18c302ddd17b548d5b6981e7e9bda42605ffc8df5",
+  "original_rerun": "/Users/olaugh/sources/magpie-pat-postx/postx/threatgames/pass_relative_20260929",
+  "weights_locked_before_outcomes": true,
+  "matched_identical_pool_rule": "If a matched static control contains exactly the same candidates as a primary policy, use the original completed full-15s pool result for both. Retain the independent rerun raw records; matched_effective.csv records the prespecified identical-pool reuse. This removes timing noise from the candidate-diversity comparison.",
+  "finalized_before_fresh_sim_epoch": 1790735079.272073
+}

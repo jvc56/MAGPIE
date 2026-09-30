@@ -1,0 +1,398 @@
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex NWL20 -s1 score -s2 score -r1 all -r2 all -numplays 1
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex NWL20 -s1 score -s2 score -wmp false
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex NWL20 -s1 score -s2 score -wmp false
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex CSW21 -wmp false -s1 score -s2 score
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity -r1 best -r2 best -numplays 1
+seed: 1790805237
+loaded config with command: set -l2 CSW21 -l1 NWL20 -k2 CSW21 -k1 NWL20 -s1 equity -s2 equity -r1 best -r2 best -numplays 1
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity -r1 best -r2 best -numplays 1 -w1 true
+seed: 1790805237
+loaded config with command: set -l2 CSW21 -l1 NWL20 -k2 CSW21 -k1 NWL20 -s1 equity -s2 equity -r1 best -r2 best -numplays 1
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity -r1 best -r2 best -numplays 1
+seed: 1790805237
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805236
+loaded config with command: set -lex CSW21_alpha -wmp false -s1 equity -s2 equity -r1 best -r2 best -numplays 1 -var wordsmog
+seed: 1790805237
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0
+seed: 1790805238
+loaded config with command: set -ld english_blank_is_5
+seed: 1790805239
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0
+seed: 1790805240
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1
+seed: 1790805238
+loaded config with command: set -ld english_blank_is_5
+seed: 1790805239
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 E?INAOI/ 0/0 0
+seed: 1790805240
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  AEIINO?  0    1:  8C EpINAOI  82 79.90 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (37v | 55c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? A A A A A A A A B     
+ 4┃＇　　－　　　＇　　　－　　＇┃   B C C D D D D E E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E F F     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   G G G H H I I I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I J K L L L L M M     
+ 8┃＝　　＇　　　－　　　＇　　＝┃   N N N N N O O O O O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O P P Q R R R R R     
+10┃　＂　　　＂　　　＂　　　＂　┃   R S S S S T T T T T     
+11┃　　　　－　　　　　－　　　　┃   T U U U U V V W W X     
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805241
+loaded config with command: set -bb 40
+seed: 1790805242
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0
+seed: 1790805243
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  BISTUUU  0    1:  8D BUSUUTI  64 63.30 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (38v | 53c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B C C D D D D E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F F G G G H H I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I J K L L L     
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L M M N N N N N N O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O O O P P Q     
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R R R R S S S T     
+11┃　　　　－　　　　　－　　　　┃   T T T T U V V W W X     
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805244
+loaded config with command: set -lex NWL20
+seed: 1790805245
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0
+seed: 1790805246
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  BISTUUU  0    1:  (exch BUUU) IST 0 13.03 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (38v | 53c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B C C D D D D E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F F G G G H H I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I J K L L L     
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L M M N N N N N N O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O O O P P Q     
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R R R R S S S T     
+11┃　　　　－　　　　　－　　　　┃   T T T T U V V W W X     
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805247
+loaded config with command: set -s1 score
+seed: 1790805248
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  BISTUUU  0    1:  8E BITS UUU 12 12.00 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (38v | 53c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B C C D D D D E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F F G G G H H I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I J K L L L     
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L M M N N N N N N O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O O O P P Q     
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R R R R S S S T     
+11┃　　　　－　　　　　－　　　　┃   T T T T U V V W W X     
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805249
+loaded config with command: set -bdn quadruple_word_opening15 -bb 50
+seed: 1790805250
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DITZIER/ 0/0 0
+seed: 1790805251
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  DEIIRTZ  0    1:  8D DITZIER  126 126.00 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (39v | 52c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B B C C D D D E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E F     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F G G G H H I I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I J K L L L L M     
+ 8┃＝　　＇　　　～　　　＇　　＝┃   M N N N N N N O O O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O P P Q R R     
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R S S S S T T T     
+11┃　　　　－　　　　　－　　　　┃   T T U U U U V V W W     
+12┃＇　　－　　　＇　　　－　　＇┃   X Y Y                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805252
+loaded config with command: set -lex CSW21_alpha -wmp false -var wordsmog -bdn standard15
+seed: 1790805253
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 DITZIER/ 0/0 0
+seed: 1790805254
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  DEIIRTZ  0    1:  8B DEZIIRT  104 104.00 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (39v | 52c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B B C C D D D E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E F     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F G G G H H I I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I J K L L L L M     
+ 8┃＝　　＇　　　－　　　＇　　＝┃   M N N N N N N O O O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O P P Q R R     
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R S S S S T T T     
+11┃　　　　－　　　　　－　　　　┃   T T U U U U V V W W     
+12┃＇　　－　　　＇　　　－　　＇┃   X Y Y                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805255
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1
+seed: 1790805238
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0
+seed: 1790805239
+loaded config with command: set -bb 40
+seed: 1790805240
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  BISTUUU  0    1:  8D BUSUUTI  64 63.30 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (38v | 53c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B C C D D D D E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F F G G G H H I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I J K L L L     
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L M M N N N N N N O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O O O P P Q     
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R R R R S S S T     
+11┃　　　　－　　　　　－　　　　┃   T T T T U V V W W X     
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805241
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0
+seed: 1790805242
+loaded config with command: set -bb 30
+seed: 1790805243
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  BISTUUU  0    1:  8D BUSUUTI  54 53.30 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (38v | 53c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B C C D D D D E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F F G G G H H I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I J K L L L     
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L M M N N N N N N O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O O O P P Q     
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R R R R S S S T     
+11┃　　　　－　　　　　－　　　　┃   T T T T U V V W W X     
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805244
+loaded config with command: cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BUSUUTI/ 0/0 0
+seed: 1790805245
+loaded config with command: set -bb 300
+seed: 1790805246
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  BISTUUU  0    1:  8D BUSUUTI  324 323.30 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 1 of 1 plays
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (38v | 53c)  
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B C C D D D D E E     
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E     
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F F G G G H H I I I     
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I J K L L L     
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L M M N N N N N N O     
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O O O P P Q     
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R R R R S S S T     
+11┃　　　　－　　　　　－　　　　┃   T T T T U V V W W X     
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   
+13┃　　－　　　＇　＇　　　－　　┃                           
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805247
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -w1 true -w2 false
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -w1 false -w2 true
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 equity -r2 equity -numplays 100
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 equity -r2 equity -numplays 100
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex NWL23 -ld english -r2 equity -numplays 40 -mmargin 30 -sr tt -threads 16 -scond 95 -s2 equity -plies 5 -minp 100 -thres gk16 -it 1000000 -wmp true -s1 equity -r1 equity 
+seed: 1790805238
+loaded config with command: cgp WAgTAILS5K1/7P4QI1/3NEUTRINO1UN1/JOTA3I3BEDU/I2EFF1N2ZAS1N/HM5G2AGO1R/AE4REP2G2E/D6SOOTY1TA/ID11EL/1AR10L1/1WO7UNBOX/1TE10M1/1E11I1/1D10ICY/15 AILORRV/ 303/458 0
+seed: 1790805239
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  AILORRV  303  1:   13H RAVIOL(I) R     26 26.78 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           458  2:   D12 ARVO      ILR   22 20.22 
+ 1┃ＷＡｇＴＡＩＬＳ　　　＇　Ｋ＝┃                           3:   A12 ARIL      ORV   24 19.63 
+ 2┃　－　　　＂　Ｐ　＂　　ＱＩ　┃   Unseen: 8 (3v | 4c)     4:   10B (AR)RIVAL OR    18 17.39 
+ 3┃　　－ＮＥＵＴＲＩＮＯ　ＵＮ　┃   ? C E E E H S V         5:   11B (WO)ORALI RV    20 14.96 
+ 4┃ＪＯＴＡ　　　Ｉ　　　ＢＥＤＵ┃                           6:   2A OR         AILRV 13 14.43 
+ 5┃Ｉ　　ＥＦＦ　Ｎ　　ＺＡＳ　Ｎ┃                           7:   E5 (F)RIVOL   AR    12 13.89 
+ 6┃ＨＭ　　　＂　Ｇ　＂ＡＧＯ＂Ｒ┃                           8:   11B (WO)ORARI LV    20 13.29 
+ 7┃ＡＥ＇　　　ＲＥＰ　　Ｇ＇　Ｅ┃                           9:   D11 OAR       ILRV  18 12.49 
+ 8┃Ｄ　　＇　　　ＳＯＯＴＹ　ＴＡ┃                           10:  B1 (A)RV(O)   AILOR 14 12.48 
+ 9┃ＩＤ＇　　　＇　＇　　　＇ＥＬ┃                           11:  9I OR         AILRV 11 12.43 
+10┃　ＡＲ　　＂　　　＂　　　Ｌ　┃                           12:  D12 ARIL      ORV   16 11.63 
+11┃　ＷＯ　－　　　　　ＵＮＢＯＸ┃                           13:  D12 LAIR      ORV   16 11.63 
+12┃＇ＴＥ－　　　＇　　　－　Ｍ＇┃                           14:  D12 LARI      ORV   16 11.63 
+13┃　Ｅ－　　　＇　＇　　　－Ｉ　┃                           15:  D12 LIAR      ORV   16 11.63 
+14┃　Ｄ　　　＂　　　＂　　ＩＣＹ┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 15 of 40 plays
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: gen
+seed: 1790805240
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -wmp true
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -wmp false
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -wmp true
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 -wmp false
+seed: 1790805238
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805237
+loaded config with command: set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all
+seed: 1790805238

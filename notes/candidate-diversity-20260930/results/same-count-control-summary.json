@@ -1,0 +1,161 @@
+{
+  "audit": {
+    "positions": 128,
+    "pools": 256,
+    "rows": 9090,
+    "identical_pool_reuse": 0,
+    "full_budget_and_finite_results": true
+  },
+  "comparisons": {
+    "nonopening": {
+      "setup_wide": {
+        "left": "setup_wide",
+        "right": "static_setup_count",
+        "wp_gain_pp": {
+          "n": 96,
+          "mean": 0.02944164583333329,
+          "se": 0.02506509827936149
+        },
+        "game_bootstrap95_pp": [
+          -0.007561833333333302,
+          0.0866084822916665
+        ],
+        "equity_gain": {
+          "n": 96,
+          "mean": -0.05011169791666673,
+          "se": 0.24159591346549336
+        },
+        "different_choices": 6,
+        "positive": 3,
+        "negative": 3,
+        "zero": 90,
+        "rough_positions_for_80pct_power_at_observed_effect": 546,
+        "sd_pp": 0.245586804548593
+      },
+      "combined": {
+        "left": "combined",
+        "right": "static_combined_count",
+        "wp_gain_pp": {
+          "n": 96,
+          "mean": 0.03732160000000002,
+          "se": 0.026119039815049094
+        },
+        "game_bootstrap95_pp": [
+          -0.0018589843749999835,
+          0.09562256874999993
+        ],
+        "equity_gain": {
+          "n": 96,
+          "mean": -0.28873306250000014,
+          "se": 0.30910240608273953
+        },
+        "different_choices": 5,
+        "positive": 3,
+        "negative": 2,
+        "zero": 91,
+        "rough_positions_for_80pct_power_at_observed_effect": 369,
+        "sd_pp": 0.25591328047323275
+      }
+    },
+    "opening": {
+      "setup_wide": {
+        "left": "setup_wide",
+        "right": "static_setup_count",
+        "wp_gain_pp": {
+          "n": 32,
+          "mean": 0.0,
+          "se": 0.0
+        },
+        "game_bootstrap95_pp": [
+          0.0,
+          0.0
+        ],
+        "equity_gain": {
+          "n": 32,
+          "mean": 0.0,
+          "se": 0.0
+        },
+        "different_choices": 0,
+        "positive": 0,
+        "negative": 0,
+        "zero": 32,
+        "rough_positions_for_80pct_power_at_observed_effect": null,
+        "sd_pp": 0.0
+      },
+      "combined": {
+        "left": "combined",
+        "right": "static_combined_count",
+        "wp_gain_pp": {
+          "n": 32,
+          "mean": 0.007212825000000103,
+          "se": 0.005954390662400732
+        },
+        "game_bootstrap95_pp": [
+          0.0,
+          0.020263671875000305
+        ],
+        "equity_gain": {
+          "n": 32,
+          "mean": 0.015350375000000027,
+          "se": 0.014346959599071866
+        },
+        "different_choices": 2,
+        "positive": 2,
+        "negative": 0,
+        "zero": 30,
+        "rough_positions_for_80pct_power_at_observed_effect": 171,
+        "sd_pp": 0.03368312012173933
+      }
+    },
+    "late": {
+      "setup_wide": {
+        "left": "setup_wide",
+        "right": "static_setup_count",
+        "wp_gain_pp": {
+          "n": 40,
+          "mean": 0.08256284499999987,
+          "se": 0.05894274703108571
+        },
+        "game_bootstrap95_pp": [
+          -0.003749412499999999,
+          0.2170281399999996
+        ],
+        "equity_gain": {
+          "n": 40,
+          "mean": -0.14955015000000005,
+          "se": 0.5819020431904992
+        },
+        "different_choices": 4,
+        "positive": 3,
+        "negative": 1,
+        "zero": 36,
+        "rough_positions_for_80pct_power_at_observed_effect": 160,
+        "sd_pp": 0.37278666433071683
+      },
+      "combined": {
+        "left": "combined",
+        "right": "static_combined_count",
+        "wp_gain_pp": {
+          "n": 40,
+          "mean": 0.09403340250000002,
+          "se": 0.061861513845799576
+        },
+        "game_bootstrap95_pp": [
+          -2.0250000000000002e-07,
+          0.2328597474999999
+        ],
+        "equity_gain": {
+          "n": 40,
+          "mean": -0.6782830000000001,
+          "se": 0.7427512344529049
+        },
+        "different_choices": 4,
+        "positive": 3,
+        "negative": 1,
+        "zero": 36,
+        "rough_positions_for_80pct_power_at_observed_effect": 136,
+        "sd_pp": 0.3912465665175378
+      }
+    }
+  }
+}

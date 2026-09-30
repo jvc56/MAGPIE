@@ -1,0 +1,70 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MAGPIE · Fresh confirmation</title><style>
+body{font:16px/1.5 system-ui;color:#21382d;background:#f7f8f3;max-width:1180px;margin:32px auto;padding:0 24px}h1,h2{line-height:1.2}a{color:#176754}.result{background:#e9f0df;border:1px solid #c6d4be;border-radius:10px;padding:18px 22px}.result p{margin:7px 0}.number{font-size:32px;font-weight:750}.tablewrap{overflow:auto;background:white;border:1px solid #dce2d7;border-radius:8px}table{border-collapse:collapse;width:100%;font-size:14px}td,th{padding:10px 12px;text-align:left;border-bottom:1px solid #e1e5dc;white-space:nowrap}th{background:#e8ede3}td:first-child{white-space:normal}pre{font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;background:#edf0e8;padding:16px}small{color:#516357}.limits{border-left:4px solid #8f9f87;padding-left:16px}details{margin:18px 0}summary{cursor:pointer;font-weight:650}
+</style><h1>Fresh independent-position confirmation</h1><div class="result"><p><b>Setup has a small, statistically significant advantage over equal-size static pools.</b></p><p class="number">+0.0292 percentage points</p><p>95% position bootstrap interval: +0.0105 to +0.0515; two-sided p = 0.0057996. N = 1,200.</p></div><p>One occupied-board position from each of 1,200 fresh independent CSW24 games: 400 early, 400 middle, and 400 late. Selection sims receive 15 seconds with no-PAT static rollouts. The setup pool and its static control contain exactly the same number of candidates. Selected plays are evaluated in the same independent 60-second four-ply reference. All zero-change positions are included.</p><p>The pools selected different plays in 35 positions: 20 positive and 15 negative reference differences; 1165 positions contributed zero. The advantage is concentrated late: +0.0804 pp across 400 late positions. Phase estimates are exploratory.</p><p><a href="candidate-pools-debug.html#primary/870">Open the sortable candidate explorer</a> · <a href="PROTOCOL.json">Frozen protocol</a> · <a href="paired_outcomes.csv">All paired outcomes</a></p><h2>Primary comparison and phases</h2><div class="tablewrap"><table><tr><th>Comparison</th><th>N</th><th>Mean gain (pp)</th><th>95% bootstrap interval (pp)</th><th>Two-sided paired t p</th><th>Different choices</th></tr><tr><td>Setup vs exactly equal-count static (primary)</td><td>1200</td><td>+0.02924</td><td>+0.01052 to +0.05151</td><td>0.0057996</td><td>35</td></tr><tr><td>Early</td><td>400</td><td>-0.00223</td><td>-0.00540 to -0.00004</td><td>0.11932</td><td>4</td></tr><tr><td>Middle</td><td>400</td><td>+0.00956</td><td>-0.00003 to +0.02379</td><td>0.12301</td><td>8</td></tr><tr><td>Late</td><td>400</td><td>+0.08037</td><td>+0.02618 to +0.14774</td><td>0.0097746</td><td>23</td></tr></table></div><h2>Other candidate policies</h2><p>These comparisons are exploratory and uncorrected for multiple comparisons. The comparisons with static 25 include differences in pool size.</p><div class="tablewrap"><table><tr><th>Comparison</th><th>N</th><th>Mean gain (pp)</th><th>95% bootstrap interval (pp)</th><th>Two-sided paired t p</th><th>Different choices</th></tr><tr><td>Blocking vs static 25</td><td>1200</td><td>+0.00101</td><td>-0.00063 to +0.00295</td><td>0.26318</td><td>23</td></tr><tr><td>Setup vs static 25</td><td>1200</td><td>+0.03972</td><td>+0.01898 to +0.06401</td><td>0.00062231</td><td>34</td></tr><tr><td>Raw signals vs static 25</td><td>1200</td><td>+0.02990</td><td>+0.01068 to +0.05309</td><td>0.0065394</td><td>30</td></tr><tr><td>Exchange quota vs static 25</td><td>1200</td><td>+0.00094</td><td>-0.00001 to +0.00250</td><td>0.1767</td><td>9</td></tr><tr><td>Combined vs static 25</td><td>1200</td><td>+0.04573</td><td>+0.02225 to +0.07278</td><td>0.00043015</td><td>49</td></tr><tr><td>Combined vs equal-count static</td><td>1200</td><td>+0.02208</td><td>+0.00439 to +0.04344</td><td>0.028783</td><td>38</td></tr></table></div><p>Blocking did not show a clear average gain in this study: +0.00101 pp versus static 25, p = 0.263. Setup provides the clearest evidence of valuable candidate diversity under the tested sim policy.</p><h2>Longer independent references</h2><p>All 47 prespecified novel-choice positions received independent 600-second, sixteen-ply references. Setup versus its selected equal-size static control averaged +0.6615 pp on this enriched subset (18 positive, 8 negative, 21 zero). This subset cannot estimate the population average.</p><p>The table compares the originally selected setup play with the best candidate in each static pool under the longer reference. Some additions help substantially; others fail to improve on the static candidates. Click a position to inspect its board, provenance, adjustments, and sim results.</p><div class="tablewrap"><table><tr><th>Position</th><th>Setup choice</th><th>Static rank</th><th>Gain vs best static 25 (pp)</th><th>Gain vs best same-size static (pp)</th></tr><tr><td><a href="candidate-pools-debug.html#primary/795">795</a></td><td>l8 TEPAS</td><td>110</td><td>+5.1120</td><td>+5.1120</td></tr><tr><td><a href="candidate-pools-debug.html#primary/870">870</a></td><td>12l NOIL</td><td>49</td><td>+4.8795</td><td>+4.8795</td></tr><tr><td><a href="candidate-pools-debug.html#primary/939">939</a></td><td>4l KIRN</td><td>31</td><td>+4.6978</td><td>+4.6978</td></tr><tr><td><a href="candidate-pools-debug.html#primary/837">837</a></td><td>6a ADMIN</td><td>78</td><td>+4.1932</td><td>+4.1932</td></tr><tr><td><a href="candidate-pools-debug.html#primary/609">609</a></td><td>n10 ALOO</td><td>41</td><td>+2.8205</td><td>+2.8205</td></tr><tr><td><a href="candidate-pools-debug.html#primary/378">378</a></td><td>9k DEEM</td><td>56</td><td>+2.6607</td><td>+2.6607</td></tr><tr><td><a href="candidate-pools-debug.html#primary/165">165</a></td><td>14a RANGA</td><td>47</td><td>+2.4851</td><td>+2.4851</td></tr><tr><td><a href="candidate-pools-debug.html#primary/635">635</a></td><td>j1 RAG</td><td>34</td><td>+2.0247</td><td>+2.0247</td></tr><tr><td><a href="candidate-pools-debug.html#primary/833">833</a></td><td>9h MEAL</td><td>44</td><td>+1.8829</td><td>+1.8829</td></tr><tr><td><a href="candidate-pools-debug.html#primary/959">959</a></td><td>h11 GLIB</td><td>46</td><td>+0.7544</td><td>+0.7544</td></tr><tr><td><a href="candidate-pools-debug.html#primary/17">17</a></td><td>g1 AINEE</td><td>35</td><td>+2.0298</td><td>+0.3027</td></tr><tr><td><a href="candidate-pools-debug.html#primary/396">396</a></td><td>b12 ROJI</td><td>64</td><td>+0.1697</td><td>+0.1697</td></tr><tr><td><a href="candidate-pools-debug.html#primary/801">801</a></td><td>h10 AROHA</td><td>67</td><td>+0.1501</td><td>+0.1501</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1089">1089</a></td><td>d1 TIDAL</td><td>60</td><td>+0.1763</td><td>+0.1452</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1077">1077</a></td><td>3i DARAF</td><td>35</td><td>+0.1186</td><td>+0.1186</td></tr><tr><td><a href="candidate-pools-debug.html#primary/497">497</a></td><td>e4 FRATI</td><td>48</td><td>+0.1095</td><td>+0.1095</td></tr><tr><td><a href="candidate-pools-debug.html#primary/981">981</a></td><td>4a BINIT</td><td>13</td><td>+0.0000</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/957">957</a></td><td>o12 BAFT</td><td>2</td><td>+0.0000</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1002">1002</a></td><td>3j NEAFE</td><td>28</td><td>+0.1405</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1092">1092</a></td><td>4k VEERY</td><td>3</td><td>+0.0000</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/419">419</a></td><td>a10 WIFEY</td><td>27</td><td>+0.6969</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1041">1041</a></td><td>3g JO</td><td>28</td><td>+1.2969</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/339">339</a></td><td>m12 OLD</td><td>64</td><td>+0.0000</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/276">276</a></td><td>ex FNTTV</td><td>26</td><td>+1.2985</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/162">162</a></td><td>g2 SODA</td><td>2</td><td>+0.0000</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1008">1008</a></td><td>i1 PLUG</td><td>32</td><td>+0.5772</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1116">1116</a></td><td>13l EAU</td><td>27</td><td>+0.0000</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/594">594</a></td><td>b7 TINFUL</td><td>2</td><td>+0.0000</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1128">1128</a></td><td>13k MAE</td><td>25</td><td>+0.0000</td><td>+0.0000</td></tr><tr><td><a href="candidate-pools-debug.html#primary/471">471</a></td><td>8k HOE</td><td>19</td><td>-0.0023</td><td>-0.0023</td></tr><tr><td><a href="candidate-pools-debug.html#primary/195">195</a></td><td>d9 AA</td><td>6</td><td>-0.0029</td><td>-0.0029</td></tr><tr><td><a href="candidate-pools-debug.html#primary/405">405</a></td><td>8l GOBI</td><td>17</td><td>-0.0034</td><td>-0.0034</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1068">1068</a></td><td>ex BLT</td><td>20</td><td>-0.0037</td><td>-0.0037</td></tr><tr><td><a href="candidate-pools-debug.html#primary/966">966</a></td><td>i1 AUE</td><td>7</td><td>-0.0023</td><td>-0.0046</td></tr><tr><td><a href="candidate-pools-debug.html#primary/507">507</a></td><td>5c POSH</td><td>6</td><td>-0.0065</td><td>-0.0065</td></tr><tr><td><a href="candidate-pools-debug.html#primary/87">87</a></td><td>4a BUGBANE</td><td>26</td><td>-0.0235</td><td>-0.0235</td></tr><tr><td><a href="candidate-pools-debug.html#primary/204">204</a></td><td>5k AIT</td><td>16</td><td>-0.0456</td><td>-0.0456</td></tr><tr><td><a href="candidate-pools-debug.html#primary/738">738</a></td><td>3h FOUTRE</td><td>24</td><td>+0.0000</td><td>-0.0598</td></tr><tr><td><a href="candidate-pools-debug.html#primary/93">93</a></td><td>13m ARO</td><td>52</td><td>-0.0806</td><td>-0.0806</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1133">1133</a></td><td>15b WAGE</td><td>85</td><td>-0.0230</td><td>-0.1151</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1056">1056</a></td><td>15a ARO</td><td>8</td><td>-0.1572</td><td>-0.1572</td></tr><tr><td><a href="candidate-pools-debug.html#primary/1146">1146</a></td><td>14a TUT</td><td>59</td><td>+0.0362</td><td>-0.1600</td></tr><tr><td><a href="candidate-pools-debug.html#primary/720">720</a></td><td>10a UTTER</td><td>17</td><td>-0.1668</td><td>-0.4166</td></tr><tr><td><a href="candidate-pools-debug.html#primary/150">150</a></td><td>f4 DERP</td><td>14</td><td>+0.0000</td><td>-0.9842</td></tr><tr><td><a href="candidate-pools-debug.html#primary/72">72</a></td><td>10i ROOD</td><td>1</td><td>-1.0229</td><td>-1.0229</td></tr><tr><td><a href="candidate-pools-debug.html#primary/522">522</a></td><td>a12 CIRE</td><td>2</td><td>-0.7535</td><td>-1.5028</td></tr><tr><td><a href="candidate-pools-debug.html#primary/12">12</a></td><td>14f DENTAL</td><td>35</td><td>-1.9704</td><td>-1.9704</td></tr></table></div><h2>Interpretation and limits</h2><div class="limits"><p>This is evidence about candidate selection under the stated sim model. It does not measure played-game strength. The balanced phases differ from natural turn frequency, and the primary reference uses four-ply static rollouts and a win-probability model.</p><p>The practical result is a small average benefit from occasional valuable setup additions, chiefly late in the game. The stronger examples do not make every setup addition useful.</p></div><details><summary>Passed integrity checks</summary><pre>{
+  &quot;main&quot;: {
+    &quot;primary&quot;: {
+      &quot;positions&quot;: 1200,
+      &quot;pools&quot;: 8400,
+      &quot;rows&quot;: 368082,
+      &quot;identical_pool_reuse&quot;: 896,
+      &quot;full_budget_and_finite_results&quot;: true
+    },
+    &quot;matched&quot;: {
+      &quot;positions&quot;: 1200,
+      &quot;pools&quot;: 2400,
+      &quot;rows&quot;: 84919,
+      &quot;identical_pool_reuse&quot;: 71,
+      &quot;full_budget_and_finite_results&quot;: true
+    },
+    &quot;checks&quot;: {
+      &quot;positions&quot;: 1200,
+      &quot;candidate_records&quot;: 145906,
+      &quot;racks&quot;: 64,
+      &quot;paired_means_weights_and_exchange_zeros_match&quot;: true,
+      &quot;terminal_reply_cases&quot;: {
+        &quot;972&quot;: {
+          &quot;n7 OUTRATES&quot;: 14,
+          &quot;n8 OUTSTARE&quot;: 14,
+          &quot;n5 SEATROUT&quot;: 6
+        },
+        &quot;768&quot;: {
+          &quot;c8 TITHoNIA&quot;: 14,
+          &quot;12b TITHoNIA&quot;: 1
+        },
+        &quot;507&quot;: {
+          &quot;n5 PHOnERS&quot;: 6,
+          &quot;n4 uPHROES&quot;: 3,
+          &quot;n5 uPHROES&quot;: 3,
+          &quot;n7 tHORPES&quot;: 7,
+          &quot;n5 HOPpERS&quot;: 4,
+          &quot;n5 HOoPERS&quot;: 6,
+          &quot;n5 HOpPERS&quot;: 4,
+          &quot;n5 POtHERS&quot;: 4,
+          &quot;n5 gOPHERS&quot;: 4,
+          &quot;n4 PORcHES&quot;: 3,
+          &quot;n4 SHOPpER&quot;: 4,
+          &quot;n4 SHOpPER&quot;: 4,
+          &quot;n4 tHORPES&quot;: 3,
+          &quot;n5 HoOPERS&quot;: 6,
+          &quot;n4 PRESHOw&quot;: 3,
+          &quot;n3 StROPHE&quot;: 5,
+          &quot;n3 PHORESy&quot;: 3
+        },
+        &quot;1065&quot;: {
+          &quot;1b TRUNCATE&quot;: 4
+        }
+      }
+    },
+    &quot;input_hashes_and_frozen_binary_match&quot;: true,
+    &quot;independent_source_games&quot;: 1200,
+    &quot;paired_count_matches&quot;: true,
+    &quot;identical_matched_pools_reuse_original_full_budget_result&quot;: true
+  },
+  &quot;deep&quot;: {
+    &quot;positions&quot;: 47,
+    &quot;pools&quot;: 47,
+    &quot;rows&quot;: 2138,
+    &quot;identical_pool_reuse&quot;: 0,
+    &quot;full_budget_and_finite_results&quot;: true
+  }
+}</pre></details></html>

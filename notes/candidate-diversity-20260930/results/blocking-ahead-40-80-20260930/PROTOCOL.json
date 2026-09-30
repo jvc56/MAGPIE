@@ -1,0 +1,34 @@
+{
+  "user_request": "Include five-in-bag positions; on-turn lead between40and80points.",
+  "planned_positions": 400,
+  "one_position_per_independent_game": true,
+  "population": "Fresh CSW24 no-PAT static games; occupied board; bag5\u201329inclusive; on-turn lead40\u201380inclusive; at least50static non-pass candidates.",
+  "sampling": "Fresh game seeds, ordered by batch and game. Randomized eligible-position order within game, first position with at least50static candidates. First400eligible independent games. No sim outcome or win-probability filtering.",
+  "primary": "Blocking pool versus exactly equal-count static prefix, measured by selected-play win probability in an independent60s4ply reference.",
+  "selection_ms": 15000,
+  "reference_ms": 60000,
+  "rollout": "no-PAT static",
+  "plies": 4,
+  "blocking_formula": "Unchanged: static equity +1.4*mean(pass opponent best placement score minus candidate opponent best placement score),64paired sampled racks.",
+  "blocking_admission": "Static top25 union adjusted top25; adaptive count.",
+  "candidate_universe": "Top120static plus up to5exchanges within35points of top play; exchanges permitted only when legal.",
+  "same_count_control": "Static prefix containing exactly as many candidates as blocking. All identical candidate pools reuse the same completed15s result.",
+  "arm_order": "Rotate three selection arms by position ID modulo3; same selection seed, independent reference seed.",
+  "analysis": "Fixed N400, include unchanged choices. Two-sided paired t alpha.05;95% position bootstrap. No changes based on significance. Bag5\u20136/7\u201314/15\u201329and lead40\u201359/60\u201380are exploratory.",
+  "exploratory": [
+    "blocking versus static25",
+    "equal-count static versus static25",
+    "pool additions and choices beyond same-size static prefix"
+  ],
+  "deeper_validation": "Up to24positions where any selection chooses outside static25; hash-selected without reference gains. Independent600s16ply reference over all three pools; enriched subset only.",
+  "interpretation": "A new targeted follow-up prompted after the prior results; position-level sim study, not measured played-game strength.",
+  "seeds": {
+    "games": 202610010000,
+    "sample": 202609301001,
+    "sim": 202609301002,
+    "deep": 202609301003
+  },
+  "binary_sha256": "4bd4e83ceb0a07f462a50ae7a1c961f4ff411fcde480cf338d72c02e9ebcc7c7",
+  "harness_sha256": "bb8f2ade3412b3ef4f407ad2dfde7f415bd6fd0017e1e464c8704ef7ace0b14c",
+  "fixed_before_selection_sims_epoch": 1790781263.492616
+}

@@ -1,0 +1,1911 @@
+<!doctype html><html><meta charset="utf-8"><title>Pass-relative candidate diversity</title><style>body{font:15px system-ui;max-width:1150px;margin:40px auto;padding:0 20px;color:#263b31}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:9px;border-bottom:1px solid #ddd}pre{white-space:pre-wrap;background:#f3f5ef;padding:16px}</style><h1>Pass-relative candidate diversity rerun</h1><p>Setup finds useful additional plays at the 15-second selection budget. The benefit is concentrated in late positions. Its advantage over an exactly same-size static pool remains uncertain in this sample; a separately frozen 1,200-game confirmation study tests that comparison overnight.</p><p><a href="candidate-pools-debug.html#primary/1217">Explore all candidates, sortable sim results and pass/play adjustments</a></p><p>The corrected rerun includes 256 occupied-board positions, 64 openings, width and same-count controls on 128 positions, six-ply controls on 64, doubled check samples on 128, 40 exchange/tile-quota positions, and independent 10-minute sixteen-ply validations at all 14 primary positions where a policy selects outside static25, plus two quota examples. Rollouts use no-PAT static play. Every distinct selection pool receives 15 seconds.</p><p>Blocking adds 1.4 × the reduction in the opponent’s best placement score versus pass. Setup adds 0.75 × the improvement in our next-turn best placement score after the opponent reply versus the matched pass/reply branch. Setup branches share the candidate leave and conditioned refill; they isolate board opportunity. Terminal opponent replies give zero next-turn opportunity. Exchanges have zero board adjustments.</p><p>Subtracting the shared pass reply baseline changes the interpretation of blocking values but preserves its candidate ranking. Setup admission changes because its matched baseline depends on candidate leave/refill. The main checks average 64 paired opponent racks; doubled-sample controls measure admission stability.</p><table><tr><th>Sample</th><th>Pool</th><th>Mean candidates</th><th>Mean gain vs selected25 (pp)</th><th>95% game bootstrap</th><th>Choices outside25</th></tr><tr><td>nonopening</td><td>static25</td><td>25.00</td><td>+0.0000</td><td>+0.0000 to +0.0000</td><td>0</td></tr><tr><td>nonopening</td><td>threat_wide</td><td>32.16</td><td>+0.0143</td><td>-0.0002 to +0.0377</td><td>4</td></tr><tr><td>nonopening</td><td>setup_wide</td><td>29.44</td><td>+0.0439</td><td>+0.0120 to +0.0835</td><td>9</td></tr><tr><td>nonopening</td><td>signals</td><td>29.66</td><td>+0.0355</td><td>+0.0069 to +0.0708</td><td>8</td></tr><tr><td>nonopening</td><td>exchange</td><td>27.81</td><td>-0.0001</td><td>-0.0032 to +0.0025</td><td>3</td></tr><tr><td>nonopening</td><td>combined</td><td>41.18</td><td>+0.0448</td><td>+0.0126 to +0.0843</td><td>12</td></tr><tr><td>opening</td><td>static25</td><td>25.00</td><td>+0.0000</td><td>+0.0000 to +0.0000</td><td>0</td></tr><tr><td>opening</td><td>threat_wide</td><td>35.47</td><td>+0.0029</td><td>-0.0015 to +0.0101</td><td>2</td></tr><tr><td>opening</td><td>setup_wide</td><td>30.47</td><td>+0.0009</td><td>+0.0000 to +0.0027</td><td>0</td></tr><tr><td>opening</td><td>signals</td><td>30.89</td><td>+0.0038</td><td>-0.0013 to +0.0111</td><td>2</td></tr><tr><td>opening</td><td>exchange</td><td>28.12</td><td>+0.0031</td><td>-0.0015 to +0.0100</td><td>2</td></tr><tr><td>opening</td><td>combined</td><td>44.11</td><td>+0.0029</td><td>-0.0015 to +0.0101</td><td>2</td></tr></table><p>Win gains evaluate both selected plays in the same independently seeded round-robin reference. Confidence intervals include unchanged positions and cluster positions from the same source game. The phase-balanced sample does not represent natural turn frequency. These are sim-model results; full played-game strength has not been measured.</p><h2>Same-count static controls</h2><pre>{
+  &quot;setup_wide&quot;: {
+    &quot;left&quot;: &quot;setup_wide&quot;,
+    &quot;right&quot;: &quot;static_setup_count&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.022081234374999967,
+      &quot;se&quot;: 0.018808188770496895
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.006045071093749993,
+      0.06556132656249986
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.03758377343750005,
+      &quot;se&quot;: 0.18096923122682426
+    },
+    &quot;different_choices&quot;: 6,
+    &quot;positive&quot;: 3,
+    &quot;negative&quot;: 3,
+    &quot;zero&quot;: 122,
+    &quot;mean_candidates&quot;: 29.5078125,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;setup_wide&quot;,
+        &quot;right&quot;: &quot;static_setup_count&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.02944164583333329,
+          &quot;se&quot;: 0.02506509827936149
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.007348671874999953,
+          0.08671042291666653
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.05011169791666673,
+          &quot;se&quot;: 0.24159591346549336
+        },
+        &quot;different_choices&quot;: 6,
+        &quot;positive&quot;: 3,
+        &quot;negative&quot;: 3,
+        &quot;zero&quot;: 90
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;setup_wide&quot;,
+        &quot;right&quot;: &quot;static_setup_count&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.0,
+          &quot;se&quot;: 0.0
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.0,
+          &quot;se&quot;: 0.0
+        },
+        &quot;different_choices&quot;: 0,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 32
+      }
+    }
+  },
+  &quot;combined&quot;: {
+    &quot;left&quot;: &quot;combined&quot;,
+    &quot;right&quot;: &quot;static_combined_count&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.02979440625000004,
+      &quot;se&quot;: 0.0196528538833938
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      0.00013047109375007425,
+      0.07572619999999998
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.21271220312500008,
+      &quot;se&quot;: 0.23184409520945257
+    },
+    &quot;different_choices&quot;: 7,
+    &quot;positive&quot;: 5,
+    &quot;negative&quot;: 2,
+    &quot;zero&quot;: 121,
+    &quot;mean_candidates&quot;: 41.5078125,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;combined&quot;,
+        &quot;right&quot;: &quot;static_combined_count&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.03732160000000002,
+          &quot;se&quot;: 0.026119039815049094
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.0018590687499999835,
+          0.09622514895833324
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.28873306250000014,
+          &quot;se&quot;: 0.30910240608273953
+        },
+        &quot;different_choices&quot;: 5,
+        &quot;positive&quot;: 3,
+        &quot;negative&quot;: 2,
+        &quot;zero&quot;: 91
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;combined&quot;,
+        &quot;right&quot;: &quot;static_combined_count&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.007212825000000103,
+          &quot;se&quot;: 0.005954390662400732
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.020263671875000305
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.015350375000000027,
+          &quot;se&quot;: 0.014346959599071866
+        },
+        &quot;different_choices&quot;: 2,
+        &quot;positive&quot;: 2,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 30
+      }
+    }
+  }
+}</pre><h2>Wider/adaptive static controls</h2><pre>{
+  &quot;adaptive_static&quot;: {
+    &quot;left&quot;: &quot;adaptive_static&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.020453970312499976,
+      &quot;se&quot;: 0.019936798970413408
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.006493319531249942,
+      0.06463773749999992
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.17285801562500008,
+      &quot;se&quot;: 0.1879451612065677
+    },
+    &quot;different_choices&quot;: 10,
+    &quot;positive&quot;: 5,
+    &quot;negative&quot;: 5,
+    &quot;zero&quot;: 118,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;adaptive_static&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.030749909374999954,
+          &quot;se&quot;: 0.02636238479294347
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.0035559979166667273,
+          0.08938822187499988
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.22392283333333346,
+          &quot;se&quot;: 0.25062870207573057
+        },
+        &quot;different_choices&quot;: 8,
+        &quot;positive&quot;: 5,
+        &quot;negative&quot;: 3,
+        &quot;zero&quot;: 88
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;adaptive_static&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: -0.010433846874999958,
+          &quot;se&quot;: 0.009118818317775591
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.02992673749999987,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: -0.019663562499999898,
+          &quot;se&quot;: 0.018651987242506593
+        },
+        &quot;different_choices&quot;: 2,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 2,
+        &quot;zero&quot;: 30
+      }
+    }
+  },
+  &quot;static60&quot;: {
+    &quot;left&quot;: &quot;static60&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.05856156015624995,
+      &quot;se&quot;: 0.028598937189294436
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      0.010717242968750016,
+      0.12066480390624977
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.5814848281250001,
+      &quot;se&quot;: 0.36853181236945576
+    },
+    &quot;different_choices&quot;: 13,
+    &quot;positive&quot;: 9,
+    &quot;negative&quot;: 4,
+    &quot;zero&quot;: 115,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;static60&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.0785403479166666,
+          &quot;se&quot;: 0.03795862852828825
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.014728073958333395,
+          0.1631850999999999
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.7749776875000002,
+          &quot;se&quot;: 0.4904171826277866
+        },
+        &quot;different_choices&quot;: 12,
+        &quot;positive&quot;: 9,
+        &quot;negative&quot;: 3,
+        &quot;zero&quot;: 84
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;static60&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: -0.0013748031250000042,
+          &quot;se&quot;: 0.001374803125000004
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.004124409375000013,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: -0.0010062499999999863,
+          &quot;se&quot;: 0.0010062499999999863
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 31
+      }
+    }
+  },
+  &quot;adaptive_signals&quot;: {
+    &quot;left&quot;: &quot;adaptive_signals&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.05004081640624997,
+      &quot;se&quot;: 0.027577996633140953
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      0.004426949218750055,
+      0.11244282578124996
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.2039353984375001,
+      &quot;se&quot;: 0.2568935528026084
+    },
+    &quot;different_choices&quot;: 12,
+    &quot;positive&quot;: 8,
+    &quot;negative&quot;: 4,
+    &quot;zero&quot;: 116,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.06523334895833327,
+          &quot;se&quot;: 0.036632664814637415
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0051984875000000205,
+          0.14773260104166655
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.27635982291666683,
+          &quot;se&quot;: 0.3426200438651099
+        },
+        &quot;different_choices&quot;: 10,
+        &quot;positive&quot;: 7,
+        &quot;negative&quot;: 3,
+        &quot;zero&quot;: 86
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.004463218750000095,
+          &quot;se&quot;: 0.006040728261600075
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.004124409375000013,
+          0.017514065625000297
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.013337875000000055,
+          &quot;se&quot;: 0.014411719967403334
+        },
+        &quot;different_choices&quot;: 2,
+        &quot;positive&quot;: 1,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 30
+      }
+    }
+  },
+  &quot;signals_vs_adaptive_static&quot;: {
+    &quot;left&quot;: &quot;adaptive_signals&quot;,
+    &quot;right&quot;: &quot;adaptive_static&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.029586846093749997,
+      &quot;se&quot;: 0.019896152583028962
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.0005653296875000174,
+      0.07616258359374987
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.03107738281250004,
+      &quot;se&quot;: 0.1874554090658103
+    },
+    &quot;different_choices&quot;: 6,
+    &quot;positive&quot;: 5,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 122,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;adaptive_static&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.03448343958333332,
+          &quot;se&quot;: 0.026085418382859393
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.003856237500000078,
+          0.09308237187499996
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.05243698958333337,
+          &quot;se&quot;: 0.24999399783891987
+        },
+        &quot;different_choices&quot;: 5,
+        &quot;positive&quot;: 4,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 91
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;adaptive_static&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.014897065625000053,
+          &quot;se&quot;: 0.014897065625000053
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.04469119687500016
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.03300143749999995,
+          &quot;se&quot;: 0.033001437499999946
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 1,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 31
+      }
+    }
+  },
+  &quot;signals_vs_static60&quot;: {
+    &quot;left&quot;: &quot;adaptive_signals&quot;,
+    &quot;right&quot;: &quot;static60&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.008520743749999978,
+      &quot;se&quot;: 0.008268125074510073
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.028481242187499985,
+      0.0029190109375000495
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.37754942968750005,
+      &quot;se&quot;: 0.26657053778507817
+    },
+    &quot;different_choices&quot;: 3,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 2,
+    &quot;zero&quot;: 125,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;static60&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.013306998958333337,
+          &quot;se&quot;: 0.0108249848933113
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.03709281458333335,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.49861786458333335,
+          &quot;se&quot;: 0.35499510971533166
+        },
+        &quot;different_choices&quot;: 2,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 2,
+        &quot;zero&quot;: 94
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;static60&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.005838021875000099,
+          &quot;se&quot;: 0.005838021875000099
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.017514065625000297
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.014344125000000041,
+          &quot;se&quot;: 0.01434412500000004
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 1,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 31
+      }
+    }
+  }
+}</pre><h2>Six-ply controls</h2><pre>{
+  &quot;adaptive_static&quot;: {
+    &quot;left&quot;: &quot;adaptive_static&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: 0.03487874374999993,
+      &quot;se&quot;: 0.03411114275219964
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.03427475937499995,
+      0.10043860468749977
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: -0.5503105468749999,
+      &quot;se&quot;: 0.3658799165729096
+    },
+    &quot;different_choices&quot;: 7,
+    &quot;positive&quot;: 5,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 58,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;adaptive_static&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: 0.07348628749999986,
+          &quot;se&quot;: 0.03543593280076131
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.01421416041666667,
+          0.15062852291666626
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: -0.6751088541666665,
+          &quot;se&quot;: 0.48439239228152703
+        },
+        &quot;different_choices&quot;: 6,
+        &quot;positive&quot;: 5,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 43
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;adaptive_static&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: -0.08094388749999987,
+          &quot;se&quot;: 0.08094388749999987
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.2428316624999996,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: -0.17591562500000002,
+          &quot;se&quot;: 0.17591562500000002
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 15
+      }
+    }
+  },
+  &quot;static60&quot;: {
+    &quot;left&quot;: &quot;static60&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: 0.02610865781249997,
+      &quot;se&quot;: 0.03077899537693988
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.0378228953124999,
+      0.0838825843749999
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: -0.885627765625,
+      &quot;se&quot;: 0.47973010588609666
+    },
+    &quot;different_choices&quot;: 7,
+    &quot;positive&quot;: 5,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 58,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;static60&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: 0.06179283958333325,
+          &quot;se&quot;: 0.029795081275510504
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.010968183333333326,
+          0.12659709999999982
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: -1.1221984791666666,
+          &quot;se&quot;: 0.6350280193488974
+        },
+        &quot;different_choices&quot;: 6,
+        &quot;positive&quot;: 5,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 43
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;static60&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: -0.08094388749999987,
+          &quot;se&quot;: 0.08094388749999987
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.2428316624999996,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: -0.17591562500000002,
+          &quot;se&quot;: 0.17591562500000002
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 15
+      }
+    }
+  },
+  &quot;adaptive_signals&quot;: {
+    &quot;left&quot;: &quot;adaptive_signals&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: 0.03387541406249994,
+      &quot;se&quot;: 0.02176012795322176
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.0022889718750000168,
+      0.07952605781249987
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: -0.530970734375,
+      &quot;se&quot;: 0.36344818742934215
+    },
+    &quot;different_choices&quot;: 6,
+    &quot;positive&quot;: 4,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 59,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: 0.050824656249999926,
+          &quot;se&quot;: 0.028127695882709317
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.005331016666666666,
+          0.11346435208333316
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: -0.6952801666666666,
+          &quot;se&quot;: 0.48335526430605946
+        },
+        &quot;different_choices&quot;: 5,
+        &quot;positive&quot;: 4,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 44
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;static25_fulltime&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: -0.016972312500000003,
+          &quot;se&quot;: 0.016972312500000003
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.05091693750000001,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: -0.03804243750000014,
+          &quot;se&quot;: 0.03804243750000014
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 15
+      }
+    }
+  },
+  &quot;signals_vs_adaptive_static&quot;: {
+    &quot;left&quot;: &quot;adaptive_signals&quot;,
+    &quot;right&quot;: &quot;adaptive_static&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: -0.0010033296874999847,
+      &quot;se&quot;: 0.02352176502199803
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.05098867031249985,
+      0.0479786812499999
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: 0.019339812499999942,
+      &quot;se&quot;: 0.037861439424820884
+    },
+    &quot;different_choices&quot;: 2,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 62,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;adaptive_static&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: -0.022661631249999935,
+          &quot;se&quot;: 0.022661631249999935
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.0679848937499998,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: -0.020171312500000038,
+          &quot;se&quot;: 0.020171312500000038
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 47
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;adaptive_static&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: 0.06397157499999986,
+          &quot;se&quot;: 0.06397157499999986
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.1919147249999996
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: 0.13787318749999988,
+          &quot;se&quot;: 0.13787318749999988
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 1,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 15
+      }
+    }
+  },
+  &quot;signals_vs_static60&quot;: {
+    &quot;left&quot;: &quot;adaptive_signals&quot;,
+    &quot;right&quot;: &quot;static60&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: 0.007766756249999972,
+      &quot;se&quot;: 0.018100234485934202
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.024678412499999983,
+      0.0479786812499999
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 64,
+      &quot;mean&quot;: 0.35465703125000003,
+      &quot;se&quot;: 0.3214942121781003
+    },
+    &quot;different_choices&quot;: 2,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 62,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;static60&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: -0.010968183333333326,
+          &quot;se&quot;: 0.010968183333333326
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.03290454999999998,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 48,
+          &quot;mean&quot;: 0.42691831250000006,
+          &quot;se&quot;: 0.4269183125000001
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 47
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;adaptive_signals&quot;,
+        &quot;right&quot;: &quot;static60&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: 0.06397157499999986,
+          &quot;se&quot;: 0.06397157499999986
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.1919147249999996
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 16,
+          &quot;mean&quot;: 0.13787318749999988,
+          &quot;se&quot;: 0.13787318749999988
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 1,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 15
+      }
+    }
+  }
+}</pre><h2>Doubled check samples</h2><pre>{
+  &quot;setup_wide&quot;: {
+    &quot;left&quot;: &quot;setup_conditioned&quot;,
+    &quot;right&quot;: &quot;setup_wide&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.00489134609374999,
+      &quot;se&quot;: 0.002933364983482278
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      0.0,
+      0.011176930468749968
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: 0.06975146093750004,
+      &quot;se&quot;: 0.0802972308084479
+    },
+    &quot;different_choices&quot;: 4,
+    &quot;positive&quot;: 3,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 125,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;setup_conditioned&quot;,
+        &quot;right&quot;: &quot;setup_wide&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.006521794791666653,
+          &quot;se&quot;: 0.003901979591470587
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.01490257395833329
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.09300194791666672,
+          &quot;se&quot;: 0.10709754167276096
+        },
+        &quot;different_choices&quot;: 4,
+        &quot;positive&quot;: 3,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 93
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;setup_conditioned&quot;,
+        &quot;right&quot;: &quot;setup_wide&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.0,
+          &quot;se&quot;: 0.0
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: 0.0,
+          &quot;se&quot;: 0.0
+        },
+        &quot;different_choices&quot;: 0,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 32
+      }
+    }
+  },
+  &quot;signals&quot;: {
+    &quot;left&quot;: &quot;signals_conditioned&quot;,
+    &quot;right&quot;: &quot;signals&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.016635169531249987,
+      &quot;se&quot;: 0.02003515170265218
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.06087460937499991,
+      0.010854422656250001
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.1709803359375,
+      &quot;se&quot;: 0.11056052270596982
+    },
+    &quot;different_choices&quot;: 7,
+    &quot;positive&quot;: 3,
+    &quot;negative&quot;: 4,
+    &quot;zero&quot;: 121,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;signals_conditioned&quot;,
+        &quot;right&quot;: &quot;signals&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.01675626979166663,
+          &quot;se&quot;: 0.026292384548935347
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.07387705624999984,
+          0.016962905208333313
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.2166378854166667,
+          &quot;se&quot;: 0.14690803147113615
+        },
+        &quot;different_choices&quot;: 5,
+        &quot;positive&quot;: 3,
+        &quot;negative&quot;: 2,
+        &quot;zero&quot;: 91
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;signals_conditioned&quot;,
+        &quot;right&quot;: &quot;signals&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: -0.016271868750000057,
+          &quot;se&quot;: 0.014916143040301678
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.04744080312500017,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: -0.03400768749999994,
+          &quot;se&quot;: 0.03298431421293541
+        },
+        &quot;different_choices&quot;: 2,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 2,
+        &quot;zero&quot;: 30
+      }
+    }
+  },
+  &quot;combined&quot;: {
+    &quot;left&quot;: &quot;combined_conditioned&quot;,
+    &quot;right&quot;: &quot;combined&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.0020213554687500256,
+      &quot;se&quot;: 0.004000304685971296
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      -0.01117279921875004,
+      0.004182714843749963
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 128,
+      &quot;mean&quot;: -0.10898997656249991,
+      &quot;se&quot;: 0.1057221971051513
+    },
+    &quot;different_choices&quot;: 3,
+    &quot;positive&quot;: 2,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 125,
+    &quot;by_phase&quot;: {
+      &quot;nonopening&quot;: {
+        &quot;left&quot;: &quot;combined_conditioned&quot;,
+        &quot;right&quot;: &quot;combined&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: 0.00227054791666665,
+          &quot;se&quot;: 0.0018997632203407724
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          0.0,
+          0.00681164374999995
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 96,
+          &quot;mean&quot;: -0.13431948958333323,
+          &quot;se&quot;: 0.1406320069394579
+        },
+        &quot;different_choices&quot;: 2,
+        &quot;positive&quot;: 2,
+        &quot;negative&quot;: 0,
+        &quot;zero&quot;: 94
+      },
+      &quot;opening&quot;: {
+        &quot;left&quot;: &quot;combined_conditioned&quot;,
+        &quot;right&quot;: &quot;combined&quot;,
+        &quot;wp_gain_pp&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: -0.014897065625000053,
+          &quot;se&quot;: 0.014897065625000053
+        },
+        &quot;game_bootstrap95_pp&quot;: [
+          -0.04469119687500016,
+          0.0
+        ],
+        &quot;equity_gain&quot;: {
+          &quot;n&quot;: 32,
+          &quot;mean&quot;: -0.03300143749999995,
+          &quot;se&quot;: 0.033001437499999946
+        },
+        &quot;different_choices&quot;: 1,
+        &quot;positive&quot;: 0,
+        &quot;negative&quot;: 1,
+        &quot;zero&quot;: 31
+      }
+    }
+  }
+}</pre><h2>Exchange and tile quotas</h2><pre>{
+  &quot;tile_quota&quot;: {
+    &quot;left&quot;: &quot;tile_quota&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 40,
+      &quot;mean&quot;: 0.0013554774999999936,
+      &quot;se&quot;: 0.0013554774999999933
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      0.0,
+      0.004066432499999981
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 40,
+      &quot;mean&quot;: -0.04160717500000001,
+      &quot;se&quot;: 0.041607175
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 39
+  },
+  &quot;tile_exchange&quot;: {
+    &quot;left&quot;: &quot;tile_exchange&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 40,
+      &quot;mean&quot;: 0.03200831750000008,
+      &quot;se&quot;: 0.02410686676445677
+    },
+    &quot;game_bootstrap95_pp&quot;: [
+      0.0,
+      0.0863437525000002
+    ],
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 40,
+      &quot;mean&quot;: 0.06900744999999997,
+      &quot;se&quot;: 0.05281210299625564
+    },
+    &quot;different_choices&quot;: 2,
+    &quot;positive&quot;: 2,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 38
+  }
+}</pre><h2>Sixteen-ply timed admission</h2><pre>[
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 2.5204016999999967,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 24.695635000000003,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1100,
+    &quot;base_move&quot;: &quot;15d YETTS&quot;,
+    &quot;enlarged_move&quot;: &quot;15d YETT&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 0,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 1,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1124,
+    &quot;base_move&quot;: &quot;a7 YEGG&quot;,
+    &quot;enlarged_move&quot;: &quot;a7 YEGG&quot;,
+    &quot;candidates&quot;: 27
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 1.3199781999999938,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -16.710483999999994,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1217,
+    &quot;base_move&quot;: &quot;o12 FUSK&quot;,
+    &quot;enlarged_move&quot;: &quot;o8 KiSTFUL&quot;,
+    &quot;candidates&quot;: 27
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 0,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 1,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1379,
+    &quot;base_move&quot;: &quot;o1 ASHIER&quot;,
+    &quot;enlarged_move&quot;: &quot;o1 ASHIER&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 0,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 1,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1542,
+    &quot;base_move&quot;: &quot;o6 ICE&quot;,
+    &quot;enlarged_move&quot;: &quot;o6 ICE&quot;,
+    &quot;candidates&quot;: 28
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 2.2808176,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -0.09989099999999995,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1755,
+    &quot;base_move&quot;: &quot;2k ANCON&quot;,
+    &quot;enlarged_move&quot;: &quot;2l NAAN&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 0,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 1,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 2151,
+    &quot;base_move&quot;: &quot;9b WULL&quot;,
+    &quot;enlarged_move&quot;: &quot;9b WULL&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 1.9686005999999998,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -7.060777999999999,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 2241,
+    &quot;base_move&quot;: &quot;5e FOYS&quot;,
+    &quot;enlarged_move&quot;: &quot;d10 KLOOFS&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 9.36997000000001,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 1,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 443,
+    &quot;base_move&quot;: &quot;d8 PIR&quot;,
+    &quot;enlarged_move&quot;: &quot;5m TIL&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 1.6863363999999992,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 1.694139999999999,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 493,
+    &quot;base_move&quot;: &quot;e4 BOI&quot;,
+    &quot;enlarged_move&quot;: &quot;e2 BUSTI&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 0.0,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 0,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 1,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 575,
+    &quot;base_move&quot;: &quot;m11 OURIE&quot;,
+    &quot;enlarged_move&quot;: &quot;m11 OURIE&quot;,
+    &quot;candidates&quot;: 27
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 2.5047582000000013,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 8.924985999999999,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 580,
+    &quot;base_move&quot;: &quot;l12 TET&quot;,
+    &quot;enlarged_move&quot;: &quot;l12 TEE&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -0.6586466999999985,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -1.4669489999999996,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 6013,
+    &quot;base_move&quot;: &quot;8g GIE&quot;,
+    &quot;enlarged_move&quot;: &quot;8f AGE&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -0.4240549999999954,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -0.858000999999998,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 6024,
+    &quot;base_move&quot;: &quot;8h ARE&quot;,
+    &quot;enlarged_move&quot;: &quot;ex E&quot;,
+    &quot;candidates&quot;: 26
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 1.6929338999999988,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: 4.3464089999999995,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 1,
+    &quot;negative&quot;: 0,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 106,
+    &quot;base_move&quot;: &quot;8d DIENE&quot;,
+    &quot;enlarged_move&quot;: &quot;ex AEI&quot;,
+    &quot;candidates&quot;: 32
+  },
+  {
+    &quot;left&quot;: &quot;static25_admitted&quot;,
+    &quot;right&quot;: &quot;static25_fulltime&quot;,
+    &quot;wp_gain_pp&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -0.175534799999999,
+      &quot;se&quot;: null
+    },
+    &quot;game_bootstrap95_pp&quot;: null,
+    &quot;equity_gain&quot;: {
+      &quot;n&quot;: 1,
+      &quot;mean&quot;: -0.2174359999999993,
+      &quot;se&quot;: null
+    },
+    &quot;different_choices&quot;: 1,
+    &quot;positive&quot;: 0,
+    &quot;negative&quot;: 1,
+    &quot;zero&quot;: 0,
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 6007,
+    &quot;base_move&quot;: &quot;8f ONO&quot;,
+    &quot;enlarged_move&quot;: &quot;8h ONO&quot;,
+    &quot;candidates&quot;: 31
+  }
+]</pre><h2>Independent sixteen-ply references</h2><pre>[
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1217,
+    &quot;move&quot;: &quot;o10 FLOUT&quot;,
+    &quot;rank&quot;: 89,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.9475526000000012,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.9475526000000012,
+    &quot;sem_sum_upper_pp&quot;: 0.058096699999999994,
+    &quot;best25_move&quot;: &quot;o12 FUSK&quot;,
+    &quot;chosen25_move&quot;: &quot;o12 FUSK&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1217,
+    &quot;move&quot;: &quot;o8 KiSTFUL&quot;,
+    &quot;rank&quot;: 49,
+    &quot;wp_gain_vs_best25_pp&quot;: 1.3199781999999938,
+    &quot;wp_gain_vs_selected25_pp&quot;: 1.3199781999999938,
+    &quot;sem_sum_upper_pp&quot;: 0.0487205,
+    &quot;best25_move&quot;: &quot;o12 FUSK&quot;,
+    &quot;chosen25_move&quot;: &quot;o12 FUSK&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 493,
+    &quot;move&quot;: &quot;e2 BUSTI&quot;,
+    &quot;rank&quot;: 26,
+    &quot;wp_gain_vs_best25_pp&quot;: 1.3970967999999973,
+    &quot;wp_gain_vs_selected25_pp&quot;: 1.6863363999999992,
+    &quot;sem_sum_upper_pp&quot;: 0.33075839999999995,
+    &quot;best25_move&quot;: &quot;m3 OB&quot;,
+    &quot;chosen25_move&quot;: &quot;e4 BOI&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 580,
+    &quot;move&quot;: &quot;l12 TEE&quot;,
+    &quot;rank&quot;: 26,
+    &quot;wp_gain_vs_best25_pp&quot;: 2.5047582000000013,
+    &quot;wp_gain_vs_selected25_pp&quot;: 2.5047582000000013,
+    &quot;sem_sum_upper_pp&quot;: 0.3211358,
+    &quot;best25_move&quot;: &quot;l12 TET&quot;,
+    &quot;chosen25_move&quot;: &quot;l12 TET&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1100,
+    &quot;move&quot;: &quot;15d YETT&quot;,
+    &quot;rank&quot;: 57,
+    &quot;wp_gain_vs_best25_pp&quot;: 2.4225223999999934,
+    &quot;wp_gain_vs_selected25_pp&quot;: 2.4225223999999934,
+    &quot;sem_sum_upper_pp&quot;: 0.2572141,
+    &quot;best25_move&quot;: &quot;ex DQTT&quot;,
+    &quot;chosen25_move&quot;: &quot;ex DQTT&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 2241,
+    &quot;move&quot;: &quot;d10 KLOOFS&quot;,
+    &quot;rank&quot;: 34,
+    &quot;wp_gain_vs_best25_pp&quot;: 1.9686005999999998,
+    &quot;wp_gain_vs_selected25_pp&quot;: 1.9686005999999998,
+    &quot;sem_sum_upper_pp&quot;: 0.09450820000000001,
+    &quot;best25_move&quot;: &quot;5e FOYS&quot;,
+    &quot;chosen25_move&quot;: &quot;5e FOYS&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1755,
+    &quot;move&quot;: &quot;2l NAAN&quot;,
+    &quot;rank&quot;: 120,
+    &quot;wp_gain_vs_best25_pp&quot;: 2.2808176,
+    &quot;wp_gain_vs_selected25_pp&quot;: 2.2808176,
+    &quot;sem_sum_upper_pp&quot;: 0.13643750000000002,
+    &quot;best25_move&quot;: &quot;2k ANCON&quot;,
+    &quot;chosen25_move&quot;: &quot;2k ANCON&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 6013,
+    &quot;move&quot;: &quot;ex I&quot;,
+    &quot;rank&quot;: 87,
+    &quot;wp_gain_vs_best25_pp&quot;: -0.12733910000000126,
+    &quot;wp_gain_vs_selected25_pp&quot;: -0.12733910000000126,
+    &quot;sem_sum_upper_pp&quot;: 0.4177519,
+    &quot;best25_move&quot;: &quot;8g GIE&quot;,
+    &quot;chosen25_move&quot;: &quot;8g GIE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 575,
+    &quot;move&quot;: &quot;o11 SORER&quot;,
+    &quot;rank&quot;: 74,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.8539729000000051,
+    &quot;wp_gain_vs_selected25_pp&quot;: 1.6366514000000054,
+    &quot;sem_sum_upper_pp&quot;: 0.5491476000000001,
+    &quot;best25_move&quot;: &quot;14a EUROS&quot;,
+    &quot;chosen25_move&quot;: &quot;13k ROUe&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 575,
+    &quot;move&quot;: &quot;m13 OI&quot;,
+    &quot;rank&quot;: 34,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.7351629999999998,
+    &quot;wp_gain_vs_selected25_pp&quot;: 1.5178415,
+    &quot;sem_sum_upper_pp&quot;: 0.5491002,
+    &quot;best25_move&quot;: &quot;14a EUROS&quot;,
+    &quot;chosen25_move&quot;: &quot;13k ROUe&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 6024,
+    &quot;move&quot;: &quot;ex E&quot;,
+    &quot;rank&quot;: 190,
+    &quot;wp_gain_vs_best25_pp&quot;: -0.44465949999999976,
+    &quot;wp_gain_vs_selected25_pp&quot;: -0.4240549999999954,
+    &quot;sem_sum_upper_pp&quot;: 0.4185771,
+    &quot;best25_move&quot;: &quot;8f ERA&quot;,
+    &quot;chosen25_move&quot;: &quot;8h ARE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1379,
+    &quot;move&quot;: &quot;3a HAJ&quot;,
+    &quot;rank&quot;: 54,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.012518700000000577,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.012518700000000577,
+    &quot;sem_sum_upper_pp&quot;: 0.1459035,
+    &quot;best25_move&quot;: &quot;o1 ASHIER&quot;,
+    &quot;chosen25_move&quot;: &quot;o1 ASHIER&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1124,
+    &quot;move&quot;: &quot;13k GIE&quot;,
+    &quot;rank&quot;: 104,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.0,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.0,
+    &quot;sem_sum_upper_pp&quot;: 0.0,
+    &quot;best25_move&quot;: &quot;14k GIRL&quot;,
+    &quot;chosen25_move&quot;: &quot;13l GEY&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1124,
+    &quot;move&quot;: &quot;ex GGILLY&quot;,
+    &quot;rank&quot;: 32,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.0,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.0,
+    &quot;sem_sum_upper_pp&quot;: 0.0,
+    &quot;best25_move&quot;: &quot;14k GIRL&quot;,
+    &quot;chosen25_move&quot;: &quot;13l GEY&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 2151,
+    &quot;move&quot;: &quot;ex HLUW&quot;,
+    &quot;rank&quot;: 144,
+    &quot;wp_gain_vs_best25_pp&quot;: -0.0007651,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.0,
+    &quot;sem_sum_upper_pp&quot;: 0.0007651,
+    &quot;best25_move&quot;: &quot;4f UNWET&quot;,
+    &quot;chosen25_move&quot;: &quot;i12 WHAE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 443,
+    &quot;move&quot;: &quot;5m TIL&quot;,
+    &quot;rank&quot;: 59,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.0,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.0,
+    &quot;sem_sum_upper_pp&quot;: 0.0,
+    &quot;best25_move&quot;: &quot;a8 IS&quot;,
+    &quot;chosen25_move&quot;: &quot;d8 PIR&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1542,
+    &quot;move&quot;: &quot;ex CEIIO&quot;,
+    &quot;rank&quot;: 58,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.005877399999999999,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.0074803,
+    &quot;sem_sum_upper_pp&quot;: 0.0046253,
+    &quot;best25_move&quot;: &quot;j6 ZOOEY&quot;,
+    &quot;chosen25_move&quot;: &quot;o4 IO&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1542,
+    &quot;move&quot;: &quot;o6 ICES&quot;,
+    &quot;rank&quot;: 35,
+    &quot;wp_gain_vs_best25_pp&quot;: -0.0010686000000000003,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.0005342999999999998,
+    &quot;sem_sum_upper_pp&quot;: 0.0027976,
+    &quot;best25_move&quot;: &quot;j6 ZOOEY&quot;,
+    &quot;chosen25_move&quot;: &quot;o4 IO&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;primary&quot;,
+    &quot;pos&quot;: 1542,
+    &quot;move&quot;: &quot;o5 OI&quot;,
+    &quot;rank&quot;: 26,
+    &quot;wp_gain_vs_best25_pp&quot;: -0.0016028999999999998,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.0,
+    &quot;sem_sum_upper_pp&quot;: 0.0026715,
+    &quot;best25_move&quot;: &quot;j6 ZOOEY&quot;,
+    &quot;chosen25_move&quot;: &quot;o4 IO&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 106,
+    &quot;move&quot;: &quot;ex AI&quot;,
+    &quot;rank&quot;: 105,
+    &quot;wp_gain_vs_best25_pp&quot;: -0.010182999999996944,
+    &quot;wp_gain_vs_selected25_pp&quot;: -0.010182999999996944,
+    &quot;sem_sum_upper_pp&quot;: 0.46072860000000004,
+    &quot;best25_move&quot;: &quot;8h INDIE&quot;,
+    &quot;chosen25_move&quot;: &quot;8h INDIE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 106,
+    &quot;move&quot;: &quot;ex AEII&quot;,
+    &quot;rank&quot;: 91,
+    &quot;wp_gain_vs_best25_pp&quot;: -0.15874389999999683,
+    &quot;wp_gain_vs_selected25_pp&quot;: -0.15874389999999683,
+    &quot;sem_sum_upper_pp&quot;: 0.4600865,
+    &quot;best25_move&quot;: &quot;8h INDIE&quot;,
+    &quot;chosen25_move&quot;: &quot;8h INDIE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 106,
+    &quot;move&quot;: &quot;ex EII&quot;,
+    &quot;rank&quot;: 83,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.3264813000000033,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.3264813000000033,
+    &quot;sem_sum_upper_pp&quot;: 0.4608675,
+    &quot;best25_move&quot;: &quot;8h INDIE&quot;,
+    &quot;chosen25_move&quot;: &quot;8h INDIE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 106,
+    &quot;move&quot;: &quot;ex AEI&quot;,
+    &quot;rank&quot;: 76,
+    &quot;wp_gain_vs_best25_pp&quot;: 1.2576770000000015,
+    &quot;wp_gain_vs_selected25_pp&quot;: 1.2576770000000015,
+    &quot;sem_sum_upper_pp&quot;: 0.4611474,
+    &quot;best25_move&quot;: &quot;8h INDIE&quot;,
+    &quot;chosen25_move&quot;: &quot;8h INDIE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 106,
+    &quot;move&quot;: &quot;8f IDE&quot;,
+    &quot;rank&quot;: 53,
+    &quot;wp_gain_vs_best25_pp&quot;: -1.6097642999999995,
+    &quot;wp_gain_vs_selected25_pp&quot;: -1.6097642999999995,
+    &quot;sem_sum_upper_pp&quot;: 0.46557049999999994,
+    &quot;best25_move&quot;: &quot;8h INDIE&quot;,
+    &quot;chosen25_move&quot;: &quot;8h INDIE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 106,
+    &quot;move&quot;: &quot;8g AI&quot;,
+    &quot;rank&quot;: 72,
+    &quot;wp_gain_vs_best25_pp&quot;: -1.5488017999999992,
+    &quot;wp_gain_vs_selected25_pp&quot;: -1.5488017999999992,
+    &quot;sem_sum_upper_pp&quot;: 0.4618067,
+    &quot;best25_move&quot;: &quot;8h INDIE&quot;,
+    &quot;chosen25_move&quot;: &quot;8h INDIE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 106,
+    &quot;move&quot;: &quot;ex EI&quot;,
+    &quot;rank&quot;: 63,
+    &quot;wp_gain_vs_best25_pp&quot;: 1.2320929000000036,
+    &quot;wp_gain_vs_selected25_pp&quot;: 1.2320929000000036,
+    &quot;sem_sum_upper_pp&quot;: 0.4614008,
+    &quot;best25_move&quot;: &quot;8h INDIE&quot;,
+    &quot;chosen25_move&quot;: &quot;8h INDIE&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 6007,
+    &quot;move&quot;: &quot;ex ENOO&quot;,
+    &quot;rank&quot;: 117,
+    &quot;wp_gain_vs_best25_pp&quot;: -2.423602699999999,
+    &quot;wp_gain_vs_selected25_pp&quot;: -2.423602699999999,
+    &quot;sem_sum_upper_pp&quot;: 0.4420816,
+    &quot;best25_move&quot;: &quot;8f ONO&quot;,
+    &quot;chosen25_move&quot;: &quot;8f ONO&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 6007,
+    &quot;move&quot;: &quot;ex NNOO&quot;,
+    &quot;rank&quot;: 116,
+    &quot;wp_gain_vs_best25_pp&quot;: -2.9264085999999967,
+    &quot;wp_gain_vs_selected25_pp&quot;: -2.9264085999999967,
+    &quot;sem_sum_upper_pp&quot;: 0.4412379,
+    &quot;best25_move&quot;: &quot;8f ONO&quot;,
+    &quot;chosen25_move&quot;: &quot;8f ONO&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 6007,
+    &quot;move&quot;: &quot;ex ANOO&quot;,
+    &quot;rank&quot;: 112,
+    &quot;wp_gain_vs_best25_pp&quot;: -1.7254137000000003,
+    &quot;wp_gain_vs_selected25_pp&quot;: -1.7254137000000003,
+    &quot;sem_sum_upper_pp&quot;: 0.4418554,
+    &quot;best25_move&quot;: &quot;8f ONO&quot;,
+    &quot;chosen25_move&quot;: &quot;8f ONO&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 6007,
+    &quot;move&quot;: &quot;ex NOO&quot;,
+    &quot;rank&quot;: 33,
+    &quot;wp_gain_vs_best25_pp&quot;: -0.2749058999999998,
+    &quot;wp_gain_vs_selected25_pp&quot;: -0.2749058999999998,
+    &quot;sem_sum_upper_pp&quot;: 0.4423634,
+    &quot;best25_move&quot;: &quot;8f ONO&quot;,
+    &quot;chosen25_move&quot;: &quot;8f ONO&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 6007,
+    &quot;move&quot;: &quot;ex O&quot;,
+    &quot;rank&quot;: 76,
+    &quot;wp_gain_vs_best25_pp&quot;: 0.09697450000000218,
+    &quot;wp_gain_vs_selected25_pp&quot;: 0.09697450000000218,
+    &quot;sem_sum_upper_pp&quot;: 0.44219339999999996,
+    &quot;best25_move&quot;: &quot;8f ONO&quot;,
+    &quot;chosen25_move&quot;: &quot;8f ONO&quot;
+  },
+  {
+    &quot;dataset&quot;: &quot;quota&quot;,
+    &quot;pos&quot;: 6007,
+    &quot;move&quot;: &quot;8g NO&quot;,
+    &quot;rank&quot;: 62,
+    &quot;wp_gain_vs_best25_pp&quot;: -1.6740207999999979,
+    &quot;wp_gain_vs_selected25_pp&quot;: -1.6740207999999979,
+    &quot;sem_sum_upper_pp&quot;: 0.44305680000000003,
+    &quot;best25_move&quot;: &quot;8f ONO&quot;,
+    &quot;chosen25_move&quot;: &quot;8f ONO&quot;
+  }
+]</pre><h2>Integrity checks</h2><pre>{
+  &quot;audit&quot;: {
+    &quot;primary&quot;: {
+      &quot;positions&quot;: 320,
+      &quot;pools&quot;: 2240,
+      &quot;rows&quot;: 98686,
+      &quot;identical_pool_reuse&quot;: 220,
+      &quot;full_budget_and_finite_results&quot;: true
+    },
+    &quot;width&quot;: {
+      &quot;positions&quot;: 128,
+      &quot;pools&quot;: 512,
+      &quot;rows&quot;: 21756,
+      &quot;identical_pool_reuse&quot;: 26,
+      &quot;full_budget_and_finite_results&quot;: true
+    },
+    &quot;matched&quot;: {
+      &quot;positions&quot;: 128,
+      &quot;pools&quot;: 256,
+      &quot;rows&quot;: 9090,
+      &quot;identical_pool_reuse&quot;: 0,
+      &quot;full_budget_and_finite_results&quot;: true
+    },
+    &quot;sample128&quot;: {
+      &quot;positions&quot;: 128,
+      &quot;pools&quot;: 384,
+      &quot;rows&quot;: 12853,
+      &quot;identical_pool_reuse&quot;: 2,
+      &quot;full_budget_and_finite_results&quot;: true
+    },
+    &quot;six_ply&quot;: {
+      &quot;positions&quot;: 64,
+      &quot;pools&quot;: 320,
+      &quot;rows&quot;: 19194,
+      &quot;identical_pool_reuse&quot;: 15,
+      &quot;full_budget_and_finite_results&quot;: true
+    },
+    &quot;quota&quot;: {
+      &quot;positions&quot;: 40,
+      &quot;pools&quot;: 160,
+      &quot;rows&quot;: 7984,
+      &quot;identical_pool_reuse&quot;: 40,
+      &quot;full_budget_and_finite_results&quot;: true
+    }
+  },
+  &quot;diagnostics&quot;: {
+    &quot;primary&quot;: {
+      &quot;positions&quot;: 320,
+      &quot;candidate_records&quot;: 38840,
+      &quot;racks&quot;: 64,
+      &quot;paired_means_weights_and_exchange_zeros_match&quot;: true,
+      &quot;terminal_reply_cases&quot;: {
+        &quot;443&quot;: {
+          &quot;15a VIRELaIS&quot;: 5,
+          &quot;15a VIRILiSE&quot;: 5,
+          &quot;15a ViRILISE&quot;: 5,
+          &quot;15a VIRiLISE&quot;: 5,
+          &quot;13c LaIRISE&quot;: 3,
+          &quot;13c RILIESt&quot;: 3,
+          &quot;14a OILERIeS&quot;: 3,
+          &quot;14a OILeRIES&quot;: 3,
+          &quot;6h vIRILISE&quot;: 1
+        }
+      }
+    },
+    &quot;width&quot;: {
+      &quot;positions&quot;: 128,
+      &quot;candidate_records&quot;: 15484,
+      &quot;racks&quot;: 64,
+      &quot;paired_means_weights_and_exchange_zeros_match&quot;: true,
+      &quot;terminal_reply_cases&quot;: {}
+    },
+    &quot;six_ply&quot;: {
+      &quot;positions&quot;: 64,
+      &quot;candidate_records&quot;: 7761,
+      &quot;racks&quot;: 64,
+      &quot;paired_means_weights_and_exchange_zeros_match&quot;: true,
+      &quot;terminal_reply_cases&quot;: {}
+    },
+    &quot;sample128&quot;: {
+      &quot;positions&quot;: 128,
+      &quot;candidate_records&quot;: 15484,
+      &quot;racks&quot;: 128,
+      &quot;paired_means_weights_and_exchange_zeros_match&quot;: true,
+      &quot;terminal_reply_cases&quot;: {}
+    },
+    &quot;quota&quot;: {
+      &quot;positions&quot;: 40,
+      &quot;candidate_records&quot;: 4844,
+      &quot;racks&quot;: 64,
+      &quot;paired_means_weights_and_exchange_zeros_match&quot;: true,
+      &quot;terminal_reply_cases&quot;: {
+        &quot;323&quot;: {
+          &quot;k8 ORCINES&quot;: 1,
+          &quot;k9 CRINOSE&quot;: 1,
+          &quot;11h SERICON&quot;: 11,
+          &quot;10i SERICON&quot;: 11
+        }
+      }
+    }
+  }
+}</pre></html>

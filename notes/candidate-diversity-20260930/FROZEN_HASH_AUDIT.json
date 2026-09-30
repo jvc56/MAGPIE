@@ -1,0 +1,12 @@
+[
+  {
+    "study": "overnight",
+    "frozen_input_result_deliverable_hashes_matched": 95,
+    "additional_frozen_screenshots_matched": 2
+  },
+  {
+    "study": "blocking",
+    "frozen_input_result_deliverable_hashes_matched": 62,
+    "additional_frozen_screenshots_matched": 0
+  }
+]

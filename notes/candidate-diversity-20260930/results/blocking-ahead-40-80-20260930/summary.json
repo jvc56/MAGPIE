@@ -1,0 +1,3716 @@
+{
+  "study": "Blocking at bag5\u201329 and on-turn lead40\u201380",
+  "primary": {
+    "positions": 400,
+    "mean_wp_gain_pp": 0.03331039225000004,
+    "position_se_pp": 0.01887612858062058,
+    "bootstrap95_pp": [
+      0.0007045605000000066,
+      0.07408082050000003
+    ],
+    "t_test_two_sided_p": 0.07838199794634206,
+    "different_choices": 15,
+    "positive": 9,
+    "negative": 6,
+    "zero": 385,
+    "reference_mc_sem_upper_mean_pp": 0.007184423787339407
+  },
+  "groups_exploratory": {
+    "bag5_6": {
+      "positions": 23,
+      "mean_wp_gain_pp": 0.194029043478261,
+      "position_se_pp": 0.17878455271708796,
+      "bootstrap95_pp": [
+        -9.704347825806073e-06,
+        0.5668919956521741
+      ],
+      "t_test_two_sided_p": 0.2895528927739587,
+      "different_choices": 3,
+      "positive": 2,
+      "negative": 1,
+      "zero": 20,
+      "reference_mc_sem_upper_mean_pp": 0.01722566128233907
+    },
+    "bag7_14": {
+      "positions": 139,
+      "mean_wp_gain_pp": 0.004129290647482059,
+      "position_se_pp": 0.023514136384009728,
+      "bootstrap95_pp": [
+        -0.04561713812949628,
+        0.04890458201438862
+      ],
+      "t_test_two_sided_p": 0.8608586586469851,
+      "different_choices": 8,
+      "positive": 4,
+      "negative": 4,
+      "zero": 131,
+      "reference_mc_sem_upper_mean_pp": 0.0178157186359241
+    },
+    "bag15_29": {
+      "positions": 238,
+      "mean_wp_gain_pp": 0.03482150210084037,
+      "position_se_pp": 0.022820184806083617,
+      "bootstrap95_pp": [
+        -0.000818702100840307,
+        0.08549017983193279
+      ],
+      "t_test_two_sided_p": 0.12836615366434057,
+      "different_choices": 4,
+      "positive": 3,
+      "negative": 1,
+      "zero": 234,
+      "reference_mc_sem_upper_mean_pp": 0.005895996209277064
+    },
+    "lead40_59": {
+      "positions": 237,
+      "mean_wp_gain_pp": 0.05722511898734182,
+      "position_se_pp": 0.03171072610061405,
+      "bootstrap95_pp": [
+        0.0023250063291140005,
+        0.12542057257383973
+      ],
+      "t_test_two_sided_p": 0.07241233931260467,
+      "different_choices": 10,
+      "positive": 8,
+      "negative": 2,
+      "zero": 227,
+      "reference_mc_sem_upper_mean_pp": 0.011784930089655742
+    },
+    "lead60_80": {
+      "positions": 163,
+      "mean_wp_gain_pp": -0.0014613269938649886,
+      "position_se_pp": 0.003317512174794076,
+      "bootstrap95_pp": [
+        -0.0083052975460123,
+        0.004819609815950984
+      ],
+      "t_test_two_sided_p": 0.6601703138804951,
+      "different_choices": 5,
+      "positive": 1,
+      "negative": 4,
+      "zero": 158,
+      "reference_mc_sem_upper_mean_pp": 0.004149813188324599
+    }
+  },
+  "exploratory": {
+    "blocking_vs_static25": {
+      "positions": 400,
+      "mean_wp_gain_pp": 0.04605815024999996,
+      "position_se_pp": 0.018130230827443385,
+      "bootstrap95_pp": [
+        0.015084158999999986,
+        0.08599439650000001
+      ],
+      "t_test_two_sided_p": 0.011450542286367408,
+      "different_choices": 19,
+      "positive": 14,
+      "negative": 5,
+      "zero": 381,
+      "reference_mc_sem_upper_mean_pp": 0.007793853321711155
+    },
+    "same_count_static_vs_static25": {
+      "positions": 400,
+      "mean_wp_gain_pp": 0.012747757999999915,
+      "position_se_pp": 0.006982847707792709,
+      "bootstrap95_pp": [
+        0.0018790707499999615,
+        0.028579555999999895
+      ],
+      "t_test_two_sided_p": 0.06866065024529527,
+      "different_choices": 14,
+      "positive": 11,
+      "negative": 3,
+      "zero": 386,
+      "reference_mc_sem_upper_mean_pp": 0.004853091709630077
+    }
+  },
+  "changed_cases": [
+    {
+      "pos": 66,
+      "left_move": "3b YO",
+      "right_move": "m8 GROYNE",
+      "wp_gain_pp": -0.19485109999999306,
+      "eq_gain": 11.948735,
+      "reference_mc_sem_upper_pp": 0.6943138,
+      "bag": 18,
+      "score_lead": 42,
+      "blocking_count": 31,
+      "static_rank": 1,
+      "outside_equal_count_static": false
+    },
+    {
+      "pos": 134,
+      "left_move": "10d IPOMOEA",
+      "right_move": "11e POME",
+      "wp_gain_pp": -0.021341499999993907,
+      "eq_gain": -9.159699,
+      "reference_mc_sem_upper_pp": 0.4067336,
+      "bag": 11,
+      "score_lead": 63,
+      "blocking_count": 32,
+      "static_rank": 43,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 140,
+      "left_move": "o10 DAISES",
+      "right_move": "1j EUPADS",
+      "wp_gain_pp": 1.536102100000003,
+      "eq_gain": 0.8118690000000015,
+      "reference_mc_sem_upper_pp": 0.4896185,
+      "bag": 13,
+      "score_lead": 46,
+      "blocking_count": 30,
+      "static_rank": 34,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 148,
+      "left_move": "n2 PIN",
+      "right_move": "15h ONO",
+      "wp_gain_pp": 0.16110630000000237,
+      "eq_gain": 1.0292050000000046,
+      "reference_mc_sem_upper_pp": 0.7359667999999999,
+      "bag": 8,
+      "score_lead": 42,
+      "blocking_count": 33,
+      "static_rank": 2,
+      "outside_equal_count_static": false
+    },
+    {
+      "pos": 151,
+      "left_move": "1c ECOTAGE",
+      "right_move": "8j ATE",
+      "wp_gain_pp": 1.345874299999994,
+      "eq_gain": -7.701177,
+      "reference_mc_sem_upper_pp": 2.088575,
+      "bag": 9,
+      "score_lead": 43,
+      "blocking_count": 33,
+      "static_rank": 17,
+      "outside_equal_count_static": false
+    },
+    {
+      "pos": 194,
+      "left_move": "8m DUI",
+      "right_move": "8m MEU",
+      "wp_gain_pp": 1.635197300000002,
+      "eq_gain": 3.4683369999999982,
+      "reference_mc_sem_upper_pp": 0.7087683,
+      "bag": 15,
+      "score_lead": 42,
+      "blocking_count": 35,
+      "static_rank": 47,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 207,
+      "left_move": "3f NEEP",
+      "right_move": "c7 EVINCE",
+      "wp_gain_pp": -0.00011159999999676984,
+      "eq_gain": 16.157153,
+      "reference_mc_sem_upper_pp": 0.0001593,
+      "bag": 6,
+      "score_lead": 75,
+      "blocking_count": 28,
+      "static_rank": 30,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 219,
+      "left_move": "3g WEEDING",
+      "right_move": "6f BREADING",
+      "wp_gain_pp": -2.436165999999995,
+      "eq_gain": 7.2137519999999995,
+      "reference_mc_sem_upper_pp": 0.5088674,
+      "bag": 7,
+      "score_lead": 45,
+      "blocking_count": 39,
+      "static_rank": 11,
+      "outside_equal_count_static": false
+    },
+    {
+      "pos": 225,
+      "left_move": "8l QAT",
+      "right_move": "3k TAMP",
+      "wp_gain_pp": -0.22085450000000062,
+      "eq_gain": 28.311744999999995,
+      "reference_mc_sem_upper_pp": 0.20192000000000002,
+      "bag": 8,
+      "score_lead": 71,
+      "blocking_count": 32,
+      "static_rank": 78,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 274,
+      "left_move": "o6 OTARIES",
+      "right_move": "o6 TORTIES",
+      "wp_gain_pp": 0.554850699999998,
+      "eq_gain": 0.02874899999999947,
+      "reference_mc_sem_upper_pp": 0.5276509,
+      "bag": 12,
+      "score_lead": 50,
+      "blocking_count": 34,
+      "static_rank": 38,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 281,
+      "left_move": "7f ACTA",
+      "right_move": "e7 TRACT",
+      "wp_gain_pp": 4.1130683,
+      "eq_gain": 16.795256,
+      "reference_mc_sem_upper_pp": 0.3886193,
+      "bag": 5,
+      "score_lead": 56,
+      "blocking_count": 36,
+      "static_rank": 38,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 286,
+      "left_move": "m10 DeX",
+      "right_move": "13h MARVY",
+      "wp_gain_pp": 4.748143100000002,
+      "eq_gain": 19.286550000000002,
+      "reference_mc_sem_upper_pp": 0.9236832,
+      "bag": 15,
+      "score_lead": 40,
+      "blocking_count": 33,
+      "static_rank": 104,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 295,
+      "left_move": "n8 GIO",
+      "right_move": "k1 ANGLO",
+      "wp_gain_pp": 2.099028199999997,
+      "eq_gain": 5.269908999999998,
+      "reference_mc_sem_upper_pp": 0.3626122,
+      "bag": 21,
+      "score_lead": 44,
+      "blocking_count": 35,
+      "static_rank": 38,
+      "outside_equal_count_static": true
+    },
+    {
+      "pos": 362,
+      "left_move": "l1 UNREAVE",
+      "right_move": "15c AVENUE",
+      "wp_gain_pp": -0.34560000000000146,
+      "eq_gain": 0.5526549999999997,
+      "reference_mc_sem_upper_pp": 0.49537639999999994,
+      "bag": 8,
+      "score_lead": 60,
+      "blocking_count": 34,
+      "static_rank": 9,
+      "outside_equal_count_static": false
+    },
+    {
+      "pos": 392,
+      "left_move": "1l TUAN",
+      "right_move": "14k ASTUN",
+      "wp_gain_pp": 0.3497112999999996,
+      "eq_gain": -28.169314999999997,
+      "reference_mc_sem_upper_pp": 0.07708240000000001,
+      "bag": 6,
+      "score_lead": 71,
+      "blocking_count": 34,
+      "static_rank": 9,
+      "outside_equal_count_static": false
+    }
+  ],
+  "deep": {
+    "summary": {
+      "positions": 20,
+      "mean_wp_gain_pp": 0.43889159999999927,
+      "position_se_pp": 0.4350496702843274,
+      "bootstrap95_pp": [
+        -0.3362322449999988,
+        1.3244117149999979
+      ],
+      "t_test_two_sided_p": 0.32573152322352306,
+      "different_choices": 13,
+      "positive": 8,
+      "negative": 4,
+      "zero": 8,
+      "reference_mc_sem_upper_mean_pp": 0.026701785844062003
+    },
+    "per_position": [
+      {
+        "pos": 134,
+        "left_move": "10d IPOMOEA",
+        "right_move": "11e POME",
+        "wp_gain_pp": -0.9398222000000067,
+        "reference_mc_sem_upper_pp": 0.0910894,
+        "gain_vs_best_same_count_static_pp": -1.0354474000000002
+      },
+      {
+        "pos": 140,
+        "left_move": "o10 DAISES",
+        "right_move": "1j EUPADS",
+        "wp_gain_pp": 0.902704700000001,
+        "reference_mc_sem_upper_pp": 0.09750740000000001,
+        "gain_vs_best_same_count_static_pp": 0.5217701000000075
+      },
+      {
+        "pos": 185,
+        "left_move": "10g NIVAL",
+        "right_move": "10g NIVAL",
+        "wp_gain_pp": 0.0,
+        "reference_mc_sem_upper_pp": 0,
+        "gain_vs_best_same_count_static_pp": 0.0
+      },
+      {
+        "pos": 194,
+        "left_move": "8m DUI",
+        "right_move": "8m MEU",
+        "wp_gain_pp": 2.7774844999999937,
+        "reference_mc_sem_upper_pp": 0.24698489999999995,
+        "gain_vs_best_same_count_static_pp": -0.16446280000000923
+      },
+      {
+        "pos": 207,
+        "left_move": "3f NEEP",
+        "right_move": "c7 EVINCE",
+        "wp_gain_pp": 0.0,
+        "reference_mc_sem_upper_pp": 0.0,
+        "gain_vs_best_same_count_static_pp": 0.0
+      },
+      {
+        "pos": 219,
+        "left_move": "3g WEEDING",
+        "right_move": "6f BREADING",
+        "wp_gain_pp": -2.374543699999998,
+        "reference_mc_sem_upper_pp": 0.1072558,
+        "gain_vs_best_same_count_static_pp": -2.374543699999998
+      },
+      {
+        "pos": 225,
+        "left_move": "8l QAT",
+        "right_move": "3k TAMP",
+        "wp_gain_pp": 0.01713399999999643,
+        "reference_mc_sem_upper_pp": 0.032825,
+        "gain_vs_best_same_count_static_pp": -0.02767339999999452
+      },
+      {
+        "pos": 229,
+        "left_move": "d1 JAR",
+        "right_move": "d1 JAR",
+        "wp_gain_pp": 0.0,
+        "reference_mc_sem_upper_pp": 0,
+        "gain_vs_best_same_count_static_pp": -0.03610979999999486
+      },
+      {
+        "pos": 274,
+        "left_move": "o6 OTARIES",
+        "right_move": "o6 TORTIES",
+        "wp_gain_pp": 0.2583104000000058,
+        "reference_mc_sem_upper_pp": 0.09966789999999999,
+        "gain_vs_best_same_count_static_pp": 0.2583104000000058
+      },
+      {
+        "pos": 281,
+        "left_move": "7f ACTA",
+        "right_move": "e7 TRACT",
+        "wp_gain_pp": 4.141528399999994,
+        "reference_mc_sem_upper_pp": 0.0727139,
+        "gain_vs_best_same_count_static_pp": 4.141528399999994
+      },
+      {
+        "pos": 286,
+        "left_move": "m10 DeX",
+        "right_move": "13h MARVY",
+        "wp_gain_pp": 5.832817999999995,
+        "reference_mc_sem_upper_pp": 0.3059522,
+        "gain_vs_best_same_count_static_pp": 1.6573123999999995
+      },
+      {
+        "pos": 295,
+        "left_move": "n8 GIO",
+        "right_move": "k1 ANGLO",
+        "wp_gain_pp": 0.9962944999999945,
+        "reference_mc_sem_upper_pp": 0.1391183,
+        "gain_vs_best_same_count_static_pp": 0.37176479999999623
+      },
+      {
+        "pos": 351,
+        "left_move": "o11 OATER",
+        "right_move": "o11 OATER",
+        "wp_gain_pp": 0.0,
+        "reference_mc_sem_upper_pp": 0,
+        "gain_vs_best_same_count_static_pp": -0.5747981000000069
+      },
+      {
+        "pos": 357,
+        "left_move": "8l YITE",
+        "right_move": "8l YITE",
+        "wp_gain_pp": 0.0,
+        "reference_mc_sem_upper_pp": 0,
+        "gain_vs_best_same_count_static_pp": 0.0
+      },
+      {
+        "pos": 361,
+        "left_move": "g10 INAPT",
+        "right_move": "g10 INAPT",
+        "wp_gain_pp": 0.0,
+        "reference_mc_sem_upper_pp": 0,
+        "gain_vs_best_same_count_static_pp": 0.0
+      },
+      {
+        "pos": 362,
+        "left_move": "l1 UNREAVE",
+        "right_move": "15c AVENUE",
+        "wp_gain_pp": -0.3594878999999995,
+        "reference_mc_sem_upper_pp": 0.099895,
+        "gain_vs_best_same_count_static_pp": -0.3594878999999995
+      },
+      {
+        "pos": 389,
+        "left_move": "o8 ANIONS",
+        "right_move": "o8 ANIONS",
+        "wp_gain_pp": 0.0,
+        "reference_mc_sem_upper_pp": 0,
+        "gain_vs_best_same_count_static_pp": 0.0
+      },
+      {
+        "pos": 392,
+        "left_move": "1l TUAN",
+        "right_move": "14k ASTUN",
+        "wp_gain_pp": 0.3903956000000042,
+        "reference_mc_sem_upper_pp": 0.0157155,
+        "gain_vs_best_same_count_static_pp": 0.0
+      },
+      {
+        "pos": 54,
+        "left_move": "2e JEERS",
+        "right_move": "2e JEERS",
+        "wp_gain_pp": 0.0,
+        "reference_mc_sem_upper_pp": 0,
+        "gain_vs_best_same_count_static_pp": 0.0
+      },
+      {
+        "pos": 66,
+        "left_move": "3b YO",
+        "right_move": "m8 GROYNE",
+        "wp_gain_pp": -2.8649842999999953,
+        "reference_mc_sem_upper_pp": 0.2353693,
+        "gain_vs_best_same_count_static_pp": -2.8649842999999953
+      }
+    ],
+    "interpretation": "Outcome-blind novel-choice enriched subset; not a population effect estimate."
+  },
+  "integrity": {
+    "positions": 400,
+    "independent_games": 400,
+    "input_hashes_valid": true,
+    "binary_hash_valid": true,
+    "all_pools_complete": true,
+    "same_counts_exact": true,
+    "identical_pool_pairs": 2,
+    "check_rows": 48605
+  },
+  "per_position": [
+    {
+      "pos": 1,
+      "left_move": "14h RESTRIVE",
+      "right_move": "14h RESTRIVE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 2,
+      "left_move": "2j FARRED",
+      "right_move": "2j FARRED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 3,
+      "left_move": "4a PEPONIDA",
+      "right_move": "4a PEPONIDA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 4,
+      "left_move": "h1 LARVA",
+      "right_move": "h1 LARVA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 5,
+      "left_move": "9j WREN",
+      "right_move": "9j WREN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 6,
+      "left_move": "l8 AIRlIFTS",
+      "right_move": "l8 AIRlIFTS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 7,
+      "left_move": "15j WIVE",
+      "right_move": "15j WIVE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 8,
+      "left_move": "1d FORTED",
+      "right_move": "1d FORTED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 9,
+      "left_move": "15j NOMINA",
+      "right_move": "15j NOMINA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 10,
+      "left_move": "14k DIXI",
+      "right_move": "14k DIXI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 11,
+      "left_move": "5b CRWTH",
+      "right_move": "5b CRWTH",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 12,
+      "left_move": "3b CUTTOE",
+      "right_move": "3b CUTTOE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 13,
+      "left_move": "n6 STUNG",
+      "right_move": "n6 STUNG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 14,
+      "left_move": "4b FABUlOUS",
+      "right_move": "4b FABUlOUS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 15,
+      "left_move": "n7 SAGINATE",
+      "right_move": "n7 SAGINATE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 16,
+      "left_move": "11j AGOGE",
+      "right_move": "11j AGOGE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 17,
+      "left_move": "e10 BLAWN",
+      "right_move": "e10 BLAWN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 18,
+      "left_move": "1a OSTREGER",
+      "right_move": "1a OSTREGER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 19,
+      "left_move": "2e ECU",
+      "right_move": "2e ECU",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 20,
+      "left_move": "14e DEIONISE",
+      "right_move": "14e DEIONISE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 21,
+      "left_move": "8k RYALS",
+      "right_move": "8k RYALS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 22,
+      "left_move": "13c pYGIDIAL",
+      "right_move": "13c pYGIDIAL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 23,
+      "left_move": "8l RIVA",
+      "right_move": "8l RIVA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 24,
+      "left_move": "j8 GOOG",
+      "right_move": "j8 GOOG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 25,
+      "left_move": "12a LAKH",
+      "right_move": "12a LAKH",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 26,
+      "left_move": "o8 DWEEB",
+      "right_move": "o8 DWEEB",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 27,
+      "left_move": "14b RENEGUE",
+      "right_move": "14b RENEGUE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 28,
+      "left_move": "2k TOEY",
+      "right_move": "2k TOEY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 29,
+      "left_move": "1l VROT",
+      "right_move": "1l VROT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 30,
+      "left_move": "o1 ET",
+      "right_move": "o1 ET",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 31,
+      "left_move": "8m RUC",
+      "right_move": "8m RUC",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 32,
+      "left_move": "l12 RYND",
+      "right_move": "l12 RYND",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 33,
+      "left_move": "o1 JARK",
+      "right_move": "o1 JARK",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 34,
+      "left_move": "a1 WEEM",
+      "right_move": "a1 WEEM",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 35,
+      "left_move": "a12 ZEIN",
+      "right_move": "a12 ZEIN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 36,
+      "left_move": "m5 OON",
+      "right_move": "m5 OON",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 37,
+      "left_move": "15k MAUVE",
+      "right_move": "15k MAUVE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 38,
+      "left_move": "4a CHEF",
+      "right_move": "4a CHEF",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 39,
+      "left_move": "14e OD",
+      "right_move": "14e OD",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 40,
+      "left_move": "12a CARLES",
+      "right_move": "12a CARLES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 41,
+      "left_move": "3j HORAL",
+      "right_move": "3j HORAL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 42,
+      "left_move": "12b VANG",
+      "right_move": "12b VANG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 43,
+      "left_move": "j2 DRAUNtS",
+      "right_move": "j2 DRAUNtS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 44,
+      "left_move": "j9 OX",
+      "right_move": "j9 OX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 45,
+      "left_move": "o1 NIDATED",
+      "right_move": "o1 NIDATED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 46,
+      "left_move": "a13 AWE",
+      "right_move": "a13 AWE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 47,
+      "left_move": "12b SHRIVEL",
+      "right_move": "12b SHRIVEL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 48,
+      "left_move": "10j CALVE",
+      "right_move": "10j CALVE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 49,
+      "left_move": "14n HI",
+      "right_move": "14n HI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 50,
+      "left_move": "12d PODEX",
+      "right_move": "12d PODEX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 51,
+      "left_move": "5c INPOURED",
+      "right_move": "5c INPOURED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 52,
+      "left_move": "2j QUESO",
+      "right_move": "2j QUESO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 53,
+      "left_move": "1a REWINdED",
+      "right_move": "1a REWINdED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 54,
+      "left_move": "2e JEERS",
+      "right_move": "2e JEERS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 55,
+      "left_move": "b8 DOJOS",
+      "right_move": "b8 DOJOS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 56,
+      "left_move": "12l CHAI",
+      "right_move": "12l CHAI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 57,
+      "left_move": "h12 WIPE",
+      "right_move": "h12 WIPE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 58,
+      "left_move": "11c VIZOR",
+      "right_move": "11c VIZOR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 59,
+      "left_move": "15d SOFTS",
+      "right_move": "15d SOFTS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 60,
+      "left_move": "o12 ZILL",
+      "right_move": "o12 ZILL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 61,
+      "left_move": "j10 FAA",
+      "right_move": "j10 FAA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 62,
+      "left_move": "2h ABLATED",
+      "right_move": "2h ABLATED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 63,
+      "left_move": "m3 ALOGIA",
+      "right_move": "m3 ALOGIA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 64,
+      "left_move": "n7 DELETION",
+      "right_move": "n7 DELETION",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 65,
+      "left_move": "5i SIF",
+      "right_move": "5i SIF",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 66,
+      "left_move": "3b YO",
+      "right_move": "m8 GROYNE",
+      "wp_gain_pp": -0.19485109999999306,
+      "eq_gain": 11.948735,
+      "reference_mc_sem_upper_pp": 0.6943138
+    },
+    {
+      "pos": 67,
+      "left_move": "4a INDOOR",
+      "right_move": "4a INDOOR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 68,
+      "left_move": "l11 POOED",
+      "right_move": "l11 POOED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 69,
+      "left_move": "a8 KENaF",
+      "right_move": "a8 KENaF",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 70,
+      "left_move": "14b TELEVIEW",
+      "right_move": "14b TELEVIEW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 71,
+      "left_move": "6b GUITAR",
+      "right_move": "6b GUITAR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 72,
+      "left_move": "b1 ENDASH",
+      "right_move": "b1 ENDASH",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 73,
+      "left_move": "b8 HEW",
+      "right_move": "b8 HEW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 74,
+      "left_move": "14a FERRITIN",
+      "right_move": "14a FERRITIN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 75,
+      "left_move": "j1 TAB",
+      "right_move": "j1 TAB",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 76,
+      "left_move": "8k WISER",
+      "right_move": "8k WISER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 77,
+      "left_move": "c3 DWINE",
+      "right_move": "c3 DWINE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 78,
+      "left_move": "8k AMBER",
+      "right_move": "8k AMBER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 79,
+      "left_move": "2j COHAB",
+      "right_move": "2j COHAB",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 80,
+      "left_move": "12h VIBRIO",
+      "right_move": "12h VIBRIO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 81,
+      "left_move": "d1 MaUVE",
+      "right_move": "d1 MaUVE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 82,
+      "left_move": "3g KAE",
+      "right_move": "3g KAE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 83,
+      "left_move": "a6 ElONGATE",
+      "right_move": "a6 ElONGATE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 84,
+      "left_move": "h10 SHREIK",
+      "right_move": "h10 SHREIK",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 85,
+      "left_move": "j5 ETERNIZE",
+      "right_move": "j5 ETERNIZE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 86,
+      "left_move": "c7 DEBIToR",
+      "right_move": "c7 DEBIToR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 87,
+      "left_move": "a1 ALOHA",
+      "right_move": "a1 ALOHA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 88,
+      "left_move": "c13 CEE",
+      "right_move": "c13 CEE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 89,
+      "left_move": "15d WEIrING",
+      "right_move": "15d WEIrING",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 90,
+      "left_move": "1l FLEA",
+      "right_move": "1l FLEA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 91,
+      "left_move": "b10 XI",
+      "right_move": "b10 XI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 92,
+      "left_move": "l8 CONVENE",
+      "right_move": "l8 CONVENE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 93,
+      "left_move": "5b COHESION",
+      "right_move": "5b COHESION",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 94,
+      "left_move": "8l LIEU",
+      "right_move": "8l LIEU",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 95,
+      "left_move": "h1 NORMIE",
+      "right_move": "h1 NORMIE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 96,
+      "left_move": "12b INSUlANT",
+      "right_move": "12b INSUlANT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 97,
+      "left_move": "15c DIVI",
+      "right_move": "15c DIVI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 98,
+      "left_move": "7a BREEZE",
+      "right_move": "7a BREEZE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 99,
+      "left_move": "11e RUbAIYAT",
+      "right_move": "11e RUbAIYAT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 100,
+      "left_move": "d4 QAT",
+      "right_move": "d4 QAT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 101,
+      "left_move": "h1 LAIKED",
+      "right_move": "h1 LAIKED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 102,
+      "left_move": "c3 ZO",
+      "right_move": "c3 ZO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 103,
+      "left_move": "m3 TORY",
+      "right_move": "m3 TORY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 104,
+      "left_move": "8k ASWIM",
+      "right_move": "8k ASWIM",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 105,
+      "left_move": "6e OF",
+      "right_move": "6e OF",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 106,
+      "left_move": "j5 AHI",
+      "right_move": "j5 AHI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 107,
+      "left_move": "1k JIVER",
+      "right_move": "1k JIVER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 108,
+      "left_move": "3i BETTA",
+      "right_move": "3i BETTA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 109,
+      "left_move": "14l LAUF",
+      "right_move": "14l LAUF",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 110,
+      "left_move": "6n JO",
+      "right_move": "6n JO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 111,
+      "left_move": "b10 VERBS",
+      "right_move": "b10 VERBS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 112,
+      "left_move": "14a ROK",
+      "right_move": "14a ROK",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 113,
+      "left_move": "13c CALUMETS",
+      "right_move": "13c CALUMETS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 114,
+      "left_move": "m7 HIOI",
+      "right_move": "m7 HIOI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 115,
+      "left_move": "15a JASY",
+      "right_move": "15a JASY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 116,
+      "left_move": "1d TWIRLED",
+      "right_move": "1d TWIRLED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 117,
+      "left_move": "1b LUCIFER",
+      "right_move": "1b LUCIFER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 118,
+      "left_move": "13k VIRTU",
+      "right_move": "13k VIRTU",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 119,
+      "left_move": "l7 WALLSEND",
+      "right_move": "l7 WALLSEND",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 120,
+      "left_move": "1a AIRWAY",
+      "right_move": "1a AIRWAY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 121,
+      "left_move": "6i OFFCUT",
+      "right_move": "6i OFFCUT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 122,
+      "left_move": "e6 UNFETTER",
+      "right_move": "e6 UNFETTER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 123,
+      "left_move": "j2 PIEZO",
+      "right_move": "j2 PIEZO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 124,
+      "left_move": "e11 TWICE",
+      "right_move": "e11 TWICE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 125,
+      "left_move": "a8 CROONS",
+      "right_move": "a8 CROONS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 126,
+      "left_move": "o8 SWY",
+      "right_move": "o8 SWY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 127,
+      "left_move": "e11 DEWAN",
+      "right_move": "e11 DEWAN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 128,
+      "left_move": "1a ALVEoLES",
+      "right_move": "1a ALVEoLES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 129,
+      "left_move": "a12 IDEA",
+      "right_move": "a12 IDEA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 130,
+      "left_move": "1a AMAH",
+      "right_move": "1a AMAH",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 131,
+      "left_move": "4i KIORE",
+      "right_move": "4i KIORE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 132,
+      "left_move": "n10 PROVEN",
+      "right_move": "n10 PROVEN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 133,
+      "left_move": "b10 QAIDS",
+      "right_move": "b10 QAIDS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 134,
+      "left_move": "10d IPOMOEA",
+      "right_move": "11e POME",
+      "wp_gain_pp": -0.021341499999993907,
+      "eq_gain": -9.159699,
+      "reference_mc_sem_upper_pp": 0.4067336
+    },
+    {
+      "pos": 135,
+      "left_move": "2e OXER",
+      "right_move": "2e OXER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 136,
+      "left_move": "a11 AVION",
+      "right_move": "a11 AVION",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 137,
+      "left_move": "10j PLAGUY",
+      "right_move": "10j PLAGUY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 138,
+      "left_move": "a11 ZAIDY",
+      "right_move": "a11 ZAIDY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 139,
+      "left_move": "a12 CLON",
+      "right_move": "a12 CLON",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 140,
+      "left_move": "o10 DAISES",
+      "right_move": "1j EUPADS",
+      "wp_gain_pp": 1.536102100000003,
+      "eq_gain": 0.8118690000000015,
+      "reference_mc_sem_upper_pp": 0.4896185
+    },
+    {
+      "pos": 141,
+      "left_move": "m1 RUTTIER",
+      "right_move": "m1 RUTTIER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 142,
+      "left_move": "j8 EVAdING",
+      "right_move": "j8 EVAdING",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 143,
+      "left_move": "c2 YAUP",
+      "right_move": "c2 YAUP",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 144,
+      "left_move": "j8 GADID",
+      "right_move": "j8 GADID",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 145,
+      "left_move": "o7 UPDRAW",
+      "right_move": "o7 UPDRAW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 146,
+      "left_move": "1k PEPOS",
+      "right_move": "1k PEPOS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 147,
+      "left_move": "2g VERY",
+      "right_move": "2g VERY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 148,
+      "left_move": "n2 PIN",
+      "right_move": "15h ONO",
+      "wp_gain_pp": 0.16110630000000237,
+      "eq_gain": 1.0292050000000046,
+      "reference_mc_sem_upper_pp": 0.7359667999999999
+    },
+    {
+      "pos": 149,
+      "left_move": "8j TENZON",
+      "right_move": "8j TENZON",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 150,
+      "left_move": "m9 LILIED",
+      "right_move": "m9 LILIED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 151,
+      "left_move": "1c ECOTAGE",
+      "right_move": "8j ATE",
+      "wp_gain_pp": 1.345874299999994,
+      "eq_gain": -7.701177,
+      "reference_mc_sem_upper_pp": 2.088575
+    },
+    {
+      "pos": 152,
+      "left_move": "15h FUNDIES",
+      "right_move": "15h FUNDIES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 153,
+      "left_move": "4a ABeRRANT",
+      "right_move": "4a ABeRRANT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 154,
+      "left_move": "f4 POX",
+      "right_move": "f4 POX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 155,
+      "left_move": "4b DEBASERS",
+      "right_move": "4b DEBASERS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 156,
+      "left_move": "8a JAWS",
+      "right_move": "8a JAWS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 157,
+      "left_move": "11i WAE",
+      "right_move": "11i WAE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 158,
+      "left_move": "l8 PRIVY",
+      "right_move": "l8 PRIVY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 159,
+      "left_move": "14m PAM",
+      "right_move": "14m PAM",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 160,
+      "left_move": "15a FLOOSY",
+      "right_move": "15a FLOOSY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 161,
+      "left_move": "c2 WOOING",
+      "right_move": "c2 WOOING",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 162,
+      "left_move": "10c CHEZ",
+      "right_move": "10c CHEZ",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 163,
+      "left_move": "a12 BENJ",
+      "right_move": "a12 BENJ",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 164,
+      "left_move": "8m ORF",
+      "right_move": "8m ORF",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 165,
+      "left_move": "2b BEWIG",
+      "right_move": "2b BEWIG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 166,
+      "left_move": "13g XI",
+      "right_move": "13g XI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 167,
+      "left_move": "n2 BYTES",
+      "right_move": "n2 BYTES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 168,
+      "left_move": "15d HYENS",
+      "right_move": "15d HYENS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 169,
+      "left_move": "g13 MEW",
+      "right_move": "g13 MEW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 170,
+      "left_move": "l12 JOBE",
+      "right_move": "l12 JOBE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 171,
+      "left_move": "o8 VAIN",
+      "right_move": "o8 VAIN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 172,
+      "left_move": "15k BOURG",
+      "right_move": "15k BOURG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 173,
+      "left_move": "k10 OX",
+      "right_move": "k10 OX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 174,
+      "left_move": "f2 BLART",
+      "right_move": "f2 BLART",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 175,
+      "left_move": "9g PYX",
+      "right_move": "9g PYX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 176,
+      "left_move": "11i BYDED",
+      "right_move": "11i BYDED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 177,
+      "left_move": "9k CIVIL",
+      "right_move": "9k CIVIL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 178,
+      "left_move": "10h DUG",
+      "right_move": "10h DUG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 179,
+      "left_move": "11h SUBTLER",
+      "right_move": "11h SUBTLER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 180,
+      "left_move": "k1 INDOcILE",
+      "right_move": "k1 INDOcILE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 181,
+      "left_move": "15h FURIES",
+      "right_move": "15h FURIES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 182,
+      "left_move": "2e SWOUN",
+      "right_move": "2e SWOUN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 183,
+      "left_move": "a7 ZYME",
+      "right_move": "a7 ZYME",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 184,
+      "left_move": "i3 YOD",
+      "right_move": "i3 YOD",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 185,
+      "left_move": "10g NIVAL",
+      "right_move": "10g NIVAL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 186,
+      "left_move": "n12 DEX",
+      "right_move": "n12 DEX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 187,
+      "left_move": "f2 QAID",
+      "right_move": "f2 QAID",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 188,
+      "left_move": "3k BIFId",
+      "right_move": "3k BIFId",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 189,
+      "left_move": "n6 JATO",
+      "right_move": "n6 JATO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 190,
+      "left_move": "o6 SOVIETIC",
+      "right_move": "o6 SOVIETIC",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 191,
+      "left_move": "8a VULN",
+      "right_move": "8a VULN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 192,
+      "left_move": "c9 CEDAR",
+      "right_move": "c9 CEDAR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 193,
+      "left_move": "15d FEART",
+      "right_move": "15d FEART",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 194,
+      "left_move": "8m DUI",
+      "right_move": "8m MEU",
+      "wp_gain_pp": 1.635197300000002,
+      "eq_gain": 3.4683369999999982,
+      "reference_mc_sem_upper_pp": 0.7087683
+    },
+    {
+      "pos": 195,
+      "left_move": "o4 TRICOT",
+      "right_move": "o4 TRICOT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 196,
+      "left_move": "11h FUCI",
+      "right_move": "11h FUCI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 197,
+      "left_move": "5b HEAVILY",
+      "right_move": "5b HEAVILY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 198,
+      "left_move": "15c ABORAL",
+      "right_move": "15c ABORAL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 199,
+      "left_move": "10h HIPSTER",
+      "right_move": "10h HIPSTER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 200,
+      "left_move": "1h StORMInG",
+      "right_move": "1h StORMInG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 201,
+      "left_move": "b10 JOE",
+      "right_move": "b10 JOE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 202,
+      "left_move": "h1 QAT",
+      "right_move": "h1 QAT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 203,
+      "left_move": "2f JEE",
+      "right_move": "2f JEE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 204,
+      "left_move": "c12 YEDE",
+      "right_move": "c12 YEDE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 205,
+      "left_move": "o9 POOTInG",
+      "right_move": "o9 POOTInG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 206,
+      "left_move": "k8 ONIE",
+      "right_move": "k8 ONIE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 207,
+      "left_move": "3f NEEP",
+      "right_move": "c7 EVINCE",
+      "wp_gain_pp": -0.00011159999999676984,
+      "eq_gain": 16.157153,
+      "reference_mc_sem_upper_pp": 0.0001593
+    },
+    {
+      "pos": 208,
+      "left_move": "13l HOND",
+      "right_move": "13l HOND",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 209,
+      "left_move": "14b WAUR",
+      "right_move": "14b WAUR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 210,
+      "left_move": "3a OVERARM",
+      "right_move": "3a OVERARM",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 211,
+      "left_move": "a8 EGGCUP",
+      "right_move": "a8 EGGCUP",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 212,
+      "left_move": "2f TROPHIES",
+      "right_move": "2f TROPHIES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 213,
+      "left_move": "5k RACON",
+      "right_move": "5k RACON",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 214,
+      "left_move": "m1 NOY",
+      "right_move": "m1 NOY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 215,
+      "left_move": "o7 NAM",
+      "right_move": "o7 NAM",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 216,
+      "left_move": "15d EMBOLIC",
+      "right_move": "15d EMBOLIC",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 217,
+      "left_move": "k3 FOEN",
+      "right_move": "k3 FOEN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 218,
+      "left_move": "14a FELONY",
+      "right_move": "14a FELONY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 219,
+      "left_move": "3g WEEDING",
+      "right_move": "6f BREADING",
+      "wp_gain_pp": -2.436165999999995,
+      "eq_gain": 7.2137519999999995,
+      "reference_mc_sem_upper_pp": 0.5088674
+    },
+    {
+      "pos": 220,
+      "left_move": "h12 MOZO",
+      "right_move": "h12 MOZO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 221,
+      "left_move": "n6 MINX",
+      "right_move": "n6 MINX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 222,
+      "left_move": "15a JO",
+      "right_move": "15a JO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 223,
+      "left_move": "15j FRIEZE",
+      "right_move": "15j FRIEZE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 224,
+      "left_move": "1l ZOIc",
+      "right_move": "1l ZOIc",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 225,
+      "left_move": "8l QAT",
+      "right_move": "3k TAMP",
+      "wp_gain_pp": -0.22085450000000062,
+      "eq_gain": 28.311744999999995,
+      "reference_mc_sem_upper_pp": 0.20192000000000002
+    },
+    {
+      "pos": 226,
+      "left_move": "10e FEWeR",
+      "right_move": "10e FEWeR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 227,
+      "left_move": "a1 VOR",
+      "right_move": "a1 VOR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 228,
+      "left_move": "8l ILIA",
+      "right_move": "8l ILIA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 229,
+      "left_move": "d1 JAR",
+      "right_move": "d1 JAR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 230,
+      "left_move": "o1 GWYNIADS",
+      "right_move": "o1 GWYNIADS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 231,
+      "left_move": "11b CODGER",
+      "right_move": "11b CODGER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 232,
+      "left_move": "a1 OPEPE",
+      "right_move": "a1 OPEPE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 233,
+      "left_move": "d10 AUDIO",
+      "right_move": "d10 AUDIO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 234,
+      "left_move": "c2 ORBITY",
+      "right_move": "c2 ORBITY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 235,
+      "left_move": "9g MONAMINE",
+      "right_move": "9g MONAMINE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 236,
+      "left_move": "j12 TEF",
+      "right_move": "j12 TEF",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 237,
+      "left_move": "12h HAILY",
+      "right_move": "12h HAILY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 238,
+      "left_move": "12a BRoCAGE",
+      "right_move": "12a BRoCAGE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 239,
+      "left_move": "b2 OSSIA",
+      "right_move": "b2 OSSIA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 240,
+      "left_move": "15h AIRDATES",
+      "right_move": "15h AIRDATES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 241,
+      "left_move": "10f XU",
+      "right_move": "10f XU",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 242,
+      "left_move": "l9 HEXED",
+      "right_move": "l9 HEXED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 243,
+      "left_move": "k3 VAIVODE",
+      "right_move": "k3 VAIVODE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 244,
+      "left_move": "1l AHEM",
+      "right_move": "1l AHEM",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 245,
+      "left_move": "o11 EQUID",
+      "right_move": "o11 EQUID",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 246,
+      "left_move": "12g EQUATE",
+      "right_move": "12g EQUATE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 247,
+      "left_move": "3m COW",
+      "right_move": "3m COW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 248,
+      "left_move": "d4 DENATURE",
+      "right_move": "d4 DENATURE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 249,
+      "left_move": "1c NIPA",
+      "right_move": "1c NIPA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 250,
+      "left_move": "1c FRETTED",
+      "right_move": "1c FRETTED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 251,
+      "left_move": "o12 DOAT",
+      "right_move": "o12 DOAT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 252,
+      "left_move": "2j MINBAR",
+      "right_move": "2j MINBAR",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 253,
+      "left_move": "b10 INANE",
+      "right_move": "b10 INANE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 254,
+      "left_move": "d3 FOX",
+      "right_move": "d3 FOX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 255,
+      "left_move": "d3 MOOI",
+      "right_move": "d3 MOOI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 256,
+      "left_move": "4b FLUB",
+      "right_move": "4b FLUB",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 257,
+      "left_move": "6g WAVY",
+      "right_move": "6g WAVY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 258,
+      "left_move": "o7 VAuNTER",
+      "right_move": "o7 VAuNTER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 259,
+      "left_move": "n12 COPE",
+      "right_move": "n12 COPE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 260,
+      "left_move": "2e OX",
+      "right_move": "2e OX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 261,
+      "left_move": "2j BAY",
+      "right_move": "2j BAY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 262,
+      "left_move": "n1 sTOkVEL",
+      "right_move": "n1 sTOkVEL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 263,
+      "left_move": "b10 MID",
+      "right_move": "b10 MID",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 264,
+      "left_move": "c9 CYLIX",
+      "right_move": "c9 CYLIX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 265,
+      "left_move": "a6 EARCONS",
+      "right_move": "a6 EARCONS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 266,
+      "left_move": "14a QADI",
+      "right_move": "14a QADI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 267,
+      "left_move": "14n ZA",
+      "right_move": "14n ZA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 268,
+      "left_move": "15g EREMIC",
+      "right_move": "15g EREMIC",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 269,
+      "left_move": "15b SDAINeD",
+      "right_move": "15b SDAINeD",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 270,
+      "left_move": "m6 HALO",
+      "right_move": "m6 HALO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 271,
+      "left_move": "15a KRILL",
+      "right_move": "15a KRILL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 272,
+      "left_move": "15e INOSINE",
+      "right_move": "15e INOSINE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 273,
+      "left_move": "15k EINA",
+      "right_move": "15k EINA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 274,
+      "left_move": "o6 OTARIES",
+      "right_move": "o6 TORTIES",
+      "wp_gain_pp": 0.554850699999998,
+      "eq_gain": 0.02874899999999947,
+      "reference_mc_sem_upper_pp": 0.5276509
+    },
+    {
+      "pos": 275,
+      "left_move": "m12 DIVO",
+      "right_move": "m12 DIVO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 276,
+      "left_move": "l9 DESTAIN",
+      "right_move": "l9 DESTAIN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 277,
+      "left_move": "d3 DUVET",
+      "right_move": "d3 DUVET",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 278,
+      "left_move": "3a FRAILTY",
+      "right_move": "3a FRAILTY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 279,
+      "left_move": "i12 VOW",
+      "right_move": "i12 VOW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 280,
+      "left_move": "15l KYUS",
+      "right_move": "15l KYUS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 281,
+      "left_move": "7f ACTA",
+      "right_move": "e7 TRACT",
+      "wp_gain_pp": 4.1130683,
+      "eq_gain": 16.795256,
+      "reference_mc_sem_upper_pp": 0.3886193
+    },
+    {
+      "pos": 282,
+      "left_move": "h1 GEEZ",
+      "right_move": "h1 GEEZ",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 283,
+      "left_move": "11g GOBO",
+      "right_move": "11g GOBO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 284,
+      "left_move": "1h WITTY",
+      "right_move": "1h WITTY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 285,
+      "left_move": "o12 CUES",
+      "right_move": "o12 CUES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 286,
+      "left_move": "m10 DeX",
+      "right_move": "13h MARVY",
+      "wp_gain_pp": 4.748143100000002,
+      "eq_gain": 19.286550000000002,
+      "reference_mc_sem_upper_pp": 0.9236832
+    },
+    {
+      "pos": 287,
+      "left_move": "o2 GAUDIES",
+      "right_move": "o2 GAUDIES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 288,
+      "left_move": "n2 REEDY",
+      "right_move": "n2 REEDY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 289,
+      "left_move": "7c JIBS",
+      "right_move": "7c JIBS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 290,
+      "left_move": "11e ZIP",
+      "right_move": "11e ZIP",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 291,
+      "left_move": "m8 OX",
+      "right_move": "m8 OX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 292,
+      "left_move": "h13 VIN",
+      "right_move": "h13 VIN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 293,
+      "left_move": "k3 ANIMA",
+      "right_move": "k3 ANIMA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 294,
+      "left_move": "6f VOE",
+      "right_move": "6f VOE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 295,
+      "left_move": "n8 GIO",
+      "right_move": "k1 ANGLO",
+      "wp_gain_pp": 2.099028199999997,
+      "eq_gain": 5.269908999999998,
+      "reference_mc_sem_upper_pp": 0.3626122
+    },
+    {
+      "pos": 296,
+      "left_move": "e10 ATE",
+      "right_move": "e10 ATE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 297,
+      "left_move": "1a ROTARIES",
+      "right_move": "1a ROTARIES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 298,
+      "left_move": "b10 KIAAT",
+      "right_move": "b10 KIAAT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 299,
+      "left_move": "n2 PHEEZES",
+      "right_move": "n2 PHEEZES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 300,
+      "left_move": "6h ACARINES",
+      "right_move": "6h ACARINES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 301,
+      "left_move": "11d GERAH",
+      "right_move": "11d GERAH",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 302,
+      "left_move": "6b OUTFEAST",
+      "right_move": "6b OUTFEAST",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 303,
+      "left_move": "8l BUNA",
+      "right_move": "8l BUNA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 304,
+      "left_move": "15b SARGE",
+      "right_move": "15b SARGE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 305,
+      "left_move": "12d HOVEA",
+      "right_move": "12d HOVEA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 306,
+      "left_move": "l1 AZON",
+      "right_move": "l1 AZON",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 307,
+      "left_move": "i2 DITONES",
+      "right_move": "i2 DITONES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 308,
+      "left_move": "14e GNOW",
+      "right_move": "14e GNOW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 309,
+      "left_move": "4a NIMROD",
+      "right_move": "4a NIMROD",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 310,
+      "left_move": "14b RETRAITE",
+      "right_move": "14b RETRAITE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 311,
+      "left_move": "8k DIVOT",
+      "right_move": "8k DIVOT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 312,
+      "left_move": "c11 EMU",
+      "right_move": "c11 EMU",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 313,
+      "left_move": "n11 DOTAL",
+      "right_move": "n11 DOTAL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 314,
+      "left_move": "2f BOG",
+      "right_move": "2f BOG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 315,
+      "left_move": "3b CERIPH",
+      "right_move": "3b CERIPH",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 316,
+      "left_move": "n8 ROOTCAP",
+      "right_move": "n8 ROOTCAP",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 317,
+      "left_move": "l12 WOOT",
+      "right_move": "l12 WOOT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 318,
+      "left_move": "13c EUTEXIA",
+      "right_move": "13c EUTEXIA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 319,
+      "left_move": "h12 VELL",
+      "right_move": "h12 VELL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 320,
+      "left_move": "d11 QAT",
+      "right_move": "d11 QAT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 321,
+      "left_move": "14f CLEIK",
+      "right_move": "14f CLEIK",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 322,
+      "left_move": "12l ARGH",
+      "right_move": "12l ARGH",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 323,
+      "left_move": "1a FRIG",
+      "right_move": "1a FRIG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 324,
+      "left_move": "1d RATIFIED",
+      "right_move": "1d RATIFIED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 325,
+      "left_move": "f7 BEADS",
+      "right_move": "f7 BEADS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 326,
+      "left_move": "n5 SPORTIVe",
+      "right_move": "n5 SPORTIVe",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 327,
+      "left_move": "d8 VEILER",
+      "right_move": "d8 VEILER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 328,
+      "left_move": "6m FY",
+      "right_move": "6m FY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 329,
+      "left_move": "1n JO",
+      "right_move": "1n JO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 330,
+      "left_move": "b1 GUIDED",
+      "right_move": "b1 GUIDED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 331,
+      "left_move": "c12 ZERO",
+      "right_move": "c12 ZERO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 332,
+      "left_move": "10b CILANTRO",
+      "right_move": "10b CILANTRO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 333,
+      "left_move": "12b SLY",
+      "right_move": "12b SLY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 334,
+      "left_move": "15d SCOPA",
+      "right_move": "15d SCOPA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 335,
+      "left_move": "f4 QI",
+      "right_move": "f4 QI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 336,
+      "left_move": "12h DOOLEE",
+      "right_move": "12h DOOLEE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 337,
+      "left_move": "a12 FINI",
+      "right_move": "a12 FINI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 338,
+      "left_move": "m9 TINEID",
+      "right_move": "m9 TINEID",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 339,
+      "left_move": "j7 DEED",
+      "right_move": "j7 DEED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 340,
+      "left_move": "15d BEIGIER",
+      "right_move": "15d BEIGIER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 341,
+      "left_move": "m12 THEW",
+      "right_move": "m12 THEW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 342,
+      "left_move": "c5 AGOG",
+      "right_move": "c5 AGOG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 343,
+      "left_move": "h1 PADSAW",
+      "right_move": "h1 PADSAW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 344,
+      "left_move": "11e VIBS",
+      "right_move": "11e VIBS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 345,
+      "left_move": "13g MINNEOLA",
+      "right_move": "13g MINNEOLA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 346,
+      "left_move": "d12 BRIG",
+      "right_move": "d12 BRIG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 347,
+      "left_move": "1d PUNTO",
+      "right_move": "1d PUNTO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 348,
+      "left_move": "15h CRAWDAD",
+      "right_move": "15h CRAWDAD",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 349,
+      "left_move": "n11 ADIEU",
+      "right_move": "n11 ADIEU",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 350,
+      "left_move": "d1 GELATOS",
+      "right_move": "d1 GELATOS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 351,
+      "left_move": "o11 OATER",
+      "right_move": "o11 OATER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 352,
+      "left_move": "c8 COSIER",
+      "right_move": "c8 COSIER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 353,
+      "left_move": "l1 QUAIS",
+      "right_move": "l1 QUAIS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 354,
+      "left_move": "b10 VARROA",
+      "right_move": "b10 VARROA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 355,
+      "left_move": "l3 TARbOYS",
+      "right_move": "l3 TARbOYS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 356,
+      "left_move": "10f YOKE",
+      "right_move": "10f YOKE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 357,
+      "left_move": "8l YITE",
+      "right_move": "8l YITE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 358,
+      "left_move": "a1 IMIDO",
+      "right_move": "a1 IMIDO",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 359,
+      "left_move": "4d KAFTAN",
+      "right_move": "4d KAFTAN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 360,
+      "left_move": "1d JUTES",
+      "right_move": "1d JUTES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 361,
+      "left_move": "g10 INAPT",
+      "right_move": "g10 INAPT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 362,
+      "left_move": "l1 UNREAVE",
+      "right_move": "15c AVENUE",
+      "wp_gain_pp": -0.34560000000000146,
+      "eq_gain": 0.5526549999999997,
+      "reference_mc_sem_upper_pp": 0.49537639999999994
+    },
+    {
+      "pos": 363,
+      "left_move": "n2 OUTGATE",
+      "right_move": "n2 OUTGATE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 364,
+      "left_move": "a3 ZOMBIE",
+      "right_move": "a3 ZOMBIE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 365,
+      "left_move": "14e OPTIMA",
+      "right_move": "14e OPTIMA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 366,
+      "left_move": "m9 PRUTAH",
+      "right_move": "m9 PRUTAH",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 367,
+      "left_move": "m8 TRUELOVE",
+      "right_move": "m8 TRUELOVE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 368,
+      "left_move": "4d LOOIE",
+      "right_move": "4d LOOIE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 369,
+      "left_move": "11b WEFTED",
+      "right_move": "11b WEFTED",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 370,
+      "left_move": "a6 FORPIT",
+      "right_move": "a6 FORPIT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 371,
+      "left_move": "e2 TIBIA",
+      "right_move": "e2 TIBIA",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 372,
+      "left_move": "o6 WOX",
+      "right_move": "o6 WOX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 373,
+      "left_move": "j5 OXY",
+      "right_move": "j5 OXY",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 374,
+      "left_move": "o11 OLPAE",
+      "right_move": "o11 OLPAE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 375,
+      "left_move": "b4 WILD",
+      "right_move": "b4 WILD",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 376,
+      "left_move": "15d sWIVE",
+      "right_move": "15d sWIVE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 377,
+      "left_move": "2c AGUIzES",
+      "right_move": "2c AGUIzES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 378,
+      "left_move": "e4 LAX",
+      "right_move": "e4 LAX",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 379,
+      "left_move": "11b BEPAT",
+      "right_move": "11b BEPAT",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 380,
+      "left_move": "g12 OGLE",
+      "right_move": "g12 OGLE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 381,
+      "left_move": "c12 HUNG",
+      "right_move": "c12 HUNG",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 382,
+      "left_move": "k5 EQUATION",
+      "right_move": "k5 EQUATION",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 383,
+      "left_move": "l6 NILL",
+      "right_move": "l6 NILL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 384,
+      "left_move": "d3 IAMB",
+      "right_move": "d3 IAMB",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 385,
+      "left_move": "l8 AIN",
+      "right_move": "l8 AIN",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 386,
+      "left_move": "d4 COUCAL",
+      "right_move": "d4 COUCAL",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 387,
+      "left_move": "d11 UWU",
+      "right_move": "d11 UWU",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 388,
+      "left_move": "o8 YOICK",
+      "right_move": "o8 YOICK",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 389,
+      "left_move": "o8 ANIONS",
+      "right_move": "o8 ANIONS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 390,
+      "left_move": "2c ANILINES",
+      "right_move": "2c ANILINES",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 391,
+      "left_move": "13b OCCAM",
+      "right_move": "13b OCCAM",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 392,
+      "left_move": "1l TUAN",
+      "right_move": "14k ASTUN",
+      "wp_gain_pp": 0.3497112999999996,
+      "eq_gain": -28.169314999999997,
+      "reference_mc_sem_upper_pp": 0.07708240000000001
+    },
+    {
+      "pos": 393,
+      "left_move": "f9 EIREnIC",
+      "right_move": "f9 EIREnIC",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 394,
+      "left_move": "k5 DIMETER",
+      "right_move": "k5 DIMETER",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 395,
+      "left_move": "4a YEtI",
+      "right_move": "4a YEtI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 396,
+      "left_move": "h12 CHID",
+      "right_move": "h12 CHID",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 397,
+      "left_move": "7h ZORI",
+      "right_move": "7h ZORI",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 398,
+      "left_move": "4b FEDERATE",
+      "right_move": "4b FEDERATE",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 399,
+      "left_move": "j4 POW",
+      "right_move": "j4 POW",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    },
+    {
+      "pos": 400,
+      "left_move": "o1 OuTPRAYS",
+      "right_move": "o1 OuTPRAYS",
+      "wp_gain_pp": 0.0,
+      "eq_gain": 0.0,
+      "reference_mc_sem_upper_pp": 0
+    }
+  ]
+}

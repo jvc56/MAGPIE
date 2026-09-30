@@ -1,0 +1,71 @@
+{
+  "engine_commit": "d1164030",
+  "optimized_build": "make magpie_test BUILD=no_pgo_release; exit 0",
+  "format_write": "python3 format.py --write on all eight changed C/header files",
+  "full_format_check": "python3 format.py; exit 0",
+  "unit_tests": [
+    {
+      "test": "movegen",
+      "exit_code": 0,
+      "seconds": 1.3676157919981051
+    },
+    {
+      "test": "sim",
+      "exit_code": 0,
+      "seconds": 4.43906141698244
+    },
+    {
+      "test": "playchooser",
+      "exit_code": 0,
+      "seconds": 27.79126608298975
+    },
+    {
+      "test": "pat",
+      "exit_code": 0,
+      "seconds": 5.059034250007244
+    }
+  ],
+  "circular_dependencies": "No cycles found; networkx 3.7 installed in isolated temporary check dependencies",
+  "candidate_smoke": {
+    "exit_code": 0,
+    "arms": [
+      "reference",
+      "static25",
+      "static_blocking_count",
+      "threat_wide"
+    ],
+    "counts": {
+      "static_blocking_count": [
+        40
+      ],
+      "threat_wide": [
+        40
+      ],
+      "reference": [
+        120
+      ],
+      "static25": [
+        25
+      ]
+    },
+    "rows": 225,
+    "purpose": "Separate 200ms plumbing smoke test; completed study results unchanged."
+  },
+  "study_reruns": false,
+  "cppcheck_and_clang_tidy": "Not run during preservation; executables unavailable. Complete CI matrix still required for production PRs.",
+  "existing_study_audits": "Frozen completed result integrity and browser verification retained in the per-study validation files.",
+  "archive_verification": "All 7 archive hashes and 1131 member hashes verified; see validation/archive-verification.log.",
+  "preserved_script_syntax": "All Python scripts parsed with ast.parse; preserved result JSON parsed successfully.",
+  "frozen_hash_audit": [
+    {
+      "study": "overnight",
+      "frozen_input_result_deliverable_hashes_matched": 95,
+      "additional_frozen_screenshots_matched": 2
+    },
+    {
+      "study": "blocking",
+      "frozen_input_result_deliverable_hashes_matched": 62,
+      "additional_frozen_screenshots_matched": 0
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "audit128": {
+    "positions": 128,
+    "pools": 384,
+    "rows": 12853,
+    "identical_pool_reuse": 2,
+    "full_budget_and_finite_results": true
+  },
+  "checks128": {
+    "positions": 128,
+    "candidate_records": 15484,
+    "racks": 128,
+    "paired_means_weights_and_exchange_zeros_match": true,
+    "terminal_reply_cases": {}
+  },
+  "quota_audit": {
+    "positions": 40,
+    "pools": 160,
+    "rows": 7984,
+    "identical_pool_reuse": 40,
+    "full_budget_and_finite_results": true
+  },
+  "sample128_vs64": {
+    "setup_wide": {
+      "left": "setup_conditioned",
+      "right": "setup_wide",
+      "wp_gain_pp": {
+        "n": 96,
+        "mean": 0.006521794791666653,
+        "se": 0.003901979591470587
+      },
+      "game_bootstrap95_pp": [
+        0.0,
+        0.01490257395833329
+      ],
+      "equity_gain": {
+        "n": 96,
+        "mean": 0.09300194791666672,
+        "se": 0.10709754167276096
+      },
+      "different_choices": 4,
+      "positive": 3,
+      "negative": 0,
+      "zero": 93
+    },
+    "signals": {
+      "left": "signals_conditioned",
+      "right": "signals",
+      "wp_gain_pp": {
+        "n": 96,
+        "mean": -0.01675626979166663,
+        "se": 0.026292384548935347
+      },
+      "game_bootstrap95_pp": [
+        -0.07387705624999984,
+        0.016962905208333313
+      ],
+      "equity_gain": {
+        "n": 96,
+        "mean": -0.2166378854166667,
+        "se": 0.14690803147113615
+      },
+      "different_choices": 5,
+      "positive": 3,
+      "negative": 2,
+      "zero": 91
+    },
+    "combined": {
+      "left": "combined_conditioned",
+      "right": "combined",
+      "wp_gain_pp": {
+        "n": 96,
+        "mean": 0.00227054791666665,
+        "se": 0.0018997632203407724
+      },
+      "game_bootstrap95_pp": [
+        0.0,
+        0.00681164374999995
+      ],
+      "equity_gain": {
+        "n": 96,
+        "mean": -0.13431948958333323,
+        "se": 0.1406320069394579
+      },
+      "different_choices": 2,
+      "positive": 2,
+      "negative": 0,
+      "zero": 94
+    }
+  },
+  "quota": {
+    "tile_quota": {
+      "left": "tile_quota",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 40,
+        "mean": 0.0013554774999999936,
+        "se": 0.0013554774999999933
+      },
+      "game_bootstrap95_pp": [
+        0.0,
+        0.004066432499999981
+      ],
+      "equity_gain": {
+        "n": 40,
+        "mean": -0.04160717500000001,
+        "se": 0.041607175
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 39
+    },
+    "tile_exchange": {
+      "left": "tile_exchange",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 40,
+        "mean": 0.03200831750000008,
+        "se": 0.02410686676445677
+      },
+      "game_bootstrap95_pp": [
+        0.0,
+        0.0863437525000002
+      ],
+      "equity_gain": {
+        "n": 40,
+        "mean": 0.06900744999999997,
+        "se": 0.05281210299625564
+      },
+      "different_choices": 2,
+      "positive": 2,
+      "negative": 0,
+      "zero": 38
+    }
+  }
+}

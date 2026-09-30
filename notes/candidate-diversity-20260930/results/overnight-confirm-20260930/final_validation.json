@@ -1,0 +1,32 @@
+{
+  "verified_epoch": 1790769033.3608818,
+  "paired_positions": 1200,
+  "phase_counts": {
+    "early": 400,
+    "middle": 400,
+    "late": 400
+  },
+  "source_games": 1200,
+  "all_input_and_result_hashes_verified": true,
+  "frozen_harness_and_binary_verified": true,
+  "independent_t_p_numeric_check": 0.0057996171842538136,
+  "t_p_difference": 1.489103979013251e-13,
+  "paired_csv_mean_and_unique_game_ids_verified": true,
+  "browser_qa": {
+    "positions": 1200,
+    "example": 870,
+    "all_ten_sortable_columns_both_directions": true,
+    "full_and_provenance_views_keep_125_candidates": true,
+    "deep_reference_46_evaluated_candidates_and_missing_last": true,
+    "occupied_tiles_have_subscripts": 78,
+    "premium_labels_on_covered_tiles": 0,
+    "classic_premium_colors_and_blank_styling_visual_verified": true,
+    "unseen_pool_tiles": 19,
+    "report_deep_rows": 47
+  },
+  "report_rendered_from_audited_summary_without_recalculation": true,
+  "recovery_records": [
+    "recovery-20260930T0851/recovery.json",
+    "recovery-20260930T1121/recovery.json"
+  ]
+}

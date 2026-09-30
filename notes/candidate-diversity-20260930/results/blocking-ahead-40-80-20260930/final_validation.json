@@ -1,0 +1,40 @@
+{
+  "finished_epoch": 1790789460.4292,
+  "positions": 400,
+  "deep_positions": 20,
+  "all_hashes_valid": true,
+  "primary_effect_interval_and_test_unchanged_by_reporting_review": true,
+  "mc_uncertainty_aggregated_as_standard_error_of_mean": true,
+  "browser_verified": true,
+  "browser_verified_epoch": 1790789888.4794502,
+  "hash_entries_verified": 62,
+  "browser_checks": {
+    "positions": 400,
+    "bag_filter_counts": [
+      12,
+      23,
+      139,
+      238,
+      400
+    ],
+    "lead_filter_counts": [
+      237,
+      163,
+      400
+    ],
+    "all_ten_columns_both_sort_directions": true,
+    "flat_and_provenance_rows_match": true,
+    "blocking_and_static_control_counts_match": true,
+    "full_15s_and_600s_results_visible": true,
+    "occupied_premium_labels_hidden": true,
+    "all_visible_board_tiles_have_score_subscripts": true,
+    "blank_and_two_digit_score_rendering_verified": true,
+    "unseen_pool_and_game_score_verified": true,
+    "report_statistics_and_primary_significance_wording_verified": true,
+    "choice_badges_identify_original_four_ply_runs": true
+  },
+  "screenshots": [
+    "/Users/olaugh/Documents/ChatGPT/Magpie/blocking-targeted-candidate-pools.png",
+    "/Users/olaugh/Documents/ChatGPT/Magpie/blocking-targeted-report.png"
+  ]
+}

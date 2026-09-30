@@ -1,0 +1,2706 @@
+{
+  "audit": {
+    "primary": {
+      "positions": 320,
+      "pools": 2240,
+      "rows": 98686,
+      "identical_pool_reuse": 220,
+      "full_budget_and_finite_results": true
+    },
+    "width": {
+      "positions": 128,
+      "pools": 512,
+      "rows": 21756,
+      "identical_pool_reuse": 26,
+      "full_budget_and_finite_results": true
+    },
+    "matched": {
+      "positions": 128,
+      "pools": 256,
+      "rows": 9090,
+      "identical_pool_reuse": 0,
+      "full_budget_and_finite_results": true
+    },
+    "sample128": {
+      "positions": 128,
+      "pools": 384,
+      "rows": 12853,
+      "identical_pool_reuse": 2,
+      "full_budget_and_finite_results": true
+    },
+    "six_ply": {
+      "positions": 64,
+      "pools": 320,
+      "rows": 19194,
+      "identical_pool_reuse": 15,
+      "full_budget_and_finite_results": true
+    },
+    "quota": {
+      "positions": 40,
+      "pools": 160,
+      "rows": 7984,
+      "identical_pool_reuse": 40,
+      "full_budget_and_finite_results": true
+    }
+  },
+  "matched_width": {
+    "setup_wide": {
+      "left": "setup_wide",
+      "right": "static_setup_count",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": 0.022081234374999967,
+        "se": 0.018808188770496895
+      },
+      "game_bootstrap95_pp": [
+        -0.006045071093749993,
+        0.06556132656249986
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": -0.03758377343750005,
+        "se": 0.18096923122682426
+      },
+      "different_choices": 6,
+      "positive": 3,
+      "negative": 3,
+      "zero": 122,
+      "mean_candidates": 29.5078125,
+      "by_phase": {
+        "nonopening": {
+          "left": "setup_wide",
+          "right": "static_setup_count",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": 0.02944164583333329,
+            "se": 0.02506509827936149
+          },
+          "game_bootstrap95_pp": [
+            -0.007348671874999953,
+            0.08671042291666653
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": -0.05011169791666673,
+            "se": 0.24159591346549336
+          },
+          "different_choices": 6,
+          "positive": 3,
+          "negative": 3,
+          "zero": 90
+        },
+        "opening": {
+          "left": "setup_wide",
+          "right": "static_setup_count",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": 0.0,
+            "se": 0.0
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": 0.0,
+            "se": 0.0
+          },
+          "different_choices": 0,
+          "positive": 0,
+          "negative": 0,
+          "zero": 32
+        }
+      }
+    },
+    "combined": {
+      "left": "combined",
+      "right": "static_combined_count",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": 0.02979440625000004,
+        "se": 0.0196528538833938
+      },
+      "game_bootstrap95_pp": [
+        0.00013047109375007425,
+        0.07572619999999998
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": -0.21271220312500008,
+        "se": 0.23184409520945257
+      },
+      "different_choices": 7,
+      "positive": 5,
+      "negative": 2,
+      "zero": 121,
+      "mean_candidates": 41.5078125,
+      "by_phase": {
+        "nonopening": {
+          "left": "combined",
+          "right": "static_combined_count",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": 0.03732160000000002,
+            "se": 0.026119039815049094
+          },
+          "game_bootstrap95_pp": [
+            -0.0018590687499999835,
+            0.09622514895833324
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": -0.28873306250000014,
+            "se": 0.30910240608273953
+          },
+          "different_choices": 5,
+          "positive": 3,
+          "negative": 2,
+          "zero": 91
+        },
+        "opening": {
+          "left": "combined",
+          "right": "static_combined_count",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": 0.007212825000000103,
+            "se": 0.005954390662400732
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.020263671875000305
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": 0.015350375000000027,
+            "se": 0.014346959599071866
+          },
+          "different_choices": 2,
+          "positive": 2,
+          "negative": 0,
+          "zero": 30
+        }
+      }
+    }
+  },
+  "width": {
+    "adaptive_static": {
+      "left": "adaptive_static",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": 0.020453970312499976,
+        "se": 0.019936798970413408
+      },
+      "game_bootstrap95_pp": [
+        -0.006493319531249942,
+        0.06463773749999992
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": -0.17285801562500008,
+        "se": 0.1879451612065677
+      },
+      "different_choices": 10,
+      "positive": 5,
+      "negative": 5,
+      "zero": 118,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_static",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": 0.030749909374999954,
+            "se": 0.02636238479294347
+          },
+          "game_bootstrap95_pp": [
+            -0.0035559979166667273,
+            0.08938822187499988
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": -0.22392283333333346,
+            "se": 0.25062870207573057
+          },
+          "different_choices": 8,
+          "positive": 5,
+          "negative": 3,
+          "zero": 88
+        },
+        "opening": {
+          "left": "adaptive_static",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": -0.010433846874999958,
+            "se": 0.009118818317775591
+          },
+          "game_bootstrap95_pp": [
+            -0.02992673749999987,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": -0.019663562499999898,
+            "se": 0.018651987242506593
+          },
+          "different_choices": 2,
+          "positive": 0,
+          "negative": 2,
+          "zero": 30
+        }
+      }
+    },
+    "static60": {
+      "left": "static60",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": 0.05856156015624995,
+        "se": 0.028598937189294436
+      },
+      "game_bootstrap95_pp": [
+        0.010717242968750016,
+        0.12066480390624977
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": -0.5814848281250001,
+        "se": 0.36853181236945576
+      },
+      "different_choices": 13,
+      "positive": 9,
+      "negative": 4,
+      "zero": 115,
+      "by_phase": {
+        "nonopening": {
+          "left": "static60",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": 0.0785403479166666,
+            "se": 0.03795862852828825
+          },
+          "game_bootstrap95_pp": [
+            0.014728073958333395,
+            0.1631850999999999
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": -0.7749776875000002,
+            "se": 0.4904171826277866
+          },
+          "different_choices": 12,
+          "positive": 9,
+          "negative": 3,
+          "zero": 84
+        },
+        "opening": {
+          "left": "static60",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": -0.0013748031250000042,
+            "se": 0.001374803125000004
+          },
+          "game_bootstrap95_pp": [
+            -0.004124409375000013,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": -0.0010062499999999863,
+            "se": 0.0010062499999999863
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 31
+        }
+      }
+    },
+    "adaptive_signals": {
+      "left": "adaptive_signals",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": 0.05004081640624997,
+        "se": 0.027577996633140953
+      },
+      "game_bootstrap95_pp": [
+        0.004426949218750055,
+        0.11244282578124996
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": -0.2039353984375001,
+        "se": 0.2568935528026084
+      },
+      "different_choices": 12,
+      "positive": 8,
+      "negative": 4,
+      "zero": 116,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_signals",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": 0.06523334895833327,
+            "se": 0.036632664814637415
+          },
+          "game_bootstrap95_pp": [
+            0.0051984875000000205,
+            0.14773260104166655
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": -0.27635982291666683,
+            "se": 0.3426200438651099
+          },
+          "different_choices": 10,
+          "positive": 7,
+          "negative": 3,
+          "zero": 86
+        },
+        "opening": {
+          "left": "adaptive_signals",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": 0.004463218750000095,
+            "se": 0.006040728261600075
+          },
+          "game_bootstrap95_pp": [
+            -0.004124409375000013,
+            0.017514065625000297
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": 0.013337875000000055,
+            "se": 0.014411719967403334
+          },
+          "different_choices": 2,
+          "positive": 1,
+          "negative": 1,
+          "zero": 30
+        }
+      }
+    },
+    "signals_vs_adaptive_static": {
+      "left": "adaptive_signals",
+      "right": "adaptive_static",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": 0.029586846093749997,
+        "se": 0.019896152583028962
+      },
+      "game_bootstrap95_pp": [
+        -0.0005653296875000174,
+        0.07616258359374987
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": -0.03107738281250004,
+        "se": 0.1874554090658103
+      },
+      "different_choices": 6,
+      "positive": 5,
+      "negative": 1,
+      "zero": 122,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_signals",
+          "right": "adaptive_static",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": 0.03448343958333332,
+            "se": 0.026085418382859393
+          },
+          "game_bootstrap95_pp": [
+            -0.003856237500000078,
+            0.09308237187499996
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": -0.05243698958333337,
+            "se": 0.24999399783891987
+          },
+          "different_choices": 5,
+          "positive": 4,
+          "negative": 1,
+          "zero": 91
+        },
+        "opening": {
+          "left": "adaptive_signals",
+          "right": "adaptive_static",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": 0.014897065625000053,
+            "se": 0.014897065625000053
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.04469119687500016
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": 0.03300143749999995,
+            "se": 0.033001437499999946
+          },
+          "different_choices": 1,
+          "positive": 1,
+          "negative": 0,
+          "zero": 31
+        }
+      }
+    },
+    "signals_vs_static60": {
+      "left": "adaptive_signals",
+      "right": "static60",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": -0.008520743749999978,
+        "se": 0.008268125074510073
+      },
+      "game_bootstrap95_pp": [
+        -0.028481242187499985,
+        0.0029190109375000495
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": 0.37754942968750005,
+        "se": 0.26657053778507817
+      },
+      "different_choices": 3,
+      "positive": 1,
+      "negative": 2,
+      "zero": 125,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_signals",
+          "right": "static60",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": -0.013306998958333337,
+            "se": 0.0108249848933113
+          },
+          "game_bootstrap95_pp": [
+            -0.03709281458333335,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": 0.49861786458333335,
+            "se": 0.35499510971533166
+          },
+          "different_choices": 2,
+          "positive": 0,
+          "negative": 2,
+          "zero": 94
+        },
+        "opening": {
+          "left": "adaptive_signals",
+          "right": "static60",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": 0.005838021875000099,
+            "se": 0.005838021875000099
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.017514065625000297
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": 0.014344125000000041,
+            "se": 0.01434412500000004
+          },
+          "different_choices": 1,
+          "positive": 1,
+          "negative": 0,
+          "zero": 31
+        }
+      }
+    }
+  },
+  "six_ply": {
+    "adaptive_static": {
+      "left": "adaptive_static",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": 0.03487874374999993,
+        "se": 0.03411114275219964
+      },
+      "game_bootstrap95_pp": [
+        -0.03427475937499995,
+        0.10043860468749977
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": -0.5503105468749999,
+        "se": 0.3658799165729096
+      },
+      "different_choices": 7,
+      "positive": 5,
+      "negative": 1,
+      "zero": 58,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_static",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": 0.07348628749999986,
+            "se": 0.03543593280076131
+          },
+          "game_bootstrap95_pp": [
+            0.01421416041666667,
+            0.15062852291666626
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": -0.6751088541666665,
+            "se": 0.48439239228152703
+          },
+          "different_choices": 6,
+          "positive": 5,
+          "negative": 0,
+          "zero": 43
+        },
+        "opening": {
+          "left": "adaptive_static",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": -0.08094388749999987,
+            "se": 0.08094388749999987
+          },
+          "game_bootstrap95_pp": [
+            -0.2428316624999996,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": -0.17591562500000002,
+            "se": 0.17591562500000002
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 15
+        }
+      }
+    },
+    "static60": {
+      "left": "static60",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": 0.02610865781249997,
+        "se": 0.03077899537693988
+      },
+      "game_bootstrap95_pp": [
+        -0.0378228953124999,
+        0.0838825843749999
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": -0.885627765625,
+        "se": 0.47973010588609666
+      },
+      "different_choices": 7,
+      "positive": 5,
+      "negative": 1,
+      "zero": 58,
+      "by_phase": {
+        "nonopening": {
+          "left": "static60",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": 0.06179283958333325,
+            "se": 0.029795081275510504
+          },
+          "game_bootstrap95_pp": [
+            0.010968183333333326,
+            0.12659709999999982
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": -1.1221984791666666,
+            "se": 0.6350280193488974
+          },
+          "different_choices": 6,
+          "positive": 5,
+          "negative": 0,
+          "zero": 43
+        },
+        "opening": {
+          "left": "static60",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": -0.08094388749999987,
+            "se": 0.08094388749999987
+          },
+          "game_bootstrap95_pp": [
+            -0.2428316624999996,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": -0.17591562500000002,
+            "se": 0.17591562500000002
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 15
+        }
+      }
+    },
+    "adaptive_signals": {
+      "left": "adaptive_signals",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": 0.03387541406249994,
+        "se": 0.02176012795322176
+      },
+      "game_bootstrap95_pp": [
+        -0.0022889718750000168,
+        0.07952605781249987
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": -0.530970734375,
+        "se": 0.36344818742934215
+      },
+      "different_choices": 6,
+      "positive": 4,
+      "negative": 1,
+      "zero": 59,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_signals",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": 0.050824656249999926,
+            "se": 0.028127695882709317
+          },
+          "game_bootstrap95_pp": [
+            0.005331016666666666,
+            0.11346435208333316
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": -0.6952801666666666,
+            "se": 0.48335526430605946
+          },
+          "different_choices": 5,
+          "positive": 4,
+          "negative": 0,
+          "zero": 44
+        },
+        "opening": {
+          "left": "adaptive_signals",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": -0.016972312500000003,
+            "se": 0.016972312500000003
+          },
+          "game_bootstrap95_pp": [
+            -0.05091693750000001,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": -0.03804243750000014,
+            "se": 0.03804243750000014
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 15
+        }
+      }
+    },
+    "signals_vs_adaptive_static": {
+      "left": "adaptive_signals",
+      "right": "adaptive_static",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": -0.0010033296874999847,
+        "se": 0.02352176502199803
+      },
+      "game_bootstrap95_pp": [
+        -0.05098867031249985,
+        0.0479786812499999
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": 0.019339812499999942,
+        "se": 0.037861439424820884
+      },
+      "different_choices": 2,
+      "positive": 1,
+      "negative": 1,
+      "zero": 62,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_signals",
+          "right": "adaptive_static",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": -0.022661631249999935,
+            "se": 0.022661631249999935
+          },
+          "game_bootstrap95_pp": [
+            -0.0679848937499998,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": -0.020171312500000038,
+            "se": 0.020171312500000038
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 47
+        },
+        "opening": {
+          "left": "adaptive_signals",
+          "right": "adaptive_static",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": 0.06397157499999986,
+            "se": 0.06397157499999986
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.1919147249999996
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": 0.13787318749999988,
+            "se": 0.13787318749999988
+          },
+          "different_choices": 1,
+          "positive": 1,
+          "negative": 0,
+          "zero": 15
+        }
+      }
+    },
+    "signals_vs_static60": {
+      "left": "adaptive_signals",
+      "right": "static60",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": 0.007766756249999972,
+        "se": 0.018100234485934202
+      },
+      "game_bootstrap95_pp": [
+        -0.024678412499999983,
+        0.0479786812499999
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": 0.35465703125000003,
+        "se": 0.3214942121781003
+      },
+      "different_choices": 2,
+      "positive": 1,
+      "negative": 1,
+      "zero": 62,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_signals",
+          "right": "static60",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": -0.010968183333333326,
+            "se": 0.010968183333333326
+          },
+          "game_bootstrap95_pp": [
+            -0.03290454999999998,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": 0.42691831250000006,
+            "se": 0.4269183125000001
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 47
+        },
+        "opening": {
+          "left": "adaptive_signals",
+          "right": "static60",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": 0.06397157499999986,
+            "se": 0.06397157499999986
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.1919147249999996
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": 0.13787318749999988,
+            "se": 0.13787318749999988
+          },
+          "different_choices": 1,
+          "positive": 1,
+          "negative": 0,
+          "zero": 15
+        }
+      }
+    }
+  },
+  "legacy_choice_comparison": {
+    "threat_wide": {
+      "left": "threat_wide",
+      "right": "threat_wide",
+      "wp_gain_pp": {
+        "n": 320,
+        "mean": 0.0027022471875000117,
+        "se": 0.0030009526357596765
+      },
+      "game_bootstrap95_pp": [
+        -0.0030654900621118176,
+        0.008691811490683297
+      ],
+      "equity_gain": {
+        "n": 320,
+        "mean": -0.04627559062500001,
+        "se": 0.07141911794594424
+      },
+      "different_choices": 10,
+      "positive": 6,
+      "negative": 3,
+      "zero": 311
+    },
+    "setup_wide": {
+      "left": "setup_wide",
+      "right": "setup_wide",
+      "wp_gain_pp": {
+        "n": 320,
+        "mean": -0.0007054371874999906,
+        "se": 0.0025136495736434255
+      },
+      "game_bootstrap95_pp": [
+        -0.005696592771084394,
+        0.004292032317073167
+      ],
+      "equity_gain": {
+        "n": 320,
+        "mean": -0.03637012500000002,
+        "se": 0.08782091863341031
+      },
+      "different_choices": 15,
+      "positive": 7,
+      "negative": 7,
+      "zero": 306
+    },
+    "signals": {
+      "left": "signals",
+      "right": "signals",
+      "wp_gain_pp": {
+        "n": 320,
+        "mean": -0.0021775546875000143,
+        "se": 0.010792939622495366
+      },
+      "game_bootstrap95_pp": [
+        -0.023442829629629618,
+        0.0203449420245398
+      ],
+      "equity_gain": {
+        "n": 320,
+        "mean": 0.013773587500000023,
+        "se": 0.09488688089113761
+      },
+      "different_choices": 17,
+      "positive": 8,
+      "negative": 8,
+      "zero": 304
+    },
+    "exchange": {
+      "left": "exchange",
+      "right": "exchange",
+      "wp_gain_pp": {
+        "n": 320,
+        "mean": -0.0006568325000000028,
+        "se": 0.002675252712297275
+      },
+      "game_bootstrap95_pp": [
+        -0.006013938323353337,
+        0.004772237538461583
+      ],
+      "equity_gain": {
+        "n": 320,
+        "mean": 0.043119865624999996,
+        "se": 0.032899676047914085
+      },
+      "different_choices": 7,
+      "positive": 3,
+      "negative": 3,
+      "zero": 314
+    },
+    "combined": {
+      "left": "combined",
+      "right": "combined",
+      "wp_gain_pp": {
+        "n": 320,
+        "mean": -0.0010311771875000104,
+        "se": 0.002004904442997676
+      },
+      "game_bootstrap95_pp": [
+        -0.0054254593750000316,
+        0.002379594242424254
+      ],
+      "equity_gain": {
+        "n": 320,
+        "mean": -0.08069574062500001,
+        "se": 0.05417814795065283
+      },
+      "different_choices": 7,
+      "positive": 3,
+      "negative": 4,
+      "zero": 313
+    }
+  },
+  "quota": {
+    "tile_quota": {
+      "left": "tile_quota",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 40,
+        "mean": 0.0013554774999999936,
+        "se": 0.0013554774999999933
+      },
+      "game_bootstrap95_pp": [
+        0.0,
+        0.004066432499999981
+      ],
+      "equity_gain": {
+        "n": 40,
+        "mean": -0.04160717500000001,
+        "se": 0.041607175
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 39
+    },
+    "tile_exchange": {
+      "left": "tile_exchange",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 40,
+        "mean": 0.03200831750000008,
+        "se": 0.02410686676445677
+      },
+      "game_bootstrap95_pp": [
+        0.0,
+        0.0863437525000002
+      ],
+      "equity_gain": {
+        "n": 40,
+        "mean": 0.06900744999999997,
+        "se": 0.05281210299625564
+      },
+      "different_choices": 2,
+      "positive": 2,
+      "negative": 0,
+      "zero": 38
+    }
+  },
+  "novel_choice_breakdown": {
+    "threat_wide": {
+      "left": "threat_wide",
+      "right": "static25",
+      "wp_gain_pp": {
+        "n": 6,
+        "mean": 0.5850821999999997,
+        "se": 0.3725408005515869
+      },
+      "game_bootstrap95_pp": [
+        0.011441733333332095,
+        1.3163838333333324
+      ],
+      "equity_gain": {
+        "n": 6,
+        "mean": -1.594584833333333,
+        "se": 4.487735246869394
+      },
+      "different_choices": 6,
+      "positive": 3,
+      "negative": 3,
+      "zero": 0
+    },
+    "setup_wide": {
+      "left": "setup_wide",
+      "right": "static25",
+      "wp_gain_pp": {
+        "n": 9,
+        "mean": 1.275320433333332,
+        "se": 0.32599726713967586
+      },
+      "game_bootstrap95_pp": [
+        0.7662689999999992,
+        1.817304749999997
+      ],
+      "equity_gain": {
+        "n": 9,
+        "mean": 1.4152988888888896,
+        "se": 3.133402882557292
+      },
+      "different_choices": 9,
+      "positive": 7,
+      "negative": 1,
+      "zero": 1
+    },
+    "signals": {
+      "left": "signals",
+      "right": "static25",
+      "wp_gain_pp": {
+        "n": 10,
+        "mean": 0.9327627099999993,
+        "se": 0.3207109640591012
+      },
+      "game_bootstrap95_pp": [
+        0.34586742999999986,
+        1.5206231899999993
+      ],
+      "equity_gain": {
+        "n": 10,
+        "mean": -0.978272099999999,
+        "se": 2.8217365731340904
+      },
+      "different_choices": 10,
+      "positive": 7,
+      "negative": 3,
+      "zero": 0
+    },
+    "exchange": {
+      "left": "exchange",
+      "right": "static25",
+      "wp_gain_pp": {
+        "n": 5,
+        "mean": 0.02806067999999956,
+        "se": 0.040739271516615154
+      },
+      "game_bootstrap95_pp": [
+        -0.028189280000003213,
+        0.11211830000000189
+      ],
+      "equity_gain": {
+        "n": 5,
+        "mean": -2.9607943999999993,
+        "se": 3.501203016970747
+      },
+      "different_choices": 5,
+      "positive": 3,
+      "negative": 2,
+      "zero": 0
+    },
+    "combined": {
+      "left": "combined",
+      "right": "static25",
+      "wp_gain_pp": {
+        "n": 14,
+        "mean": 0.8519315142857136,
+        "se": 0.26539837874374644
+      },
+      "game_bootstrap95_pp": [
+        0.39912381999999996,
+        1.3170691538461514
+      ],
+      "equity_gain": {
+        "n": 14,
+        "mean": -1.5156128571428564,
+        "se": 2.659577898225226
+      },
+      "different_choices": 14,
+      "positive": 10,
+      "negative": 3,
+      "zero": 1
+    }
+  },
+  "primary_strata": {
+    "early_bag60plus": {
+      "threat_wide": {
+        "left": "threat_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": 0.003318144705882372,
+          "se": 0.005505287925525072
+        },
+        "game_bootstrap95_pp": [
+          -0.007193496470588345,
+          0.013839469411765015
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.016756741176470642,
+          "se": 0.022934891576890954
+        },
+        "different_choices": 4,
+        "positive": 3,
+        "negative": 1,
+        "zero": 81,
+        "choices_outside25": 0,
+        "mean_candidates": 32.78823529411765
+      },
+      "setup_wide": {
+        "left": "setup_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": -0.0011940458823529977,
+          "se": 0.004221070135927545
+        },
+        "game_bootstrap95_pp": [
+          -0.010514756470588422,
+          0.006932618823529429
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.002023611764705932,
+          "se": 0.007535743492583938
+        },
+        "different_choices": 2,
+        "positive": 1,
+        "negative": 1,
+        "zero": 83,
+        "choices_outside25": 0,
+        "mean_candidates": 29.32941176470588
+      },
+      "signals": {
+        "left": "signals",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": -0.0011940458823529977,
+          "se": 0.004221070135927545
+        },
+        "game_bootstrap95_pp": [
+          -0.010514756470588422,
+          0.006932618823529429
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.002023611764705932,
+          "se": 0.007535743492583938
+        },
+        "different_choices": 2,
+        "positive": 1,
+        "negative": 1,
+        "zero": 83,
+        "choices_outside25": 0,
+        "mean_candidates": 29.470588235294116
+      },
+      "exchange": {
+        "left": "exchange",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": -0.00021742000000001064,
+          "se": 0.0043357809391225965
+        },
+        "game_bootstrap95_pp": [
+          -0.009755550588235446,
+          0.007551623529411914
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.0005051764705882951,
+          "se": 0.007691959166062619
+        },
+        "different_choices": 3,
+        "positive": 2,
+        "negative": 1,
+        "zero": 82,
+        "choices_outside25": 0,
+        "mean_candidates": 27.51764705882353
+      },
+      "combined": {
+        "left": "combined",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": 0.0029196058823529668,
+          "se": 0.005391270908463187
+        },
+        "game_bootstrap95_pp": [
+          -0.0077006764705882,
+          0.013428131764705978
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.016377294117647146,
+          "se": 0.022930434272976433
+        },
+        "different_choices": 4,
+        "positive": 3,
+        "negative": 1,
+        "zero": 81,
+        "choices_outside25": 0,
+        "mean_candidates": 41.10588235294118
+      }
+    },
+    "middle_bag30to59": {
+      "threat_wide": {
+        "left": "threat_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 86,
+          "mean": -0.0001377779069767435,
+          "se": 0.0001377779069767435
+        },
+        "game_bootstrap95_pp": [
+          -0.0004133337209302305,
+          0.0
+        ],
+        "equity_gain": {
+          "n": 86,
+          "mean": -0.0017247325581395566,
+          "se": 0.0017247325581395568
+        },
+        "different_choices": 1,
+        "positive": 0,
+        "negative": 1,
+        "zero": 85,
+        "choices_outside25": 1,
+        "mean_candidates": 32.25581395348837
+      },
+      "setup_wide": {
+        "left": "setup_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 86,
+          "mean": -0.0001377779069767435,
+          "se": 0.0001377779069767435
+        },
+        "game_bootstrap95_pp": [
+          -0.0004133337209302305,
+          0.0
+        ],
+        "equity_gain": {
+          "n": 86,
+          "mean": -0.0017247325581395566,
+          "se": 0.0017247325581395568
+        },
+        "different_choices": 1,
+        "positive": 0,
+        "negative": 1,
+        "zero": 85,
+        "choices_outside25": 1,
+        "mean_candidates": 29.476744186046513
+      },
+      "signals": {
+        "left": "signals",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 86,
+          "mean": -0.00026943720930231737,
+          "se": 0.00026943720930231737
+        },
+        "game_bootstrap95_pp": [
+          -0.000808311627906952,
+          0.0
+        ],
+        "equity_gain": {
+          "n": 86,
+          "mean": 9.939534883722222e-05,
+          "se": 9.93953488372222e-05
+        },
+        "different_choices": 1,
+        "positive": 0,
+        "negative": 1,
+        "zero": 85,
+        "choices_outside25": 1,
+        "mean_candidates": 29.63953488372093
+      },
+      "exchange": {
+        "left": "exchange",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 86,
+          "mean": 0.0,
+          "se": 0.0
+        },
+        "game_bootstrap95_pp": [
+          0.0,
+          0.0
+        ],
+        "equity_gain": {
+          "n": 86,
+          "mean": 0.0,
+          "se": 0.0
+        },
+        "different_choices": 0,
+        "positive": 0,
+        "negative": 0,
+        "zero": 86,
+        "choices_outside25": 0,
+        "mean_candidates": 27.976744186046513
+      },
+      "combined": {
+        "left": "combined",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 86,
+          "mean": -0.0001377779069767435,
+          "se": 0.0001377779069767435
+        },
+        "game_bootstrap95_pp": [
+          -0.0004133337209302305,
+          0.0
+        ],
+        "equity_gain": {
+          "n": 86,
+          "mean": -0.0017247325581395566,
+          "se": 0.0017247325581395568
+        },
+        "different_choices": 1,
+        "positive": 0,
+        "negative": 1,
+        "zero": 85,
+        "choices_outside25": 1,
+        "mean_candidates": 41.66279069767442
+      }
+    },
+    "late_bag7to29": {
+      "threat_wide": {
+        "left": "threat_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": 0.03979702235294118,
+          "se": 0.02909857805232354
+        },
+        "game_bootstrap95_pp": [
+          -6e-07,
+          0.1051273670588235
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.11370963529411765,
+          "se": 0.29421885029518535
+        },
+        "different_choices": 3,
+        "positive": 2,
+        "negative": 1,
+        "zero": 82,
+        "choices_outside25": 3,
+        "mean_candidates": 31.435294117647057
+      },
+      "setup_wide": {
+        "left": "setup_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": 0.13340889764705866,
+          "se": 0.05397277525251296
+        },
+        "game_bootstrap95_pp": [
+          0.04053572352941169,
+          0.24772501764705854
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": 0.03278290588235303,
+          "se": 0.34029665788719826
+        },
+        "different_choices": 9,
+        "positive": 7,
+        "negative": 1,
+        "zero": 77,
+        "choices_outside25": 8,
+        "mean_candidates": 29.51764705882353
+      },
+      "signals": {
+        "left": "signals",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": 0.10836709999999994,
+          "se": 0.048682359625619405
+        },
+        "game_bootstrap95_pp": [
+          0.025532695294117603,
+          0.21184420117647051
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.11808712941176465,
+          "se": 0.31859428412434326
+        },
+        "different_choices": 7,
+        "positive": 6,
+        "negative": 1,
+        "zero": 78,
+        "choices_outside25": 7,
+        "mean_candidates": 29.88235294117647
+      },
+      "exchange": {
+        "left": "exchange",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": 8.331764705882354e-06,
+          "se": 7.654319959248935e-06
+        },
+        "game_bootstrap95_pp": [
+          -2.3294117647058824e-07,
+          2.4396470588235292e-05
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.17706010588235294,
+          "se": 0.20016771225901928
+        },
+        "different_choices": 3,
+        "positive": 2,
+        "negative": 1,
+        "zero": 82,
+        "choices_outside25": 3,
+        "mean_candidates": 27.929411764705883
+      },
+      "combined": {
+        "left": "combined",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 85,
+          "mean": 0.13224009176470575,
+          "se": 0.055216761874519404
+        },
+        "game_bootstrap95_pp": [
+          0.03603648235294116,
+          0.24775781529411744
+        ],
+        "equity_gain": {
+          "n": 85,
+          "mean": -0.3697916705882352,
+          "se": 0.4443765900603304
+        },
+        "different_choices": 13,
+        "positive": 9,
+        "negative": 2,
+        "zero": 74,
+        "choices_outside25": 11,
+        "mean_candidates": 40.77647058823529
+      }
+    },
+    "competitive": {
+      "threat_wide": {
+        "left": "threat_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 236,
+          "mean": 0.015478668644067805,
+          "se": 0.01069289822660905
+        },
+        "game_bootstrap95_pp": [
+          -0.0006961248945148024,
+          0.04020274291845497
+        ],
+        "equity_gain": {
+          "n": 236,
+          "mean": -0.014200618644067825,
+          "se": 0.10055080778168858
+        },
+        "different_choices": 7,
+        "positive": 5,
+        "negative": 2,
+        "zero": 229,
+        "choices_outside25": 3,
+        "mean_candidates": 32.279661016949156
+      },
+      "setup_wide": {
+        "left": "setup_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 236,
+          "mean": 0.04820504237288128,
+          "se": 0.01985734458820514
+        },
+        "game_bootstrap95_pp": [
+          0.013451581578947342,
+          0.0905612245833332
+        ],
+        "equity_gain": {
+          "n": 236,
+          "mean": 0.017294567796610157,
+          "se": 0.10853358076067555
+        },
+        "different_choices": 10,
+        "positive": 8,
+        "negative": 2,
+        "zero": 226,
+        "choices_outside25": 8,
+        "mean_candidates": 29.453389830508474
+      },
+      "signals": {
+        "left": "signals",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 236,
+          "mean": 0.03850112796610165,
+          "se": 0.017863647665011532
+        },
+        "game_bootstrap95_pp": [
+          0.008001774688796684,
+          0.07743378051948052
+        ],
+        "equity_gain": {
+          "n": 236,
+          "mean": -0.04107083050847457,
+          "se": 0.11379979852864334
+        },
+        "different_choices": 8,
+        "positive": 6,
+        "negative": 2,
+        "zero": 228,
+        "choices_outside25": 6,
+        "mean_candidates": 29.70762711864407
+      },
+      "exchange": {
+        "left": "exchange",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 236,
+          "mean": -7.830805084746146e-05,
+          "se": 0.0015557172389794195
+        },
+        "game_bootstrap95_pp": [
+          -0.0034795755364807382,
+          0.002789567634854794
+        ],
+        "equity_gain": {
+          "n": 236,
+          "mean": -0.00018194915254239442,
+          "se": 0.002759963111571223
+        },
+        "different_choices": 3,
+        "positive": 2,
+        "negative": 1,
+        "zero": 233,
+        "choices_outside25": 0,
+        "mean_candidates": 27.843220338983052
+      },
+      "combined": {
+        "left": "combined",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 236,
+          "mean": 0.05099535720338981,
+          "se": 0.020158866031062754
+        },
+        "game_bootstrap95_pp": [
+          0.015499947863247852,
+          0.09355767056277048
+        ],
+        "equity_gain": {
+          "n": 236,
+          "mean": -0.0690289957627119,
+          "se": 0.13164752364969878
+        },
+        "different_choices": 13,
+        "positive": 10,
+        "negative": 2,
+        "zero": 224,
+        "choices_outside25": 8,
+        "mean_candidates": 41.317796610169495
+      }
+    },
+    "tail": {
+      "threat_wide": {
+        "left": "threat_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 20,
+          "mean": -1.275e-06,
+          "se": 1.275e-06
+        },
+        "game_bootstrap95_pp": [
+          -4.026315789473684e-06,
+          0.0
+        ],
+        "equity_gain": {
+          "n": 20,
+          "mean": -0.39433115,
+          "se": 0.39433115
+        },
+        "different_choices": 1,
+        "positive": 0,
+        "negative": 1,
+        "zero": 19,
+        "choices_outside25": 1,
+        "mean_candidates": 30.75
+      },
+      "setup_wide": {
+        "left": "setup_wide",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 20,
+          "mean": -0.007498824999999998,
+          "se": 0.007498824999999997
+        },
+        "game_bootstrap95_pp": [
+          -0.023680499999999993,
+          0.0
+        ],
+        "equity_gain": {
+          "n": 20,
+          "mean": -0.08076524999999979,
+          "se": 0.6763872479967099
+        },
+        "different_choices": 2,
+        "positive": 0,
+        "negative": 1,
+        "zero": 19,
+        "choices_outside25": 1,
+        "mean_candidates": 29.3
+      },
+      "signals": {
+        "left": "signals",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 20,
+          "mean": 1.359e-05,
+          "se": 1.3711533562354682e-05
+        },
+        "game_bootstrap95_pp": [
+          -3.285714285714283e-07,
+          4.327894736842105e-05
+        ],
+        "equity_gain": {
+          "n": 20,
+          "mean": -0.025407449999999977,
+          "se": 0.14214395536563174
+        },
+        "different_choices": 2,
+        "positive": 1,
+        "negative": 1,
+        "zero": 18,
+        "choices_outside25": 2,
+        "mean_candidates": 29.15
+      },
+      "exchange": {
+        "left": "exchange",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 20,
+          "mean": 3.541e-05,
+          "se": 3.240962730586798e-05
+        },
+        "game_bootstrap95_pp": [
+          -9.9e-07,
+          0.0001059421052631579
+        ],
+        "equity_gain": {
+          "n": 20,
+          "mean": -0.75250545,
+          "se": 0.8544291290386368
+        },
+        "different_choices": 3,
+        "positive": 2,
+        "negative": 1,
+        "zero": 17,
+        "choices_outside25": 3,
+        "mean_candidates": 27.4
+      },
+      "combined": {
+        "left": "combined",
+        "right": "static25",
+        "wp_gain_pp": {
+          "n": 20,
+          "mean": -0.027908945000000254,
+          "se": 0.027946237415014473
+        },
+        "game_bootstrap95_pp": [
+          -0.0882091000000008,
+          9.661500000000001e-05
+        ],
+        "equity_gain": {
+          "n": 20,
+          "mean": -0.8340922999999997,
+          "se": 1.0871768009232037
+        },
+        "different_choices": 5,
+        "positive": 2,
+        "negative": 2,
+        "zero": 16,
+        "choices_outside25": 4,
+        "mean_candidates": 39.6
+      }
+    }
+  },
+  "sample128_vs64": {
+    "setup_wide": {
+      "left": "setup_conditioned",
+      "right": "setup_wide",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": 0.00489134609374999,
+        "se": 0.002933364983482278
+      },
+      "game_bootstrap95_pp": [
+        0.0,
+        0.011176930468749968
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": 0.06975146093750004,
+        "se": 0.0802972308084479
+      },
+      "different_choices": 4,
+      "positive": 3,
+      "negative": 0,
+      "zero": 125,
+      "by_phase": {
+        "nonopening": {
+          "left": "setup_conditioned",
+          "right": "setup_wide",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": 0.006521794791666653,
+            "se": 0.003901979591470587
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.01490257395833329
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": 0.09300194791666672,
+            "se": 0.10709754167276096
+          },
+          "different_choices": 4,
+          "positive": 3,
+          "negative": 0,
+          "zero": 93
+        },
+        "opening": {
+          "left": "setup_conditioned",
+          "right": "setup_wide",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": 0.0,
+            "se": 0.0
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": 0.0,
+            "se": 0.0
+          },
+          "different_choices": 0,
+          "positive": 0,
+          "negative": 0,
+          "zero": 32
+        }
+      }
+    },
+    "signals": {
+      "left": "signals_conditioned",
+      "right": "signals",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": -0.016635169531249987,
+        "se": 0.02003515170265218
+      },
+      "game_bootstrap95_pp": [
+        -0.06087460937499991,
+        0.010854422656250001
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": -0.1709803359375,
+        "se": 0.11056052270596982
+      },
+      "different_choices": 7,
+      "positive": 3,
+      "negative": 4,
+      "zero": 121,
+      "by_phase": {
+        "nonopening": {
+          "left": "signals_conditioned",
+          "right": "signals",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": -0.01675626979166663,
+            "se": 0.026292384548935347
+          },
+          "game_bootstrap95_pp": [
+            -0.07387705624999984,
+            0.016962905208333313
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": -0.2166378854166667,
+            "se": 0.14690803147113615
+          },
+          "different_choices": 5,
+          "positive": 3,
+          "negative": 2,
+          "zero": 91
+        },
+        "opening": {
+          "left": "signals_conditioned",
+          "right": "signals",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": -0.016271868750000057,
+            "se": 0.014916143040301678
+          },
+          "game_bootstrap95_pp": [
+            -0.04744080312500017,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": -0.03400768749999994,
+            "se": 0.03298431421293541
+          },
+          "different_choices": 2,
+          "positive": 0,
+          "negative": 2,
+          "zero": 30
+        }
+      }
+    },
+    "combined": {
+      "left": "combined_conditioned",
+      "right": "combined",
+      "wp_gain_pp": {
+        "n": 128,
+        "mean": -0.0020213554687500256,
+        "se": 0.004000304685971296
+      },
+      "game_bootstrap95_pp": [
+        -0.01117279921875004,
+        0.004182714843749963
+      ],
+      "equity_gain": {
+        "n": 128,
+        "mean": -0.10898997656249991,
+        "se": 0.1057221971051513
+      },
+      "different_choices": 3,
+      "positive": 2,
+      "negative": 1,
+      "zero": 125,
+      "by_phase": {
+        "nonopening": {
+          "left": "combined_conditioned",
+          "right": "combined",
+          "wp_gain_pp": {
+            "n": 96,
+            "mean": 0.00227054791666665,
+            "se": 0.0018997632203407724
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.00681164374999995
+          ],
+          "equity_gain": {
+            "n": 96,
+            "mean": -0.13431948958333323,
+            "se": 0.1406320069394579
+          },
+          "different_choices": 2,
+          "positive": 2,
+          "negative": 0,
+          "zero": 94
+        },
+        "opening": {
+          "left": "combined_conditioned",
+          "right": "combined",
+          "wp_gain_pp": {
+            "n": 32,
+            "mean": -0.014897065625000053,
+            "se": 0.014897065625000053
+          },
+          "game_bootstrap95_pp": [
+            -0.04469119687500016,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 32,
+            "mean": -0.03300143749999995,
+            "se": 0.033001437499999946
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 31
+        }
+      }
+    }
+  },
+  "six_vs_four_ply_choices": {
+    "static25_fulltime": {
+      "left": "static25_fulltime",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": -0.06259883437499997,
+        "se": 0.028849726607293798
+      },
+      "game_bootstrap95_pp": [
+        -0.12496703124999971,
+        -0.012101134374999866
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": -0.1616682031250002,
+        "se": 0.18522864051157817
+      },
+      "different_choices": 10,
+      "positive": 2,
+      "negative": 7,
+      "zero": 55,
+      "by_phase": {
+        "nonopening": {
+          "left": "static25_fulltime",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": -0.08346511249999997,
+            "se": 0.03808505561473782
+          },
+          "game_bootstrap95_pp": [
+            -0.16350536458333326,
+            -0.01379163958333332
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": -0.2155576041666669,
+            "se": 0.24712793947910947
+          },
+          "different_choices": 10,
+          "positive": 2,
+          "negative": 7,
+          "zero": 39
+        },
+        "opening": {
+          "left": "static25_fulltime",
+          "right": "static25_fulltime",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": 0.0,
+            "se": 0.0
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": 0.0,
+            "se": 0.0
+          },
+          "different_choices": 0,
+          "positive": 0,
+          "negative": 0,
+          "zero": 16
+        }
+      }
+    },
+    "adaptive_static": {
+      "left": "adaptive_static",
+      "right": "adaptive_static",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": -0.0504211140625,
+        "se": 0.023554932700612978
+      },
+      "game_bootstrap95_pp": [
+        -0.10155336718750001,
+        -0.007943432812500109
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": -0.21613348437500007,
+        "se": 0.10959243030107792
+      },
+      "different_choices": 8,
+      "positive": 2,
+      "negative": 6,
+      "zero": 56,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_static",
+          "right": "adaptive_static",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": -0.05387577291666671,
+            "se": 0.028633976911046435
+          },
+          "game_bootstrap95_pp": [
+            -0.11468768541666681,
+            -0.005125720833333135
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": -0.2549660833333335,
+            "se": 0.14241188626099557
+          },
+          "different_choices": 7,
+          "positive": 2,
+          "negative": 5,
+          "zero": 41
+        },
+        "opening": {
+          "left": "adaptive_static",
+          "right": "adaptive_static",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": -0.04005713749999987,
+            "se": 0.04005713749999987
+          },
+          "game_bootstrap95_pp": [
+            -0.1201714124999996,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": -0.09963568749999996,
+            "se": 0.09963568749999996
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 15
+        }
+      }
+    },
+    "static60": {
+      "left": "static60",
+      "right": "static60",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": -0.06941288749999995,
+        "se": 0.03456916485873419
+      },
+      "game_bootstrap95_pp": [
+        -0.14170822187499993,
+        -0.007522282812499914
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": -0.5705206875000002,
+        "se": 0.33660155219275417
+      },
+      "different_choices": 10,
+      "positive": 3,
+      "negative": 7,
+      "zero": 54,
+      "by_phase": {
+        "nonopening": {
+          "left": "static60",
+          "right": "static60",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": -0.06556922083333332,
+            "se": 0.03791469193892483
+          },
+          "game_bootstrap95_pp": [
+            -0.1460316895833336,
+            0.0031282958333331916
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": -0.7020557083333336,
+            "se": 0.4446684979063065
+          },
+          "different_choices": 9,
+          "positive": 3,
+          "negative": 6,
+          "zero": 39
+        },
+        "opening": {
+          "left": "static60",
+          "right": "static60",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": -0.08094388749999987,
+            "se": 0.08094388749999987
+          },
+          "game_bootstrap95_pp": [
+            -0.2428316624999996,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": -0.17591562500000002,
+            "se": 0.17591562500000002
+          },
+          "different_choices": 1,
+          "positive": 0,
+          "negative": 1,
+          "zero": 15
+        }
+      }
+    },
+    "adaptive_signals": {
+      "left": "adaptive_signals",
+      "right": "adaptive_signals",
+      "wp_gain_pp": {
+        "n": 64,
+        "mean": -0.057403053124999985,
+        "se": 0.027101004527937483
+      },
+      "game_bootstrap95_pp": [
+        -0.11533596718749997,
+        -0.010112654687500035
+      ],
+      "equity_gain": {
+        "n": 64,
+        "mean": -0.2063530468750001,
+        "se": 0.10806614067039484
+      },
+      "different_choices": 8,
+      "positive": 2,
+      "negative": 6,
+      "zero": 56,
+      "by_phase": {
+        "nonopening": {
+          "left": "adaptive_signals",
+          "right": "adaptive_signals",
+          "wp_gain_pp": {
+            "n": 48,
+            "mean": -0.07653740416666664,
+            "se": 0.035798050565137095
+          },
+          "game_bootstrap95_pp": [
+            -0.15250048125,
+            -0.01199307708333325
+          ],
+          "equity_gain": {
+            "n": 48,
+            "mean": -0.2751373958333335,
+            "se": 0.1430705284445977
+          },
+          "different_choices": 8,
+          "positive": 2,
+          "negative": 6,
+          "zero": 40
+        },
+        "opening": {
+          "left": "adaptive_signals",
+          "right": "adaptive_signals",
+          "wp_gain_pp": {
+            "n": 16,
+            "mean": 0.0,
+            "se": 0.0
+          },
+          "game_bootstrap95_pp": [
+            0.0,
+            0.0
+          ],
+          "equity_gain": {
+            "n": 16,
+            "mean": 0.0,
+            "se": 0.0
+          },
+          "different_choices": 0,
+          "positive": 0,
+          "negative": 0,
+          "zero": 16
+        }
+      }
+    }
+  },
+  "diagnostic_audit": {
+    "primary": {
+      "positions": 320,
+      "candidate_records": 38840,
+      "racks": 64,
+      "paired_means_weights_and_exchange_zeros_match": true,
+      "terminal_reply_cases": {
+        "443": {
+          "15a VIRELaIS": 5,
+          "15a VIRILiSE": 5,
+          "15a ViRILISE": 5,
+          "15a VIRiLISE": 5,
+          "13c LaIRISE": 3,
+          "13c RILIESt": 3,
+          "14a OILERIeS": 3,
+          "14a OILeRIES": 3,
+          "6h vIRILISE": 1
+        }
+      }
+    },
+    "width": {
+      "positions": 128,
+      "candidate_records": 15484,
+      "racks": 64,
+      "paired_means_weights_and_exchange_zeros_match": true,
+      "terminal_reply_cases": {}
+    },
+    "six_ply": {
+      "positions": 64,
+      "candidate_records": 7761,
+      "racks": 64,
+      "paired_means_weights_and_exchange_zeros_match": true,
+      "terminal_reply_cases": {}
+    },
+    "sample128": {
+      "positions": 128,
+      "candidate_records": 15484,
+      "racks": 128,
+      "paired_means_weights_and_exchange_zeros_match": true,
+      "terminal_reply_cases": {}
+    },
+    "quota": {
+      "positions": 40,
+      "candidate_records": 4844,
+      "racks": 64,
+      "paired_means_weights_and_exchange_zeros_match": true,
+      "terminal_reply_cases": {
+        "323": {
+          "k8 ORCINES": 1,
+          "k9 CRINOSE": 1,
+          "11h SERICON": 11,
+          "10i SERICON": 11
+        }
+      }
+    }
+  },
+  "deep_audit": {
+    "primary": {
+      "positions": 14,
+      "pools": 14,
+      "rows": 369,
+      "identical_pool_reuse": 0,
+      "full_budget_and_finite_results": true
+    },
+    "quota": {
+      "positions": 2,
+      "pools": 2,
+      "rows": 63,
+      "identical_pool_reuse": 0,
+      "full_budget_and_finite_results": true
+    }
+  },
+  "deep_admission_audit": {
+    "primary": {
+      "positions": 14,
+      "pools": 28,
+      "rows": 719,
+      "identical_pool_reuse": 0,
+      "full_budget_and_finite_results": true
+    },
+    "quota": {
+      "positions": 2,
+      "pools": 4,
+      "rows": 113,
+      "identical_pool_reuse": 0,
+      "full_budget_and_finite_results": true
+    }
+  },
+  "deep_admission": [
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 2.5204016999999967,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 24.695635000000003,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 0,
+      "dataset": "primary",
+      "pos": 1100,
+      "base_move": "15d YETTS",
+      "enlarged_move": "15d YETT",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "different_choices": 0,
+      "positive": 0,
+      "negative": 0,
+      "zero": 1,
+      "dataset": "primary",
+      "pos": 1124,
+      "base_move": "a7 YEGG",
+      "enlarged_move": "a7 YEGG",
+      "candidates": 27
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 1.3199781999999938,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": -16.710483999999994,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 0,
+      "dataset": "primary",
+      "pos": 1217,
+      "base_move": "o12 FUSK",
+      "enlarged_move": "o8 KiSTFUL",
+      "candidates": 27
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "different_choices": 0,
+      "positive": 0,
+      "negative": 0,
+      "zero": 1,
+      "dataset": "primary",
+      "pos": 1379,
+      "base_move": "o1 ASHIER",
+      "enlarged_move": "o1 ASHIER",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "different_choices": 0,
+      "positive": 0,
+      "negative": 0,
+      "zero": 1,
+      "dataset": "primary",
+      "pos": 1542,
+      "base_move": "o6 ICE",
+      "enlarged_move": "o6 ICE",
+      "candidates": 28
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 2.2808176,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": -0.09989099999999995,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 0,
+      "dataset": "primary",
+      "pos": 1755,
+      "base_move": "2k ANCON",
+      "enlarged_move": "2l NAAN",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "different_choices": 0,
+      "positive": 0,
+      "negative": 0,
+      "zero": 1,
+      "dataset": "primary",
+      "pos": 2151,
+      "base_move": "9b WULL",
+      "enlarged_move": "9b WULL",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 1.9686005999999998,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": -7.060777999999999,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 0,
+      "dataset": "primary",
+      "pos": 2241,
+      "base_move": "5e FOYS",
+      "enlarged_move": "d10 KLOOFS",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 9.36997000000001,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 0,
+      "negative": 0,
+      "zero": 1,
+      "dataset": "primary",
+      "pos": 443,
+      "base_move": "d8 PIR",
+      "enlarged_move": "5m TIL",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 1.6863363999999992,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 1.694139999999999,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 0,
+      "dataset": "primary",
+      "pos": 493,
+      "base_move": "e4 BOI",
+      "enlarged_move": "e2 BUSTI",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 0.0,
+        "se": null
+      },
+      "different_choices": 0,
+      "positive": 0,
+      "negative": 0,
+      "zero": 1,
+      "dataset": "primary",
+      "pos": 575,
+      "base_move": "m11 OURIE",
+      "enlarged_move": "m11 OURIE",
+      "candidates": 27
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 2.5047582000000013,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 8.924985999999999,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 0,
+      "dataset": "primary",
+      "pos": 580,
+      "base_move": "l12 TET",
+      "enlarged_move": "l12 TEE",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": -0.6586466999999985,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": -1.4669489999999996,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 0,
+      "negative": 1,
+      "zero": 0,
+      "dataset": "primary",
+      "pos": 6013,
+      "base_move": "8g GIE",
+      "enlarged_move": "8f AGE",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": -0.4240549999999954,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": -0.858000999999998,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 0,
+      "negative": 1,
+      "zero": 0,
+      "dataset": "primary",
+      "pos": 6024,
+      "base_move": "8h ARE",
+      "enlarged_move": "ex E",
+      "candidates": 26
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": 1.6929338999999988,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": 4.3464089999999995,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 1,
+      "negative": 0,
+      "zero": 0,
+      "dataset": "quota",
+      "pos": 106,
+      "base_move": "8d DIENE",
+      "enlarged_move": "ex AEI",
+      "candidates": 32
+    },
+    {
+      "left": "static25_admitted",
+      "right": "static25_fulltime",
+      "wp_gain_pp": {
+        "n": 1,
+        "mean": -0.175534799999999,
+        "se": null
+      },
+      "game_bootstrap95_pp": null,
+      "equity_gain": {
+        "n": 1,
+        "mean": -0.2174359999999993,
+        "se": null
+      },
+      "different_choices": 1,
+      "positive": 0,
+      "negative": 1,
+      "zero": 0,
+      "dataset": "quota",
+      "pos": 6007,
+      "base_move": "8f ONO",
+      "enlarged_move": "8h ONO",
+      "candidates": 31
+    }
+  ]
+}

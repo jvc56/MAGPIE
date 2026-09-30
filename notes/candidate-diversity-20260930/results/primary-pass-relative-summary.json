@@ -1,0 +1,1724 @@
+{
+  "completed_positions": 320,
+  "expected_positions": 320,
+  "method": {
+    "started_epoch": 1790724856.2551942,
+    "source": "same 320 primary positions and 40 independent quota positions as prior study; new sims and pass-relative checks",
+    "blocking": "1.4 * mean(pass opponent best placement score - candidate opponent best placement score), same sampled racks",
+    "setup": "0.75 * mean(our best placement after candidate and opponent reply - our best placement after pass and opponent reply), same candidate leave/refill in both branches",
+    "conditioned_draws": true,
+    "racks": 64,
+    "selection_ms": 15000,
+    "selection_cutoff": "disabled; full 15-second runs",
+    "reference_ms": 60000,
+    "rollout": "static noPAT",
+    "plies": 4,
+    "workers": 8,
+    "arms": [
+      "static25",
+      "threat_wide",
+      "setup_wide",
+      "signals",
+      "exchange",
+      "combined"
+    ],
+    "binary_sha256": "2ce29d5c848bc4b7aac8b12442cf471a3c97ad5e7d2d2f5b5d7489bcbd7a7dc5",
+    "old_results_retained": "/Users/olaugh/sources/magpie-pat-postx/postx/threatgames/extended_2h40",
+    "secondary": {
+      "width": 128,
+      "matched_width": 128,
+      "six_ply": 64,
+      "rack_sample_robustness": 128,
+      "quota": 40
+    },
+    "terminal_guard": {
+      "updated_epoch": 1790726764.2771368,
+      "primary_position_repaired": 443,
+      "only_other_potential_position": "quota dataset position 323; all quota and secondary runs use the guard",
+      "v1_sha256": "2ce29d5c848bc4b7aac8b12442cf471a3c97ad5e7d2d2f5b5d7489bcbd7a7dc5",
+      "v2_sha256": "c4daae223b33dae7ea12fe6c1eb24eeef25d58f88e2d56c71294264a53084677",
+      "meaning": "next-turn opportunity is zero after a terminal opponent reply; 319 other primary positions cannot end at that reply because bag remains positive"
+    }
+  },
+  "groups": {
+    "nonopening": {
+      "static25": {
+        "candidate_count": {
+          "n": 256,
+          "mean": 25,
+          "se": 0.0
+        },
+        "selected_wp_gain_pp": {
+          "n": 256,
+          "mean": 0.0,
+          "se": 0.0
+        },
+        "selected_wp_game_bootstrap95": [
+          0.0,
+          0.0
+        ],
+        "selected_eq_gain": {
+          "n": 256,
+          "mean": 0.0,
+          "se": 0.0
+        },
+        "choices_outside25": 0,
+        "positions_with_additions": 0,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 256,
+          "mean": 0.0,
+          "se": 0.0
+        }
+      },
+      "threat_wide": {
+        "candidate_count": {
+          "n": 256,
+          "mean": 32.16015625,
+          "se": 0.19889529441279574
+        },
+        "selected_wp_gain_pp": {
+          "n": 256,
+          "mean": 0.014269298046875009,
+          "se": 0.009859310300466209
+        },
+        "selected_wp_game_bootstrap95": [
+          -0.00017402773437508157,
+          0.037707001953125034
+        ],
+        "selected_eq_gain": {
+          "n": 256,
+          "mean": -0.043898316406250026,
+          "se": 0.09765004413551286
+        },
+        "choices_outside25": 4,
+        "positions_with_additions": 256,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 256,
+          "mean": 0.013213954687500001,
+          "se": 0.009694756121109096
+        }
+      },
+      "setup_wide": {
+        "candidate_count": {
+          "n": 256,
+          "mean": 29.44140625,
+          "se": 0.14991424702352718
+        },
+        "selected_wp_gain_pp": {
+          "n": 256,
+          "mean": 0.04385317773437493,
+          "se": 0.01833580097707922
+        },
+        "selected_wp_game_bootstrap95": [
+          0.011993936328124982,
+          0.08345541132812487
+        ],
+        "selected_eq_gain": {
+          "n": 256,
+          "mean": 0.009633644531250006,
+          "se": 0.1125762517626357
+        },
+        "choices_outside25": 9,
+        "positions_with_additions": 255,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 256,
+          "mean": 0.04500701601562495,
+          "se": 0.01826247289635364
+        }
+      },
+      "signals": {
+        "candidate_count": {
+          "n": 256,
+          "mean": 29.6640625,
+          "se": 0.22771743322909224
+        },
+        "selected_wp_gain_pp": {
+          "n": 256,
+          "mean": 0.03549428906249996,
+          "se": 0.01647801326740731
+        },
+        "selected_wp_game_bootstrap95": [
+          0.006864899999999993,
+          0.07083527499999993
+        ],
+        "selected_eq_gain": {
+          "n": 256,
+          "mean": -0.039847128906249994,
+          "se": 0.10545123965479136
+        },
+        "choices_outside25": 8,
+        "positions_with_additions": 177,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 256,
+          "mean": 0.03613358593749998,
+          "se": 0.016413706894782144
+        }
+      },
+      "exchange": {
+        "candidate_count": {
+          "n": 256,
+          "mean": 27.80859375,
+          "se": 0.14881172994907038
+        },
+        "selected_wp_gain_pp": {
+          "n": 256,
+          "mean": -6.942382812500354e-05,
+          "se": 0.0014339419009295857
+        },
+        "selected_wp_game_bootstrap95": [
+          -0.003166681250000047,
+          0.0025078886718750493
+        ],
+        "selected_eq_gain": {
+          "n": 256,
+          "mean": -0.058957222656250016,
+          "se": 0.06645300304013099
+        },
+        "choices_outside25": 3,
+        "positions_with_additions": 158,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 256,
+          "mean": 2.805078125e-06,
+          "se": 2.5428645222524117e-06
+        }
+      },
+      "combined": {
+        "candidate_count": {
+          "n": 256,
+          "mean": 41.18359375,
+          "se": 0.3517370039404772
+        },
+        "selected_wp_gain_pp": {
+          "n": 256,
+          "mean": 0.044830958593749956,
+          "se": 0.018749752850948275
+        },
+        "selected_wp_game_bootstrap95": [
+          0.012587476171874978,
+          0.08430169179687498
+        ],
+        "selected_eq_gain": {
+          "n": 256,
+          "mean": -0.12879956640625,
+          "se": 0.14754503152296417
+        },
+        "choices_outside25": 12,
+        "positions_with_additions": 256,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 256,
+          "mean": 0.04636831874999997,
+          "se": 0.018522021328393673
+        }
+      }
+    },
+    "opening": {
+      "static25": {
+        "candidate_count": {
+          "n": 64,
+          "mean": 25,
+          "se": 0.0
+        },
+        "selected_wp_gain_pp": {
+          "n": 64,
+          "mean": 0.0,
+          "se": 0.0
+        },
+        "selected_wp_game_bootstrap95": [
+          0.0,
+          0.0
+        ],
+        "selected_eq_gain": {
+          "n": 64,
+          "mean": 0.0,
+          "se": 0.0
+        },
+        "choices_outside25": 0,
+        "positions_with_additions": 0,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 64,
+          "mean": 0.0,
+          "se": 0.0
+        }
+      },
+      "threat_wide": {
+        "candidate_count": {
+          "n": 64,
+          "mean": 35.46875,
+          "se": 0.5651804521145268
+        },
+        "selected_wp_gain_pp": {
+          "n": 64,
+          "mean": 0.002868576562499968,
+          "se": 0.0030916536823127963
+        },
+        "selected_wp_game_bootstrap95": [
+          -0.0014756718750001674,
+          0.010131835937500153
+        ],
+        "selected_eq_gain": {
+          "n": 64,
+          "mean": 0.004349015625000063,
+          "se": 0.00796560889394749
+        },
+        "choices_outside25": 2,
+        "positions_with_additions": 64,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 64,
+          "mean": 0.011024231249999981,
+          "se": 0.007788816918648893
+        }
+      },
+      "setup_wide": {
+        "candidate_count": {
+          "n": 64,
+          "mean": 30.46875,
+          "se": 0.43299480251838646
+        },
+        "selected_wp_gain_pp": {
+          "n": 64,
+          "mean": 0.0009035281249999971,
+          "se": 0.0009035281249999971
+        },
+        "selected_wp_game_bootstrap95": [
+          0.0,
+          0.0027105843749999914
+        ],
+        "selected_eq_gain": {
+          "n": 64,
+          "mean": 0.0021157656249999324,
+          "se": 0.0021157656249999324
+        },
+        "choices_outside25": 0,
+        "positions_with_additions": 62,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 64,
+          "mean": 0.006163995312499955,
+          "se": 0.006163995312499955
+        }
+      },
+      "signals": {
+        "candidate_count": {
+          "n": 64,
+          "mean": 30.890625,
+          "se": 0.45541124114530585
+        },
+        "selected_wp_gain_pp": {
+          "n": 64,
+          "mean": 0.003772104687499965,
+          "se": 0.00320817782264464
+        },
+        "selected_wp_game_bootstrap95": [
+          -0.001309979687500254,
+          0.011103900000000028
+        ],
+        "selected_eq_gain": {
+          "n": 64,
+          "mean": 0.006464781249999996,
+          "se": 0.008224067010379013
+        },
+        "choices_outside25": 2,
+        "positions_with_additions": 52,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 64,
+          "mean": 0.011024231249999981,
+          "se": 0.007788816918648893
+        }
+      },
+      "exchange": {
+        "candidate_count": {
+          "n": 64,
+          "mean": 28.125,
+          "se": 0.28565227501671014
+        },
+        "selected_wp_gain_pp": {
+          "n": 64,
+          "mean": 0.003084703124999963,
+          "se": 0.0031443917160042033
+        },
+        "selected_wp_game_bootstrap95": [
+          -0.0014756718750001674,
+          0.009991945312499972
+        ],
+        "selected_eq_gain": {
+          "n": 64,
+          "mean": 0.0059616562500000025,
+          "se": 0.0082144606836978
+        },
+        "choices_outside25": 2,
+        "positions_with_additions": 43,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 64,
+          "mean": 0.011024231249999981,
+          "se": 0.007788816918648893
+        }
+      },
+      "combined": {
+        "candidate_count": {
+          "n": 64,
+          "mean": 44.109375,
+          "se": 0.9309272737640134
+        },
+        "selected_wp_gain_pp": {
+          "n": 64,
+          "mean": 0.002868576562499968,
+          "se": 0.0030916536823127963
+        },
+        "selected_wp_game_bootstrap95": [
+          -0.0014756718750001674,
+          0.010131835937500153
+        ],
+        "selected_eq_gain": {
+          "n": 64,
+          "mean": 0.004349015625000063,
+          "se": 0.00796560889394749
+        },
+        "choices_outside25": 2,
+        "positions_with_additions": 64,
+        "optimistic_reference_coverage_gain_pp": {
+          "n": 64,
+          "mean": 0.011024231249999981,
+          "se": 0.007788816918648893
+        }
+      }
+    }
+  },
+  "changed_examples": [
+    {
+      "pos": 493,
+      "arm": "setup_wide",
+      "move": "e2 BUSTI",
+      "rank": 26,
+      "baseline_move": "e4 BOI",
+      "outside_static25": true,
+      "wp_gain_pp": 2.463280599999995,
+      "equity_gain": 4.155521000000004,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 0.04375,
+      "setup_adjustment": 2.63671875
+    },
+    {
+      "pos": 493,
+      "arm": "signals",
+      "move": "e2 BUSTI",
+      "rank": 26,
+      "baseline_move": "e4 BOI",
+      "outside_static25": true,
+      "wp_gain_pp": 2.463280599999995,
+      "equity_gain": 4.155521000000004,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 0.04375,
+      "setup_adjustment": 2.63671875
+    },
+    {
+      "pos": 493,
+      "arm": "combined",
+      "move": "e2 BUSTI",
+      "rank": 26,
+      "baseline_move": "e4 BOI",
+      "outside_static25": true,
+      "wp_gain_pp": 2.463280599999995,
+      "equity_gain": 4.155521000000004,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 0.04375,
+      "setup_adjustment": 2.63671875
+    },
+    {
+      "pos": 580,
+      "arm": "setup_wide",
+      "move": "l12 TEE",
+      "rank": 26,
+      "baseline_move": "l12 TET",
+      "outside_static25": true,
+      "wp_gain_pp": 2.2090831999999976,
+      "equity_gain": 8.034949000000001,
+      "sources": [
+        "setup_wide"
+      ],
+      "blocking_adjustment": -6.51875,
+      "setup_adjustment": 8.296875
+    },
+    {
+      "pos": 580,
+      "arm": "combined",
+      "move": "l12 TEE",
+      "rank": 26,
+      "baseline_move": "l12 TET",
+      "outside_static25": true,
+      "wp_gain_pp": 2.2090831999999976,
+      "equity_gain": 8.034949000000001,
+      "sources": [
+        "setup_wide"
+      ],
+      "blocking_adjustment": -6.51875,
+      "setup_adjustment": 8.296875
+    },
+    {
+      "pos": 1100,
+      "arm": "threat_wide",
+      "move": "15d YETT",
+      "rank": 57,
+      "baseline_move": "ex DQTT",
+      "outside_static25": true,
+      "wp_gain_pp": 2.170281399999996,
+      "equity_gain": 15.774843,
+      "sources": [
+        "threat_wide",
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 6.584375,
+      "setup_adjustment": 23.68359375
+    },
+    {
+      "pos": 1100,
+      "arm": "setup_wide",
+      "move": "15d YETT",
+      "rank": 57,
+      "baseline_move": "ex DQTT",
+      "outside_static25": true,
+      "wp_gain_pp": 2.170281399999996,
+      "equity_gain": 15.774843,
+      "sources": [
+        "threat_wide",
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 6.584375,
+      "setup_adjustment": 23.68359375
+    },
+    {
+      "pos": 1100,
+      "arm": "signals",
+      "move": "15d YETT",
+      "rank": 57,
+      "baseline_move": "ex DQTT",
+      "outside_static25": true,
+      "wp_gain_pp": 2.170281399999996,
+      "equity_gain": 15.774843,
+      "sources": [
+        "threat_wide",
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 6.584375,
+      "setup_adjustment": 23.68359375
+    },
+    {
+      "pos": 1100,
+      "arm": "combined",
+      "move": "15d YETT",
+      "rank": 57,
+      "baseline_move": "ex DQTT",
+      "outside_static25": true,
+      "wp_gain_pp": 2.170281399999996,
+      "equity_gain": 15.774843,
+      "sources": [
+        "threat_wide",
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 6.584375,
+      "setup_adjustment": 23.68359375
+    },
+    {
+      "pos": 2241,
+      "arm": "setup_wide",
+      "move": "d10 KLOOFS",
+      "rank": 34,
+      "baseline_move": "5e FOYS",
+      "outside_static25": true,
+      "wp_gain_pp": 1.7551750999999998,
+      "equity_gain": -11.998821,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": -1.575,
+      "setup_adjustment": 18.78515625
+    },
+    {
+      "pos": 2241,
+      "arm": "signals",
+      "move": "d10 KLOOFS",
+      "rank": 34,
+      "baseline_move": "5e FOYS",
+      "outside_static25": true,
+      "wp_gain_pp": 1.7551750999999998,
+      "equity_gain": -11.998821,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": -1.575,
+      "setup_adjustment": 18.78515625
+    },
+    {
+      "pos": 2241,
+      "arm": "combined",
+      "move": "d10 KLOOFS",
+      "rank": 34,
+      "baseline_move": "5e FOYS",
+      "outside_static25": true,
+      "wp_gain_pp": 1.7551750999999998,
+      "equity_gain": -11.998821,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": -1.575,
+      "setup_adjustment": 18.78515625
+    },
+    {
+      "pos": 1755,
+      "arm": "setup_wide",
+      "move": "2l NAAN",
+      "rank": 120,
+      "baseline_move": "2k ANCON",
+      "outside_static25": true,
+      "wp_gain_pp": 1.6097035999999996,
+      "equity_gain": 0.0927389999999999,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": -8.575,
+      "setup_adjustment": 8.19140625
+    },
+    {
+      "pos": 1755,
+      "arm": "signals",
+      "move": "2l NAAN",
+      "rank": 120,
+      "baseline_move": "2k ANCON",
+      "outside_static25": true,
+      "wp_gain_pp": 1.6097035999999996,
+      "equity_gain": 0.0927389999999999,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": -8.575,
+      "setup_adjustment": 8.19140625
+    },
+    {
+      "pos": 1755,
+      "arm": "combined",
+      "move": "2l NAAN",
+      "rank": 120,
+      "baseline_move": "2k ANCON",
+      "outside_static25": true,
+      "wp_gain_pp": 1.6097035999999996,
+      "equity_gain": 0.0927389999999999,
+      "sources": [
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": -8.575,
+      "setup_adjustment": 8.19140625
+    },
+    {
+      "pos": 1217,
+      "arm": "threat_wide",
+      "move": "o8 KiSTFUL",
+      "rank": 49,
+      "baseline_move": "o12 FUSK",
+      "outside_static25": true,
+      "wp_gain_pp": 1.2124910000000044,
+      "equity_gain": -17.553539,
+      "sources": [
+        "threat_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 15.70625,
+      "setup_adjustment": -6.97265625
+    },
+    {
+      "pos": 1217,
+      "arm": "signals",
+      "move": "o8 KiSTFUL",
+      "rank": 49,
+      "baseline_move": "o12 FUSK",
+      "outside_static25": true,
+      "wp_gain_pp": 1.2124910000000044,
+      "equity_gain": -17.553539,
+      "sources": [
+        "threat_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 15.70625,
+      "setup_adjustment": -6.97265625
+    },
+    {
+      "pos": 1217,
+      "arm": "combined",
+      "move": "o8 KiSTFUL",
+      "rank": 49,
+      "baseline_move": "o12 FUSK",
+      "outside_static25": true,
+      "wp_gain_pp": 1.2124910000000044,
+      "equity_gain": -17.553539,
+      "sources": [
+        "threat_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 15.70625,
+      "setup_adjustment": -6.97265625
+    },
+    {
+      "pos": 1217,
+      "arm": "setup_wide",
+      "move": "o10 FLOUT",
+      "rank": 89,
+      "baseline_move": "o12 FUSK",
+      "outside_static25": true,
+      "wp_gain_pp": 0.9036370999999987,
+      "equity_gain": 1.5987590000000012,
+      "sources": [
+        "threat_wide",
+        "setup_wide"
+      ],
+      "blocking_adjustment": 15.290625,
+      "setup_adjustment": 18.33984375
+    },
+    {
+      "pos": 1379,
+      "arm": "setup_wide",
+      "move": "3a HAJ",
+      "rank": 54,
+      "baseline_move": "o1 ASHIER",
+      "outside_static25": true,
+      "wp_gain_pp": 0.3785718,
+      "equity_gain": -13.256138000000004,
+      "sources": [
+        "setup_wide"
+      ],
+      "blocking_adjustment": -11.003125,
+      "setup_adjustment": 5.8828125
+    },
+    {
+      "pos": 1379,
+      "arm": "combined",
+      "move": "3a HAJ",
+      "rank": 54,
+      "baseline_move": "o1 ASHIER",
+      "outside_static25": true,
+      "wp_gain_pp": 0.3785718,
+      "equity_gain": -13.256138000000004,
+      "sources": [
+        "setup_wide"
+      ],
+      "blocking_adjustment": -11.003125,
+      "setup_adjustment": 5.8828125
+    },
+    {
+      "pos": 1834,
+      "arm": "threat_wide",
+      "move": "e11 BOA",
+      "rank": 6,
+      "baseline_move": "8k DIOTA",
+      "outside_static25": false,
+      "wp_gain_pp": 0.29765330000000034,
+      "equity_gain": -1.7583370000000045,
+      "sources": [],
+      "blocking_adjustment": -4.50625,
+      "setup_adjustment": 1.72265625
+    },
+    {
+      "pos": 1834,
+      "arm": "combined",
+      "move": "e11 BOA",
+      "rank": 6,
+      "baseline_move": "8k DIOTA",
+      "outside_static25": false,
+      "wp_gain_pp": 0.29765330000000034,
+      "equity_gain": -1.7583370000000045,
+      "sources": [],
+      "blocking_adjustment": -4.50625,
+      "setup_adjustment": 1.72265625
+    },
+    {
+      "pos": 1705,
+      "arm": "setup_wide",
+      "move": "d7 NET",
+      "rank": 6,
+      "baseline_move": "e8 VENT",
+      "outside_static25": false,
+      "wp_gain_pp": 0.1964242000000005,
+      "equity_gain": 0.35615999999999914,
+      "sources": [],
+      "blocking_adjustment": 2.909375,
+      "setup_adjustment": -1.921875
+    },
+    {
+      "pos": 1705,
+      "arm": "signals",
+      "move": "d7 NET",
+      "rank": 6,
+      "baseline_move": "e8 VENT",
+      "outside_static25": false,
+      "wp_gain_pp": 0.1964242000000005,
+      "equity_gain": 0.35615999999999914,
+      "sources": [],
+      "blocking_adjustment": 2.909375,
+      "setup_adjustment": -1.921875
+    },
+    {
+      "pos": 1705,
+      "arm": "exchange",
+      "move": "d7 NET",
+      "rank": 6,
+      "baseline_move": "e8 VENT",
+      "outside_static25": false,
+      "wp_gain_pp": 0.1964242000000005,
+      "equity_gain": 0.35615999999999914,
+      "sources": [],
+      "blocking_adjustment": 2.909375,
+      "setup_adjustment": -1.921875
+    },
+    {
+      "pos": 6024,
+      "arm": "threat_wide",
+      "move": "ex E",
+      "rank": 190,
+      "baseline_move": "8h ARE",
+      "outside_static25": true,
+      "wp_gain_pp": 0.18681670000000317,
+      "equity_gain": 0.4590120000000013,
+      "sources": [
+        "threat_wide",
+        "signals",
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 6024,
+      "arm": "signals",
+      "move": "ex E",
+      "rank": 190,
+      "baseline_move": "8h ARE",
+      "outside_static25": true,
+      "wp_gain_pp": 0.18681670000000317,
+      "equity_gain": 0.4590120000000013,
+      "sources": [
+        "threat_wide",
+        "signals",
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 6024,
+      "arm": "exchange",
+      "move": "ex E",
+      "rank": 190,
+      "baseline_move": "8h ARE",
+      "outside_static25": true,
+      "wp_gain_pp": 0.18681670000000317,
+      "equity_gain": 0.4590120000000013,
+      "sources": [
+        "threat_wide",
+        "signals",
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 6024,
+      "arm": "combined",
+      "move": "ex E",
+      "rank": 190,
+      "baseline_move": "8h ARE",
+      "outside_static25": true,
+      "wp_gain_pp": 0.18681670000000317,
+      "equity_gain": 0.4590120000000013,
+      "sources": [
+        "threat_wide",
+        "signals",
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 167,
+      "arm": "threat_wide",
+      "move": "5d hIRRIENT",
+      "rank": 2,
+      "baseline_move": "5d fERRITIN",
+      "outside_static25": false,
+      "wp_gain_pp": 0.14937060000000946,
+      "equity_gain": 0.5674460000000039,
+      "sources": [],
+      "blocking_adjustment": -2.340625,
+      "setup_adjustment": 2.73046875
+    },
+    {
+      "pos": 1705,
+      "arm": "threat_wide",
+      "move": "d7 TEN",
+      "rank": 7,
+      "baseline_move": "e8 VENT",
+      "outside_static25": false,
+      "wp_gain_pp": 0.13293649999999713,
+      "equity_gain": 0.2947349999999993,
+      "sources": [],
+      "blocking_adjustment": 2.8,
+      "setup_adjustment": -1.640625
+    },
+    {
+      "pos": 1705,
+      "arm": "combined",
+      "move": "d7 TENANT",
+      "rank": 1,
+      "baseline_move": "e8 VENT",
+      "outside_static25": false,
+      "wp_gain_pp": 0.1288328999999977,
+      "equity_gain": 0.5034719999999986,
+      "sources": [],
+      "blocking_adjustment": 0.525,
+      "setup_adjustment": -1.41796875
+    },
+    {
+      "pos": 167,
+      "arm": "combined",
+      "move": "5e RETIRINg",
+      "rank": 3,
+      "baseline_move": "5d fERRITIN",
+      "outside_static25": false,
+      "wp_gain_pp": 0.11959840000000943,
+      "equity_gain": 0.3909620000000018,
+      "sources": [],
+      "blocking_adjustment": -2.84375,
+      "setup_adjustment": 2.07421875
+    },
+    {
+      "pos": 1871,
+      "arm": "exchange",
+      "move": "9b GOOSE",
+      "rank": 1,
+      "baseline_move": "f3 GOOS",
+      "outside_static25": false,
+      "wp_gain_pp": 0.0830132000000039,
+      "equity_gain": 0.12906699999999915,
+      "sources": [],
+      "blocking_adjustment": -0.35,
+      "setup_adjustment": -1.79296875
+    },
+    {
+      "pos": 6021,
+      "arm": "setup_wide",
+      "move": "8d BUDgIES",
+      "rank": 5,
+      "baseline_move": "8d BUrDIES",
+      "outside_static25": false,
+      "wp_gain_pp": 0.057825799999999816,
+      "equity_gain": 0.13540899999999567,
+      "sources": [],
+      "blocking_adjustment": -9.603125,
+      "setup_adjustment": 0.97265625
+    },
+    {
+      "pos": 6021,
+      "arm": "signals",
+      "move": "8d BUDgIES",
+      "rank": 5,
+      "baseline_move": "8d BUrDIES",
+      "outside_static25": false,
+      "wp_gain_pp": 0.057825799999999816,
+      "equity_gain": 0.13540899999999567,
+      "sources": [],
+      "blocking_adjustment": -9.603125,
+      "setup_adjustment": 0.97265625
+    },
+    {
+      "pos": 6021,
+      "arm": "exchange",
+      "move": "8d BUDgIES",
+      "rank": 5,
+      "baseline_move": "8d BUrDIES",
+      "outside_static25": false,
+      "wp_gain_pp": 0.057825799999999816,
+      "equity_gain": 0.13540899999999567,
+      "sources": [],
+      "blocking_adjustment": -9.603125,
+      "setup_adjustment": 0.97265625
+    },
+    {
+      "pos": 6063,
+      "arm": "threat_wide",
+      "move": "8d AMIGA",
+      "rank": 3,
+      "baseline_move": "8d MILIA",
+      "outside_static25": false,
+      "wp_gain_pp": 0.043993700000000135,
+      "equity_gain": 0.03219999999999956,
+      "sources": [],
+      "blocking_adjustment": -5.971875,
+      "setup_adjustment": -2.05078125
+    },
+    {
+      "pos": 6063,
+      "arm": "signals",
+      "move": "8d AMIGA",
+      "rank": 3,
+      "baseline_move": "8d MILIA",
+      "outside_static25": false,
+      "wp_gain_pp": 0.043993700000000135,
+      "equity_gain": 0.03219999999999956,
+      "sources": [],
+      "blocking_adjustment": -5.971875,
+      "setup_adjustment": -2.05078125
+    },
+    {
+      "pos": 6063,
+      "arm": "combined",
+      "move": "8d AMIGA",
+      "rank": 3,
+      "baseline_move": "8d MILIA",
+      "outside_static25": false,
+      "wp_gain_pp": 0.043993700000000135,
+      "equity_gain": 0.03219999999999956,
+      "sources": [],
+      "blocking_adjustment": -5.971875,
+      "setup_adjustment": -2.05078125
+    },
+    {
+      "pos": 1124,
+      "arm": "exchange",
+      "move": "ex GGILLY",
+      "rank": 32,
+      "baseline_move": "13l GEY",
+      "outside_static25": true,
+      "wp_gain_pp": 0.0006474,
+      "equity_gain": 6.261986,
+      "sources": [
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 1124,
+      "arm": "combined",
+      "move": "ex GGILLY",
+      "rank": 32,
+      "baseline_move": "13l GEY",
+      "outside_static25": true,
+      "wp_gain_pp": 0.0006474,
+      "equity_gain": 6.261986,
+      "sources": [
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 1124,
+      "arm": "signals",
+      "move": "13k GIE",
+      "rank": 104,
+      "baseline_move": "13l GEY",
+      "outside_static25": true,
+      "wp_gain_pp": 0.0002741,
+      "equity_gain": 1.6903620000000004,
+      "sources": [
+        "signals"
+      ],
+      "blocking_adjustment": 10.5875,
+      "setup_adjustment": -0.12890625
+    },
+    {
+      "pos": 2151,
+      "arm": "exchange",
+      "move": "ex HLUW",
+      "rank": 144,
+      "baseline_move": "i12 WHAE",
+      "outside_static25": true,
+      "wp_gain_pp": 7.070000000000001e-05,
+      "equity_gain": -7.307257000000001,
+      "sources": [
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 2151,
+      "arm": "combined",
+      "move": "ex HLUW",
+      "rank": 144,
+      "baseline_move": "i12 WHAE",
+      "outside_static25": true,
+      "wp_gain_pp": 7.070000000000001e-05,
+      "equity_gain": -7.307257000000001,
+      "sources": [
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 443,
+      "arm": "setup_wide",
+      "move": "5m TIL",
+      "rank": 59,
+      "baseline_move": "d8 PIR",
+      "outside_static25": true,
+      "wp_gain_pp": 0.0,
+      "equity_gain": 8.484165000000004,
+      "sources": [
+        "setup_wide"
+      ],
+      "blocking_adjustment": -5.6,
+      "setup_adjustment": 19.65234375
+    },
+    {
+      "pos": 443,
+      "arm": "combined",
+      "move": "5m TIL",
+      "rank": 59,
+      "baseline_move": "d8 PIR",
+      "outside_static25": true,
+      "wp_gain_pp": 0.0,
+      "equity_gain": 8.484165000000004,
+      "sources": [
+        "setup_wide"
+      ],
+      "blocking_adjustment": -5.6,
+      "setup_adjustment": 19.65234375
+    },
+    {
+      "pos": 736,
+      "arm": "combined",
+      "move": "1b BETrAYER",
+      "rank": 3,
+      "baseline_move": "1b BETRAYEd",
+      "outside_static25": false,
+      "wp_gain_pp": 0.0,
+      "equity_gain": 0.0,
+      "sources": [],
+      "blocking_adjustment": 1.509375,
+      "setup_adjustment": -1.4765625
+    },
+    {
+      "pos": 1542,
+      "arm": "signals",
+      "move": "o5 OI",
+      "rank": 26,
+      "baseline_move": "o4 IO",
+      "outside_static25": true,
+      "wp_gain_pp": -2.2999999999999983e-06,
+      "equity_gain": -2.198511,
+      "sources": [
+        "threat_wide",
+        "setup_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 14.13125,
+      "setup_adjustment": -0.7265625
+    },
+    {
+      "pos": 1542,
+      "arm": "exchange",
+      "move": "ex CEIIO",
+      "rank": 58,
+      "baseline_move": "o4 IO",
+      "outside_static25": true,
+      "wp_gain_pp": -9.9e-06,
+      "equity_gain": -14.004838,
+      "sources": [
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 1542,
+      "arm": "combined",
+      "move": "ex CEIIO",
+      "rank": 58,
+      "baseline_move": "o4 IO",
+      "outside_static25": true,
+      "wp_gain_pp": -9.9e-06,
+      "equity_gain": -14.004838,
+      "sources": [
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 1542,
+      "arm": "threat_wide",
+      "move": "o6 ICES",
+      "rank": 35,
+      "baseline_move": "o4 IO",
+      "outside_static25": true,
+      "wp_gain_pp": -2.55e-05,
+      "equity_gain": -7.886623,
+      "sources": [
+        "threat_wide"
+      ],
+      "blocking_adjustment": 6.60625,
+      "setup_adjustment": -1.62890625
+    },
+    {
+      "pos": 575,
+      "arm": "threat_wide",
+      "move": "m13 OI",
+      "rank": 34,
+      "baseline_move": "13k ROUe",
+      "outside_static25": true,
+      "wp_gain_pp": -0.01184889999999994,
+      "equity_gain": -0.14832700000000187,
+      "sources": [
+        "threat_wide",
+        "setup_wide"
+      ],
+      "blocking_adjustment": 4.965625,
+      "setup_adjustment": 4.3828125
+    },
+    {
+      "pos": 575,
+      "arm": "setup_wide",
+      "move": "m13 OI",
+      "rank": 34,
+      "baseline_move": "13k ROUe",
+      "outside_static25": true,
+      "wp_gain_pp": -0.01184889999999994,
+      "equity_gain": -0.14832700000000187,
+      "sources": [
+        "threat_wide",
+        "setup_wide"
+      ],
+      "blocking_adjustment": 4.965625,
+      "setup_adjustment": 4.3828125
+    },
+    {
+      "pos": 575,
+      "arm": "combined",
+      "move": "m13 OI",
+      "rank": 34,
+      "baseline_move": "13k ROUe",
+      "outside_static25": true,
+      "wp_gain_pp": -0.01184889999999994,
+      "equity_gain": -0.14832700000000187,
+      "sources": [
+        "threat_wide",
+        "setup_wide"
+      ],
+      "blocking_adjustment": 4.965625,
+      "setup_adjustment": 4.3828125
+    },
+    {
+      "pos": 575,
+      "arm": "signals",
+      "move": "o11 SORER",
+      "rank": 74,
+      "baseline_move": "13k ROUe",
+      "outside_static25": true,
+      "wp_gain_pp": -0.023171599999999293,
+      "equity_gain": 0.00854800000000111,
+      "sources": [
+        "threat_wide",
+        "signals"
+      ],
+      "blocking_adjustment": 7.04375,
+      "setup_adjustment": -0.8671875
+    },
+    {
+      "pos": 6013,
+      "arm": "threat_wide",
+      "move": "ex I",
+      "rank": 87,
+      "baseline_move": "8g GIE",
+      "outside_static25": true,
+      "wp_gain_pp": -0.047221500000005356,
+      "equity_gain": -0.21287499999999682,
+      "sources": [
+        "threat_wide",
+        "signals",
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 6013,
+      "arm": "signals",
+      "move": "ex I",
+      "rank": 87,
+      "baseline_move": "8g GIE",
+      "outside_static25": true,
+      "wp_gain_pp": -0.047221500000005356,
+      "equity_gain": -0.21287499999999682,
+      "sources": [
+        "threat_wide",
+        "signals",
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 6013,
+      "arm": "exchange",
+      "move": "ex I",
+      "rank": 87,
+      "baseline_move": "8g GIE",
+      "outside_static25": true,
+      "wp_gain_pp": -0.047221500000005356,
+      "equity_gain": -0.21287499999999682,
+      "sources": [
+        "threat_wide",
+        "signals",
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 6013,
+      "arm": "combined",
+      "move": "ex I",
+      "rank": 87,
+      "baseline_move": "8g GIE",
+      "outside_static25": true,
+      "wp_gain_pp": -0.047221500000005356,
+      "equity_gain": -0.21287499999999682,
+      "sources": [
+        "threat_wide",
+        "signals",
+        "exchange"
+      ],
+      "blocking_adjustment": 0.0,
+      "setup_adjustment": 0.0
+    },
+    {
+      "pos": 1562,
+      "arm": "setup_wide",
+      "move": "1a NUTMEG",
+      "rank": 18,
+      "baseline_move": "c3 ENGLUT",
+      "outside_static25": false,
+      "wp_gain_pp": -0.14997649999999996,
+      "equity_gain": -10.09947,
+      "sources": [],
+      "blocking_adjustment": 4.1125,
+      "setup_adjustment": -1.44140625
+    },
+    {
+      "pos": 764,
+      "arm": "threat_wide",
+      "move": "10a OW",
+      "rank": 2,
+      "baseline_move": "12a WOOPS",
+      "outside_static25": false,
+      "wp_gain_pp": -0.2979181000000053,
+      "equity_gain": -0.5281670000000034,
+      "sources": [],
+      "blocking_adjustment": 0.04375,
+      "setup_adjustment": 0.046875
+    },
+    {
+      "pos": 764,
+      "arm": "setup_wide",
+      "move": "10a OW",
+      "rank": 2,
+      "baseline_move": "12a WOOPS",
+      "outside_static25": false,
+      "wp_gain_pp": -0.2979181000000053,
+      "equity_gain": -0.5281670000000034,
+      "sources": [],
+      "blocking_adjustment": 0.04375,
+      "setup_adjustment": 0.046875
+    },
+    {
+      "pos": 764,
+      "arm": "signals",
+      "move": "10a OW",
+      "rank": 2,
+      "baseline_move": "12a WOOPS",
+      "outside_static25": false,
+      "wp_gain_pp": -0.2979181000000053,
+      "equity_gain": -0.5281670000000034,
+      "sources": [],
+      "blocking_adjustment": 0.04375,
+      "setup_adjustment": 0.046875
+    },
+    {
+      "pos": 764,
+      "arm": "exchange",
+      "move": "10a OW",
+      "rank": 2,
+      "baseline_move": "12a WOOPS",
+      "outside_static25": false,
+      "wp_gain_pp": -0.2979181000000053,
+      "equity_gain": -0.5281670000000034,
+      "sources": [],
+      "blocking_adjustment": 0.04375,
+      "setup_adjustment": 0.046875
+    },
+    {
+      "pos": 764,
+      "arm": "combined",
+      "move": "10a OW",
+      "rank": 2,
+      "baseline_move": "12a WOOPS",
+      "outside_static25": false,
+      "wp_gain_pp": -0.2979181000000053,
+      "equity_gain": -0.5281670000000034,
+      "sources": [],
+      "blocking_adjustment": 0.04375,
+      "setup_adjustment": 0.046875
+    },
+    {
+      "pos": 54,
+      "arm": "combined",
+      "move": "m2 TAROK",
+      "rank": 4,
+      "baseline_move": "f2 CARTOON",
+      "outside_static25": false,
+      "wp_gain_pp": -0.5588871000000051,
+      "equity_gain": -10.115901999999998,
+      "sources": [],
+      "blocking_adjustment": -16.1,
+      "setup_adjustment": 2.14453125
+    }
+  ],
+  "audit": {
+    "positions_with_blocking_membership_change": [],
+    "old_reply_mean_discrepancies": [],
+    "exchange_nonzero_adjustments": [],
+    "all_checks_have_matching_means": true,
+    "all_references_full60s": true,
+    "all_distinct_selection_pools_full15s": true
+  },
+  "legacy_membership": {
+    "threat_wide": {
+      "positions": 320,
+      "changed_pools": 0,
+      "jaccard": {
+        "n": 320,
+        "mean": 1.0,
+        "se": 0.0
+      },
+      "legacy_choices_retained": 320
+    },
+    "setup_wide": {
+      "positions": 320,
+      "changed_pools": 316,
+      "jaccard": {
+        "n": 320,
+        "mean": 0.8237956700014976,
+        "se": 0.0048540095037167465
+      },
+      "legacy_choices_retained": 317
+    },
+    "signals": {
+      "positions": 320,
+      "changed_pools": 220,
+      "jaccard": {
+        "n": 320,
+        "mean": 0.899869413019605,
+        "se": 0.004674842228870479
+      },
+      "legacy_choices_retained": 316
+    },
+    "exchange": {
+      "positions": 320,
+      "changed_pools": 0,
+      "jaccard": {
+        "n": 320,
+        "mean": 1.0,
+        "se": 0.0
+      },
+      "legacy_choices_retained": 320
+    },
+    "combined": {
+      "positions": 320,
+      "changed_pools": 316,
+      "jaccard": {
+        "n": 320,
+        "mean": 0.857121800358427,
+        "se": 0.0037779820994790626
+      },
+      "legacy_choices_retained": 320
+    }
+  },
+  "width": {
+    "positions": 0,
+    "arms": {
+      "static25_fulltime": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "adaptive_static": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "static60": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "adaptive_signals": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      }
+    }
+  },
+  "matched": {
+    "positions": 0,
+    "arms": {
+      "static_setup_count": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "static_combined_count": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      }
+    }
+  },
+  "sample128": {
+    "positions": 0,
+    "arms": {
+      "setup_conditioned": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "signals_conditioned": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "combined_conditioned": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      }
+    },
+    "robustness_vs64": {
+      "setup_wide": {
+        "positions": 0,
+        "membership_jaccard": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "changed_choices": 0
+      },
+      "signals": {
+        "positions": 0,
+        "membership_jaccard": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "changed_choices": 0
+      },
+      "combined": {
+        "positions": 0,
+        "membership_jaccard": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "changed_choices": 0
+      }
+    }
+  },
+  "six_ply": {
+    "positions": 0,
+    "arms": {
+      "static25_fulltime": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "adaptive_static": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "static60": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "adaptive_signals": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      }
+    }
+  },
+  "quota": {
+    "positions": 0,
+    "arms": {
+      "static25_fulltime": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "tile_quota": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      },
+      "tile_exchange": {
+        "candidate_count": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "selected_wp_gain_pp": {
+          "n": 0,
+          "mean": null,
+          "se": null
+        },
+        "choices_outside25": 0
+      }
+    }
+  }
+}

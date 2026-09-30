@@ -1,0 +1,7 @@
+PCD_BLOCKING_DONE pos=281 bag=5 pool=120
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1790805361
+loaded config with command: set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all -numplays 1 -threads 1
+seed: 1790805362
+loaded config with command: cgp 13FY/13LA/11ODA1/11VUM1/11AMI1/12BE1/2C7F1OR1/QUaIR2INDOWS1E/2R7D3N/1HE4oUTGUARD/1YE7E3I/1EN4ZILLAH1V/2E4I4O1E/1TRIPART4O2/BESNOW1E2EXPOS AACJNTT/EIILNST 422/366 0
+seed: 1790805363

@@ -1,0 +1,24 @@
+{
+  "position_id": 281,
+  "candidate": "7f ACTA",
+  "purpose": "Explain residual loss probability with legal no-PAT static rollout continuations; separate diagnostic, original study unchanged.",
+  "trials": 10000,
+  "wins": 9974,
+  "losses": 20,
+  "ties": 6,
+  "unfinished": 0,
+  "mean_win_probability_ties_half": 0.9977,
+  "rollout_plies": 16,
+  "policy": "No-PAT static equity on both sides",
+  "finding": "ACTA supplies A at F7, permitting column-F bingos that put S at F8 and extend QUAIR to QUAIRS. Observed examples include AGASTING, ALIASING and KEITLOAS.",
+  "example": {
+    "opponent_rack": "AGGINST",
+    "our_rack_after_ACTA": "EIJLNOT",
+    "last_bag_tile": "K",
+    "moves": ["7f ACTA 15", "f5 AGASTING 80", "2j JIN 33", "14m OK 24"],
+    "our_remaining_rack": "ELOT",
+    "final_spread": -8
+  },
+  "limitation": "These are static-policy losses. Optimal endgame defence has not been solved, so these continuations do not establish forced losses.",
+  "trace_file": "traces.txt"
+}
