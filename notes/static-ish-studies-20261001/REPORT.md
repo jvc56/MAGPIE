@@ -23,7 +23,7 @@ Each result is a prespecified paired-game test with 2,000 pairs (≈ ±0.65 pp S
 - **Racing.** z = 3 is not detectably worse than exact evaluation (49.10%, p = 0.16) and is 3.4× cheaper.
 - **Teacher value.** Equity mode is a small, probably real gain over score mode: +0.87 ± 0.29 pp pooled, but heterogeneous across lexica and about 1.3× the time. The default remains score mode.
 - **Weights.** No point on a 3×3 grid beat 1.4 / 0.75 in equity mode.
-- **Hybrid teacher (equity_reply).** Opponent replies are valued by equity and our follow-ups by score, so a setup does not count our leave twice. With lighter weights (0.7 / 0.4) it beats score mode 1.4 / 0.75: 51.39%, p = 0.03 (P38). It is a little faster than score mode (median 50 vs 65 ms). This is one confirmation after a best-of-8 grid, so it needs replicating in another lexicon before it becomes a default.
+- **Hybrid teacher (equity_reply).** Opponent replies are valued by equity and our follow-ups by score, so a setup does not count our leave twice. With lighter weights (0.7 / 0.4) it beats score mode 1.4 / 0.75: 51.39%, p = 0.03 (P38). It is a little faster than score mode (median 50 vs 65 ms). It replicates in FRA20 (51.25%, p = 0.048) but not NWL23 (49.88%, p = 0.85). Pooled over the three lexica it gains +0.85 ± 0.37 pp (p = 0.02, P42–P43). This is the same pattern as equity mode, which also gained nothing in NWL23.
 - **Win chance instead of points (P39).** Racing on win chance at the current lead does not help: 49.56%, p = 0.51, and it gives up 8.6 points of spread.
 - **Nomination.** Nominated root candidates do not help a 300 ms sim at equal time (49.58%, 1,000 pairs).
 - **Rollouts.** Static-ish rollouts run about 1,700× fewer sim iterations per second than static rollouts. They were benchmarked but not tested in played games.
@@ -218,3 +218,17 @@ P40 extends P37 below its corner optimum. Each point played 800 pairs against eq
 - A weighted quadratic surface fits well (χ² 7.8 on 10 dof). Its maximum is at blocking 0.96, setup 0.18, where it predicts 49.5% against the reference.
 - **P41 was skipped** because there was nothing to confirm; see `p41-confirm-low/SKIPPED`.
 - Together with P37, the optimum is probably blocking 0.7–1.0 with a light setup weight. 0.7 / 0.4 stays the equity_reply setting.
+
+## equity_reply replications (P42–P43)
+
+These replications use the CSW24-tuned 0.7 / 0.4 weights without refitting, against score mode 1.4 / 0.75 in the same lexicon. Each run is 2,000 pairs on a fresh seed with 10 workers.
+
+| run | lexicon | a's score | 95% CI | p | spread | check p50 (a / b) |
+|---|---|---:|---|---:|---:|---|
+| P38 | CSW24 | 51.39% ± 0.64% | [50.12, 52.65] | 0.031 | +2.1 | 50 / 65 ms |
+| P42 | NWL23 | 49.88% ± 0.65% | [48.60, 51.15] | 0.85 | +0.4 | 57 / 72 ms |
+| P43 | FRA20 | **51.25% ± 0.63%** | [50.01, 52.49] | 0.048 | +3.2 | 58 / 70 ms |
+
+- The inverse-variance pooled gain is **+0.85 ± 0.37 pp** (p = 0.022). The heterogeneity is not significant (Q = 3.3 on 2 dof), but NWL23 is null, as it was for equity mode (P19, P32).
+- equity_reply is about 20% cheaper than score mode in every lexicon, so it is at least no worse at lower cost. Equity mode's gain was similar but cost 1.3× the time of score mode.
+- Not yet tested: equity_reply against equity mode head to head, and NWL23-specific weights.
