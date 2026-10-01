@@ -124,3 +124,10 @@ each recorded below with command, seeds, wall time, outputs.
   notes committed locally on claude/blocking-setup-studies (04200dd6), not
   pushed yet: that branch also has the unreviewed WIP rollout-policy commit
   d827ce1d (SimArgs.rollout_blocking_setup, -rbs/-rbsz/-rbsracks).
+- Overlap research (scratch branch claude/bs-overlap-research, local):
+  pool-as-rack enumeration 4-25x slower; word-map repetition 13x but caching
+  it gains 0-3%. Not pursued.
+- teacher_value .bsp row (score | equity_score | equity). Head-to-heads
+  (2,000 pairs each, 64 racks, z=3, weights 1.4/0.75 unrefit, b = score
+  mode): equity 51.76% +- 0.66 (p=0.007); equity_score 49.61% +- 0.65
+  (p=0.55). Local WIP commits on claude/blocking-setup-studies, unpushed.
