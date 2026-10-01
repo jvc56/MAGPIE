@@ -1,0 +1,10 @@
+{
+  "kind": "Prespecified: cheap configuration vs PAT static",
+  "frozen_utc": "2026-10-01T12:52:50Z",
+  "player_a": "static-ish, score, 1.4/0.75, checks only while bag < 30, universe 30, 64 racks, z=3",
+  "player_b": "PAT static (CSW24.pat)",
+  "pairs": 2000,
+  "seed": 20264601,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "binary": "magpie_test_p24, sha256 b6bcf56ff61e9dd30f21a17e40d63934a8aca466bd541771c8960bcac7250b24"
+}

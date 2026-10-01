@@ -17,7 +17,8 @@ Each result is a prespecified paired-game test with 2,000 pairs (≈ ±0.65 pp S
 - **Against short sims** it wins at about equal time and with less time:
   - vs a 100 ms 2-ply sim: 52.25%. That sim is no better than static: 50.70%.
   - vs a 300 ms 2-ply sim, about 2.6× static-ish's time: 52.38%.
-- **Cheap configuration.** Checks only while the bag is below 30 and a universe of 30 cut the mean decision time from about 83 ms to 18 ms. Against static it scores 52.41% (P30), as strong as the full configuration. Head-to-head against full: P33, below.
+- **Cheap configuration.** Checks only while the bag is below 30 and a universe of 30 cut the mean decision time from about 83 ms to 18 ms. Against static it scores 52.41% (P30), and 52.38% on NWL23 (P35). Head-to-head, the full configuration may be about 1 pp better (P33, 48.91%, p = 0.09).
+- **Against PAT static.** The full configuration is about +1 pp better (P14 51.12%, P36 51.04%, pooled p ≈ 0.02); the cheap one only ties it (P34).
 - **Rack count.** 64 racks is the floor: 32 is significantly worse (47.81% head to head), and 96 or 128 show no gain.
 - **Racing.** z = 3 is not detectably worse than exact evaluation (49.10%, p = 0.16) and is 3.4× cheaper.
 - **Teacher value.** Equity mode is a small, probably real gain over score mode: +0.87 ± 0.29 pp pooled, but heterogeneous across lexica and about 1.3× the time. The default remains score mode.
@@ -158,3 +159,16 @@ At most, equity mode is a small improvement, and it is not established. It costs
 
 - **Cheap configuration (P30).** It does as well against static as the full configuration (P5, 52.24%) at about a fifth of the time. Its SE is smaller because the two games of a pair diverge less when the checks start late; the pair-level SE accounts for this.
 - **Equity vs score, all five head-to-heads (P8, P27, P19, P29, P32).** The inverse-variance pooled gain for equity is **+0.87 ± 0.29 pp** (p = 0.002), or +0.67 ± 0.32 pp (p = 0.04) excluding P8. By lexicon: CSW24 +1.32 ± 0.46, NWL23 +0.24 ± 0.45, FRA20 +1.28 ± 0.64. Equity mode is a small, probably real gain at about 1.3× the time.
+
+## Cheap configuration head-to-heads, PAT baseline (P33–P36)
+
+| run | player a | player b | a's score | 95% CI | p | time per decision (a / b) |
+|---|---|---|---:|---|---:|---|
+| P33 | cheap (score, bag < 30, universe 30) | full (score, ungated, universe 60) | 48.91% ± 0.65% | [47.64, 50.18] | 0.093 | mean 19 / 71 ms |
+| P34 | cheap | PAT static | 50.06% ± 0.62% | [48.84, 51.28] | 0.92 | median 46 / 2 ms |
+| P35 (NWL23) | cheap | no-PAT static | **52.38% ± 0.46%** | [51.47, 53.28] | <0.0001 | median 45 ms |
+| P36 | full, score mode | PAT static | 51.04% ± 0.65% | [49.76, 52.32] | 0.11 | median 67 / 2 ms |
+
+- **Cheap vs full (P33).** The full configuration may be about 1 pp better than the cheap one (not significant) and uses about 4× the time.
+- **Against PAT static.** The cheap configuration ties it (P34). The full configuration beats it by about 1 pp in each of P14 (equity) and P36 (score); neither is significant alone, and together they pool to +1.08 ± 0.46 pp (p ≈ 0.02).
+- **NWL23 (P35).** The cheap configuration also holds up there.
