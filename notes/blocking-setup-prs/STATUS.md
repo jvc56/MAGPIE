@@ -98,3 +98,16 @@ each recorded below with command, seeds, wall time, outputs.
 - Open questions: whether to publish .bsp files via MAGPIE-DATA; whether the
   static-ish evaluator should become a PlayChooser mode (currently test-only);
   a cheap feature-model approximation of the teacher (not started).
+- 2026-09-30 ~20:00: P4 2000-pair confirmation (seed 20261401) STOPPED by
+  user request at 273/4000 games to speed up the evaluator first; marked
+  incomplete, not analyzed.
+- Teacher speed (one M4 core, 48 positions, 64 racks): exact path 311 ->
+  152 ms/position (byte-identical; replay still exact); movegen additions
+  free when off (10k static games 6.881 s both). Best-move race
+  (blocking_setup_checker_choose): z=3 99.4% agreement with full argmax,
+  48 ms/position; z=2 97.8%, 35 ms. In games: check 274 ms -> 126 (exact,
+  identical games) -> 37 (z=3) -> 28 (z=2) median. Pushed to #744
+  (22792a7a), merged into #745 and #746; evidence in #746 REPORT.md.
+- Not yet tried: 16 racks + race, threads for evaluate-all, follow-up
+  reconstruction when the reply changes. Confirmation run: not restarted;
+  needs a decision on which evaluator mode (exact / z=3 / z=2) to confirm.
