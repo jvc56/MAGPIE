@@ -124,5 +124,16 @@ cp bin/magpie_test /some/where/magpie_test_run
 Use exact globs (`labels.w[0-9].csv`); each labels shard has a
 `<name>.timing` side file with per-position movegen and teacher times.
 
+## Studies
+
+- `pools_study.sh` + `pools_analyze.py` + `build_pool_explorer.py`: root pool
+  arms (A static+checks, B PAT+checks, Bp PAT-ranked checks, C
+  static+PAT+checks) against exactly equal-size static pools, top-two
+  selection sims and an independent round-robin reference over the union,
+  no-PAT static rollouts. `sims=0` gives an untimed nomination audit.
+- `games_study.sh` + `games_analyze.py`: paired games (same tiles per seat,
+  seats swapped) between `static`, `pat` and `adjusted` players, with
+  per-decision timing.
+
 Do not commit generated data. A published `.bsp` belongs in the MAGPIE-DATA
 repository with its provenance rows.

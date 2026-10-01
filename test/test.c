@@ -13,6 +13,7 @@
 #include "benchmark_peg_test.h"
 #include "bit_rack_test.h"
 #include "blocking_setup_gen_test.h"
+#include "blocking_setup_study_test.h"
 #include "blocking_setup_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -273,6 +274,10 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("pattablecheck:", subtest)) {
     pat_run_through_table_check(subtest + strlen("pattablecheck:"));
+    return;
+  }
+  if (has_prefix("bsstudy:", subtest)) {
+    blocking_setup_study_run_spec(subtest + strlen("bsstudy:"));
     return;
   }
   if (has_prefix("bsgen:", subtest)) {
