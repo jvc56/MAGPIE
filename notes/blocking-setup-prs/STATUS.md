@@ -131,3 +131,9 @@ each recorded below with command, seeds, wall time, outputs.
   (2,000 pairs each, 64 racks, z=3, weights 1.4/0.75 unrefit, b = score
   mode): equity 51.76% +- 0.66 (p=0.007); equity_score 49.61% +- 0.65
   (p=0.55). Local WIP commits on claude/blocking-setup-studies, unpushed.
+- 2026-09-30 22:41 PDT: user authorized useful testing until 07:30 PDT.
+  Queue (sequential, each prespecified, fresh seeds): P9 equity-weight grid
+  (running) -> P10 confirm winner (2,000 pairs) -> rollout wiring tests +
+  off-cost check + sim it/s (no-PAT/PAT/static-ish) -> NWL23 transfer
+  -> paired 64 vs 96 racks -> PlayChooser sim pilot (static vs static-ish
+  rollouts) if time allows.
