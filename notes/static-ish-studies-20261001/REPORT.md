@@ -72,3 +72,15 @@ The rollout wiring costs nothing when unused: 120,000 fixed iterations took 11.9
 - **Universe 30 (P18)** is not detectably worse than 60 and is 33% cheaper.
 - **Equity vs score teacher does not replicate on NWL23 (P19).** CSW24 (P8) gave +1.76 ± 0.66 pp for equity; NWL23 gives −0.74 ± 0.64 pp. The two estimates differ by about 2.7 SE. Whether the gain is lexicon-dependent, or the CSW24 result was partly luck, is unresolved. The inverse-variance pooled estimate is +0.49 ± 0.46 pp, not significant.
 - **Racks (P20).** 96 vs 64 racks in score mode is not significant. Together with P12 (equity mode, 50.04%), extra racks beyond 64 show no reliable gain.
+
+## Sim baseline, late-only gating, fewer racks (P21–P23)
+
+| run | player a | player b | a's score | 95% CI | p | mean time per decision (a / b) |
+|---|---|---|---:|---|---:|---|
+| P21 | 2-ply sim, 100 ms | no-PAT static | 50.70% ± 0.66% | [49.40, 52.00] | 0.29 | 100 ms median / 0 ms |
+| P22 | equity, checks only while bag < 30 | equity, ungated | 49.73% ± 0.65% | [48.45, 51.00] | 0.67 | **37 / 93 ms** |
+| P23 | equity, 32 racks | equity, 64 racks | **47.81% ± 0.66%** | [46.51, 49.11] | **0.001** | 74 / 92 ms |
+
+- **P21.** The 100 ms sim is not detectably better than static (spread −5.3). Static-ish's win over it in P15 therefore fits static-ish beating static.
+- **P22.** Checking only late in the game (bag < 30) shows no detectable loss and cuts mean decision time by 60%; the interval allows a loss of up to 1.5 pp.
+- **P23.** 32 racks is significantly worse than 64 and saves only 20%. Combined with P12 and P20, 64 racks is the floor and more racks show no gain.
