@@ -84,3 +84,13 @@ The rollout wiring costs nothing when unused: 120,000 fixed iterations took 11.9
 - **P21.** The 100 ms sim is not detectably better than static (spread −5.3). Static-ish's win over it in P15 therefore fits static-ish beating static.
 - **P22.** Checking only late in the game (bag < 30) shows no detectable loss and cuts mean decision time by 60%; the interval allows a loss of up to 1.5 pp.
 - **P23.** 32 racks is significantly worse than 64 and saves only 20%. Combined with P12 and P20, 64 racks is the floor and more racks show no gain.
+
+## Nominated sim candidates in played games (P24)
+
+Player a was a PlayChooser 2-ply sim, 300 ms per move. Its root candidates came from the nominator: static 10, blocking 5, setup 5, exchanges 3, a universe of 30, with the equity teacher and exact checks. Player b was the same sim over the default top 15 static candidates, given 460 ms per move to cover a's roughly 160 ms of nomination. The run was 1,000 pairs, seed 20263601.
+
+| a's score | 95% CI | p | decision time, median (a / b) |
+|---:|---|---:|---|
+| 49.58% ± 0.94% | [47.73, 51.42] | 0.65 | 482 / 460 ms |
+
+At this short budget, nominating candidates by blocking and setup does not help the sim at equal time. The test can rule out gains above about 1.5 pp. Larger budgets, where the earlier position-level studies saw small gains, were not tested.
