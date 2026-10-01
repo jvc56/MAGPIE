@@ -5,6 +5,7 @@ for measuring what they do. The runtime pieces live in `src/`:
 
 - `src/impl/blocking_setup.[ch]` — the pass-relative teacher.
 - `src/ent/blocking_setup_params.[ch]` — the `.bsp` format.
+- `src/impl/sim_nomination.[ch]` — sim root-candidate nomination.
 
 ## Definitions and units
 

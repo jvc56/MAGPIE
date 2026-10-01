@@ -45,6 +45,13 @@ typedef struct PlayChooserStrategy {
   play_chooser_eval_t endgame_eval;
   int sim_plies;          // 0 = default
   int sim_max_candidates; // 0 = default
+  // Optional root candidate source for SIM (see sim_nomination.h for one).
+  // Called with the position on turn; returns a list it owns, valid until
+  // its next call, or NULL to use the default: the top sim_max_candidates
+  // by equity. The list's count replaces sim_max_candidates. Root
+  // candidates only: rollouts still follow pat_rollout_disabled below.
+  const MoveList *(*sim_candidates_fn)(void *context, const Game *game);
+  void *sim_candidates_context;
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;

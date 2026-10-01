@@ -68,6 +68,7 @@
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
+#include "sim_nomination_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
@@ -159,6 +160,7 @@ static TestEntry test_table[] = {
     {"patfeatures", test_pat_features},
     {"pateval", test_pat_eval},
     {"blockingsetup", test_blocking_setup},
+    {"simnomination", test_sim_nomination},
     {"winpctcoverage", test_win_pct_coverage},
     {"winpctstate", test_win_pct_state},
     {"winpctrecord", test_win_pct_record},
