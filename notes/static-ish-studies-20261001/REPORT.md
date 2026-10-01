@@ -94,3 +94,13 @@ Player a was a PlayChooser 2-ply sim, 300 ms per move. Its root candidates came 
 | 49.58% ± 0.94% | [47.73, 51.42] | 0.65 | 482 / 460 ms |
 
 At this short budget, nominating candidates by blocking and setup does not help the sim at equal time. The test can rule out gains above about 1.5 pp. Larger budgets, where the earlier position-level studies saw small gains, were not tested.
+
+## French transfer and a longer sim (P25–P26)
+
+| run | player a | player b | a's score | 95% CI | p | spread | mean time per decision (a / b) |
+|---|---|---|---:|---|---:|---:|---|
+| P25 (FRA20) | equity static-ish, CSW24 weights unrefit | no-PAT static | **52.69% ± 0.66%** | [51.39, 53.98] | <0.0001 | +7.2 | median 89 / 0 ms |
+| P26 | equity static-ish | 2-ply sim, 15 candidates, 300 ms/move | **52.38% ± 0.65%** | [51.10, 53.65] | 0.0003 | +11.5 | 95 / 247 ms |
+
+- **French (P25).** The weights transfer to French, which has a different letter distribution, without refitting.
+- **Longer sim (P26).** Static-ish beats a 2-ply sim that uses 2.6× its time per decision.
