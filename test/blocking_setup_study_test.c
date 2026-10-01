@@ -21,6 +21,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/play_chooser.h"
 #include "../src/impl/sim_nomination.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
@@ -58,8 +59,10 @@
 //          Writes <out>.pools.csv, <out>.nominees.csv, <out>.select.csv
 //          and <out>.refs.csv; sims=0 writes only the nominees (an untimed
 //          nomination audit).
-//   games  Game pairs between two players (a= and b=, each "static", "pat"
-//          or "adjusted"): both games of a pair use one seed, so each seat
+//   games  Game pairs between two players (a= and b=, each "static", "pat",
+//          "adjusted" or "sim": a PlayChooser simulating sim_cands=
+//          candidates sim_plies= plies deep for sim_ms= per move, no-PAT
+//          static rollouts): both games of a pair use one seed, so each seat
 //          draws the same tiles, and the players swap seats. "adjusted"
 //          plays argmax(static equity + blocking + setup adjustments) over
 //          the top universe= static moves and exch= exchanges, with weights
@@ -529,6 +532,9 @@ typedef enum {
   BSS_PLAYER_STATIC,
   BSS_PLAYER_PAT,
   BSS_PLAYER_ADJUSTED,
+  // A PlayChooser simulating its top candidates (no-PAT static rollouts)
+  // for sim_ms per move.
+  BSS_PLAYER_SIM,
 } bss_player_t;
 
 static bss_player_t bss_parse_player(const char *name) {
@@ -540,6 +546,9 @@ static bss_player_t bss_parse_player(const char *name) {
   }
   if (strings_equal(name, "adjusted")) {
     return BSS_PLAYER_ADJUSTED;
+  }
+  if (strings_equal(name, "sim")) {
+    return BSS_PLAYER_SIM;
   }
   log_fatal("unknown player %s", name);
   return BSS_PLAYER_STATIC;
@@ -555,6 +564,8 @@ typedef struct BSSPlayerState {
   Equity exchange_margin;
   int num_racks;
   BlockingSetupRaceSettings race;
+  PlayChooser *chooser;
+  Move *chosen;
 } BSSPlayerState;
 
 static void bss_generate(const Game *game, MoveList *list, bool disable_pat) {
@@ -670,6 +681,37 @@ static int bss_decide(BSSPlayerState *state, bss_player_t kind,
   return choice;
 }
 
+// The sim player's move, as an index into state->list (the static list).
+static int bss_sim_decide(BSSPlayerState *state, Game *game,
+                          BSSDecision *decision) {
+  const double start = bss_now_ms();
+  bss_generate(game, state->list, true);
+  decision->movegen_ms = bss_now_ms() - start;
+  decision->check_ms = 0.0;
+  decision->universe = 0;
+  decision->changed = false;
+  decision->checked = false;
+  decision->candidate_racks = 0;
+  ErrorStack *error_stack = error_stack_create();
+  play_chooser_choose_move(state->chooser, game, state->chosen, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  int choice = 0;
+  for (int move_idx = 0; move_idx < move_list_get_count(state->list);
+       move_idx++) {
+    if (compare_moves_without_equity(move_list_get_move(state->list, move_idx),
+                                     state->chosen, true) == -1) {
+      choice = move_idx;
+      break;
+    }
+  }
+  decision->checked = bag_get_letters(game_get_bag(game)) > 0;
+  decision->changed = choice != 0;
+  decision->total_ms = bss_now_ms() - start;
+  decision->check_ms = decision->total_ms - decision->movegen_ms;
+  return choice;
+}
+
 // A game's result for player a: win 1, tie 0.5, loss 0.
 static double bss_game_score(int spread) {
   if (spread > 0) {
@@ -707,6 +749,29 @@ static void bss_games(const BSOptions *options) {
     state->exchange_margin = int_to_equity((int)bs_options_get_long(
         options, "exchmargin", BSS_DEFAULT_EXCHANGE_MARGIN));
     state->num_racks = 0;
+    state->chooser = NULL;
+    state->chosen = NULL;
+    if (kinds[player_idx] == BSS_PLAYER_SIM) {
+      ErrorStack *error_stack = error_stack_create();
+      config_load_win_pcts(config, error_stack);
+      assert(error_stack_is_empty(error_stack));
+      error_stack_destroy(error_stack);
+      const PlayChooserStrategy strategy = {
+          .pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM,
+          .endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+          .fixed_seconds_per_move =
+              (double)bs_options_get_long(options, "sim_ms", 100) / 1000.0,
+          .sim_plies = (int)bs_options_get_long(options, "sim_plies", 2),
+          .sim_max_candidates =
+              (int)bs_options_get_long(options, "sim_cands", 15),
+          .win_pcts = config_get_win_pcts(config),
+          .num_threads = 1,
+          .pat_rollout_disabled = true,
+          .seed = bs_options_get_u64(options, "seed", 0) + (uint64_t)player_idx,
+      };
+      state->chooser = play_chooser_create(&strategy);
+      state->chosen = move_create();
+    }
     // z=0 (the default) measures every candidate in full; z > 0 races.
     state->race = (BlockingSetupRaceSettings){
         .batch_racks = (int)bs_options_get_long(options, "batch",
@@ -763,10 +828,13 @@ static void bss_games(const BSOptions *options) {
         BSSDecision decision;
         const int bag = bag_get_letters(game_get_bag(game));
         const int lead = bss_lead(game);
-        const int choice = bss_decide(
-            &states[player_idx], kinds[player_idx], game,
-            bs_mix(pair_seed ^ (uint64_t)((turn * 2) + game_in_pair)),
-            &decision);
+        const int choice =
+            kinds[player_idx] == BSS_PLAYER_SIM
+                ? bss_sim_decide(&states[player_idx], game, &decision)
+                : bss_decide(
+                      &states[player_idx], kinds[player_idx], game,
+                      bs_mix(pair_seed ^ (uint64_t)((turn * 2) + game_in_pair)),
+                      &decision);
         (void)fprintf(moves_out,
                       "%ld,%d,%d,%c,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%d\n",
                       pair_idx, game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
@@ -793,6 +861,10 @@ static void bss_games(const BSOptions *options) {
     move_list_destroy(states[player_idx].list);
     blocking_setup_samples_destroy(states[player_idx].samples);
     blocking_setup_checker_destroy(states[player_idx].checker);
+    if (states[player_idx].chooser != NULL) {
+      play_chooser_destroy(states[player_idx].chooser);
+      move_destroy(states[player_idx].chosen);
+    }
   }
   (void)fclose(games_out);
   (void)fclose(moves_out);
