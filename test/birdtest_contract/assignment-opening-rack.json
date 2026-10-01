@@ -89,6 +89,7 @@
       "use_wordmap": true,
       "use_rit": false,
       "rit_name": null,
+      "use_wit": false,
       "min_play_iterations": 500,
       "threshold": "gk16",
       "sampling_rule": "top_two_ids",

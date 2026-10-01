@@ -1048,19 +1048,20 @@ char *str_api_version(Config __attribute__((unused)) * config,
 // The identity of every builder in this binary, as one JSON object.
 //
 // birdtest's server runs a pinned MAGPIE to build a reference wordmap, rack
-// info table or leave-generation KLV, and records the builder that produced
-// each hash alongside it. It reads that identity from here rather than being
-// told it in configuration, so the recorded builder is always the one that did
-// the work. See src/def/builder_defs.h.
+// info table, word info table or leave-generation KLV, and records the builder
+// that produced each hash alongside it. It reads that identity from here rather
+// than being told it in configuration, so the recorded builder is always the
+// one that did the work. See src/def/builder_defs.h.
 static char *builders_json(void) {
   return get_formatted_string("{\"magpie_version\":\"%s\","
                               "\"build_target\":\"%s\","
                               "\"wmp_builder_version\":%d,"
                               "\"rit_builder_version\":%d,"
-                              "\"klv_builder_version\":%d}\n",
+                              "\"klv_builder_version\":%d,"
+                              "\"wit_builder_version\":%d}\n",
                               MAGPIE_VERSION, MAGPIE_BUILD_TARGET,
                               WMP_BUILDER_VERSION, RIT_BUILDER_VERSION,
-                              KLV_BUILDER_VERSION);
+                              KLV_BUILDER_VERSION, WIT_BUILDER_VERSION);
 }
 
 void execute_builders(Config *config,
@@ -7545,6 +7546,12 @@ static const char *contribute_rit_name(const JsonValue *settings) {
   return json_get_string_or_null(settings, CONTRIBUTE_KEY_RIT_NAME);
 }
 
+// True if the settings ask for a word info table. Read the same way as
+// use_wordmap, and absent means no.
+static bool contribute_wants_wit(const JsonValue *settings) {
+  return json_get_bool_or(settings, CONTRIBUTE_KEY_USE_WIT, false);
+}
+
 // The sidecar beside a wordmap, naming the .kwg digest it was built from.
 //
 // This is the weaker of the two checks and is now the fallback. A wordmap is
@@ -7969,6 +7976,83 @@ static void config_contribute_ensure_rack_info_table(
           pinned.build_target ? pinned.build_target : "unstated"));
 }
 
+// Makes the word info table for `lexicon` available, building it if what is
+// on disk is absent or does not match.
+//
+// Like a rack info table, only ever against a pinned hash. A table records the
+// hash of the .kwg it was built from, and the load refuses one whose hash is
+// not the loaded .kwg's -- but a table built by an older builder from the same
+// .kwg passes that, and a pruning mask that is wrong prunes plays that exist.
+// What the server built is the check; with nothing pinned, nothing is loaded.
+//
+// Built from the .kwg alone, which expected_data has already verified: no
+// wordmap, no leaves. About two seconds and 92 MB for NWL23, once per lexicon.
+static void config_contribute_ensure_word_info_table(Config *config,
+                                                     ContributeState *state,
+                                                     const char *lexicon,
+                                                     const char *ld_name,
+                                                     ErrorStack *error_stack) {
+  ContributeDerived pinned;
+  if (!contribute_find_derived(state, "wit", lexicon, &pinned)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+        get_formatted_string(
+            "this job asks for the word info table %s but pins no hash for "
+            "it; a table that cannot be checked could prune plays that exist",
+            lexicon));
+    return;
+  }
+  if (config_contribute_derived_matches(config, state, lexicon,
+                                        DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+                                        pinned.sha256)) {
+    return;
+  }
+
+  // Held for the build, and the table checked again once it is: a worker
+  // sharing this data directory has usually just built it.
+  char *what = get_formatted_string("the word info table for %s", lexicon);
+  const int lock_fd = config_contribute_lock_build(
+      config, lexicon, DATA_FILEPATH_TYPE_WORD_INFO_TABLE, what, error_stack);
+  free(what);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_contribute_derived_matches(config, state, lexicon,
+                                        DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+                                        pinned.sha256)) {
+    contribute_unlock_build(lock_fd);
+    return;
+  }
+  thread_control_print_formatted(
+      config->thread_control, "building the word info table for %s\n", lexicon);
+  // `kwg2wit` rather than `kwg2witifneeded`: the second keeps a table it
+  // judges current, and this one has just been found not to be the table the
+  // job pins.
+  contribute_convert(config, "kwg2wit", lexicon, ld_name, /*klv_name=*/NULL,
+                     /*wmp_name=*/NULL, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    contribute_unlock_build(lock_fd);
+    return;
+  }
+  char *built = contribute_derived_digest(config, state, lexicon,
+                                          DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
+  contribute_unlock_build(lock_fd);
+  if (built && strings_equal(built, pinned.sha256)) {
+    free(built);
+    return;
+  }
+  contribute_record_derived_mismatch(state, "wit", lexicon, pinned.sha256,
+                                     built);
+  free(built);
+  error_stack_push(
+      error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+      get_formatted_string(
+          "the word info table built here for %s is not the one this job pins "
+          "(builder %s, target %s)",
+          lexicon, pinned.builder ? pinned.builder : "unstated",
+          pinned.build_target ? pinned.build_target : "unstated"));
+}
+
 // Sets the rack info table names the next lexicon load should use, or clears
 // them with two NULLs. Duplicated rather than borrowed: the JSON they come
 // from is the claim's, and the load happens while it is still alive, but a
@@ -7986,7 +8070,7 @@ static void config_contribute_set_rit_names(Config *config, const char *p1,
 // file each is read from.
 static const players_data_t contribute_cached_types[] = {
     PLAYERS_DATA_TYPE_KWG, PLAYERS_DATA_TYPE_KLV, PLAYERS_DATA_TYPE_WMP,
-    PLAYERS_DATA_TYPE_RIT};
+    PLAYERS_DATA_TYPE_RIT, PLAYERS_DATA_TYPE_WIT};
 
 static data_filepath_t
 contribute_cached_filepath_type(players_data_t players_data_type) {
@@ -7997,6 +8081,8 @@ contribute_cached_filepath_type(players_data_t players_data_type) {
     return DATA_FILEPATH_TYPE_WORDMAP;
   case PLAYERS_DATA_TYPE_RIT:
     return DATA_FILEPATH_TYPE_RACK_INFO_TABLE;
+  case PLAYERS_DATA_TYPE_WIT:
+    return DATA_FILEPATH_TYPE_WORD_INFO_TABLE;
   default:
     return DATA_FILEPATH_TYPE_KWG;
   }
@@ -8199,20 +8285,21 @@ static void config_contribute_record_loaded_data(Config *config) {
 // check it against; the caller has verified the file's bytes against the hash
 // the job pins before reaching here.
 //
-// The word info table is switched off here for both players, always. It is
-// the third file the load can open by lexicon name -- a per-substring letter
-// mask move generation prunes with -- and birdtest neither offers nor pins
-// one, so nothing a task carries has checked it: built from the lexicon on
-// disk it prunes nothing legal, built from an older one it prunes plays that
-// exist. It is opt-in (-wit, -wit1, -wit2), and nothing else on this path
-// reset the flag, so a contributor whose settings.txt or an earlier command
-// in this process had switched one on played every task with it.
+// p1_use_wit/p2_use_wit say whether each player loads the word info table for
+// its lexicon -- the third file the load can open by lexicon name, a
+// per-substring letter mask move generation prunes with. Stated for every
+// task, like the wordmap: it is opt-in (-wit, -wit1, -wit2), and before this
+// was stated nothing on this path reset the flag, so a contributor whose
+// settings.txt or an earlier command in this process had switched one on
+// played every task with a table nothing had checked. A player that asks for
+// one has had it verified against the hash the job pins before reaching here.
 void config_contribute_load_lexicon_and_variant(
     Config *config, const char *lexicon, const char *variant,
     const char *letter_distribution, const char *board_layout,
     const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
     const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
-    const char *p1_rit_name, const char *p2_rit_name, ErrorStack *error_stack) {
+    const char *p1_rit_name, const char *p2_rit_name, bool p1_use_wit,
+    bool p2_use_wit, ErrorStack *error_stack) {
   config_contribute_evict_changed_data(config);
   config_contribute_set_rit_names(config, p1_rit_name, p2_rit_name);
   for (int player_index = 0; player_index < 2; player_index++) {
@@ -8223,7 +8310,8 @@ void config_contribute_load_lexicon_and_variant(
         config->players_data, PLAYERS_DATA_TYPE_RIT, player_index,
         (player_index == 0 ? p1_rit_name : p2_rit_name) != NULL);
     players_data_set_use_when_available(
-        config->players_data, PLAYERS_DATA_TYPE_WIT, player_index, false);
+        config->players_data, PLAYERS_DATA_TYPE_WIT, player_index,
+        player_index == 0 ? p1_use_wit : p2_use_wit);
   }
   config_load_game_variant(config, variant, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -9068,13 +9156,35 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
     }
   }
 
+  // A word info table is built from the .kwg alone, so its order against the
+  // other two does not matter. Two players on one lexicon build it once.
+  const bool p1_use_wit = contribute_wants_wit(player1);
+  const bool p2_use_wit = contribute_wants_wit(player2);
+  const char *p1_wit_lexicon = p1_lexicon ? p1_lexicon : shared_lexicon;
+  const char *p2_wit_lexicon = p2_lexicon ? p2_lexicon : shared_lexicon;
+  if (p1_use_wit) {
+    config_contribute_ensure_word_info_table(config, state, p1_wit_lexicon,
+                                             letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+  if (p2_use_wit && !(p1_use_wit && p1_wit_lexicon && p2_wit_lexicon &&
+                      strings_equal(p1_wit_lexicon, p2_wit_lexicon))) {
+    config_contribute_ensure_word_info_table(config, state, p2_wit_lexicon,
+                                             letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
+
   config_contribute_load_lexicon_and_variant(
       config, shared_lexicon, variant, letter_distribution, board_layout,
       p1_lexicon, p2_lexicon,
       json_get_string_or_null(player1, CONTRIBUTE_KEY_LEAVES),
       json_get_string_or_null(player2, CONTRIBUTE_KEY_LEAVES),
       contribute_wants_wordmap(player1), contribute_wants_wordmap(player2),
-      p1_rit_name, p2_rit_name, error_stack);
+      p1_rit_name, p2_rit_name, p1_use_wit, p2_use_wit, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -9371,12 +9481,21 @@ static char *config_contribute_opening_rack(Config *config,
   // whichever leaves player 2 last had -- another job's, or the KLV an earlier
   // leave-generation task fetched -- none of which this task's expected_data
   // verified.
+  const bool use_wit = contribute_wants_wit(player);
+  if (use_wit) {
+    config_contribute_ensure_word_info_table(
+        config, state, contribute_shared_lexicon(lexicon, p1_lexicon),
+        letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
   const char *leaves = json_get_string_or_null(player, CONTRIBUTE_KEY_LEAVES);
   config_contribute_load_lexicon_and_variant(
       config, contribute_shared_lexicon(lexicon, p1_lexicon), variant,
       letter_distribution, board_layout, p1_lexicon, NULL, leaves, leaves,
       contribute_wants_wordmap(player), contribute_wants_wordmap(player),
-      rit_name, rit_name, error_stack);
+      rit_name, rit_name, use_wit, use_wit, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
@@ -9554,6 +9673,16 @@ static char *config_contribute_leave_gen(Config *config,
       return NULL;
     }
   }
+  // A word info table, unlike a rack info table, holds nothing a generation
+  // changes: it is the lexicon's, and every generation plays the same one.
+  const bool use_wit = contribute_wants_wit(player);
+  if (use_wit) {
+    config_contribute_ensure_word_info_table(config, state, lexicon,
+                                             letter_distribution, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
+    }
+  }
 
   // The fetched KLV is checked against the hash the server recorded when it
   // built it -- every other file a task loads is checked by digest, and this
@@ -9671,7 +9800,7 @@ static char *config_contribute_leave_gen(Config *config,
   config_contribute_load_lexicon_and_variant(
       config, lexicon, variant, letter_distribution, board_layout, NULL, NULL,
       leaves_name, leaves_name, use_wordmap, use_wordmap, /*p1_rit_name=*/NULL,
-      /*p2_rit_name=*/NULL, error_stack);
+      /*p2_rit_name=*/NULL, use_wit, use_wit, error_stack);
   free(leaves_name);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;

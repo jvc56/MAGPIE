@@ -9,6 +9,7 @@
 #include "../src/ent/autoplay_solver_settings.h"
 #include "../src/ent/bonus_square.h"
 #include "../src/ent/client_state.h"
+#include "../src/ent/conversion_results.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
@@ -19,6 +20,7 @@
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/contribute.h"
+#include "../src/impl/convert.h"
 #include "../src/impl/rack_list.h"
 #include "../src/util/hash.h"
 #include "../src/util/http_client.h"
@@ -478,12 +480,12 @@ static void assert_fixture_has_keys(const JsonValue *object,
 // birdtest sent "num_plies" and "num_plays": every simming player ran on the
 // worker's own ambient settings and nothing failed.
 // Every derived file the claim pins has to carry what
-// config_contribute_ensure_wordmap and
-// config_contribute_ensure_rack_info_table read off it. A wordmap or a rack
-// info table is built on this machine and never shipped, so this hash is the
-// only thing that says the bytes are the ones the job means -- a fixture
-// missing a field here is a worker running unverified, which is the state this
-// whole mechanism replaces.
+// config_contribute_ensure_wordmap, config_contribute_ensure_rack_info_table
+// and config_contribute_ensure_word_info_table read off it. A wordmap, a rack
+// info table or a word info table is built on this machine and never shipped,
+// so this hash is the only thing that says the bytes are the ones the job means
+// -- a fixture missing a field here is a worker running unverified, which is
+// the state this whole mechanism replaces.
 static void assert_expected_data_pins_derived_files(const JsonValue *expected) {
   assert(expected);
   const JsonValue *derived = json_object_get(expected, "derived");
@@ -496,7 +498,8 @@ static void assert_expected_data_pins_derived_files(const JsonValue *expected) {
     const JsonValue *entry = json_array_get(derived, i);
     const char *role = json_get_string_or_null(entry, "role");
     assert(role);
-    assert(strings_equal(role, "wmp") || strings_equal(role, "rit"));
+    assert(strings_equal(role, "wmp") || strings_equal(role, "rit") ||
+           strings_equal(role, "wit"));
     assert(json_get_string_or_null(entry, "name"));
     assert(json_get_string_or_null(entry, "sha256"));
     // Diagnostic rather than load-bearing -- a worker does not refuse work
@@ -1146,9 +1149,9 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   assert(players_data_get_wmp(players_data, 0));
   // The table and the word info table flags are forced on the way a
   // contributor's settings.txt or an earlier command would leave them (-wit
-  // itself refuses to set the flag without a file to load): birdtest offers
-  // neither setting, so contribute must switch both off before the load
-  // decides what to open.
+  // itself refuses to set the flag without a file to load): a task that asks
+  // for neither must have both switched off before the load decides what to
+  // open.
   for (int player_index = 0; player_index < 2; player_index++) {
     players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT,
                                         player_index, true);
@@ -1159,7 +1162,7 @@ static void test_lexical_flags_are_set_before_the_load(void) {
 
   config_contribute_load_lexicon_and_variant(
       config, "CSW21", "classic", NULL, NULL, "CSW21", "CSW21", "CSW21",
-      "CSW21", false, false, NULL, NULL, error_stack);
+      "CSW21", false, false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   for (int player_index = 0; player_index < 2; player_index++) {
     assert(!players_data_get_wmp(players_data, player_index));
@@ -1171,10 +1174,44 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   // A task that asks for a wordmap gets it for itself, not for the next task.
   config_contribute_load_lexicon_and_variant(
       config, "CSW21", "classic", NULL, NULL, "CSW21", "CSW21", "CSW21",
-      "CSW21", true, false, NULL, NULL, error_stack);
+      "CSW21", true, false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(players_data_get_wmp(players_data, 0));
   assert(!players_data_get_wmp(players_data, 1));
+
+  // And a word info table the same way, for the player that asks: built here
+  // as the worker builds it, for a lexicon small enough to take milliseconds.
+  const ConversionArgs wit_args = {
+      .conversion_type_string = "kwg2wit",
+      .data_paths = config_get_data_paths(config),
+      .input_and_output_name = "CSW21_ab",
+      .ld_name = "english_ab",
+      .num_threads = 1,
+  };
+  ConversionResults *results = conversion_results_create();
+  convert(&wit_args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_load_lexicon_and_variant(
+      config, "CSW21_ab", "classic", "english_ab", NULL, "CSW21_ab", "CSW21_ab",
+      "CSW21_ab", "CSW21_ab", false, false, NULL, NULL, true, false,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(players_data_get_word_info_table(players_data, 0));
+  assert(!players_data_get_word_info_table(players_data, 1));
+  config_contribute_load_lexicon_and_variant(
+      config, "CSW21_ab", "classic", "english_ab", NULL, "CSW21_ab", "CSW21_ab",
+      "CSW21_ab", "CSW21_ab", false, false, NULL, NULL, false, false,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!players_data_get_word_info_table(players_data, 0));
+  assert(!players_data_get_word_info_table(players_data, 1));
+  char *wit_path = data_filepaths_get_readable_filename(
+      config_get_data_paths(config), "CSW21_ab",
+      DATA_FILEPATH_TYPE_WORD_INFO_TABLE, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  (void)remove(wit_path);
+  free(wit_path);
+  conversion_results_destroy(results);
 
   error_stack_destroy(error_stack);
   config_destroy(config);
@@ -1350,7 +1387,7 @@ static void test_a_rewritten_klv_is_read_again(void) {
   copy_file_bytes(csw21_path, path);
   config_contribute_load_lexicon_and_variant(
       config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
-      false, NULL, NULL, error_stack);
+      false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(klv_values_match(players_data_get_klv(players_data, 0), csw21));
   const KLV *first = players_data_get_klv(players_data, 0);
@@ -1358,7 +1395,7 @@ static void test_a_rewritten_klv_is_read_again(void) {
   // Unchanged on disk: the loaded copy is kept.
   config_contribute_load_lexicon_and_variant(
       config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
-      false, NULL, NULL, error_stack);
+      false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(players_data_get_klv(players_data, 0) == first);
 
@@ -1366,7 +1403,7 @@ static void test_a_rewritten_klv_is_read_again(void) {
   copy_file_bytes(csw24_path, path);
   config_contribute_load_lexicon_and_variant(
       config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
-      false, NULL, NULL, error_stack);
+      false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   for (int player_index = 0; player_index < 2; player_index++) {
     assert(klv_values_match(players_data_get_klv(players_data, player_index),

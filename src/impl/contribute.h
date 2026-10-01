@@ -115,7 +115,7 @@ void contribute_decline_task(ContributeState *state,
 // inputs and the same format version, because the builder changed underneath
 // them. Comparing the output catches that; comparing the inputs does not.
 typedef struct ContributeDerived {
-  // "wmp" or "rit".
+  // "wmp", "rit" or "wit".
   const char *role;
   // The name the file is loaded under. A wordmap's is its lexicon's, but a
   // rack info table belongs to a (.kwg, .klv2) pair, so the server names it

@@ -73,14 +73,15 @@ Identical to `no_pgo_release` except that the instruction set is fixed
 (`-march=nehalem`) instead of being whatever the building machine happens to
 have. Use it whenever a build's *output bytes* have to match another build's.
 
-That matters for one thing in particular. A wordmap and a rack info table are
-built on each machine that needs one and are far too large to ship, so
+That matters for one thing in particular. A wordmap, a rack info table and a
+word info table are built on each machine that needs one and are far too large to ship, so
 [birdtest](https://github.com/jvc56/birdtest) checks them by building its own
 reference copy on the server and comparing SHA-256s. `-march=native` makes the
 binary's instruction set a property of whatever compiled it, and two builds of
 one commit could then vectorize the same floating-point reduction differently.
 Measurement says they do not — `-march=native` and `-march=nehalem` produce
-byte-identical wordmaps and rack info tables on x86-64 with GCC 10 — but being
+byte-identical wordmaps, rack info tables and word info tables on x86-64 with
+GCC 10 — but being
 right by construction beats being right by measurement, so birdtest's server
 image and the released contributor binaries both use this flavor.
 
@@ -93,16 +94,16 @@ Clang 12.
 ```
 magpie> builders
 {"magpie_version":"0.1.1","build_target":"nehalem","wmp_builder_version":1,
- "rit_builder_version":1,"klv_builder_version":1}
+ "rit_builder_version":1,"klv_builder_version":1,"wit_builder_version":1}
 ```
 
 A derived file's hash is only meaningful together with the builder that
 produced it: a CSW24 wordmap built in December 2025 and one built nine months
 later differ in 72,852,152 bytes with the same inputs and the same wordmap
 format version 3, because the builder changed and the format did not have to.
-So `src/def/builder_defs.h` versions the three builders separately from
+So `src/def/builder_defs.h` versions the four builders separately from
 `MAGPIE_VERSION`, and `test/builder_hash_test.c` pins their output — a change
-that alters either derived builder fails that test until someone bumps the
+that alters a derived builder fails that test until someone bumps the
 version and updates the pinned hash.
 
 birdtest reads this command's output from the binary it runs, rather than being

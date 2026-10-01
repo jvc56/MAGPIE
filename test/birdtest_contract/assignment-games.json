@@ -62,6 +62,14 @@
         "bytes": 1885416048,
         "builder": "rit-1",
         "build_target": "nehalem"
+      },
+      {
+        "role": "wit",
+        "name": "NWL23",
+        "sha256": "2547e017e64a5f4f91b75736fd7a4666faa20961ce92abfe6a813e4f85f55475",
+        "bytes": 92123868,
+        "builder": "wit-1",
+        "build_target": "nehalem"
       }
     ]
   },
@@ -94,6 +102,7 @@
       "use_wordmap": true,
       "use_rit": true,
       "rit_name": "NWL23.NWL23",
+      "use_wit": true,
       "min_play_iterations": 500,
       "threshold": "gk16",
       "sampling_rule": "top_two_ids",
@@ -130,6 +139,7 @@
       "use_wordmap": true,
       "use_rit": false,
       "rit_name": null,
+      "use_wit": false,
       "min_play_iterations": null,
       "threshold": null,
       "sampling_rule": null,

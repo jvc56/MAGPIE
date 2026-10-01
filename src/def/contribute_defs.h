@@ -73,8 +73,8 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_BINGO_BONUS "bingo_bonus"
 #define CONTRIBUTE_KEY_SIM_CUTOFF "sim_cutoff"
 
-// Remaining per-player options (-l1/-l2, -w1/-w2, -rit1/-rit2, -mi1/-mi2,
-// -pc1/-pc2, -th1/-th2, -sa1/-sa2, -im1/-im2, -uwin1/-uwin2,
+// Remaining per-player options (-l1/-l2, -w1/-w2, -rit1/-rit2, -wit1/-wit2,
+// -mi1/-mi2, -pc1/-pc2, -th1/-th2, -sa1/-sa2, -im1/-im2, -uwin1/-uwin2,
 // -uspread1/-uspread2, -uspreadscale1/-uspreadscale2), sent inside "player"/
 // "player1"/"player2" alongside the existing keys above.
 #define CONTRIBUTE_KEY_PLAYER_LEXICON "lexicon"
@@ -85,6 +85,10 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 // infer it from the lexicon -- see src/impl/config.c's
 // config_contribute_ensure_rack_info_table.
 #define CONTRIBUTE_KEY_RIT_NAME "rit_name"
+// Whether this player loads the word info table for its lexicon (-wit1/-wit2).
+// Absent means no. The table is named for the lexicon, as on the CLI: it is
+// built from the .kwg alone.
+#define CONTRIBUTE_KEY_USE_WIT "use_wit"
 #define CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS "min_play_iterations"
 #define CONTRIBUTE_KEY_THRESHOLD "threshold"
 #define CONTRIBUTE_KEY_SAMPLING_RULE "sampling_rule"

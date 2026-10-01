@@ -3,11 +3,11 @@
 
 // Versions of the builders that derive one data file from another.
 //
-// A wordmap and a rack info table are never shipped: every machine builds its
-// own from files it already has. birdtest turns that into something it can
-// check by building a reference copy on the server and sending its SHA-256 to
-// workers, which build their own and refuse to use one whose bytes differ (see
-// birdtest's MAGPIE_DEPENDENCY.md).
+// A wordmap, a rack info table and a word info table are never shipped: every
+// machine builds its own from files it already has. birdtest turns that into
+// something it can check by building a reference copy on the server and sending
+// its SHA-256 to workers, which build their own and refuse to use one whose
+// bytes differ (see birdtest's MAGPIE_DEPENDENCY.md).
 //
 // That only works while a builder's output is a function of its inputs, and a
 // builder's output is not a function of its inputs across MAGPIE versions. A
@@ -28,6 +28,12 @@
 // which is the entire reason these exist separately.
 #define WMP_BUILDER_VERSION 1
 #define RIT_BUILDER_VERSION 1
+
+// The word info table (`convert kwg2wit`): a per-substring letter mask move
+// generation prunes with, built from the .kwg alone. Checked the same way as
+// the other two: a table built from an older lexicon, or by an older builder,
+// prunes plays that exist.
+#define WIT_BUILDER_VERSION 1
 
 // The KLV builder is versioned alongside them because birdtest's server now
 // builds every leave-generation KLV with `convert rackequity2klv` rather than
