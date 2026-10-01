@@ -190,3 +190,14 @@ each recorded below with command, seeds, wall time, outputs.
     left freed params. Now compared by value.
   - Next: replicate equity_reply 0.7/0.4 in NWL23 and FRA20; equity_reply
     vs equity mode head-to-head.
+- 2026-10-01 afternoon (#747 notes through 5acbe717 and the P44-P48 commit):
+  - P40 lower equity_reply grid: nothing beats 0.7/0.4; blocking matters,
+    setup flat in CSW24. P41 skipped.
+  - P42 NWL23 hybrid vs score 49.88% (n.s.); P43 FRA20 51.25% (p=0.048);
+    pooled with P38 +0.85 +- 0.37 pp.
+  - P44-P46 hybrid vs equity mode: +0.48 +- 0.37 pp pooled (n.s.), at
+    ~60% of the time. Hybrid supersedes equity mode.
+  - P47 NWL23 grid picked 1.4/0.4; P48 vs score 49.46% (n.s.). NWL23 gains
+    nothing from equity variants or refit.
+  - Candidate default: equity_reply 0.7/0.4 (better or equal everywhere,
+    ~20% cheaper than score mode). Not switched; user's call.
