@@ -1,0 +1,11 @@
+{
+  "kind": "Prespecified: static-ish racing on win chance vs on points, head to head",
+  "frozen_utc": "2026-10-01T15:45:57Z",
+  "player_a": "static-ish, score teacher, 1.4/0.75 (research_v0.bsp), winpct=1 (CSW24 default win% table; per-rack value = win chance at lead + base equity + weighted swing, opponent on turn), 64 racks, z=3",
+  "player_b": "static-ish, score teacher, 1.4/0.75 (research_v0.bsp), points, 64 racks, z=3",
+  "pairs": 2000,
+  "seed": 20264901,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "secondary": "mean spread (expected to fall if a trades spread for wins); decision changes by lead stratum (descriptive)",
+  "binary": "magpie_test_wp, sha256 f7ade064ee58cbaf4abfa1f4680efb664ea7138c95c03b21754062a75fa29849 (commit d678122c)"
+}

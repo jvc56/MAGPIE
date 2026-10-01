@@ -23,6 +23,8 @@ Each result is a prespecified paired-game test with 2,000 pairs (≈ ±0.65 pp S
 - **Racing.** z = 3 is not detectably worse than exact evaluation (49.10%, p = 0.16) and is 3.4× cheaper.
 - **Teacher value.** Equity mode is a small, probably real gain over score mode: +0.87 ± 0.29 pp pooled, but heterogeneous across lexica and about 1.3× the time. The default remains score mode.
 - **Weights.** No point on a 3×3 grid beat 1.4 / 0.75 in equity mode.
+- **Hybrid teacher (equity_reply).** Opponent replies are valued by equity and our follow-ups by score, so a setup does not count our leave twice. With lighter weights (0.7 / 0.4) it beats score mode 1.4 / 0.75: 51.39%, p = 0.03 (P38). It is a little faster than score mode (median 50 vs 65 ms). This is one confirmation after a best-of-8 grid, so it needs replicating in another lexicon before it becomes a default.
+- **Win chance instead of points (P39).** Racing on win chance at the current lead does not help: 49.56%, p = 0.51, and it gives up 8.6 points of spread.
 - **Nomination.** Nominated root candidates do not help a 300 ms sim at equal time (49.58%, 1,000 pairs).
 - **Rollouts.** Static-ish rollouts run about 1,700× fewer sim iterations per second than static rollouts. They were benchmarked but not tested in played games.
 
@@ -172,3 +174,29 @@ At most, equity mode is a small improvement, and it is not established. It costs
 - **Cheap vs full (P33).** The full configuration may be about 1 pp better than the cheap one (not significant) and uses about 4× the time.
 - **Against PAT static.** The cheap configuration ties it (P34). The full configuration beats it by about 1 pp in each of P14 (equity) and P36 (score); neither is significant alone, and together they pool to +1.08 ± 0.46 pp (p ≈ 0.02).
 - **NWL23 (P35).** The cheap configuration also holds up there.
+
+## Hybrid teacher and win-chance racing (P37–P39)
+
+`equity_reply` chooses and values the opponent's replies by static equity (exchanges included). It chooses our follow-ups by score and values them in points. This keeps the exact lane-restricted reconstruction for follow-ups, and score mode stays byte-identical in `bsbench`.
+
+P37, weight grid for `equity_reply` (800 pairs per point, all against equity_reply 1.4 / 0.75, common seed 20264701, 10 workers). SE is about 1.0 pp per point.
+
+| blocking \ setup | 0.4 | 0.75 | 1.1 |
+|---|---|---|---|
+| 0.7 | **51.75** | 51.16 | 48.66 |
+| 1.4 | 50.50 | (reference) | 49.63 |
+| 2.1 | 48.38 | 49.22 | 46.78 |
+
+- The grid falls off toward heavier weights; 2.1 / 1.1 is 3.1 SE worse.
+- Equity mode's grid (P9) showed the same fall-off, but its best point was the reference. Here the best point is half the reference weights, as expected if equity-valued replies already carry part of what the weights added.
+
+| run | player a | player b | a's score | 95% CI | p | spread | check p50 (a / b) |
+|---|---|---|---:|---|---:|---:|---|
+| P38 | equity_reply 0.7 / 0.4 | score 1.4 / 0.75 | **51.39% ± 0.64%** | [50.12, 52.65] | 0.031 | +2.1 | 50 / 65 ms |
+| P39 | score 1.4 / 0.75, win chance | score 1.4 / 0.75, points | 49.56% ± 0.66% | [48.27, 50.86] | 0.51 | −8.6 | 75 / 74 ms |
+
+- **P38** confirms P37's selected point on a fresh seed (20264801) against the current default. Compared with equity mode's +0.87 pp pooled gain over score mode, it is a similar gain at lower cost. It has been tested only in CSW24.
+- **P39, win chance.** For each rack, the adjusted value plus the lead is read from the win% table. This is our chance of winning with the opponent on turn, at the bag and rack sizes after the candidate. Candidates race on the mean of that chance.
+  - Win rate is unchanged and spread falls by 8.6 points, so the mode does change decisions.
+  - It reuses points-tuned weights, and it reads the table at one ply after the candidate, while the racks' swings extend two plies further. Either could hide a gain.
+  - It is kept as an option (`winpct=1` in `bsstudy:games`, `-rbswp true` for rollouts), not as a default.
