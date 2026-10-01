@@ -258,6 +258,7 @@ void run_all(void) {
   }
 }
 
+void overlap_research_run_spec(const char *spec);
 void run_test(const char *subtest) {
   for (int i = 0; test_table[i].name != NULL; ++i) {
     if (strcmp(subtest, test_table[i].name) == 0) {
@@ -282,6 +283,10 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("bsgen:", subtest)) {
     blocking_setup_gen_run_spec(subtest + strlen("bsgen:"));
+    return;
+  }
+  if (has_prefix("bsoverlap:", subtest)) {
+    overlap_research_run_spec(subtest + strlen("bsoverlap:"));
     return;
   }
   if (has_prefix("bsrace:", subtest)) {
