@@ -24,7 +24,7 @@ Each result is a prespecified paired-game test with 2,000 pairs (≈ ±0.65 pp S
 - **Teacher value.** Equity mode is a small, probably real gain over score mode: +0.87 ± 0.29 pp pooled, but heterogeneous across lexica and about 1.3× the time. The default remains score mode.
 - **Weights.** No point on a 3×3 grid beat 1.4 / 0.75 in equity mode.
 - **Nomination.** Nominated root candidates do not help a 300 ms sim at equal time (49.58%, 1,000 pairs).
-- **Rollouts.** Static-ish rollouts cost about 1,700× fewer sim iterations per second than static rollouts. They are not useful at any budget tested.
+- **Rollouts.** Static-ish rollouts run about 1,700× fewer sim iterations per second than static rollouts. They were benchmarked but not tested in played games.
 
 All of these compare equal work against static play unless stated. The sim comparisons are short-budget 2-ply sims only.
 
