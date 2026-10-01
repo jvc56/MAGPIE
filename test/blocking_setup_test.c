@@ -8,6 +8,7 @@
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/blocking_setup_params.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
@@ -636,7 +637,7 @@ void blocking_setup_bench_run_spec(const char *spec) {
       continue;
     }
     blocking_setup_samples_deal(samples, game, num_racks, true, true,
-                                (uint64_t)game_idx * UINT64_C(7919) + 1);
+                                ((uint64_t)game_idx * UINT64_C(7919)) + 1);
     const int64_t start = ctimer_monotonic_ns();
     blocking_setup_checker_load(checker, game, samples, 1);
     BlockingSetupResult results[BST_MAX_UNIVERSE];
@@ -761,7 +762,7 @@ void blocking_setup_race_run_spec(const char *spec) {
       continue;
     }
     blocking_setup_samples_deal(samples, game, num_racks, true, true,
-                                (uint64_t)game_idx * UINT64_C(7919) + 1);
+                                ((uint64_t)game_idx * UINT64_C(7919)) + 1);
     // Full measurement and its argmax.
     int64_t start = ctimer_monotonic_ns();
     blocking_setup_checker_load(checker, game, samples, 1);

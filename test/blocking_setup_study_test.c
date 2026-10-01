@@ -64,7 +64,9 @@
 //          plays argmax(static equity + blocking + setup adjustments) over
 //          the top universe= static moves and exch= exchanges, with weights
 //          from params= (its bins give conditional policies) and racks=
-//          sampled racks (default: the file's teacher_racks). Writes
+//          sampled racks (default: the file's teacher_racks); z=<z> races
+//          the candidates (blocking_setup_checker_choose; 0, the default,
+//          measures all) in batches of batch= racks. Writes
 //          <out>.games.csv and per-decision timing <out>.moves.csv.
 enum {
   BSS_MAX_ARMS = 8,
@@ -546,6 +548,7 @@ typedef struct BSSPlayerState {
   int exchanges;
   Equity exchange_margin;
   int num_racks;
+  BlockingSetupRaceSettings race;
 } BSSPlayerState;
 
 static void bss_generate(const Game *game, MoveList *list, bool disable_pat) {
@@ -566,6 +569,7 @@ static void bss_generate(const Game *game, MoveList *list, bool disable_pat) {
 }
 
 typedef struct BSSDecision {
+  int candidate_racks;
   double movegen_ms;
   double check_ms;
   double total_ms;
@@ -590,6 +594,7 @@ static int bss_decide(BSSPlayerState *state, bss_player_t kind,
   decision->universe = 0;
   decision->changed = false;
   decision->checked = false;
+  decision->candidate_racks = 0;
   int choice = 0;
   const int bag = bag_get_letters(game_get_bag(game));
   if (kind == BSS_PLAYER_ADJUSTED && bag > 0 &&
@@ -609,10 +614,15 @@ static int bss_decide(BSSPlayerState *state, bss_player_t kind,
           state->checker, game, state->samples,
           blocking_setup_params_get_teacher_followup_draws(state->params));
       const Equity top = move_get_equity(move_list_get_move(state->list, 0));
-      Equity best_value = 0;
+      const Move *universe[BSS_MAX_POOL];
+      Equity base[BSS_MAX_POOL] = {0};
+      int indices[BSS_MAX_POOL];
+      int count = 0;
       int placements = 0;
       int exchanges = 0;
-      for (int move_idx = 0; move_idx < move_list_get_count(state->list);
+      for (int move_idx = 0;
+           move_idx < move_list_get_count(state->list) &&
+           (placements < state->universe || exchanges < state->exchanges);
            move_idx++) {
         const Move *move = move_list_get_move(state->list, move_idx);
         const bool is_exchange = move_get_type(move) == GAME_EVENT_EXCHANGE;
@@ -628,21 +638,20 @@ static int bss_decide(BSSPlayerState *state, bss_player_t kind,
         } else {
           placements++;
         }
-        BlockingSetupResult result;
-        blocking_setup_checker_measure(state->checker, move, &result);
-        const Equity value =
-            move_get_equity(move) +
-            double_to_equity((blocking_weight * result.blocking_delta) +
-                             (setup_weight * result.setup_delta));
-        if (decision->universe == 0 || value > best_value) {
-          best_value = value;
-          choice = move_idx;
-        }
-        decision->universe++;
-        if (placements >= state->universe && exchanges >= state->exchanges) {
-          break;
-        }
+        universe[count] = move;
+        base[count] = move_get_equity(move);
+        indices[count] = move_idx;
+        count++;
       }
+      if (count > 0) {
+        BlockingSetupRaceStats stats;
+        const int pick = blocking_setup_checker_choose(
+            state->checker, universe, base, count, blocking_weight,
+            setup_weight, &state->race, &stats);
+        choice = indices[pick];
+        decision->candidate_racks = stats.candidate_racks;
+      }
+      decision->universe = count;
       decision->check_ms = bss_now_ms() - check_start;
       decision->checked = true;
       decision->changed = choice != 0;
@@ -686,6 +695,13 @@ static void bss_games(const BSOptions *options) {
     state->exchange_margin = int_to_equity((int)bs_options_get_long(
         options, "exchmargin", BSS_DEFAULT_EXCHANGE_MARGIN));
     state->num_racks = 0;
+    // z=0 (the default) measures every candidate in full; z > 0 races.
+    state->race = (BlockingSetupRaceSettings){
+        .batch_racks = (int)bs_options_get_long(options, "batch",
+                                                BLOCKING_SETUP_RACE_BATCH),
+        .min_racks = (int)bs_options_get_long(options, "batch",
+                                              BLOCKING_SETUP_RACE_BATCH),
+        .z = bs_options_get_double(options, "z", 0.0)};
     state->samples = NULL;
     state->checker = NULL;
     if (kinds[player_idx] == BSS_PLAYER_ADJUSTED) {
@@ -708,8 +724,9 @@ static void bss_games(const BSOptions *options) {
   free(path);
   (void)fprintf(games_out, "pair,game,a_seat,a_score,b_score,a_spread,a_win,"
                            "turns\n");
-  (void)fprintf(moves_out, "pair,game,turn,player,bag,lead,universe,checked,"
-                           "changed,movegen_ms,check_ms,total_ms\n");
+  (void)fprintf(moves_out,
+                "pair,game,turn,player,bag,lead,universe,checked,"
+                "changed,movegen_ms,check_ms,total_ms,candidate_racks\n");
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   Game *game = config_get_game(config);
@@ -737,11 +754,12 @@ static void bss_games(const BSOptions *options) {
             &states[player_idx], kinds[player_idx], game,
             bs_mix(pair_seed ^ (uint64_t)((turn * 2) + game_in_pair)),
             &decision);
-        (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f\n",
+        (void)fprintf(moves_out,
+                      "%ld,%d,%d,%c,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%d\n",
                       pair_idx, game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
                       bag, lead, decision.universe, decision.checked,
                       decision.changed, decision.movegen_ms, decision.check_ms,
-                      decision.total_ms);
+                      decision.total_ms, decision.candidate_racks);
         play_move(move_list_get_move(states[player_idx].list, choice), game,
                   NULL);
         turn++;
