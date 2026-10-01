@@ -1,0 +1,8 @@
+lexicon=CSW24 a=adjusted b=static pairs=200 seed=20261302 workers=8
+params=/Users/olaugh/sources/bs-data/p1fit_CSW24.bsp racks=64 pat=
+params_sha256=836f90d666f4dafba4864a8d3ff305b20a24b5256a3914127ab18eda6dd2d717
+binary_sha256=3388e57ec3abf058769ad2feed57303835df12ad366a9727feeb7d512ac0da7c
+commit=b5227ae027ac77a8ac4579878797cddd95baddf8
+hardware=Apple M4
+started=2026-10-01T02:32:18Z
+finished=2026-10-01T02:36:42Z

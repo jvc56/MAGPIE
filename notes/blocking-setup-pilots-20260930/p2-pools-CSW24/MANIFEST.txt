@@ -1,0 +1,8 @@
+lexicon=CSW24 pat=CSW24 params=/Users/olaugh/sources/bs-data/research_v0.bsp seed=20261202 workers=8
+arms=A,B,Bp,C select_ms=5000 ref_ms=20000
+params_sha256=750fe7945c38569be5abf13caa40ad2889d2cbbcb203988b699b4bdc7d343096
+positions_sha256=9a10eb21ac9cf61124236ae2da8cd377faf043425ae77e0e4ffb44d2b1e0fe12
+binary_sha256=19be6f1b153fb207be4d18ee0bc884902558692cc95225cddfe755e39bfa8f79
+commit=a9fa7e174c02873571fbc97496f44e90859c03d3
+started=2026-10-01T02:17:00Z
+finished=2026-10-01T02:26:40Z

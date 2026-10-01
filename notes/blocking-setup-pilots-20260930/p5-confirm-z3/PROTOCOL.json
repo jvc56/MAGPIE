@@ -1,0 +1,19 @@
+{
+  "kind": "Prespecified confirmation: race-based static-ish evaluator (z=3) vs no-PAT static",
+  "frozen_utc": "2026-10-01T03:42:14Z",
+  "lexicon": "CSW24",
+  "player_a": "adjusted: argmax(static_eq + 1.4*blocking_delta + 0.75*setup_delta) over top 60 static placements + up to 5 exchanges within 35 points; 64 sampled racks; candidates raced with blocking_setup_checker_choose z=3, batches of 8 racks (elimination from 8 racks); static when bag empty",
+  "player_b": "no-PAT static",
+  "params": "research_v0.bsp (1.4/0.75, unchanged from the pilot)",
+  "pairs": 2000,
+  "pair_design": "two games per pair on one seed, same tiles per seat, seats swapped; starting player alternates by pair",
+  "seed": 20261501,
+  "seed_note": "fresh; pilot used 20261301; the stopped exact-mode run used 20261401 and is not analyzed",
+  "primary_outcome": "player a score per game (win 1, tie 0.5, loss 0), averaged within pair",
+  "primary_test": "two-sided z test of mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "secondary": "mean spread; per-decision check/total time distributions (8 workers; machine had ~1 core of OS background load at launch); changed-decision rate by bag/lead stratum (descriptive)",
+  "policy_note": "z=3 is not identical to the pilot's exact policy: on 360 positions it chose the full-evaluation move 99.4% of the time",
+  "not_claimed": "equal-time strength vs simulation; other lexica; the exact (z=0) policy",
+  "binary": "magpie_test_p5 (commit ea6d5b6a), sha256 64b22e270f0dac83d740bef7c792a87b78320d9eacadb068c3f91f505398dcf3",
+  "params_sha256": "750fe7945c38569be5abf13caa40ad2889d2cbbcb203988b699b4bdc7d343096"
+}

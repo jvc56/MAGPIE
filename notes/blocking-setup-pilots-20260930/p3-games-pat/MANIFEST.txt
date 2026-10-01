@@ -1,0 +1,7 @@
+lexicon=CSW24 a=pat b=static pairs=500 seed=20261303 workers=8
+params= racks= pat=CSW24
+binary_sha256=3388e57ec3abf058769ad2feed57303835df12ad366a9727feeb7d512ac0da7c
+commit=b5227ae027ac77a8ac4579878797cddd95baddf8
+hardware=Apple M4
+started=2026-10-01T02:36:42Z
+finished=2026-10-01T02:36:54Z

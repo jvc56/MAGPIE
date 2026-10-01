@@ -1,0 +1,22 @@
+{
+ "blocking_r16_vs_r256": {
+  "median_spearman": 0.8272843307268818,
+  "top25_admission_identical": 0.03611111111111111,
+  "mean_top25_admissions_replaced": 3.4055555555555554
+ },
+ "setup_r16_vs_r256": {
+  "median_spearman": 0.6238186539799948,
+  "top25_admission_identical": 0.022222222222222223,
+  "mean_top25_admissions_replaced": 3.686111111111111
+ },
+ "blocking_r64_vs_r256": {
+  "median_spearman": 0.9450238270931058,
+  "top25_admission_identical": 0.13333333333333333,
+  "mean_top25_admissions_replaced": 1.7916666666666667
+ },
+ "setup_r64_vs_r256": {
+  "median_spearman": 0.861061338814709,
+  "top25_admission_identical": 0.11944444444444445,
+  "mean_top25_admissions_replaced": 1.9527777777777777
+ }
+}

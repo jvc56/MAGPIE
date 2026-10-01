@@ -1,0 +1,6 @@
+lexicon=CSW24 leaves=CSW24 games=360 seed=20261001 workers=8
+racks=16,64,256 ref_ms=10000 plies=4 wmp=true pat=CSW24
+binary_sha256=a7ac5227fa845582c1b4b2945ac9fd71739aec43b8c7ede1189ab8350b66b20b
+commit=b39399e32dbd9b4a0fcf250de20d895446df1a76
+started=2026-10-01T01:41:24Z
+finished=2026-10-01T01:58:42Z

@@ -1,0 +1,114 @@
+{
+ "pairs": 200,
+ "games": 400,
+ "a_score": 0.515,
+ "a_score_se": 0.020639889174257405,
+ "a_score_95": [
+  0.4745458172184555,
+  0.5554541827815446
+ ],
+ "a_mean_spread": 6.405,
+ "timing_ms": {
+  "a": {
+   "decisions": 4515,
+   "checked": 4000,
+   "changed": 826,
+   "total_ms": {
+    "n": 4515,
+    "mean": 459.86840553709857,
+    "p50": 456.024,
+    "p90": 720.767,
+    "p99": 1297.115,
+    "max": 2626.424
+   },
+   "movegen_ms": {
+    "n": 4515,
+    "mean": 0.44803344407530454,
+    "p50": 0.18,
+    "p90": 0.958,
+    "p99": 4.595,
+    "max": 31.633
+   },
+   "check_ms_when_checked": {
+    "n": 4000,
+    "mean": 518.57040725,
+    "p50": 477.072,
+    "p90": 742.396,
+    "p99": 1410.986,
+    "max": 2624.815
+   }
+  },
+  "b": {
+   "decisions": 4514,
+   "checked": 0,
+   "changed": 0,
+   "total_ms": {
+    "n": 4514,
+    "mean": 0.4148730615861764,
+    "p50": 0.18,
+    "p90": 0.955,
+    "p99": 3.757,
+    "max": 23.419
+   },
+   "movegen_ms": {
+    "n": 4514,
+    "mean": 0.4148170137350465,
+    "p50": 0.18,
+    "p90": 0.955,
+    "p99": 3.757,
+    "max": 23.419
+   },
+   "check_ms_when_checked": null
+  }
+ },
+ "changed_by_stratum": {
+  "early/ahead40_80": {
+   "checked": 61,
+   "changed": 14
+  },
+  "early/ahead80+": {
+   "checked": 6,
+   "changed": 2
+  },
+  "early/behind": {
+   "checked": 287,
+   "changed": 57
+  },
+  "early/close": {
+   "checked": 904,
+   "changed": 229
+  },
+  "late/ahead40_80": {
+   "checked": 174,
+   "changed": 31
+  },
+  "late/ahead80+": {
+   "checked": 164,
+   "changed": 27
+  },
+  "late/behind": {
+   "checked": 570,
+   "changed": 114
+  },
+  "late/close": {
+   "checked": 494,
+   "changed": 103
+  },
+  "middle/ahead40_80": {
+   "checked": 135,
+   "changed": 33
+  },
+  "middle/ahead80+": {
+   "checked": 58,
+   "changed": 11
+  },
+  "middle/behind": {
+   "checked": 484,
+   "changed": 85
+  },
+  "middle/close": {
+   "checked": 663,
+   "changed": 120
+  }
+ }
+}
