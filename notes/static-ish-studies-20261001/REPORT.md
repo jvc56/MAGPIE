@@ -23,7 +23,7 @@ Each result is a prespecified paired-game test with 2,000 pairs (≈ ±0.65 pp S
 - **Racing.** z = 3 is not detectably worse than exact evaluation (49.10%, p = 0.16) and is 3.4× cheaper.
 - **Teacher value.** Equity mode is a small, probably real gain over score mode: +0.87 ± 0.29 pp pooled, but heterogeneous across lexica and about 1.3× the time. The default remains score mode.
 - **Weights.** No point on a 3×3 grid beat 1.4 / 0.75 in equity mode.
-- **Hybrid teacher (equity_reply).** Opponent replies are valued by equity and our follow-ups by score, so a setup does not count our leave twice. With lighter weights (0.7 / 0.4) it beats score mode 1.4 / 0.75: 51.39%, p = 0.03 (P38). It is a little faster than score mode (median 50 vs 65 ms). It replicates in FRA20 (51.25%, p = 0.048) but not NWL23 (49.88%, p = 0.85). Pooled over the three lexica it gains +0.85 ± 0.37 pp (p = 0.02, P42–P43). This is the same pattern as equity mode, which also gained nothing in NWL23.
+- **Hybrid teacher (equity_reply).** Opponent replies are valued by equity and our follow-ups by score, so a setup does not count our leave twice. With lighter weights (0.7 / 0.4) it beats score mode 1.4 / 0.75: 51.39%, p = 0.03 (P38). It is a little faster than score mode (median 50 vs 65 ms). It replicates in FRA20 (51.25%, p = 0.048) but not NWL23 (49.88%, p = 0.85). Pooled over the three lexica it gains +0.85 ± 0.37 pp (p = 0.02, P42–P43). This is the same pattern as equity mode, which also gained nothing in NWL23. Against equity mode it is +0.48 ± 0.37 pp pooled (n.s., P44–P46) at about 60% of the time, so it is the better way to use equity. Refitting weights for NWL23 did not help (P47–P48).
 - **Win chance instead of points (P39).** Racing on win chance at the current lead does not help: 49.56%, p = 0.51, and it gives up 8.6 points of spread.
 - **Nomination.** Nominated root candidates do not help a 300 ms sim at equal time (49.58%, 1,000 pairs).
 - **Rollouts.** Static-ish rollouts run about 1,700× fewer sim iterations per second than static rollouts. They were benchmarked but not tested in played games.
@@ -232,3 +232,27 @@ These replications use the CSW24-tuned 0.7 / 0.4 weights without refitting, agai
 - The inverse-variance pooled gain is **+0.85 ± 0.37 pp** (p = 0.022). The heterogeneity is not significant (Q = 3.3 on 2 dof), but NWL23 is null, as it was for equity mode (P19, P32).
 - equity_reply is about 20% cheaper than score mode in every lexicon, so it is at least no worse at lower cost. Equity mode's gain was similar but cost 1.3× the time of score mode.
 - Not yet tested: equity_reply against equity mode head to head, and NWL23-specific weights.
+
+## equity_reply vs equity mode; NWL23 refit (P44–P48)
+
+| run | lexicon | player a | player b | a's score | 95% CI | p | spread | check p50 (a / b) |
+|---|---|---|---|---:|---|---:|---:|---|
+| P44 | CSW24 | equity_reply 0.7 / 0.4 | equity 1.4 / 0.75 | 50.99% ± 0.64% | [49.73, 52.25] | 0.12 | +1.2 | 58 / 93 ms |
+| P45 | NWL23 | equity_reply 0.7 / 0.4 | equity 1.4 / 0.75 | 50.31% ± 0.64% | [49.06, 51.56] | 0.62 | +1.1 | 56 / 90 ms |
+| P46 | FRA20 | equity_reply 0.7 / 0.4 | equity 1.4 / 0.75 | 50.14% ± 0.65% | [48.86, 51.41] | 0.83 | +2.5 | 57 / 93 ms |
+| P48 | NWL23 | equity_reply 1.4 / 0.4 (P47's pick) | score 1.4 / 0.75 | 49.46% ± 0.65% | [48.19, 50.74] | 0.41 | +0.0 | 65 / 72 ms |
+
+- **Against equity mode (P44–P46):** pooled **+0.48 ± 0.37 pp** (p = 0.20), with no heterogeneity (Q = 1.0). equity_reply is at least as good as equity mode in every lexicon and takes about 60% of its time.
+
+P47, NWL23 weight grid for equity_reply. Each point played 800 pairs against equity_reply 0.7 / 0.4 on common seed 20265701. The SE is about 1.0 pp.
+
+| blocking \ setup | 0.2 | 0.4 | 0.75 |
+|---|---|---|---|
+| 0.45 | 49.53 | 48.97 | 46.75 |
+| 0.7 | 48.66 | (reference) | 47.56 |
+| 1.0 | 49.53 | 48.91 | 48.00 |
+| 1.4 | 50.72 | **51.12** | 48.84 |
+
+- **Setup 0.75 is worse at every blocking weight**, significantly so for blocking 0.45 to 1.0. Under the prespecified rule, P47 selected 1.4 / 0.4 (51.12%, p = 0.25 alone).
+- **P48:** the refit point does not beat NWL23 score mode (49.46%). It does no better than 0.7 / 0.4 did in P42 (49.88%). P47's apparent preference for heavier blocking does not survive a fresh seed.
+- **Conclusion for NWL23:** neither equity-valued replies nor refit weights gain anything over score mode. Score, equity and equity_reply all play about equally there.

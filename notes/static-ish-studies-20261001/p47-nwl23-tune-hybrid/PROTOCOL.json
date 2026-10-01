@@ -1,0 +1,9 @@
+{
+  "kind": "NWL23 weight tuning for equity_reply",
+  "frozen_utc": "2026-10-01T21:07:10Z",
+  "reference": "research_v0_equity_reply_b07_s04_NWL23.bsp (0.7/0.4) sha256 8717182b6bd376eb6e677afc7d528e239d7c4873a6bd6bd964ab2029a290650f",
+  "grid": "blocking {0.45,0.7,1.0,1.4} x setup {0.2,0.4,0.75}, reference skipped (11 points)",
+  "pairs_per_point": 800, "seed": 20265701, "racks": 64, "z": 3, "lexicon": "NWL23", "workers": 10,
+  "selection": "highest mean pair score vs the reference; if no point exceeds 0.5 the reference is selected. Also report a weighted quadratic surface (descriptive).",
+  "binary": "magpie_test_hyb, sha256 e5e287486f1e76848ee2454d6e500642899df1ea9a2cb9267539c6fa5a90b613 (commit 190a69c1)"
+}
