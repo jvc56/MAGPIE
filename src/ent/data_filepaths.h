@@ -11,6 +11,7 @@
 #define RACK_INFO_TABLE_EXTENSION ".rit"
 #define WORD_INFO_TABLE_EXTENSION ".wit"
 #define PAT_EXTENSION ".pat"
+#define BLOCKING_SETUP_EXTENSION ".bsp"
 #define TXT_EXTENSION ".txt"
 #define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
@@ -30,6 +31,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_DAWG_PACKED,
   DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
   DATA_FILEPATH_TYPE_PAT,
+  DATA_FILEPATH_TYPE_BLOCKING_SETUP,
 } data_filepath_t;
 
 char *get_filepath(const char *data_path, const char *data_name,

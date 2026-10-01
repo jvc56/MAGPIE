@@ -408,7 +408,10 @@ static inline void update_best_move_or_insert_into_movelist(
           get_move_equity_for_sort_type(gen, current_move, score);
     }
     move_set_equity(current_move, move_equity_or_score);
-    if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+    // A search seeded with MoveGenArgs.initial_best_move can find that move
+    // again; any other repeat is a bug.
+    if (compare_moves(current_move, gen_get_readonly_best_move(gen),
+                      gen->best_may_repeat) == 1) {
       need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
     }
@@ -871,7 +874,8 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                                        gen, current_move, leave_value);
     }
     move_set_equity(current_move, move_equity_or_score);
-    if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
+    if (compare_moves(current_move, gen_get_readonly_best_move(gen),
+                      gen->best_may_repeat) == 1) {
       need_to_update_best_move_equity_or_score = true;
       gen_switch_best_move_and_current_move(gen);
     }
@@ -3177,7 +3181,9 @@ void shadow_play_for_anchor_small(MoveGen *gen, int col) {
 void shadow_by_orientation(MoveGen *gen) {
   for (int row = 0; row < BOARD_DIM; row++) {
     gen->current_row_index = row;
-    if (gen->row_number_of_anchors_cache[BOARD_DIM * gen->dir + row] == 0) {
+    const int lane = BOARD_DIM * gen->dir + row;
+    if (gen->row_number_of_anchors_cache[lane] == 0 ||
+        ((gen->lane_mask >> lane) & 1) == 0) {
       continue;
     }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
@@ -3386,6 +3392,13 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
   gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
   gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
+  gen->best_may_repeat = args->initial_best_move != NULL;
+  if (args->initial_best_move != NULL) {
+    assert(args->move_record_type == MOVE_RECORD_BEST);
+    move_copy(gen_get_best_move(gen), args->initial_best_move);
+    gen->best_move_equity_or_score = move_get_equity(args->initial_best_move);
+    gen_update_cutoff_equity_or_score(gen);
+  }
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
@@ -3444,6 +3457,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
   gen->threshold_exceeded = false;
   gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
+  gen->skip_exchanges = args->skip_exchanges;
+  gen->lane_mask = args->lane_mask != 0 ? args->lane_mask : ~(uint64_t)0;
 }
 
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
@@ -3464,9 +3479,11 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
                             (gen->move_sort_type != MOVE_SORT_SCORE);
 
   // Assumes the player has drawn a full rack but not the opponent.
-  const bool add_exchange = gen->number_of_tiles_in_bag +
-                                rack_get_total_letters(&gen->opponent_rack) >=
-                            (RACK_SIZE * 2);
+  const bool add_exchange =
+      !gen->skip_exchanges &&
+      gen->number_of_tiles_in_bag +
+              rack_get_total_letters(&gen->opponent_rack) >=
+          (RACK_SIZE * 2);
 
   // Try to use the pre-computed rack info table for full racks.
   const bool has_full_rack =
@@ -3875,9 +3892,10 @@ void generate_moves(const MoveGenArgs *args) {
       // add_exchange=true iff there are enough unseen tiles for the
       // exchange walk to make sense.
       const bool add_exchange =
+          !gen->skip_exchanges &&
           gen->number_of_tiles_in_bag +
-              rack_get_total_letters(&gen->opponent_rack) >=
-          (RACK_SIZE * 2);
+                  rack_get_total_letters(&gen->opponent_rack) >=
+              (RACK_SIZE * 2);
       const bool leaves_are_populated =
           (gen->rit_entry != NULL) || check_leaves || add_exchange;
       const uint32_t subrack_slot = bit_rack_get_bucket_index(
