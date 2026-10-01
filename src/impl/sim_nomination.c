@@ -291,6 +291,8 @@ static void nominator_run_checks(SimNominator *nominator, const Game *game,
       blocking_setup_params_get_teacher_partition(params),
       blocking_setup_params_get_teacher_condition_draws(params),
       settings->seed);
+  blocking_setup_checker_set_value(
+      nominator->checker, blocking_setup_params_get_teacher_value(params));
   blocking_setup_checker_load(
       nominator->checker, game, nominator->samples,
       blocking_setup_params_get_teacher_followup_draws(params));

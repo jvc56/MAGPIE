@@ -105,6 +105,10 @@ typedef struct BlockingSetupResult {
 typedef struct BlockingSetupChecker BlockingSetupChecker;
 
 BlockingSetupChecker *blocking_setup_checker_create(void);
+// How replies and follow-ups are picked and valued (see
+// blocking_setup_value_t); score, the default, until set.
+void blocking_setup_checker_set_value(BlockingSetupChecker *checker,
+                                      blocking_setup_value_t value);
 void blocking_setup_checker_destroy(BlockingSetupChecker *checker);
 
 // Plays our pass and each sampled rack's best reply to it, keeping one board
