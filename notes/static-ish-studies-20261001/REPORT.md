@@ -58,3 +58,17 @@ These were measured on a quiet machine, single thread: 4-ply sims of 15 candidat
 | static-ish, equity mode, 64 racks | 4.2 | 1/2,500 |
 
 The rollout wiring costs nothing when unused: 120,000 fixed iterations took 11.97–12.19 s on the base binary and 11.97–12.30 s on the new one.
+
+## Head-to-head cost and mode tests (P17–P20)
+
+| run | player a | player b | a's score | 95% CI | p | mean time per decision (a / b) |
+|---|---|---|---:|---|---:|---|
+| P17 | equity, race z = 3 | equity, exact (z = 0) | 49.10% ± 0.64% | [47.84, 50.36] | 0.16 | 94 / 317 ms |
+| P18 | equity, universe 30 | equity, universe 60 | 49.66% ± 0.64% | [48.40, 50.92] | 0.60 | 64 / 95 ms |
+| P19 (NWL23) | equity teacher | score teacher | 49.26% ± 0.64% | [48.01, 50.52] | 0.25 | median 88 / 68 ms |
+| P20 | score, 96 racks | score, 64 racks | 50.82% ± 0.65% | [49.56, 52.09] | 0.20 | median 81 / 70 ms |
+
+- **Racing (P17)** is not detectably worse than exact evaluation and takes 3.4× less time. The interval still allows a loss of up to 1.6 pp.
+- **Universe 30 (P18)** is not detectably worse than 60 and is 33% cheaper.
+- **Equity vs score teacher does not replicate on NWL23 (P19).** CSW24 (P8) gave +1.76 ± 0.66 pp for equity; NWL23 gives −0.74 ± 0.64 pp. The two estimates differ by about 2.7 SE. Whether the gain is lexicon-dependent, or the CSW24 result was partly luck, is unresolved. The inverse-variance pooled estimate is +0.49 ± 0.46 pp, not significant.
+- **Racks (P20).** 96 vs 64 racks in score mode is not significant. Together with P12 (equity mode, 50.04%), extra racks beyond 64 show no reliable gain.

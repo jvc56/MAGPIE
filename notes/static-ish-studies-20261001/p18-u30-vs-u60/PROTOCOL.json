@@ -1,0 +1,10 @@
+{
+  "kind": "Prespecified: universe 30 vs 60 placements, equity mode",
+  "frozen_utc": "2026-10-01T07:29:36Z",
+  "player_a": "static-ish CSW24, equity, 1.4/0.75, 64 racks, z=3, universe 30 (+5 exchanges)",
+  "player_b": "same with universe 60",
+  "pairs": 2000,
+  "seed": 20263001,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "binary": "magpie_test_p17 (commit f2012601), sha256 9ea993f385cfdebd81154a7b290b553483b710af13a452222854b481a60f12fa"
+}
