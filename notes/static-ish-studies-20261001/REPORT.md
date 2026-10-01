@@ -104,3 +104,17 @@ At this short budget, nominating candidates by blocking and setup does not help 
 
 - **French (P25).** The weights transfer to French, which has a different letter distribution, without refitting.
 - **Longer sim (P26).** Static-ish beats a 2-ply sim that uses 2.6× its time per decision.
+
+## Replication and cheap configuration (P27–P29)
+
+| run | player a | player b | a's score | 95% CI | p | time per decision (a / b) |
+|---|---|---|---:|---|---:|---|
+| P27 | CSW24 equity teacher (replication of P8) | score teacher | 50.91% ± 0.64% | [49.66, 52.16] | 0.15 | median 91 / 71 ms |
+| P28 | score, gated bag < 60, universe 30 | score, ungated, universe 60 | 50.31% ± 0.65% | [49.03, 51.59] | 0.63 | **mean 36 / 72 ms** |
+| P29 (FRA20) | equity teacher | score teacher | 51.28% ± 0.64% | [50.02, 52.53] | 0.047 | median 90 / 65 ms |
+
+**Stacked cost cuts (P28).** Gating to bag < 60 and shrinking the universe to 30 together halve the decision time with no detectable loss.
+
+**Equity vs score, all head-to-heads.** Inverse-variance pooled over P8, P27, P19 and P29, equity mode is **+0.79 ± 0.32 pp** better (p = 0.015). The results are heterogeneous: Q = 8.5 on 3 df, p = 0.04, with NWL23 the outlier. Excluding P8, the result that prompted the follow-ups, the pooled gain is **+0.48 ± 0.37 pp (p = 0.19)**.
+
+At most, equity mode is a small improvement, and it is not established. It costs about 1.3× the time. The default stays score mode. A fresh-seed NWL23 replication (P32) is below.
