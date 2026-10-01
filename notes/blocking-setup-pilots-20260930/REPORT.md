@@ -104,3 +104,28 @@ Remaining options, none tried yet:
 - 16 racks combined with the race, which would be about 4× less work but adds teacher noise.
 - Worker threads for evaluate-all, since candidates are independent once the checker is loaded.
 - Reconstructing our follow-ups when the reply changed, against a base-board list; I estimate this at about −10%.
+
+## P5 — prespecified confirmation, race-based evaluator z = 3 (CSW24)
+
+- **Design.** The protocol was frozen before launch (`p5-confirm-z3/PROTOCOL.json`): 2,000 fresh pairs (seed 20261501) of the adjusted player against no-PAT static, using the research weights 1.4 / 0.75 and 64 racks.
+- **Adjusted player.** Its candidates are raced with `blocking_setup_checker_choose` at z = 3 in batches of 8 racks. This is not identical to the pilot's exact policy: on 360 positions it chose the full-evaluation move 99.4% of the time.
+- **Primary test.** A two-sided z-test of the mean pair score against 0.5, at α = 0.05, with all pairs included.
+- **Run.** 8 workers on the M4 took 7 min 21 s; at launch, background OS processes were using about one core.
+
+| outcome | value |
+|---|---|
+| adjusted player's score (pair mean) | **52.24% ± 0.65%** (SE), 95% CI [50.97%, 53.51%] |
+| z, two-sided p | 3.46, 0.0005 |
+| wins / ties / losses | 2,079 / 21 / 1,900 |
+| spread per game | +8.0 ± 1.15 points |
+| decisions changed vs static | 39.3% of 40,612 checked decisions |
+| check time per decision (8 workers busy) | median 71 ms, p90 143 ms, p99 263 ms, max 1.05 s |
+
+**Result.** The primary test rejects at 5%. The pilot estimate (53.6% ± 2.1%) is consistent with this one.
+
+**Limits.**
+- This is an equal-work comparison against static play: the adjusted player spends about 70 ms per move and the static player under 1 ms.
+- It does not show the adjusted player beats a sim of equal time.
+- It covers CSW24 only.
+- The weights are research choices, not fitted.
+- The exact (z = 0) policy was not confirmed.

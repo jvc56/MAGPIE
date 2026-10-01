@@ -1,0 +1,114 @@
+{
+ "pairs": 2000,
+ "games": 4000,
+ "a_score": 0.522375,
+ "a_score_se": 0.006473890663091154,
+ "a_score_95": [
+  0.5096861743003414,
+  0.5350638256996587
+ ],
+ "a_mean_spread": 8.00125,
+ "timing_ms": {
+  "a": {
+   "decisions": 45923,
+   "checked": 40612,
+   "changed": 15970,
+   "total_ms": {
+    "n": 45923,
+    "mean": 73.77273449034253,
+    "p50": 64.952,
+    "p90": 138.18,
+    "p99": 255.475,
+    "max": 1061.443
+   },
+   "movegen_ms": {
+    "n": 45923,
+    "mean": 0.461812555799926,
+    "p50": 0.182,
+    "p90": 0.998,
+    "p99": 4.736,
+    "max": 46.065
+   },
+   "check_ms_when_checked": {
+    "n": 40612,
+    "mean": 82.89780601792573,
+    "p50": 70.717,
+    "p90": 142.796,
+    "p99": 262.674,
+    "max": 1048.527
+   }
+  },
+  "b": {
+   "decisions": 45919,
+   "checked": 0,
+   "changed": 0,
+   "total_ms": {
+    "n": 45919,
+    "mean": 0.45105004464382936,
+    "p50": 0.183,
+    "p90": 0.968,
+    "p99": 4.639,
+    "max": 62.326
+   },
+   "movegen_ms": {
+    "n": 45919,
+    "mean": 0.4509876521701256,
+    "p50": 0.183,
+    "p90": 0.967,
+    "p99": 4.639,
+    "max": 62.326
+   },
+   "check_ms_when_checked": null
+  }
+ },
+ "changed_by_stratum": {
+  "early/ahead40_80": {
+   "checked": 655,
+   "changed": 272
+  },
+  "early/ahead80+": {
+   "checked": 76,
+   "changed": 27
+  },
+  "early/behind": {
+   "checked": 3012,
+   "changed": 1162
+  },
+  "early/close": {
+   "checked": 9037,
+   "changed": 4287
+  },
+  "late/ahead40_80": {
+   "checked": 1820,
+   "changed": 703
+  },
+  "late/ahead80+": {
+   "checked": 1846,
+   "changed": 736
+  },
+  "late/behind": {
+   "checked": 5675,
+   "changed": 2147
+  },
+  "late/close": {
+   "checked": 4891,
+   "changed": 1892
+  },
+  "middle/ahead40_80": {
+   "checked": 1636,
+   "changed": 553
+  },
+  "middle/ahead80+": {
+   "checked": 823,
+   "changed": 275
+  },
+  "middle/behind": {
+   "checked": 5214,
+   "changed": 1867
+  },
+  "middle/close": {
+   "checked": 5927,
+   "changed": 2049
+  }
+ }
+}
