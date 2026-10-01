@@ -842,13 +842,14 @@ static void bss_games(const BSOptions *options) {
     if (kinds[player_idx] == BSS_PLAYER_ADJUSTED) {
       if (state->params == NULL) {
         log_fatal("adjusted players need params=");
+      } else {
+        state->num_racks = (int)bs_options_get_long(
+            options, "racks",
+            blocking_setup_params_get_teacher_racks(state->params));
+        state->samples =
+            blocking_setup_samples_create(state->num_racks, BSS_POOL_CAPACITY);
+        state->checker = blocking_setup_checker_create();
       }
-      state->num_racks = (int)bs_options_get_long(
-          options, "racks",
-          blocking_setup_params_get_teacher_racks(state->params));
-      state->samples =
-          blocking_setup_samples_create(state->num_racks, BSS_POOL_CAPACITY);
-      state->checker = blocking_setup_checker_create();
     }
   }
   const char *out_path = bs_options_require(options, "out");
