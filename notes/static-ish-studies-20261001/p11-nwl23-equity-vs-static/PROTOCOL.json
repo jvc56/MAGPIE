@@ -1,0 +1,10 @@
+{
+  "kind": "Prespecified: NWL23 transfer of CSW24-derived equity-mode weights",
+  "frozen_utc": "2026-10-01T06:47:15Z",
+  "player_a": "static-ish NWL23, teacher_value=equity, 1.4/0.75 (unfitted for NWL23), 64 racks, z=3",
+  "player_b": "no-PAT static NWL23",
+  "pairs": 2000,
+  "seed": 20262301,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "binary": "magpie_test_p8, sha256 cfedfa5729af1d010eba37fbd51b8218050bf34d9802fc1155000cce6f3cdda1"
+}

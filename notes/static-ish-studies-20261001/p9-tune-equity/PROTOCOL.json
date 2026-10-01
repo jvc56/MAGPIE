@@ -1,0 +1,13 @@
+{
+  "kind": "Tuning (exploratory): equity-mode blocking/setup weights by head-to-head games",
+  "frozen_utc": "2026-10-01T05:39:05Z",
+  "reference": "research_v0_equity.bsp (teacher_value=equity, 1.4/0.75)",
+  "grid": "blocking {0.7,1.4,2.1} x setup {0.4,0.75,1.1}, reference point skipped (8 points)",
+  "pairs_per_point": 800,
+  "seed": 20262101,
+  "seed_note": "common seed for all points; tuning only, not a confirmation",
+  "settings": "both players static-ish, 64 racks, race z=3, batch 8",
+  "selection_rule": "point with the highest mean pair score vs the reference; ties by smaller distance from the reference",
+  "confirmation": "the selected point then plays the reference on a fresh seed, 2,000 pairs, prespecified two-sided z test at alpha 0.05",
+  "binary": "magpie_test_p8, sha256 cfedfa5729af1d010eba37fbd51b8218050bf34d9802fc1155000cce6f3cdda1"
+}
