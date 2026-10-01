@@ -21,6 +21,7 @@
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
+#include "../ent/blocking_setup_params.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
@@ -60,6 +61,7 @@
 #include "../util/string_util.h"
 #include "analyze.h"
 #include "autoplay.h"
+#include "blocking_setup.h"
 #include "cgp.h"
 #include "convert.h"
 #include "endgame.h"
@@ -198,6 +200,9 @@ typedef enum {
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
   ARG_TOKEN_CUTOFF,
+  ARG_TOKEN_ROLLOUT_BLOCKING_SETUP,
+  ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z,
+  ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS,
   ARG_TOKEN_UTILITY_W_WINPCT,
   ARG_TOKEN_UTILITY_W_SPREAD,
   ARG_TOKEN_UTILITY_SPREAD_SCALE,
@@ -307,6 +312,10 @@ struct Config {
   uint64_t min_play_iterations;
   double stop_cond_pct;
   double cutoff;
+  // Static-ish rollouts (the rbs options): the loaded parameters (NULL for
+  // static rollouts) and the policy settings handed to simulations.
+  BlockingSetupParams *rollout_blocking_setup;
+  BlockingSetupPolicySettings rollout_blocking_setup_settings;
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
@@ -2135,6 +2144,33 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "option will make the simulation run until it hits the max total "
           "iterations or time limit.";
       break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP:
+      usages[0] = "<blocking_setup_params>";
+      examples[0] = "CSW24";
+      examples[1] = "none";
+      text = "Plays simulation rollouts (both players, every ply) with the "
+             "static-ish blocking/setup policy: static equity plus the "
+             "parameters' weighted pass-relative blocking and setup deltas, "
+             "over the top 60 static placements and up to 5 exchanges within "
+             "35 points. Loads data/strategy/<name>.bsp; 'none', the default, "
+             "rolls out statically. Root candidates are unaffected.";
+      break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z:
+      usages[0] = "<z>";
+      examples[0] = "3";
+      examples[1] = "0";
+      text = "Race threshold for 'rbs' rollouts in standard errors: "
+             "candidates trailing the leader by more than this are dropped "
+             "after each batch of 8 racks. 0 measures every candidate in "
+             "full. Defaults to 3.";
+      break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS:
+      usages[0] = "<racks>";
+      examples[0] = "64";
+      examples[1] = "32";
+      text = "Sampled opponent racks per 'rbs' rollout decision; 0, the "
+             "default, uses the parameters' teacher_racks.";
+      break;
     case ARG_TOKEN_CUTOFF:
       usages[0] = "<cutoff>";
       examples[0] = "0.005";
@@ -2577,76 +2613,79 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
-        ARG_TOKEN_CUTOFF,                  /* cutoff */
-        ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
-        ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
-        ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
-        ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
-        ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
-        ARG_TOKEN_P1_INFERENCE_MARGIN,     /* im1 */
-        ARG_TOKEN_P2_INFERENCE_MARGIN,     /* im2 */
-        ARG_TOKEN_MAX_ITERATIONS,          /* iterations */
-        ARG_TOKEN_P1_MAX_ITERATIONS,       /* i1 */
-        ARG_TOKEN_P2_MAX_ITERATIONS,       /* i2 */
-        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
-        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
-        ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
-        ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
-        ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
-        ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
-        ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
-        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
-        ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
-        ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
-        ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
-        ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
-        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
-        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
-        ARG_TOKEN_PEG_NESTED,              /* pegnested */
-        ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
-        ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
-        ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
-        ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
-        ARG_TOKEN_PEG_STRIDE,              /* pegstride */
-        ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
-        ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
-        ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
-        ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
-        ARG_TOKEN_PLIES,                   /* plies */
-        ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
-        ARG_TOKEN_STOP_COND_PCT,           /* scondition */
-        ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
-        ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
-        ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
-        ARG_TOKEN_SAMPLING_RULE,           /* sr */
-        ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
-        ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
-        ARG_TOKEN_PAT_LABEL_PLIES,         /* patplies */
-        ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
-        ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
-        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
-        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
-        ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
-        ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
-        ARG_TOKEN_P1_THRESHOLD,            /* th1 */
-        ARG_TOKEN_P2_THRESHOLD,            /* th2 */
-        ARG_TOKEN_THRESHOLD,               /* threshold */
-        ARG_TOKEN_P1_TIME_LIMIT,           /* tl1 */
-        ARG_TOKEN_P2_TIME_LIMIT,           /* tl2 */
-        ARG_TOKEN_TIME_LIMIT,              /* tlim */
-        ARG_TOKEN_TT_FRACTION_OF_MEM,      /* ttfraction */
-        ARG_TOKEN_USE_HEAT_MAP,            /* useheatmap */
-        ARG_TOKEN_UTILITY_W_SPREAD,        /* uspread */
-        ARG_TOKEN_P1_UTILITY_W_SPREAD,     /* uspread1 */
-        ARG_TOKEN_P2_UTILITY_W_SPREAD,     /* uspread2 */
-        ARG_TOKEN_UTILITY_SPREAD_SCALE,    /* uspreadscale */
-        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, /* uspreadscale1 */
-        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, /* uspreadscale2 */
-        ARG_TOKEN_UTILITY_W_WINPCT,        /* uwin */
-        ARG_TOKEN_P1_UTILITY_W_WINPCT,     /* uwin1 */
-        ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
-        ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
-        ARG_TOKEN_WIN_PCT,                 /* winpct */
+        ARG_TOKEN_CUTOFF,                       /* cutoff */
+        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP,       /* rbs */
+        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS, /* rbsracks */
+        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z,     /* rbsz */
+        ARG_TOKEN_ENDGAME_PLIES,                /* eplies */
+        ARG_TOKEN_ENDGAME_TIME_LIMIT,           /* etlim */
+        ARG_TOKEN_ENDGAME_TOP_K,                /* etopk */
+        ARG_TOKEN_USE_GAME_PAIRS,               /* gp */
+        ARG_TOKEN_INFERENCE_MARGIN,             /* imargin */
+        ARG_TOKEN_P1_INFERENCE_MARGIN,          /* im1 */
+        ARG_TOKEN_P2_INFERENCE_MARGIN,          /* im2 */
+        ARG_TOKEN_MAX_ITERATIONS,               /* iterations */
+        ARG_TOKEN_P1_MAX_ITERATIONS,            /* i1 */
+        ARG_TOKEN_P2_MAX_ITERATIONS,            /* i2 */
+        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,       /* mi1 */
+        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,       /* mi2 */
+        ARG_TOKEN_MIN_PLAY_ITERATIONS,          /* minplayiterations */
+        ARG_TOKEN_SHOW_MISTAKES,                /* mistakes */
+        ARG_TOKEN_MOVEGEN_MARGIN,               /* mmargin */
+        ARG_TOKEN_MULTI_THREADING_MODE,         /* mtmode */
+        ARG_TOKEN_NUMBER_OF_PLAYS,              /* numplays */
+        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,        /* numsmallplays */
+        ARG_TOKEN_P1_NUM_PLAYS,                 /* np1 */
+        ARG_TOKEN_P2_NUM_PLAYS,                 /* np2 */
+        ARG_TOKEN_OVERTIME_PENALTY_POINTS,      /* otpenalty */
+        ARG_TOKEN_OVERTIME_PERIOD,              /* otperiod */
+        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,         /* pc1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,         /* pc2 */
+        ARG_TOKEN_PEG_NESTED,                   /* pegnested */
+        ARG_TOKEN_PEG_OUTCOMES,                 /* pegoutcomes */
+        ARG_TOKEN_PEG_OUT_LINES,                /* pegoutlines */
+        ARG_TOKEN_PEG_OUT_WIDTH,                /* pegoutwidth */
+        ARG_TOKEN_PEG_PESSIMISTIC,              /* pegpess */
+        ARG_TOKEN_PEG_STRIDE,                   /* pegstride */
+        ARG_TOKEN_PEG_TIME_LIMIT,               /* pegtlim */
+        ARG_TOKEN_PEG_TOP_K,                    /* pegtopk */
+        ARG_TOKEN_P1_SIM_PLIES,                 /* pl1 */
+        ARG_TOKEN_P2_SIM_PLIES,                 /* pl2 */
+        ARG_TOKEN_PLIES,                        /* plies */
+        ARG_TOKEN_PEG_NOPRUNE,                  /* pnoprune */
+        ARG_TOKEN_STOP_COND_PCT,                /* scondition */
+        ARG_TOKEN_SIM_WITH_INFERENCE,           /* sinfer */
+        ARG_TOKEN_SIM_MARGIN_FORECAST,          /* smargin */
+        ARG_TOKEN_USE_SMALL_PLAYS,              /* sp */
+        ARG_TOKEN_SAMPLING_RULE,                /* sr */
+        ARG_TOKEN_P1_STOP_COND_PCT,             /* sc1 */
+        ARG_TOKEN_P2_STOP_COND_PCT,             /* sc2 */
+        ARG_TOKEN_PAT_LABEL_PLIES,              /* patplies */
+        ARG_TOKEN_P1_SIM_WITH_INFERENCE,        /* si1 */
+        ARG_TOKEN_P2_SIM_WITH_INFERENCE,        /* si2 */
+        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,       /* sm1 */
+        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,       /* sm2 */
+        ARG_TOKEN_P1_SAMPLING_RULE,             /* sa1 */
+        ARG_TOKEN_P2_SAMPLING_RULE,             /* sa2 */
+        ARG_TOKEN_P1_THRESHOLD,                 /* th1 */
+        ARG_TOKEN_P2_THRESHOLD,                 /* th2 */
+        ARG_TOKEN_THRESHOLD,                    /* threshold */
+        ARG_TOKEN_P1_TIME_LIMIT,                /* tl1 */
+        ARG_TOKEN_P2_TIME_LIMIT,                /* tl2 */
+        ARG_TOKEN_TIME_LIMIT,                   /* tlim */
+        ARG_TOKEN_TT_FRACTION_OF_MEM,           /* ttfraction */
+        ARG_TOKEN_USE_HEAT_MAP,                 /* useheatmap */
+        ARG_TOKEN_UTILITY_W_SPREAD,             /* uspread */
+        ARG_TOKEN_P1_UTILITY_W_SPREAD,          /* uspread1 */
+        ARG_TOKEN_P2_UTILITY_W_SPREAD,          /* uspread2 */
+        ARG_TOKEN_UTILITY_SPREAD_SCALE,         /* uspreadscale */
+        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE,      /* uspreadscale1 */
+        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,      /* uspreadscale2 */
+        ARG_TOKEN_UTILITY_W_WINPCT,             /* uwin */
+        ARG_TOKEN_P1_UTILITY_W_WINPCT,          /* uwin1 */
+        ARG_TOKEN_P2_UTILITY_W_WINPCT,          /* uwin2 */
+        ARG_TOKEN_WRITE_BUFFER_SIZE,            /* wb */
+        ARG_TOKEN_WIN_PCT,                      /* winpct */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -3256,6 +3295,9 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   if (config->game) {
     config_set_sim_args_pat_rollout(
         config, game_get_player_on_turn_index(config->game), sim_args);
+  }
+  if (config->rollout_blocking_setup != NULL) {
+    sim_args->rollout_blocking_setup = &config->rollout_blocking_setup_settings;
   }
 }
 
@@ -7612,6 +7654,63 @@ exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
 }
 
 // Assumes all args are parsed and correctly set in pargs.
+// Loads the rbs, rbsz and rbsracks options: the static-ish rollout policy's
+// parameters (a missing or malformed file, or one for another lexicon, is an
+// error) and settings.
+static void config_load_rollout_blocking_setup(Config *config,
+                                               ErrorStack *error_stack) {
+  BlockingSetupPolicySettings *settings =
+      &config->rollout_blocking_setup_settings;
+  if (config_get_parg_value(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z, 0)) {
+    config_load_double(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z, 0, 100,
+                       &settings->race.z, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS,
+                            0)) {
+    config_load_int(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS, 0,
+                    BLOCKING_SETUP_MAX_RACKS, &settings->num_racks,
+                    error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  const char *name =
+      config_get_parg_value(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP, 0);
+  if (name == NULL) {
+    return;
+  }
+  blocking_setup_params_destroy(config->rollout_blocking_setup);
+  config->rollout_blocking_setup = NULL;
+  settings->params = NULL;
+  if (strings_iequal(name, "none")) {
+    return;
+  }
+  BlockingSetupParams *params =
+      blocking_setup_params_create(config->data_paths, name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const char *lexicon = players_data_get_data_name(config->players_data,
+                                                   PLAYERS_DATA_TYPE_KWG, 0);
+  if (lexicon == NULL ||
+      !strings_iequal(lexicon, blocking_setup_params_get_lexicon(params))) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_BSP_LEXICON_MISMATCH,
+        get_formatted_string(
+            "blocking/setup parameters '%s' are for lexicon '%s', but the "
+            "loaded lexicon is '%s'",
+            name, blocking_setup_params_get_lexicon(params),
+            lexicon != NULL ? lexicon : "none"));
+    blocking_setup_params_destroy(params);
+    return;
+  }
+  config->rollout_blocking_setup = params;
+  settings->params = params;
+}
+
 void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
   if (new_path) {
@@ -8801,6 +8900,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       }
     }
   }
+  config_load_rollout_blocking_setup(config, error_stack);
 }
 
 // Parses the arguments given by the cmd string and updates the state of
@@ -10032,6 +10132,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1);
   arg(ARG_TOKEN_THRESHOLD, "threshold", 1, 1);
   arg(ARG_TOKEN_CUTOFF, "cutoff", 1, 1);
+  arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP, "rbs", 1, 1);
+  arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z, "rbsz", 1, 1);
+  arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS, "rbsracks", 1, 1);
   arg(ARG_TOKEN_UTILITY_W_WINPCT, "uwin", 1, 1);
   arg(ARG_TOKEN_UTILITY_W_SPREAD, "uspread", 1, 1);
   arg(ARG_TOKEN_UTILITY_SPREAD_SCALE, "uspreadscale", 1, 1);
@@ -10140,6 +10243,16 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
+  config->rollout_blocking_setup = NULL;
+  config->rollout_blocking_setup_settings = (BlockingSetupPolicySettings){
+      .universe = DEFAULT_ROLLOUT_BLOCKING_SETUP_UNIVERSE,
+      .exchange_quota = DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGES,
+      .exchange_margin =
+          int_to_equity(DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGE_MARGIN),
+      .race = {.batch_racks = BLOCKING_SETUP_RACE_BATCH,
+               .min_racks = BLOCKING_SETUP_RACE_BATCH,
+               .z = DEFAULT_ROLLOUT_BLOCKING_SETUP_Z},
+  };
   config->utility_w_winpct = 1.0;
   config->utility_w_spread = 0.5;
   config->utility_spread_scale = 100.0;
@@ -10240,6 +10353,7 @@ void config_destroy(Config *config) {
   thread_control_destroy(config->thread_control);
   game_destroy(config->game);
   game_destroy(config->game_backup);
+  blocking_setup_params_destroy(config->rollout_blocking_setup);
   game_history_destroy(config->game_history);
   game_history_destroy(config->game_history_backup);
   endgame_ctx_destroy(config->endgame_ctx);
@@ -10812,6 +10926,23 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PRINT_INTERVAL:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->print_interval);
+      break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          config->rollout_blocking_setup != NULL
+              ? blocking_setup_params_get_name(config->rollout_blocking_setup)
+              : "none");
+      break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token,
+          config->rollout_blocking_setup_settings.race.z);
+      break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          config->rollout_blocking_setup_settings.num_racks);
       break;
     case ARG_TOKEN_EXEC_MODE:
       string_builder_add_formatted_string(sb, " -%s ",

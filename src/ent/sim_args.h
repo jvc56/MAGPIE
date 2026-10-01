@@ -2,6 +2,7 @@
 #define SIM_ARGS_H
 
 #include "../def/bai_defs.h"
+#include "../ent/blocking_setup_params.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -54,6 +55,12 @@ typedef struct SimArgs {
   // sim_args_fill clears them (PAT on, every class); callers set them after.
   bool pat_rollout_disabled;
   uint32_t pat_rollout_disabled_classes_mask;
+  // When non-NULL, every rollout ply (both players') is chosen by the
+  // static-ish blocking/setup policy with these settings instead of the
+  // player's static move (see BlockingSetupPolicySettings); not owned, and
+  // must outlive the simulation. NULL, the default, rolls out statically.
+  // sim_args_fill clears it.
+  const BlockingSetupPolicySettings *rollout_blocking_setup;
   // Whether a nonterminal sim horizon's spread is projected to the end of the
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
@@ -130,6 +137,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->resume_results = false;
   sim_args->pat_rollout_disabled = false;
   sim_args->pat_rollout_disabled_classes_mask = 0;
+  sim_args->rollout_blocking_setup = NULL;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

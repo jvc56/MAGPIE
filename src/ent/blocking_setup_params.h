@@ -2,6 +2,7 @@
 #define BLOCKING_SETUP_PARAMS_H
 
 #include "../util/io_util.h"
+#include "equity.h"
 #include <stdbool.h>
 
 // Per-lexicon blocking/setup parameters: how a lexicon's pass-relative
@@ -41,6 +42,46 @@ enum {
 };
 
 typedef struct BlockingSetupParams BlockingSetupParams;
+
+// Picking only the best candidate needs less than measuring all of them.
+// A race (blocking_setup_checker_choose) measures the candidates in batches
+// of racks, all on the same racks, and after each batch drops any candidate
+// whose adjusted value trails the leader's by more than z standard errors
+// of their paired per-rack difference. Adjusted value = base equity +
+// blocking_weight * blocking_delta + setup_weight * setup_delta. With z <= 0
+// nothing is dropped and the result is exactly the argmax of full
+// measurements; with z > 0 it is a different, faster policy whose choices
+// can differ.
+enum {
+  BLOCKING_SETUP_RACE_BATCH = 8,
+};
+
+typedef struct BlockingSetupRaceSettings {
+  // Racks per batch; 0 for BLOCKING_SETUP_RACE_BATCH.
+  int batch_racks;
+  // Racks measured before the first elimination.
+  int min_racks;
+  // Elimination threshold in standard errors; <= 0 disables elimination.
+  double z;
+} BlockingSetupRaceSettings;
+
+// A static-ish move policy (blocking_setup_policy_choose): the on-turn
+// player's top universe no-PAT static placements and up to exchange_quota
+// exchanges within exchange_margin of the top move, raced (or, with
+// race.z <= 0, measured in full) on num_racks sampled racks, choosing the
+// highest static equity plus the params' weighted deltas. Positions with an
+// empty bag, or whose weights (by bag and lead) are both zero, get the plain
+// no-PAT static choice.
+typedef struct BlockingSetupPolicySettings {
+  // Not owned; must outlive every policy made from these settings.
+  const BlockingSetupParams *params;
+  // 0 for the params' teacher_racks.
+  int num_racks;
+  int universe;
+  int exchange_quota;
+  Equity exchange_margin;
+  BlockingSetupRaceSettings race;
+} BlockingSetupPolicySettings;
 
 // Reads data/strategy/<name>.bsp from the first data path that has it.
 // Missing or malformed files push an error and return NULL.

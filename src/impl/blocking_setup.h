@@ -1,6 +1,7 @@
 #ifndef BLOCKING_SETUP_H
 #define BLOCKING_SETUP_H
 
+#include "../ent/blocking_setup_params.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
@@ -125,26 +126,8 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
                                     BlockingSetupResult *result);
 
 // Picking only the best candidate (a rollout or static-ish policy) needs less
-// than measuring all of them (a list of every play's values). The race
-// measures the candidates in batches of racks, all on the same racks, and
-// after each batch drops any candidate whose adjusted value trails the
-// leader's by more than z standard errors of their paired per-rack
-// difference. Adjusted value = base equity + blocking_weight *
-// blocking_delta + setup_weight * setup_delta. With z <= 0 nothing is
-// dropped and the result is exactly the argmax of full measurements; with
-// z > 0 it is a different, faster policy whose choices can differ.
-enum {
-  BLOCKING_SETUP_RACE_BATCH = 8,
-};
-
-typedef struct BlockingSetupRaceSettings {
-  // Racks per batch; 0 for BLOCKING_SETUP_RACE_BATCH.
-  int batch_racks;
-  // Racks measured before the first elimination.
-  int min_racks;
-  // Elimination threshold in standard errors; <= 0 disables elimination.
-  double z;
-} BlockingSetupRaceSettings;
+// than measuring all of them (a list of every play's values); see
+// BlockingSetupRaceSettings in blocking_setup_params.h.
 
 typedef struct BlockingSetupRaceStats {
   // Candidate-rack measurements made (num_candidates * racks without
@@ -165,6 +148,22 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
                                   double setup_weight,
                                   const BlockingSetupRaceSettings *settings,
                                   BlockingSetupRaceStats *stats);
+
+// The static-ish move policy of BlockingSetupPolicySettings
+// (blocking_setup_params.h).
+
+// Scratch state for one thread's decisions. Not thread safe.
+typedef struct BlockingSetupPolicy BlockingSetupPolicy;
+
+BlockingSetupPolicy *
+blocking_setup_policy_create(const BlockingSetupPolicySettings *settings);
+void blocking_setup_policy_destroy(BlockingSetupPolicy *policy);
+
+// The policy's move for the player on turn, sampling racks from seed. The
+// move is owned by the policy and valid until its next call; NULL when the
+// player has no move at all.
+const Move *blocking_setup_policy_choose(BlockingSetupPolicy *policy,
+                                         const Game *game, uint64_t seed);
 
 // The rack the on-turn player keeps after the move: placed tiles (blanks as
 // BLANK_MACHINE_LETTER) or exchanged tiles removed.

@@ -1007,3 +1007,130 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
   free(entries);
   return best;
 }
+
+enum {
+  // Every move of a position, so exchanges far down the static order are
+  // still seen by the exchange quota.
+  BLOCKING_SETUP_POLICY_GEN_CAPACITY = 200000,
+  BLOCKING_SETUP_POLICY_POOL_CAPACITY = 1024,
+  BLOCKING_SETUP_POLICY_MAX_UNIVERSE = 512,
+};
+
+struct BlockingSetupPolicy {
+  BlockingSetupPolicySettings settings;
+  int num_racks;
+  MoveList *list;
+  BlockingSetupSamples *samples;
+  BlockingSetupChecker *checker;
+  const Move *universe[BLOCKING_SETUP_POLICY_MAX_UNIVERSE];
+  Equity base[BLOCKING_SETUP_POLICY_MAX_UNIVERSE];
+};
+
+BlockingSetupPolicy *
+blocking_setup_policy_create(const BlockingSetupPolicySettings *settings) {
+  assert(settings->params != NULL);
+  assert(settings->universe >= 1 &&
+         settings->universe + settings->exchange_quota <=
+             BLOCKING_SETUP_POLICY_MAX_UNIVERSE);
+  BlockingSetupPolicy *policy = malloc_or_die(sizeof(BlockingSetupPolicy));
+  policy->settings = *settings;
+  policy->num_racks =
+      settings->num_racks > 0
+          ? settings->num_racks
+          : blocking_setup_params_get_teacher_racks(settings->params);
+  policy->list = move_list_create(BLOCKING_SETUP_POLICY_GEN_CAPACITY);
+  policy->samples = blocking_setup_samples_create(
+      policy->num_racks, BLOCKING_SETUP_POLICY_POOL_CAPACITY);
+  policy->checker = blocking_setup_checker_create();
+  return policy;
+}
+
+void blocking_setup_policy_destroy(BlockingSetupPolicy *policy) {
+  if (policy == NULL) {
+    return;
+  }
+  move_list_destroy(policy->list);
+  blocking_setup_samples_destroy(policy->samples);
+  blocking_setup_checker_destroy(policy->checker);
+  free(policy);
+}
+
+const Move *blocking_setup_policy_choose(BlockingSetupPolicy *policy,
+                                         const Game *game, uint64_t seed) {
+  const BlockingSetupPolicySettings *settings = &policy->settings;
+  MoveList *list = policy->list;
+  move_list_reset(list);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .disable_pat = true,
+  };
+  generate_moves(&args);
+  if (move_list_get_count(list) == 0) {
+    return NULL;
+  }
+  move_list_sort_moves(list);
+  const Move *top = move_list_get_move(list, 0);
+  if (move_list_get_count(list) == 1 || game_over(game) ||
+      bag_get_letters(game_get_bag(game)) == 0) {
+    return top;
+  }
+  const int on_turn = game_get_player_on_turn_index(game);
+  const int lead =
+      equity_to_int(player_get_score(game_get_player(game, on_turn)) -
+                    player_get_score(game_get_player(game, 1 - on_turn)));
+  double blocking_weight = 0.0;
+  double setup_weight = 0.0;
+  blocking_setup_params_get_weights(settings->params,
+                                    bag_get_letters(game_get_bag(game)), lead,
+                                    &blocking_weight, &setup_weight);
+  if (blocking_weight == 0.0 && setup_weight == 0.0) {
+    return top;
+  }
+  int count = 0;
+  int placements = 0;
+  int exchanges = 0;
+  const Equity top_equity = move_get_equity(top);
+  for (int move_idx = 0; move_idx < move_list_get_count(list) &&
+                         (placements < settings->universe ||
+                          exchanges < settings->exchange_quota);
+       move_idx++) {
+    const Move *move = move_list_get_move(list, move_idx);
+    const game_event_t type = move_get_type(move);
+    if (type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        placements < settings->universe) {
+      placements++;
+    } else if (type == GAME_EVENT_EXCHANGE &&
+               exchanges < settings->exchange_quota &&
+               move_get_equity(move) >=
+                   top_equity - settings->exchange_margin) {
+      exchanges++;
+    } else {
+      continue;
+    }
+    policy->universe[count] = move;
+    policy->base[count] = move_get_equity(move);
+    count++;
+  }
+  if (count < 2) {
+    return top;
+  }
+  blocking_setup_samples_deal(
+      policy->samples, game, policy->num_racks,
+      blocking_setup_params_get_teacher_partition(settings->params),
+      blocking_setup_params_get_teacher_condition_draws(settings->params),
+      seed);
+  blocking_setup_checker_load(
+      policy->checker, game, policy->samples,
+      blocking_setup_params_get_teacher_followup_draws(settings->params));
+  const int pick = blocking_setup_checker_choose(
+      policy->checker, policy->universe, policy->base, count, blocking_weight,
+      setup_weight, &settings->race, NULL);
+  return policy->universe[pick];
+}
