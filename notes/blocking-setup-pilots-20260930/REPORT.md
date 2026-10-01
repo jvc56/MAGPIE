@@ -68,3 +68,39 @@ The static player takes 0.18 ms (p50) per decision, so the adjusted evaluator co
 1. **Static-ish confirmation (~50 min).** 2,000 fresh pairs (new seed) of research 1.4 / 0.75 vs static, plus 16-rack and late-only (bin) variants to price speed. The primary test is the prespecified two-sided pair-mean z.
 2. **Track 1 data per lexicon (~40 min each).** 3,000 positions with labels at 64 racks only and choice-set references (`bs_fit.py choices`, then `refs cands=`) at 10 s, for CSW24 and NWL23, then fit `static_choice`.
 3. **Decisive A/B/C pool comparison (~6–7 h).** This is the archived 15 s / 60 s design on about 2,000 fresh positions. The cost can be cut a lot: screen pools without sims (`sims=0`), run selection sims only for distinct pools, and run the reference only on the plays that some pool chooses. Even so, B and A pick the same play about 99% of the time, so the B − A estimate rests on roughly 20 positions per 2,000 unless pools are enriched by an outcome-blind rule.
+
+## Speed work on the teacher (after the pilots)
+
+The 2,000-pair confirmation (P4, seed 20261401) was stopped at the user's request after 273 of 4,000 games so that the evaluator could be sped up first. Its partial output is marked incomplete and has not been analyzed.
+
+All timings below are single-process on a quiet M4. The benchmark set is 48 fresh CSW24 positions (P2's), each with about 62 candidates (the top 60 placements plus up to 5 exchanges) and 64 racks. Commands are `bsbench` and `bsrace`.
+
+| step | ms / position | results |
+|---|---:|---|
+| baseline (pilot code) | 311 | — |
+| skip exchange generation in the teacher's searches | 251 | identical |
+| cache pass-branch follow-ups per leave | 210 | identical |
+| lane-restricted reply / follow-up reconstruction | 191 | identical |
+| …seeded with the known play (`initial_best_move`) | 166 | identical |
+| best 16 pass replies within 20 points | 161 | identical |
+| exchanges reuse the pass branch; candidate played once per batch | 152 | identical |
+
+"Identical" means byte-identical benchmark output. The archived replay (200 positions, 24,308 rows) still has 0 mismatches. The three new movegen arguments cost nothing when unused: over 5 interleaved 10,000-game static autoplay runs the mean time was 6.881 s both before and after, with identical results.
+
+`MOVE_RECORD_BEST_SMALL` was tried as a faster score-only search and rejected. It was 4× slower here because it has no word-map path, and its follow-up scores differed by more than ties alone would explain.
+
+**Best-move race** (`blocking_setup_checker_choose`; weights 1.4/0.75; 360 P1 CSW24 positions). The reference is the argmax of full measurement; with z = 0 the race asserts exactly that argmax.
+
+| z | agrees | mean / max regret (pts) | ms / position | speedup vs exact | work |
+|---|---:|---:|---:|---:|---:|
+| 1.5 | 92.5% | 0.116 / 6.13 | 30.6 | 5.1× | 0.17 |
+| 2.0 | 97.8% | 0.027 / 2.10 | 35.4 | 4.4× | 0.20 |
+| 2.5 | 99.2% | 0.009 / 2.09 | 41.3 | 3.8× | 0.24 |
+| 3.0 | 99.4% | 0.008 / 2.09 | 48.1 | 3.3× | 0.29 |
+
+**In games** (the adjusted player in `bsstudy:games`, pilot seed, worker 0, 109 checked decisions, single process). The check took 274 ms at the median (mean 279 ms) with the pilot code. The exact version takes 126 ms (mean 132 ms) and its games are byte-identical to the pilot's. Racing gives 37 ms at z = 3 (mean 46 ms) and 28 ms at z = 2 (mean 33 ms).
+
+Remaining options, none tried yet:
+- 16 racks combined with the race, which would be about 4× less work but adds teacher noise.
+- Worker threads for evaluate-all, since candidates are independent once the checker is loaded.
+- Reconstructing our follow-ups when the reply changed, against a base-board list; I estimate this at about −10%.
