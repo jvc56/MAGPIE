@@ -68,7 +68,7 @@
 //          the top universe= static moves and exch= exchanges, with weights
 //          from params= (its bins give conditional policies) and racks=
 //          sampled racks (default: the file's teacher_racks); player b
-//          uses params_b= when given; z=<z> races
+//          uses params_b=, universe_b= and z_b= when given; z=<z> races
 //          the candidates (blocking_setup_checker_choose; 0, the default,
 //          measures all) in batches of batch= racks. Writes
 //          <out>.games.csv and per-decision timing <out>.moves.csv.
@@ -723,6 +723,13 @@ static double bss_game_score(int spread) {
   return 0.0;
 }
 
+// Player b's own option (key_b=) when given, else the shared one.
+static const char *bss_player_key(const BSOptions *options, int player_idx,
+                                  const char *key, const char *key_b) {
+  return player_idx == 1 && bs_options_get(options, key_b, NULL) != NULL ? key_b
+                                                                         : key;
+}
+
 static void bss_games(const BSOptions *options) {
   Config *config = bss_config_create(options);
   BlockingSetupParams *params = bss_params_create(options);
@@ -742,8 +749,9 @@ static void bss_games(const BSOptions *options) {
     BSSPlayerState *state = &states[player_idx];
     state->list = move_list_create(BSS_MOVE_LIST_CAPACITY);
     state->params = player_idx == 1 && params_b != NULL ? params_b : params;
-    state->universe =
-        (int)bs_options_get_long(options, "universe", BSS_DEFAULT_UNIVERSE);
+    state->universe = (int)bs_options_get_long(
+        options, bss_player_key(options, player_idx, "universe", "universe_b"),
+        BSS_DEFAULT_UNIVERSE);
     state->exchanges =
         (int)bs_options_get_long(options, "exch", BSS_DEFAULT_EXCHANGES);
     state->exchange_margin = int_to_equity((int)bs_options_get_long(
@@ -778,7 +786,8 @@ static void bss_games(const BSOptions *options) {
                                                 BLOCKING_SETUP_RACE_BATCH),
         .min_racks = (int)bs_options_get_long(options, "batch",
                                               BLOCKING_SETUP_RACE_BATCH),
-        .z = bs_options_get_double(options, "z", 0.0)};
+        .z = bs_options_get_double(
+            options, bss_player_key(options, player_idx, "z", "z_b"), 0.0)};
     state->samples = NULL;
     state->checker = NULL;
     if (kinds[player_idx] == BSS_PLAYER_ADJUSTED) {
