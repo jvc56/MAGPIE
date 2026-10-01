@@ -72,7 +72,9 @@
 //          sampled racks (default: the file's teacher_racks); player b
 //          uses params_b=, universe_b= and z_b= when given; z=<z> races
 //          the candidates (blocking_setup_checker_choose; 0, the default,
-//          measures all) in batches of batch= racks. Writes
+//          measures all) in batches of batch= racks; winpct=1 (winpct_b=
+//          for player b) races on win chance from the lexicon's win% table
+//          instead of points (see BlockingSetupRaceSettings). Writes
 //          <out>.games.csv and per-decision timing <out>.moves.csv.
 enum {
   BSS_MAX_ARMS = 8,
@@ -826,6 +828,15 @@ static void bss_games(const BSOptions *options) {
                                               BLOCKING_SETUP_RACE_BATCH),
         .z = bs_options_get_double(
             options, bss_player_key(options, player_idx, "z", "z_b"), 0.0)};
+    if (bs_options_get_long(
+            options, bss_player_key(options, player_idx, "winpct", "winpct_b"),
+            0)) {
+      ErrorStack *error_stack = error_stack_create();
+      config_load_win_pcts(config, error_stack);
+      assert(error_stack_is_empty(error_stack));
+      error_stack_destroy(error_stack);
+      state->race.win_pcts = config_get_win_pcts(config);
+    }
     state->samples = NULL;
     state->checker = NULL;
     if (kinds[player_idx] == BSS_PLAYER_ADJUSTED) {

@@ -3,6 +3,7 @@
 
 #include "../util/io_util.h"
 #include "equity.h"
+#include "win_pct.h"
 #include <stdbool.h>
 
 // Per-lexicon blocking/setup parameters: how a lexicon's pass-relative
@@ -77,6 +78,12 @@ typedef struct BlockingSetupRaceSettings {
   int min_racks;
   // Elimination threshold in standard errors; <= 0 disables elimination.
   double z;
+  // Not owned. NULL races the candidates' mean adjusted values in points;
+  // otherwise each rack's adjusted value, added to the lead, is turned into
+  // our chance of winning with the opponent on turn after the candidate,
+  // and the candidates race on their mean win chance, so the same swing
+  // counts by how much it moves the result at this lead.
+  const WinPct *win_pcts;
 } BlockingSetupRaceSettings;
 
 // A static-ish move policy (blocking_setup_policy_choose): the on-turn

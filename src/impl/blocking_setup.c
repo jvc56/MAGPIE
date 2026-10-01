@@ -16,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 #include "../util/io_util.h"
 #include "gameplay.h"
@@ -1019,6 +1020,31 @@ static Equity race_value(const RaceEntry *entry, int racks, int draws,
                           (setup_weight * setup_delta));
 }
 
+// Our chance of winning after the candidate, ahead by spread points (score
+// plus leave), with the opponent on turn: the table read at both integer
+// spreads around it, interpolated so small swings still count. Bags larger
+// than the table covers read its largest bag.
+static double race_win_value(const BlockingSetupChecker *checker,
+                             const WinPct *win_pcts,
+                             const CandidateState *state, double spread) {
+  unsigned int bag_tiles =
+      (unsigned int)(checker->bag_tiles -
+                     (state->is_placement ? state->missing : 0));
+  if (bag_tiles > win_pct_get_max_bag(win_pcts)) {
+    bag_tiles = win_pct_get_max_bag(win_pcts);
+  }
+  const unsigned int our_tiles =
+      (unsigned int)(rack_get_total_letters(&state->leave) + state->missing);
+  const double opponent_spread = -spread;
+  const double low = floor(opponent_spread);
+  const double fraction = opponent_spread - low;
+  const double low_win =
+      win_pct_get(win_pcts, (int)low, bag_tiles, RACK_SIZE, our_tiles);
+  const double high_win =
+      win_pct_get(win_pcts, (int)low + 1, bag_tiles, RACK_SIZE, our_tiles);
+  return 1.0 - (low_win + (fraction * (high_win - low_win)));
+}
+
 int blocking_setup_checker_choose(BlockingSetupChecker *checker,
                                   const Move *const *candidates,
                                   const Equity *base_equities,
@@ -1048,6 +1074,19 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
     checker_play_candidate(checker, &entries[cand_idx].state,
                            &checker->candidate_boards[cand_idx]);
   }
+  // With a win table, each rack's value already holds the base equity and
+  // the lead (see race_win_value), so the base is not added again.
+  const WinPct *win_pcts = settings->win_pcts;
+  double lead = 0.0;
+  if (win_pcts != NULL) {
+    lead = equity_to_double(player_get_score(game_get_player(
+                                checker->base, checker->on_turn_index)) -
+                            player_get_score(game_get_player(
+                                checker->base, 1 - checker->on_turn_index)));
+    for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+      entries[cand_idx].base_points = 0.0;
+    }
+  }
   const int batch = settings->batch_racks > 0 ? settings->batch_racks
                                               : BLOCKING_SETUP_RACE_BATCH;
   int alive = num_candidates;
@@ -1071,10 +1110,17 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
         entry->candidate_reply_sum += values.candidate_reply;
         entry->pass_followup_sum += values.pass_followup;
         entry->candidate_followup_sum += values.candidate_followup;
-        rack_values[((size_t)cand_idx * (size_t)num_racks) + rack_idx] =
+        double rack_value =
             (blocking_weight * (values.pass_reply - values.candidate_reply)) +
             (setup_weight * (values.candidate_followup - values.pass_followup) /
              draws);
+        if (win_pcts != NULL) {
+          rack_value = race_win_value(
+              checker, win_pcts, &entry->state,
+              lead + equity_to_double(base_equities[cand_idx]) + rack_value);
+        }
+        rack_values[((size_t)cand_idx * (size_t)num_racks) + rack_idx] =
+            rack_value;
         candidate_racks++;
       }
     }
@@ -1135,8 +1181,22 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
   // The best survivor by the value a full measurement of its racks gives.
   int best = -1;
   Equity best_value = 0;
+  double best_win = 0.0;
   for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
     if (!entries[cand_idx].alive) {
+      continue;
+    }
+    if (win_pcts != NULL) {
+      const double *values =
+          rack_values + ((size_t)cand_idx * (size_t)num_racks);
+      double sum = 0.0;
+      for (int rack_idx = 0; rack_idx < racks_done; rack_idx++) {
+        sum += values[rack_idx];
+      }
+      if (best < 0 || sum / racks_done > best_win) {
+        best = cand_idx;
+        best_win = sum / racks_done;
+      }
       continue;
     }
     const Equity value = race_value(&entries[cand_idx], racks_done, draws,
