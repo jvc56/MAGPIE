@@ -147,6 +147,12 @@ typedef struct MoveGen {
   Equity target_equity_cutoff;
   int target_leave_size;
   bool stop_on_threshold;
+  // See MoveGenArgs.skip_exchanges and MoveGenArgs.lane_mask (all ones when
+  // unrestricted).
+  bool skip_exchanges;
+  uint64_t lane_mask;
+  // Whether the best move may be found again (MoveGenArgs.initial_best_move).
+  bool best_may_repeat;
   bool threshold_exceeded;
 
   MachineLetter strip[(MOVE_MAX_TILES)];
@@ -300,6 +306,23 @@ typedef struct MoveGenArgs {
   // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
   // Movegen ORs further discoveries in. Default 0 (no known tiles).
   uint64_t initial_tiles_bv;
+  // Restricts the shadow-ordered record types (MOVE_RECORD_ALL, BEST and
+  // WITHIN_X_EQUITY_OF_BEST) to the lanes whose bit is set: bit
+  // dir * BOARD_DIM + row_or_col, as in generate_small_moves_in_lanes. 0, the
+  // default, searches every lane. A single-tile play is recorded only from
+  // its canonical lane, so a restricted search may miss one whose canonical
+  // lane is excluded, but never records it in another form.
+  uint64_t lane_mask;
+  // MOVE_RECORD_BEST only: when non-NULL, generation starts as if this move
+  // had been found, with its equity (the score for MOVE_SORT_SCORE), so
+  // anchors that cannot reach it are pruned and the result is this move
+  // unless a better one (by compare_moves) is found. The move must be legal
+  // on the board with that equity.
+  const Move *initial_best_move;
+  // Records no exchanges. Their leave walk still runs when leaves are needed
+  // for the placements; with MOVE_SORT_SCORE it does not run at all. For
+  // searches that want only the best scoring placement.
+  bool skip_exchanges;
   // Disables the PAT term even when the player has weights loaded.
   // Set by the inference paths, which build their own equity thresholds
   // from score plus leave and would misclassify moves whose recorded

@@ -1,5 +1,6 @@
 #include "blocking_setup_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -7,6 +8,7 @@
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/blocking_setup_params.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
@@ -33,6 +35,11 @@ enum {
   BST_LINE_CAPACITY = 65536,
   BST_MOVE_TEXT_CAPACITY = 128,
   BST_NUM_CHECKED = 12,
+  BST_MOVE_LIST_CAPACITY = 200000,
+  BST_MAX_UNIVERSE = 512,
+  BST_BENCH_EXCHANGES = 5,
+  BST_BENCH_EXCHANGE_MARGIN = 35,
+  BST_MAX_RACE_SETTINGS = 8,
 };
 
 // A late CSW24 position (16 in the bag) from the candidate-diversity study.
@@ -545,5 +552,283 @@ void blocking_setup_replay_run_spec(const char *spec) {
   blocking_setup_samples_destroy(samples);
   move_list_destroy(list);
   config_destroy(config);
+  string_splitter_destroy(fields);
+}
+
+// Times the teacher on a fixed set of positions and writes every result at
+// full precision, so speed changes can be checked to leave results
+// unchanged. Spec: "<positions.csv>:<out.csv>[:<racks>[:<universe>
+// [:<max_positions>]]]" with a bsgen positions file. Each position's
+// universe is its top <universe> static non-pass moves plus up to five
+// exchanges within 35 points of the top move; the samples are dealt from a
+// seed fixed by the game index.
+void blocking_setup_bench_run_spec(const char *spec) {
+  StringSplitter *fields = split_string(spec, ':', true);
+  const int num_fields = string_splitter_get_number_of_items(fields);
+  assert(num_fields >= 2);
+  const int num_racks =
+      num_fields >= 3
+          ? (int)strtol(string_splitter_get_item(fields, 2), NULL, 10)
+          : 64;
+  const int universe =
+      num_fields >= 4
+          ? (int)strtol(string_splitter_get_item(fields, 3), NULL, 10)
+          : 60;
+  const long max_positions =
+      num_fields >= 5 ? strtol(string_splitter_get_item(fields, 4), NULL, 10)
+                      : 1000000;
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity "
+      "-r1 all -r2 all -numplays 1 -threads 1");
+  MoveList *list = move_list_create(BST_MOVE_LIST_CAPACITY);
+  BlockingSetupSamples *samples =
+      blocking_setup_samples_create(num_racks, BST_POOL_CAPACITY);
+  BlockingSetupChecker *checker = blocking_setup_checker_create();
+  FILE *in = fopen_or_die(string_splitter_get_item(fields, 0), "r");
+  FILE *out = fopen_or_die(string_splitter_get_item(fields, 1), "w");
+  (void)fprintf(out, "game,cand,move,pass_reply,cand_reply,blocking,"
+                     "pass_followup,cand_followup,setup,terminal\n");
+  char *line = malloc_or_die(BST_LINE_CAPACITY);
+  long positions = 0;
+  long candidates = 0;
+  int64_t total_ns = 0;
+  while (positions < max_positions &&
+         fgets(line, BST_LINE_CAPACITY, in) != NULL) {
+    char *end = NULL;
+    const long game_idx = strtol(line, &end, 10);
+    if (end == line) {
+      continue;
+    }
+    // The CGP is the sixth field.
+    char *cgp = line;
+    for (int field_idx = 0; field_idx < 5 && cgp != NULL; field_idx++) {
+      cgp = strchr(cgp, ',');
+      if (cgp != NULL) {
+        cgp++;
+      }
+    }
+    assert(cgp != NULL);
+    cgp[strcspn(cgp, "\r\n")] = '\0';
+    char *command = get_formatted_string("cgp %s", cgp);
+    load_and_exec_config_or_die(config, command);
+    free(command);
+    const Game *game = config_get_game(config);
+    bst_generate_all(game, list);
+    const Move *universe_moves[BST_MAX_UNIVERSE];
+    int count = 0;
+    int exchanges = 0;
+    const Equity top = move_get_equity(move_list_get_move(list, 0));
+    int placements = 0;
+    for (int move_idx = 0; move_idx < move_list_get_count(list); move_idx++) {
+      const Move *move = move_list_get_move(list, move_idx);
+      if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+          placements < universe) {
+        universe_moves[count++] = move;
+        placements++;
+      } else if (move_get_type(move) == GAME_EVENT_EXCHANGE &&
+                 exchanges < BST_BENCH_EXCHANGES &&
+                 move_get_equity(move) >=
+                     top - int_to_equity(BST_BENCH_EXCHANGE_MARGIN)) {
+        universe_moves[count++] = move;
+        exchanges++;
+      }
+    }
+    if (bag_get_letters(game_get_bag(game)) == 0 || count == 0) {
+      continue;
+    }
+    blocking_setup_samples_deal(samples, game, num_racks, true, true,
+                                ((uint64_t)game_idx * UINT64_C(7919)) + 1);
+    const int64_t start = ctimer_monotonic_ns();
+    blocking_setup_checker_load(checker, game, samples, 1);
+    BlockingSetupResult results[BST_MAX_UNIVERSE];
+    for (int cand_idx = 0; cand_idx < count; cand_idx++) {
+      blocking_setup_checker_measure(checker, universe_moves[cand_idx],
+                                     &results[cand_idx]);
+    }
+    total_ns += ctimer_monotonic_ns() - start;
+    for (int cand_idx = 0; cand_idx < count; cand_idx++) {
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_ucgi_move(sb, universe_moves[cand_idx],
+                                   game_get_board(game), game_get_ld(game));
+      const BlockingSetupResult *result = &results[cand_idx];
+      (void)fprintf(out, "%ld,%d,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%d\n",
+                    game_idx, cand_idx, string_builder_peek(sb),
+                    result->pass_reply_mean, result->candidate_reply_mean,
+                    result->blocking_delta, result->pass_followup_mean,
+                    result->candidate_followup_mean, result->setup_delta,
+                    result->terminal_replies);
+      string_builder_destroy(sb);
+    }
+    positions++;
+    candidates += count;
+  }
+  printf("blocking_setup_bench positions=%ld candidates=%ld racks=%d "
+         "total_ms=%.1f ms_per_position=%.2f us_per_candidate=%.1f\n",
+         positions, candidates, num_racks, (double)total_ns / 1e6,
+         positions > 0 ? (double)total_ns / 1e6 / (double)positions : 0.0,
+         candidates > 0 ? (double)total_ns / 1e3 / (double)candidates : 0.0);
+  free(line);
+  (void)fclose(in);
+  (void)fclose(out);
+  blocking_setup_checker_destroy(checker);
+  blocking_setup_samples_destroy(samples);
+  move_list_destroy(list);
+  config_destroy(config);
+  string_splitter_destroy(fields);
+}
+
+// Races against full measurement on a fixed position set. Spec:
+// "<positions.csv>:<racks>:<universe>:<max_positions>:<blocking_weight>:
+// <setup_weight>:<z>[,<z>...]". For each position, every universe candidate
+// is measured in full, and the argmax of static equity plus the weighted
+// deltas is the reference choice; the race without elimination must pick
+// exactly that. Each z then reports how often its pick agrees, the mean and
+// worst adjusted-value regret of its pick (points, by the full values) and
+// its time and work relative to full measurement.
+void blocking_setup_race_run_spec(const char *spec) {
+  StringSplitter *fields = split_string(spec, ':', true);
+  assert(string_splitter_get_number_of_items(fields) == 7);
+  const char *positions_path = string_splitter_get_item(fields, 0);
+  const int num_racks =
+      (int)strtol(string_splitter_get_item(fields, 1), NULL, 10);
+  const int universe =
+      (int)strtol(string_splitter_get_item(fields, 2), NULL, 10);
+  const long max_positions =
+      strtol(string_splitter_get_item(fields, 3), NULL, 10);
+  const double blocking_weight =
+      strtod(string_splitter_get_item(fields, 4), NULL);
+  const double setup_weight = strtod(string_splitter_get_item(fields, 5), NULL);
+  StringSplitter *z_values =
+      split_string(string_splitter_get_item(fields, 6), ',', true);
+  const int num_z = string_splitter_get_number_of_items(z_values);
+  assert(num_z >= 1 && num_z <= BST_MAX_RACE_SETTINGS);
+  double z_list[BST_MAX_RACE_SETTINGS];
+  long agree[BST_MAX_RACE_SETTINGS] = {0};
+  double regret_sum[BST_MAX_RACE_SETTINGS] = {0};
+  double regret_max[BST_MAX_RACE_SETTINGS] = {0};
+  int64_t race_ns[BST_MAX_RACE_SETTINGS] = {0};
+  long race_work[BST_MAX_RACE_SETTINGS] = {0};
+  for (int z_idx = 0; z_idx < num_z; z_idx++) {
+    z_list[z_idx] = strtod(string_splitter_get_item(z_values, z_idx), NULL);
+  }
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity "
+      "-r1 all -r2 all -numplays 1 -threads 1");
+  MoveList *list = move_list_create(BST_MOVE_LIST_CAPACITY);
+  BlockingSetupSamples *samples =
+      blocking_setup_samples_create(num_racks, BST_POOL_CAPACITY);
+  BlockingSetupChecker *checker = blocking_setup_checker_create();
+  FILE *in = fopen_or_die(positions_path, "r");
+  char *line = malloc_or_die(BST_LINE_CAPACITY);
+  long positions = 0;
+  long full_work = 0;
+  int64_t full_ns = 0;
+  while (positions < max_positions &&
+         fgets(line, BST_LINE_CAPACITY, in) != NULL) {
+    char *end = NULL;
+    const long game_idx = strtol(line, &end, 10);
+    if (end == line) {
+      continue;
+    }
+    char *cgp = line;
+    for (int field_idx = 0; field_idx < 5 && cgp != NULL; field_idx++) {
+      cgp = strchr(cgp, ',');
+      if (cgp != NULL) {
+        cgp++;
+      }
+    }
+    assert(cgp != NULL);
+    cgp[strcspn(cgp, "\r\n")] = '\0';
+    char *command = get_formatted_string("cgp %s", cgp);
+    load_and_exec_config_or_die(config, command);
+    free(command);
+    const Game *game = config_get_game(config);
+    if (bag_get_letters(game_get_bag(game)) == 0) {
+      continue;
+    }
+    bst_generate_all(game, list);
+    const Move *moves[BST_MAX_UNIVERSE];
+    Equity base[BST_MAX_UNIVERSE];
+    int count = 0;
+    for (int move_idx = 0;
+         move_idx < move_list_get_count(list) && count < universe; move_idx++) {
+      const Move *move = move_list_get_move(list, move_idx);
+      if (move_get_type(move) != GAME_EVENT_PASS) {
+        base[count] = move_get_equity(move);
+        moves[count++] = move;
+      }
+    }
+    if (count < 2) {
+      continue;
+    }
+    blocking_setup_samples_deal(samples, game, num_racks, true, true,
+                                ((uint64_t)game_idx * UINT64_C(7919)) + 1);
+    // Full measurement and its argmax.
+    int64_t start = ctimer_monotonic_ns();
+    blocking_setup_checker_load(checker, game, samples, 1);
+    Equity full_values[BST_MAX_UNIVERSE];
+    int full_best = 0;
+    for (int cand_idx = 0; cand_idx < count; cand_idx++) {
+      BlockingSetupResult result;
+      blocking_setup_checker_measure(checker, moves[cand_idx], &result);
+      full_values[cand_idx] =
+          base[cand_idx] +
+          double_to_equity((blocking_weight * result.blocking_delta) +
+                           (setup_weight * result.setup_delta));
+      if (full_values[cand_idx] > full_values[full_best]) {
+        full_best = cand_idx;
+      }
+    }
+    full_ns += ctimer_monotonic_ns() - start;
+    full_work += (long)count * num_racks;
+    // Without elimination the race is the full argmax.
+    blocking_setup_checker_load(checker, game, samples, 1);
+    const BlockingSetupRaceSettings exact = {.z = 0.0};
+    assert(blocking_setup_checker_choose(checker, moves, base, count,
+                                         blocking_weight, setup_weight, &exact,
+                                         NULL) == full_best);
+    for (int z_idx = 0; z_idx < num_z; z_idx++) {
+      const BlockingSetupRaceSettings race = {
+          .batch_racks = BLOCKING_SETUP_RACE_BATCH,
+          .min_racks = BLOCKING_SETUP_RACE_BATCH,
+          .z = z_list[z_idx]};
+      BlockingSetupRaceStats stats;
+      start = ctimer_monotonic_ns();
+      blocking_setup_checker_load(checker, game, samples, 1);
+      const int pick = blocking_setup_checker_choose(
+          checker, moves, base, count, blocking_weight, setup_weight, &race,
+          &stats);
+      race_ns[z_idx] += ctimer_monotonic_ns() - start;
+      race_work[z_idx] += stats.candidate_racks;
+      agree[z_idx] += pick == full_best;
+      const double regret =
+          equity_to_double(full_values[full_best] - full_values[pick]);
+      regret_sum[z_idx] += regret;
+      if (regret > regret_max[z_idx]) {
+        regret_max[z_idx] = regret;
+      }
+    }
+    positions++;
+  }
+  printf("blocking_setup_race positions=%ld racks=%d weights=%.3f,%.3f "
+         "full_ms_per_position=%.2f\n",
+         positions, num_racks, blocking_weight, setup_weight,
+         (double)full_ns / 1e6 / (double)positions);
+  for (int z_idx = 0; z_idx < num_z; z_idx++) {
+    printf("  z=%.2f agree=%.4f mean_regret=%.4f max_regret=%.3f "
+           "ms_per_position=%.2f speedup=%.2f work=%.3f\n",
+           z_list[z_idx], (double)agree[z_idx] / (double)positions,
+           regret_sum[z_idx] / (double)positions, regret_max[z_idx],
+           (double)race_ns[z_idx] / 1e6 / (double)positions,
+           (double)full_ns / (double)race_ns[z_idx],
+           (double)race_work[z_idx] / (double)full_work);
+  }
+  free(line);
+  (void)fclose(in);
+  blocking_setup_checker_destroy(checker);
+  blocking_setup_samples_destroy(samples);
+  move_list_destroy(list);
+  config_destroy(config);
+  string_splitter_destroy(z_values);
   string_splitter_destroy(fields);
 }

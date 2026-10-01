@@ -277,6 +277,14 @@ void run_test(const char *subtest) {
     blocking_setup_gen_run_spec(subtest + strlen("bsgen:"));
     return;
   }
+  if (has_prefix("bsrace:", subtest)) {
+    blocking_setup_race_run_spec(subtest + strlen("bsrace:"));
+    return;
+  }
+  if (has_prefix("bsbench:", subtest)) {
+    blocking_setup_bench_run_spec(subtest + strlen("bsbench:"));
+    return;
+  }
   if (has_prefix("blockingsetupreplay:", subtest)) {
     blocking_setup_replay_run_spec(subtest + strlen("blockingsetupreplay:"));
     return;
