@@ -6,23 +6,26 @@
 #   test/blocking_setup/games_study.sh <lexicon> <a> <b> <pairs> <out_dir> \
 #       <seed> [workers] [params.bsp] [racks] [pat]
 #
-# Analyze with games_analyze.py.
+# Z=<z> races the adjusted player's candidates (blocking_setup_checker_choose,
+# batches of BATCH racks, default 8); Z=0, the default, measures every
+# candidate. Analyze with games_analyze.py.
 set -eu
 lex="$1"; a="$2"; b="$3"; pairs="$4"; out="$5"; seed="$6"
 workers="${7:-8}"; params="${8:-}"; racks="${9:-}"; pat="${10:-}"
 bin="${BIN:-./bin/magpie_test}"
+z="${Z:-0}"; batch="${BATCH:-8}"
 mkdir -p "$out"
 if ls "$out"/w*.games.csv > /dev/null 2>&1; then
   echo "$out already has results; use a fresh directory" >&2
   exit 1
 fi
-extra=""
+extra=":z=$z:batch=$batch"
 if [ -n "$params" ]; then extra="$extra:params=$params"; fi
 if [ -n "$racks" ]; then extra="$extra:racks=$racks"; fi
 if [ -n "$pat" ]; then extra="$extra:pat=$pat"; fi
 {
   echo "lexicon=$lex a=$a b=$b pairs=$pairs seed=$seed workers=$workers"
-  echo "params=$params racks=$racks pat=$pat"
+  echo "params=$params racks=$racks pat=$pat z=$z batch=$batch"
   if [ -n "$params" ]; then
     echo "params_sha256=$(shasum -a 256 "$params" | cut -d' ' -f1)"
   fi
