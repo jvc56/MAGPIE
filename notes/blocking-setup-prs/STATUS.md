@@ -111,3 +111,8 @@ each recorded below with command, seeds, wall time, outputs.
 - Not yet tried: 16 racks + race, threads for evaluate-all, follow-up
   reconstruction when the reply changes. Confirmation run: not restarted;
   needs a decision on which evaluator mode (exact / z=3 / z=2) to confirm.
+- P5 prespecified confirmation (z=3 race, research 1.4/0.75, 64 racks, CSW24,
+  2,000 fresh pairs, seed 20261501, binary ea6d5b6a): 52.24% +- 0.65% vs
+  no-PAT static, 95% CI [50.97, 53.51], z=3.46, p=0.0005; spread +8.0 +- 1.15
+  per game; 39% of checked decisions changed; check median 71 ms with 8
+  workers. Equal-work vs static only. games_study.sh now takes Z=/BATCH=.
