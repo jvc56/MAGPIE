@@ -137,3 +137,20 @@ each recorded below with command, seeds, wall time, outputs.
   off-cost check + sim it/s (no-PAT/PAT/static-ish) -> NWL23 transfer
   -> paired 64 vs 96 racks -> PlayChooser sim pilot (static vs static-ish
   rollouts) if time allows.
+- P9 equity-weight grid (800 pairs/point vs equity 1.4/0.75, seed
+  20262101): no point beat the reference; best (1.4,0.4) 49.94% +- 1.0;
+  blocking 2.1 or setup 1.1 2-3 SE worse. P10 confirmation SKIPPED
+  (deviation recorded in ~/sources/bs-data/p10-confirm-tuned/SKIPPED):
+  the selected point did not beat the reference even in tuning.
+- Benchmarks (quiet machine): rollout wiring off-cost within noise
+  (11.97-12.19 s base vs 11.97-12.30 s new, 120k iterations). Sim it/s
+  (4-ply, 15 cands, 1 thread): no-PAT 10,457; PAT 6,911 (0.66x);
+  static-ish score 16 racks 10.1, 64 racks 6.1, equity 64 racks 4.2.
+- Code reorganized: #746 got notes-only commits (rack sweep, teacher
+  value); new draft PR #747 (claude/static-ish-rollouts, base #746): equity
+  teacher mode, BlockingSetupPolicy, SimArgs.rollout_blocking_setup,
+  -rbs/-rbsz/-rbsracks, params_b, tune_weights.sh, sim player in games.
+  Backup of the pre-split tip: local claude/static-ish-wip.
+- Queued: P11 NWL23 equity vs static, P13 CSW24 equity vs static, P12
+  equity 96 vs 64 racks, P14 equity vs PAT static, P15 equity vs 100 ms
+  2-ply sim, P16 gate (checks only bag<60) vs ungated.
