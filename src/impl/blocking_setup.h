@@ -1,6 +1,7 @@
 #ifndef BLOCKING_SETUP_H
 #define BLOCKING_SETUP_H
 
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -122,6 +123,48 @@ void blocking_setup_checker_load(BlockingSetupChecker *checker,
 void blocking_setup_checker_measure(BlockingSetupChecker *checker,
                                     const Move *candidate,
                                     BlockingSetupResult *result);
+
+// Picking only the best candidate (a rollout or static-ish policy) needs less
+// than measuring all of them (a list of every play's values). The race
+// measures the candidates in batches of racks, all on the same racks, and
+// after each batch drops any candidate whose adjusted value trails the
+// leader's by more than z standard errors of their paired per-rack
+// difference. Adjusted value = base equity + blocking_weight *
+// blocking_delta + setup_weight * setup_delta. With z <= 0 nothing is
+// dropped and the result is exactly the argmax of full measurements; with
+// z > 0 it is a different, faster policy whose choices can differ.
+enum {
+  BLOCKING_SETUP_RACE_BATCH = 8,
+};
+
+typedef struct BlockingSetupRaceSettings {
+  // Racks per batch; 0 for BLOCKING_SETUP_RACE_BATCH.
+  int batch_racks;
+  // Racks measured before the first elimination.
+  int min_racks;
+  // Elimination threshold in standard errors; <= 0 disables elimination.
+  double z;
+} BlockingSetupRaceSettings;
+
+typedef struct BlockingSetupRaceStats {
+  // Candidate-rack measurements made (num_candidates * racks without
+  // elimination).
+  int candidate_racks;
+  // Racks the survivors were measured on.
+  int racks;
+  int survivors;
+} BlockingSetupRaceStats;
+
+// Returns the index of the candidate with the highest adjusted value among
+// the race's survivors (ties to the earlier candidate). base_equities are
+// the candidates' equities without the checks. stats may be NULL.
+int blocking_setup_checker_choose(BlockingSetupChecker *checker,
+                                  const Move *const *candidates,
+                                  const Equity *base_equities,
+                                  int num_candidates, double blocking_weight,
+                                  double setup_weight,
+                                  const BlockingSetupRaceSettings *settings,
+                                  BlockingSetupRaceStats *stats);
 
 // The rack the on-turn player keeps after the move: placed tiles (blanks as
 // BLANK_MACHINE_LETTER) or exchanged tiles removed.
