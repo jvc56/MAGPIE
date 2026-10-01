@@ -1,0 +1,6 @@
+lexicon=NWL23 leaves=NWL23 games=360 seed=20261101 workers=8
+racks=16,64,256 ref_ms=10000 plies=4 wmp=true pat=NWL23
+binary_sha256=a7ac5227fa845582c1b4b2945ac9fd71739aec43b8c7ede1189ab8350b66b20b
+commit=6908554ca2b7cc9cf5d78897e7bb3b05f0cb5794
+started=2026-10-01T01:58:52Z
+finished=2026-10-01T02:16:08Z

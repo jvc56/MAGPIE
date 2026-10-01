@@ -1,0 +1,315 @@
+{
+ "objective": "sim_admission",
+ "racks": "r64",
+ "reference_selection": "A",
+ "reference_value": "B",
+ "biased_max": false,
+ "train": {
+  "n": 210,
+  "best_blocking_weight": 3.0,
+  "best_setup_weight": 0.0,
+  "mean_pp": 0.0033171533333332566,
+  "changed": 208
+ },
+ "validation": {
+  "n": 78,
+  "mean_pp": 0.0,
+  "se_pp": 0.0,
+  "t": NaN,
+  "changed": 76,
+  "bootstrap95": [
+   0.0,
+   0.0
+  ]
+ },
+ "grid": [
+  {
+   "blocking_weight": 0.0,
+   "setup_weight": 0.0,
+   "train_mean_pp": -0.004392266666666633,
+   "changed": 133
+  },
+  {
+   "blocking_weight": 0.0,
+   "setup_weight": 0.25,
+   "train_mean_pp": 0.0012422142857141964,
+   "changed": 186
+  },
+  {
+   "blocking_weight": 0.0,
+   "setup_weight": 0.5,
+   "train_mean_pp": 0.0015556609523809497,
+   "changed": 199
+  },
+  {
+   "blocking_weight": 0.0,
+   "setup_weight": 0.75,
+   "train_mean_pp": 0.0015981728571428482,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 0.0,
+   "setup_weight": 1.0,
+   "train_mean_pp": -0.011870784761904793,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 0.0,
+   "setup_weight": 1.5,
+   "train_mean_pp": -0.017592560952380983,
+   "changed": 208
+  },
+  {
+   "blocking_weight": 0.25,
+   "setup_weight": 0.0,
+   "train_mean_pp": -0.008227111428571474,
+   "changed": 181
+  },
+  {
+   "blocking_weight": 0.25,
+   "setup_weight": 0.25,
+   "train_mean_pp": -0.004479561904761993,
+   "changed": 187
+  },
+  {
+   "blocking_weight": 0.25,
+   "setup_weight": 0.5,
+   "train_mean_pp": -0.0041661152380952395,
+   "changed": 198
+  },
+  {
+   "blocking_weight": 0.25,
+   "setup_weight": 0.75,
+   "train_mean_pp": -0.01742930095238095,
+   "changed": 203
+  },
+  {
+   "blocking_weight": 0.25,
+   "setup_weight": 1.0,
+   "train_mean_pp": -0.017635072857142883,
+   "changed": 205
+  },
+  {
+   "blocking_weight": 0.25,
+   "setup_weight": 1.5,
+   "train_mean_pp": -0.017635072857142883,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 0.5,
+   "setup_weight": 0.0,
+   "train_mean_pp": -0.013948887619047664,
+   "changed": 197
+  },
+  {
+   "blocking_weight": 0.5,
+   "setup_weight": 0.25,
+   "train_mean_pp": -0.004479561904761993,
+   "changed": 198
+  },
+  {
+   "blocking_weight": 0.5,
+   "setup_weight": 0.5,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 203
+  },
+  {
+   "blocking_weight": 0.5,
+   "setup_weight": 0.75,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 206
+  },
+  {
+   "blocking_weight": 0.5,
+   "setup_weight": 1.0,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 0.5,
+   "setup_weight": 1.5,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 0.75,
+   "setup_weight": 0.0,
+   "train_mean_pp": -0.013906375714285765,
+   "changed": 202
+  },
+  {
+   "blocking_weight": 0.75,
+   "setup_weight": 0.25,
+   "train_mean_pp": -0.00887042000000008,
+   "changed": 202
+  },
+  {
+   "blocking_weight": 0.75,
+   "setup_weight": 0.5,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 205
+  },
+  {
+   "blocking_weight": 0.75,
+   "setup_weight": 0.75,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 206
+  },
+  {
+   "blocking_weight": 0.75,
+   "setup_weight": 1.0,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 0.75,
+   "setup_weight": 1.5,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 1.0,
+   "setup_weight": 0.0,
+   "train_mean_pp": -0.013906375714285765,
+   "changed": 205
+  },
+  {
+   "blocking_weight": 1.0,
+   "setup_weight": 0.25,
+   "train_mean_pp": -0.00887042000000008,
+   "changed": 205
+  },
+  {
+   "blocking_weight": 1.0,
+   "setup_weight": 0.5,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 1.0,
+   "setup_weight": 0.75,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 208
+  },
+  {
+   "blocking_weight": 1.0,
+   "setup_weight": 1.0,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 208
+  },
+  {
+   "blocking_weight": 1.0,
+   "setup_weight": 1.5,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 208
+  },
+  {
+   "blocking_weight": 1.4,
+   "setup_weight": 0.0,
+   "train_mean_pp": -0.01829723380952385,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 1.4,
+   "setup_weight": 0.25,
+   "train_mean_pp": -0.02213360571428579,
+   "changed": 206
+  },
+  {
+   "blocking_weight": 1.4,
+   "setup_weight": 0.5,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 208
+  },
+  {
+   "blocking_weight": 1.4,
+   "setup_weight": 0.75,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 209
+  },
+  {
+   "blocking_weight": 1.4,
+   "setup_weight": 1.0,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 209
+  },
+  {
+   "blocking_weight": 1.4,
+   "setup_weight": 1.5,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 209
+  },
+  {
+   "blocking_weight": 2.0,
+   "setup_weight": 0.0,
+   "train_mean_pp": -0.01850300571428578,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 2.0,
+   "setup_weight": 0.25,
+   "train_mean_pp": -0.02233937761904772,
+   "changed": 207
+  },
+  {
+   "blocking_weight": 2.0,
+   "setup_weight": 0.5,
+   "train_mean_pp": -0.02202593095238097,
+   "changed": 209
+  },
+  {
+   "blocking_weight": 2.0,
+   "setup_weight": 0.75,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 210
+  },
+  {
+   "blocking_weight": 2.0,
+   "setup_weight": 1.0,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 210
+  },
+  {
+   "blocking_weight": 2.0,
+   "setup_weight": 1.5,
+   "train_mean_pp": -0.02182015904761904,
+   "changed": 210
+  },
+  {
+   "blocking_weight": 3.0,
+   "setup_weight": 0.0,
+   "train_mean_pp": 0.0033171533333332566,
+   "changed": 208
+  },
+  {
+   "blocking_weight": 3.0,
+   "setup_weight": 0.25,
+   "train_mean_pp": -0.0005192185714286828,
+   "changed": 208
+  },
+  {
+   "blocking_weight": 3.0,
+   "setup_weight": 0.5,
+   "train_mean_pp": -0.00020577190476192949,
+   "changed": 209
+  },
+  {
+   "blocking_weight": 3.0,
+   "setup_weight": 0.75,
+   "train_mean_pp": 0.0,
+   "changed": 210
+  },
+  {
+   "blocking_weight": 3.0,
+   "setup_weight": 1.0,
+   "train_mean_pp": 0.0,
+   "changed": 209
+  },
+  {
+   "blocking_weight": 3.0,
+   "setup_weight": 1.5,
+   "train_mean_pp": 0.0,
+   "changed": 209
+  }
+ ]
+}
