@@ -2622,7 +2622,101 @@ static void pcd_pass_relative_checks(
   move_destroy(pass_move);
 }
 
+// Untimed candidate audit: PAT is used only to nominate root moves.
+// Frozen reference results remain separate; this runs no simulations.
+static void pcd_audit_pat_pool(const char *out_path) {
+  const char *in_path = getenv("PCD_IN");
+  const char *pat_name = getenv("PCD_PAT");
+  if (pat_name == NULL) {
+    pat_name = "CSW24";
+  }
+  assert(in_path != NULL);
+  FILE *in = fopen(in_path, "r");
+  FILE *out = fopen(out_path, "w");
+  assert(in != NULL && out != NULL);
+  char *settings = get_formatted_string(
+      "set -lex CSW24 -leaves CSW24 -wmp true -pat %s -s1 equity "
+      "-s2 equity -r1 all -r2 all -numplays 1 -threads 1",
+      pat_name);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  MoveList *static_moves = move_list_create(10000);
+  MoveList *pat_moves = move_list_create(10000);
+  fprintf(out,
+          "pos,model,pat_rank,static_rank,static_eq,pat_eq,pat_adj,move\n");
+  const long worker = ptg_env_long("PCD_WORKER", 0);
+  const long workers = ptg_env_long("PCD_NUM_WORKERS", 1);
+  assert(worker >= 0 && worker < workers);
+  char line[65536];
+  long input_idx = 0;
+  while (fgets(line, sizeof(line), in) != NULL) {
+    char *end = NULL;
+    const long pos = strtol(line, &end, 10);
+    if (end == line || *end != ',') {
+      continue;
+    }
+    if (input_idx++ % workers != worker) {
+      continue;
+    }
+    end[strcspn(end, "\r\n")] = '\0';
+    char *command = get_formatted_string("cgp %s", end + 1);
+    load_and_exec_config_or_die(config, command);
+    free(command);
+    Game *game = config_get_game(config);
+    const int on_turn = game_get_player_on_turn_index(game);
+    for (int seat = 0; seat < 2; seat++) {
+      player_set_pat_usage(game_get_player(game, seat), true, 0);
+    }
+    ptg_generate(game, static_moves, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, NULL,
+                 false, 0);
+    move_list_sort_moves(static_moves);
+    assert(player_get_pat(game_get_player(game, on_turn)) != NULL);
+    player_set_pat_usage(game_get_player(game, on_turn), false, 0);
+    ptg_generate(game, pat_moves, MOVE_RECORD_ALL, MOVE_SORT_EQUITY, 0, NULL,
+                 false, 0);
+    move_list_sort_moves(pat_moves);
+    assert(move_list_get_count(static_moves) == move_list_get_count(pat_moves));
+    int admitted = 0;
+    for (int pat_idx = 0;
+         pat_idx < move_list_get_count(pat_moves) && admitted < 25; pat_idx++) {
+      const Move *pat_move = move_list_get_move(pat_moves, pat_idx);
+      if (move_get_type(pat_move) == GAME_EVENT_PASS) {
+        continue;
+      }
+      int static_idx = 0;
+      while (static_idx < move_list_get_count(static_moves) &&
+             compare_moves_without_equity(
+                 pat_move, move_list_get_move(static_moves, static_idx),
+                 true) != -1) {
+        static_idx++;
+      }
+      assert(static_idx < move_list_get_count(static_moves));
+      const double static_eq = equity_to_double(
+          move_get_equity(move_list_get_move(static_moves, static_idx)));
+      const double pat_eq = equity_to_double(move_get_equity(pat_move));
+      StringBuilder *text = string_builder_create();
+      string_builder_add_ucgi_move(text, pat_move, game_get_board(game),
+                                   game_get_ld(game));
+      fprintf(out, "%ld,%s,%d,%d,%.6f,%.6f,%.6f,%s\n", pos, pat_name,
+              ++admitted, static_idx + 1, static_eq, pat_eq, pat_eq - static_eq,
+              string_builder_peek(text));
+      string_builder_destroy(text);
+    }
+    fflush(out);
+  }
+  move_list_destroy(pat_moves);
+  move_list_destroy(static_moves);
+  config_destroy(config);
+  fclose(out);
+  fclose(in);
+}
+
 void test_pat_candidate_diversity(void) {
+  const char *pat_audit_out = getenv("PCD_PAT_AUDIT_OUT");
+  if (pat_audit_out != NULL) {
+    pcd_audit_pat_pool(pat_audit_out);
+    return;
+  }
   const char *generate_out = getenv("PCD_GENERATE_OUT");
   if (generate_out != NULL) {
     pcd_generate_positions(generate_out);

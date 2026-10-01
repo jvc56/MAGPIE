@@ -1,0 +1,39 @@
+{
+  "kind": "Exploratory untimed nomination audit; no new simulations",
+  "models": [
+    "CSW24",
+    "CSW24_hsp"
+  ],
+  "N": 1600,
+  "root_pat_nominees": 25,
+  "rollout": "No rollouts run; reused references had no-PAT static rollouts",
+  "reference_limitation": "Old reference universe only; no evaluation of previously uncovered moves",
+  "sha256": {
+    "/Users/olaugh/sources/magpie-pat-simcmp/bin/magpie_test": "75550844ce64f8697c89cd62841dae997c5b7dbbe3fde042c16be13f532a33c8",
+    "/Users/olaugh/sources/magpie-pat-simcmp/notes/pat-seeded-pool-audit-20260930/combined.cgp": "567beb5d925f5338b283f896ee1c943d18c2409160d82db1776ea845ec3db824",
+    "/Users/olaugh/sources/magpie-pat-simcmp/data/strategy/CSW24.pat": "b3a862dbe22ab8c52ab077dcb7ef35334acb05301bddecd38bcdb7106b354d33",
+    "/Users/olaugh/sources/magpie-pat-simcmp/data/strategy/CSW24_hsp.pat": "5891655a8002974bea790e6536e91c6707c4966bee67189d473bac0d0b2bd6dc",
+    "run_pat_audit.py": "cc449116dccc429b68aebc305b7483acb17754a09ed5a7f5a06ed752aa59324d",
+    "analyze_pat_audit.py": "86482587a4f8559e533fa7f17c7d78cc9ac9ef66b501aa34efb60b03700855cb"
+  },
+  "pool_definition": "Union of 25 base nominees, 25 by static + wide blocking adjustment, 25 by static + wide setup adjustment, and up to 5 exchange quota nominees within 35 static points. Base is either no-PAT static or PAT. Shared blocking/setup sources use the original checked universe. Counts remain adaptive.",
+  "raw_signal_extras": "The earlier combined arm included additional top-five raw signals. They are excluded from BOTH pools in this literal three-source audit.",
+  "admission_validation": "Reconstructed static+blocking admissions match all 1600 saved threat_wide pools; static+setup matches all 1200 saved setup_wide pools.",
+  "inference": "Oracle potential using existing 60-second four-ply references, not selection performance or played-game strength. Maxima are noisy and the rare new winners were not independently validated.",
+  "coverage": "Current model has six uncovered nominees across three general positions. HSP has five across two. None in targeted blocking sample.",
+  "additive_option": "Keeping both static and PAT nominations avoids dropping static candidates but increases pool width; no selection sim was run on that additive pool.",
+  "validation": {
+    "CSW24": {
+      "positions": 1600,
+      "nominees": 40000,
+      "unique_moves_and_ranks": true,
+      "equity_identity": true
+    },
+    "CSW24_hsp": {
+      "positions": 1600,
+      "nominees": 40000,
+      "unique_moves_and_ranks": true,
+      "equity_identity": true
+    }
+  }
+}
