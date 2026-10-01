@@ -62,7 +62,9 @@
 //   games  Game pairs between two players (a= and b=, each "static", "pat",
 //          "adjusted" or "sim": a PlayChooser simulating sim_cands=
 //          candidates sim_plies= plies deep for sim_ms= per move, no-PAT
-//          static rollouts): both games of a pair use one seed, so each seat
+//          static rollouts; "nomsim" takes its root candidates from the
+//          nominator, see bss_player_t; sim_ms_b= gives player b its own
+//          budget): both games of a pair use one seed, so each seat
 //          draws the same tiles, and the players swap seats. "adjusted"
 //          plays argmax(static equity + blocking + setup adjustments) over
 //          the top universe= static moves and exch= exchanges, with weights
@@ -535,6 +537,11 @@ typedef enum {
   // A PlayChooser simulating its top candidates (no-PAT static rollouts)
   // for sim_ms per move.
   BSS_PLAYER_SIM,
+  // The same sim with root candidates from the nominator (sim_nomination.h):
+  // the top nom_static static moves, nom_block blocking and nom_setup setup
+  // nominees over a universe of nom_universe, and nom_exch exchanges, with
+  // the player's .bsp.
+  BSS_PLAYER_NOMSIM,
 } bss_player_t;
 
 static bss_player_t bss_parse_player(const char *name) {
@@ -549,6 +556,9 @@ static bss_player_t bss_parse_player(const char *name) {
   }
   if (strings_equal(name, "sim")) {
     return BSS_PLAYER_SIM;
+  }
+  if (strings_equal(name, "nomsim")) {
+    return BSS_PLAYER_NOMSIM;
   }
   log_fatal("unknown player %s", name);
   return BSS_PLAYER_STATIC;
@@ -566,6 +576,7 @@ typedef struct BSSPlayerState {
   BlockingSetupRaceSettings race;
   PlayChooser *chooser;
   Move *chosen;
+  SimNominationCandidateSource *nomination;
 } BSSPlayerState;
 
 static void bss_generate(const Game *game, MoveList *list, bool disable_pat) {
@@ -759,7 +770,27 @@ static void bss_games(const BSOptions *options) {
     state->num_racks = 0;
     state->chooser = NULL;
     state->chosen = NULL;
-    if (kinds[player_idx] == BSS_PLAYER_SIM) {
+    state->nomination = NULL;
+    if (kinds[player_idx] == BSS_PLAYER_NOMSIM) {
+      if (state->params == NULL) {
+        log_fatal("nomsim players need params=");
+      }
+      const SimNominationSettings settings = {
+          .static_count = (int)bs_options_get_long(options, "nom_static", 10),
+          .blocking_count = (int)bs_options_get_long(options, "nom_block", 5),
+          .setup_count = (int)bs_options_get_long(options, "nom_setup", 5),
+          .exchange_quota = (int)bs_options_get_long(options, "nom_exch", 3),
+          .exchange_margin = int_to_equity(BSS_DEFAULT_EXCHANGE_MARGIN),
+          .universe_count =
+              (int)bs_options_get_long(options, "nom_universe", 30),
+          .params = state->params,
+          .seed = bs_options_get_u64(options, "seed", 0) ^ UINT64_C(0x4e0b),
+      };
+      state->nomination = malloc_or_die(sizeof(SimNominationCandidateSource));
+      sim_nomination_candidate_source_init(state->nomination, &settings);
+    }
+    if (kinds[player_idx] == BSS_PLAYER_SIM ||
+        kinds[player_idx] == BSS_PLAYER_NOMSIM) {
       ErrorStack *error_stack = error_stack_create();
       config_load_win_pcts(config, error_stack);
       assert(error_stack_is_empty(error_stack));
@@ -768,7 +799,14 @@ static void bss_games(const BSOptions *options) {
           .pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM,
           .endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
           .fixed_seconds_per_move =
-              (double)bs_options_get_long(options, "sim_ms", 100) / 1000.0,
+              (double)bs_options_get_long(
+                  options,
+                  bss_player_key(options, player_idx, "sim_ms", "sim_ms_b"),
+                  100) /
+              1000.0,
+          .sim_candidates_fn =
+              state->nomination != NULL ? sim_nomination_candidates : NULL,
+          .sim_candidates_context = state->nomination,
           .sim_plies = (int)bs_options_get_long(options, "sim_plies", 2),
           .sim_max_candidates =
               (int)bs_options_get_long(options, "sim_cands", 15),
@@ -838,7 +876,8 @@ static void bss_games(const BSOptions *options) {
         const int bag = bag_get_letters(game_get_bag(game));
         const int lead = bss_lead(game);
         const int choice =
-            kinds[player_idx] == BSS_PLAYER_SIM
+            kinds[player_idx] == BSS_PLAYER_SIM ||
+                    kinds[player_idx] == BSS_PLAYER_NOMSIM
                 ? bss_sim_decide(&states[player_idx], game, &decision)
                 : bss_decide(
                       &states[player_idx], kinds[player_idx], game,
@@ -873,6 +912,10 @@ static void bss_games(const BSOptions *options) {
     if (states[player_idx].chooser != NULL) {
       play_chooser_destroy(states[player_idx].chooser);
       move_destroy(states[player_idx].chosen);
+    }
+    if (states[player_idx].nomination != NULL) {
+      sim_nomination_candidate_source_cleanup(states[player_idx].nomination);
+      free(states[player_idx].nomination);
     }
   }
   (void)fclose(games_out);
