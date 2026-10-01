@@ -446,21 +446,27 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
     *out_simulated = false;
   }
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
-  MoveList *move_list = play_chooser->move_list;
-  move_list_reset(move_list);
-  const MoveGenArgs gen_args = {
-      .game = game,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .move_list = move_list,
-      .tiles_played_bv = NULL,
-      .initial_tiles_bv = 0,
-  };
-  generate_moves(&gen_args);
+  const MoveList *move_list =
+      strategy->sim_candidates_fn != NULL
+          ? strategy->sim_candidates_fn(strategy->sim_candidates_context, game)
+          : NULL;
+  if (move_list == NULL) {
+    move_list_reset(play_chooser->move_list);
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        .move_list = play_chooser->move_list,
+        .tiles_played_bv = NULL,
+        .initial_tiles_bv = 0,
+    };
+    generate_moves(&gen_args);
+    move_list = play_chooser->move_list;
+  }
   const int num_candidates = move_list_get_count(move_list);
   if (num_candidates == 0) {
     return false;
