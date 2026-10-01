@@ -177,3 +177,16 @@ each recorded below with command, seeds, wall time, outputs.
 - Branches: #744 teacher (+speedups), #745 nomination, #746 studies,
   #747 claude/static-ish-rollouts (all draft). Local only:
   claude/static-ish-wip (backup), claude/bs-overlap-research (scratch).
+- 2026-10-01 morning (#747, commits 190a69c1..be4b8d07):
+  - teacher_value equity_reply: replies by equity, follow-ups by score.
+    P37 grid best 0.7/0.4; P38 confirm vs score 1.4/0.75 = 51.39%
+    (p=0.031, 2,000 pairs, fresh seed), and cheaper (50 vs 65 ms p50).
+    CSW24 only so far.
+  - Win-chance racing (race.win_pcts; bsstudy winpct=1; sim -rbswp true):
+    P39 vs points = 49.56% (p=0.51), spread -8.6. Null with points-tuned
+    weights.
+  - Fixed: sim workers kept a stale rollout policy (pointer compare), so
+    -rbsz/-rbsracks changes between sims were ignored and a reloaded -rbs
+    left freed params. Now compared by value.
+  - Next: replicate equity_reply 0.7/0.4 in NWL23 and FRA20; equity_reply
+    vs equity mode head-to-head.
