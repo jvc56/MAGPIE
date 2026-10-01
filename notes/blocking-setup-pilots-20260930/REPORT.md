@@ -149,3 +149,17 @@ Each rack count was tested as its own protocol, frozen before launch. Every run 
 - **Pattern.** Strength rises from 32 to about 96 racks, then levels off within noise.
 - **Cost.** The time per check grows only slowly with racks, because the race drops more candidates when each estimate is less noisy: 128 racks costs about 1.2× as much as 64.
 - **Timing caveat.** Builds ran during part of the 32-rack run.
+
+## P8 — teacher value: score vs equity (CSW24, prespecified head-to-heads)
+
+Both players are static-ish with 64 racks, race z = 3, and the research weights 1.4 / 0.75. The weights were chosen under score mode and were not refit. Player b is always the confirmed score-mode player from P5. Player a picks the opponent's reply and our follow-up by static equity (score plus leave, exchanges allowed, as a static player chooses), and values them as follows:
+
+| a's teacher_value | seed | a's score ± SE | 95% CI | p | a's spread / game | check median a / b |
+|---|---|---:|---|---:|---:|---:|
+| equity (chosen and valued by equity) | 20261901 | **51.76% ± 0.66%** | [50.47, 53.05] | 0.0073 | +2.6 | 91 / 72 ms |
+| equity_score (chosen by equity, valued in score) | 20262001 | 49.61% ± 0.65% | [48.33, 50.89] | 0.55 | −1.3 | 104 / 69 ms |
+
+- **Equity mode beats score mode head to head**, without any refitting.
+- **The gain needs valuing in equity, not just choosing by it.** Choosing replies and follow-ups by equity while still valuing them in score points does not differ from score mode.
+- **Speed cost is modest.** The equity modes run full searches with no lane reconstruction, and cost about 1.3–1.5× per check.
+- **Refitting is the next step.** The weights for equity mode should be refit, since the values now include leave.
