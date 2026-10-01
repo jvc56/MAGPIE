@@ -205,10 +205,13 @@ static void bsp_parse_row(BlockingSetupParams *params, const char *line,
       params->teacher_value = BLOCKING_SETUP_VALUE_EQUITY_SCORE;
     } else if (strings_equal(value, "equity")) {
       params->teacher_value = BLOCKING_SETUP_VALUE_EQUITY;
+    } else if (strings_equal(value, "equity_reply")) {
+      params->teacher_value = BLOCKING_SETUP_VALUE_EQUITY_REPLY;
     } else {
       bsp_push_error(error_stack, ERROR_STATUS_BSP_INVALID_ROW, params->name,
                      line_number,
-                     "teacher_value must be score, equity_score or equity");
+                     "teacher_value must be score, equity_score, equity or "
+                     "equity_reply");
     }
   } else if (strings_equal(key, "blocking_weight")) {
     params->has_blocking_weight =

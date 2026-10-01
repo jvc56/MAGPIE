@@ -20,9 +20,9 @@
 //   teacher_partition,<0|1>   disjoint rack deals
 //   teacher_condition_draws,<0|1>
 //   teacher_followup_draws,<int>
-//   teacher_value,<score|equity_score|equity>   (see blocking_setup_value_t)
-//   blocking_weight,<real>    default weights (required)
-//   setup_weight,<real>
+//   teacher_value,<score|equity_score|equity|equity_reply>   (see
+//   blocking_setup_value_t) blocking_weight,<real>    default weights
+//   (required) setup_weight,<real>
 //   bin,<min_bag>,<max_bag>,<min_lead>,<max_lead>,<blocking_weight>,
 //       <setup_weight>        optional conditional weights, inclusive ranges;
 //                             the first matching bin wins, else the defaults
@@ -47,12 +47,14 @@ typedef struct BlockingSetupParams BlockingSetupParams;
 // How the teacher picks and values the opponent's reply and our follow-up
 // (the teacher_value row): by score and in points (score, the default), by
 // static equity (score plus leave, exchanges allowed, as a static player
-// chooses) but valued in points (equity_score), or by and in static equity
-// (equity).
+// chooses) but valued in points (equity_score), by and in static equity
+// (equity), or the reply by and in static equity and the follow-up by score
+// and in points (equity_reply), so a setup does not count our leave again.
 typedef enum {
   BLOCKING_SETUP_VALUE_SCORE,
   BLOCKING_SETUP_VALUE_EQUITY_SCORE,
   BLOCKING_SETUP_VALUE_EQUITY,
+  BLOCKING_SETUP_VALUE_EQUITY_REPLY,
 } blocking_setup_value_t;
 
 // Picking only the best candidate needs less than measuring all of them.

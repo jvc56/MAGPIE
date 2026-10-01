@@ -421,8 +421,27 @@ static uint64_t candidate_lanes(const Board *board, const Move *candidate) {
   return lanes;
 }
 
-static bool checker_by_score(const BlockingSetupChecker *checker) {
-  return checker->value == BLOCKING_SETUP_VALUE_SCORE;
+// Whether a search picks the opponent's reply or our follow-up, which the
+// teacher modes may treat differently.
+typedef enum {
+  CHECKER_ROLE_REPLY,
+  CHECKER_ROLE_FOLLOWUP,
+} checker_role_t;
+
+// Whether plays in this role are chosen by score (else by static equity).
+static bool checker_by_score(const BlockingSetupChecker *checker,
+                             checker_role_t role) {
+  return checker->value == BLOCKING_SETUP_VALUE_SCORE ||
+         (checker->value == BLOCKING_SETUP_VALUE_EQUITY_REPLY &&
+          role == CHECKER_ROLE_FOLLOWUP);
+}
+
+// Whether plays in this role are valued in equity (else in score).
+static bool checker_valued_by_equity(const BlockingSetupChecker *checker,
+                                     checker_role_t role) {
+  return checker->value == BLOCKING_SETUP_VALUE_EQUITY ||
+         (checker->value == BLOCKING_SETUP_VALUE_EQUITY_REPLY &&
+          role == CHECKER_ROLE_REPLY);
 }
 
 // The best move for the player on turn's rack: by score, a tile placement
@@ -431,9 +450,10 @@ static bool checker_by_score(const BlockingSetupChecker *checker) {
 // when there is none (only a pass).
 static const Move *checker_best_placement(BlockingSetupChecker *checker,
                                           const Game *game, uint64_t lane_mask,
-                                          const Move *initial_best) {
+                                          const Move *initial_best,
+                                          checker_role_t role) {
   move_list_reset(checker->reply_list);
-  const bool by_score = checker_by_score(checker);
+  const bool by_score = checker_by_score(checker, role);
   assert(by_score || (lane_mask == 0 && initial_best == NULL));
   const MoveGenArgs args = {
       .game = game,
@@ -463,11 +483,11 @@ static const Move *checker_best_placement(BlockingSetupChecker *checker,
 
 // A reply's or follow-up's value in points under the checker's mode.
 static double checker_move_value(const BlockingSetupChecker *checker,
-                                 const Move *move) {
+                                 const Move *move, checker_role_t role) {
   if (move == NULL) {
     return 0.0;
   }
-  return equity_to_double(checker->value == BLOCKING_SETUP_VALUE_EQUITY
+  return equity_to_double(checker_valued_by_equity(checker, role)
                               ? move_get_equity(move)
                               : move_get_score(move));
 }
@@ -484,16 +504,17 @@ static const Move *checker_best_after_candidate(BlockingSetupChecker *checker,
                                                 const BestPlay *known) {
   // In the equity modes a play's equity can depend on the bag, which the
   // candidate changes, so nothing is reused.
-  if (!checker_by_score(checker) ||
+  if (!checker_by_score(checker, CHECKER_ROLE_FOLLOWUP) ||
       (known->exists &&
        !candidate_leaves_clear(candidate, &known->footprint))) {
-    return checker_best_placement(checker, game, 0, NULL);
+    return checker_best_placement(checker, game, 0, NULL,
+                                  CHECKER_ROLE_FOLLOWUP);
   }
   // Starting from the known play prunes every lane anchor that cannot
   // reach it, and ties resolve by compare_moves as in a full search.
   return checker_best_placement(
       checker, game, candidate_lanes(game_get_board(game), candidate),
-      known->exists ? &known->move : NULL);
+      known->exists ? &known->move : NULL, CHECKER_ROLE_FOLLOWUP);
 }
 
 // The opponent's best reply on game, which holds the candidate: the best
@@ -505,8 +526,8 @@ static const Move *checker_reply_after_candidate(BlockingSetupChecker *checker,
                                                  const Game *game,
                                                  const Move *candidate,
                                                  int rack_idx) {
-  if (!checker_by_score(checker)) {
-    return checker_best_placement(checker, game, 0, NULL);
+  if (!checker_by_score(checker, CHECKER_ROLE_REPLY)) {
+    return checker_best_placement(checker, game, 0, NULL, CHECKER_ROLE_REPLY);
   }
   const BestPlay *entries = checker->pass_reply_lists +
                             ((size_t)rack_idx * BLOCKING_SETUP_PASS_REPLIES);
@@ -514,7 +535,8 @@ static const Move *checker_reply_after_candidate(BlockingSetupChecker *checker,
   if (count == 0) {
     // No reply at all after the pass: only the candidate's lanes can hold one.
     return checker_best_placement(
-        checker, game, candidate_lanes(game_get_board(game), candidate), NULL);
+        checker, game, candidate_lanes(game_get_board(game), candidate), NULL,
+        CHECKER_ROLE_REPLY);
   }
   for (int entry_idx = 0; entry_idx < count; entry_idx++) {
     const BestPlay *entry = &entries[entry_idx];
@@ -524,17 +546,17 @@ static const Move *checker_reply_after_candidate(BlockingSetupChecker *checker,
     if (candidate_leaves_clear(candidate, &entry->footprint)) {
       return checker_best_placement(
           checker, game, candidate_lanes(game_get_board(game), candidate),
-          &entry->move);
+          &entry->move, CHECKER_ROLE_REPLY);
     }
   }
-  return checker_best_placement(checker, game, 0, NULL);
+  return checker_best_placement(checker, game, 0, NULL, CHECKER_ROLE_REPLY);
 }
 
 // Records game's best placement for the player on turn's current rack, with
 // its footprint on game's board.
 static void checker_record_best(BlockingSetupChecker *checker, const Game *game,
-                                BestPlay *best_play) {
-  const Move *best = checker_best_placement(checker, game, 0, NULL);
+                                BestPlay *best_play, checker_role_t role) {
+  const Move *best = checker_best_placement(checker, game, 0, NULL, role);
   best_play->exists = best != NULL;
   if (best != NULL) {
     move_copy(&best_play->move, best);
@@ -543,8 +565,8 @@ static void checker_record_best(BlockingSetupChecker *checker, const Game *game,
 }
 
 static double best_play_value(const BlockingSetupChecker *checker,
-                              const BestPlay *best_play) {
-  return best_play->exists ? checker_move_value(checker, &best_play->move)
+                              const BestPlay *best_play, checker_role_t role) {
+  return best_play->exists ? checker_move_value(checker, &best_play->move, role)
                            : 0.0;
 }
 
@@ -651,8 +673,8 @@ void blocking_setup_checker_load(BlockingSetupChecker *checker,
         player_get_rack(game_get_player(passed, 1 - checker->on_turn_index)),
         &samples->opponent_racks[rack_idx]);
     BestPlay *reply = &checker->pass_replies[rack_idx];
-    checker_record_best(checker, passed, reply);
-    if (checker_by_score(checker)) {
+    checker_record_best(checker, passed, reply, CHECKER_ROLE_REPLY);
+    if (checker_by_score(checker, CHECKER_ROLE_REPLY)) {
       checker_record_reply_list(checker, passed, rack_idx);
     }
     play_move(reply->exists ? &reply->move : checker->pass_move, passed, NULL);
@@ -798,7 +820,8 @@ static const BestPlay *checker_pass_followup(BlockingSetupChecker *checker,
       rack_copy(
           player_get_rack(game_get_player(passed, checker->on_turn_index)),
           followup);
-      checker_record_best(checker, passed, pass_followup);
+      checker_record_best(checker, passed, pass_followup,
+                          CHECKER_ROLE_FOLLOWUP);
     }
     pass_followup->known = true;
   }
@@ -821,7 +844,8 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
                                  const Game *candidate_board, int rack_idx,
                                  RackValues *values) {
   const BestPlay *pass_reply = &checker->pass_replies[rack_idx];
-  *values = (RackValues){.pass_reply = best_play_value(checker, pass_reply)};
+  *values = (RackValues){
+      .pass_reply = best_play_value(checker, pass_reply, CHECKER_ROLE_REPLY)};
   if (!state->is_placement) {
     // An exchange leaves the board as a pass does, and the opponent's reply
     // and our follow-up on it depend only on the board, the racks and the
@@ -834,7 +858,8 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
       checker_followup_rack(checker, rack_idx, state, draw_idx, &followup);
       const double score = best_play_value(
           checker,
-          checker_pass_followup(checker, state, rack_idx, draw_idx, &followup));
+          checker_pass_followup(checker, state, rack_idx, draw_idx, &followup),
+          CHECKER_ROLE_FOLLOWUP);
       values->pass_followup += score;
       values->candidate_followup += score;
     }
@@ -854,7 +879,8 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
     same_reply =
         pass_reply->exists && reply != NULL &&
         compare_moves_without_equity(reply, &pass_reply->move, true) == -1;
-    values->candidate_reply = checker_move_value(checker, reply);
+    values->candidate_reply =
+        checker_move_value(checker, reply, CHECKER_ROLE_REPLY);
     play_move(reply == NULL ? checker->pass_move : reply, after, NULL);
     values->terminal = game_over(after);
   }
@@ -864,7 +890,8 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
     checker_followup_rack(checker, rack_idx, state, draw_idx, &followup);
     const BestPlay *pass_followup =
         checker_pass_followup(checker, state, rack_idx, draw_idx, &followup);
-    values->pass_followup += best_play_value(checker, pass_followup);
+    values->pass_followup +=
+        best_play_value(checker, pass_followup, CHECKER_ROLE_FOLLOWUP);
     if (game_over(after)) {
       continue;
     }
@@ -873,8 +900,10 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
     const Move *best = same_reply && !game_over(passed)
                            ? checker_best_after_candidate(
                                  checker, after, state->move, pass_followup)
-                           : checker_best_placement(checker, after, 0, NULL);
-    values->candidate_followup += checker_move_value(checker, best);
+                           : checker_best_placement(checker, after, 0, NULL,
+                                                    CHECKER_ROLE_FOLLOWUP);
+    values->candidate_followup +=
+        checker_move_value(checker, best, CHECKER_ROLE_FOLLOWUP);
   }
 }
 
