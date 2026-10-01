@@ -109,6 +109,20 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
 // games of a pair share a seed and are not independent observations.
 void autoplay_results_add_game_pair(AutoplayResults *autoplay_results,
                                     const Game *game1, const Game *game2);
+
+// The positions recorder's "divergentpositions" mode, which keeps only each
+// game pair's first divergence: both games' positions at the first turn the
+// two games play different moves, or none for a pair played identically.
+//
+// The recorder cannot tell which turn that is when it records a position --
+// the second game's move is not chosen yet -- so in this mode it holds what it
+// records until the pair's play commits it (the first divergence) or discards
+// it (any other turn). Outside the mode, both are no-ops on a recorder that
+// keeps every position as it records it.
+bool autoplay_results_keeps_first_divergences(
+    const AutoplayResults *autoplay_results);
+void autoplay_results_commit_positions(AutoplayResults *autoplay_results);
+void autoplay_results_discard_positions(AutoplayResults *autoplay_results);
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary);
 
@@ -136,7 +150,8 @@ void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
 //                     actually differ -- and NOT a sample to run a test on,
 //                     since selecting it conditions on the outcome.
 //
-// The positions recorder (when active) writes "positions": each worker
+// The positions recorder (when active) writes "positions" -- every position,
+// or with "divergentpositions" only each pair's first divergence: each worker
 // thread accumulates its own captures, and consolidation renders all of them
 // into this recorder's share of the JSON, so they are *not* in game or turn
 // order -- each carries its own game and turn number.

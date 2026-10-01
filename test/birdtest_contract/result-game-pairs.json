@@ -1,5 +1,5 @@
 {
-  "claim_token": "1bb0ae7a-e9ee-436a-be4e-bc7b09236ead",
+  "claim_token": "dc6c8849-bcea-4a8b-b0d3-d43bb395a64f",
   "result": {
     "all_games": {
       "games": 4,
@@ -27,6 +27,184 @@
       "p1_score_sd": 93.392987,
       "p2_score_mean": 373.5,
       "p2_score_sd": 56.512535
-    }
+    },
+    "positions": [
+      {
+        "game_index": 0,
+        "turn_number": 0,
+        "rack": "HHIRRUV",
+        "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 HHIRRUV/AEFLMST 0/0 0",
+        "analysis": "static",
+        "num_moves": 79,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "8G HUH",
+            "score": 18,
+            "equity": 7.356,
+            "iterations": 0
+          },
+          {
+            "move": "8F HUH",
+            "score": 18,
+            "equity": 6.656,
+            "iterations": 0
+          },
+          {
+            "move": "8H HUH",
+            "score": 18,
+            "equity": 6.656,
+            "iterations": 0
+          },
+          {
+            "move": "(exch HIRUV)",
+            "score": 0,
+            "equity": 1.329,
+            "iterations": 0
+          },
+          {
+            "move": "(exch HIRRUV)",
+            "score": 0,
+            "equity": 1.14,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 0,
+        "rack": "HHIRRUV",
+        "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEFLMST/HHIRRUV 0/0 0",
+        "analysis": "static",
+        "num_moves": 79,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "8F HUH",
+            "score": 18,
+            "equity": 18.0,
+            "iterations": 0
+          },
+          {
+            "move": "8G HUH",
+            "score": 18,
+            "equity": 18.0,
+            "iterations": 0
+          },
+          {
+            "move": "8H HUH",
+            "score": 18,
+            "equity": 18.0,
+            "iterations": 0
+          },
+          {
+            "move": "8G HI",
+            "score": 10,
+            "equity": 10.0,
+            "iterations": 0
+          },
+          {
+            "move": "8G UH",
+            "score": 10,
+            "equity": 10.0,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 2,
+        "turn_number": 1,
+        "rack": "GGOSSV?",
+        "position": "15/15/15/15/15/15/15/3FARING6/15/15/15/15/15/15/15 GGOSSV?/AEEEHNR 0/28 0",
+        "analysis": "static",
+        "previous_move": "8D FARING",
+        "previous_move_score": 28,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "G7 V(I)GS",
+            "score": 14,
+            "equity": 47.434,
+            "iterations": 0
+          },
+          {
+            "move": "G7 V(I)G",
+            "score": 13,
+            "equity": 45.191,
+            "iterations": 0
+          },
+          {
+            "move": "G7 G(I)GS",
+            "score": 10,
+            "equity": 39.645,
+            "iterations": 0
+          },
+          {
+            "move": "F7 G(R)OGS",
+            "score": 11,
+            "equity": 39.336,
+            "iterations": 0
+          },
+          {
+            "move": "E8 (A)VOS",
+            "score": 14,
+            "equity": 38.653,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 3,
+        "turn_number": 1,
+        "rack": "GGOSSV?",
+        "position": "15/15/15/15/15/15/15/3FARING6/15/15/15/15/15/15/15 AEEEHNR/GGOSSV? 28/0 0",
+        "analysis": "static",
+        "previous_move": "8D FARING",
+        "previous_move_score": 28,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "F6 Ve(R)SOS",
+            "score": 18,
+            "equity": 18.0,
+            "iterations": 0
+          },
+          {
+            "move": "E7 G(A)VOtS",
+            "score": 18,
+            "equity": 18.0,
+            "iterations": 0
+          },
+          {
+            "move": "D8 (F)OGGy",
+            "score": 18,
+            "equity": 18.0,
+            "iterations": 0
+          },
+          {
+            "move": "F6 Ve(R)SO",
+            "score": 17,
+            "equity": 17.0,
+            "iterations": 0
+          },
+          {
+            "move": "F7 G(R)OVeS",
+            "score": 17,
+            "equity": 17.0,
+            "iterations": 0
+          }
+        ]
+      }
+    ]
   }
 }

@@ -1,6 +1,6 @@
 {
-  "claim_token": "b9f7157d-ae56-42fb-b3b9-3b8b21e29742",
-  "job_id": "06806f4d-685e-4c82-8065-9e00acbcb0de",
+  "claim_token": "31d0f216-5023-47c8-83df-3dcc96f8c4cf",
+  "job_id": "981fca54-39a3-4c3f-b2cc-eac082140f42",
   "task_request": {
     "job_type": "games",
     "variant": "classic",
@@ -10,6 +10,7 @@
     "num_games": 2,
     "game_pairs": false,
     "capture_positions": true,
+    "capture_first_divergence": false,
     "bingo_bonus": 50,
     "sim_cutoff": 0.005,
     "player1": {
@@ -130,5 +131,5 @@
     ],
     "derived": []
   },
-  "worker_uuid": "f2e6df73-6bb7-4283-8dac-6495c9205628"
+  "worker_uuid": "54f552b8-3038-4315-a4d9-67efc42be8b4"
 }

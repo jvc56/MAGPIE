@@ -1044,11 +1044,22 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
                       1 - starting_player_index, 2);
   }
   bool games_are_divergent = false;
+  // Positions recorded this turn are held until the comparison below says
+  // whether it is the pair's first divergence, and only that turn's are kept.
+  AutoplayResults *results = autoplay_worker->autoplay_results;
+  const bool keep_first_divergence =
+      game_runner2 && autoplay_results_keeps_first_divergences(results);
   while (true) {
+    // Each game's move, as that game's runner kept it after playing it.
+    // Not the pointer game_runner_play_move returns: a solved turn returns
+    // the worker's one solver buffer, which the other game's solve
+    // overwrites, so two solved turns compared as one move however
+    // differently they were played.
     const Move *move1 = NULL;
     bool game1_is_over = game_runner_is_game_over(game_runner1);
     if (!game1_is_over) {
-      move1 = game_runner_play_move(autoplay_worker, game_runner1);
+      game_runner_play_move(autoplay_worker, game_runner1);
+      move1 = &game_runner1->previous_move;
     }
 
     const Move *move2 = NULL;
@@ -1056,7 +1067,8 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
     if (game_runner2) {
       game2_is_over = game_runner_is_game_over(game_runner2);
       if (!game2_is_over) {
-        move2 = game_runner_play_move(autoplay_worker, game_runner2);
+        game_runner_play_move(autoplay_worker, game_runner2);
+        move2 = &game_runner2->previous_move;
       }
     }
 
@@ -1070,6 +1082,12 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
       games_are_divergent = true;
+      if (keep_first_divergence) {
+        autoplay_results_commit_positions(results);
+      }
+    }
+    if (keep_first_divergence) {
+      autoplay_results_discard_positions(results);
     }
   }
   game_runner_assess_overtime(autoplay_worker, game_runner1);
@@ -1245,6 +1263,15 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
         error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
         string_duplicate("the game pairs setting can only be used with the "
                          "games and positions recorders"));
+    return;
+  }
+  // A first divergence is a pair's: without pairs nothing would be kept.
+  if (autoplay_results_keeps_first_divergences(autoplay_results) &&
+      !args->use_game_pairs) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
+        string_duplicate("divergentpositions keeps each game pair's first "
+                         "divergence, so it needs game pairs (-gp true)"));
     return;
   }
 }

@@ -1327,7 +1327,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[2] = "leave,winpct 2000";
       text = "Runs the autoplay command with the specified recorder(s). If the "
              "game pairs option is set to true, autoplay will run <num_games> "
-             "game pairs resulting in a total of 2 * <num_games> games.";
+             "game pairs resulting in a total of 2 * <num_games> games. The "
+             "positions recorder keeps every position played; "
+             "divergentpositions, with game pairs, keeps only each pair's "
+             "first divergence: both games' positions at the first turn the "
+             "two games play different moves.";
       break;
     case ARG_TOKEN_CONTRIBUTE:
       usages[0] = "[<settings_path>]";
@@ -9264,8 +9268,24 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   config->shplies =
       json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED,
                       CONFIG_DEFAULT_SHPLIES);
-  autoplay_results_set_options(config->autoplay_results,
-                               capture_positions ? "games,positions" : "games",
+  // Or only each pair's first divergence. Refused where it means nothing
+  // rather than ignored: a games task has no pairs to diverge, and a task that
+  // captures nothing has nothing to narrow.
+  const bool capture_first_divergence =
+      json_get_bool_or(request, CONTRIBUTE_KEY_CAPTURE_FIRST_DIVERGENCE, false);
+  if (capture_first_divergence && (!game_pairs || !capture_positions)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        string_duplicate("server asked for first divergences on a task that "
+                         "is not a game_pairs task capturing positions"));
+    return NULL;
+  }
+  const char *recorders = "games";
+  if (capture_positions) {
+    recorders = capture_first_divergence ? "games,divergentpositions"
+                                         : "games,positions";
+  }
+  autoplay_results_set_options(config->autoplay_results, recorders,
                                error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;

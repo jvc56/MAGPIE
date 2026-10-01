@@ -64,6 +64,10 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_USE_INFERENCE "use_inference"
 #define CONTRIBUTE_KEY_TIME_LIMIT_SECS "time_limit_secs"
 #define CONTRIBUTE_KEY_CAPTURE_POSITIONS "capture_positions"
+// A game_pairs task with capture_positions: keep only each pair's first
+// divergence -- both games' positions at the first turn the two games play
+// different moves, and nothing from a pair played identically.
+#define CONTRIBUTE_KEY_CAPTURE_FIRST_DIVERGENCE "capture_first_divergence"
 #define CONTRIBUTE_KEY_NUM_PLAYS_RECORDED "num_plays_recorded"
 // Run-wide settings a request states once for the whole task rather than per
 // player: the bingo bonus (-bb) every job type scores with, and the

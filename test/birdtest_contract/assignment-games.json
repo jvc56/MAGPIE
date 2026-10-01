@@ -82,6 +82,7 @@
     "num_games": 10,
     "game_pairs": false,
     "capture_positions": false,
+    "capture_first_divergence": false,
     "bingo_bonus": 50,
     "sim_cutoff": 0.005,
     "player1": {

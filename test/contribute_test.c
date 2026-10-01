@@ -846,8 +846,10 @@ static void test_results_carry_every_key_the_server_reads(void) {
       BIRDTEST_RESULT_GAMES_FIXTURE,
       autoplay_results_get_json(config_get_autoplay_results(config), false));
 
-  // game_pairs: all_games, the pentanomial and the divergent subset.
-  load_and_exec_config_or_die(config, "autoplay games 2 -seed 3 -gp true");
+  // game_pairs: all_games, the pentanomial and the divergent subset, and each
+  // diverging pair's positions at its first divergence.
+  load_and_exec_config_or_die(
+      config, "autoplay games,divergentpositions 2 -seed 3 -gp true");
   assert_result_produces_fixture_keys(
       BIRDTEST_RESULT_GAME_PAIRS_FIXTURE,
       autoplay_results_get_json(config_get_autoplay_results(config), true));
@@ -900,6 +902,117 @@ static void test_results_carry_every_key_the_server_reads(void) {
                                       string_builder_peek(sb));
   string_builder_destroy(sb);
   error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// The board of a CGP: everything before its first space.
+static char *cgp_board(const char *cgp) {
+  const char *space = strchr(cgp, ' ');
+  assert(space);
+  const size_t length = (size_t)(space - cgp);
+  char *board = malloc_or_die(length + 1);
+  memcpy(board, cgp, length);
+  board[length] = '\0';
+  return board;
+}
+
+// Runs a paired autoplay keeping first divergences and checks what it kept:
+// for each pair whose games diverged, exactly two positions -- one per game,
+// at one turn, on one board with one rack to play from -- and from a pair
+// played identically, none. Returns how many positions were kept.
+static int assert_first_divergences(Config *config, const char *settings,
+                                    int pairs) {
+  load_and_exec_config_or_die(config, settings);
+  char *command = get_formatted_string(
+      "autoplay games,divergentpositions %d -seed 5 -gp true", pairs);
+  load_and_exec_config_or_die(config, command);
+  free(command);
+  ErrorStack *error_stack = error_stack_create();
+  JsonValue *result = json_parse(
+      autoplay_results_get_json(config_get_autoplay_results(config), true),
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *positions =
+      json_object_get(result, CONTRIBUTE_KEY_POSITIONS);
+  const int count = json_array_length(positions);
+  const int64_t divergent_games =
+      json_get_int(json_object_get(result, CONTRIBUTE_KEY_DIVERGENT_GAMES),
+                   CONTRIBUTE_KEY_GAMES, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  // Two per divergent pair, as the games are two per pair.
+  assert(count == divergent_games);
+
+  int *kept = calloc_or_die((size_t)pairs, sizeof(int));
+  int *turn = calloc_or_die((size_t)pairs, sizeof(int));
+  char **board = calloc_or_die((size_t)pairs, sizeof(char *));
+  char **rack = calloc_or_die((size_t)pairs, sizeof(char *));
+  bool *game_seen = calloc_or_die((size_t)pairs * 2, sizeof(bool));
+  for (int i = 0; i < count; i++) {
+    const JsonValue *position = json_array_get(positions, i);
+    const int game_index =
+        (int)json_get_int(position, CONTRIBUTE_KEY_GAME_INDEX, error_stack);
+    const int turn_number =
+        (int)json_get_int(position, CONTRIBUTE_KEY_TURN_NUMBER, error_stack);
+    const char *position_rack =
+        json_get_string(position, CONTRIBUTE_KEY_RACK, error_stack);
+    char *position_board = cgp_board(
+        json_get_string(position, CONTRIBUTE_KEY_POSITION, error_stack));
+    assert(error_stack_is_empty(error_stack));
+    assert(game_index >= 0 && game_index < pairs * 2);
+    // One position per game.
+    assert(!game_seen[game_index]);
+    game_seen[game_index] = true;
+    const int pair = game_index / 2;
+    if (kept[pair] == 0) {
+      turn[pair] = turn_number;
+      board[pair] = position_board;
+      rack[pair] = string_duplicate(position_rack);
+    } else {
+      // The other game of the pair: the same turn of the same position, the
+      // players to move in the two games holding the same tiles.
+      assert(turn[pair] == turn_number);
+      assert(strings_equal(board[pair], position_board));
+      assert(strings_equal(rack[pair], position_rack));
+      free(position_board);
+    }
+    kept[pair]++;
+  }
+  for (int pair = 0; pair < pairs; pair++) {
+    assert(kept[pair] == 0 || kept[pair] == 2);
+    free(board[pair]);
+    free(rack[pair]);
+  }
+  free(kept);
+  free(turn);
+  free(board);
+  free(rack);
+  free(game_seen);
+  json_destroy(result);
+  error_stack_destroy(error_stack);
+  return count;
+}
+
+// A game pair's first divergence: both games' positions at the first turn the
+// two games play different moves, and nothing else from the pair.
+static void test_a_pairs_first_divergence_is_both_games_at_one_turn(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -r1 best -r2 best -threads 1 "
+      "-maxnumdplays 3");
+  // Equity against score: nearly every pair diverges, at whatever turn the
+  // two first disagree.
+  assert(assert_first_divergences(config, "set -s1 equity -s2 score", 12) > 0);
+  // One static player against itself plays every pair identically, so
+  // nothing is kept: every turn's positions were held, and discarded.
+  assert(assert_first_divergences(config, "set -s1 equity -s2 equity", 6) == 0);
+
+  // A first divergence is a pair's, and it is the positions recorder in a
+  // second mode, not a second recorder.
+  assert_config_exec_status(config,
+                            "autoplay games,divergentpositions 2 -gp false",
+                            ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
+  assert_config_exec_status(
+      config, "autoplay games,positions,divergentpositions 2 -gp true",
+      ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS);
   config_destroy(config);
 }
 
@@ -2104,6 +2217,7 @@ void test_contribute(void) {
   test_contract_fixtures_carry_every_key_contribute_reads();
   test_results_carry_every_key_the_server_reads();
   test_capturing_positions_does_not_change_the_games();
+  test_a_pairs_first_divergence_is_both_games_at_one_turn();
   test_player_settings_do_not_leak_between_tasks();
   test_a_rewritten_klv_is_read_again();
   test_an_abandoned_temporary_is_removed();

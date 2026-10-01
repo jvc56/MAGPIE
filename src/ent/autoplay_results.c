@@ -81,6 +81,12 @@ typedef struct RecorderContext {
   double time_control_seconds[2];
   int overtime_penalty_points;
   double overtime_period_seconds;
+  // The positions recorder keeps only each game pair's first divergence: the
+  // two positions, one per game, at the first turn the pair's games play
+  // different moves. Set by the "divergentpositions" option. Until the pair's
+  // play says whether a turn is that one, its positions are held uncommitted
+  // (autoplay_results_commit_positions, autoplay_results_discard_positions).
+  bool positions_at_first_divergence;
 } RecorderContext;
 
 typedef struct Recorder Recorder;
@@ -1552,6 +1558,10 @@ typedef struct PositionsData {
   CapturedPosition *positions;
   int count;
   int capacity;
+  // positions[0, committed) are kept; positions[committed, count) are held
+  // until the caller commits or discards them. Every position is committed as
+  // it is recorded unless the run keeps only first divergences.
+  int committed;
 } PositionsData;
 
 // Shared across every worker thread's recorder, owned by the one created
@@ -1566,6 +1576,14 @@ static void positions_data_free_contents(PositionsData *data) {
     free(data->positions[i].plays);
   }
   data->count = 0;
+  data->committed = 0;
+}
+
+static void positions_data_discard_uncommitted(PositionsData *data) {
+  for (int i = data->committed; i < data->count; i++) {
+    free(data->positions[i].plays);
+  }
+  data->count = data->committed;
 }
 
 void positions_data_reset(Recorder *recorder) {
@@ -1584,6 +1602,7 @@ void positions_data_create(Recorder *recorder) {
   data->positions =
       malloc_or_die(sizeof(CapturedPosition) * (size_t)data->capacity);
   data->count = 0;
+  data->committed = 0;
   recorder->data = data;
 
   PositionsSharedData *shared_data = NULL;
@@ -1703,6 +1722,16 @@ static CapturedPlay *captured_plays_create(int needed, int *out_capacity) {
   return malloc_or_die(sizeof(CapturedPlay) * (size_t)capacity);
 }
 
+// A position is kept as soon as it is recorded, unless the run keeps only
+// first divergences: then it waits for the pair's play to say whether its turn
+// is the one.
+static void positions_data_commit_unless_held(Recorder *recorder) {
+  PositionsData *data = (PositionsData *)recorder->data;
+  if (!recorder->recorder_context->positions_at_first_divergence) {
+    data->committed = data->count;
+  }
+}
+
 void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   PositionsData *data = (PositionsData *)recorder->data;
   if (!args->move_list) {
@@ -1754,6 +1783,7 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
       captured_play_fill_from_solver(&position->plays[i], &solver->plays[i],
                                      game, ld);
     }
+    positions_data_commit_unless_held(recorder);
     return;
   }
 
@@ -1797,6 +1827,7 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
       captured_play_fill_from_move(&position->plays[i], move, game, ld);
     }
   }
+  positions_data_commit_unless_held(recorder);
 }
 
 static void write_captured_play(StringBuilder *sb, const CapturedPlay *play) {
@@ -1963,7 +1994,10 @@ void positions_data_consolidate(Recorder **recorder_list,
   bool any_written = false;
   for (int i = 0; i < recorder_list_size; i++) {
     const PositionsData *data = (const PositionsData *)recorder_list[i]->data;
-    for (int j = 0; j < data->count; j++) {
+    // Only what was kept: a pair still being played has nothing uncommitted
+    // by the time its results are consolidated, but held positions are never
+    // the run's.
+    for (int j = 0; j < data->committed; j++) {
       if (any_written) {
         string_builder_add_string(sb, ",");
       }
@@ -2033,6 +2067,8 @@ void autoplay_results_set_options_with_splitter(
   }
 
   uint64_t options = 0;
+  bool all_positions = false;
+  bool divergent_positions = false;
   for (int i = 0; i < number_of_options; i++) {
     const char *option_str = string_splitter_get_item(split_options, i);
     if (has_iprefix(option_str, "games")) {
@@ -2045,6 +2081,11 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
     } else if (has_iprefix(option_str, "positions")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_POSITION);
+      all_positions = true;
+    } else if (has_iprefix(option_str, "divergentpositions")) {
+      // The positions recorder, keeping only each pair's first divergence.
+      options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_POSITION);
+      divergent_positions = true;
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
@@ -2053,7 +2094,19 @@ void autoplay_results_set_options_with_splitter(
     }
   }
 
+  if (error_stack_is_empty(error_stack) && all_positions &&
+      divergent_positions) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
+        string_duplicate("positions and divergentpositions are two ways to "
+                         "run the same recorder; choose one"));
+  }
+
   if (error_stack_is_empty(error_stack)) {
+    // Stated by every options string, so one run's choice never carries into
+    // the next run's.
+    autoplay_results->recorder_context->positions_at_first_divergence =
+        divergent_positions;
     autoplay_results_set_options_int(autoplay_results, options, NULL);
   }
 }
@@ -2086,6 +2139,7 @@ RecorderContext *create_recorder_context(void) {
   recorder_context->time_control_seconds[1] = 0.0;
   recorder_context->overtime_penalty_points = 10;
   recorder_context->overtime_period_seconds = 60.0;
+  recorder_context->positions_at_first_divergence = false;
   return recorder_context;
 }
 
@@ -2237,6 +2291,29 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
     if (autoplay_results->recorders[i]) {
       recorder_add_game(autoplay_results->recorders[i], &args);
     }
+  }
+}
+
+bool autoplay_results_keeps_first_divergences(
+    const AutoplayResults *autoplay_results) {
+  return autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_POSITION] &&
+         autoplay_results->recorder_context->positions_at_first_divergence;
+}
+
+void autoplay_results_commit_positions(AutoplayResults *autoplay_results) {
+  Recorder *recorder =
+      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_POSITION];
+  if (recorder) {
+    PositionsData *data = (PositionsData *)recorder->data;
+    data->committed = data->count;
+  }
+}
+
+void autoplay_results_discard_positions(AutoplayResults *autoplay_results) {
+  Recorder *recorder =
+      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_POSITION];
+  if (recorder) {
+    positions_data_discard_uncommitted((PositionsData *)recorder->data);
   }
 }
 

@@ -1,46 +1,46 @@
 {
-  "claim_token": "b13aa89f-0d26-47b9-908a-b12383bc0f87",
+  "claim_token": "581ba3b9-ce56-49d0-9bf3-a58b735d7207",
   "result": {
     "racks": [
       {
         "rack": "BBBBBBB",
         "count": 90,
-        "mean": 6.655556
+        "mean": 8.444444
       },
       {
         "rack": "ABBBBBB",
-        "count": 142,
-        "mean": 18.267606
+        "count": 147,
+        "mean": 18.993197
       },
       {
         "rack": "AABBBBB",
-        "count": 175,
-        "mean": 25.114286
+        "count": 202,
+        "mean": 23.336634
       },
       {
         "rack": "AAABBBB",
-        "count": 199,
-        "mean": 24.934673
+        "count": 192,
+        "mean": 24.411458
       },
       {
         "rack": "AAAABBB",
-        "count": 179,
-        "mean": 24.597765
+        "count": 152,
+        "mean": 24.019737
       },
       {
         "rack": "AAAAABB",
-        "count": 136,
-        "mean": 24.691176
+        "count": 126,
+        "mean": 24.68254
       },
       {
         "rack": "AAAAAAB",
-        "count": 94,
-        "mean": 21.957447
+        "count": 84,
+        "mean": 21.464286
       },
       {
         "rack": "AAAAAAA",
-        "count": 61,
-        "mean": 14.386885
+        "count": 49,
+        "mean": 14.420408
       }
     ]
   }
