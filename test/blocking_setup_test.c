@@ -759,7 +759,9 @@ void blocking_setup_replay_run_spec(const char *spec) {
 // Times the teacher on a fixed set of positions and writes every result at
 // full precision, so speed changes can be checked to leave results
 // unchanged. Spec: "<positions.csv>:<out.csv>[:<racks>[:<universe>
-// [:<max_positions>]]]" with a bsgen positions file. Each position's
+// [:<max_positions>[:<flags>]]]]" with a bsgen positions file; flags may hold
+// "rackmajor" (blocking_setup_checker_measure_all) and "tables" (RIT and
+// WIT on). Each position's
 // universe is its top <universe> static non-pass moves plus up to five
 // exchanges within 35 points of the top move; the samples are dealt from a
 // seed fixed by the game index.
@@ -778,9 +780,16 @@ void blocking_setup_bench_run_spec(const char *spec) {
   const long max_positions =
       num_fields >= 5 ? strtol(string_splitter_get_item(fields, 4), NULL, 10)
                       : 1000000;
+  const char *flags =
+      num_fields >= 6 ? string_splitter_get_item(fields, 5) : "";
+  const bool rack_major = strstr(flags, "rackmajor") != NULL;
   Config *config = config_create_or_die(
-      "set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity "
-      "-r1 all -r2 all -numplays 1 -threads 1");
+      strstr(flags, "tables") != NULL
+          ? "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true "
+            "-wit true -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+            "-threads 1"
+          : "set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity "
+            "-r1 all -r2 all -numplays 1 -threads 1");
   MoveList *list = move_list_create(BST_MOVE_LIST_CAPACITY);
   BlockingSetupSamples *samples =
       blocking_setup_samples_create(num_racks, BST_POOL_CAPACITY);
@@ -842,9 +851,14 @@ void blocking_setup_bench_run_spec(const char *spec) {
     const int64_t start = ctimer_monotonic_ns();
     blocking_setup_checker_load(checker, game, samples, 1);
     BlockingSetupResult results[BST_MAX_UNIVERSE];
-    for (int cand_idx = 0; cand_idx < count; cand_idx++) {
-      blocking_setup_checker_measure(checker, universe_moves[cand_idx],
-                                     &results[cand_idx]);
+    if (rack_major) {
+      blocking_setup_checker_measure_all(checker, universe_moves, count,
+                                         results);
+    } else {
+      for (int cand_idx = 0; cand_idx < count; cand_idx++) {
+        blocking_setup_checker_measure(checker, universe_moves[cand_idx],
+                                       &results[cand_idx]);
+      }
     }
     total_ns += ctimer_monotonic_ns() - start;
     for (int cand_idx = 0; cand_idx < count; cand_idx++) {

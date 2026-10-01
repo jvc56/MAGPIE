@@ -208,8 +208,11 @@ struct BlockingSetupChecker {
   int on_turn_index;
   int bag_tiles;
   Game *base;
-  // The base board plus the candidate being measured.
+  // The base board plus the candidate being measured; and, for measuring
+  // several candidates rack by rack, one such board per candidate.
   Game *candidate_board;
+  Game **candidate_boards;
+  int candidate_board_capacity;
   Game *after;
   // One board per rack: our pass and that rack's best reply to it.
   Game **pass_replied;
@@ -250,6 +253,13 @@ static void checker_destroy_games(BlockingSetupChecker *checker) {
   game_destroy(checker->after);
   game_destroy(checker->candidate_board);
   checker->candidate_board = NULL;
+  for (int board_idx = 0; board_idx < checker->candidate_board_capacity;
+       board_idx++) {
+    game_destroy(checker->candidate_boards[board_idx]);
+  }
+  free(checker->candidate_boards);
+  checker->candidate_boards = NULL;
+  checker->candidate_board_capacity = 0;
   for (int rack_idx = 0; rack_idx < checker->pass_replied_capacity;
        rack_idx++) {
     game_destroy(checker->pass_replied[rack_idx]);
@@ -724,14 +734,29 @@ static void checker_prepare_candidate(BlockingSetupChecker *checker,
   state->leave_index = checker_leave_index(checker, &state->leave);
 }
 
-// Plays the candidate on the checker's candidate board, which each rack's
-// branch then starts from.
-static void checker_play_candidate(BlockingSetupChecker *checker,
-                                   const CandidateState *state) {
-  checker_copy_game(&checker->candidate_board, checker->base);
+// Plays the candidate on *board (the base board plus the candidate), which
+// each rack's branch then starts from.
+static void checker_play_candidate(const BlockingSetupChecker *checker,
+                                   const CandidateState *state, Game **board) {
+  checker_copy_game(board, checker->base);
   if (state->is_placement) {
-    play_move(state->move, checker->candidate_board, NULL);
+    play_move(state->move, *board, NULL);
   }
+}
+
+// Ensures one candidate board per candidate for count candidates.
+static void checker_ensure_candidate_boards(BlockingSetupChecker *checker,
+                                            int count) {
+  if (count <= checker->candidate_board_capacity) {
+    return;
+  }
+  checker->candidate_boards =
+      realloc_or_die(checker->candidate_boards, sizeof(Game *) * (size_t)count);
+  for (int board_idx = checker->candidate_board_capacity; board_idx < count;
+       board_idx++) {
+    checker->candidate_boards[board_idx] = NULL;
+  }
+  checker->candidate_board_capacity = count;
 }
 
 // The follow-up rack of rack_idx and draw_idx for the candidate's leave:
@@ -789,10 +814,11 @@ typedef struct RackValues {
   int terminal;
 } RackValues;
 
-// Measures one rack for the candidate on the checker's candidate board (see
-// checker_play_candidate).
+// Measures one rack for the candidate, whose board (see
+// checker_play_candidate) is candidate_board.
 static void checker_measure_rack(BlockingSetupChecker *checker,
-                                 const CandidateState *state, int rack_idx,
+                                 const CandidateState *state,
+                                 const Game *candidate_board, int rack_idx,
                                  RackValues *values) {
   const BestPlay *pass_reply = &checker->pass_replies[rack_idx];
   *values = (RackValues){.pass_reply = best_play_value(checker, pass_reply)};
@@ -814,7 +840,7 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
     }
     return;
   }
-  checker_copy_game(&checker->after, checker->candidate_board);
+  checker_copy_game(&checker->after, candidate_board);
   Game *after = checker->after;
   // Whether the candidate's board is the pass branch's plus the candidate:
   // the same reply, and one the candidate left intact.
@@ -857,7 +883,7 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
                                     BlockingSetupResult *result) {
   CandidateState state;
   checker_prepare_candidate(checker, candidate, &state);
-  checker_play_candidate(checker, &state);
+  checker_play_candidate(checker, &state, &checker->candidate_board);
   double pass_reply_sum = 0.0;
   double candidate_reply_sum = 0.0;
   double pass_followup_sum = 0.0;
@@ -866,7 +892,8 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
   const int num_racks = checker->samples->num_racks;
   for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
     RackValues values;
-    checker_measure_rack(checker, &state, rack_idx, &values);
+    checker_measure_rack(checker, &state, checker->candidate_board, rack_idx,
+                         &values);
     pass_reply_sum += values.pass_reply;
     candidate_reply_sum += values.candidate_reply;
     pass_followup_sum += values.pass_followup;
@@ -883,6 +910,57 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
   result->setup_delta =
       (candidate_followup_sum - pass_followup_sum) / num_followups;
   result->terminal_replies = terminal_replies;
+}
+
+void blocking_setup_checker_measure_all(BlockingSetupChecker *checker,
+                                        const Move *const *candidates,
+                                        int num_candidates,
+                                        BlockingSetupResult *results) {
+  CandidateState *states =
+      malloc_or_die(sizeof(CandidateState) * (size_t)num_candidates);
+  double *sums = calloc_or_die((size_t)num_candidates * 4, sizeof(double));
+  int *terminal = calloc_or_die((size_t)num_candidates, sizeof(int));
+  checker_ensure_candidate_boards(checker, num_candidates);
+  for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+    checker_prepare_candidate(checker, candidates[cand_idx], &states[cand_idx]);
+    checker_play_candidate(checker, &states[cand_idx],
+                           &checker->candidate_boards[cand_idx]);
+  }
+  const int num_racks = checker->samples->num_racks;
+  // Rack by rack: consecutive searches share the opponent's rack, so its
+  // rack-keyed movegen caches stay warm. Each candidate's sums still run
+  // over the racks in order, so results match blocking_setup_checker_measure.
+  for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+    for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+      RackValues values;
+      checker_measure_rack(checker, &states[cand_idx],
+                           checker->candidate_boards[cand_idx], rack_idx,
+                           &values);
+      double *candidate_sums = sums + ((size_t)cand_idx * 4);
+      candidate_sums[0] += values.pass_reply;
+      candidate_sums[1] += values.candidate_reply;
+      candidate_sums[2] += values.pass_followup;
+      candidate_sums[3] += values.candidate_followup;
+      terminal[cand_idx] += values.terminal;
+    }
+  }
+  const double racks = (double)num_racks;
+  const double num_followups = racks * checker->followup_draws;
+  for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+    const double *candidate_sums = sums + ((size_t)cand_idx * 4);
+    BlockingSetupResult *result = &results[cand_idx];
+    result->pass_reply_mean = candidate_sums[0] / racks;
+    result->candidate_reply_mean = candidate_sums[1] / racks;
+    result->blocking_delta = (candidate_sums[0] - candidate_sums[1]) / racks;
+    result->pass_followup_mean = candidate_sums[2] / num_followups;
+    result->candidate_followup_mean = candidate_sums[3] / num_followups;
+    result->setup_delta =
+        (candidate_sums[3] - candidate_sums[2]) / num_followups;
+    result->terminal_replies = terminal[cand_idx];
+  }
+  free(terminal);
+  free(sums);
+  free(states);
 }
 
 // One candidate's per-rack adjusted values in a race: rack_values[rack] is
@@ -936,6 +1014,11 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
     entry->pass_followup_sum = 0.0;
     entry->candidate_followup_sum = 0.0;
   }
+  checker_ensure_candidate_boards(checker, num_candidates);
+  for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+    checker_play_candidate(checker, &entries[cand_idx].state,
+                           &checker->candidate_boards[cand_idx]);
+  }
   const int batch = settings->batch_racks > 0 ? settings->batch_racks
                                               : BLOCKING_SETUP_RACE_BATCH;
   int alive = num_candidates;
@@ -944,15 +1027,17 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
   while (racks_done < num_racks && alive > 1) {
     const int end =
         racks_done + batch < num_racks ? racks_done + batch : num_racks;
-    for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
-      RaceEntry *entry = &entries[cand_idx];
-      if (!entry->alive) {
-        continue;
-      }
-      checker_play_candidate(checker, &entry->state);
-      for (int rack_idx = racks_done; rack_idx < end; rack_idx++) {
+    // Rack by rack within the batch (see blocking_setup_checker_measure_all).
+    for (int rack_idx = racks_done; rack_idx < end; rack_idx++) {
+      for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+        RaceEntry *entry = &entries[cand_idx];
+        if (!entry->alive) {
+          continue;
+        }
         RackValues values;
-        checker_measure_rack(checker, &entry->state, rack_idx, &values);
+        checker_measure_rack(checker, &entry->state,
+                             checker->candidate_boards[cand_idx], rack_idx,
+                             &values);
         entry->pass_reply_sum += values.pass_reply;
         entry->candidate_reply_sum += values.candidate_reply;
         entry->pass_followup_sum += values.pass_followup;

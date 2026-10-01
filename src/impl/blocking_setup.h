@@ -129,6 +129,15 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
                                     const Move *candidate,
                                     BlockingSetupResult *result);
 
+// Measures several candidates of the loaded position (results[i] for
+// candidates[i]) exactly as blocking_setup_checker_measure does, but rack by
+// rack across the candidates, so consecutive searches share racks and their
+// rack-keyed caches.
+void blocking_setup_checker_measure_all(BlockingSetupChecker *checker,
+                                        const Move *const *candidates,
+                                        int num_candidates,
+                                        BlockingSetupResult *results);
+
 // Picking only the best candidate (a rollout or static-ish policy) needs less
 // than measuring all of them (a list of every play's values); see
 // BlockingSetupRaceSettings in blocking_setup_params.h.
