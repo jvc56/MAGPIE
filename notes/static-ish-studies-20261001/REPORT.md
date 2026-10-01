@@ -1,5 +1,34 @@
 # Static-ish play studies — night of 2026-09-30 / 10-01
 
+## Summary
+
+Each result is a prespecified paired-game test with 2,000 pairs (≈ ±0.65 pp SE) unless noted. "Static-ish" means the top static placements and exchanges, re-ranked by static equity plus 1.4 × blocking + 0.75 × setup, with 64 racks and a race at z = 3.
+
+- **Against static** it wins in every lexicon tried, with CSW24-derived weights and no refitting:
+
+  | lexicon | mode | score vs static | p |
+  |---|---|---:|---:|
+  | CSW24 | score | 52.24% (P5) | 0.0005 |
+  | CSW24 | equity | 51.42% | 0.028 |
+  | NWL23 | score | 53.93% | <0.0001 |
+  | NWL23 | equity | 52.25% | 0.0003 |
+  | FRA20 | equity | 52.69% | <0.0001 |
+
+- **Against short sims** it wins at about equal time and with less time:
+  - vs a 100 ms 2-ply sim: 52.25%. That sim is no better than static: 50.70%.
+  - vs a 300 ms 2-ply sim, about 2.6× static-ish's time: 52.38%.
+- **Cheap configuration.** Checks only while the bag is below 30 and a universe of 30 cut the mean decision time from about 83 ms to 18 ms. Against static it scores 52.41% (P30), as strong as the full configuration. Head-to-head against full: P33, below.
+- **Rack count.** 64 racks is the floor: 32 is significantly worse (47.81% head to head), and 96 or 128 show no gain.
+- **Racing.** z = 3 is not detectably worse than exact evaluation (49.10%, p = 0.16) and is 3.4× cheaper.
+- **Teacher value.** Equity mode is a small, probably real gain over score mode: +0.87 ± 0.29 pp pooled, but heterogeneous across lexica and about 1.3× the time. The default remains score mode.
+- **Weights.** No point on a 3×3 grid beat 1.4 / 0.75 in equity mode.
+- **Nomination.** Nominated root candidates do not help a 300 ms sim at equal time (49.58%, 1,000 pairs).
+- **Rollouts.** Static-ish rollouts cost about 1,700× fewer sim iterations per second than static rollouts. They are not useful at any budget tested.
+
+All of these compare equal work against static play unless stated. The sim comparisons are short-budget 2-ply sims only.
+
+## Setup
+
 All runs use CSW24 unless a different lexicon is named. Each is a prespecified paired-game test: 2,000 fresh pairs, the same tiles for each seat within a pair, and seats swapped between the two games. The primary test is a two-sided z test of player a's mean pair score against 50% (α = 0.05), and every pair is included. Protocols are frozen in each directory's `PROTOCOL.json`, which also records the binary hash and commit.
 
 "Static-ish" means the `adjusted` player in `bsstudy:games`. It takes the top 60 no-PAT static placements plus up to 5 exchanges within 35 points, and plays the one with the highest static equity plus the weighted pass-relative blocking and setup deltas. The checks use 64 sampled racks and a race at z = 3, with the research weights 1.4 / 0.75 unless stated otherwise. The `.bsp` files used are in this directory.
@@ -118,3 +147,14 @@ At this short budget, nominating candidates by blocking and setup does not help 
 **Equity vs score, all head-to-heads.** Inverse-variance pooled over P8, P27, P19 and P29, equity mode is **+0.79 ± 0.32 pp** better (p = 0.015). The results are heterogeneous: Q = 8.5 on 3 df, p = 0.04, with NWL23 the outlier. Excluding P8, the result that prompted the follow-ups, the pooled gain is **+0.48 ± 0.37 pp (p = 0.19)**.
 
 At most, equity mode is a small improvement, and it is not established. It costs about 1.3× the time. The default stays score mode. A fresh-seed NWL23 replication (P32) is below.
+
+## Cheap configuration and NWL23 (P30–P32)
+
+| run | player a | player b | a's score | 95% CI | p | time per decision (a) |
+|---|---|---|---:|---|---:|---|
+| P30 | score, checks only while bag < 30, universe 30 | no-PAT static | **52.41% ± 0.46%** | [51.52, 53.31] | <0.0001 | **mean 18 ms** |
+| P31 (NWL23) | score static-ish, CSW24 weights | no-PAT static | **53.93% ± 0.66%** | [52.63, 55.22] | <0.0001 | median 66 ms |
+| P32 (NWL23) | equity teacher (replication of P19) | score teacher | 51.21% ± 0.64% | [49.96, 52.46] | 0.057 | median 87 / 67 ms |
+
+- **Cheap configuration (P30).** It does as well against static as the full configuration (P5, 52.24%) at about a fifth of the time. Its SE is smaller because the two games of a pair diverge less when the checks start late; the pair-level SE accounts for this.
+- **Equity vs score, all five head-to-heads (P8, P27, P19, P29, P32).** The inverse-variance pooled gain for equity is **+0.87 ± 0.29 pp** (p = 0.002), or +0.67 ± 0.32 pp (p = 0.04) excluding P8. By lexicon: CSW24 +1.32 ± 0.46, NWL23 +0.24 ± 0.45, FRA20 +1.28 ± 0.64. Equity mode is a small, probably real gain at about 1.3× the time.
