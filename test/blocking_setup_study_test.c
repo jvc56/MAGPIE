@@ -64,7 +64,8 @@
 //          plays argmax(static equity + blocking + setup adjustments) over
 //          the top universe= static moves and exch= exchanges, with weights
 //          from params= (its bins give conditional policies) and racks=
-//          sampled racks (default: the file's teacher_racks); z=<z> races
+//          sampled racks (default: the file's teacher_racks); player b
+//          uses params_b= when given; z=<z> races
 //          the candidates (blocking_setup_checker_choose; 0, the default,
 //          measures all) in batches of batch= racks. Writes
 //          <out>.games.csv and per-decision timing <out>.moves.csv.
@@ -100,8 +101,13 @@ static Config *bss_config_create(const BSOptions *options) {
   return config;
 }
 
+static BlockingSetupParams *bss_params_create_from(const char *path);
+
 static BlockingSetupParams *bss_params_create(const BSOptions *options) {
-  const char *path = bs_options_get(options, "params", NULL);
+  return bss_params_create_from(bs_options_get(options, "params", NULL));
+}
+
+static BlockingSetupParams *bss_params_create_from(const char *path) {
   if (path == NULL) {
     return NULL;
   }
@@ -610,6 +616,9 @@ static int bss_decide(BSSPlayerState *state, bss_player_t kind,
           blocking_setup_params_get_teacher_partition(state->params),
           blocking_setup_params_get_teacher_condition_draws(state->params),
           seed);
+      blocking_setup_checker_set_value(
+          state->checker,
+          blocking_setup_params_get_teacher_value(state->params));
       blocking_setup_checker_load(
           state->checker, game, state->samples,
           blocking_setup_params_get_teacher_followup_draws(state->params));
@@ -675,6 +684,9 @@ static double bss_game_score(int spread) {
 static void bss_games(const BSOptions *options) {
   Config *config = bss_config_create(options);
   BlockingSetupParams *params = bss_params_create(options);
+  // Player b may use other parameters (params_b=), e.g. another teacher_value.
+  BlockingSetupParams *params_b =
+      bss_params_create_from(bs_options_get(options, "params_b", NULL));
   const bss_player_t kinds[2] = {
       bss_parse_player(bs_options_require(options, "a")),
       bss_parse_player(bs_options_require(options, "b"))};
@@ -687,7 +699,7 @@ static void bss_games(const BSOptions *options) {
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     BSSPlayerState *state = &states[player_idx];
     state->list = move_list_create(BSS_MOVE_LIST_CAPACITY);
-    state->params = params;
+    state->params = player_idx == 1 && params_b != NULL ? params_b : params;
     state->universe =
         (int)bs_options_get_long(options, "universe", BSS_DEFAULT_UNIVERSE);
     state->exchanges =
@@ -705,11 +717,12 @@ static void bss_games(const BSOptions *options) {
     state->samples = NULL;
     state->checker = NULL;
     if (kinds[player_idx] == BSS_PLAYER_ADJUSTED) {
-      if (params == NULL) {
+      if (state->params == NULL) {
         log_fatal("adjusted players need params=");
       }
       state->num_racks = (int)bs_options_get_long(
-          options, "racks", blocking_setup_params_get_teacher_racks(params));
+          options, "racks",
+          blocking_setup_params_get_teacher_racks(state->params));
       state->samples =
           blocking_setup_samples_create(state->num_racks, BSS_POOL_CAPACITY);
       state->checker = blocking_setup_checker_create();
@@ -784,6 +797,7 @@ static void bss_games(const BSOptions *options) {
   (void)fclose(games_out);
   (void)fclose(moves_out);
   blocking_setup_params_destroy(params);
+  blocking_setup_params_destroy(params_b);
   config_destroy(config);
 }
 

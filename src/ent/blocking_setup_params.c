@@ -26,6 +26,7 @@ struct BlockingSetupParams {
   bool teacher_partition;
   bool teacher_condition_draws;
   int teacher_followup_draws;
+  blocking_setup_value_t teacher_value;
   bool has_blocking_weight;
   bool has_setup_weight;
   double blocking_weight;
@@ -197,6 +198,18 @@ static void bsp_parse_row(BlockingSetupParams *params, const char *line,
       bsp_push_error(error_stack, ERROR_STATUS_BSP_INVALID_ROW, params->name,
                      line_number, "teacher_followup_draws must be positive");
     }
+  } else if (strings_equal(key, "teacher_value")) {
+    if (strings_equal(value, "score")) {
+      params->teacher_value = BLOCKING_SETUP_VALUE_SCORE;
+    } else if (strings_equal(value, "equity_score")) {
+      params->teacher_value = BLOCKING_SETUP_VALUE_EQUITY_SCORE;
+    } else if (strings_equal(value, "equity")) {
+      params->teacher_value = BLOCKING_SETUP_VALUE_EQUITY;
+    } else {
+      bsp_push_error(error_stack, ERROR_STATUS_BSP_INVALID_ROW, params->name,
+                     line_number,
+                     "teacher_value must be score, equity_score or equity");
+    }
   } else if (strings_equal(key, "blocking_weight")) {
     params->has_blocking_weight =
         bsp_parse_double(value, params->name, line_number,
@@ -338,6 +351,11 @@ bool blocking_setup_params_get_teacher_condition_draws(
 int blocking_setup_params_get_teacher_followup_draws(
     const BlockingSetupParams *params) {
   return params->teacher_followup_draws;
+}
+
+blocking_setup_value_t
+blocking_setup_params_get_teacher_value(const BlockingSetupParams *params) {
+  return params->teacher_value;
 }
 
 int blocking_setup_params_get_num_bins(const BlockingSetupParams *params) {

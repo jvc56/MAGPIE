@@ -18,6 +18,14 @@ enum {
 #define DEFAULT_WIN_PCT_PREFIX "winpct_"
 // Given to -winpct, returns to that per-distribution default.
 #define DEFAULT_WIN_PCT_ARG "default"
+// Static-ish rollouts (the rbs options): the candidates the policy weighs
+// and its default race threshold (see BlockingSetupPolicySettings).
+enum {
+  DEFAULT_ROLLOUT_BLOCKING_SETUP_UNIVERSE = 60,
+  DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGES = 5,
+  DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGE_MARGIN = 35,
+};
+#define DEFAULT_ROLLOUT_BLOCKING_SETUP_Z 3.0
 #define COMMAND_FINISHED_KEYWORD "finished"
 #define COMMAND_RUNNING_KEYWORD "running"
 
