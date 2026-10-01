@@ -129,3 +129,23 @@ Remaining options, none tried yet:
 - It covers CSW24 only.
 - The weights are research choices, not fitted.
 - The exact (z = 0) policy was not confirmed.
+
+## P6/P7 — rack-count sweep at z = 3 (CSW24, each run prespecified)
+
+Each rack count was tested as its own protocol, frozen before launch. Every run used 2,000 fresh pairs on its own seed, with the same player as P5 except for the rack count. Each primary test is a two-sided z test against 50%.
+
+| racks | seed | score ± SE | 95% CI | p | spread / game | decisions changed | check median / mean (8 workers) | run |
+|---:|---|---:|---|---:|---:|---:|---:|---:|
+| 32 | 20261601 | 51.29% ± 0.65% | [50.01, 52.56] | 0.048 | +2.4 | 41.9% | 57 / 66 ms | 5.7 min |
+| 64 | 20261501 | 52.24% ± 0.65% | [50.97, 53.51] | 0.0005 | +8.0 | 39.3% | 71 / 83 ms | 7.2 min |
+| 96 | 20261701 | 53.55% ± 0.64% | [52.29, 54.81] | <0.0001 | +8.9 | 38.6% | 80 / 94 ms | 8.1 min |
+| 128 | 20261801 | 53.21% ± 0.65% | [51.93, 54.50] | <0.0001 | +8.5 | 38.0% | 86 / 103 ms | 8.9 min |
+
+- **Every rack count beats static at 5%.** The 32-rack run only just does.
+- **Comparisons between rack counts are descriptive.** The runs use different seeds and are unpaired, so the SE of any difference is about 0.9 pp:
+  - 64 → 96: +1.3 ± 0.9 pp
+  - 96 → 128: −0.3 ± 0.9 pp
+  - 32 → 128: +1.9 ± 0.9 pp
+- **Pattern.** Strength rises from 32 to about 96 racks, then levels off within noise.
+- **Cost.** The time per check grows only slowly with racks, because the race drops more candidates when each estimate is less noisy: 128 racks costs about 1.2× as much as 64.
+- **Timing caveat.** Builds ran during part of the 32-rack run.

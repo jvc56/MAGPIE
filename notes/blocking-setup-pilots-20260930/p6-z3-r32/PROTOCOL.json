@@ -1,0 +1,14 @@
+{
+  "kind": "Prespecified test: race-based static-ish evaluator with 32 racks (z=3) vs no-PAT static",
+  "frozen_utc": "2026-10-01T04:05:10Z",
+  "lexicon": "CSW24",
+  "player_a": "as P5 (top 60 placements + up to 5 exchanges within 35, weights 1.4/0.75, race z=3 in batches of 8 racks) but with 32 sampled racks instead of 64",
+  "player_b": "no-PAT static",
+  "pairs": 2000,
+  "seed": 20261601,
+  "seed_note": "fresh; P5 (64 racks) used 20261501",
+  "primary_test": "two-sided z test of mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "secondary": "comparison with P5 (64 racks) is descriptive: different seeds, unpaired, so the 64-vs-32 difference has SE ~ sqrt(2) x 0.65 pp; per-decision timing (other work ran on the machine during this run)",
+  "binary": "magpie_test_p5 (commit ea6d5b6a), sha256 64b22e270f0dac83d740bef7c792a87b78320d9eacadb068c3f91f505398dcf3",
+  "params_sha256": "750fe7945c38569be5abf13caa40ad2889d2cbbcb203988b699b4bdc7d343096"
+}
