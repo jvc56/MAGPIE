@@ -116,3 +116,11 @@ each recorded below with command, seeds, wall time, outputs.
   no-PAT static, 95% CI [50.97, 53.51], z=3.46, p=0.0005; spread +8.0 +- 1.15
   per game; 39% of checked decisions changed; check median 71 ms with 8
   workers. Equal-work vs static only. games_study.sh now takes Z=/BATCH=.
+- Rack sweep at z=3 (2,000 fresh pairs each vs no-PAT static, research
+  1.4/0.75): 32 racks 51.29% +- 0.65 (p=0.048); 64 52.24% +- 0.65; 96
+  53.55% +- 0.64; 128 53.21% +- 0.65. Unpaired across rack counts
+  (difference SE ~0.9 pp): rises to ~96 then flat within noise. Check
+  median 57/71/80/86 ms with 8 workers. Data ~/sources/bs-data/p6-*, p7-*;
+  notes committed locally on claude/blocking-setup-studies (04200dd6), not
+  pushed yet: that branch also has the unreviewed WIP rollout-policy commit
+  d827ce1d (SimArgs.rollout_blocking_setup, -rbs/-rbsz/-rbsracks).
