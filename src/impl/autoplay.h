@@ -3,6 +3,7 @@
 
 #include "../def/autoplay_defs.h"
 #include "../ent/autoplay_results.h"
+#include "../ent/autoplay_solver_settings.h"
 #include "../ent/game.h"
 #include "../ent/sim_args.h"
 #include "../ent/thread_control.h"
@@ -66,6 +67,16 @@ typedef struct AutoplayArgs {
   // Templates copied into each game runner, which supplies the per-game
   // timer and seed before constructing its choosers.
   PlayChooserStrategy play_chooser_strategies[2];
+  // Each player's endgame and pre-endgame solving (see
+  // AutoplaySolverSettings). Only AUTOPLAY_TYPE_DEFAULT reads them: a leavegen
+  // game ends before the bag is small enough for either solver.
+  AutoplaySolverSettings solver_settings[2];
+  // Threads every endgame and PEG solve uses: the run's own thread count, not
+  // the per-game share autoplay's multi-threading mode gives sims.
+  int solver_num_threads;
+  // Fraction of memory the run's one endgame transposition table takes,
+  // shared by every worker's endgame and PEG leaf solves.
+  double solver_tt_fraction_of_mem;
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,

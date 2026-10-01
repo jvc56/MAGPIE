@@ -1,19 +1,19 @@
 {
-  "claim_token": "df5b4e78-d5b5-4fbc-9be5-8317a685bb18",
-  "job_id": "f4ebe207-4bac-46d0-b72f-18508401a92b",
+  "claim_token": "b9f7157d-ae56-42fb-b3b9-3b8b21e29742",
+  "job_id": "06806f4d-685e-4c82-8065-9e00acbcb0de",
   "task_request": {
     "job_type": "games",
     "variant": "classic",
     "letter_distribution": "english",
     "board_layout": "standard15",
     "seed": "1",
-    "num_games": 1,
+    "num_games": 2,
     "game_pairs": false,
     "capture_positions": true,
     "bingo_bonus": 50,
     "sim_cutoff": 0.005,
     "player1": {
-      "name": "e2e-static-equity",
+      "name": "e2e-solving",
       "recorder_type": "best",
       "sort_strategy": "equity",
       "lexicon": "NWL23",
@@ -37,12 +37,23 @@
       "utility_w_spread": null,
       "utility_spread_scale": null,
       "win_pct_model": null,
-      "movegen_margin": 5.0
+      "movegen_margin": 5.0,
+      "endgame_plies": 2,
+      "peg_max_bag": 2,
+      "peg_stage_top_k": [
+        2
+      ],
+      "peg_scenario_stride": 1,
+      "peg_opp_model": "rational",
+      "peg_nested": false,
+      "peg_nested_cand_caps": null,
+      "peg_nested_max_depth": null,
+      "peg_nested_strides": null
     },
     "player2": {
-      "name": "e2e-static-score",
+      "name": "e2e-solving",
       "recorder_type": "best",
-      "sort_strategy": "score",
+      "sort_strategy": "equity",
       "lexicon": "NWL23",
       "leaves": "NWL23",
       "max_iterations": null,
@@ -64,7 +75,18 @@
       "utility_w_spread": null,
       "utility_spread_scale": null,
       "win_pct_model": null,
-      "movegen_margin": 5.0
+      "movegen_margin": 5.0,
+      "endgame_plies": 2,
+      "peg_max_bag": 2,
+      "peg_stage_top_k": [
+        2
+      ],
+      "peg_scenario_stride": 1,
+      "peg_opp_model": "rational",
+      "peg_nested": false,
+      "peg_nested_cand_caps": null,
+      "peg_nested_max_depth": null,
+      "peg_nested_strides": null
     }
   },
   "min_magpie_version": "0.1.1",
@@ -106,5 +128,5 @@
     ],
     "derived": []
   },
-  "worker_uuid": "b438f0fd-912d-4edf-9342-3b859895776d"
+  "worker_uuid": "f2e6df73-6bb7-4283-8dac-6495c9205628"
 }

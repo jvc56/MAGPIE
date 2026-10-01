@@ -29,6 +29,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/transposition_table.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
@@ -36,6 +37,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "autoplay_solvers.h"
 #include "gameplay.h"
 #include "play_chooser.h"
 #include "rack_list.h"
@@ -127,6 +129,9 @@ typedef struct AutoplaySharedData {
   cpthread_mutex_t iter_completed_mutex;
   ThreadControl *thread_control;
   LeavegenSharedData *leavegen_shared_data;
+  // The endgame transposition table every worker's endgame and PEG leaf solves
+  // share, or NULL when no player solves.
+  TranspositionTable *solver_tt;
 } AutoplaySharedData;
 
 typedef struct AutoplayIterOutput {
@@ -346,6 +351,12 @@ typedef struct AutoplayWorker {
   Rack nontarget_known_rack;
   Rack target_known_rack;
   MoveList *move_lists[2];
+  // Endgame and pre-endgame solving; NULL when no player solves.
+  AutoplaySolverCtx *solver_ctx;
+  // Whether a solver chose the move this turn, so the positions recorder takes
+  // the solver's analysis instead of the move list and sim results, which then
+  // describe an earlier turn.
+  bool turn_was_solved;
   // Whether the positions recorder is active for this run. A static player
   // otherwise only ever ranks the one move it plays; this asks it to keep the
   // whole ranked list instead, the same way a simming player already does.
@@ -400,6 +411,8 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->sim_results = NULL;
   autoplay_worker->inference_results = NULL;
   autoplay_worker->error_stack = NULL;
+  autoplay_worker->solver_ctx = NULL;
+  autoplay_worker->turn_was_solved = false;
 
   const bool any_player_sims =
       ap_args->p1_sim_args.num_plies > 0 || ap_args->p2_sim_args.num_plies > 0;
@@ -409,6 +422,12 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   // the legacy autoplay simmer.
   if (any_player_uses_play_chooser) {
     autoplay_worker->error_stack = error_stack_create();
+  }
+  if (shared_data->solver_tt) {
+    autoplay_worker->solver_ctx = autoplay_solver_ctx_create();
+    if (autoplay_worker->error_stack == NULL) {
+      autoplay_worker->error_stack = error_stack_create();
+    }
   }
   if (any_player_sims) {
     autoplay_worker->sim_results = sim_results_create(ap_args->cutoff);
@@ -436,6 +455,7 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   sim_ctx_destroy(autoplay_worker->sim_ctx);
   sim_results_destroy(autoplay_worker->sim_results);
   inference_results_destroy(autoplay_worker->inference_results);
+  autoplay_solver_ctx_destroy(autoplay_worker->solver_ctx);
   error_stack_destroy(autoplay_worker->error_stack);
   move_list_destroy(autoplay_worker->move_lists[0]);
   move_list_destroy(autoplay_worker->move_lists[1]);
@@ -504,6 +524,13 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
   cpthread_mutex_init(&shared_data->iter_completed_mutex);
   shared_data->thread_control = args->thread_control;
   shared_data->leavegen_shared_data = NULL;
+  shared_data->solver_tt = NULL;
+  if (args->type == AUTOPLAY_TYPE_DEFAULT &&
+      (autoplay_solver_settings_solves(&args->solver_settings[0]) ||
+       autoplay_solver_settings_solves(&args->solver_settings[1]))) {
+    shared_data->solver_tt =
+        transposition_table_create(args->solver_tt_fraction_of_mem);
+  }
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
@@ -511,6 +538,7 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
         forced_racks, num_forced_racks, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       prng_destroy(shared_data->prng);
+      transposition_table_destroy(shared_data->solver_tt);
       free(shared_data);
       return NULL;
     }
@@ -536,6 +564,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   }
   prng_destroy(shared_data->prng);
   leavegen_shared_data_destroy(shared_data->leavegen_shared_data);
+  transposition_table_destroy(shared_data->solver_tt);
   free(shared_data);
 }
 
@@ -749,6 +778,7 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
 
 const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                       GameRunner *game_runner) {
+  autoplay_worker->turn_was_solved = false;
   const int player_on_turn_index =
       game_get_player_on_turn_index(game_runner->game);
   PlayChooser *play_chooser = game_runner->play_choosers[player_on_turn_index];
@@ -771,6 +801,32 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
           game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
     }
     return &game_runner->play_chooser_move;
+  }
+  // The end of the game, for a player that solves it: the endgame once the bag
+  // is empty, the pre-endgame while it is small.
+  const AutoplaySolverSettings *solver_settings =
+      &autoplay_worker->args.solver_settings[player_on_turn_index];
+  if (autoplay_worker->solver_ctx &&
+      autoplay_solver_applies(solver_settings, game_runner->game)) {
+    ErrorStack *error_stack = autoplay_worker->error_stack;
+    const Move *solved = autoplay_solver_solve(
+        autoplay_worker->solver_ctx, solver_settings, game_runner->game,
+        autoplay_worker->shared_data->solver_tt,
+        autoplay_worker->args.solver_num_threads,
+        autoplay_solver_seed(game_runner->seed, game_runner->turn_number,
+                             player_on_turn_index),
+        autoplay_worker->captures_positions, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("autoplay worker %d failed to solve for player %d on turn %d "
+                "of game number %llu with seed %llu",
+                autoplay_worker->worker_index, player_on_turn_index + 1,
+                game_runner->turn_number + 1,
+                (unsigned long long)game_runner->game_number + 1,
+                (unsigned long long)game_runner->seed);
+    }
+    autoplay_worker->turn_was_solved = true;
+    return solved;
   }
   const SimArgs *sim_args = (player_on_turn_index == 0)
                                 ? &autoplay_worker->args.p1_sim_args
@@ -852,9 +908,14 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
           ->move_lists[game_get_player_on_turn_index(game_runner->game)],
       // Only when this player actually simmed: sim_results holds whatever the
       // last simulation produced, so passing it on a static player's turn
-      // would attribute the other player's analysis to this one.
-      (sim_args_for_player->num_plies > 0) ? autoplay_worker->sim_results
-                                           : NULL,
+      // -- or on a turn a solver decided -- would attribute another turn's
+      // analysis to this one.
+      (sim_args_for_player->num_plies > 0 && !autoplay_worker->turn_was_solved)
+          ? autoplay_worker->sim_results
+          : NULL,
+      autoplay_worker->turn_was_solved
+          ? autoplay_solver_get_analysis(autoplay_worker->solver_ctx)
+          : NULL,
       (int)game_runner->game_number, game_runner->pair_game_number,
       game_runner->turn_number, autoplay_worker->args.position_play_cap);
 
@@ -880,7 +941,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     const SimArgs *sim_args = (player_on_turn_index == 0)
                                   ? &autoplay_worker->args.p1_sim_args
                                   : &autoplay_worker->args.p2_sim_args;
-    if (sim_args->num_plies > 0 &&
+    if (sim_args->num_plies > 0 && !autoplay_worker->turn_was_solved &&
         !autoplay_worker->args.use_play_chooser[player_on_turn_index]) {
       char *sim_str = sim_results_get_string(
           game, autoplay_worker->sim_results, sim_args->max_num_display_plays,

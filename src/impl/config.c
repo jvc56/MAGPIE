@@ -23,6 +23,7 @@
 #include "../def/thread_control_defs.h"
 #include "../def/validated_move_defs.h"
 #include "../ent/autoplay_results.h"
+#include "../ent/autoplay_solver_settings.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
@@ -253,6 +254,21 @@ typedef enum {
   ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,
   ARG_TOKEN_P1_INFERENCE_MARGIN,
   ARG_TOKEN_P2_INFERENCE_MARGIN,
+  ARG_TOKEN_P1_ENDGAME_PLIES,
+  ARG_TOKEN_P2_ENDGAME_PLIES,
+  ARG_TOKEN_P1_PEG_MAX_BAG,
+  ARG_TOKEN_P2_PEG_MAX_BAG,
+  ARG_TOKEN_P1_PEG_TOP_K,
+  ARG_TOKEN_P2_PEG_TOP_K,
+  ARG_TOKEN_P1_PEG_STRIDE,
+  ARG_TOKEN_P2_PEG_STRIDE,
+  ARG_TOKEN_P1_PEG_PESSIMISTIC,
+  ARG_TOKEN_P2_PEG_PESSIMISTIC,
+  ARG_TOKEN_P1_PEG_NESTED,
+  ARG_TOKEN_P2_PEG_NESTED,
+  ARG_TOKEN_PEG_NESTED_CAND_CAPS,
+  ARG_TOKEN_PEG_NESTED_DEPTH,
+  ARG_TOKEN_PEG_NESTED_STRIDES,
   ARG_TOKEN_MULTI_THREADING_MODE,
   ARG_TOKEN_ANALYZE,
   ARG_TOKEN_VERSION,
@@ -321,6 +337,8 @@ struct Config {
   double p2_utility_w_spread;
   double p1_utility_spread_scale;
   double p2_utility_spread_scale;
+  // Each player's autoplay endgame and pre-endgame solving.
+  AutoplaySolverSettings solver_settings[2];
   WinPct *win_pcts;
   BoardLayout *board_layout;
   LetterDistribution *ld;
@@ -997,6 +1015,11 @@ char *str_api_fatal(Config *config,
 #define MAGPIE_VERSION "0.1.1"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
+
+const AutoplaySolverSettings *
+config_get_player_solver_settings(const Config *config, int player_index) {
+  return &config->solver_settings[player_index == 0 ? 0 : 1];
+}
 
 int config_get_player_sim_plies(const Config *config, int player_index) {
   return player_index == 0 ? config->p1_sim_plies : config->p2_sim_plies;
@@ -2322,6 +2345,82 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the maximum equity loss for an opponent's play when "
              "running an inference for player 1 or 2 during autoplay.";
       break;
+    case ARG_TOKEN_P1_ENDGAME_PLIES:
+    case ARG_TOKEN_P2_ENDGAME_PLIES:
+      usages[0] = "<plies>";
+      examples[0] = "0";
+      examples[1] = "6";
+      text = "Has player 1 or 2 solve the endgame during autoplay, to this "
+             "many plies, once the bag is empty. 0 (the default) turns off "
+             "both endgame and pre-endgame solving, since the pre-endgame "
+             "solver scores its emptier scenarios with endgame solves. No "
+             "time limit applies: the depth bounds the work. Unlike -eplies, "
+             "which sets the endgame command's depth, this changes how the "
+             "player plays.";
+      break;
+    case ARG_TOKEN_P1_PEG_MAX_BAG:
+    case ARG_TOKEN_P2_PEG_MAX_BAG:
+      usages[0] = "<bag_size>";
+      examples[0] = "0";
+      examples[1] = "4";
+      text = "Has player 1 or 2 solve the pre-endgame during autoplay while "
+             "the bag holds 1 to this many tiles (at most 4). 0 (the default) "
+             "turns it off, and so does -eplies1/-eplies2 0. The schedule is "
+             "-pegtopk1/2, -pegstride1/2, -pegpess1/2, -pegnested1/2, "
+             "-pegncaps, -pegndepth and -pegnstrides; no time limit applies.";
+      break;
+    case ARG_TOKEN_P1_PEG_TOP_K:
+    case ARG_TOKEN_P2_PEG_TOP_K:
+      usages[0] = "<count1>,<count2>,...";
+      examples[0] = "32,16,8,4,2";
+      text = "Per-stage survivor counts for player 1's or 2's autoplay "
+             "pre-endgame solves (see -pegtopk). Each count must be an "
+             "integer >= 2; the exhaustive 'all'/0 setting is not allowed "
+             "here. Defaults to 32,16,8,4,2.";
+      break;
+    case ARG_TOKEN_P1_PEG_STRIDE:
+    case ARG_TOKEN_P2_PEG_STRIDE:
+      usages[0] = "<stride>";
+      examples[0] = "1";
+      text = "Scenario-sampling stride for player 1's or 2's autoplay "
+             "pre-endgame solves (see -pegstride). Must be >= 1; 1 (the "
+             "default) is full enumeration.";
+      break;
+    case ARG_TOKEN_P1_PEG_PESSIMISTIC:
+    case ARG_TOKEN_P2_PEG_PESSIMISTIC:
+      usages[0] = "<true_or_false>";
+      examples[0] = "false";
+      text = "Opponent model for player 1's or 2's autoplay pre-endgame "
+             "solves (see -pegpess). Defaults to false (rational).";
+      break;
+    case ARG_TOKEN_P1_PEG_NESTED:
+    case ARG_TOKEN_P2_PEG_NESTED:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      text = "Nested lookahead for player 1's or 2's autoplay pre-endgame "
+             "solves (see -pegnested). Defaults to true.";
+      break;
+    case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
+      usages[0] = "<cap1>,<cap2>,...";
+      examples[0] = "8,4,2";
+      text = "Per-level candidate caps of the nested lookahead in both "
+             "players' autoplay pre-endgame solves. Each must be >= 1. "
+             "Defaults to 8,4,2.";
+      break;
+    case ARG_TOKEN_PEG_NESTED_DEPTH:
+      usages[0] = "<depth>";
+      examples[0] = "1";
+      text = "How many nested pre-endgames deep both players' autoplay "
+             "pre-endgame solves look before a greedy rollout, from 1 to 4. "
+             "Defaults to 1.";
+      break;
+    case ARG_TOKEN_PEG_NESTED_STRIDES:
+      usages[0] = "<bag1>,<bag2>,<bag3>,<bag4>";
+      examples[0] = "1,1,5,7";
+      text = "Scenario-sampling stride of an inner pre-endgame with a bag of "
+             "1, 2, 3 and 4 tiles, in both players' autoplay pre-endgame "
+             "solves. Each must be >= 1. Defaults to 1,1,5,7.";
+      break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
       usages[0] = "<mode>";
       examples[0] = MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING;
@@ -2494,6 +2593,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     static const arg_token_t game_analysis_opts[] = {
         ARG_TOKEN_CUTOFF,                  /* cutoff */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
+        ARG_TOKEN_P1_ENDGAME_PLIES,        /* eplies1 */
+        ARG_TOKEN_P2_ENDGAME_PLIES,        /* eplies2 */
         ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
         ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
         ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
@@ -2517,14 +2618,27 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
         ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
         ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
+        ARG_TOKEN_P1_PEG_MAX_BAG,          /* pegbag1 */
+        ARG_TOKEN_P2_PEG_MAX_BAG,          /* pegbag2 */
+        ARG_TOKEN_PEG_NESTED_CAND_CAPS,    /* pegncaps */
+        ARG_TOKEN_PEG_NESTED_DEPTH,        /* pegndepth */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
+        ARG_TOKEN_P1_PEG_NESTED,           /* pegnested1 */
+        ARG_TOKEN_P2_PEG_NESTED,           /* pegnested2 */
+        ARG_TOKEN_PEG_NESTED_STRIDES,      /* pegnstrides */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
         ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
         ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
+        ARG_TOKEN_P1_PEG_PESSIMISTIC,      /* pegpess1 */
+        ARG_TOKEN_P2_PEG_PESSIMISTIC,      /* pegpess2 */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
+        ARG_TOKEN_P1_PEG_STRIDE,           /* pegstride1 */
+        ARG_TOKEN_P2_PEG_STRIDE,           /* pegstride2 */
         ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
         ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
+        ARG_TOKEN_P1_PEG_TOP_K,            /* pegtopk1 */
+        ARG_TOKEN_P2_PEG_TOP_K,            /* pegtopk2 */
         ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
         ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
         ARG_TOKEN_PLIES,                   /* plies */
@@ -3464,6 +3578,153 @@ char *status_endgame(Config *config) {
 // config->peg_stage_top_k. Absent => leave the existing value (0 = built-in
 // default schedule). Each count must be an integer >= 2 (a stage re-ranks a
 // set, so a top-1 stage is meaningless).
+// Parses a comma-separated list of integers, each at least `min`, of 1 to
+// `max_count` items (exactly `max_count` when `exact`). Pushes an error naming
+// `what` and returns 0 on a malformed list; returns the count otherwise.
+static int config_parse_int_list(const char *value, int min, int max_count,
+                                 bool exact, const char *what, int *out,
+                                 ErrorStack *error_stack) {
+  StringSplitter *split = split_string(value, ',', true);
+  const int n = string_splitter_get_number_of_items(split);
+  if (n < 1 || n > max_count || (exact && n != max_count)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_INVALID_SOLVER_SETTINGS,
+        exact ? get_formatted_string("%s needs exactly %d comma-separated "
+                                     "values, got %d",
+                                     what, max_count, n)
+              : get_formatted_string("%s needs 1..%d comma-separated values, "
+                                     "got %d",
+                                     what, max_count, n));
+    string_splitter_destroy(split);
+    return 0;
+  }
+  for (int i = 0; i < n; i++) {
+    const char *item = string_splitter_get_item(split, i);
+    char *endptr = NULL;
+    const long parsed = strtol(item, &endptr, 10);
+    if (endptr == item || *endptr != '\0' || parsed < min || parsed > INT_MAX) {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_AUTOPLAY_INVALID_SOLVER_SETTINGS,
+                       get_formatted_string("%s values must be integers >= "
+                                            "%d; got '%s'",
+                                            what, min, item));
+      string_splitter_destroy(split);
+      return 0;
+    }
+    out[i] = (int)parsed;
+  }
+  string_splitter_destroy(split);
+  return n;
+}
+
+// The autoplay endgame and pre-endgame options: per player, plus the nested
+// lookahead knobs, which set both players. See AutoplaySolverSettings.
+static void config_load_solver_settings(Config *config,
+                                        ErrorStack *error_stack) {
+  static const arg_token_t plies_tokens[2] = {ARG_TOKEN_P1_ENDGAME_PLIES,
+                                              ARG_TOKEN_P2_ENDGAME_PLIES};
+  static const arg_token_t bag_tokens[2] = {ARG_TOKEN_P1_PEG_MAX_BAG,
+                                            ARG_TOKEN_P2_PEG_MAX_BAG};
+  static const arg_token_t top_k_tokens[2] = {ARG_TOKEN_P1_PEG_TOP_K,
+                                              ARG_TOKEN_P2_PEG_TOP_K};
+  static const arg_token_t stride_tokens[2] = {ARG_TOKEN_P1_PEG_STRIDE,
+                                               ARG_TOKEN_P2_PEG_STRIDE};
+  static const arg_token_t pess_tokens[2] = {ARG_TOKEN_P1_PEG_PESSIMISTIC,
+                                             ARG_TOKEN_P2_PEG_PESSIMISTIC};
+  static const arg_token_t nested_tokens[2] = {ARG_TOKEN_P1_PEG_NESTED,
+                                               ARG_TOKEN_P2_PEG_NESTED};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    AutoplaySolverSettings *settings = &config->solver_settings[player_index];
+    config_load_int(config, plies_tokens[player_index], 0, MAX_VARIANT_LENGTH,
+                    &settings->endgame_plies, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config_load_int(config, bag_tokens[player_index], 0, PEG_MAX_BAG,
+                    &settings->peg_max_bag, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    const char *top_k =
+        config_get_parg_value(config, top_k_tokens[player_index], 0);
+    if (top_k) {
+      int counts[AUTOPLAY_SOLVER_MAX_PEG_STAGES];
+      const int n = config_parse_int_list(
+          top_k, 2, AUTOPLAY_SOLVER_MAX_PEG_STAGES, false,
+          config->pargs[top_k_tokens[player_index]]->name, counts, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+      for (int i = 0; i < n; i++) {
+        settings->peg_stage_top_k[i] = counts[i];
+      }
+      settings->peg_num_stages = n;
+    }
+    config_load_int(config, stride_tokens[player_index], 1, INT_MAX,
+                    &settings->peg_scenario_stride, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config_load_bool(config, pess_tokens[player_index],
+                     &settings->peg_pessimistic, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config_load_bool(config, nested_tokens[player_index], &settings->peg_nested,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  const char *caps =
+      config_get_parg_value(config, ARG_TOKEN_PEG_NESTED_CAND_CAPS, 0);
+  if (caps) {
+    int values[AUTOPLAY_SOLVER_MAX_NESTED_CAND_CAPS];
+    const int n = config_parse_int_list(
+        caps, 1, AUTOPLAY_SOLVER_MAX_NESTED_CAND_CAPS, false,
+        config->pargs[ARG_TOKEN_PEG_NESTED_CAND_CAPS]->name, values,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    for (int player_index = 0; player_index < 2; player_index++) {
+      for (int i = 0; i < n; i++) {
+        config->solver_settings[player_index].peg_nested_cand_caps[i] =
+            values[i];
+      }
+      config->solver_settings[player_index].peg_nested_num_cand_caps = n;
+    }
+  }
+  int depth = 0;
+  if (config_get_parg_value(config, ARG_TOKEN_PEG_NESTED_DEPTH, 0)) {
+    config_load_int(config, ARG_TOKEN_PEG_NESTED_DEPTH, 1, PEG_MAX_BAG, &depth,
+                    error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->solver_settings[0].peg_nested_max_depth = depth;
+    config->solver_settings[1].peg_nested_max_depth = depth;
+  }
+  const char *strides =
+      config_get_parg_value(config, ARG_TOKEN_PEG_NESTED_STRIDES, 0);
+  if (strides) {
+    int values[PEG_MAX_BAG];
+    config_parse_int_list(strides, 1, PEG_MAX_BAG, true,
+                          config->pargs[ARG_TOKEN_PEG_NESTED_STRIDES]->name,
+                          values, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    for (int player_index = 0; player_index < 2; player_index++) {
+      for (int bag = 1; bag <= PEG_MAX_BAG; bag++) {
+        config->solver_settings[player_index].peg_nested_strides[bag] =
+            values[bag - 1];
+      }
+    }
+  }
+}
+
 static void config_load_peg_stage_top_k(Config *config,
                                         ErrorStack *error_stack) {
   const char *value = config_get_parg_value(config, ARG_TOKEN_PEG_TOP_K, 0);
@@ -3541,13 +3802,15 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*nested_cand_cap=*/0, PEG_NESTED_DEFAULT_CAND_CAPS,
       (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
             sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0])),
-      /*nested_stride=*/0, /*nested_emptier_ply_cap=*/0,
+      /*nested_stride=*/0, /*nested_strides_by_bag=*/NULL,
+      /*nested_n_strides_by_bag=*/0, /*nested_emptier_ply_cap=*/0,
       PEG_NESTED_DEFAULT_DEPTH, /*eval_bag_order=*/NULL,
       /*eval_bag_order_len=*/0, /*only_moves=*/NULL, /*n_only_moves=*/0,
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
-      /*on_scenario_done=*/NULL, /*user_data=*/NULL, /*poll=*/NULL, peg_args);
+      /*on_scenario_done=*/NULL, /*user_data=*/NULL, /*poll=*/NULL,
+      /*shared_endgame_tt=*/NULL, peg_args);
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -3833,6 +4096,13 @@ void config_fill_autoplay_args(const Config *config,
   }
   autoplay_args->overtime_penalty_points = config->overtime_penalty_points;
   autoplay_args->overtime_period_seconds = config->overtime_period_ms / 1000.0;
+  // Solving is per player, and every solve gets the run's whole thread count:
+  // the multi-threading mode below decides how autoplay shares threads
+  // between games and sims, not what a solve is given.
+  autoplay_args->solver_settings[0] = config->solver_settings[0];
+  autoplay_args->solver_settings[1] = config->solver_settings[1];
+  autoplay_args->solver_num_threads = config->num_threads;
+  autoplay_args->solver_tt_fraction_of_mem = config->tt_fraction_of_mem;
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
@@ -8081,6 +8351,9 @@ static void config_contribute_reset_player_settings(Config *config,
       CONFIG_DEFAULT_UTILITY_SPREAD_SCALE;
   *(p1 ? &config->p1_play_chooser_time_ms : &config->p2_play_chooser_time_ms) =
       -1.0;
+  // Solving off: a request turns it on per player, and a contributor's
+  // -eplies1 must not.
+  autoplay_solver_settings_set_defaults(&config->solver_settings[p1 ? 0 : 1]);
   config_load_record_type(config, MOVE_RECORD_BEST_STRING, player_index,
                           error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8105,11 +8378,35 @@ static void config_contribute_reset_player_settings(Config *config,
 static const char *const contribute_required_player_keys[] = {
     // The lexicon and leaves too: absent, the load kept whatever leaves were
     // loaded already -- another job's, or a leave task's fetched KLV.
-    CONTRIBUTE_KEY_PLAYER_LEXICON,     CONTRIBUTE_KEY_LEAVES,
-    CONTRIBUTE_KEY_RECORDER_TYPE,      CONTRIBUTE_KEY_SORT_STRATEGY,
-    CONTRIBUTE_KEY_NUM_PLIES,          CONTRIBUTE_KEY_NUM_PLAYS,
-    CONTRIBUTE_KEY_NUM_PLIES_RECORDED, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,
+    CONTRIBUTE_KEY_PLAYER_LEXICON,
+    CONTRIBUTE_KEY_LEAVES,
+    CONTRIBUTE_KEY_RECORDER_TYPE,
+    CONTRIBUTE_KEY_SORT_STRATEGY,
+    CONTRIBUTE_KEY_NUM_PLIES,
+    CONTRIBUTE_KEY_NUM_PLAYS,
+    CONTRIBUTE_KEY_NUM_PLIES_RECORDED,
+    CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,
     CONTRIBUTE_KEY_MOVEGEN_MARGIN,
+    // Whether the player solves endgames and pre-endgames, if only as 0:
+    // absent, a request would play whatever this build defaults to.
+    CONTRIBUTE_KEY_ENDGAME_PLIES,
+    CONTRIBUTE_KEY_PEG_MAX_BAG,
+};
+
+// The keys a player that runs PEG (peg_max_bag > 0) must state, and the ones
+// it must state as well when its nested lookahead is on. Stated exactly then:
+// a player that states one it does not use was built by a server that thinks
+// it runs, which is refused rather than guessed at.
+static const char *const contribute_peg_keys[] = {
+    CONTRIBUTE_KEY_PEG_STAGE_TOP_K,
+    CONTRIBUTE_KEY_PEG_SCENARIO_STRIDE,
+    CONTRIBUTE_KEY_PEG_OPP_MODEL,
+    CONTRIBUTE_KEY_PEG_NESTED,
+};
+static const char *const contribute_peg_nested_keys[] = {
+    CONTRIBUTE_KEY_PEG_NESTED_CAND_CAPS,
+    CONTRIBUTE_KEY_PEG_NESTED_MAX_DEPTH,
+    CONTRIBUTE_KEY_PEG_NESTED_STRIDES,
 };
 
 // The keys a simulating player must state as well. A static player never
@@ -8140,6 +8437,180 @@ static bool contribute_require_keys(const JsonValue *object,
     }
   }
   return true;
+}
+
+// Pushes an error naming the first of `keys` that `object` states (non-null)
+// although `what` says it must not, and returns false.
+static bool contribute_refuse_keys(const JsonValue *object,
+                                   const char *const *keys, int num_keys,
+                                   const char *what, ErrorStack *error_stack) {
+  for (int i = 0; i < num_keys; i++) {
+    const JsonValue *value = json_object_get(object, keys[i]);
+    if (value && !json_is_null(value)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string("server sent a %s with a %s", what, keys[i]));
+      return false;
+    }
+  }
+  return true;
+}
+
+// Reads an array of integers, each at least `min`, of 1 to `max_count`
+// elements (exactly `max_count` when `exact`), into `out`. Returns the count,
+// or pushes an error and returns 0.
+static int contribute_get_int_array(const JsonValue *object, const char *key,
+                                    int min, int max_count, bool exact,
+                                    int *out, ErrorStack *error_stack) {
+  const JsonValue *array = json_object_get(object, key);
+  const int n = json_is_array(array) ? json_array_length(array) : -1;
+  if (n < 1 || n > max_count || (exact && n != max_count)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string("server sent an invalid %s", key));
+    return 0;
+  }
+  for (int i = 0; i < n; i++) {
+    const int64_t value = json_array_get_int_or(array, i, INT64_MIN);
+    if (value < min || value > INT_MAX) {
+      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                       get_formatted_string("server sent an invalid %s", key));
+      return 0;
+    }
+    out[i] = (int)value;
+  }
+  return n;
+}
+
+// Applies a player's endgame and pre-endgame settings, on top of the reset's
+// "off". See AutoplaySolverSettings.
+static void config_contribute_apply_solver_settings(Config *config,
+                                                    const JsonValue *player,
+                                                    int player_index,
+                                                    ErrorStack *error_stack) {
+  AutoplaySolverSettings *settings = &config->solver_settings[player_index];
+  const int64_t plies =
+      json_get_int(player, CONTRIBUTE_KEY_ENDGAME_PLIES, error_stack);
+  const int64_t max_bag =
+      json_get_int(player, CONTRIBUTE_KEY_PEG_MAX_BAG, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (plies < 0 || plies > MAX_VARIANT_LENGTH) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an invalid endgame_plies: %lld",
+                             (long long)plies));
+    return;
+  }
+  if (max_bag < 0 || max_bag > PEG_MAX_BAG) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an invalid peg_max_bag: %lld",
+                             (long long)max_bag));
+    return;
+  }
+  // PEG scores its emptier scenarios with endgame solves, so a player that
+  // does not solve endgames cannot run it.
+  if (max_bag > 0 && plies == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     string_duplicate("server sent a player that runs the "
+                                      "pre-endgame without solving endgames"));
+    return;
+  }
+  settings->endgame_plies = (int)plies;
+  settings->peg_max_bag = (int)max_bag;
+  const int num_peg_keys =
+      sizeof(contribute_peg_keys) / sizeof(contribute_peg_keys[0]);
+  const int num_nested_keys = sizeof(contribute_peg_nested_keys) /
+                              sizeof(contribute_peg_nested_keys[0]);
+  if (max_bag == 0) {
+    contribute_refuse_keys(player, contribute_peg_keys, num_peg_keys,
+                           "player that does not run the pre-endgame",
+                           error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      contribute_refuse_keys(
+          player, contribute_peg_nested_keys, num_nested_keys,
+          "player that does not run the pre-endgame", error_stack);
+    }
+    return;
+  }
+  if (!contribute_require_keys(player, contribute_peg_keys, num_peg_keys,
+                               "pre-endgame player", error_stack)) {
+    return;
+  }
+  settings->peg_num_stages = contribute_get_int_array(
+      player, CONTRIBUTE_KEY_PEG_STAGE_TOP_K, 2, AUTOPLAY_SOLVER_MAX_PEG_STAGES,
+      false, settings->peg_stage_top_k, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const int64_t stride =
+      json_get_int(player, CONTRIBUTE_KEY_PEG_SCENARIO_STRIDE, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (stride < 1 || stride > INT_MAX) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an invalid peg_scenario_stride: %lld",
+                             (long long)stride));
+    return;
+  }
+  settings->peg_scenario_stride = (int)stride;
+  const char *opp_model =
+      json_get_string_or_null(player, CONTRIBUTE_KEY_PEG_OPP_MODEL);
+  if (strings_equal(opp_model, CONTRIBUTE_PEG_OPP_MODEL_RATIONAL)) {
+    settings->peg_pessimistic = false;
+  } else if (strings_equal(opp_model, CONTRIBUTE_PEG_OPP_MODEL_PESSIMISTIC)) {
+    settings->peg_pessimistic = true;
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an invalid peg_opp_model: %s",
+                             opp_model ? opp_model : "(not a string)"));
+    return;
+  }
+  settings->peg_nested =
+      json_get_bool_or(player, CONTRIBUTE_KEY_PEG_NESTED, false);
+  if (!settings->peg_nested) {
+    contribute_refuse_keys(player, contribute_peg_nested_keys, num_nested_keys,
+                           "player without nested lookahead", error_stack);
+    return;
+  }
+  if (!contribute_require_keys(player, contribute_peg_nested_keys,
+                               num_nested_keys, "nested pre-endgame player",
+                               error_stack)) {
+    return;
+  }
+  settings->peg_nested_num_cand_caps =
+      contribute_get_int_array(player, CONTRIBUTE_KEY_PEG_NESTED_CAND_CAPS, 1,
+                               AUTOPLAY_SOLVER_MAX_NESTED_CAND_CAPS, false,
+                               settings->peg_nested_cand_caps, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const int64_t depth =
+      json_get_int(player, CONTRIBUTE_KEY_PEG_NESTED_MAX_DEPTH, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (depth < 1 || depth > PEG_MAX_BAG) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "server sent an invalid peg_nested_max_depth: %lld",
+                         (long long)depth));
+    return;
+  }
+  settings->peg_nested_max_depth = (int)depth;
+  int strides[PEG_MAX_BAG];
+  contribute_get_int_array(player, CONTRIBUTE_KEY_PEG_NESTED_STRIDES, 1,
+                           PEG_MAX_BAG, true, strides, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  for (int bag = 1; bag <= PEG_MAX_BAG; bag++) {
+    settings->peg_nested_strides[bag] = strides[bag - 1];
+  }
 }
 
 // Applies one player's settings from a task request's "player1"/"player2"/
@@ -8358,6 +8829,9 @@ void config_contribute_apply_player_settings(Config *config,
     *utility_spread_scale =
         json_get_double_or(player, CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE, 1.0);
   }
+
+  config_contribute_apply_solver_settings(config, player, player_index,
+                                          error_stack);
 }
 
 // Resets the run-wide settings to MAGPIE's own defaults, for the same reason
@@ -10540,6 +11014,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         double_to_equity(p2_eq_margin_inference_double);
   }
 
+  config_load_solver_settings(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   const char *mtmode_str =
       config_get_parg_value(config, ARG_TOKEN_MULTI_THREADING_MODE, 0);
   if (mtmode_str) {
@@ -11924,6 +12403,21 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SAMPLING_RULE, "sa2", 1, 1);
   arg(ARG_TOKEN_P1_INFERENCE_MARGIN, "im1", 1, 1);
   arg(ARG_TOKEN_P2_INFERENCE_MARGIN, "im2", 1, 1);
+  arg(ARG_TOKEN_P1_ENDGAME_PLIES, "eplies1", 1, 1);
+  arg(ARG_TOKEN_P2_ENDGAME_PLIES, "eplies2", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_MAX_BAG, "pegbag1", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_MAX_BAG, "pegbag2", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_TOP_K, "pegtopk1", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_TOP_K, "pegtopk2", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_STRIDE, "pegstride1", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_STRIDE, "pegstride2", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_PESSIMISTIC, "pegpess1", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_PESSIMISTIC, "pegpess2", 1, 1);
+  arg(ARG_TOKEN_P1_PEG_NESTED, "pegnested1", 1, 1);
+  arg(ARG_TOKEN_P2_PEG_NESTED, "pegnested2", 1, 1);
+  arg(ARG_TOKEN_PEG_NESTED_CAND_CAPS, "pegncaps", 1, 1);
+  arg(ARG_TOKEN_PEG_NESTED_DEPTH, "pegndepth", 1, 1);
+  arg(ARG_TOKEN_PEG_NESTED_STRIDES, "pegnstrides", 1, 1);
   arg(ARG_TOKEN_MULTI_THREADING_MODE, "mtmode", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
@@ -12043,6 +12537,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_utility_spread_scale = config->utility_spread_scale;
   config->p1_eq_margin_inference = config->eq_margin_inference;
   config->p2_eq_margin_inference = config->eq_margin_inference;
+  autoplay_solver_settings_set_defaults(&config->solver_settings[0]);
+  autoplay_solver_settings_set_defaults(&config->solver_settings[1]);
   config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
   config->use_heat_map = false;
   config->print_boards = false;
@@ -12160,6 +12656,18 @@ void config_add_bool_setting_to_string_builder(const Config *config,
                                                bool value) {
   string_builder_add_formatted_string(
       sb, " -%s %s", config->pargs[arg_token]->name, value ? "true" : "false");
+}
+
+static void config_add_int_list_setting_to_string_builder(const Config *config,
+                                                          StringBuilder *sb,
+                                                          arg_token_t arg_token,
+                                                          const int *values,
+                                                          int count) {
+  string_builder_add_formatted_string(sb, " -%s ",
+                                      config->pargs[arg_token]->name);
+  for (int i = 0; i < count; i++) {
+    string_builder_add_formatted_string(sb, i > 0 ? ",%d" : "%d", values[i]);
+  }
 }
 
 void config_add_settings_to_string_builder(const Config *config,
@@ -12497,6 +13005,68 @@ void config_add_settings_to_string_builder(const Config *config,
             config, sb, arg_token,
             equity_to_double(config->p2_eq_margin_inference));
       }
+      break;
+    case ARG_TOKEN_P1_ENDGAME_PLIES:
+    case ARG_TOKEN_P2_ENDGAME_PLIES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          config->solver_settings[arg_token == ARG_TOKEN_P2_ENDGAME_PLIES]
+              .endgame_plies);
+      break;
+    case ARG_TOKEN_P1_PEG_MAX_BAG:
+    case ARG_TOKEN_P2_PEG_MAX_BAG:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          config->solver_settings[arg_token == ARG_TOKEN_P2_PEG_MAX_BAG]
+              .peg_max_bag);
+      break;
+    case ARG_TOKEN_P1_PEG_TOP_K:
+    case ARG_TOKEN_P2_PEG_TOP_K: {
+      const AutoplaySolverSettings *settings =
+          &config->solver_settings[arg_token == ARG_TOKEN_P2_PEG_TOP_K];
+      config_add_int_list_setting_to_string_builder(config, sb, arg_token,
+                                                    settings->peg_stage_top_k,
+                                                    settings->peg_num_stages);
+      break;
+    }
+    case ARG_TOKEN_P1_PEG_STRIDE:
+    case ARG_TOKEN_P2_PEG_STRIDE:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          config->solver_settings[arg_token == ARG_TOKEN_P2_PEG_STRIDE]
+              .peg_scenario_stride);
+      break;
+    case ARG_TOKEN_P1_PEG_PESSIMISTIC:
+    case ARG_TOKEN_P2_PEG_PESSIMISTIC:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          config->solver_settings[arg_token == ARG_TOKEN_P2_PEG_PESSIMISTIC]
+              .peg_pessimistic);
+      break;
+    case ARG_TOKEN_P1_PEG_NESTED:
+    case ARG_TOKEN_P2_PEG_NESTED:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          config->solver_settings[arg_token == ARG_TOKEN_P2_PEG_NESTED]
+              .peg_nested);
+      break;
+    // The nested knobs are one option for both players; player 1's values
+    // stand for both, as the option sets both.
+    case ARG_TOKEN_PEG_NESTED_CAND_CAPS:
+      config_add_int_list_setting_to_string_builder(
+          config, sb, arg_token,
+          config->solver_settings[0].peg_nested_cand_caps,
+          config->solver_settings[0].peg_nested_num_cand_caps);
+      break;
+    case ARG_TOKEN_PEG_NESTED_DEPTH:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token,
+          config->solver_settings[0].peg_nested_max_depth);
+      break;
+    case ARG_TOKEN_PEG_NESTED_STRIDES:
+      config_add_int_list_setting_to_string_builder(
+          config, sb, arg_token,
+          &config->solver_settings[0].peg_nested_strides[1], PEG_MAX_BAG);
       break;
     case ARG_TOKEN_MOVEGEN_MARGIN:
       if (config->eq_margin_movegen != 0) {

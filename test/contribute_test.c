@@ -6,6 +6,7 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_results.h"
+#include "../src/ent/autoplay_solver_settings.h"
 #include "../src/ent/bonus_square.h"
 #include "../src/ent/client_state.h"
 #include "../src/ent/data_filepaths.h"
@@ -554,6 +555,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
       CONTRIBUTE_KEY_INFERENCE_MARGIN,   CONTRIBUTE_KEY_UTILITY_W_WINPCT,
       CONTRIBUTE_KEY_UTILITY_W_SPREAD,   CONTRIBUTE_KEY_UTILITY_SPREAD_SCALE,
       CONTRIBUTE_KEY_WIN_PCT_MODEL,      CONTRIBUTE_KEY_MOVEGEN_MARGIN,
+      CONTRIBUTE_KEY_ENDGAME_PLIES,      CONTRIBUTE_KEY_PEG_MAX_BAG,
   };
   const int num_player_keys = sizeof(player_keys) / sizeof(player_keys[0]);
   assert_fixture_has_keys(json_object_get(request, CONTRIBUTE_KEY_PLAYER1),
@@ -685,6 +687,49 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
 // matched member by member against whichever produced element carries the
 // key, so a member only some elements have -- a captured position's
 // previous_move -- counts once any element produces it.
+// Whether `produced` has every key `fixture` has, at every depth, with the
+// same matching of array members as assert_produces_every_fixture_key.
+static bool produces_every_fixture_key(const JsonValue *fixture,
+                                       const JsonValue *produced) {
+  if (json_is_object(fixture)) {
+    if (!json_is_object(produced)) {
+      return false;
+    }
+    for (int i = 0; i < json_object_size(fixture); i++) {
+      const char *key = json_object_key_at(fixture, i);
+      const JsonValue *mine = json_object_get(produced, key);
+      if (!mine ||
+          !produces_every_fixture_key(json_object_get(fixture, key), mine)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (!json_is_array(fixture)) {
+    return true;
+  }
+  if (!json_is_array(produced)) {
+    return false;
+  }
+  for (int i = 0; i < json_array_length(fixture); i++) {
+    const JsonValue *element = json_array_get(fixture, i);
+    for (int k = 0; k < json_object_size(element); k++) {
+      const char *key = json_object_key_at(element, k);
+      bool found = false;
+      for (int j = 0; j < json_array_length(produced) && !found; j++) {
+        const JsonValue *mine =
+            json_object_get(json_array_get(produced, j), key);
+        found = mine &&
+                produces_every_fixture_key(json_object_get(element, key), mine);
+      }
+      if (!found) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 static void assert_produces_every_fixture_key(const JsonValue *fixture,
                                               const JsonValue *produced,
                                               const char *where) {
@@ -721,14 +766,30 @@ static void assert_produces_every_fixture_key(const JsonValue *fixture,
     const JsonValue *element = json_array_get(fixture, i);
     for (int k = 0; k < json_object_size(element); k++) {
       const char *key = json_object_key_at(element, k);
+      // Members differ in shape -- a captured position decided by a solver
+      // carries keys a static one does not -- so a member's key is matched
+      // against whichever produced member carries everything under it.
       const JsonValue *mine = NULL;
+      const JsonValue *any = NULL;
       for (int j = 0; j < json_array_length(produced) && !mine; j++) {
-        mine = json_object_get(json_array_get(produced, j), key);
+        const JsonValue *candidate =
+            json_object_get(json_array_get(produced, j), key);
+        if (candidate && !any) {
+          any = candidate;
+        }
+        if (candidate && produces_every_fixture_key(
+                             json_object_get(element, key), candidate)) {
+          mine = candidate;
+        }
       }
-      if (!mine) {
+      if (!any) {
         log_fatal("%s[]: birdtest's fixture has '%s', which no element of "
                   "MAGPIE's result does",
                   where, key);
+      }
+      if (!mine) {
+        // Recursing into the first that has it names what is missing.
+        mine = any;
       }
       char *path = get_formatted_string("%s[].%s", where, key);
       assert_produces_every_fixture_key(json_object_get(element, key), mine,
@@ -767,13 +828,17 @@ static void assert_result_produces_fixture_keys(const char *fixture_path,
 // every key those fixtures carry -- so a key renamed here fails this test
 // rather than every submission, which the server would refuse as malformed.
 static void test_results_carry_every_key_the_server_reads(void) {
+  // Both players solve their endgames and small pre-endgames, so the captured
+  // positions include solver analyses alongside the static turns before them.
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp false -s1 equity -s2 score -r1 best -r2 best "
-      "-threads 1 -maxnumdplays 5");
+      "-threads 1 -maxnumdplays 5 -eplies1 2 -eplies2 2 -pegbag1 2 -pegbag2 2 "
+      "-pegtopk1 2 -pegtopk2 2 -pegnested1 false -pegnested2 false");
 
   // games, with capture on: the game recorder and the positions recorder,
-  // together, as config_contribute_games asks for them.
-  load_and_exec_config_or_die(config, "autoplay games,positions 2 -seed 3");
+  // together, as config_contribute_games asks for them. Four games, so a
+  // pre-endgame turn comes up.
+  load_and_exec_config_or_die(config, "autoplay games,positions 4 -seed 3");
   assert_result_produces_fixture_keys(
       BIRDTEST_RESULT_GAMES_FIXTURE,
       autoplay_results_get_json(config_get_autoplay_results(config), false));
@@ -983,7 +1048,8 @@ static void test_a_player_must_state_every_setting(void) {
       "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "
+      "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
       error_stack);
   assert(error_stack_is_empty(error_stack));
   config_contribute_apply_player_settings(config, static_player, 0,
@@ -995,7 +1061,8 @@ static void test_a_player_must_state_every_setting(void) {
       "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": null, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "
+      "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
       error_stack);
   assert(error_stack_is_empty(error_stack));
   config_contribute_apply_player_settings(config, no_plays, 0, error_stack);
@@ -1007,7 +1074,8 @@ static void test_a_player_must_state_every_setting(void) {
       "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 2, \"num_plays\": 100, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "
+      "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
       error_stack);
   assert(error_stack_is_empty(error_stack));
   config_contribute_apply_player_settings(config, bare_simmer, 0, error_stack);
@@ -1020,7 +1088,8 @@ static void test_a_player_must_state_every_setting(void) {
       "{\"lexicon\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0}",
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "
+      "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
       error_stack);
   assert(error_stack_is_empty(error_stack));
   config_contribute_apply_player_settings(config, no_leaves, 0, error_stack);
@@ -1655,7 +1724,331 @@ static void test_a_high_byte_is_not_a_bonus_square(void) {
   assert(!bonus_square_is_invalid(bonus_square_from_char('=')));
 }
 
+// A static player's games are a function of the seed alone, whatever the thread
+// count: birdtest relies on it for redundancy and game pairs. Simulating and
+// solving players are multithreaded and make no such promise; this pins that
+// adding the solvers did not disturb the static case.
+static void test_static_games_are_identical_across_thread_counts(void) {
+  const int thread_counts[] = {1, 2, 8};
+  char *first = NULL;
+  for (size_t i = 0; i < sizeof(thread_counts) / sizeof(thread_counts[0]);
+       i++) {
+    char *settings = get_formatted_string(
+        "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+        "-threads %d",
+        thread_counts[i]);
+    Config *config = config_create_or_die(settings);
+    free(settings);
+    load_and_exec_config_or_die(config, "autoplay games 8 -seed 41");
+    ErrorStack *error_stack = error_stack_create();
+    const JsonValue *result = json_parse(
+        autoplay_results_get_json(config_get_autoplay_results(config), false),
+        error_stack);
+    assert(error_stack_is_empty(error_stack));
+    const JsonValue *games = json_object_get(result, "all_games");
+    char *summary = get_formatted_string(
+        "%lld %lld %lld %lld %.6f %.6f %.6f %.6f",
+        (long long)json_get_int(games, "games", error_stack),
+        (long long)json_get_int(games, "wins", error_stack),
+        (long long)json_get_int(games, "losses", error_stack),
+        (long long)json_get_int(games, "ties", error_stack),
+        json_get_double(games, "p1_score_mean", error_stack),
+        json_get_double(games, "p1_score_sd", error_stack),
+        json_get_double(games, "p2_score_mean", error_stack),
+        json_get_double(games, "p2_score_sd", error_stack));
+    assert(error_stack_is_empty(error_stack));
+    if (first == NULL) {
+      first = summary;
+    } else {
+      assert_strings_equal(first, summary);
+      free(summary);
+    }
+    json_destroy(result);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+  free(first);
+}
+
+// A player's endgame and pre-endgame settings come from the request alone,
+// and a request that states a contradictory or partial set is refused. The
+// cases this pins: a request that leaves the switches out playing whatever
+// this build defaults to, and a player told to run the pre-endgame without
+// solving endgames, which PEG needs.
+static void test_a_player_states_its_solving(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -eplies1 5 -pegbag1 3");
+  ErrorStack *error_stack = error_stack_create();
+  const char *const base =
+      "\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
+      "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
+      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0";
+  const char *const peg =
+      "\"peg_stage_top_k\": [8, 4, 2], \"peg_scenario_stride\": 3, "
+      "\"peg_opp_model\": \"pessimistic\"";
+  const char *const nested =
+      "\"peg_nested_cand_caps\": [6, 3], \"peg_nested_max_depth\": 2, "
+      "\"peg_nested_strides\": [1, 2, 3, 4]";
+  // A contributor's own -eplies1/-pegbag1 do not survive a request.
+  assert(config_get_player_solver_settings(config, 0)->endgame_plies == 5);
+  struct {
+    const char *rest;
+    bool accepted;
+  } cases[] = {
+      // Neither switch stated: refused, not defaulted.
+      {"", false},
+      {", \"endgame_plies\": 0", false},
+      // Off, which is what a player that states nothing else is.
+      {", \"endgame_plies\": 0, \"peg_max_bag\": 0", true},
+      // The endgame alone needs nothing more.
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 0", true},
+      // PEG without endgame solving is refused.
+      {", \"endgame_plies\": 0, \"peg_max_bag\": 2", false},
+      // Out of range.
+      {", \"endgame_plies\": 26, \"peg_max_bag\": 0", false},
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 5", false},
+      // A PEG setting a player that runs no PEG states is refused.
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 0, "
+       "\"peg_scenario_stride\": 1",
+       false},
+      // PEG with only some of its settings is refused.
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 2, "
+       "\"peg_scenario_stride\": 1",
+       false},
+      // A stage that keeps one play, or a zero stride, is refused.
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 2, "
+       "\"peg_stage_top_k\": [4, 1], \"peg_scenario_stride\": 1, "
+       "\"peg_opp_model\": \"rational\", \"peg_nested\": false",
+       false},
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 2, "
+       "\"peg_stage_top_k\": [4, 2], \"peg_scenario_stride\": 0, "
+       "\"peg_opp_model\": \"rational\", \"peg_nested\": false",
+       false},
+      // Nested settings without nested lookahead are refused...
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 2, "
+       "\"peg_stage_top_k\": [4, 2], \"peg_scenario_stride\": 1, "
+       "\"peg_opp_model\": \"rational\", \"peg_nested\": false, "
+       "\"peg_nested_max_depth\": 1",
+       false},
+      // ...and nested lookahead without them.
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 2, "
+       "\"peg_stage_top_k\": [4, 2], \"peg_scenario_stride\": 1, "
+       "\"peg_opp_model\": \"rational\", \"peg_nested\": true",
+       false},
+      // Strides for every bag size or none.
+      {", \"endgame_plies\": 4, \"peg_max_bag\": 2, "
+       "\"peg_stage_top_k\": [4, 2], \"peg_scenario_stride\": 1, "
+       "\"peg_opp_model\": \"rational\", \"peg_nested\": true, "
+       "\"peg_nested_cand_caps\": [2], \"peg_nested_max_depth\": 1, "
+       "\"peg_nested_strides\": [1, 1, 5]",
+       false},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    char *text = get_formatted_string("{%s%s}", base, cases[i].rest);
+    const JsonValue *player = json_parse(text, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    config_contribute_apply_player_settings(config, player, 0, error_stack);
+    if (error_stack_is_empty(error_stack) != cases[i].accepted) {
+      log_fatal("solver settings case %d: expected %s: %s", (int)i,
+                cases[i].accepted ? "accepted" : "refused", text);
+    }
+    error_stack_reset(error_stack);
+    json_destroy(player);
+    free(text);
+  }
+
+  // A full nested PEG player is applied as stated.
+  char *text =
+      get_formatted_string("{%s, \"endgame_plies\": 7, \"peg_max_bag\": 3, %s, "
+                           "\"peg_nested\": true, %s}",
+                           base, peg, nested);
+  const JsonValue *player = json_parse(text, error_stack);
+  free(text);
+  assert(error_stack_is_empty(error_stack));
+  config_contribute_apply_player_settings(config, player, 1, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const AutoplaySolverSettings *settings =
+      config_get_player_solver_settings(config, 1);
+  assert(settings->endgame_plies == 7);
+  assert(settings->peg_max_bag == 3);
+  assert(settings->peg_num_stages == 3);
+  assert(settings->peg_stage_top_k[0] == 8 &&
+         settings->peg_stage_top_k[2] == 2);
+  assert(settings->peg_scenario_stride == 3);
+  assert(settings->peg_pessimistic);
+  assert(settings->peg_nested);
+  assert(settings->peg_nested_num_cand_caps == 2);
+  assert(settings->peg_nested_cand_caps[1] == 3);
+  assert(settings->peg_nested_max_depth == 2);
+  assert(settings->peg_nested_strides[1] == 1);
+  assert(settings->peg_nested_strides[4] == 4);
+  json_destroy(player);
+
+  // And the next task's player starts from off, not from this one.
+  text = get_formatted_string("{%s, \"endgame_plies\": 0, \"peg_max_bag\": 0}",
+                              base);
+  player = json_parse(text, error_stack);
+  free(text);
+  config_contribute_apply_player_settings(config, player, 1, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(config_get_player_solver_settings(config, 1)->endgame_plies == 0);
+  assert(config_get_player_solver_settings(config, 1)->peg_max_bag == 0);
+  json_destroy(player);
+
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// PEG scores its emptier scenarios with endgame solves, so endgame_plies 0
+// turns it off however large peg_max_bag is.
+static void test_no_endgame_depth_means_no_pre_endgame(void) {
+  AutoplaySolverSettings settings;
+  autoplay_solver_settings_set_defaults(&settings);
+  settings.peg_max_bag = PEG_MAX_BAG;
+  assert(!autoplay_solver_settings_solves(&settings));
+  for (int bag = 0; bag <= PEG_MAX_BAG + 1; bag++) {
+    assert(!autoplay_solver_settings_runs_peg(&settings, bag));
+  }
+  settings.endgame_plies = 2;
+  assert(autoplay_solver_settings_solves(&settings));
+  assert(!autoplay_solver_settings_runs_peg(&settings, 0));
+  for (int bag = PEG_MIN_BAG; bag <= PEG_MAX_BAG; bag++) {
+    assert(autoplay_solver_settings_runs_peg(&settings, bag));
+  }
+  assert(!autoplay_solver_settings_runs_peg(&settings, PEG_MAX_BAG + 1));
+  settings.peg_max_bag = 2;
+  assert(autoplay_solver_settings_runs_peg(&settings, 2));
+  assert(!autoplay_solver_settings_runs_peg(&settings, 3));
+
+  // The same through the CLI: -pegbag1 without -eplies1 solves nothing.
+  Config *config = config_create_or_die("set -lex CSW21 -pegbag1 4");
+  assert(!autoplay_solver_settings_solves(
+      config_get_player_solver_settings(config, 0)));
+  config_destroy(config);
+}
+
+// The CLI options round-trip through saved settings, so a run saved by one
+// session is the run the next one plays.
+static void test_solver_options_round_trip(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -eplies2 3 -pegbag2 2 -pegtopk2 6,3 -pegstride2 2 "
+      "-pegpess2 true -pegnested2 false -pegncaps 5,2 -pegndepth 2 "
+      "-pegnstrides 1,1,4,6");
+  StringBuilder *sb = string_builder_create();
+  config_add_settings_to_string_builder(config, sb);
+  Config *reloaded = config_create_or_die(string_builder_peek(sb));
+  string_builder_destroy(sb);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    const AutoplaySolverSettings *a =
+        config_get_player_solver_settings(config, player_index);
+    const AutoplaySolverSettings *b =
+        config_get_player_solver_settings(reloaded, player_index);
+    assert(a->endgame_plies == b->endgame_plies);
+    assert(a->peg_max_bag == b->peg_max_bag);
+    assert(a->peg_num_stages == b->peg_num_stages);
+    for (int i = 0; i < a->peg_num_stages; i++) {
+      assert(a->peg_stage_top_k[i] == b->peg_stage_top_k[i]);
+    }
+    assert(a->peg_scenario_stride == b->peg_scenario_stride);
+    assert(a->peg_pessimistic == b->peg_pessimistic);
+    assert(a->peg_nested == b->peg_nested);
+    assert(a->peg_nested_num_cand_caps == b->peg_nested_num_cand_caps);
+    assert(a->peg_nested_max_depth == b->peg_nested_max_depth);
+    for (int bag = 1; bag <= PEG_MAX_BAG; bag++) {
+      assert(a->peg_nested_strides[bag] == b->peg_nested_strides[bag]);
+    }
+  }
+  const AutoplaySolverSettings *p2 =
+      config_get_player_solver_settings(config, 1);
+  assert(p2->endgame_plies == 3 && p2->peg_max_bag == 2);
+  assert(p2->peg_num_stages == 2 && p2->peg_stage_top_k[1] == 3);
+  assert(p2->peg_pessimistic && !p2->peg_nested);
+  assert(p2->peg_nested_strides[3] == 4);
+  assert(config_get_player_solver_settings(config, 0)->endgame_plies == 0);
+  config_destroy(reloaded);
+  config_destroy(config);
+
+  // A stage that keeps one play is refused, as is a short stride list.
+  Config *bad = config_create_default_test();
+  assert_config_exec_status(bad, "set -pegtopk1 4,1",
+                            ERROR_STATUS_AUTOPLAY_INVALID_SOLVER_SETTINGS);
+  assert_config_exec_status(bad, "set -pegnstrides 1,1,5",
+                            ERROR_STATUS_AUTOPLAY_INVALID_SOLVER_SETTINGS);
+  config_destroy(bad);
+}
+
+// A player that solves plays its endgame and pre-endgame turns with the
+// solvers, and a captured position on such a turn reports the solver's ranking:
+// best first, with each play's projected final spread and the depth it was
+// ranked at, and a PEG play's win percentage. The rest of the game is captured
+// as before.
+static void test_solving_players_report_their_solves(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "-threads 2 -maxnumdplays 5 -eplies1 2 -eplies2 2 -pegbag1 2 -pegbag2 2 "
+      "-pegtopk1 2 -pegtopk2 2 -pegnested1 false -pegnested2 false");
+  load_and_exec_config_or_die(config, "autoplay games,positions 4 -seed 7");
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *result = json_parse(
+      autoplay_results_get_json(config_get_autoplay_results(config), false),
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *positions = json_object_get(result, "positions");
+  int counts[4] = {0};
+  for (int i = 0; i < json_array_length(positions); i++) {
+    const JsonValue *position = json_array_get(positions, i);
+    const char *analysis = json_get_string_or_null(position, "analysis");
+    const JsonValue *moves = json_object_get(position, "moves");
+    assert(json_array_length(moves) > 0);
+    if (strings_equal(analysis, CONTRIBUTE_ANALYSIS_STATIC)) {
+      counts[0]++;
+      assert(!json_object_get(json_array_get(moves, 0), "mean_spread"));
+      continue;
+    }
+    assert(strings_equal(analysis, CONTRIBUTE_ANALYSIS_PEG) ||
+           strings_equal(analysis, CONTRIBUTE_ANALYSIS_ENDGAME));
+    const bool is_peg = strings_equal(analysis, CONTRIBUTE_ANALYSIS_PEG);
+    counts[is_peg ? 2 : 3]++;
+    // An endgame position reports the one play its solve chose.
+    if (!is_peg) {
+      assert(json_array_length(moves) == 1);
+    }
+    for (int m = 0; m < json_array_length(moves); m++) {
+      const JsonValue *move = json_array_get(moves, m);
+      const double spread = json_get_double(move, "mean_spread", error_stack);
+      const int64_t fidelity =
+          json_get_int(move, "fidelity_plies", error_stack);
+      assert(error_stack_is_empty(error_stack));
+      assert(spread > -1000.0 && spread < 1000.0);
+      assert(fidelity >= 0 && fidelity <= 25);
+      if (is_peg) {
+        const double win = json_get_double(move, "win_percentage", error_stack);
+        assert(error_stack_is_empty(error_stack));
+        assert(win >= 0.0 && win <= 100.0);
+        // Best first: no deeper-ranked play follows a shallower one.
+        if (m > 0) {
+          assert(json_get_int(json_array_get(moves, m - 1), "fidelity_plies",
+                              error_stack) >= fidelity);
+        }
+      } else {
+        assert(!json_object_get(move, "win_percentage"));
+      }
+    }
+  }
+  assert(counts[0] > 0);
+  assert(counts[2] > 0);
+  assert(counts[3] > 0);
+  json_destroy(result);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_contribute(void) {
+  test_static_games_are_identical_across_thread_counts();
+  test_a_player_states_its_solving();
+  test_no_endgame_depth_means_no_pre_endgame();
+  test_solver_options_round_trip();
+  test_solving_players_report_their_solves();
   test_a_high_byte_is_not_a_bonus_square();
   test_a_simulating_rack_analysis_ranks_every_play();
   test_contribute_runs_in_a_config_of_its_own();

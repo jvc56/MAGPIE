@@ -101,7 +101,16 @@
       "utility_w_winpct": 1.0,
       "utility_w_spread": 0.5,
       "utility_spread_scale": 100.0,
-      "movegen_margin": 5.0
+      "movegen_margin": 5.0,
+      "endgame_plies": 0,
+      "peg_max_bag": 0,
+      "peg_stage_top_k": null,
+      "peg_scenario_stride": null,
+      "peg_opp_model": null,
+      "peg_nested": null,
+      "peg_nested_cand_caps": null,
+      "peg_nested_max_depth": null,
+      "peg_nested_strides": null
     },
     "player2": {
       "name": "static-NWL23@20251004",
@@ -128,7 +137,31 @@
       "utility_w_winpct": null,
       "utility_w_spread": null,
       "utility_spread_scale": null,
-      "movegen_margin": 5.0
+      "movegen_margin": 5.0,
+      "endgame_plies": 6,
+      "peg_max_bag": 2,
+      "peg_stage_top_k": [
+        32,
+        16,
+        8,
+        4,
+        2
+      ],
+      "peg_scenario_stride": 1,
+      "peg_opp_model": "rational",
+      "peg_nested": true,
+      "peg_nested_cand_caps": [
+        8,
+        4,
+        2
+      ],
+      "peg_nested_max_depth": 1,
+      "peg_nested_strides": [
+        1,
+        1,
+        5,
+        7
+      ]
     }
   }
 }

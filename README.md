@@ -198,6 +198,31 @@ when combined with a clock. Pairs work by having both games see identical draws
 so that only the players' decisions differ; with timing on, the two games can
 diverge for reasons unrelated to strategy.
 
+Without a clock, an autoplay player can still solve the end of the game.
+`-eplies1`/`-eplies2` have that player solve the endgame to the given depth
+once the bag is empty, and `-pegbag1`/`-pegbag2` have it solve the
+pre-endgame while the bag holds 1 to that many tiles (at most 4). Every other
+turn is played as before, statically or by simulation:
+
+```
+magpie> autoplay games 100 -eplies1 6 -pegbag1 2 -hr true
+```
+
+`-eplies1 0` (the default) turns both solvers off, since the pre-endgame
+solver scores its emptier scenarios with endgame solves. The pre-endgame's
+schedule is `-pegtopk1`, `-pegstride1`, `-pegpess1` and `-pegnested1` (and
+their `2` forms), and `-pegncaps`, `-pegndepth` and `-pegnstrides` for its
+nested lookahead, which set both players. Unlike `-eplies` and `-pegtopk`,
+which configure the `endgame` and `peg` commands, these change how the
+player plays.
+
+No time limit applies: the depth and the schedule bound the work, so a player
+is as strong on a slow machine as on a fast one. Every solve uses all of
+`-threads`, whatever `-mtmode` gives a simulation. A solve is multithreaded,
+so these games are not reproducible from the seed either. Cost grows steeply
+with the bag: at a bag of 4 with the default schedule, a single game can take
+minutes.
+
 How much search a clock buys also depends on the threading mode, so the same
 `-pc1` value is not comparable across `-mtmode` settings:
 

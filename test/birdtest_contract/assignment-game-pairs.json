@@ -1,6 +1,6 @@
 {
-  "claim_token": "98eac535-7654-4851-9d94-75109abf273b",
-  "job_id": "6c18f3da-7dd7-41e8-95b0-dde77c815a4c",
+  "claim_token": "1bb0ae7a-e9ee-436a-be4e-bc7b09236ead",
+  "job_id": "490ffdbb-9749-44b2-a657-d6151837863e",
   "task_request": {
     "job_type": "game_pairs",
     "variant": "classic",
@@ -37,7 +37,16 @@
       "utility_w_spread": null,
       "utility_spread_scale": null,
       "win_pct_model": null,
-      "movegen_margin": 5.0
+      "movegen_margin": 5.0,
+      "endgame_plies": 0,
+      "peg_max_bag": 0,
+      "peg_stage_top_k": null,
+      "peg_scenario_stride": null,
+      "peg_opp_model": null,
+      "peg_nested": null,
+      "peg_nested_cand_caps": null,
+      "peg_nested_max_depth": null,
+      "peg_nested_strides": null
     },
     "player2": {
       "name": "e2e-wordmap-score",
@@ -64,7 +73,16 @@
       "utility_w_spread": null,
       "utility_spread_scale": null,
       "win_pct_model": null,
-      "movegen_margin": 5.0
+      "movegen_margin": 5.0,
+      "endgame_plies": 0,
+      "peg_max_bag": 0,
+      "peg_stage_top_k": null,
+      "peg_scenario_stride": null,
+      "peg_opp_model": null,
+      "peg_nested": null,
+      "peg_nested_cand_caps": null,
+      "peg_nested_max_depth": null,
+      "peg_nested_strides": null
     }
   },
   "min_magpie_version": "0.1.1",

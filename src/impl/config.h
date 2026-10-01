@@ -6,6 +6,7 @@
 #include "../def/convert_defs.h"
 #include "../def/game_defs.h"
 #include "../ent/autoplay_results.h"
+#include "../ent/autoplay_solver_settings.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
 #include "../ent/endgame_results.h"
@@ -37,6 +38,9 @@ typedef struct ConfigArgs {
 const char *config_get_magpie_version(void);
 
 // One player's simulation settings, for tests of the contribute path.
+// A player's autoplay endgame and pre-endgame solving settings.
+const AutoplaySolverSettings *
+config_get_player_solver_settings(const Config *config, int player_index);
 int config_get_player_sim_plies(const Config *config, int player_index);
 int config_get_player_num_plays(const Config *config, int player_index);
 uint64_t config_get_player_max_iterations(const Config *config,

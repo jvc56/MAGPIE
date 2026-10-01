@@ -96,7 +96,16 @@
       "utility_w_winpct": 1.0,
       "utility_w_spread": 0.5,
       "utility_spread_scale": 100.0,
-      "movegen_margin": 5.0
+      "movegen_margin": 5.0,
+      "endgame_plies": 0,
+      "peg_max_bag": 0,
+      "peg_stage_top_k": null,
+      "peg_scenario_stride": null,
+      "peg_opp_model": null,
+      "peg_nested": null,
+      "peg_nested_cand_caps": null,
+      "peg_nested_max_depth": null,
+      "peg_nested_strides": null
     }
   }
 }

@@ -21,6 +21,39 @@ typedef enum {
 
 typedef struct AutoplayResults AutoplayResults;
 
+// How a turn's move was chosen, as the positions recorder reports it.
+typedef enum {
+  POSITION_ANALYSIS_STATIC,
+  POSITION_ANALYSIS_SIM,
+  POSITION_ANALYSIS_PEG,
+  POSITION_ANALYSIS_ENDGAME,
+} position_analysis_t;
+
+// One play an endgame or PEG solve ranked. `move` carries its static equity.
+typedef struct SolverRankedPlay {
+  Move move;
+  // PEG only: the play's win probability over the bag's draws, as a
+  // percentage (the same scale as a simulation's win_percentage).
+  bool has_win_percentage;
+  double win_percentage;
+  // The mover's projected final spread, in points.
+  double mean_spread;
+  // The endgame depth the play was ranked at (a PEG play's deepest tier; 0 is
+  // PEG's greedy seed).
+  int fidelity_plies;
+} SolverRankedPlay;
+
+// The analysis behind a turn a solver decided, best play first. NULL for a
+// static or simulated turn, which the recorder reads from the move list and
+// simulation results instead.
+typedef struct SolverAnalysis {
+  position_analysis_t type;
+  // How many plays the solver ranked, before any cap.
+  int num_moves;
+  const SolverRankedPlay *plays;
+  int num_plays;
+} SolverAnalysis;
+
 typedef struct AutoplayGameTiming {
   bool active[2];
   double seconds_used[2];
@@ -37,13 +70,11 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
 
-void autoplay_results_add_move(AutoplayResults *autoplay_results,
-                               const Game *game, const Move *move,
-                               const Move *previous_move, const Rack *leave,
-                               const MoveList *move_list,
-                               SimResults *sim_results, int game_number,
-                               int pair_game_number, int turn_number,
-                               int play_cap);
+void autoplay_results_add_move(
+    AutoplayResults *autoplay_results, const Game *game, const Move *move,
+    const Move *previous_move, const Rack *leave, const MoveList *move_list,
+    SimResults *sim_results, const SolverAnalysis *solver_analysis,
+    int game_number, int pair_game_number, int turn_number, int play_cap);
 // Appends a "moves" array field -- the ranked plays of one analysed position --
 // to the JSON object being written to sb. With sim_results (a simming player)
 // the plays come in the simulation's ranking, each with its win percentage,

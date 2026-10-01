@@ -292,6 +292,10 @@ typedef enum {
   // A stop request arrived while this worker waited for another process to
   // finish building a derived file it needs. The task is handed back.
   ERROR_STATUS_CONTRIBUTE_INTERRUPTED,
+  // An endgame or pre-endgame solve chose no move for an autoplay player.
+  ERROR_STATUS_AUTOPLAY_SOLVER_NO_MOVE,
+  // A player's endgame / pre-endgame settings are out of range.
+  ERROR_STATUS_AUTOPLAY_INVALID_SOLVER_SETTINGS,
 } error_code_t;
 
 typedef enum {

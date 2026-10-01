@@ -52,6 +52,10 @@ typedef struct RecorderArgs {
   // The simulation behind this turn, when the player simmed. Carries the
   // per-play win percentage and per-ply statistics the move list does not.
   SimResults *sim_results;
+  // The solve behind this turn, when an endgame or PEG solve chose the move.
+  // Takes precedence over move_list and sim_results, which then describe an
+  // earlier turn.
+  const SolverAnalysis *solver_analysis;
   int game_number;
   int pair_game_number;
   int turn_number;
@@ -1511,6 +1515,10 @@ typedef struct CapturedPlay {
   // to rank moves instead of equity or raw win percentage.
   bool has_blended_utility;
   double blended_utility;
+  // An endgame or PEG play's projected final spread and ranking depth.
+  bool has_solver_stats;
+  double mean_spread;
+  int fidelity_plies;
   int num_plies;
   CapturedPly plies[CAPTURED_PLAY_MAX_PLIES];
 } CapturedPlay;
@@ -1527,6 +1535,7 @@ typedef struct CapturedPosition {
   int game_number;
   int pair_game_number;
   int turn_number;
+  position_analysis_t analysis;
   // How many plays were ranked, before the report cap.
   int num_moves;
   uint64_t total_iterations;
@@ -1603,6 +1612,9 @@ void positions_data_destroy(Recorder *recorder) {
 static void captured_play_fill_common(CapturedPlay *play, const Move *move,
                                       const Game *game,
                                       const LetterDistribution *ld) {
+  play->has_solver_stats = false;
+  play->mean_spread = 0.0;
+  play->fidelity_plies = 0;
   move_get_string(move, game_get_board(game), ld, false, play->move,
                   sizeof(play->move));
   play->score = equity_to_int(move_get_score(move));
@@ -1665,6 +1677,18 @@ static void captured_play_fill_from_move(CapturedPlay *play, const Move *move,
   play->num_plies = 0;
 }
 
+static void captured_play_fill_from_solver(CapturedPlay *play,
+                                           const SolverRankedPlay *ranked,
+                                           const Game *game,
+                                           const LetterDistribution *ld) {
+  captured_play_fill_from_move(play, &ranked->move, game, ld);
+  play->has_win_percentage = ranked->has_win_percentage;
+  play->win_percentage = ranked->win_percentage;
+  play->has_solver_stats = true;
+  play->mean_spread = ranked->mean_spread;
+  play->fidelity_plies = ranked->fidelity_plies;
+}
+
 // Allocates a plays array big enough for `needed` entries, starting from
 // CAPTURED_POSITION_PLAYS_INITIAL_CAPACITY and doubling -- a position can
 // legally have hundreds of ranked plays, far more than makes sense as a
@@ -1714,12 +1738,32 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   position->pair_game_number = args->pair_game_number;
   position->turn_number = args->turn_number;
 
+  const int play_cap = args->play_cap > 0 ? args->play_cap : 0;
+  const SolverAnalysis *solver = args->solver_analysis;
+  if (solver) {
+    position->analysis = solver->type;
+    position->num_moves = solver->num_moves;
+    position->num_stored_plays =
+        solver->num_plays < play_cap ? solver->num_plays : play_cap;
+    position->plays = captured_plays_create(position->num_stored_plays,
+                                            &position->plays_capacity);
+    position->total_iterations = 0;
+    position->time_elapsed = 0.0;
+    position->status = BAI_RESULT_STATUS_NONE;
+    for (int i = 0; i < position->num_stored_plays; i++) {
+      captured_play_fill_from_solver(&position->plays[i], &solver->plays[i],
+                                     game, ld);
+    }
+    return;
+  }
+
   const bool simmed = args->sim_results &&
                       sim_results_get_number_of_plays(args->sim_results) > 0;
+  position->analysis =
+      simmed ? POSITION_ANALYSIS_SIM : POSITION_ANALYSIS_STATIC;
   position->num_moves = simmed
                             ? sim_results_get_number_of_plays(args->sim_results)
                             : move_list_get_count(args->move_list);
-  const int play_cap = args->play_cap > 0 ? args->play_cap : 0;
   position->num_stored_plays =
       position->num_moves < play_cap ? position->num_moves : play_cap;
   position->plays = captured_plays_create(position->num_stored_plays,
@@ -1770,6 +1814,12 @@ static void write_captured_play(StringBuilder *sb, const CapturedPlay *play) {
   if (play->has_blended_utility) {
     json_write_double_field(sb, CONTRIBUTE_KEY_BLENDED_UTILITY,
                             play->blended_utility, &first);
+  }
+  if (play->has_solver_stats) {
+    json_write_double_field(sb, CONTRIBUTE_KEY_MEAN_SPREAD, play->mean_spread,
+                            &first);
+    json_write_int_field(sb, CONTRIBUTE_KEY_FIDELITY_PLIES,
+                         play->fidelity_plies, &first);
   }
   if (play->num_plies > 0) {
     json_write_array_start(sb, CONTRIBUTE_KEY_PLIES, &first);
@@ -1836,6 +1886,20 @@ int autoplay_results_write_ranked_plays_json(StringBuilder *sb, bool *first,
   return num_moves;
 }
 
+static const char *position_analysis_name(position_analysis_t analysis) {
+  switch (analysis) {
+  case POSITION_ANALYSIS_STATIC:
+    return CONTRIBUTE_ANALYSIS_STATIC;
+  case POSITION_ANALYSIS_SIM:
+    return CONTRIBUTE_ANALYSIS_SIM;
+  case POSITION_ANALYSIS_PEG:
+    return CONTRIBUTE_ANALYSIS_PEG;
+  case POSITION_ANALYSIS_ENDGAME:
+    return CONTRIBUTE_ANALYSIS_ENDGAME;
+  }
+  return CONTRIBUTE_ANALYSIS_STATIC;
+}
+
 static void write_captured_position(StringBuilder *sb,
                                     const CapturedPosition *position) {
   bool position_first = true;
@@ -1853,6 +1917,9 @@ static void write_captured_position(StringBuilder *sb,
   json_write_string_field(sb, CONTRIBUTE_KEY_RACK, position->rack,
                           &position_first);
   json_write_string_field(sb, CONTRIBUTE_KEY_POSITION, position->cgp,
+                          &position_first);
+  json_write_string_field(sb, CONTRIBUTE_KEY_ANALYSIS,
+                          position_analysis_name(position->analysis),
                           &position_first);
   if (position->has_previous_move) {
     json_write_string_field(sb, CONTRIBUTE_KEY_PREVIOUS_MOVE,
@@ -2125,13 +2192,11 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
   }
 }
 
-void autoplay_results_add_move(AutoplayResults *autoplay_results,
-                               const Game *game, const Move *move,
-                               const Move *previous_move, const Rack *leave,
-                               const MoveList *move_list,
-                               SimResults *sim_results, int game_number,
-                               int pair_game_number, int turn_number,
-                               int play_cap) {
+void autoplay_results_add_move(
+    AutoplayResults *autoplay_results, const Game *game, const Move *move,
+    const Move *previous_move, const Rack *leave, const MoveList *move_list,
+    SimResults *sim_results, const SolverAnalysis *solver_analysis,
+    int game_number, int pair_game_number, int turn_number, int play_cap) {
   RecorderArgs args = {0};
   args.game = game;
   args.move = move;
@@ -2139,6 +2204,7 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
   args.leave = leave;
   args.move_list = move_list;
   args.sim_results = sim_results;
+  args.solver_analysis = solver_analysis;
   args.game_number = game_number;
   args.pair_game_number = pair_game_number;
   args.turn_number = turn_number;

@@ -101,6 +101,24 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_WIN_PCT_MODEL "win_pct_model"
 #define CONTRIBUTE_KEY_MOVEGEN_MARGIN "movegen_margin"
 
+// Endgame and pre-endgame (PEG) solving, per player, for games and game-pairs
+// tasks (see AutoplaySolverSettings). endgame_plies and peg_max_bag are stated
+// by every player, if only as 0; endgame_plies 0 turns off both solvers. The
+// PEG keys are stated exactly when peg_max_bag > 0, and the nested keys
+// exactly when peg_nested is true.
+#define CONTRIBUTE_KEY_ENDGAME_PLIES "endgame_plies"
+#define CONTRIBUTE_KEY_PEG_MAX_BAG "peg_max_bag"
+#define CONTRIBUTE_KEY_PEG_STAGE_TOP_K "peg_stage_top_k"
+#define CONTRIBUTE_KEY_PEG_SCENARIO_STRIDE "peg_scenario_stride"
+#define CONTRIBUTE_KEY_PEG_OPP_MODEL "peg_opp_model"
+#define CONTRIBUTE_KEY_PEG_NESTED "peg_nested"
+#define CONTRIBUTE_KEY_PEG_NESTED_CAND_CAPS "peg_nested_cand_caps"
+#define CONTRIBUTE_KEY_PEG_NESTED_MAX_DEPTH "peg_nested_max_depth"
+// One stride per inner bag size, bags 1..PEG_MAX_BAG in order.
+#define CONTRIBUTE_KEY_PEG_NESTED_STRIDES "peg_nested_strides"
+#define CONTRIBUTE_PEG_OPP_MODEL_RATIONAL "rational"
+#define CONTRIBUTE_PEG_OPP_MODEL_PESSIMISTIC "pessimistic"
+
 // Game recorder ("games" job type): written once per GameData set
 // (all_games, and divergent_games for a paired run).
 #define CONTRIBUTE_KEY_ALL_GAMES "all_games"
@@ -147,6 +165,17 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_PLY "ply"
 #define CONTRIBUTE_KEY_BINGO_PERCENTAGE "bingo_percentage"
 #define CONTRIBUTE_KEY_AVERAGE_SCORE "average_score"
+// How a captured in-game position was analysed: one of the
+// CONTRIBUTE_ANALYSIS_* names. A PEG or endgame position's moves carry the
+// solver's mean_spread (the mover's projected final spread, in points) and
+// fidelity_plies (the depth the move was ranked at).
+#define CONTRIBUTE_KEY_ANALYSIS "analysis"
+#define CONTRIBUTE_KEY_MEAN_SPREAD "mean_spread"
+#define CONTRIBUTE_KEY_FIDELITY_PLIES "fidelity_plies"
+#define CONTRIBUTE_ANALYSIS_STATIC "static"
+#define CONTRIBUTE_ANALYSIS_SIM "sim"
+#define CONTRIBUTE_ANALYSIS_PEG "peg"
+#define CONTRIBUTE_ANALYSIS_ENDGAME "endgame"
 
 // Leave generation ("leave_generation" job type).
 #define CONTRIBUTE_KEY_GENERATION "generation"
