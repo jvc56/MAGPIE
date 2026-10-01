@@ -200,3 +200,21 @@ P37, weight grid for `equity_reply` (800 pairs per point, all against equity_rep
   - Win rate is unchanged and spread falls by 8.6 points, so the mode does change decisions.
   - It reuses points-tuned weights, and it reads the table at one ply after the candidate, while the racks' swings extend two plies further. Either could hide a gain.
   - It is kept as an option (`winpct=1` in `bsstudy:games`, `-rbswp true` for rollouts), not as a default.
+
+## Lower equity_reply weights (P40)
+
+P40 extends P37 below its corner optimum. Each point played 800 pairs against equity_reply 0.7 / 0.4 on common seed 20265001, with an SE of about 1.0 pp.
+
+| blocking \ setup | 0 | 0.2 | 0.4 | 0.6 |
+|---|---|---|---|---|
+| 0.2 | 46.72 | 47.88 | 46.75 | 48.84 |
+| 0.45 | 48.75 | 49.50 | 47.94 | 47.53 |
+| 0.7 | 49.50 | 49.03 | (reference) | 47.91 |
+| 1.0 | 48.84 | 49.25 | 49.34 | 49.41 |
+
+- No point beats 0.7 / 0.4.
+- Blocking matters: the row means are 47.6 / 48.4 / 49.1 / 49.2 for blocking 0.2 / 0.45 / 0.7 / 1.0.
+- Setup barely does: the column means span 48.4–48.9 for setup 0–0.6.
+- A weighted quadratic surface fits well (χ² 7.8 on 10 dof). Its maximum is at blocking 0.96, setup 0.18, where it predicts 49.5% against the reference.
+- **P41 was skipped** because there was nothing to confirm; see `p41-confirm-low/SKIPPED`.
+- Together with P37, the optimum is probably blocking 0.7–1.0 with a light setup weight. 0.7 / 0.4 stays the equity_reply setting.
