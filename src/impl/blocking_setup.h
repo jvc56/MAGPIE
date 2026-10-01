@@ -171,6 +171,11 @@ typedef struct BlockingSetupPolicy BlockingSetupPolicy;
 BlockingSetupPolicy *
 blocking_setup_policy_create(const BlockingSetupPolicySettings *settings);
 void blocking_setup_policy_destroy(BlockingSetupPolicy *policy);
+// Whether the policy was made from settings equal to these, field by field
+// (params and win_pcts by address).
+bool blocking_setup_policy_has_settings(
+    const BlockingSetupPolicy *policy,
+    const BlockingSetupPolicySettings *settings);
 
 // The policy's move for the player on turn, sampling racks from seed. The
 // move is owned by the policy and valid until its next call; NULL when the

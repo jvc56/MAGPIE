@@ -425,10 +425,16 @@ static void simmer_worker_set_rollout_pat(const SimmerWorker *simmer_worker,
   }
 }
 
-// Makes, keeps or drops the worker's rollout policy to match sim_args.
+// Makes, keeps or drops the worker's rollout policy to match sim_args. The
+// settings are compared by value, since the config passes the same settings
+// object every time and only its contents change between sims.
 static void simmer_worker_set_rollout_policy(SimmerWorker *simmer_worker,
                                              const SimArgs *sim_args) {
-  if (simmer_worker->rollout_settings == sim_args->rollout_blocking_setup) {
+  const BlockingSetupPolicySettings *settings =
+      sim_args->rollout_blocking_setup;
+  if (simmer_worker->rollout_settings == settings &&
+      (settings == NULL || blocking_setup_policy_has_settings(
+                               simmer_worker->rollout_policy, settings))) {
     return;
   }
   blocking_setup_policy_destroy(simmer_worker->rollout_policy);

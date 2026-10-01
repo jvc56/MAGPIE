@@ -203,6 +203,7 @@ typedef enum {
   ARG_TOKEN_ROLLOUT_BLOCKING_SETUP,
   ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z,
   ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS,
+  ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT,
   ARG_TOKEN_UTILITY_W_WINPCT,
   ARG_TOKEN_UTILITY_W_SPREAD,
   ARG_TOKEN_UTILITY_SPREAD_SCALE,
@@ -316,6 +317,8 @@ struct Config {
   // static rollouts) and the policy settings handed to simulations.
   BlockingSetupParams *rollout_blocking_setup;
   BlockingSetupPolicySettings rollout_blocking_setup_settings;
+  // Whether 'rbs' rollouts race on win chance from win_pcts (rbswp).
+  bool rollout_blocking_setup_win_pct;
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
@@ -2171,6 +2174,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Sampled opponent racks per 'rbs' rollout decision; 0, the "
              "default, uses the parameters' teacher_racks.";
       break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT:
+      usages[0] = "<true|false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Whether 'rbs' rollouts choose by win chance instead of points: "
+             "each sampled rack's adjusted value plus the lead is read in "
+             "the win percentage table, so a swing counts by how much it "
+             "moves the result at that lead. Defaults to false.";
+      break;
     case ARG_TOKEN_CUTOFF:
       usages[0] = "<cutoff>";
       examples[0] = "0.005";
@@ -2613,79 +2625,80 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
-        ARG_TOKEN_CUTOFF,                       /* cutoff */
-        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP,       /* rbs */
-        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS, /* rbsracks */
-        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z,     /* rbsz */
-        ARG_TOKEN_ENDGAME_PLIES,                /* eplies */
-        ARG_TOKEN_ENDGAME_TIME_LIMIT,           /* etlim */
-        ARG_TOKEN_ENDGAME_TOP_K,                /* etopk */
-        ARG_TOKEN_USE_GAME_PAIRS,               /* gp */
-        ARG_TOKEN_INFERENCE_MARGIN,             /* imargin */
-        ARG_TOKEN_P1_INFERENCE_MARGIN,          /* im1 */
-        ARG_TOKEN_P2_INFERENCE_MARGIN,          /* im2 */
-        ARG_TOKEN_MAX_ITERATIONS,               /* iterations */
-        ARG_TOKEN_P1_MAX_ITERATIONS,            /* i1 */
-        ARG_TOKEN_P2_MAX_ITERATIONS,            /* i2 */
-        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,       /* mi1 */
-        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,       /* mi2 */
-        ARG_TOKEN_MIN_PLAY_ITERATIONS,          /* minplayiterations */
-        ARG_TOKEN_SHOW_MISTAKES,                /* mistakes */
-        ARG_TOKEN_MOVEGEN_MARGIN,               /* mmargin */
-        ARG_TOKEN_MULTI_THREADING_MODE,         /* mtmode */
-        ARG_TOKEN_NUMBER_OF_PLAYS,              /* numplays */
-        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,        /* numsmallplays */
-        ARG_TOKEN_P1_NUM_PLAYS,                 /* np1 */
-        ARG_TOKEN_P2_NUM_PLAYS,                 /* np2 */
-        ARG_TOKEN_OVERTIME_PENALTY_POINTS,      /* otpenalty */
-        ARG_TOKEN_OVERTIME_PERIOD,              /* otperiod */
-        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,         /* pc1 */
-        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,         /* pc2 */
-        ARG_TOKEN_PEG_NESTED,                   /* pegnested */
-        ARG_TOKEN_PEG_OUTCOMES,                 /* pegoutcomes */
-        ARG_TOKEN_PEG_OUT_LINES,                /* pegoutlines */
-        ARG_TOKEN_PEG_OUT_WIDTH,                /* pegoutwidth */
-        ARG_TOKEN_PEG_PESSIMISTIC,              /* pegpess */
-        ARG_TOKEN_PEG_STRIDE,                   /* pegstride */
-        ARG_TOKEN_PEG_TIME_LIMIT,               /* pegtlim */
-        ARG_TOKEN_PEG_TOP_K,                    /* pegtopk */
-        ARG_TOKEN_P1_SIM_PLIES,                 /* pl1 */
-        ARG_TOKEN_P2_SIM_PLIES,                 /* pl2 */
-        ARG_TOKEN_PLIES,                        /* plies */
-        ARG_TOKEN_PEG_NOPRUNE,                  /* pnoprune */
-        ARG_TOKEN_STOP_COND_PCT,                /* scondition */
-        ARG_TOKEN_SIM_WITH_INFERENCE,           /* sinfer */
-        ARG_TOKEN_SIM_MARGIN_FORECAST,          /* smargin */
-        ARG_TOKEN_USE_SMALL_PLAYS,              /* sp */
-        ARG_TOKEN_SAMPLING_RULE,                /* sr */
-        ARG_TOKEN_P1_STOP_COND_PCT,             /* sc1 */
-        ARG_TOKEN_P2_STOP_COND_PCT,             /* sc2 */
-        ARG_TOKEN_PAT_LABEL_PLIES,              /* patplies */
-        ARG_TOKEN_P1_SIM_WITH_INFERENCE,        /* si1 */
-        ARG_TOKEN_P2_SIM_WITH_INFERENCE,        /* si2 */
-        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,       /* sm1 */
-        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,       /* sm2 */
-        ARG_TOKEN_P1_SAMPLING_RULE,             /* sa1 */
-        ARG_TOKEN_P2_SAMPLING_RULE,             /* sa2 */
-        ARG_TOKEN_P1_THRESHOLD,                 /* th1 */
-        ARG_TOKEN_P2_THRESHOLD,                 /* th2 */
-        ARG_TOKEN_THRESHOLD,                    /* threshold */
-        ARG_TOKEN_P1_TIME_LIMIT,                /* tl1 */
-        ARG_TOKEN_P2_TIME_LIMIT,                /* tl2 */
-        ARG_TOKEN_TIME_LIMIT,                   /* tlim */
-        ARG_TOKEN_TT_FRACTION_OF_MEM,           /* ttfraction */
-        ARG_TOKEN_USE_HEAT_MAP,                 /* useheatmap */
-        ARG_TOKEN_UTILITY_W_SPREAD,             /* uspread */
-        ARG_TOKEN_P1_UTILITY_W_SPREAD,          /* uspread1 */
-        ARG_TOKEN_P2_UTILITY_W_SPREAD,          /* uspread2 */
-        ARG_TOKEN_UTILITY_SPREAD_SCALE,         /* uspreadscale */
-        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE,      /* uspreadscale1 */
-        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,      /* uspreadscale2 */
-        ARG_TOKEN_UTILITY_W_WINPCT,             /* uwin */
-        ARG_TOKEN_P1_UTILITY_W_WINPCT,          /* uwin1 */
-        ARG_TOKEN_P2_UTILITY_W_WINPCT,          /* uwin2 */
-        ARG_TOKEN_WRITE_BUFFER_SIZE,            /* wb */
-        ARG_TOKEN_WIN_PCT,                      /* winpct */
+        ARG_TOKEN_CUTOFF,                         /* cutoff */
+        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP,         /* rbs */
+        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS,   /* rbsracks */
+        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT, /* rbswp */
+        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z,       /* rbsz */
+        ARG_TOKEN_ENDGAME_PLIES,                  /* eplies */
+        ARG_TOKEN_ENDGAME_TIME_LIMIT,             /* etlim */
+        ARG_TOKEN_ENDGAME_TOP_K,                  /* etopk */
+        ARG_TOKEN_USE_GAME_PAIRS,                 /* gp */
+        ARG_TOKEN_INFERENCE_MARGIN,               /* imargin */
+        ARG_TOKEN_P1_INFERENCE_MARGIN,            /* im1 */
+        ARG_TOKEN_P2_INFERENCE_MARGIN,            /* im2 */
+        ARG_TOKEN_MAX_ITERATIONS,                 /* iterations */
+        ARG_TOKEN_P1_MAX_ITERATIONS,              /* i1 */
+        ARG_TOKEN_P2_MAX_ITERATIONS,              /* i2 */
+        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,         /* mi1 */
+        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,         /* mi2 */
+        ARG_TOKEN_MIN_PLAY_ITERATIONS,            /* minplayiterations */
+        ARG_TOKEN_SHOW_MISTAKES,                  /* mistakes */
+        ARG_TOKEN_MOVEGEN_MARGIN,                 /* mmargin */
+        ARG_TOKEN_MULTI_THREADING_MODE,           /* mtmode */
+        ARG_TOKEN_NUMBER_OF_PLAYS,                /* numplays */
+        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,          /* numsmallplays */
+        ARG_TOKEN_P1_NUM_PLAYS,                   /* np1 */
+        ARG_TOKEN_P2_NUM_PLAYS,                   /* np2 */
+        ARG_TOKEN_OVERTIME_PENALTY_POINTS,        /* otpenalty */
+        ARG_TOKEN_OVERTIME_PERIOD,                /* otperiod */
+        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,           /* pc1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,           /* pc2 */
+        ARG_TOKEN_PEG_NESTED,                     /* pegnested */
+        ARG_TOKEN_PEG_OUTCOMES,                   /* pegoutcomes */
+        ARG_TOKEN_PEG_OUT_LINES,                  /* pegoutlines */
+        ARG_TOKEN_PEG_OUT_WIDTH,                  /* pegoutwidth */
+        ARG_TOKEN_PEG_PESSIMISTIC,                /* pegpess */
+        ARG_TOKEN_PEG_STRIDE,                     /* pegstride */
+        ARG_TOKEN_PEG_TIME_LIMIT,                 /* pegtlim */
+        ARG_TOKEN_PEG_TOP_K,                      /* pegtopk */
+        ARG_TOKEN_P1_SIM_PLIES,                   /* pl1 */
+        ARG_TOKEN_P2_SIM_PLIES,                   /* pl2 */
+        ARG_TOKEN_PLIES,                          /* plies */
+        ARG_TOKEN_PEG_NOPRUNE,                    /* pnoprune */
+        ARG_TOKEN_STOP_COND_PCT,                  /* scondition */
+        ARG_TOKEN_SIM_WITH_INFERENCE,             /* sinfer */
+        ARG_TOKEN_SIM_MARGIN_FORECAST,            /* smargin */
+        ARG_TOKEN_USE_SMALL_PLAYS,                /* sp */
+        ARG_TOKEN_SAMPLING_RULE,                  /* sr */
+        ARG_TOKEN_P1_STOP_COND_PCT,               /* sc1 */
+        ARG_TOKEN_P2_STOP_COND_PCT,               /* sc2 */
+        ARG_TOKEN_PAT_LABEL_PLIES,                /* patplies */
+        ARG_TOKEN_P1_SIM_WITH_INFERENCE,          /* si1 */
+        ARG_TOKEN_P2_SIM_WITH_INFERENCE,          /* si2 */
+        ARG_TOKEN_P1_SIM_MARGIN_FORECAST,         /* sm1 */
+        ARG_TOKEN_P2_SIM_MARGIN_FORECAST,         /* sm2 */
+        ARG_TOKEN_P1_SAMPLING_RULE,               /* sa1 */
+        ARG_TOKEN_P2_SAMPLING_RULE,               /* sa2 */
+        ARG_TOKEN_P1_THRESHOLD,                   /* th1 */
+        ARG_TOKEN_P2_THRESHOLD,                   /* th2 */
+        ARG_TOKEN_THRESHOLD,                      /* threshold */
+        ARG_TOKEN_P1_TIME_LIMIT,                  /* tl1 */
+        ARG_TOKEN_P2_TIME_LIMIT,                  /* tl2 */
+        ARG_TOKEN_TIME_LIMIT,                     /* tlim */
+        ARG_TOKEN_TT_FRACTION_OF_MEM,             /* ttfraction */
+        ARG_TOKEN_USE_HEAT_MAP,                   /* useheatmap */
+        ARG_TOKEN_UTILITY_W_SPREAD,               /* uspread */
+        ARG_TOKEN_P1_UTILITY_W_SPREAD,            /* uspread1 */
+        ARG_TOKEN_P2_UTILITY_W_SPREAD,            /* uspread2 */
+        ARG_TOKEN_UTILITY_SPREAD_SCALE,           /* uspreadscale */
+        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE,        /* uspreadscale1 */
+        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,        /* uspreadscale2 */
+        ARG_TOKEN_UTILITY_W_WINPCT,               /* uwin */
+        ARG_TOKEN_P1_UTILITY_W_WINPCT,            /* uwin1 */
+        ARG_TOKEN_P2_UTILITY_W_WINPCT,            /* uwin2 */
+        ARG_TOKEN_WRITE_BUFFER_SIZE,              /* wb */
+        ARG_TOKEN_WIN_PCT,                        /* winpct */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -3297,7 +3310,12 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
         config, game_get_player_on_turn_index(config->game), sim_args);
   }
   if (config->rollout_blocking_setup != NULL) {
-    sim_args->rollout_blocking_setup = &config->rollout_blocking_setup_settings;
+    sim_args->rollout_blocking_setup_storage =
+        config->rollout_blocking_setup_settings;
+    sim_args->rollout_blocking_setup_storage.race.win_pcts =
+        config->rollout_blocking_setup_win_pct ? config->win_pcts : NULL;
+    sim_args->rollout_blocking_setup =
+        &sim_args->rollout_blocking_setup_storage;
   }
 }
 
@@ -7654,7 +7672,8 @@ exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
 }
 
 // Assumes all args are parsed and correctly set in pargs.
-// Loads the rbs, rbsz and rbsracks options: the static-ish rollout policy's
+// Loads the rbs, rbsz, rbsracks and rbswp options: the static-ish rollout
+// policy's
 // parameters (a missing or malformed file, or one for another lexicon, is an
 // error) and settings.
 static void config_load_rollout_blocking_setup(Config *config,
@@ -7676,6 +7695,11 @@ static void config_load_rollout_blocking_setup(Config *config,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+  }
+  config_load_bool(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT,
+                   &config->rollout_blocking_setup_win_pct, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
   const char *name =
       config_get_parg_value(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP, 0);
@@ -10135,6 +10159,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP, "rbs", 1, 1);
   arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z, "rbsz", 1, 1);
   arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS, "rbsracks", 1, 1);
+  arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT, "rbswp", 1, 1);
   arg(ARG_TOKEN_UTILITY_W_WINPCT, "uwin", 1, 1);
   arg(ARG_TOKEN_UTILITY_W_SPREAD, "uspread", 1, 1);
   arg(ARG_TOKEN_UTILITY_SPREAD_SCALE, "uspreadscale", 1, 1);
@@ -10244,6 +10269,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->stop_cond_pct = 99;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
   config->rollout_blocking_setup = NULL;
+  config->rollout_blocking_setup_win_pct = false;
   config->rollout_blocking_setup_settings = (BlockingSetupPolicySettings){
       .universe = DEFAULT_ROLLOUT_BLOCKING_SETUP_UNIVERSE,
       .exchange_quota = DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGES,
@@ -10943,6 +10969,10 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(
           config, sb, arg_token,
           config->rollout_blocking_setup_settings.num_racks);
+      break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token, config->rollout_blocking_setup_win_pct);
       break;
     case ARG_TOKEN_EXEC_MODE:
       string_builder_add_formatted_string(sb, " -%s ",

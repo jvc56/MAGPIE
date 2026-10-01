@@ -543,6 +543,28 @@ static void test_blocking_setup_rollouts(void) {
   assert(differs);
   double threaded[BST_SIM_CANDIDATES];
   bst_sim_means(config, candidates, &rollout, 2, threaded);
+  // Racing on win chance is reproducible and chooses differently.
+  BlockingSetupPolicySettings by_win = rollout;
+  by_win.race.win_pcts = config_get_win_pcts(config);
+  assert(by_win.race.win_pcts != NULL);
+  double win_first[BST_SIM_CANDIDATES];
+  double win_second[BST_SIM_CANDIDATES];
+  bst_sim_means(config, candidates, &by_win, 1, win_first);
+  bst_sim_means(config, candidates, &by_win, 1, win_second);
+  bool win_differs = false;
+  for (int cand_idx = 0; cand_idx < BST_SIM_CANDIDATES; cand_idx++) {
+    assert(win_first[cand_idx] == win_second[cand_idx]);
+    win_differs = win_differs || win_first[cand_idx] != first[cand_idx];
+  }
+  assert(win_differs);
+  // A worker keeps its policy only while the settings' contents match.
+  BlockingSetupPolicy *policy = blocking_setup_policy_create(&rollout);
+  assert(blocking_setup_policy_has_settings(policy, &rollout));
+  assert(!blocking_setup_policy_has_settings(policy, &by_win));
+  BlockingSetupPolicySettings other_z = rollout;
+  other_z.race.z = 0.0;
+  assert(!blocking_setup_policy_has_settings(policy, &other_z));
+  blocking_setup_policy_destroy(policy);
   blocking_setup_params_destroy(params);
   move_list_destroy(candidates);
   move_list_destroy(all);

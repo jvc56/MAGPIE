@@ -1263,6 +1263,21 @@ void blocking_setup_policy_destroy(BlockingSetupPolicy *policy) {
   free(policy);
 }
 
+bool blocking_setup_policy_has_settings(
+    const BlockingSetupPolicy *policy,
+    const BlockingSetupPolicySettings *settings) {
+  const BlockingSetupPolicySettings *own = &policy->settings;
+  return own->params == settings->params &&
+         own->num_racks == settings->num_racks &&
+         own->universe == settings->universe &&
+         own->exchange_quota == settings->exchange_quota &&
+         own->exchange_margin == settings->exchange_margin &&
+         own->race.batch_racks == settings->race.batch_racks &&
+         own->race.min_racks == settings->race.min_racks &&
+         own->race.z == settings->race.z &&
+         own->race.win_pcts == settings->race.win_pcts;
+}
+
 const Move *blocking_setup_policy_choose(BlockingSetupPolicy *policy,
                                          const Game *game, uint64_t seed) {
   const BlockingSetupPolicySettings *settings = &policy->settings;

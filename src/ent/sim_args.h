@@ -61,6 +61,9 @@ typedef struct SimArgs {
   // must outlive the simulation. NULL, the default, rolls out statically.
   // sim_args_fill clears it.
   const BlockingSetupPolicySettings *rollout_blocking_setup;
+  // Storage the config fills and points rollout_blocking_setup at, so the
+  // settings can carry this sim's win percentage table.
+  BlockingSetupPolicySettings rollout_blocking_setup_storage;
   // Whether a nonterminal sim horizon's spread is projected to the end of the
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
