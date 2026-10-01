@@ -379,7 +379,8 @@ static bool candidate_leaves_clear(const Move *candidate,
 // through one. A play in no such lane neither fills nor scores through a
 // square the placement changed, so it was available, with the same score,
 // before the placement. board already holds the placement.
-static uint64_t candidate_lanes(const Board *board, const Move *candidate) {
+uint64_t candidate_lanes(const Board *board, const Move *candidate);
+uint64_t candidate_lanes(const Board *board, const Move *candidate) {
   SquareSet changed;
   memset(&changed, 0, sizeof(changed));
   const bool vertical = board_is_dir_vertical(move_get_dir(candidate));
