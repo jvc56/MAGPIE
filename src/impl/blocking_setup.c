@@ -8,6 +8,7 @@
 #include "../def/move_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bag.h"
+#include "../ent/blocking_setup_params.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"

@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/blocking_setup_params.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
