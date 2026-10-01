@@ -154,3 +154,12 @@ each recorded below with command, seeds, wall time, outputs.
 - Queued: P11 NWL23 equity vs static, P13 CSW24 equity vs static, P12
   equity 96 vs 64 racks, P14 equity vs PAT static, P15 equity vs 100 ms
   2-ply sim, P16 gate (checks only bag<60) vs ungated.
+- Overnight results so far (all 2,000 pairs, details in #747
+  notes/static-ish-studies-20261001/REPORT.md): NWL23 equity vs static
+  52.25% (p=0.0003); CSW24 equity vs static 51.42% (p=0.028); equity vs
+  PAT static 51.12% (p=0.08); equity vs 100 ms 2-ply sim 52.25%
+  (p=0.0006); gate bag<60 vs ungated 50.54% (n.s., 26% cheaper); 96 vs 64
+  racks equity 50.04%, score 50.82% (both n.s.); z=3 vs exact 49.10%
+  (n.s., 3.4x cheaper); universe 30 vs 60 49.66% (n.s., 33% cheaper);
+  NWL23 equity vs score 49.26% (n.s.; CSW24 equity advantage does not
+  replicate). Running: P21 block, P24 nominated-candidate sims, P25 block.
