@@ -163,3 +163,17 @@ each recorded below with command, seeds, wall time, outputs.
   (n.s., 3.4x cheaper); universe 30 vs 60 49.66% (n.s., 33% cheaper);
   NWL23 equity vs score 49.26% (n.s.; CSW24 equity advantage does not
   replicate). Running: P21 block, P24 nominated-candidate sims, P25 block.
+- Overnight run finished 06:14 PDT (P9-P36). Summary at the top of #747
+  notes/static-ish-studies-20261001/REPORT.md. Key: static-ish beats
+  static in CSW24/NWL23/FRA20 (51.4-53.9%); beats 100 ms and 300 ms 2-ply
+  sims; cheap config (bag<30, universe 30, 18 ms mean) 52.4% vs static,
+  ~1 pp behind full (p=0.09), ties PAT static; 64 racks is the floor;
+  z=3 fine; equity mode +0.87 +- 0.29 pp pooled but heterogeneous;
+  nominated sim candidates no help at 300 ms (1,000 pairs).
+- Open next steps: decide default config (full vs cheap; score vs equity);
+  fit weights per lexicon with the bs_fit/tune pipeline; a sim test at
+  realistic budgets (>= 1 s) for nomination; publishing .bsp files via
+  MAGPIE-DATA; whether static-ish should be a PlayChooser mode.
+- Branches: #744 teacher (+speedups), #745 nomination, #746 studies,
+  #747 claude/static-ish-rollouts (all draft). Local only:
+  claude/static-ish-wip (backup), claude/bs-overlap-research (scratch).
