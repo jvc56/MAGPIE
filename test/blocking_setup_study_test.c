@@ -2,6 +2,7 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/def/bai_defs.h"
+#include "../src/def/config_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/move_defs.h"
@@ -64,7 +65,11 @@
 //          candidates sim_plies= plies deep for sim_ms= per move, no-PAT
 //          static rollouts; "nomsim" takes its root candidates from the
 //          nominator, see bss_player_t; sim_ms_b= gives player b its own
-//          budget): both games of a pair use one seed, so each seat
+//          budget; rbs=<file.bsp> gives player a static-ish rollouts and
+//          rbs_b= player b, with rbsz= and rbsracks= as for the sim
+//          command's -rbsz / -rbsracks; sim_iters= / sim_iters_b= cap the
+//          iterations per decision): both games of a pair use one seed,
+//          so each seat
 //          draws the same tiles, and the players swap seats. "adjusted"
 //          plays argmax(static equity + blocking + setup adjustments) over
 //          the top universe= static moves and exch= exchanges, with weights
@@ -579,6 +584,10 @@ typedef struct BSSPlayerState {
   PlayChooser *chooser;
   Move *chosen;
   SimNominationCandidateSource *nomination;
+  // Static-ish rollouts for a sim player (rbs= / rbs_b=); NULL params for
+  // static rollouts.
+  BlockingSetupParams *rollout_params;
+  BlockingSetupPolicySettings rollout;
 } BSSPlayerState;
 
 static void bss_generate(const Game *game, MoveList *list, bool disable_pat) {
@@ -773,6 +782,23 @@ static void bss_games(const BSOptions *options) {
     state->chooser = NULL;
     state->chosen = NULL;
     state->nomination = NULL;
+    // Unlike the other per-player options, rbs is never shared: player a
+    // reads rbs= and player b reads rbs_b=, so a one-sided test cannot
+    // silently become two-sided.
+    state->rollout_params = bss_params_create_from(
+        bs_options_get(options, player_idx == 0 ? "rbs" : "rbs_b", NULL));
+    state->rollout = (BlockingSetupPolicySettings){
+        .params = state->rollout_params,
+        .num_racks = (int)bs_options_get_long(options, "rbsracks", 0),
+        .universe = DEFAULT_ROLLOUT_BLOCKING_SETUP_UNIVERSE,
+        .exchange_quota = DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGES,
+        .exchange_margin =
+            int_to_equity(DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGE_MARGIN),
+        .race = {.batch_racks = BLOCKING_SETUP_RACE_BATCH,
+                 .min_racks = BLOCKING_SETUP_RACE_BATCH,
+                 .z = bs_options_get_double(options, "rbsz",
+                                            DEFAULT_ROLLOUT_BLOCKING_SETUP_Z)},
+    };
     if (kinds[player_idx] == BSS_PLAYER_NOMSIM) {
       if (state->params == NULL) {
         log_fatal("nomsim players need params=");
@@ -812,9 +838,15 @@ static void bss_games(const BSOptions *options) {
           .sim_plies = (int)bs_options_get_long(options, "sim_plies", 2),
           .sim_max_candidates =
               (int)bs_options_get_long(options, "sim_cands", 15),
+          .sim_max_iterations = (uint64_t)bs_options_get_long(
+              options,
+              bss_player_key(options, player_idx, "sim_iters", "sim_iters_b"),
+              0),
           .win_pcts = config_get_win_pcts(config),
           .num_threads = 1,
           .pat_rollout_disabled = true,
+          .rollout_blocking_setup =
+              state->rollout_params != NULL ? &state->rollout : NULL,
           .seed = bs_options_get_u64(options, "seed", 0) + (uint64_t)player_idx,
       };
       state->chooser = play_chooser_create(&strategy);
@@ -929,6 +961,7 @@ static void bss_games(const BSOptions *options) {
       sim_nomination_candidate_source_cleanup(states[player_idx].nomination);
       free(states[player_idx].nomination);
     }
+    blocking_setup_params_destroy(states[player_idx].rollout_params);
   }
   (void)fclose(games_out);
   (void)fclose(moves_out);

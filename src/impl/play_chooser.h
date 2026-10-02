@@ -1,6 +1,7 @@
 #ifndef PLAY_CHOOSER_H
 #define PLAY_CHOOSER_H
 
+#include "../ent/blocking_setup_params.h"
 #include "../ent/game.h"
 #include "../ent/game_timer.h"
 #include "../ent/move.h"
@@ -45,6 +46,9 @@ typedef struct PlayChooserStrategy {
   play_chooser_eval_t endgame_eval;
   int sim_plies;          // 0 = default
   int sim_max_candidates; // 0 = default
+  // Total SIM iterations per decision, stopping before the time budget if
+  // reached; 0 = no limit.
+  uint64_t sim_max_iterations;
   // Optional root candidate source for SIM (see sim_nomination.h for one).
   // Called with the position on turn; returns a list it owns, valid until
   // its next call, or NULL to use the default: the top sim_max_candidates
@@ -105,6 +109,9 @@ typedef struct PlayChooserStrategy {
   // SimArgs.pat_rollout_disabled). Zero/unset: PAT on, every class.
   bool pat_rollout_disabled;
   uint32_t pat_rollout_disabled_classes_mask;
+  // When non-NULL, SIM rollouts use the static-ish blocking/setup policy
+  // with these settings (see SimArgs.rollout_blocking_setup); not owned.
+  const BlockingSetupPolicySettings *rollout_blocking_setup;
   uint64_t seed;
 } PlayChooserStrategy;
 
