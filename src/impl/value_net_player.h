@@ -15,6 +15,11 @@ typedef enum {
   VALUE_NET_BACKEND_CPU,
   VALUE_NET_BACKEND_METAL_FP32,
   VALUE_NET_BACKEND_METAL_FP16,
+  // The Neural Engine, through the CoreML build at <model_dir>/ane.mlpackage.
+  VALUE_NET_BACKEND_COREML,
+  // Both: each evaluation on whichever of the GPU (fp16) and the Neural
+  // Engine is free, the GPU first.
+  VALUE_NET_BACKEND_COREML_AND_METAL,
 } value_net_backend_t;
 
 typedef struct ValueNetPlayer ValueNetPlayer;

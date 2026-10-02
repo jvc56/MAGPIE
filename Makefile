@@ -174,7 +174,7 @@ ifeq ($(VALUE_NET_METAL),1)
 SRC_OBJC := $(wildcard $(SRC_DIR)/**/*.m)
 OBJ_SRC += $(SRC_OBJC:$(SRC_DIR)/%.m=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 CFLAGS += -DVALUE_NET_METAL=1
-LDLIBS += -framework Foundation -framework Metal \
+LDLIBS += -framework Foundation -framework Metal -framework CoreML \
           -framework MetalPerformanceShaders \
           -framework MetalPerformanceShadersGraph
 endif

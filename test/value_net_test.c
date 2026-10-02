@@ -25,6 +25,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/play_chooser.h"
 #include "../src/impl/simmer.h"
+#include "../src/impl/value_net_coreml.h"
 #include "../src/impl/value_net_features.h"
 #include "../src/impl/value_net_metal.h"
 #include "../src/impl/value_net_player.h"
@@ -59,8 +60,14 @@ static value_net_backend_t vnt_parse_backend(const char *name) {
   if (strings_equal(name, "fp16")) {
     return VALUE_NET_BACKEND_METAL_FP16;
   }
+  if (strings_equal(name, "ane")) {
+    return VALUE_NET_BACKEND_COREML;
+  }
+  if (strings_equal(name, "anegpu")) {
+    return VALUE_NET_BACKEND_COREML_AND_METAL;
+  }
   if (!strings_equal(name, "fp32")) {
-    log_fatal("backend must be cpu, fp32 or fp16, got %s", name);
+    log_fatal("backend must be cpu, fp32, fp16, ane or anegpu, got %s", name);
   }
   return VALUE_NET_BACKEND_METAL_FP32;
 }
@@ -714,11 +721,85 @@ static void vnt_simbench(const StringSplitter *fields) {
   config_destroy(config);
 }
 
+// "anebench:<dir>:<parity_dir>": the CoreML (Neural Engine) build at
+// <dir>/ane.mlpackage on the parity rows, then rows per second by rows per
+// call (the parity rows tiled), up to VALUE_NET_MAX_GPU_ROWS.
+static void vnt_anebench(const char *dir, const char *parity_dir) {
+  ErrorStack *error_stack = error_stack_create();
+  char *path = get_formatted_string("%s/ane.mlpackage", dir);
+  ValueNetCoreML *coreml = value_net_coreml_create(path, 0, error_stack);
+  free(path);
+  if (coreml == NULL) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("no CoreML value net");
+  }
+  path = get_formatted_string("%s/board.f32", parity_dir);
+  float *board = vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS *
+                                           VALUE_NET_BOARD_FLOATS);
+  free(path);
+  path = get_formatted_string("%s/scalars.f32", parity_dir);
+  float *scalars =
+      vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS * VALUE_NET_SCALARS);
+  free(path);
+  path = get_formatted_string("%s/value.f32", parity_dir);
+  float *ref_value = vnt_read_floats(path, VALUE_NET_PARITY_ROWS);
+  free(path);
+  float value[VALUE_NET_PARITY_ROWS];
+  value_net_coreml_evaluate(coreml, VALUE_NET_PARITY_ROWS, board, scalars,
+                            value);
+  double max_diff = 0.0;
+  for (int row = 0; row < VALUE_NET_PARITY_ROWS; row++) {
+    max_diff = fmax(max_diff, fabs((double)value[row] - ref_value[row]));
+  }
+  printf("value_net_parity backend=ane rows=%d max_abs_value_diff=%.3g\n",
+         VALUE_NET_PARITY_ROWS, max_diff);
+  const int max_rows = VALUE_NET_MAX_GPU_ROWS;
+  float *big_board =
+      malloc_or_die(sizeof(float) * (size_t)max_rows * VALUE_NET_BOARD_FLOATS);
+  float *big_scalars =
+      malloc_or_die(sizeof(float) * (size_t)max_rows * VALUE_NET_SCALARS);
+  for (int row = 0; row < max_rows; row++) {
+    memcpy(big_board + ((size_t)row * VALUE_NET_BOARD_FLOATS),
+           board +
+               ((size_t)(row % VALUE_NET_PARITY_ROWS) * VALUE_NET_BOARD_FLOATS),
+           sizeof(float) * VALUE_NET_BOARD_FLOATS);
+    memcpy(big_scalars + ((size_t)row * VALUE_NET_SCALARS),
+           scalars +
+               ((size_t)(row % VALUE_NET_PARITY_ROWS) * VALUE_NET_SCALARS),
+           sizeof(float) * VALUE_NET_SCALARS);
+  }
+  float *values = malloc_or_die(sizeof(float) * (size_t)max_rows);
+  for (int rows = 8; rows <= max_rows; rows *= 2) {
+    value_net_coreml_evaluate(coreml, rows, big_board, big_scalars, values);
+    const int repeats = 20;
+    const int64_t start = ctimer_monotonic_ns();
+    for (int repeat = 0; repeat < repeats; repeat++) {
+      value_net_coreml_evaluate(coreml, rows, big_board, big_scalars, values);
+    }
+    const double seconds =
+        (double)(ctimer_monotonic_ns() - start) / 1e9 / repeats;
+    printf("value_net_throughput ane rows=%d ms_per_call=%.2f "
+           "rows_per_s=%.0f\n",
+           rows, seconds * 1e3, rows / seconds);
+  }
+  free(values);
+  free(big_board);
+  free(big_scalars);
+  free(board);
+  free(scalars);
+  free(ref_value);
+  value_net_coreml_destroy(coreml);
+  error_stack_destroy(error_stack);
+}
+
 void value_net_test_run_spec(const char *spec) {
   StringSplitter *fields = split_string(spec, ':', true);
   const int num_fields = string_splitter_get_number_of_items(fields);
   const char *mode = string_splitter_get_item(fields, 0);
-  if (strings_equal(mode, "simbench")) {
+  if (strings_equal(mode, "anebench") && num_fields == 3) {
+    vnt_anebench(string_splitter_get_item(fields, 1),
+                 string_splitter_get_item(fields, 2));
+  } else if (strings_equal(mode, "simbench")) {
     vnt_simbench(fields);
   } else if (strings_equal(mode, "throughput") && num_fields == 4) {
     vnt_throughput(string_splitter_get_item(fields, 1),

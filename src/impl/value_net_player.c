@@ -10,9 +10,12 @@
 #include "../ent/move.h"
 #include "../ent/value_net.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "move_gen.h"
+#include "value_net_coreml.h"
 #include "value_net_features.h"
 #include "value_net_metal.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +30,10 @@ enum {
 struct ValueNetPlayer {
   ValueNet *net;
   ValueNetMetal *metal;
+  ValueNetCoreML *coreml;
+  // Whether a call holds the GPU (with both engines; see
+  // value_net_player_evaluate_rows).
+  atomic_bool metal_busy;
   int max_candidates;
   int batch_capacity;
   MoveList *list;
@@ -51,10 +58,24 @@ ValueNetPlayer *value_net_player_create(const char *model_dir,
     return NULL;
   }
   ValueNetMetal *metal = NULL;
-  if (backend != VALUE_NET_BACKEND_CPU) {
-    metal = value_net_metal_create(net, backend == VALUE_NET_BACKEND_METAL_FP16,
+  ValueNetCoreML *coreml = NULL;
+  if (backend == VALUE_NET_BACKEND_COREML ||
+      backend == VALUE_NET_BACKEND_COREML_AND_METAL) {
+    char *path = get_formatted_string("%s/ane.mlpackage", model_dir);
+    coreml = value_net_coreml_create(path, 0, error_stack);
+    free(path);
+    if (coreml == NULL) {
+      value_net_destroy(net);
+      return NULL;
+    }
+  }
+  if (backend == VALUE_NET_BACKEND_METAL_FP32 ||
+      backend == VALUE_NET_BACKEND_METAL_FP16 ||
+      backend == VALUE_NET_BACKEND_COREML_AND_METAL) {
+    metal = value_net_metal_create(net, backend != VALUE_NET_BACKEND_METAL_FP32,
                                    error_stack);
     if (metal == NULL) {
+      value_net_coreml_destroy(coreml);
       value_net_destroy(net);
       return NULL;
     }
@@ -62,6 +83,7 @@ ValueNetPlayer *value_net_player_create(const char *model_dir,
   ValueNetPlayer *player = calloc_or_die(1, sizeof(ValueNetPlayer));
   player->net = net;
   player->metal = metal;
+  player->coreml = coreml;
   player->max_candidates =
       max_candidates > 0 ? max_candidates : VALUE_NET_PLAYER_DEFAULT_CANDIDATES;
   player->batch_capacity = VALUE_NET_PLAYER_MIN_BATCH;
@@ -83,6 +105,7 @@ void value_net_player_destroy(ValueNetPlayer *player) {
     return;
   }
   value_net_metal_destroy(player->metal);
+  value_net_coreml_destroy(player->coreml);
   value_net_destroy(player->net);
   move_list_destroy(player->list);
   game_destroy(player->scratch);
@@ -93,15 +116,6 @@ void value_net_player_destroy(ValueNetPlayer *player) {
   free(player->staging_scalars);
   free(player->staging_values);
   free(player);
-}
-
-// The smallest padded batch size holding rows rows.
-static int value_net_player_batch(const ValueNetPlayer *player, int rows) {
-  int batch = VALUE_NET_PLAYER_MIN_BATCH;
-  while (batch < rows && batch < player->batch_capacity) {
-    batch *= 2;
-  }
-  return batch;
 }
 
 // The next power of two from VALUE_NET_PLAYER_MIN_BATCH holding rows rows,
@@ -119,16 +133,12 @@ static int value_net_padded_rows(int rows) {
   return batch;
 }
 
-void value_net_player_evaluate_rows(void *context, int rows, const float *board,
-                                    const float *scalars, float *values) {
-  ValueNetPlayer *player = context;
-  if (rows <= 0) {
-    return;
-  }
-  if (player->metal == NULL) {
-    value_net_evaluate_cpu(player->net, rows, board, scalars, values, NULL);
-    return;
-  }
+// Evaluates rows on Metal through the staging buffers (padded to a batch
+// size Metal has compiled).
+static void value_net_player_evaluate_metal(ValueNetPlayer *player, int rows,
+                                            const float *board,
+                                            const float *scalars,
+                                            float *values) {
   const int batch = value_net_padded_rows(rows);
   cpthread_mutex_lock(&player->staging_mutex);
   if (batch > player->staging_capacity) {
@@ -160,6 +170,35 @@ void value_net_player_evaluate_rows(void *context, int rows, const float *board,
   cpthread_mutex_unlock(&player->staging_mutex);
 }
 
+void value_net_player_evaluate_rows(void *context, int rows, const float *board,
+                                    const float *scalars, float *values) {
+  ValueNetPlayer *player = context;
+  if (rows <= 0) {
+    return;
+  }
+  if (player->coreml != NULL && player->metal != NULL) {
+    // Whole calls go to the GPU when it is idle and to the Neural Engine
+    // otherwise: splitting one call between them leaves the faster engine
+    // waiting, and the Neural Engine takes concurrent callers while the GPU
+    // runs one evaluation at a time.
+    bool idle = false;
+    if (atomic_compare_exchange_strong(&player->metal_busy, &idle, true)) {
+      value_net_player_evaluate_metal(player, rows, board, scalars, values);
+      atomic_store(&player->metal_busy, false);
+    } else {
+      value_net_coreml_evaluate(player->coreml, rows, board, scalars, values);
+    }
+    return;
+  }
+  if (player->coreml != NULL) {
+    value_net_coreml_evaluate(player->coreml, rows, board, scalars, values);
+  } else if (player->metal != NULL) {
+    value_net_player_evaluate_metal(player, rows, board, scalars, values);
+  } else {
+    value_net_evaluate_cpu(player->net, rows, board, scalars, values, NULL);
+  }
+}
+
 const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
                                     const ValueNetHistory *history) {
   MoveList *list = player->list;
@@ -189,21 +228,8 @@ const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
         player->board_rows + ((size_t)move_idx * VALUE_NET_BOARD_FLOATS),
         player->scalar_rows + ((size_t)move_idx * VALUE_NET_SCALARS));
   }
-  if (player->metal != NULL) {
-    // Padding rows repeat the first row; their values are ignored.
-    const int batch = value_net_player_batch(player, count);
-    for (int pad_idx = count; pad_idx < batch; pad_idx++) {
-      memcpy(player->board_rows + ((size_t)pad_idx * VALUE_NET_BOARD_FLOATS),
-             player->board_rows, sizeof(float) * VALUE_NET_BOARD_FLOATS);
-      memcpy(player->scalar_rows + ((size_t)pad_idx * VALUE_NET_SCALARS),
-             player->scalar_rows, sizeof(float) * VALUE_NET_SCALARS);
-    }
-    value_net_metal_evaluate(player->metal, batch, player->board_rows,
-                             player->scalar_rows, player->values, NULL);
-  } else {
-    value_net_evaluate_cpu(player->net, count, player->board_rows,
-                           player->scalar_rows, player->values, NULL);
-  }
+  value_net_player_evaluate_rows(player, count, player->board_rows,
+                                 player->scalar_rows, player->values);
   int best = 0;
   for (int move_idx = 1; move_idx < count; move_idx++) {
     const float value = player->values[move_idx];
