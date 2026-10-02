@@ -782,8 +782,9 @@ void blocking_setup_replay_run_spec(const char *spec) {
 // full precision, so speed changes can be checked to leave results
 // unchanged. Spec: "<positions.csv>:<out.csv>[:<racks>[:<universe>
 // [:<max_positions>[:<flags>]]]]" with a bsgen positions file; flags may hold
-// "rackmajor" (blocking_setup_checker_measure_all) and "tables" (RIT and
-// WIT on). Each position's
+// "rackmajor" (blocking_setup_checker_measure_all), "tables" (RIT and WIT
+// on) and a teacher value, "equity_reply" or "equity" (default score). Each
+// position's
 // universe is its top <universe> static non-pass moves plus up to five
 // exchanges within 35 points of the top move; the samples are dealt from a
 // seed fixed by the game index.
@@ -816,6 +817,12 @@ void blocking_setup_bench_run_spec(const char *spec) {
   BlockingSetupSamples *samples =
       blocking_setup_samples_create(num_racks, BST_POOL_CAPACITY);
   BlockingSetupChecker *checker = blocking_setup_checker_create();
+  if (strstr(flags, "equity_reply") != NULL) {
+    blocking_setup_checker_set_value(checker,
+                                     BLOCKING_SETUP_VALUE_EQUITY_REPLY);
+  } else if (strstr(flags, "equity") != NULL) {
+    blocking_setup_checker_set_value(checker, BLOCKING_SETUP_VALUE_EQUITY);
+  }
   FILE *in = fopen_or_die(string_splitter_get_item(fields, 0), "r");
   FILE *out = fopen_or_die(string_splitter_get_item(fields, 1), "w");
   (void)fprintf(out, "game,cand,move,pass_reply,cand_reply,blocking,"
