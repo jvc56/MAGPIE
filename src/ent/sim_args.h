@@ -55,12 +55,16 @@ typedef struct SimArgs {
   // sim_args_fill clears them (PAT on, every class); callers set them after.
   bool pat_rollout_disabled;
   uint32_t pat_rollout_disabled_classes_mask;
-  // When non-NULL, every rollout ply (both players') is chosen by the
+  // When non-NULL, rollout plies (both players') are chosen by the
   // static-ish blocking/setup policy with these settings instead of the
   // player's static move (see BlockingSetupPolicySettings); not owned, and
   // must outlive the simulation. NULL, the default, rolls out statically.
   // sim_args_fill clears it.
   const BlockingSetupPolicySettings *rollout_blocking_setup;
+  // How many rollout plies, from the first (the opponent's reply), use that
+  // policy; later plies are static. 0, the default, means every ply.
+  // sim_args_fill clears it.
+  int rollout_blocking_setup_plies;
   // Storage the config fills and points rollout_blocking_setup at, so the
   // settings can carry this sim's win percentage table.
   BlockingSetupPolicySettings rollout_blocking_setup_storage;
@@ -141,6 +145,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->pat_rollout_disabled = false;
   sim_args->pat_rollout_disabled_classes_mask = 0;
   sim_args->rollout_blocking_setup = NULL;
+  sim_args->rollout_blocking_setup_plies = 0;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

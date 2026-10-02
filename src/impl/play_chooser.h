@@ -112,6 +112,8 @@ typedef struct PlayChooserStrategy {
   // When non-NULL, SIM rollouts use the static-ish blocking/setup policy
   // with these settings (see SimArgs.rollout_blocking_setup); not owned.
   const BlockingSetupPolicySettings *rollout_blocking_setup;
+  // See SimArgs.rollout_blocking_setup_plies; 0 = every ply.
+  int rollout_blocking_setup_plies;
   uint64_t seed;
 } PlayChooserStrategy;
 

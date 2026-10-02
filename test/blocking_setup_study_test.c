@@ -66,20 +66,19 @@
 //          static rollouts; "nomsim" takes its root candidates from the
 //          nominator, see bss_player_t; sim_ms_b= gives player b its own
 //          budget; rbs=<file.bsp> gives player a static-ish rollouts and
-//          rbs_b= player b, with rbsz= and rbsracks= as for the sim
-//          command's -rbsz / -rbsracks; sim_iters= / sim_iters_b= cap the
-//          iterations per decision): both games of a pair use one seed,
-//          so each seat
-//          draws the same tiles, and the players swap seats. "adjusted"
-//          plays argmax(static equity + blocking + setup adjustments) over
-//          the top universe= static moves and exch= exchanges, with weights
-//          from params= (its bins give conditional policies) and racks=
-//          sampled racks (default: the file's teacher_racks); player b
-//          uses params_b=, universe_b= and z_b= when given; z=<z> races
-//          the candidates (blocking_setup_checker_choose; 0, the default,
-//          measures all) in batches of batch= racks; winpct=1 (winpct_b=
-//          for player b) races on win chance from the lexicon's win% table
-//          instead of points (see BlockingSetupRaceSettings). Writes
+//          rbs_b= player b, with rbsz=, rbsracks= and rbsplies= as for
+//          the sim command's -rbsz / -rbsracks / -rbsplies; sim_iters= /
+//          sim_iters_b= cap the iterations per decision): both games of a pair
+//          use one seed, so each seat draws the same tiles, and the players
+//          swap seats. "adjusted" plays argmax(static equity + blocking + setup
+//          adjustments) over the top universe= static moves and exch=
+//          exchanges, with weights from params= (its bins give conditional
+//          policies) and racks= sampled racks (default: the file's
+//          teacher_racks); player b uses params_b=, universe_b= and z_b= when
+//          given; z=<z> races the candidates (blocking_setup_checker_choose; 0,
+//          the default, measures all) in batches of batch= racks; winpct=1
+//          (winpct_b= for player b) races on win chance from the lexicon's win%
+//          table instead of points (see BlockingSetupRaceSettings). Writes
 //          <out>.games.csv and per-decision timing <out>.moves.csv.
 enum {
   BSS_MAX_ARMS = 8,
@@ -847,6 +846,8 @@ static void bss_games(const BSOptions *options) {
           .pat_rollout_disabled = true,
           .rollout_blocking_setup =
               state->rollout_params != NULL ? &state->rollout : NULL,
+          .rollout_blocking_setup_plies =
+              (int)bs_options_get_long(options, "rbsplies", 0),
           .seed = bs_options_get_u64(options, "seed", 0) + (uint64_t)player_idx,
       };
       state->chooser = play_chooser_create(&strategy);

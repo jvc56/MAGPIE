@@ -410,6 +410,8 @@ typedef struct Simmer {
   double utility_w_spread;
   double utility_spread_scale;
   bool use_margin_forecast;
+  // See SimArgs.rollout_blocking_setup_plies.
+  int rollout_blocking_setup_plies;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -552,7 +554,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     }
 
     const Move *best_play = NULL;
-    if (simmer_worker->rollout_policy != NULL) {
+    if (simmer_worker->rollout_policy != NULL &&
+        (simmer->rollout_blocking_setup_plies == 0 ||
+         ply < simmer->rollout_blocking_setup_plies)) {
       best_play = blocking_setup_policy_choose(
           simmer_worker->rollout_policy, game, prng_next(simmer_worker->prng));
     }
@@ -729,6 +733,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
+  simmer->rollout_blocking_setup_plies = sim_args->rollout_blocking_setup_plies;
 
   simmer->thread_control = thread_control;
 
@@ -785,6 +790,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
+  simmer->rollout_blocking_setup_plies = sim_args->rollout_blocking_setup_plies;
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

@@ -203,6 +203,7 @@ typedef enum {
   ARG_TOKEN_ROLLOUT_BLOCKING_SETUP,
   ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z,
   ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS,
+  ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_PLIES,
   ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT,
   ARG_TOKEN_UTILITY_W_WINPCT,
   ARG_TOKEN_UTILITY_W_SPREAD,
@@ -319,6 +320,8 @@ struct Config {
   BlockingSetupPolicySettings rollout_blocking_setup_settings;
   // Whether 'rbs' rollouts race on win chance from win_pcts (rbswp).
   bool rollout_blocking_setup_win_pct;
+  // Rollout plies that use 'rbs' (rbsplies); 0 for every ply.
+  int rollout_blocking_setup_plies;
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
@@ -2174,6 +2177,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Sampled opponent racks per 'rbs' rollout decision; 0, the "
              "default, uses the parameters' teacher_racks.";
       break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_PLIES:
+      usages[0] = "<plies>";
+      examples[0] = "1";
+      examples[1] = "0";
+      text = "How many rollout plies, from the first (the opponent's reply), "
+             "use the 'rbs' policy; later plies roll out statically. 0, the "
+             "default, uses it on every ply.";
+      break;
     case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT:
       usages[0] = "<true|false>";
       examples[0] = "true";
@@ -2627,6 +2638,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     static const arg_token_t game_analysis_opts[] = {
         ARG_TOKEN_CUTOFF,                         /* cutoff */
         ARG_TOKEN_ROLLOUT_BLOCKING_SETUP,         /* rbs */
+        ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_PLIES,   /* rbsplies */
         ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS,   /* rbsracks */
         ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT, /* rbswp */
         ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z,       /* rbsz */
@@ -3316,6 +3328,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
         config->rollout_blocking_setup_win_pct ? config->win_pcts : NULL;
     sim_args->rollout_blocking_setup =
         &sim_args->rollout_blocking_setup_storage;
+    sim_args->rollout_blocking_setup_plies =
+        config->rollout_blocking_setup_plies;
   }
 }
 
@@ -7701,6 +7715,15 @@ static void config_load_rollout_blocking_setup(Config *config,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  if (config_get_parg_value(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_PLIES,
+                            0)) {
+    config_load_int(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_PLIES, 0,
+                    MAX_PLIES, &config->rollout_blocking_setup_plies,
+                    error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
   const char *name =
       config_get_parg_value(config, ARG_TOKEN_ROLLOUT_BLOCKING_SETUP, 0);
   if (name == NULL) {
@@ -10159,6 +10182,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP, "rbs", 1, 1);
   arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_Z, "rbsz", 1, 1);
   arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_RACKS, "rbsracks", 1, 1);
+  arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_PLIES, "rbsplies", 1, 1);
   arg(ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT, "rbswp", 1, 1);
   arg(ARG_TOKEN_UTILITY_W_WINPCT, "uwin", 1, 1);
   arg(ARG_TOKEN_UTILITY_W_SPREAD, "uspread", 1, 1);
@@ -10270,6 +10294,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
   config->rollout_blocking_setup = NULL;
   config->rollout_blocking_setup_win_pct = false;
+  config->rollout_blocking_setup_plies = 0;
   config->rollout_blocking_setup_settings = (BlockingSetupPolicySettings){
       .universe = DEFAULT_ROLLOUT_BLOCKING_SETUP_UNIVERSE,
       .exchange_quota = DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGES,
@@ -10969,6 +10994,10 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(
           config, sb, arg_token,
           config->rollout_blocking_setup_settings.num_racks);
+      break;
+    case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_PLIES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->rollout_blocking_setup_plies);
       break;
     case ARG_TOKEN_ROLLOUT_BLOCKING_SETUP_WIN_PCT:
       config_add_bool_setting_to_string_builder(
