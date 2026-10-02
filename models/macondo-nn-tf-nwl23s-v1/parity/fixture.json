@@ -1,0 +1,39 @@
+{
+ "frames": 64,
+ "board": {
+  "file": "board.f32",
+  "shape": [
+   64,
+   85,
+   15,
+   15
+  ]
+ },
+ "scalars": {
+  "file": "scalars.f32",
+  "shape": [
+   64,
+   72
+  ]
+ },
+ "value": {
+  "file": "value.f32",
+  "shape": [
+   64
+  ],
+  "source": "onnxruntime fp32"
+ },
+ "spread": {
+  "file": "spread.f32",
+  "shape": [
+   64
+  ],
+  "source": "onnxruntime fp32"
+ },
+ "max_abs_diff_torch_vs_onnx_value": 5.960464477539062e-07,
+ "value_range": [
+  -0.836941123008728,
+  0.7408410906791687
+ ],
+ "tolerance_note": "fp32 ports should match within ~1e-5; fp16 within ~2e-3 (the TensorRT engine is at 1.75e-3)"
+}

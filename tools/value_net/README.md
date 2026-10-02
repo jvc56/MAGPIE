@@ -29,3 +29,13 @@ replies on the first rollout ply among the top K static replies):
 | Metal fp16 (`fp16`) | ~1,000 | 68 it/s | 130 it/s |
 | Neural Engine (`ane`) | ~2,200 | 142 it/s | 275 it/s |
 | both (`anegpu`) | ~2,600 | 175 it/s | 363 it/s |
+
+On the `claude/value-net` branch (not for main), the net César shared is
+committed under `models/macondo-nn-tf-nwl23s-v1/`: his handoff files
+(`weights.f32`, `manifest.json`, `README.md`, `MD5SUMS`, `parity/`) and the
+Neural Engine build (`ane.mlpackage`, batch 8), so that directory can be
+passed as `<model_dir>` directly, e.g.
+
+```sh
+./bin/magpie_test valuenet:parity:models/macondo-nn-tf-nwl23s-v1:models/macondo-nn-tf-nwl23s-v1/parity
+```
