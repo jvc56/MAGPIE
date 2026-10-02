@@ -225,25 +225,15 @@ static MPSGraphTensor *builder_block(MetalBuilder *builder, MPSGraphTensor *x,
                                           name:nil];
     parts[part] = [graph squeezeTensor:slice axis:0 name:nil];
   }
-  MPSGraphTensor *keys_t = [graph transposeTensor:parts[1]
-                                        dimension:2
-                                    withDimension:3
-                                             name:nil];
-  MPSGraphTensor *scores =
-      [graph matrixMultiplicationWithPrimaryTensor:parts[0]
-                                   secondaryTensor:keys_t
-                                              name:nil];
-  scores = [graph
-      multiplicationWithPrimaryTensor:scores
-                      secondaryTensor:
-                          [graph constantWithScalar:1.0 / sqrt(VALUE_NET_HEAD_DIM)
-                                           dataType:builder->data_type]
-                                 name:nil];
-  MPSGraphTensor *weights = [graph softMaxWithTensor:scores axis:-1 name:nil];
-  MPSGraphTensor *attended =
-      [graph matrixMultiplicationWithPrimaryTensor:weights
-                                   secondaryTensor:parts[2]
-                                              name:nil];
+  // softmax(q k^T / sqrt(head_dim)) v as one fused op, without the
+  // [B, heads, T, T] score tensor.
+  MPSGraphTensor *attended = [graph
+      scaledDotProductAttentionWithQueryTensor:parts[0]
+                                     keyTensor:parts[1]
+                                   valueTensor:parts[2]
+                                         scale:(float)(1.0 /
+                                                       sqrt(VALUE_NET_HEAD_DIM))
+                                          name:nil];
   // [B, heads, T, head_dim] -> [B, T, dim]
   attended = [graph transposeTensor:attended dimension:1 withDimension:2 name:nil];
   attended = [graph
