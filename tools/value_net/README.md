@@ -6,8 +6,10 @@ from `<model_dir>/ane.mlpackage`. It reads the same `weights.f32` and
 `manifest.json` as the CPU and Metal backends and lays the net out the way
 the Neural Engine prefers (Apple's ml-ane-transformers recipe):
 activations as (batch, channels, 1, tokens), 1x1 convolutions for linear
-layers, LayerNorm over channels, and per-head attention by einsum. Before
-converting it checks the PyTorch model against the parity rows in fp32.
+layers, LayerNorm over channels, and per-head attention by einsum. Its
+outputs are value and spread (the spread head, which MAGPIE's utility
+uses). Before converting it checks the PyTorch model against the parity
+rows in fp32.
 
 ```sh
 python3.13 -m venv ~/sources/nn-venv   # coremltools has no 3.14 build yet
@@ -19,7 +21,8 @@ python3.13 -m venv ~/sources/nn-venv   # coremltools has no 3.14 build yet
 The batch size (8) is fixed in the model; the backend splits larger
 requests into chunks of it. On an M4, batches of 8 to 16 run fastest (about
 2,250 rows/s from one caller; larger batches are slower), and the
-converted model matches the reference values within 1.4e-3 (fp16).
+converted model matches the reference values within 1.4e-3 and
+spreads within 1.3e-3 (fp16).
 
 Measured on an M4 (4-ply sims of 15 root plays, 10 threads, value net
 replies on the first rollout ply among the top K static replies):

@@ -2,7 +2,8 @@
 Apple's ml-ane-transformers layout: activations as (batch, channels, 1,
 tokens), 1x1 convolutions for linear layers, LayerNorm over channels, and
 per-head attention by einsum with no reshapes or transposes. Weights come
-from the raw blob (weights.f32 + manifest.json).
+from the raw blob (weights.f32 + manifest.json). Outputs value (P(win) -
+P(loss)) and spread (the spread head, tanh-scaled).
 Usage: build_ane.py <handoff_dir> <batch> <out.mlpackage>
 """
 import json
@@ -93,6 +94,7 @@ class ValueNetANE(nn.Module):
         self.ln_f = LayerNormANE("ln_f")
         self.fc1 = conv("fc1", D, 128)
         self.wdl = conv("heads.wdl", 128, 3)
+        self.spread = conv("heads.spread", 128, 1)
 
     def forward(self, board, scalars):
         squares = self.square_proj(board.reshape(batch, 85, 1, 225)) + self.pos_emb
@@ -106,7 +108,9 @@ class ValueNetANE(nn.Module):
         first = x[:, :, :, 0:1]
         hidden = torch.relu(self.fc1(self.ln_f(first)))
         probs = self.wdl(hidden).softmax(dim=1)
-        return (probs[:, 2] - probs[:, 0]).reshape(batch)
+        value = (probs[:, 2] - probs[:, 0]).reshape(batch)
+        spread = torch.tanh(self.spread(hidden)).reshape(batch)
+        return value, spread
 
 
 net = ValueNetANE().eval()
@@ -118,16 +122,18 @@ pb = torch.from_numpy(np.fromfile(f"{handoff}/parity/board.f32", "<f4")
 ps = torch.from_numpy(np.fromfile(f"{handoff}/parity/scalars.f32", "<f4")
                       .reshape(64, 72))
 ref = np.fromfile(f"{handoff}/parity/value.f32", "<f4")
+ref_spread = np.fromfile(f"{handoff}/parity/spread.f32", "<f4")
 idx = np.arange(batch) % 64
 with torch.no_grad():
-    check = net(pb[idx], ps[idx]).numpy()
-print("torch fp32 max_abs_err", np.abs(check - ref[idx]).max())
+    check, check_spread = (out.numpy() for out in net(pb[idx], ps[idx]))
+print("torch fp32 max_abs_err value", np.abs(check - ref[idx]).max(),
+      "spread", np.abs(check_spread - ref_spread[idx]).max())
 traced = torch.jit.trace(net, (board, scalars))
 model = ct.convert(
     traced,
     inputs=[ct.TensorType(name="board", shape=board.shape),
             ct.TensorType(name="scalars", shape=scalars.shape)],
-    outputs=[ct.TensorType(name="value")],
+    outputs=[ct.TensorType(name="value"), ct.TensorType(name="spread")],
     convert_to="mlprogram",
     compute_precision=ct.precision.FLOAT16,
     compute_units=ct.ComputeUnit.CPU_AND_NE,

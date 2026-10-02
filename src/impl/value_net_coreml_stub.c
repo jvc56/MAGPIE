@@ -20,12 +20,13 @@ void value_net_coreml_destroy(ValueNetCoreML *coreml) { (void)coreml; }
 
 void value_net_coreml_evaluate(ValueNetCoreML *coreml, int rows,
                                const float *board, const float *scalars,
-                               float *value) {
+                               float *value, float *spread) {
   (void)coreml;
   (void)rows;
   (void)board;
   (void)scalars;
   (void)value;
+  (void)spread;
   log_fatal("value_net_coreml_evaluate called without a CoreML backend");
 }
 

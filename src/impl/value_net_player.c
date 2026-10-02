@@ -30,17 +30,23 @@ struct ValueNetPlayer {
   // value_net_player_evaluate_rows).
   atomic_bool metal_busy;
   int max_candidates;
+  // The utility value_net_player_choose ranks candidates by.
+  double utility_w_winpct;
+  double utility_w_spread;
+  double utility_spread_scale;
   MoveList *list;
   Game *scratch;
   float *board_rows;
   float *scalar_rows;
   float *values;
+  float *spreads;
 };
 
-ValueNetPlayer *value_net_player_create(const char *model_dir,
-                                        value_net_backend_t backend,
-                                        int max_candidates,
-                                        ErrorStack *error_stack) {
+ValueNetPlayer *
+value_net_player_create(const char *model_dir, value_net_backend_t backend,
+                        int max_candidates, double utility_w_winpct,
+                        double utility_w_spread, double utility_spread_scale,
+                        ErrorStack *error_stack) {
   ValueNet *net = value_net_create(model_dir, error_stack);
   if (net == NULL) {
     return NULL;
@@ -74,12 +80,17 @@ ValueNetPlayer *value_net_player_create(const char *model_dir,
   player->coreml = coreml;
   player->max_candidates =
       max_candidates > 0 ? max_candidates : VALUE_NET_PLAYER_DEFAULT_CANDIDATES;
+  player->utility_w_winpct = utility_w_winpct;
+  player->utility_w_spread = utility_w_spread;
+  player->utility_spread_scale = utility_spread_scale;
   player->list = move_list_create(player->max_candidates);
   player->board_rows = calloc_or_die(
       (size_t)player->max_candidates * VALUE_NET_BOARD_FLOATS, sizeof(float));
   player->scalar_rows = calloc_or_die(
       (size_t)player->max_candidates * VALUE_NET_SCALARS, sizeof(float));
   player->values = calloc_or_die((size_t)player->max_candidates, sizeof(float));
+  player->spreads =
+      calloc_or_die((size_t)player->max_candidates, sizeof(float));
   return player;
 }
 
@@ -95,11 +106,13 @@ void value_net_player_destroy(ValueNetPlayer *player) {
   free(player->board_rows);
   free(player->scalar_rows);
   free(player->values);
+  free(player->spreads);
   free(player);
 }
 
 void value_net_player_evaluate_rows(void *context, int rows, const float *board,
-                                    const float *scalars, float *values) {
+                                    const float *scalars, float *values,
+                                    float *spreads) {
   ValueNetPlayer *player = context;
   if (rows <= 0) {
     return;
@@ -112,19 +125,22 @@ void value_net_player_evaluate_rows(void *context, int rows, const float *board,
     bool idle = false;
     if (atomic_compare_exchange_strong(&player->metal_busy, &idle, true)) {
       value_net_metal_evaluate(player->metal, rows, board, scalars, values,
-                               NULL);
+                               spreads);
       atomic_store(&player->metal_busy, false);
     } else {
-      value_net_coreml_evaluate(player->coreml, rows, board, scalars, values);
+      value_net_coreml_evaluate(player->coreml, rows, board, scalars, values,
+                                spreads);
     }
     return;
   }
   if (player->coreml != NULL) {
-    value_net_coreml_evaluate(player->coreml, rows, board, scalars, values);
+    value_net_coreml_evaluate(player->coreml, rows, board, scalars, values,
+                              spreads);
   } else if (player->metal != NULL) {
-    value_net_metal_evaluate(player->metal, rows, board, scalars, values, NULL);
+    value_net_metal_evaluate(player->metal, rows, board, scalars, values,
+                             spreads);
   } else {
-    value_net_evaluate_cpu(player->net, rows, board, scalars, values, NULL);
+    value_net_evaluate_cpu(player->net, rows, board, scalars, values, spreads);
   }
 }
 
@@ -157,17 +173,23 @@ const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
         player->board_rows + ((size_t)move_idx * VALUE_NET_BOARD_FLOATS),
         player->scalar_rows + ((size_t)move_idx * VALUE_NET_SCALARS));
   }
-  value_net_player_evaluate_rows(player, count, player->board_rows,
-                                 player->scalar_rows, player->values);
+  value_net_player_evaluate_rows(
+      player, count, player->board_rows, player->scalar_rows, player->values,
+      player->utility_w_spread > 0.0 ? player->spreads : NULL);
   int best = 0;
-  for (int move_idx = 1; move_idx < count; move_idx++) {
-    const float value = player->values[move_idx];
-    const float best_value = player->values[best];
-    if (value > best_value ||
-        (value == best_value &&
-         move_get_tiles_played(move_list_get_move(list, move_idx)) >
+  double best_utility = 0.0;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const Move *move = move_list_get_move(list, move_idx);
+    const double utility = value_net_utility(
+        player->values[move_idx], player->spreads[move_idx],
+        value_net_spread_after_move(game, move), player->utility_w_winpct,
+        player->utility_w_spread, player->utility_spread_scale);
+    if (move_idx == 0 || utility > best_utility ||
+        (utility == best_utility &&
+         move_get_tiles_played(move) >
              move_get_tiles_played(move_list_get_move(list, best)))) {
       best = move_idx;
+      best_utility = utility;
     }
   }
   return move_list_get_move(list, best);

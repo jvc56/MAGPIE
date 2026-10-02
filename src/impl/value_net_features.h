@@ -17,4 +17,17 @@ void value_net_features_for_move(const Game *game, const Move *move,
                                  const ValueNetHistory *history, Game *scratch,
                                  float *board_row, float *scalars_row);
 
+// The spread in points of the player on turn in game just after making
+// move, from that player's side (the input row's spread scalar).
+double value_net_spread_after_move(const Game *game, const Move *move);
+
+// MAGPIE's score+win utility (sim_args.h's sim_utility_blend) of the
+// position after a candidate, from the net's value and spread for its row:
+// win% is (1 + value) / 2, draws counting half, and the final spread is
+// spread_after (value_net_spread_after_move) plus the spread head's
+// predicted change to the end of the game, 130 * atanh(spread). With
+// w_spread 0 it is the win% alone and spread is not read.
+double value_net_utility(float value, float spread, double spread_after,
+                         double w_winpct, double w_spread, double spread_scale);
+
 #endif

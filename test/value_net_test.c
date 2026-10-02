@@ -258,15 +258,25 @@ static const char *vnt_option(const StringSplitter *fields, int first,
   return found != NULL ? found : fallback;
 }
 
+// vnt_option as a number; fallback when absent.
+static double vnt_option_double(const StringSplitter *fields, int first,
+                                const char *key, int player_idx,
+                                double fallback) {
+  const char *text = vnt_option(fields, first, key, player_idx, NULL);
+  return text != NULL ? strtod(text, NULL) : fallback;
+}
+
 // "games:<model_dir>:<backend>:<lexicon>:<pairs>:<seed>:<worker>:<workers>:
 // <out>[:key=value...]": game pairs between players a and b (a=, b=: nn,
 // static, sim with static rollouts, simnn with value net replies on the
 // first rollout ply; default nn vs static). Sim players take plies=,
 // cands= (root candidates), ms= (per move) and iters= (cap), rcands= and
-// batch= (value net replies); any key may be given per player as <key>_a
-// or <key>_b. Both games of a pair use one seed and the players swap seats,
-// so each seat draws the same tiles. Writes <out>.games.csv and
-// per-decision timing to <out>.moves.csv.
+// batch= (value net replies). uwin=, uspread= and uscale= set the utility
+// (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults otherwise) that an
+// nn player and each sim, value net replies included, rank by. Any key may
+// be given per player as <key>_a or <key>_b. Both games of a pair use one seed
+// and the players swap seats, so each seat draws the same tiles. Writes
+// <out>.games.csv and per-decision timing to <out>.moves.csv.
 static void vnt_games(const StringSplitter *fields) {
   if (string_splitter_get_number_of_items(fields) < 9) {
     log_fatal("games needs at least 8 fields");
@@ -289,17 +299,31 @@ static void vnt_games(const StringSplitter *fields) {
   ErrorStack *error_stack = error_stack_create();
   config_load_win_pcts(config, error_stack);
   vnt_player_t kinds[2];
-  bool needs_net = false;
+  double utility_w_winpct[2];
+  double utility_w_spread[2];
+  double utility_spread_scale[2];
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     kinds[player_idx] =
         vnt_parse_player(vnt_option(fields, 9, player_idx == 0 ? "a" : "b", 2,
                                     player_idx == 0 ? "nn" : "static"));
-    needs_net = needs_net || kinds[player_idx] == VNT_PLAYER_NN ||
-                kinds[player_idx] == VNT_PLAYER_SIM_NN;
+    utility_w_winpct[player_idx] = vnt_option_double(
+        fields, 9, "uwin", player_idx, config_get_utility_w_winpct(config));
+    utility_w_spread[player_idx] = vnt_option_double(
+        fields, 9, "uspread", player_idx, config_get_utility_w_spread(config));
+    utility_spread_scale[player_idx] =
+        vnt_option_double(fields, 9, "uscale", player_idx,
+                          config_get_utility_spread_scale(config));
   }
-  ValueNetPlayer *player = NULL;
-  if (needs_net) {
-    player = value_net_player_create(model_dir, backend, 0, error_stack);
+  // Each player using the net has its own, with its own utility.
+  ValueNetPlayer *players[2] = {NULL, NULL};
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (kinds[player_idx] == VNT_PLAYER_NN ||
+        kinds[player_idx] == VNT_PLAYER_SIM_NN) {
+      players[player_idx] = value_net_player_create(
+          model_dir, backend, 0, utility_w_winpct[player_idx],
+          utility_w_spread[player_idx], utility_spread_scale[player_idx],
+          error_stack);
+    }
   }
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -331,12 +355,15 @@ static void vnt_games(const StringSplitter *fields) {
         .win_pcts = config_get_win_pcts(config),
         .num_threads = (int)strtol(
             vnt_option(fields, 9, "threads", player_idx, "1"), NULL, 10),
+        .utility_w_winpct = utility_w_winpct[player_idx],
+        .utility_w_spread = utility_w_spread[player_idx],
+        .utility_spread_scale = utility_spread_scale[player_idx],
         .seed = seed + (uint64_t)player_idx,
         .rollout_value_net_evaluate = kinds[player_idx] == VNT_PLAYER_SIM_NN
                                           ? value_net_player_evaluate_rows
                                           : NULL,
         .rollout_value_net_context =
-            kinds[player_idx] == VNT_PLAYER_SIM_NN ? player : NULL,
+            kinds[player_idx] == VNT_PLAYER_SIM_NN ? players[player_idx] : NULL,
         .rollout_value_net_candidates = (int)strtol(
             vnt_option(fields, 9, "rcands", player_idx, "15"), NULL, 10),
         .rollout_value_net_batch = (int)strtol(
@@ -380,8 +407,8 @@ static void vnt_games(const StringSplitter *fields) {
         Move move;
         switch (kinds[player_idx]) {
         case VNT_PLAYER_NN:
-          move_copy(&move,
-                    value_net_player_choose(player, game, &histories[seat]));
+          move_copy(&move, value_net_player_choose(players[player_idx], game,
+                                                   &histories[seat]));
           break;
         case VNT_PLAYER_STATIC:
           move_copy(&move, vnt_static_move(game, static_list));
@@ -426,7 +453,8 @@ static void vnt_games(const StringSplitter *fields) {
     }
   }
   move_list_destroy(static_list);
-  value_net_player_destroy(player);
+  value_net_player_destroy(players[0]);
+  value_net_player_destroy(players[1]);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
@@ -686,8 +714,9 @@ static void vnt_simbench(const StringSplitter *fields) {
   config_load_win_pcts(config, error_stack);
   ValueNetPlayer *player = NULL;
   if (!strings_equal(backend_name, "none")) {
+    // Pure win%, as the sims below.
     player = value_net_player_create(model_dir, vnt_parse_backend(backend_name),
-                                     0, error_stack);
+                                     0, 1.0, 0.0, 100.0, error_stack);
   }
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
@@ -797,15 +826,16 @@ static void vnt_anebench(const char *dir, const char *parity_dir) {
   path = get_formatted_string("%s/value.f32", parity_dir);
   float *ref_value = vnt_read_floats(path, VALUE_NET_PARITY_ROWS);
   free(path);
+  path = get_formatted_string("%s/spread.f32", parity_dir);
+  float *ref_spread = vnt_read_floats(path, VALUE_NET_PARITY_ROWS);
+  free(path);
   float value[VALUE_NET_PARITY_ROWS];
+  float spread[VALUE_NET_PARITY_ROWS];
+  const int64_t start = ctimer_monotonic_ns();
   value_net_coreml_evaluate(coreml, VALUE_NET_PARITY_ROWS, board, scalars,
-                            value);
-  double max_diff = 0.0;
-  for (int row = 0; row < VALUE_NET_PARITY_ROWS; row++) {
-    max_diff = fmax(max_diff, fabs((double)value[row] - ref_value[row]));
-  }
-  printf("value_net_parity backend=ane rows=%d max_abs_value_diff=%.3g\n",
-         VALUE_NET_PARITY_ROWS, max_diff);
+                            value, spread);
+  vnt_report("ane", VALUE_NET_PARITY_ROWS, value, spread, ref_value, ref_spread,
+             (double)(ctimer_monotonic_ns() - start) / 1e9);
   const int max_rows = VALUE_NET_MAX_GPU_ROWS;
   float *big_board =
       malloc_or_die(sizeof(float) * (size_t)max_rows * VALUE_NET_BOARD_FLOATS);
@@ -823,11 +853,13 @@ static void vnt_anebench(const char *dir, const char *parity_dir) {
   }
   float *values = malloc_or_die(sizeof(float) * (size_t)max_rows);
   for (int rows = 8; rows <= max_rows; rows *= 2) {
-    value_net_coreml_evaluate(coreml, rows, big_board, big_scalars, values);
+    value_net_coreml_evaluate(coreml, rows, big_board, big_scalars, values,
+                              NULL);
     const int repeats = 20;
     const int64_t start = ctimer_monotonic_ns();
     for (int repeat = 0; repeat < repeats; repeat++) {
-      value_net_coreml_evaluate(coreml, rows, big_board, big_scalars, values);
+      value_net_coreml_evaluate(coreml, rows, big_board, big_scalars, values,
+                                NULL);
     }
     const double seconds =
         (double)(ctimer_monotonic_ns() - start) / 1e9 / repeats;
@@ -841,6 +873,7 @@ static void vnt_anebench(const char *dir, const char *parity_dir) {
   free(board);
   free(scalars);
   free(ref_value);
+  free(ref_spread);
   value_net_coreml_destroy(coreml);
   error_stack_destroy(error_stack);
 }

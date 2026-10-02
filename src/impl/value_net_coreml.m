@@ -71,12 +71,14 @@ ValueNetCoreML *value_net_coreml_create(const char *path, int concurrency,
     if (board_description == nil || scalars_description == nil ||
         shape.count != 3 || shape[1].intValue != VALUE_NET_PLANES ||
         shape[2].intValue != VALUE_NET_SQUARES ||
-        model.modelDescription.outputDescriptionsByName[@"value"] == nil) {
+        model.modelDescription.outputDescriptionsByName[@"value"] == nil ||
+        model.modelDescription.outputDescriptionsByName[@"spread"] == nil) {
       error_stack_push(
           error_stack, ERROR_STATUS_VALUE_NET_UNEXPECTED_TENSOR,
           string_duplicate("the CoreML value net needs inputs board "
                            "[batch, 85, 225] and scalars [batch, 72] and "
-                           "output value [batch]"));
+                           "outputs value and spread [batch] (rebuild it "
+                           "with tools/value_net/build_ane.py)"));
       return NULL;
     }
     ValueNetCoreML *coreml = calloc_or_die(1, sizeof(ValueNetCoreML));
@@ -110,11 +112,32 @@ void value_net_coreml_destroy(ValueNetCoreML *coreml) {
   free(coreml);
 }
 
+// Copies the first rows floats of a [batch] output into out.
+static void coreml_read_output(MLMultiArray *array, int rows, float *out) {
+  const NSInteger stride = array.strides.lastObject.integerValue;
+  if (array.dataType == MLMultiArrayDataTypeFloat16) {
+    const __fp16 *halves = (const __fp16 *)array.dataPointer;
+    for (int row = 0; row < rows; row++) {
+      out[row] = (float)halves[row * stride];
+    }
+  } else if (array.dataType == MLMultiArrayDataTypeFloat32) {
+    const float *floats = (const float *)array.dataPointer;
+    for (int row = 0; row < rows; row++) {
+      out[row] = floats[row * stride];
+    }
+  } else {
+    for (int row = 0; row < rows; row++) {
+      out[row] = array[row].floatValue;
+    }
+  }
+}
+
 // Evaluates one chunk of at most coreml->batch rows (padded with copies of
-// its first row) into value.
+// its first row) into value and spread (either may be NULL).
 static void coreml_evaluate_chunk(const ValueNetCoreML *coreml, int instance,
                                   int rows, const float *board,
-                                  const float *scalars, float *value) {
+                                  const float *scalars, float *value,
+                                  float *spread) {
   @autoreleasepool {
     const int batch = coreml->batch;
     const size_t board_floats = (size_t)batch * VALUE_NET_BOARD_FLOATS;
@@ -172,29 +195,21 @@ static void coreml_evaluate_chunk(const ValueNetCoreML *coreml, int instance,
       log_fatal("CoreML value net prediction failed: %s",
                 error.localizedDescription.UTF8String);
     }
-    MLMultiArray *values = [outputs featureValueForName:@"value"].multiArrayValue;
-    const NSInteger stride = values.strides.lastObject.integerValue;
-    if (values.dataType == MLMultiArrayDataTypeFloat16) {
-      const __fp16 *halves = (const __fp16 *)values.dataPointer;
-      for (int row = 0; row < rows; row++) {
-        value[row] = (float)halves[row * stride];
-      }
-    } else if (values.dataType == MLMultiArrayDataTypeFloat32) {
-      const float *floats = (const float *)values.dataPointer;
-      for (int row = 0; row < rows; row++) {
-        value[row] = floats[row * stride];
-      }
-    } else {
-      for (int row = 0; row < rows; row++) {
-        value[row] = values[row].floatValue;
-      }
+    if (value != NULL) {
+      coreml_read_output([outputs featureValueForName:@"value"].multiArrayValue,
+                         rows, value);
+    }
+    if (spread != NULL) {
+      coreml_read_output(
+          [outputs featureValueForName:@"spread"].multiArrayValue, rows,
+          spread);
     }
   }
 }
 
 void value_net_coreml_evaluate(ValueNetCoreML *coreml, int rows,
                                const float *board, const float *scalars,
-                               float *value) {
+                               float *value, float *spread) {
   if (rows <= 0) {
     return;
   }
@@ -213,7 +228,9 @@ void value_net_coreml_evaluate(ValueNetCoreML *coreml, int rows,
       coreml_evaluate_chunk(
           coreml, (int)lane, count,
           board + ((size_t)start * VALUE_NET_BOARD_FLOATS),
-          scalars + ((size_t)start * VALUE_NET_SCALARS), value + start);
+          scalars + ((size_t)start * VALUE_NET_SCALARS),
+          value != NULL ? value + start : NULL,
+          spread != NULL ? spread + start : NULL);
     }
   });
 }

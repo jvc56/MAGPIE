@@ -9,8 +9,10 @@
 
 // Chooses moves as Macondo's FastMlBot does: the top max_candidates
 // (default 50) moves by static equity, one value net row each, one batched
-// evaluation, the highest value played (ties: more tiles played). With an
-// empty bag, the top static move.
+// evaluation, and the one with the highest utility played (ties: more tiles
+// played). The utility is MAGPIE's score+win blend with the player's
+// weights (value_net_utility: win% from the net's value, final spread from
+// its spread head). With an empty bag, the top static move.
 typedef enum {
   VALUE_NET_BACKEND_CPU,
   VALUE_NET_BACKEND_METAL_FP32,
@@ -24,16 +26,21 @@ typedef enum {
 
 typedef struct ValueNetPlayer ValueNetPlayer;
 
-ValueNetPlayer *value_net_player_create(const char *model_dir,
-                                        value_net_backend_t backend,
-                                        int max_candidates,
-                                        ErrorStack *error_stack);
+// utility_w_winpct, utility_w_spread and utility_spread_scale are the
+// utility weights as in SimArgs.
+ValueNetPlayer *
+value_net_player_create(const char *model_dir, value_net_backend_t backend,
+                        int max_candidates, double utility_w_winpct,
+                        double utility_w_spread, double utility_spread_scale,
+                        ErrorStack *error_stack);
 void value_net_player_destroy(ValueNetPlayer *player);
 
-// Evaluates rows input rows into values (a value_net_rows_fn, context
-// being the ValueNetPlayer); safe to call from several threads.
+// Evaluates rows input rows into values and, unless spreads is NULL,
+// spreads (a value_net_rows_fn, context being the ValueNetPlayer); safe to
+// call from several threads.
 void value_net_player_evaluate_rows(void *context, int rows, const float *board,
-                                    const float *scalars, float *values);
+                                    const float *scalars, float *values,
+                                    float *spreads);
 
 // The chosen move for the player on turn in game, whose history (see
 // ValueNetHistory) is history; valid until the next call.

@@ -411,6 +411,9 @@ typedef struct SimValueNetWorker {
   float *board;          // [batch * candidates] rows
   float *scalars;
   float *values;
+  float *spreads;
+  // Each row's replier spread just after the reply.
+  double *spread_after;
   MoveList *list;
   Game *scratch;
   // The reply for the iteration in progress.
@@ -468,6 +471,8 @@ static void sim_value_net_worker_free(SimValueNetWorker *worker) {
   free(worker->board);
   free(worker->scalars);
   free(worker->values);
+  free(worker->spreads);
+  free(worker->spread_after);
   move_list_destroy(worker->list);
   game_destroy(worker->scratch);
   memset(worker, 0, sizeof(SimValueNetWorker));
@@ -488,6 +493,8 @@ static void sim_value_net_worker_ensure(SimValueNetWorker *worker, int batch,
   worker->board = malloc_or_die(sizeof(float) * rows * VALUE_NET_BOARD_FLOATS);
   worker->scalars = malloc_or_die(sizeof(float) * rows * VALUE_NET_SCALARS);
   worker->values = malloc_or_die(sizeof(float) * rows);
+  worker->spreads = malloc_or_die(sizeof(float) * rows);
+  worker->spread_after = malloc_or_die(sizeof(double) * rows);
   worker->list = move_list_create(candidates);
   worker->scratch = game_duplicate(game);
 }
@@ -588,7 +595,8 @@ static int sim_start_iteration(const Simmer *simmer,
 // Fills play_index's shared queue (its lock held): batch seeds, each
 // iteration replayed from the start to just after the candidate, the
 // opponent's top static replies scored by the net in one evaluation, and
-// the best kept (ties: more tiles played).
+// the best by the sim's utility kept (value_net_utility; ties: more tiles
+// played).
 static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
                                  SimmedPlay *simmed_play, int play_index) {
   SimValueNetShared *shared = &simmer->value_net_shared;
@@ -636,6 +644,8 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
       } else {
         for (int move_idx = 0; move_idx < count; move_idx++) {
           move_copy(&moves[move_idx], move_list_get_move(list, move_idx));
+          worker->spread_after[rows] =
+              value_net_spread_after_move(game, &moves[move_idx]);
           value_net_features_for_move(
               game, &moves[move_idx], &history, worker->scratch,
               worker->board + ((size_t)rows * VALUE_NET_BOARD_FLOATS),
@@ -648,8 +658,9 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
     game_unplay_last_move(game);
     return_rack_to_bag(game, player_off_turn_index);
   }
-  simmer->value_net_evaluate(simmer->value_net_context, rows, worker->board,
-                             worker->scalars, worker->values);
+  simmer->value_net_evaluate(
+      simmer->value_net_context, rows, worker->board, worker->scalars,
+      worker->values, simmer->utility_w_spread > 0.0 ? worker->spreads : NULL);
   int row = 0;
   for (int seed_idx = 0; seed_idx < shared->batch; seed_idx++) {
     const int count = worker->candidate_count[seed_idx];
@@ -659,13 +670,19 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
     const Move *moves =
         worker->candidate_moves + ((size_t)seed_idx * worker->candidates);
     int best = 0;
-    for (int move_idx = 1; move_idx < count; move_idx++) {
-      const float value = worker->values[row + move_idx];
-      const float best_value = worker->values[row + best];
-      if (value > best_value ||
-          (value == best_value && move_get_tiles_played(&moves[move_idx]) >
-                                      move_get_tiles_played(&moves[best]))) {
+    double best_utility = 0.0;
+    for (int move_idx = 0; move_idx < count; move_idx++) {
+      const int move_row = row + move_idx;
+      const double utility = value_net_utility(
+          worker->values[move_row], worker->spreads[move_row],
+          worker->spread_after[move_row], simmer->utility_w_winpct,
+          simmer->utility_w_spread, simmer->utility_spread_scale);
+      if (move_idx == 0 || utility > best_utility ||
+          (utility == best_utility &&
+           move_get_tiles_played(&moves[move_idx]) >
+               move_get_tiles_played(&moves[best]))) {
         best = move_idx;
+        best_utility = utility;
       }
     }
     move_copy(&shared->replies[slot_base + seed_idx], &moves[best]);

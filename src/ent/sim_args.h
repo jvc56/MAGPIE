@@ -16,10 +16,11 @@
 #include <stdint.h>
 
 // Evaluates rows value net input rows (board then scalars, row-major) into
-// values; context is the evaluator. Must be safe to call from every sim
-// thread at once.
+// values and, unless spreads is NULL, the spread head's outputs; context is
+// the evaluator. Must be safe to call from every sim thread at once.
 typedef void (*value_net_rows_fn)(void *context, int rows, const float *board,
-                                  const float *scalars, float *values);
+                                  const float *scalars, float *values,
+                                  float *spreads);
 
 typedef struct SimArgs {
   int num_plies;
@@ -59,12 +60,14 @@ typedef struct SimArgs {
   bool use_margin_forecast;
   // When rollout_value_net_evaluate is set, the first rollout ply (the
   // opponent's reply) is chosen by the value net: the top
-  // rollout_value_net_candidates static replies (0 for 15), the highest
-  // value played. Replies are computed rollout_value_net_batch iterations
-  // at a time per thread and play (0 for 8) in one call, which evaluates
-  // rows input rows (value_net_defs.h) into values. The replier's history
-  // before the candidate is rollout_value_net_history. sim_args_fill clears
-  // the evaluator; later plies are static.
+  // rollout_value_net_candidates static replies (0 for 15), the one with
+  // the highest utility by the weights above played (value_net_utility in
+  // value_net_features.h). Replies are computed rollout_value_net_batch
+  // iterations at a time per thread and play (0 for 8) in one call, which
+  // evaluates rows input rows (value_net_defs.h) into values, and spreads
+  // when the utility weighs spread. The replier's history before the
+  // candidate is rollout_value_net_history. sim_args_fill clears the
+  // evaluator; later plies are static.
   value_net_rows_fn rollout_value_net_evaluate;
   void *rollout_value_net_context;
   int rollout_value_net_candidates;

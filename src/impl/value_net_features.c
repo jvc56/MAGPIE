@@ -15,6 +15,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "gameplay.h"
 #include <assert.h>
 #include <math.h>
@@ -71,6 +72,9 @@ enum {
 #define VNF_LEAVE_CENTER 10.0
 #define VNF_LEAVE_SCALE 20.0
 #define VNF_SPREAD_SCALE 130.0
+// The spread head's output is clamped inside (-1, 1) before atanh, as
+// Macondo's expectedFinalSpread does.
+#define VNF_MAX_SPREAD_OUTPUT 0.999999
 #define VNF_SINCE_BINGO_SCALE 25.0
 #define VNF_UNSEEN_COUNT_SCALE 100.0
 
@@ -267,8 +271,28 @@ void value_net_features_for_move(const Game *game, const Move *move,
       vnf_tanh_scaled(leave_value, VNF_LEAVE_CENTER, VNF_LEAVE_SCALE);
   scalars_row[VNF_SCALAR_UNSEEN_COUNT] =
       (float)unseen_count / (float)VNF_UNSEEN_COUNT_SCALE;
-  const double spread = equity_to_double(player_get_score(mover_player)) +
-                        score - equity_to_double(player_get_score(opponent));
-  scalars_row[VNF_SCALAR_SPREAD] =
-      vnf_tanh_scaled(spread, 0.0, VNF_SPREAD_SCALE);
+  scalars_row[VNF_SCALAR_SPREAD] = vnf_tanh_scaled(
+      value_net_spread_after_move(game, move), 0.0, VNF_SPREAD_SCALE);
+}
+
+double value_net_spread_after_move(const Game *game, const Move *move) {
+  const int mover = game_get_player_on_turn_index(game);
+  return equity_to_double(player_get_score(game_get_player(game, mover))) +
+         equity_to_double(move_get_score(move)) -
+         equity_to_double(player_get_score(game_get_player(game, 1 - mover)));
+}
+
+double value_net_utility(float value, float spread, double spread_after,
+                         double w_winpct, double w_spread,
+                         double spread_scale) {
+  const double win_pct = (1.0 + (double)value) / 2.0;
+  if (w_spread == 0.0) {
+    return win_pct;
+  }
+  const double spread_output =
+      fmax(-VNF_MAX_SPREAD_OUTPUT, fmin(VNF_MAX_SPREAD_OUTPUT, (double)spread));
+  const double final_spread =
+      spread_after + (VNF_SPREAD_SCALE * atanh(spread_output));
+  return sim_utility_blend(win_pct, double_to_equity(final_spread), w_winpct,
+                           w_spread, spread_scale);
 }

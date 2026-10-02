@@ -18,10 +18,9 @@ ValueNetCoreML *value_net_coreml_create(const char *path, int concurrency,
                                         ErrorStack *error_stack);
 void value_net_coreml_destroy(ValueNetCoreML *coreml);
 
-// As value_net_evaluate_cpu without spread; safe to call from several
-// threads at once.
+// As value_net_evaluate_cpu; safe to call from several threads at once.
 void value_net_coreml_evaluate(ValueNetCoreML *coreml, int rows,
                                const float *board, const float *scalars,
-                               float *value);
+                               float *value, float *spread);
 
 #endif
