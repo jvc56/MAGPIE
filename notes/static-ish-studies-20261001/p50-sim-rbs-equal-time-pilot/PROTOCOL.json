@@ -1,0 +1,9 @@
+{
+  "kind": "Pilot (not confirmatory): sim with static-ish rollouts vs sim with static rollouts, equal time",
+  "frozen_utc": "2026-10-02T02:24:11Z",
+  "player_a": "2-ply sim, top 8 static candidates, 3 s per decision, static-ish research_v1 gate30 rollouts (sha256 8881a54afe5b44fff24730c3640cfcbc1e307413e660b0c7e7657116c478738d), 1 thread",
+  "player_b": "2-ply sim, top 8 static candidates, 3 s per decision, static rollouts, 1 thread",
+  "pairs": 500, "seed": 20266001, "lexicon": "CSW24", "workers": 10,
+  "purpose": "estimate the equal-time effect and its cost to size a confirmatory run; reported with its z test but not used to change any default",
+  "binary": "magpie_test_simrbs, sha256 c2a3bae92241613c36c82f71e865abdf8a585a1b3d9a6fad3a00f702753bde07 (commit f6f55993)"
+}

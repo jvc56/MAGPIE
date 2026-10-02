@@ -274,3 +274,15 @@ These are exact speedups; results are unchanged.
 | pgo_simbs (static-ish sim profile) | **125 it/s (+7%)** | **214k it/s (+10%)** |
 
 The ordering held in both repeats, though Spotlight indexing kept the load average above 10. The release default is unchanged.
+
+## Static-ish rollouts in played sims (P49–P51)
+
+Both players run 2-ply sims of the top 8 static candidates, with 200 iterations per decision (top-two BAI), on one thread. The rollout policy is `research_v1` gated to bag < 30. These are equal-sample tests: they measure rollout quality per sample, not cost.
+
+| run | static-ish on | a's score vs static rollouts | 95% CI | p | spread | decision p50 (a / b) |
+|---|---|---:|---|---:|---:|---|
+| P49 | both rollout plies | stopped at 615 of 2,000 games | — | — | — | — |
+| P51 | the opponent's reply only (`-rbsplies 1`) | 48.53% ± 0.93% | [46.70, 50.35] | 0.11 | −1.3 | 110 / 18 ms |
+
+- **P49** was stopped at the user's request to test the opponent's reply alone. An interim look at 295 pairs (47.97% ± 1.66%) was reported, but no test is claimed (`p49-.../STOPPED`). The P50 equal-time pilot was not run.
+- **P51:** static-ish on the opponent's reply does not improve a sim at equal samples, and its point estimate is below 50%. It is about 6× the per-decision cost of static rollouts at 200 iterations, so an equal-time test could only be worse. Static-ish rollouts are not pursued further.

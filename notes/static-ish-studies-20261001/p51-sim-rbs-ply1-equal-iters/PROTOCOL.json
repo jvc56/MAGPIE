@@ -1,0 +1,11 @@
+{
+  "kind": "Prespecified: sim with static-ish on the opponent's reply only vs sim with static rollouts, equal iterations",
+  "frozen_utc": "2026-10-02T03:51:55Z",
+  "player_a": "2-ply sim, top 8 static candidates, 200 iterations per decision (top-two BAI); rollout ply 1 (the opponent's reply) chosen by static-ish research_v1 gated to bag < 30 (CSW24_research_v1_gate30.bsp sha256 8881a54afe5b44fff24730c3640cfcbc1e307413e660b0c7e7657116c478738d; equity_reply 0.7/0.4, 64 racks, z=3, universe 60), ply 2 static; no PAT; 1 thread",
+  "player_b": "same sim with static rollouts on both plies",
+  "pairs": 1000, "seed": 20266101, "lexicon": "CSW24", "workers": 10,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "secondary": "mean spread; decision time per player",
+  "note": "replaces P49 (both plies static-ish), stopped at 615 games at the user's request",
+  "binary": "magpie_test_simrbs1, sha256 7b99204d2b1f1aa2c489c116874f901db312bf6087d07b77b11459a3b8b55604 (commit 825dc6a0)"
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "Prespecified: sim with static-ish rollouts vs sim with static rollouts, equal iterations",
+  "frozen_utc": "2026-10-02T02:24:11Z",
+  "player_a": "2-ply sim, top 8 static candidates, 200 iterations per decision (top-two BAI), no-PAT rollouts chosen by static-ish research_v1 gated to bag < 30 (CSW24_research_v1_gate30.bsp sha256 8881a54afe5b44fff24730c3640cfcbc1e307413e660b0c7e7657116c478738d; equity_reply 0.7/0.4, 64 racks, z=3, universe 60), 1 thread",
+  "player_b": "same sim with no-PAT static rollouts",
+  "pairs": 1000, "seed": 20265901, "lexicon": "CSW24", "workers": 10,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "secondary": "mean spread; decision time per player",
+  "note": "isolates rollout quality per sample; not an equal-time comparison",
+  "binary": "magpie_test_simrbs, sha256 c2a3bae92241613c36c82f71e865abdf8a585a1b3d9a6fad3a00f702753bde07 (commit f6f55993)"
+}
