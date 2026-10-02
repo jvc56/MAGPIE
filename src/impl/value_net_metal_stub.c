@@ -9,9 +9,11 @@
 #ifndef VALUE_NET_METAL
 
 ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
+                                      int concurrency,
                                       ErrorStack *error_stack) {
   (void)net;
   (void)half_precision;
+  (void)concurrency;
   error_stack_push(
       error_stack, ERROR_STATUS_VALUE_NET_BACKEND_UNAVAILABLE,
       string_duplicate("this build has no Metal value net backend"));

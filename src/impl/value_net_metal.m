@@ -7,26 +7,50 @@
 #include "../util/string_util.h"
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
-// The whole forward pass is one MPSGraph built once from the weights (as
+enum {
+  VALUE_NET_METAL_DEFAULT_CONCURRENCY = 2,
+  VALUE_NET_METAL_MAX_CONCURRENCY = 8,
+  // Rows are padded to the next power of two from this, so each slot
+  // compiles its graph for few batch sizes.
+  VALUE_NET_METAL_MIN_BATCH = 8,
+};
+
+// The whole forward pass is one MPSGraph built from the weights (as
 // constants), with a dynamic batch dimension; each evaluation feeds the
-// input rows and reads value and spread back.
-struct ValueNetMetal {
+// input rows and reads value and spread back. A slot holds one evaluation
+// in flight: its own graph, command queue, and input buffers in shared
+// memory that rows are copied into directly. Several slots let one call's
+// CPU work (copying rows in, waiting for results) overlap another's GPU
+// work.
+typedef struct ValueNetMetalSlot {
   // Retained Objective-C objects, held through bridged pointers so the
   // struct stays plain C.
-  void *device;
   void *queue;
   void *graph;
   void *board_input;
   void *scalars_input;
   void *value_output;
   void *spread_output;
-  MPSDataType data_type;
+  void *board_buffer;
+  void *scalars_buffer;
+} ValueNetMetalSlot;
+
+struct ValueNetMetal {
+  void *device;
+  int concurrency;
+  // The slots not running an evaluation, under mutex; callers wait on
+  // slot_freed while every slot is busy.
   cpthread_mutex_t mutex;
+  cpthread_cond_t slot_freed;
+  int free_count;
+  int free_slots[VALUE_NET_METAL_MAX_CONCURRENCY];
+  ValueNetMetalSlot slots[VALUE_NET_METAL_MAX_CONCURRENCY];
 };
 
 // Builds a constant from count floats, converted to the graph's type,
@@ -377,7 +401,68 @@ static void builder_build(MetalBuilder *builder, MPSGraphTensor *board,
             name:nil];
 }
 
+// Builds slot's graph from net's weights, its command queue, and its input
+// buffers (VALUE_NET_MAX_GPU_ROWS rows each). Returns false, with an error
+// on error_stack, if the weights do not fit the graph.
+static bool metal_slot_create(ValueNetMetalSlot *slot, id<MTLDevice> device,
+                              const ValueNet *net, MPSDataType type,
+                              ErrorStack *error_stack) {
+  MPSGraph *graph = [MPSGraph new];
+  MPSGraphTensor *board_input = [graph
+      placeholderWithShape:@[ @(-1), @(VALUE_NET_PLANES), @(VALUE_NET_SQUARES) ]
+                  dataType:MPSDataTypeFloat32
+                      name:@"board"];
+  MPSGraphTensor *scalars_input =
+      [graph placeholderWithShape:@[ @(-1), @(VALUE_NET_SCALARS) ]
+                         dataType:MPSDataTypeFloat32
+                             name:@"scalars"];
+  MetalBuilder builder = {
+      .graph = graph,
+      .net = net,
+      .data_type = type,
+      .ok = true,
+      .error_stack = error_stack,
+  };
+  MPSGraphTensor *value = nil;
+  MPSGraphTensor *spread = nil;
+  builder_build(&builder,
+                [graph castTensor:board_input toType:type name:nil],
+                [graph castTensor:scalars_input toType:type name:nil],
+                &value, &spread);
+  if (!builder.ok) {
+    return false;
+  }
+  slot->queue = (__bridge_retained void *)[device newCommandQueue];
+  slot->graph = (__bridge_retained void *)graph;
+  slot->board_input = (__bridge_retained void *)board_input;
+  slot->scalars_input = (__bridge_retained void *)scalars_input;
+  slot->value_output = (__bridge_retained void *)value;
+  slot->spread_output = (__bridge_retained void *)spread;
+  slot->board_buffer = (__bridge_retained void *)[device
+      newBufferWithLength:sizeof(float) * (size_t)VALUE_NET_MAX_GPU_ROWS *
+                          VALUE_NET_BOARD_FLOATS
+                  options:MTLResourceStorageModeShared];
+  slot->scalars_buffer = (__bridge_retained void *)[device
+      newBufferWithLength:sizeof(float) * (size_t)VALUE_NET_MAX_GPU_ROWS *
+                          VALUE_NET_SCALARS
+                  options:MTLResourceStorageModeShared];
+  return true;
+}
+
+static void metal_slot_destroy(ValueNetMetalSlot *slot) {
+  // Transfer ownership back to ARC, which releases each object.
+  (void)(__bridge_transfer id)slot->scalars_buffer;
+  (void)(__bridge_transfer id)slot->board_buffer;
+  (void)(__bridge_transfer id)slot->spread_output;
+  (void)(__bridge_transfer id)slot->value_output;
+  (void)(__bridge_transfer id)slot->scalars_input;
+  (void)(__bridge_transfer id)slot->board_input;
+  (void)(__bridge_transfer id)slot->graph;
+  (void)(__bridge_transfer id)slot->queue;
+}
+
 ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
+                                      int concurrency,
                                       ErrorStack *error_stack) {
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -386,45 +471,26 @@ ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
                        string_duplicate("no Metal device"));
       return NULL;
     }
-    MPSGraph *graph = [MPSGraph new];
     const MPSDataType type =
         half_precision ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
-    MPSGraphTensor *board_input = [graph
-        placeholderWithShape:@[
-          @(-1), @(VALUE_NET_PLANES), @(VALUE_NET_SQUARES)
-        ]
-                    dataType:MPSDataTypeFloat32
-                        name:@"board"];
-    MPSGraphTensor *scalars_input =
-        [graph placeholderWithShape:@[ @(-1), @(VALUE_NET_SCALARS) ]
-                           dataType:MPSDataTypeFloat32
-                               name:@"scalars"];
-    MetalBuilder builder = {
-        .graph = graph,
-        .net = net,
-        .data_type = type,
-        .ok = true,
-        .error_stack = error_stack,
-    };
-    MPSGraphTensor *value = nil;
-    MPSGraphTensor *spread = nil;
-    builder_build(&builder,
-                  [graph castTensor:board_input toType:type name:nil],
-                  [graph castTensor:scalars_input toType:type name:nil],
-                  &value, &spread);
-    if (!builder.ok) {
-      return NULL;
-    }
+    const int slots =
+        concurrency > 0 && concurrency <= VALUE_NET_METAL_MAX_CONCURRENCY
+            ? concurrency
+            : VALUE_NET_METAL_DEFAULT_CONCURRENCY;
     ValueNetMetal *metal = calloc_or_die(1, sizeof(ValueNetMetal));
+    for (int slot_idx = 0; slot_idx < slots; slot_idx++) {
+      if (!metal_slot_create(&metal->slots[slot_idx], device, net, type,
+                             error_stack)) {
+        value_net_metal_destroy(metal);
+        return NULL;
+      }
+      metal->concurrency = slot_idx + 1;
+      metal->free_slots[slot_idx] = slot_idx;
+    }
+    metal->free_count = slots;
     metal->device = (__bridge_retained void *)device;
-    metal->queue = (__bridge_retained void *)[device newCommandQueue];
-    metal->graph = (__bridge_retained void *)graph;
-    metal->board_input = (__bridge_retained void *)board_input;
-    metal->scalars_input = (__bridge_retained void *)scalars_input;
-    metal->value_output = (__bridge_retained void *)value;
-    metal->spread_output = (__bridge_retained void *)spread;
-    metal->data_type = type;
     cpthread_mutex_init(&metal->mutex);
+    cpthread_cond_init(&metal->slot_freed);
     return metal;
   }
 }
@@ -433,69 +499,73 @@ void value_net_metal_destroy(ValueNetMetal *metal) {
   if (metal == NULL) {
     return;
   }
-  // Transfer ownership back to ARC, which releases each object.
-  (void)(__bridge_transfer id)metal->spread_output;
-  (void)(__bridge_transfer id)metal->value_output;
-  (void)(__bridge_transfer id)metal->scalars_input;
-  (void)(__bridge_transfer id)metal->board_input;
-  (void)(__bridge_transfer id)metal->graph;
-  (void)(__bridge_transfer id)metal->queue;
+  for (int slot_idx = 0; slot_idx < metal->concurrency; slot_idx++) {
+    metal_slot_destroy(&metal->slots[slot_idx]);
+  }
   (void)(__bridge_transfer id)metal->device;
   free(metal);
 }
 
-// Evaluates one chunk of at most VALUE_NET_MAX_GPU_ROWS rows; the caller
-// holds the mutex.
-static void value_net_metal_evaluate_chunk(ValueNetMetal *metal, int rows,
-                                           const float *board,
-                                           const float *scalars, float *value,
-                                           float *spread) {
+// Evaluates one chunk of at most VALUE_NET_MAX_GPU_ROWS rows on slot, which
+// the caller holds: the rows are copied into the slot's buffers and padded
+// (repeating the first row) to a batch size the slot compiles once.
+static void metal_slot_evaluate_chunk(const ValueNetMetalSlot *slot,
+                                      int rows, const float *board,
+                                      const float *scalars, float *value,
+                                      float *spread) {
   @autoreleasepool {
-    id<MTLDevice> device = (__bridge id<MTLDevice>)metal->device;
-    MPSGraph *graph = (__bridge MPSGraph *)metal->graph;
-    MPSGraphTensor *board_input = (__bridge MPSGraphTensor *)metal->board_input;
+    int batch = VALUE_NET_METAL_MIN_BATCH;
+    while (batch < rows) {
+      batch *= 2;
+    }
+    id<MTLBuffer> board_buffer = (__bridge id<MTLBuffer>)slot->board_buffer;
+    id<MTLBuffer> scalars_buffer = (__bridge id<MTLBuffer>)slot->scalars_buffer;
+    float *board_rows = (float *)board_buffer.contents;
+    float *scalar_rows = (float *)scalars_buffer.contents;
+    memcpy(board_rows, board,
+           sizeof(float) * (size_t)rows * VALUE_NET_BOARD_FLOATS);
+    memcpy(scalar_rows, scalars,
+           sizeof(float) * (size_t)rows * VALUE_NET_SCALARS);
+    for (int pad_idx = rows; pad_idx < batch; pad_idx++) {
+      memcpy(board_rows + ((size_t)pad_idx * VALUE_NET_BOARD_FLOATS), board,
+             sizeof(float) * VALUE_NET_BOARD_FLOATS);
+      memcpy(scalar_rows + ((size_t)pad_idx * VALUE_NET_SCALARS), scalars,
+             sizeof(float) * VALUE_NET_SCALARS);
+    }
+    MPSGraph *graph = (__bridge MPSGraph *)slot->graph;
+    MPSGraphTensor *board_input = (__bridge MPSGraphTensor *)slot->board_input;
     MPSGraphTensor *scalars_input =
-        (__bridge MPSGraphTensor *)metal->scalars_input;
+        (__bridge MPSGraphTensor *)slot->scalars_input;
     MPSGraphTensor *value_output =
-        (__bridge MPSGraphTensor *)metal->value_output;
+        (__bridge MPSGraphTensor *)slot->value_output;
     MPSGraphTensor *spread_output =
-        (__bridge MPSGraphTensor *)metal->spread_output;
-    MPSGraphDevice *graph_device = [MPSGraphDevice deviceWithMTLDevice:device];
-    NSData *board_data =
-        [NSData dataWithBytesNoCopy:(void *)board
-                             length:sizeof(float) * (size_t)rows *
-                                    VALUE_NET_BOARD_FLOATS
-                       freeWhenDone:NO];
-    NSData *scalars_data =
-        [NSData dataWithBytesNoCopy:(void *)scalars
-                             length:sizeof(float) * (size_t)rows *
-                                    VALUE_NET_SCALARS
-                       freeWhenDone:NO];
+        (__bridge MPSGraphTensor *)slot->spread_output;
     MPSGraphTensorData *board_feed = [[MPSGraphTensorData alloc]
-        initWithDevice:graph_device
-                  data:board_data
-                 shape:@[
-                   @(rows), @(VALUE_NET_PLANES), @(VALUE_NET_SQUARES)
-                 ]
-              dataType:MPSDataTypeFloat32];
+        initWithMTLBuffer:board_buffer
+                    shape:@[
+                      @(batch), @(VALUE_NET_PLANES), @(VALUE_NET_SQUARES)
+                    ]
+                 dataType:MPSDataTypeFloat32];
     MPSGraphTensorData *scalars_feed = [[MPSGraphTensorData alloc]
-        initWithDevice:graph_device
-                  data:scalars_data
-                 shape:@[ @(rows), @(VALUE_NET_SCALARS) ]
-              dataType:MPSDataTypeFloat32];
+        initWithMTLBuffer:scalars_buffer
+                    shape:@[ @(batch), @(VALUE_NET_SCALARS) ]
+                 dataType:MPSDataTypeFloat32];
     NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *results =
-        [graph runWithMTLCommandQueue:(__bridge id<MTLCommandQueue>)metal->queue
+        [graph runWithMTLCommandQueue:(__bridge id<MTLCommandQueue>)slot->queue
                                 feeds:@{
                                   board_input : board_feed,
                                   scalars_input : scalars_feed
                                 }
                         targetTensors:@[ value_output, spread_output ]
                      targetOperations:nil];
+    float padded[VALUE_NET_MAX_GPU_ROWS];
     if (value != NULL) {
-      [[results[value_output] mpsndarray] readBytes:value strideBytes:nil];
+      [[results[value_output] mpsndarray] readBytes:padded strideBytes:nil];
+      memcpy(value, padded, sizeof(float) * (size_t)rows);
     }
     if (spread != NULL) {
-      [[results[spread_output] mpsndarray] readBytes:spread strideBytes:nil];
+      [[results[spread_output] mpsndarray] readBytes:padded strideBytes:nil];
+      memcpy(spread, padded, sizeof(float) * (size_t)rows);
     }
   }
 }
@@ -504,15 +574,26 @@ void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
                               const float *board, const float *scalars,
                               float *value, float *spread) {
   cpthread_mutex_lock(&metal->mutex);
+  while (metal->free_count == 0) {
+    cpthread_cond_wait(&metal->slot_freed, &metal->mutex);
+  }
+  // The most recently freed slot, likeliest to have compiled this batch
+  // size already.
+  const int slot_idx = metal->free_slots[--metal->free_count];
+  cpthread_mutex_unlock(&metal->mutex);
   for (int start = 0; start < rows; start += VALUE_NET_MAX_GPU_ROWS) {
     const int chunk = rows - start < VALUE_NET_MAX_GPU_ROWS
                           ? rows - start
                           : VALUE_NET_MAX_GPU_ROWS;
-    value_net_metal_evaluate_chunk(
-        metal, chunk, board + ((size_t)start * VALUE_NET_BOARD_FLOATS),
+    metal_slot_evaluate_chunk(
+        &metal->slots[slot_idx], chunk,
+        board + ((size_t)start * VALUE_NET_BOARD_FLOATS),
         scalars + ((size_t)start * VALUE_NET_SCALARS),
         value != NULL ? value + start : NULL,
         spread != NULL ? spread + start : NULL);
   }
+  cpthread_mutex_lock(&metal->mutex);
+  metal->free_slots[metal->free_count++] = slot_idx;
+  cpthread_cond_signal(&metal->slot_freed);
   cpthread_mutex_unlock(&metal->mutex);
 }

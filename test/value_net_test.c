@@ -1,8 +1,10 @@
 #include "value_net_test.h"
 
+#include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/endian_io.h"
 #include "../src/def/bai_defs.h"
+#include "../src/def/cpthread_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -41,6 +43,7 @@
 #include <string.h>
 
 enum {
+  VNT_MAX_THROUGHPUT_THREADS = 32,
   VALUE_NET_PARITY_ROWS = 64,
   VALUE_NET_PARITY_REPEATS = 20,
   VNT_MAX_TURNS = 256,
@@ -149,7 +152,7 @@ static void vnt_parity(const char *dir, const char *parity_dir, int rows) {
   vnt_report("cpu", rows, value, spread, ref_value, ref_spread,
              (double)(ctimer_monotonic_ns() - start) / 1e9);
   for (int half = 0; half <= 1; half++) {
-    ValueNetMetal *metal = value_net_metal_create(net, half, error_stack);
+    ValueNetMetal *metal = value_net_metal_create(net, half, 1, error_stack);
     if (metal == NULL) {
       error_stack_print_and_reset(error_stack);
       continue;
@@ -540,15 +543,69 @@ static void vnt_dump(const StringSplitter *fields) {
   config_destroy(config);
 }
 
-// "throughput:<dir>:<parity_dir>:<fp32|fp16>": Metal rows per second by
-// batch size, the parity rows tiled to fill each batch.
+typedef struct VntThroughputWorker {
+  ValueNetMetal *metal;
+  int rows;
+  int calls;
+  const float *board;
+  const float *scalars;
+  float *values;
+} VntThroughputWorker;
+
+static void *vnt_throughput_worker(void *arg) {
+  const VntThroughputWorker *worker = arg;
+  for (int call_idx = 0; call_idx < worker->calls; call_idx++) {
+    value_net_metal_evaluate(worker->metal, worker->rows, worker->board,
+                             worker->scalars, worker->values, NULL);
+  }
+  return NULL;
+}
+
+// Runs calls calls of rows rows on each of threads threads at once; returns
+// the wall time in seconds.
+static double vnt_throughput_run(ValueNetMetal *metal, int threads, int rows,
+                                 int calls, const float *board,
+                                 const float *scalars) {
+  cpthread_t thread_ids[VNT_MAX_THROUGHPUT_THREADS];
+  VntThroughputWorker workers[VNT_MAX_THROUGHPUT_THREADS];
+  float *values = malloc_or_die(sizeof(float) * (size_t)threads *
+                                (size_t)VALUE_NET_MAX_GPU_ROWS);
+  const int64_t start = ctimer_monotonic_ns();
+  for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
+    workers[thread_idx] = (VntThroughputWorker){
+        .metal = metal,
+        .rows = rows,
+        .calls = calls,
+        .board = board,
+        .scalars = scalars,
+        .values = values + ((size_t)thread_idx * VALUE_NET_MAX_GPU_ROWS),
+    };
+    cpthread_create(&thread_ids[thread_idx], vnt_throughput_worker,
+                    &workers[thread_idx]);
+  }
+  for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
+    cpthread_join(thread_ids[thread_idx]);
+  }
+  const double seconds = (double)(ctimer_monotonic_ns() - start) / 1e9;
+  free(values);
+  return seconds;
+}
+
+// "throughput:<dir>:<parity_dir>:<fp32|fp16>[:<threads>[:<concurrency>]]":
+// Metal rows per second by batch size, the parity rows tiled to fill each
+// batch, with threads callers (default 1) sharing one ValueNetMetal of
+// concurrency slots (default threads).
 static void vnt_throughput(const char *dir, const char *parity_dir,
-                           bool half_precision) {
+                           bool half_precision, int threads, int concurrency) {
+  if (threads < 1 || threads > VNT_MAX_THROUGHPUT_THREADS) {
+    log_fatal("throughput threads must be 1..%d", VNT_MAX_THROUGHPUT_THREADS);
+  }
   ErrorStack *error_stack = error_stack_create();
   ValueNet *net = value_net_create(dir, error_stack);
-  ValueNetMetal *metal =
-      net != NULL ? value_net_metal_create(net, half_precision, error_stack)
-                  : NULL;
+  ValueNetMetal *metal = net != NULL
+                             ? value_net_metal_create(net, half_precision,
+                                                      concurrency, error_stack)
+                             : NULL;
   if (metal == NULL) {
     error_stack_print_and_reset(error_stack);
     log_fatal("no Metal value net");
@@ -577,22 +634,18 @@ static void vnt_throughput(const char *dir, const char *parity_dir,
                ((size_t)(row % VALUE_NET_PARITY_ROWS) * VALUE_NET_SCALARS),
            sizeof(float) * VALUE_NET_SCALARS);
   }
-  float *values = malloc_or_die(sizeof(float) * (size_t)max_rows);
   for (int rows = 1; rows <= max_rows; rows *= 2) {
-    value_net_metal_evaluate(metal, rows, big_board, big_scalars, values, NULL);
-    const int repeats = rows <= 64 ? 20 : 5;
-    const int64_t start = ctimer_monotonic_ns();
-    for (int repeat = 0; repeat < repeats; repeat++) {
-      value_net_metal_evaluate(metal, rows, big_board, big_scalars, values,
-                               NULL);
-    }
+    // Warm up: the first calls compile each slot's graph for this size.
+    (void)vnt_throughput_run(metal, threads, rows, 2, big_board, big_scalars);
+    const int calls = rows <= 64 ? 20 : 5;
     const double seconds =
-        (double)(ctimer_monotonic_ns() - start) / 1e9 / repeats;
-    printf("value_net_throughput %s rows=%d ms_per_call=%.2f rows_per_s=%.0f\n",
-           half_precision ? "fp16" : "fp32", rows, seconds * 1e3,
-           rows / seconds);
+        vnt_throughput_run(metal, threads, rows, calls, big_board, big_scalars);
+    printf("value_net_throughput %s threads=%d concurrency=%d rows=%d "
+           "ms_per_call=%.2f rows_per_s=%.0f\n",
+           half_precision ? "fp16" : "fp32", threads,
+           concurrency > 0 ? concurrency : threads, rows, seconds * 1e3 / calls,
+           (double)threads * calls * rows / seconds);
   }
-  free(values);
   free(big_board);
   free(big_scalars);
   free(board);
@@ -801,10 +854,20 @@ void value_net_test_run_spec(const char *spec) {
                  string_splitter_get_item(fields, 2));
   } else if (strings_equal(mode, "simbench")) {
     vnt_simbench(fields);
-  } else if (strings_equal(mode, "throughput") && num_fields == 4) {
+  } else if (strings_equal(mode, "throughput") && num_fields >= 4 &&
+             num_fields <= 6) {
+    const int threads =
+        num_fields >= 5
+            ? (int)strtol(string_splitter_get_item(fields, 4), NULL, 10)
+            : 1;
+    const int concurrency =
+        num_fields >= 6
+            ? (int)strtol(string_splitter_get_item(fields, 5), NULL, 10)
+            : threads;
     vnt_throughput(string_splitter_get_item(fields, 1),
                    string_splitter_get_item(fields, 2),
-                   strings_equal(string_splitter_get_item(fields, 3), "fp16"));
+                   strings_equal(string_splitter_get_item(fields, 3), "fp16"),
+                   threads, concurrency);
   } else if (strings_equal(mode, "dump")) {
     vnt_dump(fields);
   } else if (strings_equal(mode, "games")) {
