@@ -1,0 +1,10 @@
+{
+  "kind": "Prespecified: equity mode with checks only below 30 tiles in the bag vs ungated",
+  "frozen_utc": "2026-10-01T08:11:58Z",
+  "player_a": "static-ish, equity, 1.4/0.75 with a bin zeroing both weights for bag 30-1000, 64 racks, z=3",
+  "player_b": "static-ish, equity, 1.4/0.75 ungated, 64 racks, z=3",
+  "pairs": 2000,
+  "seed": 20263401,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "binary": "magpie_test_p17 (commit f2012601), sha256 9ea993f385cfdebd81154a7b290b553483b710af13a452222854b481a60f12fa"
+}

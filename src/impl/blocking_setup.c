@@ -8,6 +8,7 @@
 #include "../def/move_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bag.h"
+#include "../ent/blocking_setup_params.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -15,6 +16,8 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/static_eval.h"
+#include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 #include "../util/io_util.h"
 #include "gameplay.h"
@@ -200,26 +203,34 @@ typedef struct BestPlay {
 } BestPlay;
 
 struct BlockingSetupChecker {
+  blocking_setup_value_t value;
   const LetterDistribution *ld;
   const BlockingSetupSamples *samples;
   int followup_draws;
   int on_turn_index;
   int bag_tiles;
   Game *base;
-  // The base board plus the candidate being measured.
+  // The base board plus the candidate being measured; and, for measuring
+  // several candidates rack by rack, one such board per candidate.
   Game *candidate_board;
+  Game **candidate_boards;
+  int candidate_board_capacity;
   Game *after;
   // One board per rack: our pass and that rack's best reply to it.
   Game **pass_replied;
   int pass_replied_capacity;
   BestPlay *pass_replies;
   // Per rack, the best replies after our pass in compare_moves order (the
-  // first is pass_replies' entry), complete for every reply scoring at
-  // least pass_reply_floor: a candidate that disturbs the best can then
-  // start from the best one it leaves intact.
+  // first is pass_replies' entry), complete for every reply whose score (or
+  // static equity, when replies are chosen by equity) is at least
+  // pass_reply_floor: a candidate that disturbs the best can then start from
+  // the best one it leaves intact.
   BestPlay *pass_reply_lists;
   int *pass_reply_counts;
   Equity *pass_reply_floors;
+  // Whether the opponent could exchange after our pass (see
+  // reply_exchanges_allowed).
+  bool pass_reply_exchanges;
   MoveList *reply_candidates;
   // Pass-branch follow-ups depend only on the rack and the leave (the refill
   // is the leave's complement from the rack's draw order), so they are kept
@@ -248,6 +259,13 @@ static void checker_destroy_games(BlockingSetupChecker *checker) {
   game_destroy(checker->after);
   game_destroy(checker->candidate_board);
   checker->candidate_board = NULL;
+  for (int board_idx = 0; board_idx < checker->candidate_board_capacity;
+       board_idx++) {
+    game_destroy(checker->candidate_boards[board_idx]);
+  }
+  free(checker->candidate_boards);
+  checker->candidate_boards = NULL;
+  checker->candidate_board_capacity = 0;
   for (int rack_idx = 0; rack_idx < checker->pass_replied_capacity;
        rack_idx++) {
     game_destroy(checker->pass_replied[rack_idx]);
@@ -409,24 +427,54 @@ static uint64_t candidate_lanes(const Board *board, const Move *candidate) {
   return lanes;
 }
 
-// The best tile placement by score for the player on turn's rack, searching
-// only lane_mask's lanes (0 for all), or NULL when there is none.
+// Whether a search picks the opponent's reply or our follow-up, which the
+// teacher modes may treat differently.
+typedef enum {
+  CHECKER_ROLE_REPLY,
+  CHECKER_ROLE_FOLLOWUP,
+} checker_role_t;
+
+// Whether plays in this role are chosen by score (else by static equity).
+static bool checker_by_score(const BlockingSetupChecker *checker,
+                             checker_role_t role) {
+  return checker->value == BLOCKING_SETUP_VALUE_SCORE ||
+         (checker->value == BLOCKING_SETUP_VALUE_EQUITY_REPLY &&
+          role == CHECKER_ROLE_FOLLOWUP);
+}
+
+// Whether plays in this role are valued in equity (else in score).
+static bool checker_valued_by_equity(const BlockingSetupChecker *checker,
+                                     checker_role_t role) {
+  return checker->value == BLOCKING_SETUP_VALUE_EQUITY ||
+         (checker->value == BLOCKING_SETUP_VALUE_EQUITY_REPLY &&
+          role == CHECKER_ROLE_REPLY);
+}
+
+// The best move for the player on turn's rack: by score, a tile placement
+// only, searching only lane_mask's lanes (0 for all); or, in the equity
+// modes, by static equity over the whole board, exchanges included. NULL
+// when there is none (only a pass).
 static const Move *checker_best_placement(BlockingSetupChecker *checker,
                                           const Game *game, uint64_t lane_mask,
-                                          const Move *initial_best) {
+                                          const Move *initial_best,
+                                          checker_role_t role) {
   move_list_reset(checker->reply_list);
+  const bool by_score = checker_by_score(checker, role);
+  // A lane search by equity is seeded with the best play outside the lanes,
+  // exchanges included, so it need not generate exchanges again.
+  assert(by_score || lane_mask == 0 || initial_best != NULL);
   const MoveGenArgs args = {
       .game = game,
       .move_list = checker->reply_list,
       .move_record_type = MOVE_RECORD_BEST,
-      .move_sort_type = MOVE_SORT_SCORE,
+      .move_sort_type = by_score ? MOVE_SORT_SCORE : MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .lane_mask = lane_mask,
       .initial_best_move = initial_best,
-      .skip_exchanges = true,
+      .skip_exchanges = by_score || lane_mask != 0,
       .disable_pat = true,
   };
   generate_moves(&args);
@@ -434,10 +482,22 @@ static const Move *checker_best_placement(BlockingSetupChecker *checker,
     return NULL;
   }
   const Move *best = move_list_get_move(checker->reply_list, 0);
-  if (move_get_type(best) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  if (move_get_type(best) == GAME_EVENT_PASS ||
+      (by_score && move_get_type(best) != GAME_EVENT_TILE_PLACEMENT_MOVE)) {
     return NULL;
   }
   return best;
+}
+
+// A reply's or follow-up's value in points under the checker's mode.
+static double checker_move_value(const BlockingSetupChecker *checker,
+                                 const Move *move, checker_role_t role) {
+  if (move == NULL) {
+    return 0.0;
+  }
+  return equity_to_double(checker_valued_by_equity(checker, role)
+                              ? move_get_equity(move)
+                              : move_get_score(move));
 }
 
 // The best placement on game, given that the candidate was just placed and
@@ -450,14 +510,67 @@ static const Move *checker_best_after_candidate(BlockingSetupChecker *checker,
                                                 const Game *game,
                                                 const Move *candidate,
                                                 const BestPlay *known) {
-  if (known->exists && !candidate_leaves_clear(candidate, &known->footprint)) {
-    return checker_best_placement(checker, game, 0, NULL);
+  // In the equity modes a play's equity can depend on the bag, which the
+  // candidate changes, so nothing is reused.
+  if (!checker_by_score(checker, CHECKER_ROLE_FOLLOWUP) ||
+      (known->exists &&
+       !candidate_leaves_clear(candidate, &known->footprint))) {
+    return checker_best_placement(checker, game, 0, NULL,
+                                  CHECKER_ROLE_FOLLOWUP);
   }
   // Starting from the known play prunes every lane anchor that cannot
   // reach it, and ties resolve by compare_moves as in a full search.
   return checker_best_placement(
       checker, game, candidate_lanes(game_get_board(game), candidate),
-      known->exists ? &known->move : NULL);
+      known->exists ? &known->move : NULL, CHECKER_ROLE_FOLLOWUP);
+}
+
+// What the reply list is ordered and floored by: score, or static equity in
+// the modes that choose replies by equity.
+static Equity checker_reply_key(const BlockingSetupChecker *checker,
+                                const Move *move) {
+  return checker_by_score(checker, CHECKER_ROLE_REPLY) ? move_get_score(move)
+                                                       : move_get_equity(move);
+}
+
+// Whether the player on turn may exchange, as generate_moves decides it:
+// the bag and the other player's rack hold at least two racks of tiles.
+static bool reply_exchanges_allowed(const Game *game) {
+  const int off_turn = 1 - game_get_player_on_turn_index(game);
+  return bag_get_letters(game_get_bag(game)) +
+             rack_get_total_letters(
+                 player_get_rack(game_get_player(game, off_turn))) >=
+         2 * RACK_SIZE;
+}
+
+// Whether a move's static equity before the endgame depends on the bag only
+// through which moves are legal: true while every pre-endgame adjustment is
+// zero.
+static bool pre_endgame_equity_ignores_bag(void) {
+  for (int idx = 0; idx < PEG_ADJUST_VALUES_LENGTH; idx++) {
+    if (peg_adjust_values[idx] != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Whether every reply on game (opponent on turn, candidate played) has the
+// static equity it had after our pass: the board was not empty (no opening
+// adjustment), the bag is not empty (no endgame adjustment), nothing else in
+// the equity depends on the bag (or both bags are past every pre-endgame
+// adjustment), and exchanges are legal in both branches or in neither. A
+// placement's leave and, if the candidate leaves its squares alone, its
+// score are then the same, so the pass branch's replies carry over.
+static bool
+checker_equity_replies_carry_over(const BlockingSetupChecker *checker,
+                                  const Game *game) {
+  const int bag_tiles = bag_get_letters(game_get_bag(game));
+  return board_get_tiles_played(game_get_board(checker->base)) > 0 &&
+         bag_tiles > 0 &&
+         (pre_endgame_equity_ignores_bag() ||
+          bag_tiles >= PEG_ADJUST_VALUES_LENGTH) &&
+         reply_exchanges_allowed(game) == checker->pass_reply_exchanges;
 }
 
 // The opponent's best reply on game, which holds the candidate: the best
@@ -469,33 +582,42 @@ static const Move *checker_reply_after_candidate(BlockingSetupChecker *checker,
                                                  const Game *game,
                                                  const Move *candidate,
                                                  int rack_idx) {
+  if (!checker_by_score(checker, CHECKER_ROLE_REPLY) &&
+      !checker_equity_replies_carry_over(checker, game)) {
+    return checker_best_placement(checker, game, 0, NULL, CHECKER_ROLE_REPLY);
+  }
   const BestPlay *entries = checker->pass_reply_lists +
                             ((size_t)rack_idx * BLOCKING_SETUP_PASS_REPLIES);
   const int count = checker->pass_reply_counts[rack_idx];
+  if (count == 0 && !checker_by_score(checker, CHECKER_ROLE_REPLY)) {
+    return checker_best_placement(checker, game, 0, NULL, CHECKER_ROLE_REPLY);
+  }
   if (count == 0) {
     // No reply at all after the pass: only the candidate's lanes can hold one.
     return checker_best_placement(
-        checker, game, candidate_lanes(game_get_board(game), candidate), NULL);
+        checker, game, candidate_lanes(game_get_board(game), candidate), NULL,
+        CHECKER_ROLE_REPLY);
   }
   for (int entry_idx = 0; entry_idx < count; entry_idx++) {
     const BestPlay *entry = &entries[entry_idx];
-    if (move_get_score(&entry->move) < checker->pass_reply_floors[rack_idx]) {
+    if (checker_reply_key(checker, &entry->move) <
+        checker->pass_reply_floors[rack_idx]) {
       break;
     }
     if (candidate_leaves_clear(candidate, &entry->footprint)) {
       return checker_best_placement(
           checker, game, candidate_lanes(game_get_board(game), candidate),
-          &entry->move);
+          &entry->move, CHECKER_ROLE_REPLY);
     }
   }
-  return checker_best_placement(checker, game, 0, NULL);
+  return checker_best_placement(checker, game, 0, NULL, CHECKER_ROLE_REPLY);
 }
 
 // Records game's best placement for the player on turn's current rack, with
 // its footprint on game's board.
 static void checker_record_best(BlockingSetupChecker *checker, const Game *game,
-                                BestPlay *best_play) {
-  const Move *best = checker_best_placement(checker, game, 0, NULL);
+                                BestPlay *best_play, checker_role_t role) {
+  const Move *best = checker_best_placement(checker, game, 0, NULL, role);
   best_play->exists = best != NULL;
   if (best != NULL) {
     move_copy(&best_play->move, best);
@@ -503,8 +625,9 @@ static void checker_record_best(BlockingSetupChecker *checker, const Game *game,
   }
 }
 
-static double best_play_score(const BestPlay *best_play) {
-  return best_play->exists ? equity_to_double(move_get_score(&best_play->move))
+static double best_play_value(const BlockingSetupChecker *checker,
+                              const BestPlay *best_play, checker_role_t role) {
+  return best_play->exists ? checker_move_value(checker, &best_play->move, role)
                            : 0.0;
 }
 
@@ -514,16 +637,17 @@ static void checker_record_reply_list(BlockingSetupChecker *checker,
                                       const Game *passed, int rack_idx) {
   MoveList *list = checker->reply_candidates;
   move_list_reset(list);
+  const bool by_score = checker_by_score(checker, CHECKER_ROLE_REPLY);
   const MoveGenArgs args = {
       .game = passed,
       .move_list = list,
       .move_record_type = MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST,
-      .move_sort_type = MOVE_SORT_SCORE,
+      .move_sort_type = by_score ? MOVE_SORT_SCORE : MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .eq_margin_movegen = int_to_equity(BLOCKING_SETUP_PASS_REPLY_MARGIN),
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .skip_exchanges = true,
+      .skip_exchanges = by_score,
       .disable_pat = true,
   };
   generate_moves(&args);
@@ -535,14 +659,23 @@ static void checker_record_reply_list(BlockingSetupChecker *checker,
   Equity lowest = EQUITY_MAX_VALUE;
   for (int move_idx = 0; move_idx < move_list_get_count(list); move_idx++) {
     const Move *move = move_list_get_move(list, move_idx);
-    if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    const bool placement =
+        move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
+    // By equity, exchanges and the pass are replies too; they use no
+    // squares, so their empty footprints are never disturbed.
+    if (by_score && !placement) {
       continue;
     }
     entries[count].exists = true;
     move_copy(&entries[count].move, move);
-    checker_footprint(game_get_board(passed), move, &entries[count].footprint);
-    if (move_get_score(move) < lowest) {
-      lowest = move_get_score(move);
+    if (placement) {
+      checker_footprint(game_get_board(passed), move,
+                        &entries[count].footprint);
+    } else {
+      memset(&entries[count].footprint, 0, sizeof(SquareSet));
+    }
+    if (checker_reply_key(checker, move) < lowest) {
+      lowest = checker_reply_key(checker, move);
     }
     count++;
   }
@@ -551,13 +684,18 @@ static void checker_record_reply_list(BlockingSetupChecker *checker,
   // filled up, when only those above its lowest score are sure to be.
   Equity floor = EQUITY_MAX_VALUE;
   if (count > 0) {
-    floor = move_get_score(&entries[0].move) -
+    floor = checker_reply_key(checker, &entries[0].move) -
             int_to_equity(BLOCKING_SETUP_PASS_REPLY_MARGIN);
     if (full && lowest + 1 > floor) {
       floor = lowest + 1;
     }
   }
   checker->pass_reply_floors[rack_idx] = floor;
+}
+
+void blocking_setup_checker_set_value(BlockingSetupChecker *checker,
+                                      blocking_setup_value_t value) {
+  checker->value = value;
 }
 
 void blocking_setup_checker_load(BlockingSetupChecker *checker,
@@ -606,8 +744,11 @@ void blocking_setup_checker_load(BlockingSetupChecker *checker,
         player_get_rack(game_get_player(passed, 1 - checker->on_turn_index)),
         &samples->opponent_racks[rack_idx]);
     BestPlay *reply = &checker->pass_replies[rack_idx];
-    checker_record_best(checker, passed, reply);
+    checker_record_best(checker, passed, reply, CHECKER_ROLE_REPLY);
     checker_record_reply_list(checker, passed, rack_idx);
+    if (rack_idx == 0) {
+      checker->pass_reply_exchanges = reply_exchanges_allowed(passed);
+    }
     play_move(reply->exists ? &reply->move : checker->pass_move, passed, NULL);
   }
 }
@@ -687,14 +828,29 @@ static void checker_prepare_candidate(BlockingSetupChecker *checker,
   state->leave_index = checker_leave_index(checker, &state->leave);
 }
 
-// Plays the candidate on the checker's candidate board, which each rack's
-// branch then starts from.
-static void checker_play_candidate(BlockingSetupChecker *checker,
-                                   const CandidateState *state) {
-  checker_copy_game(&checker->candidate_board, checker->base);
+// Plays the candidate on *board (the base board plus the candidate), which
+// each rack's branch then starts from.
+static void checker_play_candidate(const BlockingSetupChecker *checker,
+                                   const CandidateState *state, Game **board) {
+  checker_copy_game(board, checker->base);
   if (state->is_placement) {
-    play_move(state->move, checker->candidate_board, NULL);
+    play_move(state->move, *board, NULL);
   }
+}
+
+// Ensures one candidate board per candidate for count candidates.
+static void checker_ensure_candidate_boards(BlockingSetupChecker *checker,
+                                            int count) {
+  if (count <= checker->candidate_board_capacity) {
+    return;
+  }
+  checker->candidate_boards =
+      realloc_or_die(checker->candidate_boards, sizeof(Game *) * (size_t)count);
+  for (int board_idx = checker->candidate_board_capacity; board_idx < count;
+       board_idx++) {
+    checker->candidate_boards[board_idx] = NULL;
+  }
+  checker->candidate_board_capacity = count;
 }
 
 // The follow-up rack of rack_idx and draw_idx for the candidate's leave:
@@ -736,7 +892,8 @@ static const BestPlay *checker_pass_followup(BlockingSetupChecker *checker,
       rack_copy(
           player_get_rack(game_get_player(passed, checker->on_turn_index)),
           followup);
-      checker_record_best(checker, passed, pass_followup);
+      checker_record_best(checker, passed, pass_followup,
+                          CHECKER_ROLE_FOLLOWUP);
     }
     pass_followup->known = true;
   }
@@ -752,13 +909,15 @@ typedef struct RackValues {
   int terminal;
 } RackValues;
 
-// Measures one rack for the candidate on the checker's candidate board (see
-// checker_play_candidate).
+// Measures one rack for the candidate, whose board (see
+// checker_play_candidate) is candidate_board.
 static void checker_measure_rack(BlockingSetupChecker *checker,
-                                 const CandidateState *state, int rack_idx,
+                                 const CandidateState *state,
+                                 const Game *candidate_board, int rack_idx,
                                  RackValues *values) {
   const BestPlay *pass_reply = &checker->pass_replies[rack_idx];
-  *values = (RackValues){.pass_reply = best_play_score(pass_reply)};
+  *values = (RackValues){
+      .pass_reply = best_play_value(checker, pass_reply, CHECKER_ROLE_REPLY)};
   if (!state->is_placement) {
     // An exchange leaves the board as a pass does, and the opponent's reply
     // and our follow-up on it depend only on the board, the racks and the
@@ -769,14 +928,16 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
     for (int draw_idx = 0; draw_idx < checker->followup_draws; draw_idx++) {
       Rack followup;
       checker_followup_rack(checker, rack_idx, state, draw_idx, &followup);
-      const double score = best_play_score(
-          checker_pass_followup(checker, state, rack_idx, draw_idx, &followup));
+      const double score = best_play_value(
+          checker,
+          checker_pass_followup(checker, state, rack_idx, draw_idx, &followup),
+          CHECKER_ROLE_FOLLOWUP);
       values->pass_followup += score;
       values->candidate_followup += score;
     }
     return;
   }
-  checker_copy_game(&checker->after, checker->candidate_board);
+  checker_copy_game(&checker->after, candidate_board);
   Game *after = checker->after;
   // Whether the candidate's board is the pass branch's plus the candidate:
   // the same reply, and one the candidate left intact.
@@ -790,9 +951,8 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
     same_reply =
         pass_reply->exists && reply != NULL &&
         compare_moves_without_equity(reply, &pass_reply->move, true) == -1;
-    if (reply != NULL) {
-      values->candidate_reply = equity_to_double(move_get_score(reply));
-    }
+    values->candidate_reply =
+        checker_move_value(checker, reply, CHECKER_ROLE_REPLY);
     play_move(reply == NULL ? checker->pass_move : reply, after, NULL);
     values->terminal = game_over(after);
   }
@@ -802,7 +962,8 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
     checker_followup_rack(checker, rack_idx, state, draw_idx, &followup);
     const BestPlay *pass_followup =
         checker_pass_followup(checker, state, rack_idx, draw_idx, &followup);
-    values->pass_followup += best_play_score(pass_followup);
+    values->pass_followup +=
+        best_play_value(checker, pass_followup, CHECKER_ROLE_FOLLOWUP);
     if (game_over(after)) {
       continue;
     }
@@ -811,10 +972,10 @@ static void checker_measure_rack(BlockingSetupChecker *checker,
     const Move *best = same_reply && !game_over(passed)
                            ? checker_best_after_candidate(
                                  checker, after, state->move, pass_followup)
-                           : checker_best_placement(checker, after, 0, NULL);
-    if (best != NULL) {
-      values->candidate_followup += equity_to_double(move_get_score(best));
-    }
+                           : checker_best_placement(checker, after, 0, NULL,
+                                                    CHECKER_ROLE_FOLLOWUP);
+    values->candidate_followup +=
+        checker_move_value(checker, best, CHECKER_ROLE_FOLLOWUP);
   }
 }
 
@@ -823,7 +984,7 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
                                     BlockingSetupResult *result) {
   CandidateState state;
   checker_prepare_candidate(checker, candidate, &state);
-  checker_play_candidate(checker, &state);
+  checker_play_candidate(checker, &state, &checker->candidate_board);
   double pass_reply_sum = 0.0;
   double candidate_reply_sum = 0.0;
   double pass_followup_sum = 0.0;
@@ -832,7 +993,8 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
   const int num_racks = checker->samples->num_racks;
   for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
     RackValues values;
-    checker_measure_rack(checker, &state, rack_idx, &values);
+    checker_measure_rack(checker, &state, checker->candidate_board, rack_idx,
+                         &values);
     pass_reply_sum += values.pass_reply;
     candidate_reply_sum += values.candidate_reply;
     pass_followup_sum += values.pass_followup;
@@ -849,6 +1011,57 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
   result->setup_delta =
       (candidate_followup_sum - pass_followup_sum) / num_followups;
   result->terminal_replies = terminal_replies;
+}
+
+void blocking_setup_checker_measure_all(BlockingSetupChecker *checker,
+                                        const Move *const *candidates,
+                                        int num_candidates,
+                                        BlockingSetupResult *results) {
+  CandidateState *states =
+      malloc_or_die(sizeof(CandidateState) * (size_t)num_candidates);
+  double *sums = calloc_or_die((size_t)num_candidates * 4, sizeof(double));
+  int *terminal = calloc_or_die((size_t)num_candidates, sizeof(int));
+  checker_ensure_candidate_boards(checker, num_candidates);
+  for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+    checker_prepare_candidate(checker, candidates[cand_idx], &states[cand_idx]);
+    checker_play_candidate(checker, &states[cand_idx],
+                           &checker->candidate_boards[cand_idx]);
+  }
+  const int num_racks = checker->samples->num_racks;
+  // Rack by rack: consecutive searches share the opponent's rack, so its
+  // rack-keyed movegen caches stay warm. Each candidate's sums still run
+  // over the racks in order, so results match blocking_setup_checker_measure.
+  for (int rack_idx = 0; rack_idx < num_racks; rack_idx++) {
+    for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+      RackValues values;
+      checker_measure_rack(checker, &states[cand_idx],
+                           checker->candidate_boards[cand_idx], rack_idx,
+                           &values);
+      double *candidate_sums = sums + ((size_t)cand_idx * 4);
+      candidate_sums[0] += values.pass_reply;
+      candidate_sums[1] += values.candidate_reply;
+      candidate_sums[2] += values.pass_followup;
+      candidate_sums[3] += values.candidate_followup;
+      terminal[cand_idx] += values.terminal;
+    }
+  }
+  const double racks = (double)num_racks;
+  const double num_followups = racks * checker->followup_draws;
+  for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+    const double *candidate_sums = sums + ((size_t)cand_idx * 4);
+    BlockingSetupResult *result = &results[cand_idx];
+    result->pass_reply_mean = candidate_sums[0] / racks;
+    result->candidate_reply_mean = candidate_sums[1] / racks;
+    result->blocking_delta = (candidate_sums[0] - candidate_sums[1]) / racks;
+    result->pass_followup_mean = candidate_sums[2] / num_followups;
+    result->candidate_followup_mean = candidate_sums[3] / num_followups;
+    result->setup_delta =
+        (candidate_sums[3] - candidate_sums[2]) / num_followups;
+    result->terminal_replies = terminal[cand_idx];
+  }
+  free(terminal);
+  free(sums);
+  free(states);
 }
 
 // One candidate's per-rack adjusted values in a race: rack_values[rack] is
@@ -878,6 +1091,31 @@ static Equity race_value(const RaceEntry *entry, int racks, int draws,
                           (setup_weight * setup_delta));
 }
 
+// Our chance of winning after the candidate, ahead by spread points (score
+// plus leave), with the opponent on turn: the table read at both integer
+// spreads around it, interpolated so small swings still count. Bags larger
+// than the table covers read its largest bag.
+static double race_win_value(const BlockingSetupChecker *checker,
+                             const WinPct *win_pcts,
+                             const CandidateState *state, double spread) {
+  unsigned int bag_tiles =
+      (unsigned int)(checker->bag_tiles -
+                     (state->is_placement ? state->missing : 0));
+  if (bag_tiles > win_pct_get_max_bag(win_pcts)) {
+    bag_tiles = win_pct_get_max_bag(win_pcts);
+  }
+  const unsigned int our_tiles =
+      (unsigned int)(rack_get_total_letters(&state->leave) + state->missing);
+  const double opponent_spread = -spread;
+  const double low = floor(opponent_spread);
+  const double fraction = opponent_spread - low;
+  const double low_win =
+      win_pct_get(win_pcts, (int)low, bag_tiles, RACK_SIZE, our_tiles);
+  const double high_win =
+      win_pct_get(win_pcts, (int)low + 1, bag_tiles, RACK_SIZE, our_tiles);
+  return 1.0 - (low_win + (fraction * (high_win - low_win)));
+}
+
 int blocking_setup_checker_choose(BlockingSetupChecker *checker,
                                   const Move *const *candidates,
                                   const Equity *base_equities,
@@ -902,6 +1140,24 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
     entry->pass_followup_sum = 0.0;
     entry->candidate_followup_sum = 0.0;
   }
+  checker_ensure_candidate_boards(checker, num_candidates);
+  for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+    checker_play_candidate(checker, &entries[cand_idx].state,
+                           &checker->candidate_boards[cand_idx]);
+  }
+  // With a win table, each rack's value already holds the base equity and
+  // the lead (see race_win_value), so the base is not added again.
+  const WinPct *win_pcts = settings->win_pcts;
+  double lead = 0.0;
+  if (win_pcts != NULL) {
+    lead = equity_to_double(player_get_score(game_get_player(
+                                checker->base, checker->on_turn_index)) -
+                            player_get_score(game_get_player(
+                                checker->base, 1 - checker->on_turn_index)));
+    for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+      entries[cand_idx].base_points = 0.0;
+    }
+  }
   const int batch = settings->batch_racks > 0 ? settings->batch_racks
                                               : BLOCKING_SETUP_RACE_BATCH;
   int alive = num_candidates;
@@ -910,23 +1166,32 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
   while (racks_done < num_racks && alive > 1) {
     const int end =
         racks_done + batch < num_racks ? racks_done + batch : num_racks;
-    for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
-      RaceEntry *entry = &entries[cand_idx];
-      if (!entry->alive) {
-        continue;
-      }
-      checker_play_candidate(checker, &entry->state);
-      for (int rack_idx = racks_done; rack_idx < end; rack_idx++) {
+    // Rack by rack within the batch (see blocking_setup_checker_measure_all).
+    for (int rack_idx = racks_done; rack_idx < end; rack_idx++) {
+      for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
+        RaceEntry *entry = &entries[cand_idx];
+        if (!entry->alive) {
+          continue;
+        }
         RackValues values;
-        checker_measure_rack(checker, &entry->state, rack_idx, &values);
+        checker_measure_rack(checker, &entry->state,
+                             checker->candidate_boards[cand_idx], rack_idx,
+                             &values);
         entry->pass_reply_sum += values.pass_reply;
         entry->candidate_reply_sum += values.candidate_reply;
         entry->pass_followup_sum += values.pass_followup;
         entry->candidate_followup_sum += values.candidate_followup;
-        rack_values[((size_t)cand_idx * (size_t)num_racks) + rack_idx] =
+        double rack_value =
             (blocking_weight * (values.pass_reply - values.candidate_reply)) +
             (setup_weight * (values.candidate_followup - values.pass_followup) /
              draws);
+        if (win_pcts != NULL) {
+          rack_value = race_win_value(
+              checker, win_pcts, &entry->state,
+              lead + equity_to_double(base_equities[cand_idx]) + rack_value);
+        }
+        rack_values[((size_t)cand_idx * (size_t)num_racks) + rack_idx] =
+            rack_value;
         candidate_racks++;
       }
     }
@@ -987,8 +1252,22 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
   // The best survivor by the value a full measurement of its racks gives.
   int best = -1;
   Equity best_value = 0;
+  double best_win = 0.0;
   for (int cand_idx = 0; cand_idx < num_candidates; cand_idx++) {
     if (!entries[cand_idx].alive) {
+      continue;
+    }
+    if (win_pcts != NULL) {
+      const double *values =
+          rack_values + ((size_t)cand_idx * (size_t)num_racks);
+      double sum = 0.0;
+      for (int rack_idx = 0; rack_idx < racks_done; rack_idx++) {
+        sum += values[rack_idx];
+      }
+      if (best < 0 || sum / racks_done > best_win) {
+        best = cand_idx;
+        best_win = sum / racks_done;
+      }
       continue;
     }
     const Equity value = race_value(&entries[cand_idx], racks_done, draws,
@@ -1006,4 +1285,149 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
   free(rack_values);
   free(entries);
   return best;
+}
+
+enum {
+  // Every move of a position, so exchanges far down the static order are
+  // still seen by the exchange quota.
+  BLOCKING_SETUP_POLICY_GEN_CAPACITY = 200000,
+  BLOCKING_SETUP_POLICY_POOL_CAPACITY = 1024,
+  BLOCKING_SETUP_POLICY_MAX_UNIVERSE = 512,
+};
+
+struct BlockingSetupPolicy {
+  BlockingSetupPolicySettings settings;
+  int num_racks;
+  MoveList *list;
+  BlockingSetupSamples *samples;
+  BlockingSetupChecker *checker;
+  const Move *universe[BLOCKING_SETUP_POLICY_MAX_UNIVERSE];
+  Equity base[BLOCKING_SETUP_POLICY_MAX_UNIVERSE];
+};
+
+BlockingSetupPolicy *
+blocking_setup_policy_create(const BlockingSetupPolicySettings *settings) {
+  assert(settings->params != NULL);
+  assert(settings->universe >= 1 &&
+         settings->universe + settings->exchange_quota <=
+             BLOCKING_SETUP_POLICY_MAX_UNIVERSE);
+  BlockingSetupPolicy *policy = malloc_or_die(sizeof(BlockingSetupPolicy));
+  policy->settings = *settings;
+  policy->num_racks =
+      settings->num_racks > 0
+          ? settings->num_racks
+          : blocking_setup_params_get_teacher_racks(settings->params);
+  policy->list = move_list_create(BLOCKING_SETUP_POLICY_GEN_CAPACITY);
+  policy->samples = blocking_setup_samples_create(
+      policy->num_racks, BLOCKING_SETUP_POLICY_POOL_CAPACITY);
+  policy->checker = blocking_setup_checker_create();
+  return policy;
+}
+
+void blocking_setup_policy_destroy(BlockingSetupPolicy *policy) {
+  if (policy == NULL) {
+    return;
+  }
+  move_list_destroy(policy->list);
+  blocking_setup_samples_destroy(policy->samples);
+  blocking_setup_checker_destroy(policy->checker);
+  free(policy);
+}
+
+bool blocking_setup_policy_has_settings(
+    const BlockingSetupPolicy *policy,
+    const BlockingSetupPolicySettings *settings) {
+  const BlockingSetupPolicySettings *own = &policy->settings;
+  return own->params == settings->params &&
+         own->num_racks == settings->num_racks &&
+         own->universe == settings->universe &&
+         own->exchange_quota == settings->exchange_quota &&
+         own->exchange_margin == settings->exchange_margin &&
+         own->race.batch_racks == settings->race.batch_racks &&
+         own->race.min_racks == settings->race.min_racks &&
+         own->race.z == settings->race.z &&
+         own->race.win_pcts == settings->race.win_pcts;
+}
+
+const Move *blocking_setup_policy_choose(BlockingSetupPolicy *policy,
+                                         const Game *game, uint64_t seed) {
+  const BlockingSetupPolicySettings *settings = &policy->settings;
+  MoveList *list = policy->list;
+  move_list_reset(list);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .disable_pat = true,
+  };
+  generate_moves(&args);
+  if (move_list_get_count(list) == 0) {
+    return NULL;
+  }
+  move_list_sort_moves(list);
+  const Move *top = move_list_get_move(list, 0);
+  if (move_list_get_count(list) == 1 || game_over(game) ||
+      bag_get_letters(game_get_bag(game)) == 0) {
+    return top;
+  }
+  const int on_turn = game_get_player_on_turn_index(game);
+  const int lead =
+      equity_to_int(player_get_score(game_get_player(game, on_turn)) -
+                    player_get_score(game_get_player(game, 1 - on_turn)));
+  double blocking_weight = 0.0;
+  double setup_weight = 0.0;
+  blocking_setup_params_get_weights(settings->params,
+                                    bag_get_letters(game_get_bag(game)), lead,
+                                    &blocking_weight, &setup_weight);
+  if (blocking_weight == 0.0 && setup_weight == 0.0) {
+    return top;
+  }
+  int count = 0;
+  int placements = 0;
+  int exchanges = 0;
+  const Equity top_equity = move_get_equity(top);
+  for (int move_idx = 0; move_idx < move_list_get_count(list) &&
+                         (placements < settings->universe ||
+                          exchanges < settings->exchange_quota);
+       move_idx++) {
+    const Move *move = move_list_get_move(list, move_idx);
+    const game_event_t type = move_get_type(move);
+    if (type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+        placements < settings->universe) {
+      placements++;
+    } else if (type == GAME_EVENT_EXCHANGE &&
+               exchanges < settings->exchange_quota &&
+               move_get_equity(move) >=
+                   top_equity - settings->exchange_margin) {
+      exchanges++;
+    } else {
+      continue;
+    }
+    policy->universe[count] = move;
+    policy->base[count] = move_get_equity(move);
+    count++;
+  }
+  if (count < 2) {
+    return top;
+  }
+  blocking_setup_samples_deal(
+      policy->samples, game, policy->num_racks,
+      blocking_setup_params_get_teacher_partition(settings->params),
+      blocking_setup_params_get_teacher_condition_draws(settings->params),
+      seed);
+  blocking_setup_checker_set_value(
+      policy->checker,
+      blocking_setup_params_get_teacher_value(settings->params));
+  blocking_setup_checker_load(
+      policy->checker, game, policy->samples,
+      blocking_setup_params_get_teacher_followup_draws(settings->params));
+  const int pick = blocking_setup_checker_choose(
+      policy->checker, policy->universe, policy->base, count, blocking_weight,
+      setup_weight, &settings->race, NULL);
+  return policy->universe[pick];
 }

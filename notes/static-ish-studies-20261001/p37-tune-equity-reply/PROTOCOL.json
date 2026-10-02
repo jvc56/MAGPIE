@@ -1,0 +1,11 @@
+{
+  "kind": "Weight tuning for teacher_value equity_reply (opponent replies by and in static equity, our follow-ups by score)",
+  "frozen_utc": "2026-10-01T14:34:26Z",
+  "reference": "research_v0_equity_reply.bsp (1.4 / 0.75, equity_reply), sha256 4ee99c976c08a4ac44f2c6f69676abf7358b3194b8d97906ad735b86e4351dc2",
+  "grid": "blocking {0.7,1.4,2.1} x setup {0.4,0.75,1.1}, reference point skipped",
+  "pairs_per_point": 800,
+  "seed": 20264701,
+  "racks": 64, "z": 3, "lexicon": "CSW24", "workers": 10,
+  "selection": "highest mean pair score vs the reference; selection overstates it, so the winner (or the reference if nothing beats it) is confirmed in P38 on a fresh seed vs score mode",
+  "binary": "magpie_test_hyb, sha256 e5e287486f1e76848ee2454d6e500642899df1ea9a2cb9267539c6fa5a90b613, commit 15840ff8 + uncommitted equity_reply change"
+}

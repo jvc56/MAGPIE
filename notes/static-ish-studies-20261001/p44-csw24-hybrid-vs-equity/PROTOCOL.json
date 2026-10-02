@@ -1,0 +1,10 @@
+{
+  "kind": "Prespecified: equity_reply 0.7/0.4 vs equity mode 1.4/0.75 in CSW24, head to head",
+  "frozen_utc": "2026-10-01T21:07:10Z",
+  "player_a": "static-ish, equity_reply 0.7/0.4, research_v0_equity_reply_b07_s04.bsp sha256 ca9117b95ab96b71a1b938b88392769784cce4d8e9d4503aa52cc6e6ffe338b8, 64 racks, z=3",
+  "player_b": "static-ish, equity 1.4/0.75, research_v0_equity.bsp sha256 2597feaaa90696705d085e23a9369728e0ef122e872d8662044ed2f7b2fb284c, 64 racks, z=3",
+  "lexicon": "CSW24", "pairs": 2000, "seed": 20265401,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "secondary": "inverse-variance pooled gain over P44-P46; mean spread; check time",
+  "binary": "magpie_test_hyb, sha256 e5e287486f1e76848ee2454d6e500642899df1ea9a2cb9267539c6fa5a90b613 (commit 190a69c1)"
+}

@@ -1,0 +1,10 @@
+{
+  "kind": "Prespecified: stacked cost cuts (gate bag<60, universe 30) vs full, score mode",
+  "frozen_utc": "2026-10-01T09:42:50Z",
+  "player_a": "static-ish CSW24, score, 1.4/0.75 with bag 60-1000 bin zeroed, universe 30, 64 racks, z=3",
+  "player_b": "static-ish CSW24, score, 1.4/0.75 ungated, universe 60, 64 racks, z=3",
+  "pairs": 2000,
+  "seed": 20264001,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "binary": "magpie_test_p24 (commit 2302b319), sha256 b6bcf56ff61e9dd30f21a17e40d63934a8aca466bd541771c8960bcac7250b24"
+}

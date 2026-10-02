@@ -2,6 +2,7 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/def/bai_defs.h"
+#include "../src/def/config_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/move_defs.h"
@@ -21,6 +22,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/play_chooser.h"
 #include "../src/impl/sim_nomination.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
@@ -58,15 +60,25 @@
 //          Writes <out>.pools.csv, <out>.nominees.csv, <out>.select.csv
 //          and <out>.refs.csv; sims=0 writes only the nominees (an untimed
 //          nomination audit).
-//   games  Game pairs between two players (a= and b=, each "static", "pat"
-//          or "adjusted"): both games of a pair use one seed, so each seat
-//          draws the same tiles, and the players swap seats. "adjusted"
-//          plays argmax(static equity + blocking + setup adjustments) over
-//          the top universe= static moves and exch= exchanges, with weights
-//          from params= (its bins give conditional policies) and racks=
-//          sampled racks (default: the file's teacher_racks); z=<z> races
-//          the candidates (blocking_setup_checker_choose; 0, the default,
-//          measures all) in batches of batch= racks. Writes
+//   games  Game pairs between two players (a= and b=, each "static", "pat",
+//          "adjusted" or "sim": a PlayChooser simulating sim_cands=
+//          candidates sim_plies= plies deep for sim_ms= per move, no-PAT
+//          static rollouts; "nomsim" takes its root candidates from the
+//          nominator, see bss_player_t; sim_ms_b= gives player b its own
+//          budget; rbs=<file.bsp> gives player a static-ish rollouts and
+//          rbs_b= player b, with rbsz=, rbsracks= and rbsplies= as for
+//          the sim command's -rbsz / -rbsracks / -rbsplies; sim_iters= /
+//          sim_iters_b= cap the iterations per decision): both games of a pair
+//          use one seed, so each seat draws the same tiles, and the players
+//          swap seats. "adjusted" plays argmax(static equity + blocking + setup
+//          adjustments) over the top universe= static moves and exch=
+//          exchanges, with weights from params= (its bins give conditional
+//          policies) and racks= sampled racks (default: the file's
+//          teacher_racks); player b uses params_b=, universe_b= and z_b= when
+//          given; z=<z> races the candidates (blocking_setup_checker_choose; 0,
+//          the default, measures all) in batches of batch= racks; winpct=1
+//          (winpct_b= for player b) races on win chance from the lexicon's win%
+//          table instead of points (see BlockingSetupRaceSettings). Writes
 //          <out>.games.csv and per-decision timing <out>.moves.csv.
 enum {
   BSS_MAX_ARMS = 8,
@@ -100,8 +112,13 @@ static Config *bss_config_create(const BSOptions *options) {
   return config;
 }
 
+static BlockingSetupParams *bss_params_create_from(const char *path);
+
 static BlockingSetupParams *bss_params_create(const BSOptions *options) {
-  const char *path = bs_options_get(options, "params", NULL);
+  return bss_params_create_from(bs_options_get(options, "params", NULL));
+}
+
+static BlockingSetupParams *bss_params_create_from(const char *path) {
   if (path == NULL) {
     return NULL;
   }
@@ -523,6 +540,14 @@ typedef enum {
   BSS_PLAYER_STATIC,
   BSS_PLAYER_PAT,
   BSS_PLAYER_ADJUSTED,
+  // A PlayChooser simulating its top candidates (no-PAT static rollouts)
+  // for sim_ms per move.
+  BSS_PLAYER_SIM,
+  // The same sim with root candidates from the nominator (sim_nomination.h):
+  // the top nom_static static moves, nom_block blocking and nom_setup setup
+  // nominees over a universe of nom_universe, and nom_exch exchanges, with
+  // the player's .bsp.
+  BSS_PLAYER_NOMSIM,
 } bss_player_t;
 
 static bss_player_t bss_parse_player(const char *name) {
@@ -534,6 +559,12 @@ static bss_player_t bss_parse_player(const char *name) {
   }
   if (strings_equal(name, "adjusted")) {
     return BSS_PLAYER_ADJUSTED;
+  }
+  if (strings_equal(name, "sim")) {
+    return BSS_PLAYER_SIM;
+  }
+  if (strings_equal(name, "nomsim")) {
+    return BSS_PLAYER_NOMSIM;
   }
   log_fatal("unknown player %s", name);
   return BSS_PLAYER_STATIC;
@@ -549,6 +580,13 @@ typedef struct BSSPlayerState {
   Equity exchange_margin;
   int num_racks;
   BlockingSetupRaceSettings race;
+  PlayChooser *chooser;
+  Move *chosen;
+  SimNominationCandidateSource *nomination;
+  // Static-ish rollouts for a sim player (rbs= / rbs_b=); NULL params for
+  // static rollouts.
+  BlockingSetupParams *rollout_params;
+  BlockingSetupPolicySettings rollout;
 } BSSPlayerState;
 
 static void bss_generate(const Game *game, MoveList *list, bool disable_pat) {
@@ -610,6 +648,9 @@ static int bss_decide(BSSPlayerState *state, bss_player_t kind,
           blocking_setup_params_get_teacher_partition(state->params),
           blocking_setup_params_get_teacher_condition_draws(state->params),
           seed);
+      blocking_setup_checker_set_value(
+          state->checker,
+          blocking_setup_params_get_teacher_value(state->params));
       blocking_setup_checker_load(
           state->checker, game, state->samples,
           blocking_setup_params_get_teacher_followup_draws(state->params));
@@ -661,6 +702,37 @@ static int bss_decide(BSSPlayerState *state, bss_player_t kind,
   return choice;
 }
 
+// The sim player's move, as an index into state->list (the static list).
+static int bss_sim_decide(BSSPlayerState *state, Game *game,
+                          BSSDecision *decision) {
+  const double start = bss_now_ms();
+  bss_generate(game, state->list, true);
+  decision->movegen_ms = bss_now_ms() - start;
+  decision->check_ms = 0.0;
+  decision->universe = 0;
+  decision->changed = false;
+  decision->checked = false;
+  decision->candidate_racks = 0;
+  ErrorStack *error_stack = error_stack_create();
+  play_chooser_choose_move(state->chooser, game, state->chosen, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  int choice = 0;
+  for (int move_idx = 0; move_idx < move_list_get_count(state->list);
+       move_idx++) {
+    if (compare_moves_without_equity(move_list_get_move(state->list, move_idx),
+                                     state->chosen, true) == -1) {
+      choice = move_idx;
+      break;
+    }
+  }
+  decision->checked = bag_get_letters(game_get_bag(game)) > 0;
+  decision->changed = choice != 0;
+  decision->total_ms = bss_now_ms() - start;
+  decision->check_ms = decision->total_ms - decision->movegen_ms;
+  return choice;
+}
+
 // A game's result for player a: win 1, tie 0.5, loss 0.
 static double bss_game_score(int spread) {
   if (spread > 0) {
@@ -672,9 +744,19 @@ static double bss_game_score(int spread) {
   return 0.0;
 }
 
+// Player b's own option (key_b=) when given, else the shared one.
+static const char *bss_player_key(const BSOptions *options, int player_idx,
+                                  const char *key, const char *key_b) {
+  return player_idx == 1 && bs_options_get(options, key_b, NULL) != NULL ? key_b
+                                                                         : key;
+}
+
 static void bss_games(const BSOptions *options) {
   Config *config = bss_config_create(options);
   BlockingSetupParams *params = bss_params_create(options);
+  // Player b may use other parameters (params_b=), e.g. another teacher_value.
+  BlockingSetupParams *params_b =
+      bss_params_create_from(bs_options_get(options, "params_b", NULL));
   const bss_player_t kinds[2] = {
       bss_parse_player(bs_options_require(options, "a")),
       bss_parse_player(bs_options_require(options, "b"))};
@@ -687,32 +769,120 @@ static void bss_games(const BSOptions *options) {
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     BSSPlayerState *state = &states[player_idx];
     state->list = move_list_create(BSS_MOVE_LIST_CAPACITY);
-    state->params = params;
-    state->universe =
-        (int)bs_options_get_long(options, "universe", BSS_DEFAULT_UNIVERSE);
+    state->params = player_idx == 1 && params_b != NULL ? params_b : params;
+    state->universe = (int)bs_options_get_long(
+        options, bss_player_key(options, player_idx, "universe", "universe_b"),
+        BSS_DEFAULT_UNIVERSE);
     state->exchanges =
         (int)bs_options_get_long(options, "exch", BSS_DEFAULT_EXCHANGES);
     state->exchange_margin = int_to_equity((int)bs_options_get_long(
         options, "exchmargin", BSS_DEFAULT_EXCHANGE_MARGIN));
     state->num_racks = 0;
+    state->chooser = NULL;
+    state->chosen = NULL;
+    state->nomination = NULL;
+    // Unlike the other per-player options, rbs is never shared: player a
+    // reads rbs= and player b reads rbs_b=, so a one-sided test cannot
+    // silently become two-sided.
+    state->rollout_params = bss_params_create_from(
+        bs_options_get(options, player_idx == 0 ? "rbs" : "rbs_b", NULL));
+    state->rollout = (BlockingSetupPolicySettings){
+        .params = state->rollout_params,
+        .num_racks = (int)bs_options_get_long(options, "rbsracks", 0),
+        .universe = DEFAULT_ROLLOUT_BLOCKING_SETUP_UNIVERSE,
+        .exchange_quota = DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGES,
+        .exchange_margin =
+            int_to_equity(DEFAULT_ROLLOUT_BLOCKING_SETUP_EXCHANGE_MARGIN),
+        .race = {.batch_racks = BLOCKING_SETUP_RACE_BATCH,
+                 .min_racks = BLOCKING_SETUP_RACE_BATCH,
+                 .z = bs_options_get_double(options, "rbsz",
+                                            DEFAULT_ROLLOUT_BLOCKING_SETUP_Z)},
+    };
+    if (kinds[player_idx] == BSS_PLAYER_NOMSIM) {
+      if (state->params == NULL) {
+        log_fatal("nomsim players need params=");
+      }
+      const SimNominationSettings settings = {
+          .static_count = (int)bs_options_get_long(options, "nom_static", 10),
+          .blocking_count = (int)bs_options_get_long(options, "nom_block", 5),
+          .setup_count = (int)bs_options_get_long(options, "nom_setup", 5),
+          .exchange_quota = (int)bs_options_get_long(options, "nom_exch", 3),
+          .exchange_margin = int_to_equity(BSS_DEFAULT_EXCHANGE_MARGIN),
+          .universe_count =
+              (int)bs_options_get_long(options, "nom_universe", 30),
+          .params = state->params,
+          .seed = bs_options_get_u64(options, "seed", 0) ^ UINT64_C(0x4e0b),
+      };
+      state->nomination = malloc_or_die(sizeof(SimNominationCandidateSource));
+      sim_nomination_candidate_source_init(state->nomination, &settings);
+    }
+    if (kinds[player_idx] == BSS_PLAYER_SIM ||
+        kinds[player_idx] == BSS_PLAYER_NOMSIM) {
+      ErrorStack *error_stack = error_stack_create();
+      config_load_win_pcts(config, error_stack);
+      assert(error_stack_is_empty(error_stack));
+      error_stack_destroy(error_stack);
+      const PlayChooserStrategy strategy = {
+          .pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM,
+          .endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+          .fixed_seconds_per_move =
+              (double)bs_options_get_long(
+                  options,
+                  bss_player_key(options, player_idx, "sim_ms", "sim_ms_b"),
+                  100) /
+              1000.0,
+          .sim_candidates_fn =
+              state->nomination != NULL ? sim_nomination_candidates : NULL,
+          .sim_candidates_context = state->nomination,
+          .sim_plies = (int)bs_options_get_long(options, "sim_plies", 2),
+          .sim_max_candidates =
+              (int)bs_options_get_long(options, "sim_cands", 15),
+          .sim_max_iterations = (uint64_t)bs_options_get_long(
+              options,
+              bss_player_key(options, player_idx, "sim_iters", "sim_iters_b"),
+              0),
+          .win_pcts = config_get_win_pcts(config),
+          .num_threads = 1,
+          .pat_rollout_disabled = true,
+          .rollout_blocking_setup =
+              state->rollout_params != NULL ? &state->rollout : NULL,
+          .rollout_blocking_setup_plies =
+              (int)bs_options_get_long(options, "rbsplies", 0),
+          .seed = bs_options_get_u64(options, "seed", 0) + (uint64_t)player_idx,
+      };
+      state->chooser = play_chooser_create(&strategy);
+      state->chosen = move_create();
+    }
     // z=0 (the default) measures every candidate in full; z > 0 races.
     state->race = (BlockingSetupRaceSettings){
         .batch_racks = (int)bs_options_get_long(options, "batch",
                                                 BLOCKING_SETUP_RACE_BATCH),
         .min_racks = (int)bs_options_get_long(options, "batch",
                                               BLOCKING_SETUP_RACE_BATCH),
-        .z = bs_options_get_double(options, "z", 0.0)};
+        .z = bs_options_get_double(
+            options, bss_player_key(options, player_idx, "z", "z_b"), 0.0)};
+    if (bs_options_get_long(
+            options, bss_player_key(options, player_idx, "winpct", "winpct_b"),
+            0)) {
+      ErrorStack *error_stack = error_stack_create();
+      config_load_win_pcts(config, error_stack);
+      assert(error_stack_is_empty(error_stack));
+      error_stack_destroy(error_stack);
+      state->race.win_pcts = config_get_win_pcts(config);
+    }
     state->samples = NULL;
     state->checker = NULL;
     if (kinds[player_idx] == BSS_PLAYER_ADJUSTED) {
-      if (params == NULL) {
+      if (state->params == NULL) {
         log_fatal("adjusted players need params=");
+      } else {
+        state->num_racks = (int)bs_options_get_long(
+            options, "racks",
+            blocking_setup_params_get_teacher_racks(state->params));
+        state->samples =
+            blocking_setup_samples_create(state->num_racks, BSS_POOL_CAPACITY);
+        state->checker = blocking_setup_checker_create();
       }
-      state->num_racks = (int)bs_options_get_long(
-          options, "racks", blocking_setup_params_get_teacher_racks(params));
-      state->samples =
-          blocking_setup_samples_create(state->num_racks, BSS_POOL_CAPACITY);
-      state->checker = blocking_setup_checker_create();
     }
   }
   const char *out_path = bs_options_require(options, "out");
@@ -750,10 +920,14 @@ static void bss_games(const BSOptions *options) {
         BSSDecision decision;
         const int bag = bag_get_letters(game_get_bag(game));
         const int lead = bss_lead(game);
-        const int choice = bss_decide(
-            &states[player_idx], kinds[player_idx], game,
-            bs_mix(pair_seed ^ (uint64_t)((turn * 2) + game_in_pair)),
-            &decision);
+        const int choice =
+            kinds[player_idx] == BSS_PLAYER_SIM ||
+                    kinds[player_idx] == BSS_PLAYER_NOMSIM
+                ? bss_sim_decide(&states[player_idx], game, &decision)
+                : bss_decide(
+                      &states[player_idx], kinds[player_idx], game,
+                      bs_mix(pair_seed ^ (uint64_t)((turn * 2) + game_in_pair)),
+                      &decision);
         (void)fprintf(moves_out,
                       "%ld,%d,%d,%c,%d,%d,%d,%d,%d,%.3f,%.3f,%.3f,%d\n",
                       pair_idx, game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
@@ -780,10 +954,20 @@ static void bss_games(const BSOptions *options) {
     move_list_destroy(states[player_idx].list);
     blocking_setup_samples_destroy(states[player_idx].samples);
     blocking_setup_checker_destroy(states[player_idx].checker);
+    if (states[player_idx].chooser != NULL) {
+      play_chooser_destroy(states[player_idx].chooser);
+      move_destroy(states[player_idx].chosen);
+    }
+    if (states[player_idx].nomination != NULL) {
+      sim_nomination_candidate_source_cleanup(states[player_idx].nomination);
+      free(states[player_idx].nomination);
+    }
+    blocking_setup_params_destroy(states[player_idx].rollout_params);
   }
   (void)fclose(games_out);
   (void)fclose(moves_out);
   blocking_setup_params_destroy(params);
+  blocking_setup_params_destroy(params_b);
   config_destroy(config);
 }
 

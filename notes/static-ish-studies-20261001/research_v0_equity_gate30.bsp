@@ -1,0 +1,9 @@
+magpie_bsp_v1
+lexicon,CSW24
+model_version,research-v0-equity-gated-bag30
+objective,sim_admission
+teacher_racks,64
+blocking_weight,1.4
+setup_weight,0.75
+teacher_value,equity
+bin,30,1000,-100000,100000,0,0

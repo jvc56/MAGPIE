@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/blocking_setup_params.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -20,6 +21,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "bai_logger.h"
+#include "blocking_setup.h"
 #include "gameplay.h"
 #include <math.h>
 #include <stdatomic.h>
@@ -375,6 +377,10 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  // The rollout policy when SimArgs.rollout_blocking_setup is set, made from
+  // rollout_settings; NULL otherwise.
+  BlockingSetupPolicy *rollout_policy;
+  const BlockingSetupPolicySettings *rollout_settings;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -404,6 +410,8 @@ typedef struct Simmer {
   double utility_w_spread;
   double utility_spread_scale;
   bool use_margin_forecast;
+  // See SimArgs.rollout_blocking_setup_plies.
+  int rollout_blocking_setup_plies;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -419,6 +427,26 @@ static void simmer_worker_set_rollout_pat(const SimmerWorker *simmer_worker,
   }
 }
 
+// Makes, keeps or drops the worker's rollout policy to match sim_args. The
+// settings are compared by value, since the config passes the same settings
+// object every time and only its contents change between sims.
+static void simmer_worker_set_rollout_policy(SimmerWorker *simmer_worker,
+                                             const SimArgs *sim_args) {
+  const BlockingSetupPolicySettings *settings =
+      sim_args->rollout_blocking_setup;
+  if (simmer_worker->rollout_settings == settings &&
+      (settings == NULL || blocking_setup_policy_has_settings(
+                               simmer_worker->rollout_policy, settings))) {
+    return;
+  }
+  blocking_setup_policy_destroy(simmer_worker->rollout_policy);
+  simmer_worker->rollout_policy =
+      sim_args->rollout_blocking_setup != NULL
+          ? blocking_setup_policy_create(sim_args->rollout_blocking_setup)
+          : NULL;
+  simmer_worker->rollout_settings = sim_args->rollout_blocking_setup;
+}
+
 SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(sim_args->game);
@@ -426,12 +454,16 @@ SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
+  simmer_worker->rollout_policy = NULL;
+  simmer_worker->rollout_settings = NULL;
+  simmer_worker_set_rollout_policy(simmer_worker, sim_args);
   return simmer_worker;
 }
 
 void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
   game_copy(simmer_worker->game, sim_args->game);
   simmer_worker_set_rollout_pat(simmer_worker, sim_args);
+  simmer_worker_set_rollout_policy(simmer_worker, sim_args);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -440,6 +472,7 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   }
   game_destroy(simmer_worker->game);
   move_list_destroy(simmer_worker->move_list);
+  blocking_setup_policy_destroy(simmer_worker->rollout_policy);
   prng_destroy(simmer_worker->prng);
   free(simmer_worker);
 }
@@ -520,7 +553,16 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, move_list);
+    const Move *best_play = NULL;
+    if (simmer_worker->rollout_policy != NULL &&
+        (simmer->rollout_blocking_setup_plies == 0 ||
+         ply < simmer->rollout_blocking_setup_plies)) {
+      best_play = blocking_setup_policy_choose(
+          simmer_worker->rollout_policy, game, prng_next(simmer_worker->prng));
+    }
+    if (best_play == NULL) {
+      best_play = get_top_equity_move(game, move_list);
+    }
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -691,6 +733,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
+  simmer->rollout_blocking_setup_plies = sim_args->rollout_blocking_setup_plies;
 
   simmer->thread_control = thread_control;
 
@@ -747,6 +790,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
+  simmer->rollout_blocking_setup_plies = sim_args->rollout_blocking_setup_plies;
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

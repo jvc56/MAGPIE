@@ -1,11 +1,13 @@
 #include "blocking_setup_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/def/bai_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/blocking_setup_params.h"
 #include "../src/ent/equity.h"
@@ -14,9 +16,14 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
+#include "../src/ent/sim_results.h"
+#include "../src/ent/stats.h"
+#include "../src/ent/thread_control.h"
 #include "../src/impl/blocking_setup.h"
 #include "../src/impl/config.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -40,6 +47,8 @@ enum {
   BST_BENCH_EXCHANGES = 5,
   BST_BENCH_EXCHANGE_MARGIN = 35,
   BST_MAX_RACE_SETTINGS = 8,
+  BST_SIM_CANDIDATES = 3,
+  BST_SIM_ITERATIONS = 30,
 };
 
 // A late CSW24 position (16 in the bag) from the candidate-diversity study.
@@ -350,11 +359,225 @@ static void test_blocking_setup_params(void) {
   error_stack_destroy(error_stack);
 }
 
+static BlockingSetupParams *bst_params_from(const char *text) {
+  ErrorStack *error_stack = error_stack_create();
+  BlockingSetupParams *params =
+      blocking_setup_params_create_from_string("policy", text, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return params;
+}
+
+static const char *bst_policy_params_text = "magpie_bsp_v1\n"
+                                            "lexicon,CSW24\n"
+                                            "model_version,test\n"
+                                            "objective,static_choice\n"
+                                            "teacher_racks,16\n"
+                                            "blocking_weight,1.4\n"
+                                            "setup_weight,0.75\n";
+
+static const char *bst_zero_params_text = "magpie_bsp_v1\n"
+                                          "lexicon,CSW24\n"
+                                          "model_version,test\n"
+                                          "objective,static_choice\n"
+                                          "blocking_weight,0\n"
+                                          "setup_weight,0\n";
+
+// The policy's choice is the full measurement's argmax with z = 0, a legal
+// universe move with z > 0, and plain static play when the weights are 0.
+static void test_blocking_setup_policy(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1");
+  load_and_exec_config_or_die(config, bst_cgp);
+  const Game *game = config_get_game(config);
+  MoveList *list = move_list_create(BST_MOVE_LIST_CAPACITY);
+  bst_generate_all(game, list);
+  BlockingSetupParams *params = bst_params_from(bst_policy_params_text);
+  BlockingSetupPolicySettings settings = {
+      .params = params,
+      .universe = 20,
+      .exchange_quota = 0,
+      .race = {.z = 0.0},
+  };
+  BlockingSetupPolicy *policy = blocking_setup_policy_create(&settings);
+  const Move *exact = blocking_setup_policy_choose(policy, game, 77);
+  assert(exact != NULL);
+  // The same choice by full measurement.
+  BlockingSetupSamples *samples =
+      blocking_setup_samples_create(16, BST_POOL_CAPACITY);
+  blocking_setup_samples_deal(samples, game, 16, true, true, 77);
+  BlockingSetupChecker *checker = blocking_setup_checker_create();
+  blocking_setup_checker_load(checker, game, samples, 1);
+  int best = -1;
+  Equity best_value = 0;
+  int placements = 0;
+  for (int move_idx = 0;
+       move_idx < move_list_get_count(list) && placements < 20; move_idx++) {
+    const Move *move = move_list_get_move(list, move_idx);
+    if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      continue;
+    }
+    placements++;
+    BlockingSetupResult result;
+    blocking_setup_checker_measure(checker, move, &result);
+    const Equity value =
+        move_get_equity(move) + double_to_equity((1.4 * result.blocking_delta) +
+                                                 (0.75 * result.setup_delta));
+    if (best < 0 || value > best_value) {
+      best = move_idx;
+      best_value = value;
+    }
+  }
+  assert(compare_moves_without_equity(exact, move_list_get_move(list, best),
+                                      true) == -1);
+  BlockingSetupPolicySettings racing = settings;
+  racing.race =
+      (BlockingSetupRaceSettings){.batch_racks = 8, .min_racks = 8, .z = 3.0};
+  BlockingSetupPolicy *racer = blocking_setup_policy_create(&racing);
+  const Move *raced = blocking_setup_policy_choose(racer, game, 77);
+  bool in_universe = false;
+  placements = 0;
+  for (int move_idx = 0;
+       move_idx < move_list_get_count(list) && placements < 20; move_idx++) {
+    const Move *move = move_list_get_move(list, move_idx);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      placements++;
+      in_universe =
+          in_universe || compare_moves_without_equity(raced, move, true) == -1;
+    }
+  }
+  assert(in_universe);
+  BlockingSetupParams *zero = bst_params_from(bst_zero_params_text);
+  BlockingSetupPolicySettings off = settings;
+  off.params = zero;
+  BlockingSetupPolicy *static_policy = blocking_setup_policy_create(&off);
+  const Move *plain = blocking_setup_policy_choose(static_policy, game, 77);
+  assert(compare_moves_without_equity(plain, move_list_get_move(list, 0),
+                                      true) == -1);
+  blocking_setup_policy_destroy(static_policy);
+  blocking_setup_policy_destroy(racer);
+  blocking_setup_policy_destroy(policy);
+  blocking_setup_checker_destroy(checker);
+  blocking_setup_samples_destroy(samples);
+  blocking_setup_params_destroy(zero);
+  blocking_setup_params_destroy(params);
+  move_list_destroy(list);
+  config_destroy(config);
+}
+
+// Runs a short simulation with the given rollout policy settings (NULL for
+// static rollouts) and copies each play's mean equity, in candidate order.
+static void bst_sim_means(Config *config, const MoveList *candidates,
+                          const BlockingSetupPolicySettings *rollout,
+                          int threads, double *means) {
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  ThreadControl *control = thread_control_create();
+  thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+  const int count = move_list_get_count(candidates);
+  SimArgs args;
+  sim_args_fill(2, candidates, count, NULL, config_get_win_pcts(config), NULL,
+                control, config_get_game(config), false, false, threads, 0,
+                count, 2, 11, BST_SIM_ITERATIONS, 1, 0.0, BAI_THRESHOLD_NONE,
+                0.0, BAI_SAMPLING_RULE_ROUND_ROBIN, -1.0, 1.0, 0.0, 100.0,
+                false, NULL, &args);
+  args.rollout_blocking_setup = rollout;
+  SimResults *results = sim_results_create(0.0);
+  simulate_without_ctx(&args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(sim_results_get_iteration_count(results) == BST_SIM_ITERATIONS);
+  for (int cand_idx = 0; cand_idx < count; cand_idx++) {
+    means[cand_idx] = 0.0;
+  }
+  for (int play_idx = 0; play_idx < sim_results_get_number_of_plays(results);
+       play_idx++) {
+    const SimmedPlay *play = sim_results_get_simmed_play(results, play_idx);
+    for (int cand_idx = 0; cand_idx < count; cand_idx++) {
+      if (compare_moves_without_equity(simmed_play_get_move(play),
+                                       move_list_get_move(candidates, cand_idx),
+                                       true) == -1) {
+        means[cand_idx] = stat_get_mean(simmed_play_get_equity_stat(play));
+      }
+    }
+  }
+  sim_results_destroy(results);
+  thread_control_destroy(control);
+  error_stack_destroy(error_stack);
+}
+
+// Static-ish rollouts run, are reproducible for a seed, differ from static
+// rollouts, and work with several workers (each owns its policy).
+static void test_blocking_setup_rollouts(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 best -r2 best "
+      "-numplays 1");
+  load_and_exec_config_or_die(config, bst_cgp);
+  MoveList *all = move_list_create(BST_MOVE_LIST_CAPACITY);
+  bst_generate_all(config_get_game(config), all);
+  MoveList *candidates = move_list_create(BST_SIM_CANDIDATES);
+  for (int move_idx = 0; move_idx < BST_SIM_CANDIDATES; move_idx++) {
+    move_list_add_move_to_sorted_list(candidates,
+                                      move_list_get_move(all, move_idx));
+  }
+  BlockingSetupParams *params = bst_params_from(bst_policy_params_text);
+  const BlockingSetupPolicySettings rollout = {
+      .params = params,
+      .universe = 10,
+      .exchange_quota = 2,
+      .exchange_margin = int_to_equity(35),
+      .race = {.batch_racks = 8, .min_racks = 8, .z = 3.0},
+  };
+  double first[BST_SIM_CANDIDATES];
+  double second[BST_SIM_CANDIDATES];
+  double plain[BST_SIM_CANDIDATES];
+  bst_sim_means(config, candidates, &rollout, 1, first);
+  bst_sim_means(config, candidates, &rollout, 1, second);
+  bst_sim_means(config, candidates, NULL, 1, plain);
+  bool differs = false;
+  for (int cand_idx = 0; cand_idx < BST_SIM_CANDIDATES; cand_idx++) {
+    assert(first[cand_idx] == second[cand_idx]);
+    differs = differs || first[cand_idx] != plain[cand_idx];
+  }
+  assert(differs);
+  double threaded[BST_SIM_CANDIDATES];
+  bst_sim_means(config, candidates, &rollout, 2, threaded);
+  // Racing on win chance is reproducible and chooses differently.
+  BlockingSetupPolicySettings by_win = rollout;
+  by_win.race.win_pcts = config_get_win_pcts(config);
+  assert(by_win.race.win_pcts != NULL);
+  double win_first[BST_SIM_CANDIDATES];
+  double win_second[BST_SIM_CANDIDATES];
+  bst_sim_means(config, candidates, &by_win, 1, win_first);
+  bst_sim_means(config, candidates, &by_win, 1, win_second);
+  bool win_differs = false;
+  for (int cand_idx = 0; cand_idx < BST_SIM_CANDIDATES; cand_idx++) {
+    assert(win_first[cand_idx] == win_second[cand_idx]);
+    win_differs = win_differs || win_first[cand_idx] != first[cand_idx];
+  }
+  assert(win_differs);
+  // A worker keeps its policy only while the settings' contents match.
+  BlockingSetupPolicy *policy = blocking_setup_policy_create(&rollout);
+  assert(blocking_setup_policy_has_settings(policy, &rollout));
+  assert(!blocking_setup_policy_has_settings(policy, &by_win));
+  BlockingSetupPolicySettings other_z = rollout;
+  other_z.race.z = 0.0;
+  assert(!blocking_setup_policy_has_settings(policy, &other_z));
+  blocking_setup_policy_destroy(policy);
+  blocking_setup_params_destroy(params);
+  move_list_destroy(candidates);
+  move_list_destroy(all);
+  config_destroy(config);
+}
+
 void test_blocking_setup(void) {
   test_blocking_setup_params();
   test_blocking_setup_leave();
   test_blocking_setup_checks();
   test_blocking_setup_exchange();
+  test_blocking_setup_policy();
+  test_blocking_setup_rollouts();
 }
 
 // Replays the candidate-diversity study's teacher (the research harness's
@@ -558,7 +781,10 @@ void blocking_setup_replay_run_spec(const char *spec) {
 // Times the teacher on a fixed set of positions and writes every result at
 // full precision, so speed changes can be checked to leave results
 // unchanged. Spec: "<positions.csv>:<out.csv>[:<racks>[:<universe>
-// [:<max_positions>]]]" with a bsgen positions file. Each position's
+// [:<max_positions>[:<flags>]]]]" with a bsgen positions file; flags may hold
+// "rackmajor" (blocking_setup_checker_measure_all), "tables" (RIT and WIT
+// on) and a teacher value, "equity_reply" or "equity" (default score). Each
+// position's
 // universe is its top <universe> static non-pass moves plus up to five
 // exchanges within 35 points of the top move; the samples are dealt from a
 // seed fixed by the game index.
@@ -577,13 +803,26 @@ void blocking_setup_bench_run_spec(const char *spec) {
   const long max_positions =
       num_fields >= 5 ? strtol(string_splitter_get_item(fields, 4), NULL, 10)
                       : 1000000;
+  const char *flags =
+      num_fields >= 6 ? string_splitter_get_item(fields, 5) : "";
+  const bool rack_major = strstr(flags, "rackmajor") != NULL;
   Config *config = config_create_or_die(
-      "set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity "
-      "-r1 all -r2 all -numplays 1 -threads 1");
+      strstr(flags, "tables") != NULL
+          ? "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true "
+            "-wit true -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+            "-threads 1 -seed 1"
+          : "set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity "
+            "-r1 all -r2 all -numplays 1 -threads 1 -seed 1");
   MoveList *list = move_list_create(BST_MOVE_LIST_CAPACITY);
   BlockingSetupSamples *samples =
       blocking_setup_samples_create(num_racks, BST_POOL_CAPACITY);
   BlockingSetupChecker *checker = blocking_setup_checker_create();
+  if (strstr(flags, "equity_reply") != NULL) {
+    blocking_setup_checker_set_value(checker,
+                                     BLOCKING_SETUP_VALUE_EQUITY_REPLY);
+  } else if (strstr(flags, "equity") != NULL) {
+    blocking_setup_checker_set_value(checker, BLOCKING_SETUP_VALUE_EQUITY);
+  }
   FILE *in = fopen_or_die(string_splitter_get_item(fields, 0), "r");
   FILE *out = fopen_or_die(string_splitter_get_item(fields, 1), "w");
   (void)fprintf(out, "game,cand,move,pass_reply,cand_reply,blocking,"
@@ -641,9 +880,14 @@ void blocking_setup_bench_run_spec(const char *spec) {
     const int64_t start = ctimer_monotonic_ns();
     blocking_setup_checker_load(checker, game, samples, 1);
     BlockingSetupResult results[BST_MAX_UNIVERSE];
-    for (int cand_idx = 0; cand_idx < count; cand_idx++) {
-      blocking_setup_checker_measure(checker, universe_moves[cand_idx],
-                                     &results[cand_idx]);
+    if (rack_major) {
+      blocking_setup_checker_measure_all(checker, universe_moves, count,
+                                         results);
+    } else {
+      for (int cand_idx = 0; cand_idx < count; cand_idx++) {
+        blocking_setup_checker_measure(checker, universe_moves[cand_idx],
+                                       &results[cand_idx]);
+      }
     }
     total_ns += ctimer_monotonic_ns() - start;
     for (int cand_idx = 0; cand_idx < count; cand_idx++) {

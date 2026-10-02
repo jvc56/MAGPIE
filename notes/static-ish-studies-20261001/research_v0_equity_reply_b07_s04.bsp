@@ -1,0 +1,9 @@
+magpie_bsp_v1
+lexicon,CSW24
+model_version,research-v0-equity-reply-b0.7-s0.4
+objective,sim_admission
+teacher_racks,64
+blocking_weight,0.7
+setup_weight,0.4
+provenance,exploratory wide coefficients of the candidate-diversity studies (not fitted)
+teacher_value,equity_reply

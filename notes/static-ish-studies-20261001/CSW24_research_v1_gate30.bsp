@@ -1,0 +1,10 @@
+magpie_bsp_v1
+lexicon,CSW24
+model_version,research-v1-gate30
+objective,sim_admission
+teacher_racks,64
+teacher_value,equity_reply
+blocking_weight,0.7
+setup_weight,0.4
+provenance,equity_reply 0.7/0.4: tuned on CSW24 (P37, P40), confirmed vs score 1.4/0.75 in CSW24 (P38 51.39%) and FRA20 (P43 51.25%), null in NWL23 (P42 49.88%); not refit per lexicon (NWL23 refit P47-P48 null). See #747 notes/static-ish-studies-20261001.
+bin,30,1000,-100000,100000,0,0

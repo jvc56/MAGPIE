@@ -1,0 +1,10 @@
+{
+  "kind": "Prespecified: NWL23-refit equity_reply (P47's selected point) vs NWL23 score mode 1.4/0.75, head to head",
+  "frozen_utc": "2026-10-01T21:07:10Z",
+  "player_a": "static-ish, equity_reply at P47's selected weights (written to selected.bsp in this directory by the runner before play), 64 racks, z=3",
+  "player_b": "static-ish, score 1.4/0.75, research_v0_score_NWL23.bsp sha256 d678ec1d23cb089091ff1f5267fccd41025ba1bdadad53149fff6cb4c9feebca, 64 racks, z=3",
+  "rule": "if P47 selects the reference (0.7/0.4), this run is skipped: P42 already measured that point vs score",
+  "lexicon": "NWL23", "pairs": 2000, "seed": 20265801,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05; all pairs included",
+  "binary": "magpie_test_hyb, sha256 e5e287486f1e76848ee2454d6e500642899df1ea9a2cb9267539c6fa5a90b613 (commit 190a69c1)"
+}

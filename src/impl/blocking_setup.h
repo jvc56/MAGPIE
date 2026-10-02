@@ -1,6 +1,7 @@
 #ifndef BLOCKING_SETUP_H
 #define BLOCKING_SETUP_H
 
+#include "../ent/blocking_setup_params.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
@@ -104,6 +105,10 @@ typedef struct BlockingSetupResult {
 typedef struct BlockingSetupChecker BlockingSetupChecker;
 
 BlockingSetupChecker *blocking_setup_checker_create(void);
+// How replies and follow-ups are picked and valued (see
+// blocking_setup_value_t); score, the default, until set.
+void blocking_setup_checker_set_value(BlockingSetupChecker *checker,
+                                      blocking_setup_value_t value);
 void blocking_setup_checker_destroy(BlockingSetupChecker *checker);
 
 // Plays our pass and each sampled rack's best reply to it, keeping one board
@@ -124,27 +129,18 @@ void blocking_setup_checker_measure(BlockingSetupChecker *checker,
                                     const Move *candidate,
                                     BlockingSetupResult *result);
 
-// Picking only the best candidate (a rollout or static-ish policy) needs less
-// than measuring all of them (a list of every play's values). The race
-// measures the candidates in batches of racks, all on the same racks, and
-// after each batch drops any candidate whose adjusted value trails the
-// leader's by more than z standard errors of their paired per-rack
-// difference. Adjusted value = base equity + blocking_weight *
-// blocking_delta + setup_weight * setup_delta. With z <= 0 nothing is
-// dropped and the result is exactly the argmax of full measurements; with
-// z > 0 it is a different, faster policy whose choices can differ.
-enum {
-  BLOCKING_SETUP_RACE_BATCH = 8,
-};
+// Measures several candidates of the loaded position (results[i] for
+// candidates[i]) exactly as blocking_setup_checker_measure does, but rack by
+// rack across the candidates, so consecutive searches share racks and their
+// rack-keyed caches.
+void blocking_setup_checker_measure_all(BlockingSetupChecker *checker,
+                                        const Move *const *candidates,
+                                        int num_candidates,
+                                        BlockingSetupResult *results);
 
-typedef struct BlockingSetupRaceSettings {
-  // Racks per batch; 0 for BLOCKING_SETUP_RACE_BATCH.
-  int batch_racks;
-  // Racks measured before the first elimination.
-  int min_racks;
-  // Elimination threshold in standard errors; <= 0 disables elimination.
-  double z;
-} BlockingSetupRaceSettings;
+// Picking only the best candidate (a rollout or static-ish policy) needs less
+// than measuring all of them (a list of every play's values); see
+// BlockingSetupRaceSettings in blocking_setup_params.h.
 
 typedef struct BlockingSetupRaceStats {
   // Candidate-rack measurements made (num_candidates * racks without
@@ -165,6 +161,27 @@ int blocking_setup_checker_choose(BlockingSetupChecker *checker,
                                   double setup_weight,
                                   const BlockingSetupRaceSettings *settings,
                                   BlockingSetupRaceStats *stats);
+
+// The static-ish move policy of BlockingSetupPolicySettings
+// (blocking_setup_params.h).
+
+// Scratch state for one thread's decisions. Not thread safe.
+typedef struct BlockingSetupPolicy BlockingSetupPolicy;
+
+BlockingSetupPolicy *
+blocking_setup_policy_create(const BlockingSetupPolicySettings *settings);
+void blocking_setup_policy_destroy(BlockingSetupPolicy *policy);
+// Whether the policy was made from settings equal to these, field by field
+// (params and win_pcts by address).
+bool blocking_setup_policy_has_settings(
+    const BlockingSetupPolicy *policy,
+    const BlockingSetupPolicySettings *settings);
+
+// The policy's move for the player on turn, sampling racks from seed. The
+// move is owned by the policy and valid until its next call; NULL when the
+// player has no move at all.
+const Move *blocking_setup_policy_choose(BlockingSetupPolicy *policy,
+                                         const Game *game, uint64_t seed);
 
 // The rack the on-turn player keeps after the move: placed tiles (blanks as
 // BLANK_MACHINE_LETTER) or exchanged tiles removed.

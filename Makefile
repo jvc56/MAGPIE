@@ -69,6 +69,10 @@ PGO_TRAIN_GAMES ?= 16
 PGO_TRAIN_TIME_MS ?= 1000
 PGO_TRAIN_SECONDS ?= 0.05
 PGO_TRAIN_THREADS ?= $(NPROCS)
+# Data paths for training, and the blocking/setup parameters (a .bsp name on
+# them) that pgo_simbs rolls out with.
+PGO_DATA_PATHS ?= $(PGO_LEAVEGEN_DATA_DIR):./data
+PGO_RBS ?= CSW24
 PGO_LEAVEGEN_TARGET ?= 100
 PGO_LEAVEGEN_DATA_DIR ?= $(abspath $(PGO_DIR)/leavegen-data)
 # Prefer the llvm-profdata matching a versioned clang (clang-18 pairs with
@@ -163,7 +167,7 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
+.PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_simbs pgo_peg \
 	pgo_toolchain_check \
 	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples
 
@@ -282,6 +286,10 @@ pgo:
 pgo_sim:
 	$(MAKE) pgo_workload PGO_WORKLOAD=sim
 
+# Sims with static-ish rollouts (-rbs $(PGO_RBS)).
+pgo_simbs:
+	$(MAKE) pgo_workload PGO_WORKLOAD=simbs
+
 pgo_peg:
 	$(MAKE) pgo_workload PGO_WORKLOAD=peg
 
@@ -345,8 +353,9 @@ pgo_workload: pgo_toolchain_check
 			"$(PGO_TRAIN_TIME_MS)" \
 			"$(PGO_TRAIN_SECONDS)" \
 			"$(PGO_TRAIN_THREADS)" \
-			"$(PGO_LEAVEGEN_DATA_DIR):./data" \
-			"$(PGO_LEAVEGEN_TARGET)"
+			"$(PGO_DATA_PATHS)" \
+			"$(PGO_LEAVEGEN_TARGET)" \
+			"$(PGO_RBS)"
 	$(LLVM_PROFDATA) merge -sparse -o $(PGO_PROFILE) $(PGO_RAW_DIR)/*.profraw
 	$(MAKE) -B magpie \
 		BUILD=pgo_use \

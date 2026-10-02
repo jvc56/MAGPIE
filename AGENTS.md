@@ -33,7 +33,9 @@ distro-versioned names (`clang-18`, `llvm-profdata-18`); with no clang on PATH,
 existing production CSW24 RIT (or creates it when missing), validates/upgrades
 the CSW24 WIT with the native C converter before training, discards old
 profile data, and trains the current source on static autoplay. Experimental `pgo`, `pgo_sim`,
-`pgo_peg`, and `pgo_eg` targets are also available. Each produces a
+`pgo_simbs` (sims with static-ish rollouts; set `PGO_RBS` and
+`PGO_DATA_PATHS` to a `.bsp`), `pgo_peg`, and `pgo_eg` targets are also
+available. Each produces a
 `-march=native` binary for the build machine. Rerun the selected target after
 source changes and on each target architecture. Override `PGO_CC`,
 `LLVM_PROFDATA`, and `PGO_LDFLAGS` for versioned toolchains.

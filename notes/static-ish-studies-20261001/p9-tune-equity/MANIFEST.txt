@@ -1,0 +1,7 @@
+lexicon=CSW24 reference=/Users/olaugh/sources/bs-data/research_v0_equity.bsp pairs=800 seed=20262101
+blocking=0.7,1.4,2.1 setup=0.4,0.75,1.1 racks=64 z=3
+reference_sha256=2597feaaa90696705d085e23a9369728e0ef122e872d8662044ed2f7b2fb284c
+binary_sha256=cfedfa5729af1d010eba37fbd51b8218050bf34d9802fc1155000cce6f3cdda1
+commit=475bfd42db799e74510ce22c1e3ea195217ce969
+started=2026-10-01T05:39:05Z
+finished=2026-10-01T06:40:38Z

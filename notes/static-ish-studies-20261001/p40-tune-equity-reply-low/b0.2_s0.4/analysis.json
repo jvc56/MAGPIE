@@ -1,0 +1,121 @@
+{
+ "pairs": 800,
+ "games": 1600,
+ "a_score": 0.4675,
+ "a_score_se": 0.01003786635451922,
+ "a_score_95": [
+  0.44782578194514233,
+  0.4871742180548577
+ ],
+ "a_mean_spread": -9.28375,
+ "timing_ms": {
+  "a": {
+   "decisions": 17856,
+   "checked": 15594,
+   "changed": 2619,
+   "total_ms": {
+    "n": 17856,
+    "mean": 50.846126680107524,
+    "p50": 47.902,
+    "p90": 88.942,
+    "p99": 158.801,
+    "max": 449.212
+   },
+   "movegen_ms": {
+    "n": 17856,
+    "mean": 0.48499456765232973,
+    "p50": 0.196,
+    "p90": 1.09,
+    "p99": 4.837,
+    "max": 33.902
+   },
+   "check_ms_when_checked": {
+    "n": 15594,
+    "mean": 57.66591612158523,
+    "p50": 51.078,
+    "p90": 91.453,
+    "p99": 162.38,
+    "max": 441.951
+   }
+  },
+  "b": {
+   "decisions": 17831,
+   "checked": 15721,
+   "changed": 3734,
+   "total_ms": {
+    "n": 17831,
+    "mean": 56.01191239975324,
+    "p50": 52.08,
+    "p90": 99.496,
+    "p99": 174.982,
+    "max": 433.022
+   },
+   "movegen_ms": {
+    "n": 17831,
+    "mean": 0.48150356121361676,
+    "p50": 0.194,
+    "p90": 1.099,
+    "p99": 4.674,
+    "max": 29.732
+   },
+   "check_ms_when_checked": {
+    "n": 15721,
+    "mean": 62.98288963806374,
+    "p50": 55.745,
+    "p90": 102.447,
+    "p99": 180.08,
+    "max": 430.384
+   }
+  }
+ },
+ "changed_by_stratum": {
+  "early/ahead40_80": {
+   "checked": 472,
+   "changed": 100
+  },
+  "early/ahead80+": {
+   "checked": 58,
+   "changed": 8
+  },
+  "early/behind": {
+   "checked": 2406,
+   "changed": 462
+  },
+  "early/close": {
+   "checked": 7028,
+   "changed": 1800
+  },
+  "late/ahead40_80": {
+   "checked": 1289,
+   "changed": 256
+  },
+  "late/ahead80+": {
+   "checked": 1254,
+   "changed": 254
+  },
+  "late/behind": {
+   "checked": 4411,
+   "changed": 875
+  },
+  "late/close": {
+   "checked": 3874,
+   "changed": 791
+  },
+  "middle/ahead40_80": {
+   "checked": 1174,
+   "changed": 214
+  },
+  "middle/ahead80+": {
+   "checked": 615,
+   "changed": 107
+  },
+  "middle/behind": {
+   "checked": 4083,
+   "changed": 677
+  },
+  "middle/close": {
+   "checked": 4651,
+   "changed": 809
+  }
+ }
+}

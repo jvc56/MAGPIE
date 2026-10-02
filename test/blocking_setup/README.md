@@ -53,20 +53,30 @@ split). **Missing files are an error**; nothing falls back silently. A
 nomination request with blocking or setup nominees and no parameters is an
 error too.
 
-No `.bsp` is published yet. The coefficients 1.4 / 0.75 of the
-September 2026 candidate-diversity studies were research choices, not fits;
-`research_v0` below writes them out for experiments only:
+No `.bsp` is published yet. The default for experiments is `research_v1`:
+the `equity_reply` teacher (opponent replies valued by static equity, our
+follow-ups by score) with weights 0.7 / 0.4. It is at least as strong as
+score mode at 1.4 / 0.75 in CSW24, NWL23 and FRA20 (+0.85 ± 0.37 pp pooled,
+null in NWL23), ties equity mode (+0.48 ± 0.37 pp) at about 60% of its time,
+and is cheaper per decision than score mode. The weights were tuned on CSW24
+only (see #747's `notes/static-ish-studies-20261001/REPORT.md`, P37–P48):
 
 ```
 magpie_bsp_v1
 lexicon,CSW24
-model_version,research-v0
+model_version,research-v1
 objective,sim_admission
 teacher_racks,64
-blocking_weight,1.4
-setup_weight,0.75
-provenance,exploratory coefficients of the candidate-diversity studies (not fitted)
+teacher_value,equity_reply
+blocking_weight,0.7
+setup_weight,0.4
+provenance,<tuning and confirmation runs>
 ```
+
+A file without a `teacher_value` row still means `score`, so earlier files
+(such as `research_v0`, score mode 1.4 / 0.75 from the September 2026
+candidate-diversity studies, not fitted) keep their meaning. Always write
+the row in new files.
 
 ## Pipeline
 
