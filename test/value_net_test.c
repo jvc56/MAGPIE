@@ -13,12 +13,14 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/value_net.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/value_net_features.h"
 #include "../src/impl/value_net_metal.h"
 #include "../src/impl/value_net_player.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -287,11 +289,125 @@ static void vnt_cross_set_probe(void) {
   config_destroy(config);
 }
 
+// "dump:<lexicon>:<positions>:<seed>:<out>": plays static games and, every
+// third turn while tiles remain, writes the position's CGP (player on turn
+// first, then a tab, the opponent's last move and its score) to <out>.cgps
+// and, for its top 50 static moves with that one move as the history, the move
+// (<out>.tsv: position, move, equity, score) and its input row (<out>.bin:
+// board floats then scalars), for comparison with Macondo's encoder on the same
+// positions.
+static void vnt_dump(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 5) {
+    log_fatal("dump needs 4 fields");
+  }
+  const char *lexicon = string_splitter_get_item(fields, 1);
+  const long positions = strtol(string_splitter_get_item(fields, 2), NULL, 10);
+  const uint64_t seed = strtoull(string_splitter_get_item(fields, 3), NULL, 10);
+  const char *out = string_splitter_get_item(fields, 4);
+  char *settings = get_formatted_string(
+      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1",
+      lexicon);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  char *path = get_formatted_string("%s.cgps", out);
+  FILE *cgps_out = fopen_or_die(path, "w");
+  free(path);
+  path = get_formatted_string("%s.tsv", out);
+  FILE *tsv_out = fopen_or_die(path, "w");
+  free(path);
+  path = get_formatted_string("%s.bin", out);
+  FILE *bin_out = fopen_or_die(path, "wb");
+  free(path);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  Game *scratch = game_duplicate(game);
+  MoveList *list = move_list_create(50);
+  MoveList *static_list = move_list_create(1);
+  float *board_row = malloc_or_die(sizeof(float) * VALUE_NET_BOARD_FLOATS);
+  float scalars_row[VALUE_NET_SCALARS];
+  // A one-move history: the opponent's last move, and 0 or 1 moves since
+  // their last bingo (Macondo's count over that one move).
+  ValueNetHistory history;
+  Move last;
+  bool has_last = false;
+  long written = 0;
+  for (uint64_t game_idx = 0; written < positions; game_idx++) {
+    game_reset(game);
+    game_seed(game, vnt_mix(seed ^ game_idx));
+    draw_starting_racks(game);
+    has_last = false;
+    for (int turn = 0; !game_over(game) && written < positions; turn++) {
+      if (turn % 3 == 1 && bag_get_letters(game_get_bag(game)) > 0) {
+        char *cgp = game_get_cgp(game, true);
+        value_net_history_reset(&history);
+        if (has_last) {
+          value_net_history_record_opponent_move(&history, &last);
+          StringBuilder *last_sb = string_builder_create();
+          string_builder_add_move_description(last_sb, &last,
+                                              game_get_ld(game));
+          (void)fprintf(cgps_out, "%s\t%s\t%d\n", cgp,
+                        string_builder_peek(last_sb),
+                        equity_to_int(move_get_score(&last)));
+          string_builder_destroy(last_sb);
+        } else {
+          (void)fprintf(cgps_out, "%s\n", cgp);
+        }
+        free(cgp);
+        move_list_reset(list);
+        const MoveGenArgs args = {
+            .game = game,
+            .move_list = list,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&args);
+        move_list_sort_moves(list);
+        for (int move_idx = 0; move_idx < move_list_get_count(list);
+             move_idx++) {
+          const Move *move = move_list_get_move(list, move_idx);
+          StringBuilder *sb = string_builder_create();
+          string_builder_add_move_description(sb, move, game_get_ld(game));
+          (void)fprintf(tsv_out, "%ld\t%s\t%.4f\t%d\n", written,
+                        string_builder_peek(sb),
+                        equity_to_double(move_get_equity(move)),
+                        equity_to_int(move_get_score(move)));
+          string_builder_destroy(sb);
+          value_net_features_for_move(game, move, &history, scratch, board_row,
+                                      scalars_row);
+          (void)fwrite(board_row, sizeof(float), VALUE_NET_BOARD_FLOATS,
+                       bin_out);
+          (void)fwrite(scalars_row, sizeof(float), VALUE_NET_SCALARS, bin_out);
+        }
+        written++;
+      }
+      move_copy(&last, vnt_static_move(game, static_list));
+      has_last = true;
+      play_move(&last, game, NULL);
+    }
+  }
+  free(board_row);
+  move_list_destroy(list);
+  move_list_destroy(static_list);
+  game_destroy(scratch);
+  (void)fclose(cgps_out);
+  (void)fclose(tsv_out);
+  (void)fclose(bin_out);
+  config_destroy(config);
+}
+
 void value_net_test_run_spec(const char *spec) {
   StringSplitter *fields = split_string(spec, ':', true);
   const int num_fields = string_splitter_get_number_of_items(fields);
   const char *mode = string_splitter_get_item(fields, 0);
-  if (strings_equal(mode, "games")) {
+  if (strings_equal(mode, "dump")) {
+    vnt_dump(fields);
+  } else if (strings_equal(mode, "games")) {
     vnt_games(fields);
   } else if (strings_equal(mode, "xsprobe")) {
     vnt_cross_set_probe();
