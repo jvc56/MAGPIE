@@ -810,9 +810,9 @@ void blocking_setup_bench_run_spec(const char *spec) {
       strstr(flags, "tables") != NULL
           ? "set -lex CSW24 -leaves CSW24 -wmp true -rit true -ritmmap true "
             "-wit true -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
-            "-threads 1"
+            "-threads 1 -seed 1"
           : "set -lex CSW24 -leaves CSW24 -wmp true -s1 equity -s2 equity "
-            "-r1 all -r2 all -numplays 1 -threads 1");
+            "-r1 all -r2 all -numplays 1 -threads 1 -seed 1");
   MoveList *list = move_list_create(BST_MOVE_LIST_CAPACITY);
   BlockingSetupSamples *samples =
       blocking_setup_samples_create(num_racks, BST_POOL_CAPACITY);

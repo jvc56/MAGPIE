@@ -16,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/static_eval.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 #include "../util/io_util.h"
@@ -220,12 +221,16 @@ struct BlockingSetupChecker {
   int pass_replied_capacity;
   BestPlay *pass_replies;
   // Per rack, the best replies after our pass in compare_moves order (the
-  // first is pass_replies' entry), complete for every reply scoring at
-  // least pass_reply_floor: a candidate that disturbs the best can then
-  // start from the best one it leaves intact.
+  // first is pass_replies' entry), complete for every reply whose score (or
+  // static equity, when replies are chosen by equity) is at least
+  // pass_reply_floor: a candidate that disturbs the best can then start from
+  // the best one it leaves intact.
   BestPlay *pass_reply_lists;
   int *pass_reply_counts;
   Equity *pass_reply_floors;
+  // Whether the opponent could exchange after our pass (see
+  // reply_exchanges_allowed).
+  bool pass_reply_exchanges;
   MoveList *reply_candidates;
   // Pass-branch follow-ups depend only on the rack and the leave (the refill
   // is the leave's complement from the rack's draw order), so they are kept
@@ -455,7 +460,9 @@ static const Move *checker_best_placement(BlockingSetupChecker *checker,
                                           checker_role_t role) {
   move_list_reset(checker->reply_list);
   const bool by_score = checker_by_score(checker, role);
-  assert(by_score || (lane_mask == 0 && initial_best == NULL));
+  // A lane search by equity is seeded with the best play outside the lanes,
+  // exchanges included, so it need not generate exchanges again.
+  assert(by_score || lane_mask == 0 || initial_best != NULL);
   const MoveGenArgs args = {
       .game = game,
       .move_list = checker->reply_list,
@@ -467,7 +474,7 @@ static const Move *checker_best_placement(BlockingSetupChecker *checker,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
       .lane_mask = lane_mask,
       .initial_best_move = initial_best,
-      .skip_exchanges = by_score,
+      .skip_exchanges = by_score || lane_mask != 0,
       .disable_pat = true,
   };
   generate_moves(&args);
@@ -518,6 +525,54 @@ static const Move *checker_best_after_candidate(BlockingSetupChecker *checker,
       known->exists ? &known->move : NULL, CHECKER_ROLE_FOLLOWUP);
 }
 
+// What the reply list is ordered and floored by: score, or static equity in
+// the modes that choose replies by equity.
+static Equity checker_reply_key(const BlockingSetupChecker *checker,
+                                const Move *move) {
+  return checker_by_score(checker, CHECKER_ROLE_REPLY) ? move_get_score(move)
+                                                       : move_get_equity(move);
+}
+
+// Whether the player on turn may exchange, as generate_moves decides it:
+// the bag and the other player's rack hold at least two racks of tiles.
+static bool reply_exchanges_allowed(const Game *game) {
+  const int off_turn = 1 - game_get_player_on_turn_index(game);
+  return bag_get_letters(game_get_bag(game)) +
+             rack_get_total_letters(
+                 player_get_rack(game_get_player(game, off_turn))) >=
+         2 * RACK_SIZE;
+}
+
+// Whether a move's static equity before the endgame depends on the bag only
+// through which moves are legal: true while every pre-endgame adjustment is
+// zero.
+static bool pre_endgame_equity_ignores_bag(void) {
+  for (int idx = 0; idx < PEG_ADJUST_VALUES_LENGTH; idx++) {
+    if (peg_adjust_values[idx] != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Whether every reply on game (opponent on turn, candidate played) has the
+// static equity it had after our pass: the board was not empty (no opening
+// adjustment), the bag is not empty (no endgame adjustment), nothing else in
+// the equity depends on the bag (or both bags are past every pre-endgame
+// adjustment), and exchanges are legal in both branches or in neither. A
+// placement's leave and, if the candidate leaves its squares alone, its
+// score are then the same, so the pass branch's replies carry over.
+static bool
+checker_equity_replies_carry_over(const BlockingSetupChecker *checker,
+                                  const Game *game) {
+  const int bag_tiles = bag_get_letters(game_get_bag(game));
+  return board_get_tiles_played(game_get_board(checker->base)) > 0 &&
+         bag_tiles > 0 &&
+         (pre_endgame_equity_ignores_bag() ||
+          bag_tiles >= PEG_ADJUST_VALUES_LENGTH) &&
+         reply_exchanges_allowed(game) == checker->pass_reply_exchanges;
+}
+
 // The opponent's best reply on game, which holds the candidate: the best
 // reply after our pass that the candidate leaves intact is the best of the
 // replies the candidate cannot affect (any reply it can affect lies in its
@@ -527,12 +582,16 @@ static const Move *checker_reply_after_candidate(BlockingSetupChecker *checker,
                                                  const Game *game,
                                                  const Move *candidate,
                                                  int rack_idx) {
-  if (!checker_by_score(checker, CHECKER_ROLE_REPLY)) {
+  if (!checker_by_score(checker, CHECKER_ROLE_REPLY) &&
+      !checker_equity_replies_carry_over(checker, game)) {
     return checker_best_placement(checker, game, 0, NULL, CHECKER_ROLE_REPLY);
   }
   const BestPlay *entries = checker->pass_reply_lists +
                             ((size_t)rack_idx * BLOCKING_SETUP_PASS_REPLIES);
   const int count = checker->pass_reply_counts[rack_idx];
+  if (count == 0 && !checker_by_score(checker, CHECKER_ROLE_REPLY)) {
+    return checker_best_placement(checker, game, 0, NULL, CHECKER_ROLE_REPLY);
+  }
   if (count == 0) {
     // No reply at all after the pass: only the candidate's lanes can hold one.
     return checker_best_placement(
@@ -541,7 +600,8 @@ static const Move *checker_reply_after_candidate(BlockingSetupChecker *checker,
   }
   for (int entry_idx = 0; entry_idx < count; entry_idx++) {
     const BestPlay *entry = &entries[entry_idx];
-    if (move_get_score(&entry->move) < checker->pass_reply_floors[rack_idx]) {
+    if (checker_reply_key(checker, &entry->move) <
+        checker->pass_reply_floors[rack_idx]) {
       break;
     }
     if (candidate_leaves_clear(candidate, &entry->footprint)) {
@@ -577,16 +637,17 @@ static void checker_record_reply_list(BlockingSetupChecker *checker,
                                       const Game *passed, int rack_idx) {
   MoveList *list = checker->reply_candidates;
   move_list_reset(list);
+  const bool by_score = checker_by_score(checker, CHECKER_ROLE_REPLY);
   const MoveGenArgs args = {
       .game = passed,
       .move_list = list,
       .move_record_type = MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST,
-      .move_sort_type = MOVE_SORT_SCORE,
+      .move_sort_type = by_score ? MOVE_SORT_SCORE : MOVE_SORT_EQUITY,
       .override_kwg = NULL,
       .eq_margin_movegen = int_to_equity(BLOCKING_SETUP_PASS_REPLY_MARGIN),
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .skip_exchanges = true,
+      .skip_exchanges = by_score,
       .disable_pat = true,
   };
   generate_moves(&args);
@@ -598,14 +659,23 @@ static void checker_record_reply_list(BlockingSetupChecker *checker,
   Equity lowest = EQUITY_MAX_VALUE;
   for (int move_idx = 0; move_idx < move_list_get_count(list); move_idx++) {
     const Move *move = move_list_get_move(list, move_idx);
-    if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    const bool placement =
+        move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE;
+    // By equity, exchanges and the pass are replies too; they use no
+    // squares, so their empty footprints are never disturbed.
+    if (by_score && !placement) {
       continue;
     }
     entries[count].exists = true;
     move_copy(&entries[count].move, move);
-    checker_footprint(game_get_board(passed), move, &entries[count].footprint);
-    if (move_get_score(move) < lowest) {
-      lowest = move_get_score(move);
+    if (placement) {
+      checker_footprint(game_get_board(passed), move,
+                        &entries[count].footprint);
+    } else {
+      memset(&entries[count].footprint, 0, sizeof(SquareSet));
+    }
+    if (checker_reply_key(checker, move) < lowest) {
+      lowest = checker_reply_key(checker, move);
     }
     count++;
   }
@@ -614,7 +684,7 @@ static void checker_record_reply_list(BlockingSetupChecker *checker,
   // filled up, when only those above its lowest score are sure to be.
   Equity floor = EQUITY_MAX_VALUE;
   if (count > 0) {
-    floor = move_get_score(&entries[0].move) -
+    floor = checker_reply_key(checker, &entries[0].move) -
             int_to_equity(BLOCKING_SETUP_PASS_REPLY_MARGIN);
     if (full && lowest + 1 > floor) {
       floor = lowest + 1;
@@ -675,8 +745,9 @@ void blocking_setup_checker_load(BlockingSetupChecker *checker,
         &samples->opponent_racks[rack_idx]);
     BestPlay *reply = &checker->pass_replies[rack_idx];
     checker_record_best(checker, passed, reply, CHECKER_ROLE_REPLY);
-    if (checker_by_score(checker, CHECKER_ROLE_REPLY)) {
-      checker_record_reply_list(checker, passed, rack_idx);
+    checker_record_reply_list(checker, passed, rack_idx);
+    if (rack_idx == 0) {
+      checker->pass_reply_exchanges = reply_exchanges_allowed(passed);
     }
     play_move(reply->exists ? &reply->move : checker->pass_move, passed, NULL);
   }
