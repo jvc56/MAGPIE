@@ -7,6 +7,7 @@
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/win_pct.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/play_chooser.h"
@@ -27,6 +28,7 @@ typedef enum {
   PGO_MODE_PEG,
   PGO_MODE_EG,
   PGO_MODE_LEAVEGEN,
+  PGO_MODE_SIM_BLOCKING_SETUP,
 } pgo_mode_t;
 
 typedef struct {
@@ -89,6 +91,9 @@ static pgo_mode_t parse_mode(const char *mode) {
   }
   if (strcmp(mode, "leavegen") == 0) {
     return PGO_MODE_LEAVEGEN;
+  }
+  if (strcmp(mode, "simbs") == 0) {
+    return PGO_MODE_SIM_BLOCKING_SETUP;
   }
   (void)fprintf(stderr, "unknown PGO workload '%s'\n", mode);
   exit(EXIT_FAILURE);
@@ -164,6 +169,7 @@ static void validate_training_counts(pgo_mode_t mode,
     valid = counts->endgame_moves > 0;
     break;
   case PGO_MODE_LEAVEGEN:
+  case PGO_MODE_SIM_BLOCKING_SETUP:
     break;
   }
   if (!valid) {
@@ -219,6 +225,7 @@ static void train_games(pgo_mode_t mode, const Config *config, int num_games,
     strategy.endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME;
     break;
   case PGO_MODE_LEAVEGEN:
+  case PGO_MODE_SIM_BLOCKING_SETUP:
     break;
   }
 
@@ -264,6 +271,60 @@ static void train_general(Config *config, int num_games, double time_control_ms,
          num_games, time_control_ms);
 }
 
+// Sims whose rollouts use the static-ish blocking/setup policy (the sim
+// command with -rbs), on positions from static games: every few turns while
+// tiles remain, the position is loaded, its top plays generated and simmed
+// for a fixed number of iterations.
+static void train_rollout_sims(Config *config, int num_games, int num_threads,
+                               const char *rollout_params,
+                               ErrorStack *error_stack) {
+  char command[512];
+  (void)snprintf(command, sizeof(command),
+                 "set -rbs %s -plies 2 -numplays 8 -iterations 48 -minp 1 "
+                 "-threshold none -sr rr -threads %d -seed 24301",
+                 rollout_params, num_threads);
+  execute_config_command(config, command, error_stack);
+  const PlayChooserStrategy strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+      .endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+      .num_threads = 1,
+      .seed = 0x5eed,
+  };
+  Game *game = config_game_create(config);
+  PlayChooser *chooser = play_chooser_create(&strategy);
+  int sims = 0;
+  for (int game_index = 0; game_index < num_games; game_index++) {
+    game_reset(game);
+    game_seed(game, 0x5eedU + ((uint64_t)game_index * 0x9e3779b9U));
+    game_set_starting_player_index(game, game_index % 2);
+    draw_starting_racks(game);
+    for (int turn = 0; !game_over(game); turn++) {
+      if (turn % 4 == 2 && bag_get_letters(game_get_bag(game)) > 0) {
+        char *cgp = game_get_cgp(game, true);
+        char *load = get_formatted_string("cgp %s", cgp);
+        free(cgp);
+        execute_config_command(config, load, error_stack);
+        free(load);
+        execute_config_command(config, "gen", error_stack);
+        execute_config_command(config, "sim", error_stack);
+        sims++;
+      }
+      Move move;
+      play_chooser_choose_move(chooser, game, &move, error_stack);
+      exit_on_error(error_stack, "choosing a move");
+      play_move(&move, game, NULL);
+    }
+  }
+  if (sims == 0) {
+    (void)fprintf(stderr, "workload ran no sims\n");
+    exit(EXIT_FAILURE);
+  }
+  printf("trained %d sims with %s rollouts over %d games\n", sims,
+         rollout_params, num_games);
+  play_chooser_destroy(chooser);
+  game_destroy(game);
+}
+
 static void train_leavegen(Config *config, int target_count,
                            ErrorStack *error_stack) {
   char command[512];
@@ -276,11 +337,12 @@ static void train_leavegen(Config *config, int target_count,
 }
 
 int main(int argc, char *argv[]) {
-  if (argc != 8) {
+  if (argc != 8 && argc != 9) {
     (void)fprintf(stderr,
-                  "usage: %s <general|static|sim|peg|eg|leavegen> <games> "
-                  "<general-time-control-ms> <focused-seconds-per-move> "
-                  "<threads> <data-paths> <leavegen-target>\n",
+                  "usage: %s <general|static|sim|peg|eg|leavegen|simbs> "
+                  "<games> <general-time-control-ms> "
+                  "<focused-seconds-per-move> <threads> <data-paths> "
+                  "<leavegen-target> [<rollout-params>]\n",
                   argv[0]);
     return EXIT_FAILURE;
   }
@@ -294,6 +356,8 @@ int main(int argc, char *argv[]) {
   const int num_threads = parse_positive_int(argv[5], "threads");
   const char *data_paths = argv[6];
   const int leavegen_target = parse_positive_int(argv[7], "leavegen-target");
+  // The blocking/setup parameters (data/strategy/<name>.bsp) for simbs.
+  const char *rollout_params = argc == 9 ? argv[8] : "CSW24";
 
   ErrorStack *error_stack = error_stack_create();
   Config *config = create_training_config(data_paths, num_threads, error_stack);
@@ -301,6 +365,9 @@ int main(int argc, char *argv[]) {
     train_general(config, num_games, time_control_ms, num_threads, error_stack);
   } else if (mode == PGO_MODE_LEAVEGEN) {
     train_leavegen(config, leavegen_target, error_stack);
+  } else if (mode == PGO_MODE_SIM_BLOCKING_SETUP) {
+    train_rollout_sims(config, num_games, num_threads, rollout_params,
+                       error_stack);
   } else {
     train_games(mode, config, num_games, seconds_per_move, num_threads,
                 data_paths, error_stack);
