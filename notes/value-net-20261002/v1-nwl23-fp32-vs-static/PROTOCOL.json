@@ -1,0 +1,11 @@
+{
+  "kind": "Prespecified: Macondo value net (macondo-nn-tf-nwl23s v1) FastMlBot-style player vs MAGPIE static, NWL23",
+  "frozen_utc": "2026-10-02T06:30:55Z",
+  "player_a": "value net, Metal fp32, top 50 static moves, highest value (ties: more tiles), static with an empty bag; NWL23 leaves",
+  "player_b": "MAGPIE static equity (NWL23.klv2 leaves, WMP), no PAT",
+  "pairs": 1000, "seed": 20266201, "lexicon": "NWL23", "workers": 8,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05",
+  "expectation": "Macondo reports 57.17% for this net vs HastyBot (static); a much lower score would point to an encoding error",
+  "weights_md5": "f31cad8f92176a1867f351064b89a5a8",
+  "binary": "magpie_test_nn1, sha256 fcd4c4a3cae89042cc1f1a87217141528840a34cf97acfe59611e909552105fe (commit eb0743ad)"
+}

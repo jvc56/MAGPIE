@@ -1,0 +1,11 @@
+{
+  "kind": "Prespecified: 4-ply sim with value net opponent replies (rollout ply 1) vs 4-ply sim with static rollouts, equal iterations, NWL23",
+  "frozen_utc": "2026-10-02T07:48:24Z",
+  "player_a": "sim: 4 plies, top 15 static root candidates, 200 iterations per decision (top-two BAI), 1 thread; rollout ply 1 chosen by macondo-nn-tf-nwl23s v1 (Metal fp16) among the top 8 static replies, highest value; plies 2-4 static; static with an empty bag",
+  "player_b": "same sim with static rollouts on every ply",
+  "pairs": 300, "seed": 20266301, "lexicon": "NWL23", "workers": 8,
+  "primary_test": "two-sided z test of player a's mean pair score vs 0.5 using pair-level SE, alpha 0.05",
+  "note": "equal samples, not equal time; per-decision time is recorded",
+  "weights_md5": "f31cad8f92176a1867f351064b89a5a8",
+  "binary": "magpie_test_nn2, sha256 40c209f476e0dae401642578886a3e9d7bad91a69a30da165bbfec4aa55cc44d (commit 7f1a1780)"
+}
