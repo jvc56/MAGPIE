@@ -1,6 +1,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "alias_method_test.h"
 #include "alphabet_test.h"
 #include "analyze_test.h"
@@ -63,6 +64,7 @@
 #include "string_util_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
+#include "value_net_test.h"
 #include "win_pct_test.h"
 #include "wit_cache_test.h"
 #include "wit_upgrade_test.h"
@@ -239,6 +241,10 @@ void run_all(void) {
 }
 
 void run_test(const char *subtest) {
+  if (has_prefix("valuenet:", subtest)) {
+    value_net_test_run_spec(subtest + strlen("valuenet:"));
+    return;
+  }
   for (int i = 0; test_table[i].name != NULL; ++i) {
     if (strcmp(subtest, test_table[i].name) == 0) {
       test_table[i].func();
