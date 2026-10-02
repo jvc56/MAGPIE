@@ -25,6 +25,11 @@ ValueNetPlayer *value_net_player_create(const char *model_dir,
                                         ErrorStack *error_stack);
 void value_net_player_destroy(ValueNetPlayer *player);
 
+// Evaluates rows input rows into values (a value_net_rows_fn, context
+// being the ValueNetPlayer); safe to call from several threads.
+void value_net_player_evaluate_rows(void *context, int rows, const float *board,
+                                    const float *scalars, float *values);
+
 // The chosen move for the player on turn in game, whose history (see
 // ValueNetHistory) is history; valid until the next call.
 const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,

@@ -78,23 +78,6 @@ static float vnf_tanh_scaled(double x, double center, double scale) {
   return (float)tanh((x - center) / scale);
 }
 
-void value_net_history_reset(ValueNetHistory *history) {
-  history->has_opponent_last_move = false;
-  history->opponent_moves_since_bingo = 0;
-}
-
-void value_net_history_record_opponent_move(ValueNetHistory *history,
-                                            const Move *move) {
-  history->has_opponent_last_move = true;
-  move_copy(&history->opponent_last_move, move);
-  if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
-      move_get_tiles_played(move) == RACK_SIZE) {
-    history->opponent_moves_since_bingo = 0;
-  } else {
-    history->opponent_moves_since_bingo++;
-  }
-}
-
 // Marks the squares a placement put tiles on in the given plane.
 static void vnf_mark_placement(const Move *move, float *plane) {
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
@@ -164,15 +147,16 @@ static void vnf_board_planes(const Board *board, float *row) {
           board, board_row, col, BOARD_VERTICAL_DIRECTION, 0);
       const uint64_t up_down = board_get_cross_set(
           board, board_row, col, BOARD_HORIZONTAL_DIRECTION, 0);
-      for (int letter = 0; letter < VNF_LETTERS; letter++) {
-        const int ml = VNF_ML_A + letter;
-        if ((left_right >> ml) & 1) {
-          plane_base[((VNF_PLANE_LEFT_RIGHT_CROSS + letter) *
+      for (int letter_idx = 0; letter_idx < VNF_LETTERS; letter_idx++) {
+        const int cross_ml = VNF_ML_A + letter_idx;
+        if ((left_right >> cross_ml) & 1) {
+          plane_base[((VNF_PLANE_LEFT_RIGHT_CROSS + letter_idx) *
                       VALUE_NET_SQUARES) +
                      square] = 1.0F;
         }
-        if ((up_down >> ml) & 1) {
-          plane_base[((VNF_PLANE_UP_DOWN_CROSS + letter) * VALUE_NET_SQUARES) +
+        if ((up_down >> cross_ml) & 1) {
+          plane_base[((VNF_PLANE_UP_DOWN_CROSS + letter_idx) *
+                      VALUE_NET_SQUARES) +
                      square] = 1.0F;
         }
       }

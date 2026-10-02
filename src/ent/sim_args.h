@@ -10,9 +10,16 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/value_net_history.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+// Evaluates rows value net input rows (board then scalars, row-major) into
+// values; context is the evaluator. Must be safe to call from every sim
+// thread at once.
+typedef void (*value_net_rows_fn)(void *context, int rows, const float *board,
+                                  const float *scalars, float *values);
 
 typedef struct SimArgs {
   int num_plies;
@@ -50,6 +57,19 @@ typedef struct SimArgs {
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
   bool use_margin_forecast;
+  // When rollout_value_net_evaluate is set, the first rollout ply (the
+  // opponent's reply) is chosen by the value net: the top
+  // rollout_value_net_candidates static replies (0 for 15), the highest
+  // value played. Replies are computed rollout_value_net_batch iterations
+  // at a time per thread and play (0 for 8) in one call, which evaluates
+  // rows input rows (value_net_defs.h) into values. The replier's history
+  // before the candidate is rollout_value_net_history. sim_args_fill clears
+  // the evaluator; later plies are static.
+  value_net_rows_fn rollout_value_net_evaluate;
+  void *rollout_value_net_context;
+  int rollout_value_net_candidates;
+  int rollout_value_net_batch;
+  ValueNetHistory rollout_value_net_history;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -114,6 +134,11 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->use_margin_forecast = use_margin_forecast;
+  sim_args->rollout_value_net_evaluate = NULL;
+  sim_args->rollout_value_net_context = NULL;
+  sim_args->rollout_value_net_candidates = 0;
+  sim_args->rollout_value_net_batch = 0;
+  value_net_history_reset(&sim_args->rollout_value_net_history);
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger

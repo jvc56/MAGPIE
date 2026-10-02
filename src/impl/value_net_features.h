@@ -3,25 +3,8 @@
 
 #include "../ent/game.h"
 #include "../ent/move.h"
+#include "../ent/value_net_history.h"
 #include <stdbool.h>
-
-// What the value net needs from the game's history, from the side of the
-// player about to move.
-typedef struct ValueNetHistory {
-  // The opponent's last move (any type), if they have moved.
-  bool has_opponent_last_move;
-  Move opponent_last_move;
-  // The opponent's moves since their last bingo, or all of their moves if
-  // they have not bingoed.
-  int opponent_moves_since_bingo;
-} ValueNetHistory;
-
-void value_net_history_reset(ValueNetHistory *history);
-
-// Updates the history of the player who did not make move: call for every
-// move played, with history being that of the mover's opponent.
-void value_net_history_record_opponent_move(ValueNetHistory *history,
-                                            const Move *move);
 
 // Writes the value net's input row (value_net_defs.h; board_row
 // VALUE_NET_BOARD_FLOATS floats, scalars_row VALUE_NET_SCALARS) for the

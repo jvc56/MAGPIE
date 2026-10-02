@@ -454,13 +454,12 @@ void value_net_metal_destroy(ValueNetMetal *metal) {
   free(metal);
 }
 
-void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
-                              const float *board, const float *scalars,
-                              float *value, float *spread) {
-  if (rows <= 0) {
-    return;
-  }
-  cpthread_mutex_lock(&metal->mutex);
+// Evaluates one chunk of at most VALUE_NET_MAX_GPU_ROWS rows; the caller
+// holds the mutex.
+static void value_net_metal_evaluate_chunk(ValueNetMetal *metal, int rows,
+                                           const float *board,
+                                           const float *scalars, float *value,
+                                           float *spread) {
   @autoreleasepool {
     id<MTLDevice> device = (__bridge id<MTLDevice>)metal->device;
     MPSGraph *graph = (__bridge MPSGraph *)metal->graph;
@@ -508,6 +507,22 @@ void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
     if (spread != NULL) {
       [[results[spread_output] mpsndarray] readBytes:spread strideBytes:nil];
     }
+  }
+}
+
+void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
+                              const float *board, const float *scalars,
+                              float *value, float *spread) {
+  cpthread_mutex_lock(&metal->mutex);
+  for (int start = 0; start < rows; start += VALUE_NET_MAX_GPU_ROWS) {
+    const int chunk = rows - start < VALUE_NET_MAX_GPU_ROWS
+                          ? rows - start
+                          : VALUE_NET_MAX_GPU_ROWS;
+    value_net_metal_evaluate_chunk(
+        metal, chunk, board + ((size_t)start * VALUE_NET_BOARD_FLOATS),
+        scalars + ((size_t)start * VALUE_NET_SCALARS),
+        value != NULL ? value + start : NULL,
+        spread != NULL ? spread + start : NULL);
   }
   cpthread_mutex_unlock(&metal->mutex);
 }

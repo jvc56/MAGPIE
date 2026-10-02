@@ -17,7 +17,8 @@ ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
 void value_net_metal_destroy(ValueNetMetal *metal);
 
 // As value_net_evaluate_cpu. Calls are serialized: one evaluation runs at a
-// time per ValueNetMetal.
+// time per ValueNetMetal, and each runs in chunks of at most
+// VALUE_NET_MAX_GPU_ROWS rows.
 void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
                               const float *board, const float *scalars,
                               float *value, float *spread);

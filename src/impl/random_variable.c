@@ -2,7 +2,10 @@
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/move_defs.h"
+#include "../def/value_net_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/equity.h"
@@ -15,14 +18,18 @@
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/value_net_history.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
+#include "move_gen.h"
+#include "value_net_features.h"
 #include <math.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -371,10 +378,50 @@ void rv_normal_predetermined_reset(RandomVariables *rvs) {
   rv_normal_predetermined->index = 0;
 }
 
+enum {
+  SIM_VALUE_NET_DEFAULT_CANDIDATES = 15,
+  SIM_VALUE_NET_DEFAULT_BATCH = 8,
+};
+
+// Value net replies for the first rollout ply (SimArgs.rollout_value_net_*).
+// Each play has one queue of iteration seeds with the reply the net chose
+// for each, shared by every thread and filled batch seeds at a time by one
+// evaluation, so few replies are left unused when the sim stops. A seed
+// reproduces an iteration's opening state only from the same bag order,
+// which every iteration changes (racks go back to the bag), so every
+// value net iteration, queued or played, starts from a copy of start.
+typedef struct SimValueNetShared {
+  int plays;
+  int batch;
+  cpthread_mutex_t *locks; // [plays]
+  uint64_t *seeds;         // [plays * batch]
+  Move *replies;           // [plays * batch]
+  bool *has_reply;         // [plays * batch]; false when the game ended
+  int *count;              // [plays]
+  int *next;               // [plays]
+  Game *start;
+} SimValueNetShared;
+
+// One thread's buffers for filling a queue.
+typedef struct SimValueNetWorker {
+  int batch;
+  int candidates;
+  Move *candidate_moves; // [batch * candidates]
+  int *candidate_count;  // [batch]
+  float *board;          // [batch * candidates] rows
+  float *scalars;
+  float *values;
+  MoveList *list;
+  Game *scratch;
+  // The reply for the iteration in progress.
+  Move reply;
+} SimValueNetWorker;
+
 typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  SimValueNetWorker value_net;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -404,12 +451,90 @@ typedef struct Simmer {
   double utility_w_spread;
   double utility_spread_scale;
   bool use_margin_forecast;
+  // See SimArgs.rollout_value_net_*.
+  value_net_rows_fn value_net_evaluate;
+  void *value_net_context;
+  int value_net_candidates;
+  int value_net_batch;
+  ValueNetHistory value_net_history;
+  SimValueNetShared value_net_shared;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
 
+static void sim_value_net_worker_free(SimValueNetWorker *worker) {
+  free(worker->candidate_moves);
+  free(worker->candidate_count);
+  free(worker->board);
+  free(worker->scalars);
+  free(worker->values);
+  move_list_destroy(worker->list);
+  game_destroy(worker->scratch);
+  memset(worker, 0, sizeof(SimValueNetWorker));
+}
+
+// Sizes a thread's buffers for batch seeds of candidates replies.
+static void sim_value_net_worker_ensure(SimValueNetWorker *worker, int batch,
+                                        int candidates, const Game *game) {
+  if (worker->batch == batch && worker->candidates == candidates) {
+    return;
+  }
+  sim_value_net_worker_free(worker);
+  worker->batch = batch;
+  worker->candidates = candidates;
+  const size_t rows = (size_t)batch * (size_t)candidates;
+  worker->candidate_moves = malloc_or_die(sizeof(Move) * rows);
+  worker->candidate_count = malloc_or_die(sizeof(int) * (size_t)batch);
+  worker->board = malloc_or_die(sizeof(float) * rows * VALUE_NET_BOARD_FLOATS);
+  worker->scalars = malloc_or_die(sizeof(float) * rows * VALUE_NET_SCALARS);
+  worker->values = malloc_or_die(sizeof(float) * rows);
+  worker->list = move_list_create(candidates);
+  worker->scratch = game_duplicate(game);
+}
+
+static void sim_value_net_shared_free(SimValueNetShared *shared) {
+  free(shared->locks);
+  free(shared->seeds);
+  free(shared->replies);
+  free(shared->has_reply);
+  free(shared->count);
+  free(shared->next);
+  game_destroy(shared->start);
+  memset(shared, 0, sizeof(SimValueNetShared));
+}
+
+// Sizes the shared queues for plays plays of batch seeds, empties them and
+// takes game as every iteration's start.
+static void sim_value_net_shared_prepare(SimValueNetShared *shared, int plays,
+                                         int batch, const Game *game) {
+  if (shared->plays < plays || shared->batch != batch) {
+    sim_value_net_shared_free(shared);
+    shared->plays = plays;
+    shared->batch = batch;
+    const size_t slots = (size_t)plays * (size_t)batch;
+    shared->locks = malloc_or_die(sizeof(cpthread_mutex_t) * (size_t)plays);
+    for (int play_idx = 0; play_idx < plays; play_idx++) {
+      cpthread_mutex_init(&shared->locks[play_idx]);
+    }
+    shared->seeds = malloc_or_die(sizeof(uint64_t) * slots);
+    shared->replies = malloc_or_die(sizeof(Move) * slots);
+    shared->has_reply = malloc_or_die(sizeof(bool) * slots);
+    shared->count = malloc_or_die(sizeof(int) * (size_t)plays);
+    shared->next = malloc_or_die(sizeof(int) * (size_t)plays);
+  }
+  for (int play_idx = 0; play_idx < shared->plays; play_idx++) {
+    shared->count[play_idx] = 0;
+    shared->next[play_idx] = 0;
+  }
+  if (shared->start == NULL) {
+    shared->start = game_duplicate(game);
+  } else {
+    game_copy(shared->start, game);
+  }
+}
+
 SimmerWorker *simmer_create_worker(const Game *game) {
-  SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
+  SimmerWorker *simmer_worker = calloc_or_die(1, sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(game);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
@@ -428,7 +553,156 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   game_destroy(simmer_worker->game);
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
+  sim_value_net_worker_free(&simmer_worker->value_net);
   free(simmer_worker);
+}
+
+// Seeds the worker's game for one iteration and deals the opponent's rack,
+// as every iteration starts. Returns the opponent's player index.
+static int sim_start_iteration(const Simmer *simmer,
+                               SimmerWorker *simmer_worker, uint64_t seed) {
+  Game *game = simmer_worker->game;
+  prng_seed(simmer_worker->prng, seed);
+  game_seed(game, seed);
+  const int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
+  bool set_player_off_turn_rack_with_known_opp_rack = false;
+  if (simmer->use_alias_method) {
+    Rack inferred_rack;
+    rack_set_dist_size(&inferred_rack, simmer->dist_size);
+    if (alias_method_sample(
+            inference_results_get_alias_method(simmer->inference_results),
+            simmer_worker->prng, &inferred_rack)) {
+      set_random_rack(game, player_off_turn_index, &inferred_rack);
+    } else {
+      set_player_off_turn_rack_with_known_opp_rack = true;
+    }
+  } else {
+    set_player_off_turn_rack_with_known_opp_rack = true;
+  }
+  if (set_player_off_turn_rack_with_known_opp_rack) {
+    set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
+  }
+  return player_off_turn_index;
+}
+
+// Fills play_index's shared queue (its lock held): batch seeds, each
+// iteration replayed from the start to just after the candidate, the
+// opponent's top static replies scored by the net in one evaluation, and
+// the best kept (ties: more tiles played).
+static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
+                                 SimmedPlay *simmed_play, int play_index) {
+  SimValueNetShared *shared = &simmer->value_net_shared;
+  SimValueNetWorker *worker = &simmer_worker->value_net;
+  Game *game = simmer_worker->game;
+  const Move *candidate = simmed_play_get_move(simmed_play);
+  ValueNetHistory history = simmer->value_net_history;
+  value_net_history_record_opponent_move(&history, candidate);
+  const size_t slot_base = (size_t)play_index * (size_t)shared->batch;
+  int rows = 0;
+  for (int seed_idx = 0; seed_idx < shared->batch; seed_idx++) {
+    const uint64_t seed = simmed_play_get_seed(simmed_play);
+    shared->seeds[slot_base + seed_idx] = seed;
+    shared->has_reply[slot_base + seed_idx] = false;
+    worker->candidate_count[seed_idx] = 0;
+    game_copy(game, shared->start);
+    const int player_off_turn_index =
+        sim_start_iteration(simmer, simmer_worker, seed);
+    game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
+    play_move(candidate, game, NULL);
+    game_set_backup_mode(game, BACKUP_MODE_OFF);
+    if (!game_over(game)) {
+      MoveList *list = worker->list;
+      move_list_reset(list);
+      const MoveGenArgs args = {
+          .game = game,
+          .move_list = list,
+          .move_record_type = MOVE_RECORD_ALL,
+          .move_sort_type = MOVE_SORT_EQUITY,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&args);
+      move_list_sort_moves(list);
+      const int count = move_list_get_count(list);
+      Move *moves =
+          worker->candidate_moves + ((size_t)seed_idx * worker->candidates);
+      if (count <= 1 || bag_get_letters(game_get_bag(game)) == 0) {
+        // Nothing to choose, or the net is not used with an empty bag.
+        move_copy(&shared->replies[slot_base + seed_idx],
+                  move_list_get_move(list, 0));
+        shared->has_reply[slot_base + seed_idx] = true;
+      } else {
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          move_copy(&moves[move_idx], move_list_get_move(list, move_idx));
+          value_net_features_for_move(
+              game, &moves[move_idx], &history, worker->scratch,
+              worker->board + ((size_t)rows * VALUE_NET_BOARD_FLOATS),
+              worker->scalars + ((size_t)rows * VALUE_NET_SCALARS));
+          rows++;
+        }
+        worker->candidate_count[seed_idx] = count;
+      }
+    }
+    game_unplay_last_move(game);
+    return_rack_to_bag(game, player_off_turn_index);
+  }
+  simmer->value_net_evaluate(simmer->value_net_context, rows, worker->board,
+                             worker->scalars, worker->values);
+  int row = 0;
+  for (int seed_idx = 0; seed_idx < shared->batch; seed_idx++) {
+    const int count = worker->candidate_count[seed_idx];
+    if (count == 0) {
+      continue;
+    }
+    const Move *moves =
+        worker->candidate_moves + ((size_t)seed_idx * worker->candidates);
+    int best = 0;
+    for (int move_idx = 1; move_idx < count; move_idx++) {
+      const float value = worker->values[row + move_idx];
+      const float best_value = worker->values[row + best];
+      if (value > best_value ||
+          (value == best_value && move_get_tiles_played(&moves[move_idx]) >
+                                      move_get_tiles_played(&moves[best]))) {
+        best = move_idx;
+      }
+    }
+    move_copy(&shared->replies[slot_base + seed_idx], &moves[best]);
+    shared->has_reply[slot_base + seed_idx] = true;
+    row += count;
+  }
+  shared->count[play_index] = shared->batch;
+  shared->next[play_index] = 0;
+}
+
+// The next queued iteration for play_index: its seed, and the reply the
+// net chose (NULL when the game ended with the candidate), copied for this
+// thread.
+static const Move *sim_value_net_next(Simmer *simmer,
+                                      SimmerWorker *simmer_worker,
+                                      SimmedPlay *simmed_play, int play_index,
+                                      uint64_t *seed) {
+  SimValueNetShared *shared = &simmer->value_net_shared;
+  SimValueNetWorker *worker = &simmer_worker->value_net;
+  const int candidates = simmer->value_net_candidates > 0
+                             ? simmer->value_net_candidates
+                             : SIM_VALUE_NET_DEFAULT_CANDIDATES;
+  sim_value_net_worker_ensure(worker, shared->batch, candidates,
+                              simmer_worker->game);
+  cpthread_mutex_lock(&shared->locks[play_index]);
+  if (shared->next[play_index] >= shared->count[play_index]) {
+    sim_value_net_refill(simmer, simmer_worker, simmed_play, play_index);
+  }
+  const size_t slot =
+      ((size_t)play_index * (size_t)shared->batch) + shared->next[play_index]++;
+  *seed = shared->seeds[slot];
+  const bool has_reply = shared->has_reply[slot];
+  if (has_reply) {
+    move_copy(&worker->reply, &shared->replies[slot]);
+  }
+  cpthread_mutex_unlock(&shared->locks[play_index]);
+  return has_reply ? &worker->reply : NULL;
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
@@ -455,31 +729,20 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   MoveList *move_list = simmer_worker->move_list;
   const int plies = sim_results_get_num_plies(sim_results);
 
-  // This will shuffle the bag, so there is no need
-  // to call bag_shuffle explicitly.
-  const uint64_t seed = simmed_play_get_seed(simmed_play);
-  prng_seed(simmer_worker->prng, seed);
-  game_seed(game, seed);
-
-  int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
-  bool set_player_off_turn_rack_with_known_opp_rack = false;
-  if (simmer->use_alias_method) {
-    Rack inferred_rack;
-    rack_set_dist_size(&inferred_rack, simmer->dist_size);
-    if (alias_method_sample(
-            inference_results_get_alias_method(simmer->inference_results),
-            simmer_worker->prng, &inferred_rack)) {
-      set_random_rack(game, player_off_turn_index, &inferred_rack);
-    } else {
-      set_player_off_turn_rack_with_known_opp_rack = true;
-    }
+  // Seeding shuffles the bag, so there is no need to call bag_shuffle
+  // explicitly. With value net replies the seed comes from the play's queue
+  // along with the reply chosen for it.
+  uint64_t seed = 0;
+  const Move *value_net_reply = NULL;
+  if (simmer->value_net_evaluate != NULL && plies >= 1) {
+    value_net_reply = sim_value_net_next(simmer, simmer_worker, simmed_play,
+                                         (int)play_index, &seed);
+    game_copy(game, simmer->value_net_shared.start);
   } else {
-    set_player_off_turn_rack_with_known_opp_rack = true;
+    seed = simmed_play_get_seed(simmed_play);
   }
-
-  if (set_player_off_turn_rack_with_known_opp_rack) {
-    set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
-  }
+  const int player_off_turn_index =
+      sim_start_iteration(simmer, simmer_worker, seed);
 
   Equity leftover = 0;
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
@@ -507,7 +770,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, move_list);
+    const Move *best_play = ply == 0 && value_net_reply != NULL
+                                ? value_net_reply
+                                : get_top_equity_move(game, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -601,6 +866,7 @@ bool rv_sim_are_similar(RandomVariables *rvs, const int i, const int j) {
 
 void rv_sim_destroy(RandomVariables *rvs) {
   Simmer *simmer = (Simmer *)rvs->data;
+  sim_value_net_shared_free(&simmer->value_net_shared);
   rack_destroy(simmer->known_opp_rack);
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
@@ -632,7 +898,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   rvs->num_rvs = move_list_get_count(sim_args->move_list);
 
-  Simmer *simmer = malloc_or_die(sizeof(Simmer));
+  Simmer *simmer = calloc_or_die(1, sizeof(Simmer));
   ThreadControl *thread_control = sim_args->thread_control;
 
   simmer->initial_player = game_get_player_on_turn_index(sim_args->game);
@@ -678,6 +944,18 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
+  simmer->value_net_evaluate = sim_args->rollout_value_net_evaluate;
+  simmer->value_net_context = sim_args->rollout_value_net_context;
+  simmer->value_net_candidates = sim_args->rollout_value_net_candidates;
+  simmer->value_net_batch = sim_args->rollout_value_net_batch;
+  simmer->value_net_history = sim_args->rollout_value_net_history;
+  if (simmer->value_net_evaluate != NULL) {
+    sim_value_net_shared_prepare(
+        &simmer->value_net_shared, move_list_get_count(sim_args->move_list),
+        simmer->value_net_batch > 0 ? simmer->value_net_batch
+                                    : SIM_VALUE_NET_DEFAULT_BATCH,
+        sim_args->game);
+  }
 
   simmer->thread_control = thread_control;
 
@@ -734,6 +1012,18 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
+  simmer->value_net_evaluate = sim_args->rollout_value_net_evaluate;
+  simmer->value_net_context = sim_args->rollout_value_net_context;
+  simmer->value_net_candidates = sim_args->rollout_value_net_candidates;
+  simmer->value_net_batch = sim_args->rollout_value_net_batch;
+  simmer->value_net_history = sim_args->rollout_value_net_history;
+  if (simmer->value_net_evaluate != NULL) {
+    sim_value_net_shared_prepare(
+        &simmer->value_net_shared, move_list_get_count(sim_args->move_list),
+        simmer->value_net_batch > 0 ? simmer->value_net_batch
+                                    : SIM_VALUE_NET_DEFAULT_BATCH,
+        sim_args->game);
+  }
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

@@ -2,8 +2,10 @@
 
 #include "../src/compat/ctime.h"
 #include "../src/compat/endian_io.h"
+#include "../src/def/bai_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/def/value_net_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
@@ -12,11 +14,17 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/sim_args.h"
+#include "../src/ent/sim_results.h"
+#include "../src/ent/thread_control.h"
 #include "../src/ent/value_net.h"
+#include "../src/ent/win_pct.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/play_chooser.h"
+#include "../src/impl/simmer.h"
 #include "../src/impl/value_net_features.h"
 #include "../src/impl/value_net_metal.h"
 #include "../src/impl/value_net_player.h"
@@ -72,103 +80,6 @@ static const Move *vnt_static_move(const Game *game, MoveList *list) {
   };
   generate_moves(&args);
   return move_list_get_move(list, 0);
-}
-
-// "games:<model_dir>:<backend>:<lexicon>:<pairs>:<seed>:<worker>:<workers>:
-// <out>": game pairs between the value net player (a) and the static player
-// (b). Both games of a pair use one seed and the players swap seats, so each
-// seat draws the same tiles. Writes <out>.games.csv and per-decision timing
-// to <out>.moves.csv.
-static void vnt_games(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 9) {
-    log_fatal("games needs 9 fields");
-  }
-  const char *model_dir = string_splitter_get_item(fields, 1);
-  const value_net_backend_t backend =
-      vnt_parse_backend(string_splitter_get_item(fields, 2));
-  const char *lexicon = string_splitter_get_item(fields, 3);
-  const long pairs = strtol(string_splitter_get_item(fields, 4), NULL, 10);
-  const uint64_t seed = strtoull(string_splitter_get_item(fields, 5), NULL, 10);
-  const long worker = strtol(string_splitter_get_item(fields, 6), NULL, 10);
-  const long workers = strtol(string_splitter_get_item(fields, 7), NULL, 10);
-  const char *out = string_splitter_get_item(fields, 8);
-  char *settings = get_formatted_string(
-      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads 1",
-      lexicon);
-  Config *config = config_create_or_die(settings);
-  free(settings);
-  ErrorStack *error_stack = error_stack_create();
-  ValueNetPlayer *player =
-      value_net_player_create(model_dir, backend, 0, error_stack);
-  if (player == NULL) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("could not create the value net player");
-  }
-  MoveList *static_list = move_list_create(1);
-  char *path = get_formatted_string("%s.games.csv", out);
-  FILE *games_out = fopen_or_die(path, "w");
-  free(path);
-  path = get_formatted_string("%s.moves.csv", out);
-  FILE *moves_out = fopen_or_die(path, "w");
-  free(path);
-  (void)fprintf(games_out,
-                "pair,game,a_seat,a_score,b_score,a_spread,a_win,turns\n");
-  (void)fprintf(moves_out, "pair,game,turn,player,bag,total_ms\n");
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
-  Game *game = config_get_game(config);
-  ValueNetHistory histories[2];
-  for (long pair_idx = 0; pair_idx < pairs; pair_idx++) {
-    if (pair_idx % workers != worker) {
-      continue;
-    }
-    const uint64_t pair_seed = vnt_mix(seed ^ vnt_mix((uint64_t)pair_idx));
-    for (int game_in_pair = 0; game_in_pair < 2; game_in_pair++) {
-      const int a_seat = game_in_pair;
-      game_reset(game);
-      game_seed(game, pair_seed);
-      game_set_starting_player_index(game, (int)(pair_idx % 2));
-      draw_starting_racks(game);
-      value_net_history_reset(&histories[0]);
-      value_net_history_reset(&histories[1]);
-      int turn = 0;
-      while (!game_over(game) && turn < VNT_MAX_TURNS) {
-        const int seat = game_get_player_on_turn_index(game);
-        const int64_t start = ctimer_monotonic_ns();
-        const Move *chosen =
-            seat == a_seat
-                ? value_net_player_choose(player, game, &histories[seat])
-                : vnt_static_move(game, static_list);
-        Move move;
-        move_copy(&move, chosen);
-        (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%.3f\n", pair_idx,
-                      game_in_pair, turn, seat == a_seat ? 'a' : 'b',
-                      bag_get_letters(game_get_bag(game)),
-                      (double)(ctimer_monotonic_ns() - start) / 1e6);
-        value_net_history_record_opponent_move(&histories[1 - seat], &move);
-        play_move(&move, game, NULL);
-        turn++;
-      }
-      const int a_score =
-          equity_to_int(player_get_score(game_get_player(game, a_seat)));
-      const int b_score =
-          equity_to_int(player_get_score(game_get_player(game, 1 - a_seat)));
-      const int spread = a_score - b_score;
-      const double result = spread > 0 ? 1.0 : (spread == 0 ? 0.5 : 0.0);
-      (void)fprintf(games_out, "%ld,%d,%d,%d,%d,%d,%.1f,%d\n", pair_idx,
-                    game_in_pair, a_seat, a_score, b_score, spread, result,
-                    turn);
-      (void)fflush(games_out);
-    }
-    (void)fflush(moves_out);
-  }
-  (void)fclose(games_out);
-  (void)fclose(moves_out);
-  move_list_destroy(static_list);
-  value_net_player_destroy(player);
-  error_stack_destroy(error_stack);
-  config_destroy(config);
 }
 
 // Reads count little-endian floats from path.
@@ -289,6 +200,227 @@ static void vnt_cross_set_probe(void) {
   config_destroy(config);
 }
 
+typedef enum {
+  VNT_PLAYER_NN,
+  VNT_PLAYER_STATIC,
+  VNT_PLAYER_SIM,
+  VNT_PLAYER_SIM_NN,
+} vnt_player_t;
+
+static vnt_player_t vnt_parse_player(const char *name) {
+  if (strings_equal(name, "nn")) {
+    return VNT_PLAYER_NN;
+  }
+  if (strings_equal(name, "static")) {
+    return VNT_PLAYER_STATIC;
+  }
+  if (strings_equal(name, "sim")) {
+    return VNT_PLAYER_SIM;
+  }
+  if (!strings_equal(name, "simnn")) {
+    log_fatal("player must be nn, static, sim or simnn, got %s", name);
+  }
+  return VNT_PLAYER_SIM_NN;
+}
+
+// The value of key=value among fields[first..], player-specific keys
+// (<key>_a / <key>_b) first; fallback when absent.
+static const char *vnt_option(const StringSplitter *fields, int first,
+                              const char *key, int player_idx,
+                              const char *fallback) {
+  char *specific =
+      get_formatted_string("%s_%c=", key, player_idx == 0 ? 'a' : 'b');
+  char *shared = get_formatted_string("%s=", key);
+  const char *found = NULL;
+  for (int pass = 0; pass < 2 && found == NULL; pass++) {
+    const char *prefix = pass == 0 ? specific : shared;
+    for (int idx = first; idx < string_splitter_get_number_of_items(fields);
+         idx++) {
+      const char *item = string_splitter_get_item(fields, idx);
+      if (has_prefix(prefix, item)) {
+        found = item + strlen(prefix);
+        break;
+      }
+    }
+  }
+  free(specific);
+  free(shared);
+  return found != NULL ? found : fallback;
+}
+
+// "games:<model_dir>:<backend>:<lexicon>:<pairs>:<seed>:<worker>:<workers>:
+// <out>[:key=value...]": game pairs between players a and b (a=, b=: nn,
+// static, sim with static rollouts, simnn with value net replies on the
+// first rollout ply; default nn vs static). Sim players take plies=,
+// cands= (root candidates), ms= (per move) and iters= (cap), rcands= and
+// batch= (value net replies); any key may be given per player as <key>_a
+// or <key>_b. Both games of a pair use one seed and the players swap seats,
+// so each seat draws the same tiles. Writes <out>.games.csv and
+// per-decision timing to <out>.moves.csv.
+static void vnt_games(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) < 9) {
+    log_fatal("games needs at least 8 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const value_net_backend_t backend =
+      vnt_parse_backend(string_splitter_get_item(fields, 2));
+  const char *lexicon = string_splitter_get_item(fields, 3);
+  const long pairs = strtol(string_splitter_get_item(fields, 4), NULL, 10);
+  const uint64_t seed = strtoull(string_splitter_get_item(fields, 5), NULL, 10);
+  const long worker = strtol(string_splitter_get_item(fields, 6), NULL, 10);
+  const long workers = strtol(string_splitter_get_item(fields, 7), NULL, 10);
+  const char *out = string_splitter_get_item(fields, 8);
+  char *settings = get_formatted_string(
+      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1",
+      lexicon);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  vnt_player_t kinds[2];
+  bool needs_net = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    kinds[player_idx] =
+        vnt_parse_player(vnt_option(fields, 9, player_idx == 0 ? "a" : "b", 2,
+                                    player_idx == 0 ? "nn" : "static"));
+    needs_net = needs_net || kinds[player_idx] == VNT_PLAYER_NN ||
+                kinds[player_idx] == VNT_PLAYER_SIM_NN;
+  }
+  ValueNetPlayer *player = NULL;
+  if (needs_net) {
+    player = value_net_player_create(model_dir, backend, 0, error_stack);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("could not set up the players");
+  }
+  // The replier's history for each sim player's rollouts, refreshed before
+  // each of its decisions.
+  ValueNetHistory rollout_histories[2];
+  PlayChooser *choosers[2] = {NULL, NULL};
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    value_net_history_reset(&rollout_histories[player_idx]);
+    if (kinds[player_idx] != VNT_PLAYER_SIM &&
+        kinds[player_idx] != VNT_PLAYER_SIM_NN) {
+      continue;
+    }
+    const double ms =
+        strtod(vnt_option(fields, 9, "ms", player_idx, "0"), NULL);
+    const PlayChooserStrategy strategy = {
+        .pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM,
+        .endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+        .sim_plies = (int)strtol(
+            vnt_option(fields, 9, "plies", player_idx, "2"), NULL, 10),
+        .sim_max_candidates = (int)strtol(
+            vnt_option(fields, 9, "cands", player_idx, "15"), NULL, 10),
+        .sim_max_iterations =
+            strtoull(vnt_option(fields, 9, "iters", player_idx, "0"), NULL, 10),
+        // An iteration cap alone gets an ample time budget.
+        .fixed_seconds_per_move = ms > 0 ? ms / 1000.0 : 600.0,
+        .win_pcts = config_get_win_pcts(config),
+        .num_threads = (int)strtol(
+            vnt_option(fields, 9, "threads", player_idx, "1"), NULL, 10),
+        .seed = seed + (uint64_t)player_idx,
+        .rollout_value_net_evaluate = kinds[player_idx] == VNT_PLAYER_SIM_NN
+                                          ? value_net_player_evaluate_rows
+                                          : NULL,
+        .rollout_value_net_context =
+            kinds[player_idx] == VNT_PLAYER_SIM_NN ? player : NULL,
+        .rollout_value_net_candidates = (int)strtol(
+            vnt_option(fields, 9, "rcands", player_idx, "15"), NULL, 10),
+        .rollout_value_net_batch = (int)strtol(
+            vnt_option(fields, 9, "batch", player_idx, "8"), NULL, 10),
+        .rollout_value_net_history = &rollout_histories[player_idx],
+    };
+    choosers[player_idx] = play_chooser_create(&strategy);
+  }
+  MoveList *static_list = move_list_create(1);
+  char *path = get_formatted_string("%s.games.csv", out);
+  FILE *games_out = fopen_or_die(path, "w");
+  free(path);
+  path = get_formatted_string("%s.moves.csv", out);
+  FILE *moves_out = fopen_or_die(path, "w");
+  free(path);
+  (void)fprintf(games_out,
+                "pair,game,a_seat,a_score,b_score,a_spread,a_win,turns\n");
+  (void)fprintf(moves_out, "pair,game,turn,player,bag,total_ms\n");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  ValueNetHistory histories[2];
+  for (long pair_idx = 0; pair_idx < pairs; pair_idx++) {
+    if (pair_idx % workers != worker) {
+      continue;
+    }
+    const uint64_t pair_seed = vnt_mix(seed ^ vnt_mix((uint64_t)pair_idx));
+    for (int game_in_pair = 0; game_in_pair < 2; game_in_pair++) {
+      const int a_seat = game_in_pair;
+      game_reset(game);
+      game_seed(game, pair_seed);
+      game_set_starting_player_index(game, (int)(pair_idx % 2));
+      draw_starting_racks(game);
+      value_net_history_reset(&histories[0]);
+      value_net_history_reset(&histories[1]);
+      int turn = 0;
+      while (!game_over(game) && turn < VNT_MAX_TURNS) {
+        const int seat = game_get_player_on_turn_index(game);
+        const int player_idx = seat == a_seat ? 0 : 1;
+        const int64_t start = ctimer_monotonic_ns();
+        Move move;
+        switch (kinds[player_idx]) {
+        case VNT_PLAYER_NN:
+          move_copy(&move,
+                    value_net_player_choose(player, game, &histories[seat]));
+          break;
+        case VNT_PLAYER_STATIC:
+          move_copy(&move, vnt_static_move(game, static_list));
+          break;
+        case VNT_PLAYER_SIM:
+        case VNT_PLAYER_SIM_NN:
+          rollout_histories[player_idx] = histories[1 - seat];
+          play_chooser_choose_move(choosers[player_idx], game, &move,
+                                   error_stack);
+          if (!error_stack_is_empty(error_stack)) {
+            error_stack_print_and_reset(error_stack);
+            log_fatal("sim player failed");
+          }
+          break;
+        }
+        (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%.3f\n", pair_idx,
+                      game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
+                      bag_get_letters(game_get_bag(game)),
+                      (double)(ctimer_monotonic_ns() - start) / 1e6);
+        value_net_history_record_opponent_move(&histories[1 - seat], &move);
+        play_move(&move, game, NULL);
+        turn++;
+      }
+      const int a_score =
+          equity_to_int(player_get_score(game_get_player(game, a_seat)));
+      const int b_score =
+          equity_to_int(player_get_score(game_get_player(game, 1 - a_seat)));
+      const int spread = a_score - b_score;
+      const double result = spread > 0 ? 1.0 : (spread == 0 ? 0.5 : 0.0);
+      (void)fprintf(games_out, "%ld,%d,%d,%d,%d,%d,%.1f,%d\n", pair_idx,
+                    game_in_pair, a_seat, a_score, b_score, spread, result,
+                    turn);
+      (void)fflush(games_out);
+    }
+    (void)fflush(moves_out);
+  }
+  (void)fclose(games_out);
+  (void)fclose(moves_out);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (choosers[player_idx] != NULL) {
+      play_chooser_destroy(choosers[player_idx]);
+    }
+  }
+  move_list_destroy(static_list);
+  value_net_player_destroy(player);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // "dump:<lexicon>:<positions>:<seed>:<out>": plays static games and, every
 // third turn while tiles remain, writes the position's CGP (player on turn
 // first, then a tab, the opponent's last move and its score) to <out>.cgps
@@ -401,11 +533,198 @@ static void vnt_dump(const StringSplitter *fields) {
   config_destroy(config);
 }
 
+// "throughput:<dir>:<parity_dir>:<fp32|fp16>": Metal rows per second by
+// batch size, the parity rows tiled to fill each batch.
+static void vnt_throughput(const char *dir, const char *parity_dir,
+                           bool half_precision) {
+  ErrorStack *error_stack = error_stack_create();
+  ValueNet *net = value_net_create(dir, error_stack);
+  ValueNetMetal *metal =
+      net != NULL ? value_net_metal_create(net, half_precision, error_stack)
+                  : NULL;
+  if (metal == NULL) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("no Metal value net");
+  }
+  char *path = get_formatted_string("%s/board.f32", parity_dir);
+  float *board = vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS *
+                                           VALUE_NET_BOARD_FLOATS);
+  free(path);
+  path = get_formatted_string("%s/scalars.f32", parity_dir);
+  float *scalars =
+      vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS * VALUE_NET_SCALARS);
+  free(path);
+  // No more than one capped GPU call (VALUE_NET_MAX_GPU_ROWS).
+  const int max_rows = VALUE_NET_MAX_GPU_ROWS;
+  float *big_board =
+      malloc_or_die(sizeof(float) * (size_t)max_rows * VALUE_NET_BOARD_FLOATS);
+  float *big_scalars =
+      malloc_or_die(sizeof(float) * (size_t)max_rows * VALUE_NET_SCALARS);
+  for (int row = 0; row < max_rows; row++) {
+    memcpy(big_board + ((size_t)row * VALUE_NET_BOARD_FLOATS),
+           board +
+               ((size_t)(row % VALUE_NET_PARITY_ROWS) * VALUE_NET_BOARD_FLOATS),
+           sizeof(float) * VALUE_NET_BOARD_FLOATS);
+    memcpy(big_scalars + ((size_t)row * VALUE_NET_SCALARS),
+           scalars +
+               ((size_t)(row % VALUE_NET_PARITY_ROWS) * VALUE_NET_SCALARS),
+           sizeof(float) * VALUE_NET_SCALARS);
+  }
+  float *values = malloc_or_die(sizeof(float) * (size_t)max_rows);
+  for (int rows = 1; rows <= max_rows; rows *= 2) {
+    value_net_metal_evaluate(metal, rows, big_board, big_scalars, values, NULL);
+    const int repeats = rows <= 64 ? 20 : 5;
+    const int64_t start = ctimer_monotonic_ns();
+    for (int repeat = 0; repeat < repeats; repeat++) {
+      value_net_metal_evaluate(metal, rows, big_board, big_scalars, values,
+                               NULL);
+    }
+    const double seconds =
+        (double)(ctimer_monotonic_ns() - start) / 1e9 / repeats;
+    printf("value_net_throughput %s rows=%d ms_per_call=%.2f rows_per_s=%.0f\n",
+           half_precision ? "fp16" : "fp32", rows, seconds * 1e3,
+           rows / seconds);
+  }
+  free(values);
+  free(big_board);
+  free(big_scalars);
+  free(board);
+  free(scalars);
+  value_net_metal_destroy(metal);
+  value_net_destroy(net);
+  error_stack_destroy(error_stack);
+}
+
+// "simbench:<model_dir>:<none|cpu|fp32|fp16>:<plies>:<root_cands>:
+// <threads>:<iterations>:<reply_cands>:<batch>:<positions>": sims of the
+// top root_cands static plays, round robin, for a fixed number of
+// iterations on NWL23 positions from static games, with value net replies
+// on the first rollout ply (or static rollouts for "none"). Prints
+// iterations per second per position and overall.
+static void vnt_simbench(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 10) {
+    log_fatal("simbench needs 9 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const char *backend_name = string_splitter_get_item(fields, 2);
+  const int plies = (int)strtol(string_splitter_get_item(fields, 3), NULL, 10);
+  const int root_cands =
+      (int)strtol(string_splitter_get_item(fields, 4), NULL, 10);
+  const int threads =
+      (int)strtol(string_splitter_get_item(fields, 5), NULL, 10);
+  const uint64_t iterations =
+      strtoull(string_splitter_get_item(fields, 6), NULL, 10);
+  const int reply_cands =
+      (int)strtol(string_splitter_get_item(fields, 7), NULL, 10);
+  const int batch = (int)strtol(string_splitter_get_item(fields, 8), NULL, 10);
+  const int positions =
+      (int)strtol(string_splitter_get_item(fields, 9), NULL, 10);
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  ValueNetPlayer *player = NULL;
+  if (!strings_equal(backend_name, "none")) {
+    player = value_net_player_create(model_dir, vnt_parse_backend(backend_name),
+                                     0, error_stack);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("simbench setup failed");
+  }
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  MoveList *static_list = move_list_create(1);
+  MoveList *root = move_list_create(root_cands);
+  double total_seconds = 0.0;
+  uint64_t total_iterations = 0;
+  int done = 0;
+  for (uint64_t game_idx = 0; done < positions; game_idx++) {
+    game_reset(game);
+    game_seed(game, vnt_mix(UINT64_C(77) ^ game_idx));
+    draw_starting_racks(game);
+    for (int turn = 0; !game_over(game) && done < positions; turn++) {
+      if (turn == 6 && bag_get_letters(game_get_bag(game)) > 0) {
+        move_list_reset(root);
+        const MoveGenArgs args = {
+            .game = game,
+            .move_list = root,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&args);
+        move_list_sort_moves(root);
+        ThreadControl *control = thread_control_create();
+        thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+        SimArgs sim_args;
+        sim_args_fill(plies, root, move_list_get_count(root), NULL,
+                      config_get_win_pcts(config), NULL, control, game, false,
+                      false, threads, 0, move_list_get_count(root), plies, 7,
+                      iterations, 1, 0.0, BAI_THRESHOLD_NONE, 0.0,
+                      BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0, 1.0, 0.0, 100.0,
+                      false, NULL, &sim_args);
+        if (player != NULL) {
+          sim_args.rollout_value_net_evaluate = value_net_player_evaluate_rows;
+          sim_args.rollout_value_net_context = player;
+          sim_args.rollout_value_net_candidates = reply_cands;
+          sim_args.rollout_value_net_batch = batch;
+        }
+        SimResults *results = sim_results_create(0.0);
+        const int64_t start = ctimer_monotonic_ns();
+        simulate_without_ctx(&sim_args, results, error_stack);
+        const double seconds = (double)(ctimer_monotonic_ns() - start) / 1e9;
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_print_and_reset(error_stack);
+          log_fatal("sim failed");
+        }
+        const uint64_t done_iterations =
+            sim_results_get_iteration_count(results);
+        printf("simbench position=%d iterations=%llu seconds=%.3f "
+               "it_per_s=%.1f\n",
+               done, (unsigned long long)done_iterations, seconds,
+               (double)done_iterations / seconds);
+        if (done > 0) {
+          // The first position pays for compiling the Metal graph.
+          total_seconds += seconds;
+          total_iterations += done_iterations;
+        }
+        sim_results_destroy(results);
+        thread_control_destroy(control);
+        done++;
+      }
+      Move move;
+      move_copy(&move, vnt_static_move(game, static_list));
+      play_move(&move, game, NULL);
+    }
+  }
+  printf("simbench backend=%s plies=%d threads=%d reply_cands=%d batch=%d "
+         "it_per_s=%.1f (positions after the first)\n",
+         backend_name, plies, threads, reply_cands, batch,
+         total_seconds > 0 ? (double)total_iterations / total_seconds : 0.0);
+  move_list_destroy(root);
+  move_list_destroy(static_list);
+  value_net_player_destroy(player);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void value_net_test_run_spec(const char *spec) {
   StringSplitter *fields = split_string(spec, ':', true);
   const int num_fields = string_splitter_get_number_of_items(fields);
   const char *mode = string_splitter_get_item(fields, 0);
-  if (strings_equal(mode, "dump")) {
+  if (strings_equal(mode, "simbench")) {
+    vnt_simbench(fields);
+  } else if (strings_equal(mode, "throughput") && num_fields == 4) {
+    vnt_throughput(string_splitter_get_item(fields, 1),
+                   string_splitter_get_item(fields, 2),
+                   strings_equal(string_splitter_get_item(fields, 3), "fp16"));
+  } else if (strings_equal(mode, "dump")) {
     vnt_dump(fields);
   } else if (strings_equal(mode, "games")) {
     vnt_games(fields);

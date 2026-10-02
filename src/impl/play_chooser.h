@@ -4,6 +4,8 @@
 #include "../ent/game.h"
 #include "../ent/game_timer.h"
 #include "../ent/move.h"
+#include "../ent/sim_args.h"
+#include "../ent/value_net_history.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
@@ -45,6 +47,17 @@ typedef struct PlayChooserStrategy {
   play_chooser_eval_t endgame_eval;
   int sim_plies;          // 0 = default
   int sim_max_candidates; // 0 = default
+  // Total SIM iterations per decision, stopping before the time budget if
+  // reached; 0 = no limit.
+  uint64_t sim_max_iterations;
+  // Value net replies on the first SIM rollout ply (see SimArgs); NULL
+  // evaluate means static rollouts. history, when set, is the replier's
+  // history before the candidate, read at each decision.
+  value_net_rows_fn rollout_value_net_evaluate;
+  void *rollout_value_net_context;
+  int rollout_value_net_candidates;
+  int rollout_value_net_batch;
+  const ValueNetHistory *rollout_value_net_history;
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;

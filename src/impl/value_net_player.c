@@ -1,5 +1,6 @@
 #include "value_net_player.h"
 
+#include "../compat/cpthread.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
@@ -33,6 +34,12 @@ struct ValueNetPlayer {
   float *board_rows;
   float *scalar_rows;
   float *values;
+  // Staging for value_net_player_evaluate_rows, under staging_mutex.
+  cpthread_mutex_t staging_mutex;
+  int staging_capacity;
+  float *staging_board;
+  float *staging_scalars;
+  float *staging_values;
 };
 
 ValueNetPlayer *value_net_player_create(const char *model_dir,
@@ -67,6 +74,7 @@ ValueNetPlayer *value_net_player_create(const char *model_dir,
   player->scalar_rows = calloc_or_die(
       (size_t)player->batch_capacity * VALUE_NET_SCALARS, sizeof(float));
   player->values = calloc_or_die((size_t)player->batch_capacity, sizeof(float));
+  cpthread_mutex_init(&player->staging_mutex);
   return player;
 }
 
@@ -81,6 +89,9 @@ void value_net_player_destroy(ValueNetPlayer *player) {
   free(player->board_rows);
   free(player->scalar_rows);
   free(player->values);
+  free(player->staging_board);
+  free(player->staging_scalars);
+  free(player->staging_values);
   free(player);
 }
 
@@ -91,6 +102,62 @@ static int value_net_player_batch(const ValueNetPlayer *player, int rows) {
     batch *= 2;
   }
   return batch;
+}
+
+// The next power of two from VALUE_NET_PLAYER_MIN_BATCH holding rows rows,
+// so Metal compiles few batch sizes.
+static int value_net_padded_rows(int rows) {
+  if (rows > VALUE_NET_MAX_GPU_ROWS) {
+    // Metal runs these in chunks of VALUE_NET_MAX_GPU_ROWS.
+    return ((rows + VALUE_NET_MAX_GPU_ROWS - 1) / VALUE_NET_MAX_GPU_ROWS) *
+           VALUE_NET_MAX_GPU_ROWS;
+  }
+  int batch = VALUE_NET_PLAYER_MIN_BATCH;
+  while (batch < rows) {
+    batch *= 2;
+  }
+  return batch;
+}
+
+void value_net_player_evaluate_rows(void *context, int rows, const float *board,
+                                    const float *scalars, float *values) {
+  ValueNetPlayer *player = context;
+  if (rows <= 0) {
+    return;
+  }
+  if (player->metal == NULL) {
+    value_net_evaluate_cpu(player->net, rows, board, scalars, values, NULL);
+    return;
+  }
+  const int batch = value_net_padded_rows(rows);
+  cpthread_mutex_lock(&player->staging_mutex);
+  if (batch > player->staging_capacity) {
+    player->staging_capacity = batch;
+    player->staging_board =
+        realloc_or_die(player->staging_board,
+                       sizeof(float) * (size_t)batch * VALUE_NET_BOARD_FLOATS);
+    player->staging_scalars =
+        realloc_or_die(player->staging_scalars,
+                       sizeof(float) * (size_t)batch * VALUE_NET_SCALARS);
+    player->staging_values =
+        realloc_or_die(player->staging_values, sizeof(float) * (size_t)batch);
+  }
+  memcpy(player->staging_board, board,
+         sizeof(float) * (size_t)rows * VALUE_NET_BOARD_FLOATS);
+  memcpy(player->staging_scalars, scalars,
+         sizeof(float) * (size_t)rows * VALUE_NET_SCALARS);
+  // Padding rows repeat the first row; their values are ignored.
+  for (int pad_idx = rows; pad_idx < batch; pad_idx++) {
+    memcpy(player->staging_board + ((size_t)pad_idx * VALUE_NET_BOARD_FLOATS),
+           board, sizeof(float) * VALUE_NET_BOARD_FLOATS);
+    memcpy(player->staging_scalars + ((size_t)pad_idx * VALUE_NET_SCALARS),
+           scalars, sizeof(float) * VALUE_NET_SCALARS);
+  }
+  value_net_metal_evaluate(player->metal, batch, player->staging_board,
+                           player->staging_scalars, player->staging_values,
+                           NULL);
+  memcpy(values, player->staging_values, sizeof(float) * (size_t)rows);
+  cpthread_mutex_unlock(&player->staging_mutex);
 }
 
 const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,

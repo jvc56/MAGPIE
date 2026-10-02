@@ -491,12 +491,22 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*print_interval=*/0,
       /*max_num_display_plays=*/num_candidates,
       /*max_num_display_plies=*/sim_plies, strategy->seed,
-      /*max_iterations=*/(uint64_t)1e15,
+      /*max_iterations=*/strategy->sim_max_iterations > 0
+          ? strategy->sim_max_iterations
+          : (uint64_t)1e15,
       /*min_play_iterations=*/1, /*scond=*/0.0, BAI_THRESHOLD_NONE,
       /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
       /*use_margin_forecast=*/false, /*inference_args=*/NULL, &sim_args);
+  sim_args.rollout_value_net_evaluate = strategy->rollout_value_net_evaluate;
+  sim_args.rollout_value_net_context = strategy->rollout_value_net_context;
+  sim_args.rollout_value_net_candidates =
+      strategy->rollout_value_net_candidates;
+  sim_args.rollout_value_net_batch = strategy->rollout_value_net_batch;
+  if (strategy->rollout_value_net_history != NULL) {
+    sim_args.rollout_value_net_history = *strategy->rollout_value_net_history;
+  }
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).

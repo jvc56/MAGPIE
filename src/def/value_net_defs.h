@@ -21,6 +21,11 @@ enum {
   VALUE_NET_HEAD_HIDDEN = 128,
   // softmax(heads.wdl) is [loss, draw, win].
   VALUE_NET_WDL = 3,
+  // Most rows per GPU call. Each row needs about 4 MB of activations
+  // (attention scores alone are heads x tokens x tokens floats), so 256
+  // rows take about 1 GB; larger requests run in chunks. Unbounded batches
+  // of 1,024+ rows exhausted a 16 GB machine.
+  VALUE_NET_MAX_GPU_ROWS = 256,
 };
 
 #endif
