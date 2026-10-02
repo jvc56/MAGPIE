@@ -20,7 +20,10 @@ blob = np.fromfile(f"{handoff}/weights.f32", dtype="<f4")
 W = {t["name"]: torch.from_numpy(
     blob[t["offset_floats"]:t["offset_floats"] + t["count"]].copy()
     .reshape(t["shape"])) for t in manifest["tensors"]}
-D, T, H, HD, FF = 192, 254, 6, 32, 768
+hparams = manifest["hparams"]
+D, T, H = hparams["d_model"], 254, hparams["heads"]
+HD, FF, LAYERS = D // H, hparams["ff_mult"] * D, hparams["layers"]
+HIDDEN = hparams.get("hidden", 128)
 
 
 def conv(name, in_dim, out_dim):
@@ -90,11 +93,11 @@ class ValueNetANE(nn.Module):
         self.pos_emb = nn.Parameter(W["pos_emb"][0].T.reshape(1, D, 1, 225))
         self.tile_emb = nn.Parameter(W["tile_emb"][0].T.reshape(1, D, 1, 27))
         self.cls = nn.Parameter(W["cls"][0].T.reshape(1, D, 1, 1))
-        self.blocks = nn.ModuleList([Block(layer) for layer in range(8)])
+        self.blocks = nn.ModuleList([Block(layer) for layer in range(LAYERS)])
         self.ln_f = LayerNormANE("ln_f")
-        self.fc1 = conv("fc1", D, 128)
-        self.wdl = conv("heads.wdl", 128, 3)
-        self.spread = conv("heads.spread", 128, 1)
+        self.fc1 = conv("fc1", D, HIDDEN)
+        self.wdl = conv("heads.wdl", HIDDEN, 3)
+        self.spread = conv("heads.spread", HIDDEN, 1)
 
     def forward(self, board, scalars):
         squares = self.square_proj(board.reshape(batch, 85, 1, 225)) + self.pos_emb

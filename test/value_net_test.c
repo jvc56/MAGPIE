@@ -35,7 +35,9 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
+#include <assert.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -47,7 +49,45 @@ enum {
   VALUE_NET_PARITY_ROWS = 64,
   VALUE_NET_PARITY_REPEATS = 20,
   VNT_MAX_TURNS = 256,
+  // Distillation records (vnt_distill): the board's 0/1 planes as bits,
+  // padded to a multiple of 8 bytes.
+  VNT_DISTILL_BOARD_BYTES = ((VALUE_NET_BOARD_FLOATS + 63) / 64) * 8,
+  VNT_DISTILL_CANDIDATES = 50,
+  VNT_DISTILL_PROGRESS_GAMES = 200,
+  // A pass's static equity in distillation records and exploration (its
+  // equity is a sentinel, not points).
+  VNT_DISTILL_PASS_EQUITY = -1000,
 };
+
+// One candidate move at one decision of a teacher self-play game, as
+// tools/value_net/distill reads it (little-endian, no padding).
+typedef struct VntDistillRecord {
+  // Input plane c, square q is bit c * 225 + q, most significant bit of
+  // each byte first (numpy's unpackbits order).
+  uint8_t board_bits[VNT_DISTILL_BOARD_BYTES];
+  float scalars[VALUE_NET_SCALARS];
+  // The teacher's outputs for this row.
+  float value;
+  float spread;
+  // The mover's spread in points just after the move, and its static
+  // equity in points (VNT_DISTILL_PASS_EQUITY for a pass).
+  float spread_after;
+  float equity;
+  uint32_t game_id;
+  uint16_t turn;
+  // This move's rank by static equity, and the decision's candidate count.
+  uint16_t candidate;
+  uint16_t candidates;
+  uint16_t bag;
+  uint16_t tiles_played;
+  // Whether this candidate was played.
+  uint16_t chosen;
+} VntDistillRecord;
+
+static_assert(sizeof(VntDistillRecord) == VNT_DISTILL_BOARD_BYTES +
+                                              (VALUE_NET_SCALARS * 4) + 16 + 4 +
+                                              12,
+              "VntDistillRecord must have no padding");
 
 static uint64_t vnt_mix(uint64_t value) {
   value += UINT64_C(0x9e3779b97f4a7c15);
@@ -273,8 +313,9 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // cands= (root candidates), ms= (per move) and iters= (cap), rcands= and
 // batch= (value net replies). uwin=, uspread= and uscale= set the utility
 // (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults otherwise) that an
-// nn player and each sim, value net replies included, rank by. Any key may
-// be given per player as <key>_a or <key>_b. Both games of a pair use one seed
+// nn player and each sim, value net replies included, rank by. model= sets
+// the net's directory (default <model_dir>). Any key may be given per
+// player as <key>_a or <key>_b. Both games of a pair use one seed
 // and the players swap seats, so each seat draws the same tiles. Writes
 // <out>.games.csv and per-decision timing to <out>.moves.csv.
 static void vnt_games(const StringSplitter *fields) {
@@ -320,9 +361,9 @@ static void vnt_games(const StringSplitter *fields) {
     if (kinds[player_idx] == VNT_PLAYER_NN ||
         kinds[player_idx] == VNT_PLAYER_SIM_NN) {
       players[player_idx] = value_net_player_create(
-          model_dir, backend, 0, utility_w_winpct[player_idx],
-          utility_w_spread[player_idx], utility_spread_scale[player_idx],
-          error_stack);
+          vnt_option(fields, 9, "model", player_idx, model_dir), backend, 0,
+          utility_w_winpct[player_idx], utility_w_spread[player_idx],
+          utility_spread_scale[player_idx], error_stack);
     }
   }
   if (!error_stack_is_empty(error_stack)) {
@@ -455,6 +496,285 @@ static void vnt_games(const StringSplitter *fields) {
   move_list_destroy(static_list);
   value_net_player_destroy(players[0]);
   value_net_player_destroy(players[1]);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// A move's static equity in points, VNT_DISTILL_PASS_EQUITY for a pass.
+static double vnt_equity_points(const Move *move) {
+  const Equity equity = move_get_equity(move);
+  return equity == EQUITY_PASS_VALUE ? VNT_DISTILL_PASS_EQUITY
+                                     : equity_to_double(equity);
+}
+
+// A uniform double in [0, 1) from state.
+static double vnt_uniform(uint64_t *state) {
+  *state = vnt_mix(*state);
+  return (double)(*state >> 11) * 0x1.0p-53;
+}
+
+// A candidate index drawn with probability proportional to
+// exp((equity - best) / temperature) over the first count moves of list.
+static int vnt_softmax_pick(const MoveList *list, int count, double temperature,
+                            uint64_t *state) {
+  const double best = vnt_equity_points(move_list_get_move(list, 0));
+  double weights[VNT_DISTILL_CANDIDATES];
+  double total = 0.0;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const double equity = vnt_equity_points(move_list_get_move(list, move_idx));
+    weights[move_idx] = exp((equity - best) / temperature);
+    total += weights[move_idx];
+  }
+  double target = vnt_uniform(state) * total;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    target -= weights[move_idx];
+    if (target < 0.0) {
+      return move_idx;
+    }
+  }
+  return count - 1;
+}
+
+// Packs a board row of 0/1 floats into bits (VntDistillRecord.board_bits).
+static void vnt_pack_board(const float *board_row, uint8_t *bits) {
+  memset(bits, 0, VNT_DISTILL_BOARD_BYTES);
+  for (int idx = 0; idx < VALUE_NET_BOARD_FLOATS; idx++) {
+    if (board_row[idx] == 1.0F) {
+      bits[idx / 8] |= (uint8_t)(0x80U >> (idx % 8));
+    } else if (board_row[idx] != 0.0F) {
+      log_fatal("board input %d is %f, not 0 or 1", idx, board_row[idx]);
+    }
+  }
+}
+
+// One game-playing thread of vnt_distill.
+typedef struct VntDistillThread {
+  ValueNetPlayer *teacher;
+  const Game *start_game;
+  long first_game;
+  long game_stride;
+  long games;
+  uint64_t seed;
+  double w_winpct;
+  double w_spread;
+  double spread_scale;
+  double temperature;
+  double explore;
+  int explore_bag;
+  FILE *records_out;
+  const char *out;
+  // Shared progress, for the log.
+  atomic_long *rows_written;
+  atomic_long *games_played;
+  int64_t start_ns;
+} VntDistillThread;
+
+static void *vnt_distill_thread(void *arg) {
+  const VntDistillThread *args = arg;
+  Game *game = game_duplicate(args->start_game);
+  Game *scratch = game_duplicate(args->start_game);
+  MoveList *list = move_list_create(VNT_DISTILL_CANDIDATES);
+  float *board_rows = malloc_or_die(sizeof(float) * VNT_DISTILL_CANDIDATES *
+                                    VALUE_NET_BOARD_FLOATS);
+  float *scalar_rows =
+      malloc_or_die(sizeof(float) * VNT_DISTILL_CANDIDATES * VALUE_NET_SCALARS);
+  float values[VNT_DISTILL_CANDIDATES];
+  float spreads[VNT_DISTILL_CANDIDATES];
+  VntDistillRecord *records =
+      malloc_or_die(sizeof(VntDistillRecord) * VNT_DISTILL_CANDIDATES);
+  ValueNetHistory histories[2];
+  uint64_t rng =
+      vnt_mix(args->seed ^ UINT64_C(0xd1571d) ^ (uint64_t)args->first_game);
+  for (long game_idx = args->first_game; game_idx < args->games;
+       game_idx += args->game_stride) {
+    game_reset(game);
+    game_seed(game, vnt_mix(args->seed ^ vnt_mix((uint64_t)game_idx)));
+    game_set_starting_player_index(game, (int)(game_idx % 2));
+    draw_starting_racks(game);
+    value_net_history_reset(&histories[0]);
+    value_net_history_reset(&histories[1]);
+    for (int turn = 0; !game_over(game) && turn < VNT_MAX_TURNS; turn++) {
+      const int seat = game_get_player_on_turn_index(game);
+      move_list_reset(list);
+      const MoveGenArgs gen_args = {
+          .game = game,
+          .move_list = list,
+          .move_record_type = MOVE_RECORD_ALL,
+          .move_sort_type = MOVE_SORT_EQUITY,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&gen_args);
+      move_list_sort_moves(list);
+      const int count = move_list_get_count(list);
+      const int bag = bag_get_letters(game_get_bag(game));
+      int chosen = 0;
+      if (count > 1 && bag > 0) {
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          value_net_features_for_move(
+              game, move_list_get_move(list, move_idx), &histories[seat],
+              scratch, board_rows + ((size_t)move_idx * VALUE_NET_BOARD_FLOATS),
+              scalar_rows + ((size_t)move_idx * VALUE_NET_SCALARS));
+        }
+        value_net_player_evaluate_rows(args->teacher, count, board_rows,
+                                       scalar_rows, values, spreads);
+        double best_utility = 0.0;
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          const Move *move = move_list_get_move(list, move_idx);
+          const double spread_after = value_net_spread_after_move(game, move);
+          const double utility = value_net_utility(
+              values[move_idx], spreads[move_idx], spread_after, args->w_winpct,
+              args->w_spread, args->spread_scale);
+          if (move_idx == 0 || utility > best_utility ||
+              (utility == best_utility &&
+               move_get_tiles_played(move) >
+                   move_get_tiles_played(move_list_get_move(list, chosen)))) {
+            chosen = move_idx;
+            best_utility = utility;
+          }
+          VntDistillRecord *record = &records[move_idx];
+          vnt_pack_board(board_rows +
+                             ((size_t)move_idx * VALUE_NET_BOARD_FLOATS),
+                         record->board_bits);
+          memcpy(record->scalars,
+                 scalar_rows + ((size_t)move_idx * VALUE_NET_SCALARS),
+                 sizeof(record->scalars));
+          record->value = values[move_idx];
+          record->spread = spreads[move_idx];
+          record->spread_after = (float)spread_after;
+          record->equity = (float)vnt_equity_points(move);
+          record->game_id = (uint32_t)game_idx;
+          record->turn = (uint16_t)turn;
+          record->candidate = (uint16_t)move_idx;
+          record->candidates = (uint16_t)count;
+          record->bag = (uint16_t)bag;
+          record->tiles_played = (uint16_t)move_get_tiles_played(move);
+          record->chosen = 0;
+        }
+        if (bag > args->explore_bag || vnt_uniform(&rng) < args->explore) {
+          chosen = vnt_softmax_pick(list, count, args->temperature, &rng);
+        }
+        records[chosen].chosen = 1;
+        if (fwrite(records, sizeof(VntDistillRecord), (size_t)count,
+                   args->records_out) != (size_t)count) {
+          log_fatal("could not write %s", args->out);
+        }
+        atomic_fetch_add(args->rows_written, count);
+      }
+      Move move;
+      move_copy(&move, move_list_get_move(list, chosen));
+      value_net_history_record_opponent_move(&histories[1 - seat], &move);
+      play_move(&move, game, NULL);
+    }
+    const long games_done = atomic_fetch_add(args->games_played, 1) + 1;
+    if (games_done % VNT_DISTILL_PROGRESS_GAMES == 0) {
+      const double seconds =
+          (double)(ctimer_monotonic_ns() - args->start_ns) / 1e9;
+      const long rows = atomic_load(args->rows_written);
+      printf("distill games=%ld rows=%ld rows_per_s=%.0f\n", games_done, rows,
+             (double)rows / seconds);
+      (void)fflush(stdout);
+    }
+  }
+  free(records);
+  free(board_rows);
+  free(scalar_rows);
+  move_list_destroy(list);
+  game_destroy(scratch);
+  game_destroy(game);
+  return NULL;
+}
+
+// "distill:<model_dir>:<backend>:<lexicon>:<games>:<seed>:<worker>:<workers>:
+// <out>[:key=value...]": teacher self-play for distillation. Of games games,
+// this worker plays those with index = worker mod workers, on threads=
+// threads (default 1) that share the teacher. Each player takes the top 50
+// static moves; the net (the teacher) scores them all, and every
+// candidate's row, the teacher's value and spread, and the move's static
+// equity and spread after it go to <out> (VntDistillRecord; with several
+// threads, thread k writes <out>.t<k>). The move played is the best by the
+// utility (uwin=, uspread=, uscale=; MAGPIE's defaults otherwise), except
+// that while the bag holds more than explore_bag= tiles (default 60), and
+// otherwise with probability explore= (default 0.05), it is drawn by softmax
+// over static equity with temperature temp= points (default 1). With an
+// empty bag (not recorded), the top static move.
+static void vnt_distill(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) < 9) {
+    log_fatal("distill needs at least 8 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const value_net_backend_t backend =
+      vnt_parse_backend(string_splitter_get_item(fields, 2));
+  const char *lexicon = string_splitter_get_item(fields, 3);
+  const long games = strtol(string_splitter_get_item(fields, 4), NULL, 10);
+  const uint64_t seed = strtoull(string_splitter_get_item(fields, 5), NULL, 10);
+  const long worker = strtol(string_splitter_get_item(fields, 6), NULL, 10);
+  const long workers = strtol(string_splitter_get_item(fields, 7), NULL, 10);
+  const char *out = string_splitter_get_item(fields, 8);
+  const int threads = (int)vnt_option_double(fields, 9, "threads", 0, 1.0);
+  if (threads < 1 || threads > VNT_MAX_THROUGHPUT_THREADS) {
+    log_fatal("distill threads must be 1..%d", VNT_MAX_THROUGHPUT_THREADS);
+  }
+  char *settings = get_formatted_string(
+      "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1",
+      lexicon);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  ErrorStack *error_stack = error_stack_create();
+  VntDistillThread args = {
+      .w_winpct = vnt_option_double(fields, 9, "uwin", 0,
+                                    config_get_utility_w_winpct(config)),
+      .w_spread = vnt_option_double(fields, 9, "uspread", 0,
+                                    config_get_utility_w_spread(config)),
+      .spread_scale = vnt_option_double(
+          fields, 9, "uscale", 0, config_get_utility_spread_scale(config)),
+      .temperature = vnt_option_double(fields, 9, "temp", 0, 1.0),
+      .explore = vnt_option_double(fields, 9, "explore", 0, 0.05),
+      .explore_bag = (int)vnt_option_double(fields, 9, "explore_bag", 0, 60.0),
+      .games = games,
+      .seed = seed,
+      .game_stride = workers * threads,
+      .out = out,
+  };
+  args.teacher = value_net_player_create(
+      model_dir, backend, VNT_DISTILL_CANDIDATES, args.w_winpct, args.w_spread,
+      args.spread_scale, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("could not load the teacher");
+  }
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  args.start_game = config_get_game(config);
+  atomic_long rows_written = 0;
+  atomic_long games_played = 0;
+  args.rows_written = &rows_written;
+  args.games_played = &games_played;
+  args.start_ns = ctimer_monotonic_ns();
+  VntDistillThread thread_args[VNT_MAX_THROUGHPUT_THREADS];
+  cpthread_t thread_ids[VNT_MAX_THROUGHPUT_THREADS];
+  for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
+    thread_args[thread_idx] = args;
+    thread_args[thread_idx].first_game = (worker * threads) + thread_idx;
+    char *path = threads > 1 ? get_formatted_string("%s.t%d", out, thread_idx)
+                             : string_duplicate(out);
+    thread_args[thread_idx].records_out = fopen_or_die(path, "wb");
+    free(path);
+    cpthread_create(&thread_ids[thread_idx], vnt_distill_thread,
+                    &thread_args[thread_idx]);
+  }
+  for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
+    cpthread_join(thread_ids[thread_idx]);
+    (void)fclose(thread_args[thread_idx].records_out);
+  }
+  const double seconds = (double)(ctimer_monotonic_ns() - args.start_ns) / 1e9;
+  printf("distill worker=%ld done games=%ld rows=%ld rows_per_s=%.0f\n", worker,
+         atomic_load(&games_played), atomic_load(&rows_written),
+         (double)atomic_load(&rows_written) / seconds);
+  value_net_player_destroy(args.teacher);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
@@ -901,6 +1221,8 @@ void value_net_test_run_spec(const char *spec) {
                    string_splitter_get_item(fields, 2),
                    strings_equal(string_splitter_get_item(fields, 3), "fp16"),
                    threads, concurrency);
+  } else if (strings_equal(mode, "distill")) {
+    vnt_distill(fields);
   } else if (strings_equal(mode, "dump")) {
     vnt_dump(fields);
   } else if (strings_equal(mode, "games")) {
