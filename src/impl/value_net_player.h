@@ -1,0 +1,33 @@
+#ifndef VALUE_NET_PLAYER_H
+#define VALUE_NET_PLAYER_H
+
+#include "../ent/game.h"
+#include "../ent/move.h"
+#include "../util/io_util.h"
+#include "value_net_features.h"
+#include <stdbool.h>
+
+// Chooses moves as Macondo's FastMlBot does: the top max_candidates
+// (default 50) moves by static equity, one value net row each, one batched
+// evaluation, the highest value played (ties: more tiles played). With an
+// empty bag, the top static move.
+typedef enum {
+  VALUE_NET_BACKEND_CPU,
+  VALUE_NET_BACKEND_METAL_FP32,
+  VALUE_NET_BACKEND_METAL_FP16,
+} value_net_backend_t;
+
+typedef struct ValueNetPlayer ValueNetPlayer;
+
+ValueNetPlayer *value_net_player_create(const char *model_dir,
+                                        value_net_backend_t backend,
+                                        int max_candidates,
+                                        ErrorStack *error_stack);
+void value_net_player_destroy(ValueNetPlayer *player);
+
+// The chosen move for the player on turn in game, whose history (see
+// ValueNetHistory) is history; valid until the next call.
+const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
+                                    const ValueNetHistory *history);
+
+#endif

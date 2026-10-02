@@ -46,6 +46,9 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
 
 // Cross-set update for move affected squares
+// Places the move's tiles on the board and updates its anchors, without
+// touching racks, scores, the bag or cross sets.
+void play_move_on_board(const Move *move, const Game *game);
 void update_cross_set_for_move(const Move *move, const Game *game);
 
 // Incremental play/unplay functions for endgame solver optimization
