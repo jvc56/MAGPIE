@@ -26,18 +26,38 @@ teacher on it in PyTorch as a check.
 ## 2. Training (`train.py`, MLX)
 
 ```sh
-nn-venv/bin/python train.py --data '<dir>/*.bin*' --out runs/d128l4 \
-    --d-model 128 --layers 4 --heads 4 --minutes 30
+nn-venv/bin/python train.py --data '<dir>/*.bin' --out runs/t4 \
+    --init-teacher models/macondo-nn-tf-nwl23s-v1 --keep-layers 0,1,2,3 \
+    --lr 3e-4 --warmup 200 --w-centered 5 --minutes 30
 ```
 
-Batches are 64 decisions x 8 of their candidates; the loss is squared error
+`--data` takes comma-separated globs (`.npy` index caches are skipped).
+Batches are 64 decisions x 8 of their candidates (`--top k`: always the
+teacher's top k by utility, the rest at random); the loss is squared error
 on the teacher's value, on the value centered within each decision (move
-choice depends only on differences), and on the spread. Weights are fp32
-and the forward pass fp16, with LayerNorm in fp32 (its fp16 backward
-overflows on the low-variance cls and tile tokens). Validation uses whole
-decisions from held-out games and reports top-1 agreement with the teacher
-and the teacher-measured regret of the student's picks, by value and by
-MAGPIE's default utility.
+choice depends only on differences), and on the spread, plus with
+`--w-rank` a listwise term: the KL divergence from the teacher's softmax
+over each decision's utilities (temperature `--rank-temp`) to the
+student's. Neither helped: over 3,000 steps from teacher blocks 0-3 on the
+pilot data, utility regret was 0.00397 with neither, 0.00449 with `--top 4`,
+0.00453 with `--w-rank 0.1 --rank-temp 0.01`, and 0.00468 with both
+(standard error ~0.0003; all on the same 4,166 held-out decisions).
+Weights are fp32 and the forward pass fp16, with LayerNorm in
+fp32 (its fp16 backward overflows on the low-variance cls and tile
+tokens). The learning rate warms up, then follows a cosine over `--steps`
+or, without it, over the `--minutes` budget.
+
+Each file's decisions are indexed once (`<file>.idx.npy`, extended when
+the file grows). Files still being written can be trained on: a partial
+last decision is left out, and `--refresh-minutes` adds what has been
+written since.
+
+Validation uses whole decisions from held-out games (`game_id % 50 == 0`,
+of `--val-data` if given, so runs on different data share a validation
+set) and reports top-1 agreement with the teacher, the teacher-measured
+regret of the student's picks by value and by MAGPIE's default utility
+(with its standard error), and `regret_k`: the utility regret if the
+teacher rescored the student's top k.
 
 The student is written in the teacher's format (`weights.f32` +
 `manifest.json` with `hparams`), which MAGPIE's CPU and Metal backends and

@@ -30,7 +30,7 @@ import mlx.optimizers as optim
 import numpy as np
 from mlx.utils import tree_flatten, tree_map, tree_unflatten
 
-from data import BOARD_BYTES, open_records
+from data import BOARD_BYTES, open_record_file, open_records
 from model import PLANES, SCALARS, SQUARES, TILE_TYPES
 
 SPREAD_SCALE = 130.0
@@ -106,7 +106,8 @@ def _norm(p, x):
 
 
 def forward(params, board, scalars, heads, dtype=mx.float16):
-    """board (B, 85, 225), scalars (B, 72) -> value, spread (float32)."""
+    """board (B, 85, 225), scalars (B, 72) -> value, spread logit (float32;
+    the spread output is its tanh)."""
     p = tree_map(lambda a: a.astype(dtype), params)
     board, scalars = board.astype(dtype), scalars.astype(dtype)
     batch = board.shape[0]
@@ -132,7 +133,7 @@ def forward(params, board, scalars, heads, dtype=mx.float16):
     hidden = mx.maximum(_linear(p["fc1"], _norm(p["ln_f"], x[:, 0])), 0)
     probs = mx.softmax(_linear(p["heads"]["wdl"], hidden).astype(mx.float32),
                        axis=-1)
-    spread = mx.tanh(_linear(p["heads"]["spread"], hidden).astype(mx.float32))
+    spread = _linear(p["heads"]["spread"], hidden).astype(mx.float32)
     return probs[:, 2] - probs[:, 0], spread[:, 0]
 
 
@@ -146,16 +147,30 @@ def unpack(bits):
 # ---- data ----------------------------------------------------------------
 
 def decision_index(part):
-    """(first row, candidates, game_id) of each decision in a records file,
-    cached beside it (reading the metadata touches the whole file)."""
+    """(first row, candidates, game_id) of each complete decision in a
+    records file, cached beside it. A decision's candidates are consecutive
+    records, so the scan hops from one decision's first record to the next
+    (reading ~1/50 of the file), and a cache for a file that has since grown
+    is extended from where it ended."""
     path = part.filename + ".idx.npy"
-    if os.path.exists(path) and os.path.getmtime(path) >= os.path.getmtime(
-            part.filename):
-        return np.load(path)
-    meta = np.asarray(part[["game_id", "candidate", "candidates"]])
-    starts = np.flatnonzero(meta["candidate"] == 0)
-    index = np.stack([starts, meta["candidates"][starts],
-                      meta["game_id"][starts]], axis=1).astype(np.int64)
+    index = np.zeros((0, 3), np.int64)
+    if os.path.exists(path):
+        index = np.load(path)
+        if os.path.getmtime(path) >= os.path.getmtime(part.filename):
+            return index
+    row = int(index[-1, 0] + index[-1, 1]) if len(index) else 0
+    new = []
+    while row < len(part):
+        record = part[row]
+        count = int(record["candidates"])
+        if record["candidate"] != 0 or count < 1:
+            raise ValueError(f"{part.filename}: row {row} starts no decision")
+        if row + count > len(part):
+            break  # still being written
+        new.append((row, count, int(record["game_id"])))
+        row += count
+    if new:
+        index = np.concatenate([index, np.array(new, np.int64)])
     np.save(path, index)
     return index
 
@@ -163,41 +178,84 @@ def decision_index(part):
 class Records:
     """All record files as decisions: (part, first row, row count). Training
     decisions have at least min_candidates candidates, so batches keep one
-    shape."""
+    shape. Games with game_id % val_mod == 0 are held out; validation uses
+    those of val_pattern's files (default: pattern's)."""
 
-    def __init__(self, pattern, val_mod, min_candidates):
+    def __init__(self, pattern, val_mod, min_candidates, val_pattern=None):
+        self.val_mod, self.min_candidates = val_mod, min_candidates
         self.parts = open_records(pattern)
+        self.train_parts = len(self.parts)
+        val_parts = open_records(val_pattern) if val_pattern else []
+        # Decisions of each training file seen so far.
+        self.seen = [0] * self.train_parts
         train, val = [], []
-        for part_idx, part in enumerate(self.parts):
+        for part_idx, part in enumerate(self.parts + val_parts):
             index = decision_index(part)
-            entries = np.concatenate(
-                [np.full((len(index), 1), part_idx), index[:, :2]], axis=1)
-            is_val = index[:, 2] % val_mod == 0
-            val.append(entries[is_val])
-            train.append(entries[~is_val & (index[:, 1] >= min_candidates)])
+            if part_idx < self.train_parts:
+                train.append(self._train_entries(part_idx, index))
+                self.seen[part_idx] = len(index)
+            if part_idx >= self.train_parts or not val_parts:
+                val.append(self._entries(part_idx, index)[
+                    index[:, 2] % val_mod == 0])
+        self.parts += val_parts
         self.train = np.concatenate(train)
         self.val = np.concatenate(val)
         # Validation decisions in a fixed shuffled order, so a prefix spans
         # many games.
         self.val = self.val[np.random.default_rng(0).permutation(len(self.val))]
 
+    @staticmethod
+    def _entries(part_idx, index):
+        return np.concatenate(
+            [np.full((len(index), 1), part_idx), index[:, :2]], axis=1)
+
+    def _train_entries(self, part_idx, index):
+        keep = ((index[:, 2] % self.val_mod != 0)
+                & (index[:, 1] >= self.min_candidates))
+        return self._entries(part_idx, index)[keep]
+
+    def refresh(self):
+        """Adds the training decisions written to the training files since
+        they were last read (files still being written); returns how many.
+        Validation stays as it was. Safe while batches() runs: parts are
+        replaced before train grows, and both only grow."""
+        added = []
+        for part_idx in range(self.train_parts):
+            part = open_record_file(self.parts[part_idx].filename)
+            index = decision_index(part)
+            if len(index) > self.seen[part_idx]:
+                self.parts[part_idx] = part
+                added.append(self._train_entries(
+                    part_idx, index[self.seen[part_idx]:]))
+                self.seen[part_idx] = len(index)
+        if added:
+            self.train = np.concatenate([self.train] + added)
+        return sum(len(entries) for entries in added)
+
     def rows(self, part_idx, indices):
         return self.parts[part_idx][indices]
 
 
-def batches(records, decisions, per_decision, seed, out_queue, stop):
-    """Fills out_queue with training batches (numpy) until stop is set."""
+def batches(records, decisions, per_decision, top, seed, out_queue, stop):
+    """Fills out_queue with training batches (numpy) until stop is set. Each
+    decision gives per_decision candidates: the teacher's top (by utility)
+    and the rest drawn at random from the others."""
     rng = np.random.default_rng(seed)
     while not stop.is_set():
         picks = records.train[rng.integers(0, len(records.train), decisions)]
         chunks = []
         for part_idx, start, count in picks:
-            offsets = np.sort(rng.choice(count, per_decision, replace=False))
-            chunks.append(records.rows(part_idx, start + offsets))
+            rows = np.asarray(records.parts[part_idx][start:start + count])
+            order = np.argsort(-utility(rows["value"], rows["spread"],
+                                        rows["spread_after"]), kind="stable")
+            offsets = np.concatenate([order[:top], rng.choice(
+                order[top:], per_decision - top, replace=False)])
+            chunks.append(rows[offsets])
         rows = np.concatenate(chunks)
         out_queue.put((np.ascontiguousarray(rows["board_bits"]),
                        np.ascontiguousarray(rows["scalars"]),
-                       rows["value"].copy(), rows["spread"].copy()))
+                       rows["value"].copy(), rows["spread"].copy(),
+                       rows["spread_after"].copy()))
 
 
 # ---- training ------------------------------------------------------------
@@ -212,17 +270,35 @@ def utility(value, spread, spread_after, w_winpct=1.0, w_spread=0.5,
     return (w_winpct * win + w_spread * sigmoid) / (w_winpct + w_spread)
 
 
+MAX_SPREAD_LOGIT = math.atanh(MAX_SPREAD_OUTPUT)
+
+
+def utility_mx(value, spread_logit, spread_after, w_winpct=1.0, w_spread=0.5,
+               spread_scale=100.0):
+    """utility() from the spread head's logit (MLX, differentiable)."""
+    win = (1.0 + value) / 2.0
+    final = spread_after + SPREAD_SCALE * mx.clip(
+        spread_logit, -MAX_SPREAD_LOGIT, MAX_SPREAD_LOGIT)
+    return ((w_winpct * win + w_spread * mx.sigmoid(final / spread_scale))
+            / (w_winpct + w_spread))
+
+
+CASCADE_KS = (2, 3, 5)
+
+
 def evaluate(params, records, heads, max_decisions):
-    """Student vs teacher on held-out decisions (all candidates)."""
+    """Student vs teacher on held-out decisions (all candidates). regret_k
+    is the utility regret if the teacher rescored the student's top k."""
     picks = records.val[:max_decisions]
     errors_v, errors_s = [], []
     agree_v = agree_u = 0
     regret_v, regret_u = [], []
+    regret_k = {k: [] for k in CASCADE_KS}
     for part_idx, start, count in picks:
         rows = records.rows(part_idx, np.arange(start, start + count))
         value, spread = forward(params, unpack(mx.array(rows["board_bits"])),
                                 mx.array(rows["scalars"]), heads)
-        value, spread = np.array(value), np.array(spread)
+        value, spread = np.array(value), np.tanh(np.array(spread))
         errors_v.append(value - rows["value"])
         errors_s.append(spread - rows["spread"])
         teacher_v, student_v = int(np.argmax(rows["value"])), int(np.argmax(value))
@@ -233,14 +309,22 @@ def evaluate(params, records, heads, max_decisions):
         teacher_u, student_u = int(np.argmax(teacher_u_all)), int(np.argmax(student_u_all))
         agree_u += teacher_u == student_u
         regret_u.append(teacher_u_all[teacher_u] - teacher_u_all[student_u])
+        student_order = np.argsort(-student_u_all, kind="stable")
+        for k in CASCADE_KS:
+            regret_k[k].append(teacher_u_all[teacher_u]
+                               - teacher_u_all[student_order[:k]].max())
     errors_v, errors_s = np.concatenate(errors_v), np.concatenate(errors_s)
     n = len(picks)
-    return {"val_decisions": n,
-            "value_rmse": float(np.sqrt((errors_v ** 2).mean())),
-            "spread_rmse": float(np.sqrt((errors_s ** 2).mean())),
-            "top1_value": agree_v / n, "top1_utility": agree_u / n,
-            "regret_value": float(np.mean(regret_v)),
-            "regret_utility": float(np.mean(regret_u))}
+    metrics = {"val_decisions": n,
+               "value_rmse": float(np.sqrt((errors_v ** 2).mean())),
+               "spread_rmse": float(np.sqrt((errors_s ** 2).mean())),
+               "top1_value": agree_v / n, "top1_utility": agree_u / n,
+               "regret_value": float(np.mean(regret_v)),
+               "regret_utility": float(np.mean(regret_u)),
+               "regret_utility_se": float(np.std(regret_u) / math.sqrt(n))}
+    for k in CASCADE_KS:
+        metrics[f"regret_{k}"] = float(np.mean(regret_k[k]))
+    return metrics
 
 
 def save(params, hparams, out_dir, extra):
@@ -278,6 +362,8 @@ def main():
     parser.add_argument("--hidden", type=int, default=128)
     parser.add_argument("--decisions", type=int, default=64)
     parser.add_argument("--per-decision", type=int, default=8)
+    parser.add_argument("--top", type=int, default=0,
+                        help="of per_decision, always the teacher's top")
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup", type=int, default=500)
@@ -291,13 +377,23 @@ def main():
     parser.add_argument("--keep-layers", default="0,2,4,6",
                         help="teacher blocks the student keeps")
     parser.add_argument("--w-spread", type=float, default=0.5)
+    parser.add_argument("--w-rank", type=float, default=0.0,
+                        help="listwise loss: KL from the teacher's softmax "
+                        "over each decision's utilities to the student's")
+    parser.add_argument("--rank-temp", type=float, default=0.01)
     parser.add_argument("--val-mod", type=int, default=50)
+    parser.add_argument("--val-data", default="",
+                        help="validate on these files' held-out games")
     parser.add_argument("--val-decisions", type=int, default=2000)
     parser.add_argument("--eval-every", type=int, default=1000)
+    parser.add_argument("--refresh-minutes", type=float, default=0.0,
+                        help="look for new training records this often "
+                        "(files still being written)")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
-    records = Records(args.data, args.val_mod, args.per_decision)
+    records = Records(args.data, args.val_mod, args.per_decision,
+                      args.val_data)
     print(f"{len(records.train)} train decisions, {len(records.val)} val "
           f"decisions", flush=True)
     if args.init_teacher:
@@ -313,16 +409,28 @@ def main():
     n_params = sum(v.size for _, v in tree_flatten(params))
     print(f"student {hparams}: {n_params / 1e6:.2f}M parameters", flush=True)
 
-    def loss_fn(params, bits, scalars, value_t, spread_t):
-        value, spread = forward(params, unpack(bits), scalars, args.heads)
+    def loss_fn(params, bits, scalars, value_t, spread_t, after):
+        value, logit = forward(params, unpack(bits), scalars, args.heads)
         # Rows come per_decision at a time from one decision.
         shape = (args.decisions, args.per_decision)
         value_g, target_g = value.reshape(shape), value_t.reshape(shape)
         centered = ((value_g - value_g.mean(axis=1, keepdims=True))
                     - (target_g - target_g.mean(axis=1, keepdims=True)))
-        return (args.w_value * mx.mean((value - value_t) ** 2)
+        loss = (args.w_value * mx.mean((value - value_t) ** 2)
                 + args.w_centered * mx.mean(centered ** 2)
-                + args.w_spread * mx.mean((spread - spread_t) ** 2))
+                + args.w_spread * mx.mean((mx.tanh(logit) - spread_t) ** 2))
+        if args.w_rank:
+            logit_t = mx.arctanh(mx.clip(spread_t, -MAX_SPREAD_OUTPUT,
+                                         MAX_SPREAD_OUTPUT))
+            scores = (utility_mx(value, logit, after).reshape(shape)
+                      / args.rank_temp)
+            scores_t = (utility_mx(value_t, logit_t, after).reshape(shape)
+                        / args.rank_temp)
+            log_p_t = scores_t - mx.logsumexp(scores_t, axis=1, keepdims=True)
+            log_p = scores - mx.logsumexp(scores, axis=1, keepdims=True)
+            loss = loss + args.w_rank * mx.mean(
+                mx.sum(mx.exp(log_p_t) * (log_p_t - log_p), axis=1))
+        return loss
 
     grad_fn = mx.value_and_grad(loss_fn)
     optimizer = optim.AdamW(learning_rate=args.lr,
@@ -330,28 +438,41 @@ def main():
     optimizer.init(params)
     state = [optimizer.state]
 
-    def step_fn(params, bits, scalars, value_t, spread_t):
-        loss, grads = grad_fn(params, bits, scalars, value_t, spread_t)
+    def step_fn(params, bits, scalars, value_t, spread_t, after):
+        loss, grads = grad_fn(params, bits, scalars, value_t, spread_t, after)
         return loss, optimizer.apply_gradients(grads, params)
 
     step_fn = mx.compile(step_fn, inputs=state, outputs=state)
-    # Steps from the time budget, measured over the first steps.
-    total_steps = args.steps or 10 ** 9
+    # Without --steps, the cosine spans the time budget: the step rate
+    # changes when other jobs share the GPU.
+    def progress(step):
+        if args.steps:
+            return step / args.steps
+        return (time.time() - start) / (60 * args.minutes)
 
     def schedule(step):
         warm = (step + 1) / args.warmup
-        cosine = 0.5 * (1 + math.cos(math.pi * min(step / total_steps, 1.0)))
+        cosine = 0.5 * (1 + math.cos(math.pi * min(progress(step), 1.0)))
         return args.lr * min(warm, cosine)
 
     batch_queue = queue.Queue(maxsize=8)
     stop = threading.Event()
     loaders = [threading.Thread(target=batches, daemon=True,
                                 args=(records, args.decisions,
-                                      args.per_decision, args.seed + idx,
-                                      batch_queue, stop))
+                                      args.per_decision, args.top,
+                                      args.seed + idx, batch_queue, stop))
                for idx in range(3)]
     for loader in loaders:
         loader.start()
+
+    def refresh():
+        while not stop.wait(60 * args.refresh_minutes):
+            added = records.refresh()
+            print(f"refresh: +{added} -> {len(records.train)} train "
+                  f"decisions", flush=True)
+
+    if args.refresh_minutes > 0:
+        threading.Thread(target=refresh, daemon=True).start()
 
     log = open(f"{args.out}/log.jsonl", "a")
     metrics = evaluate(params, records, args.heads, args.val_decisions)
@@ -360,27 +481,25 @@ def main():
     log.write(json.dumps(metrics) + "\n")
     start = time.time()
     step, rows_seen, loss_sum, loss_count = 0, 0, 0.0, 0
-    deadline = start + 60 * args.minutes
     best = None
-    while step < total_steps and (args.steps or time.time() < deadline):
-        bits, scalars, value_t, spread_t = batch_queue.get()
+    done = False
+    while not done:
+        bits, scalars, value_t, spread_t, after = batch_queue.get()
         optimizer.learning_rate = schedule(step)
         loss, params = step_fn(params, mx.array(bits), mx.array(scalars),
-                               mx.array(value_t), mx.array(spread_t))
+                               mx.array(value_t), mx.array(spread_t),
+                               mx.array(after))
         mx.eval(params, optimizer.state, loss)
         step += 1
         rows_seen += len(value_t)
         loss_sum += loss.item()
         loss_count += 1
-        if step == 200 and not args.steps:
-            # Fix the cosine horizon from the measured rate.
-            rate = step / (time.time() - start)
-            total_steps = int(rate * 60 * args.minutes)
-            print(f"{rate:.1f} steps/s -> {total_steps} steps", flush=True)
-        if step % args.eval_every == 0 or step == total_steps:
+        done = progress(step) >= 1.0
+        if step % args.eval_every == 0 or done:
             metrics = evaluate(params, records, args.heads, args.val_decisions)
             metrics.update(step=step, rows=rows_seen,
                            minutes=(time.time() - start) / 60,
+                           train_decisions=len(records.train),
                            train_loss=loss_sum / loss_count,
                            lr=schedule(step))
             loss_sum, loss_count = 0.0, 0

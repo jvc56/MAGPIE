@@ -30,16 +30,20 @@ assert RECORD.itemsize == 2712, RECORD.itemsize
 
 
 def open_records(pattern):
-    """Memory-maps every file matching pattern; returns a list of arrays. A
-    trailing partial record (a file still being written) is left out."""
-    files = sorted(glob.glob(pattern))
+    """Memory-maps every file matching pattern (comma-separated globs, index
+    caches skipped); returns a list of arrays. A trailing partial record (a
+    file still being written) is left out."""
+    files = sorted({path for one in pattern.split(",")
+                    for path in glob.glob(one) if not path.endswith(".npy")})
     if not files:
         raise FileNotFoundError(pattern)
-    parts = []
-    for path in files:
-        count = os.path.getsize(path) // RECORD.itemsize
-        parts.append(np.memmap(path, dtype=RECORD, mode="r", shape=(count,)))
-    return parts
+    return [open_record_file(path) for path in files]
+
+
+def open_record_file(path):
+    """Memory-maps one records file's complete records."""
+    count = os.path.getsize(path) // RECORD.itemsize
+    return np.memmap(path, dtype=RECORD, mode="r", shape=(count,))
 
 
 def unpack_board(bits):
