@@ -98,6 +98,7 @@ static MPSGraphTensor *metal_linear_weight(MPSGraph *graph, const float *values,
 typedef struct MetalBuilder {
   MPSGraph *graph;
   const ValueNet *net;
+  const ValueNetShape *shape;
   MPSDataType data_type;
   bool ok;
   ErrorStack *error_stack;
@@ -152,8 +153,9 @@ static MPSGraphTensor *builder_layer_norm(MetalBuilder *builder,
   char *weight_name = get_formatted_string("%s.weight", prefix);
   char *bias_name = get_formatted_string("%s.bias", prefix);
   const float *weight =
-      builder_tensor(builder, weight_name, VALUE_NET_MODEL_DIM);
-  const float *bias = builder_tensor(builder, bias_name, VALUE_NET_MODEL_DIM);
+      builder_tensor(builder, weight_name, builder->shape->model_dim);
+  const float *bias =
+      builder_tensor(builder, bias_name, builder->shape->model_dim);
   free(weight_name);
   free(bias_name);
   if (weight == NULL || bias == NULL) {
@@ -183,13 +185,13 @@ static MPSGraphTensor *builder_layer_norm(MetalBuilder *builder,
       multiplicationWithPrimaryTensor:normed
                       secondaryTensor:metal_constant(
                                           graph, weight,
-                                          @[ @(VALUE_NET_MODEL_DIM) ],
+                                          @[ @(builder->shape->model_dim) ],
                                           builder->data_type)
                                  name:nil];
   return [graph
       additionWithPrimaryTensor:scaled
                 secondaryTensor:metal_constant(graph, bias,
-                                               @[ @(VALUE_NET_MODEL_DIM) ],
+                                               @[ @(builder->shape->model_dim) ],
                                                builder->data_type)
                            name:nil];
 }
@@ -225,16 +227,17 @@ static MPSGraphTensor *builder_block(MetalBuilder *builder, MPSGraphTensor *x,
   MPSGraphTensor *normed = builder_layer_norm(builder, x, prefix);
   free(prefix);
   prefix = get_formatted_string("blocks.%d.qkv", layer);
+  const ValueNetShape *shape = builder->shape;
   MPSGraphTensor *qkv = builder_linear(builder, normed, prefix,
-                                       VALUE_NET_MODEL_DIM,
-                                       3 * VALUE_NET_MODEL_DIM);
+                                       shape->model_dim,
+                                       3 * shape->model_dim);
   free(prefix);
   // [B, T, 3, heads, head_dim] -> [3, B, heads, T, head_dim]
   MPSGraphTensor *split =
       [graph reshapeTensor:qkv
                  withShape:@[
-                   @(-1), @(VALUE_NET_TOKENS), @3, @(VALUE_NET_HEADS),
-                   @(VALUE_NET_HEAD_DIM)
+                   @(-1), @(VALUE_NET_TOKENS), @3, @(shape->heads),
+                   @(shape->head_dim)
                  ]
                       name:nil];
   MPSGraphTensor *heads = [graph transposeTensor:split
@@ -256,19 +259,19 @@ static MPSGraphTensor *builder_block(MetalBuilder *builder, MPSGraphTensor *x,
                                      keyTensor:parts[1]
                                    valueTensor:parts[2]
                                          scale:(float)(1.0 /
-                                                       sqrt(VALUE_NET_HEAD_DIM))
+                                                       sqrt(shape->head_dim))
                                           name:nil];
   // [B, heads, T, head_dim] -> [B, T, dim]
   attended = [graph transposeTensor:attended dimension:1 withDimension:2 name:nil];
   attended = [graph
       reshapeTensor:attended
-          withShape:@[ @(-1), @(VALUE_NET_TOKENS), @(VALUE_NET_MODEL_DIM) ]
+          withShape:@[ @(-1), @(VALUE_NET_TOKENS), @(shape->model_dim) ]
                name:nil];
   prefix = get_formatted_string("blocks.%d.proj", layer);
   x = [graph additionWithPrimaryTensor:x
                        secondaryTensor:builder_linear(builder, attended, prefix,
-                                                      VALUE_NET_MODEL_DIM,
-                                                      VALUE_NET_MODEL_DIM)
+                                                      shape->model_dim,
+                                                      shape->model_dim)
                                   name:nil];
   free(prefix);
   prefix = get_formatted_string("blocks.%d.ln2", layer);
@@ -276,14 +279,14 @@ static MPSGraphTensor *builder_block(MetalBuilder *builder, MPSGraphTensor *x,
   free(prefix);
   prefix = get_formatted_string("blocks.%d.fc1", layer);
   MPSGraphTensor *hidden = builder_gelu(
-      builder, builder_linear(builder, normed, prefix, VALUE_NET_MODEL_DIM,
-                              VALUE_NET_FF_DIM));
+      builder, builder_linear(builder, normed, prefix, shape->model_dim,
+                              shape->ff_dim));
   free(prefix);
   prefix = get_formatted_string("blocks.%d.fc2", layer);
   x = [graph additionWithPrimaryTensor:x
                        secondaryTensor:builder_linear(builder, hidden, prefix,
-                                                      VALUE_NET_FF_DIM,
-                                                      VALUE_NET_MODEL_DIM)
+                                                      shape->ff_dim,
+                                                      shape->model_dim)
                                   name:nil];
   free(prefix);
   return x;
@@ -294,7 +297,8 @@ static void builder_build(MetalBuilder *builder, MPSGraphTensor *board,
                           MPSGraphTensor **spread) {
   MPSGraph *graph = builder->graph;
   const MPSDataType type = builder->data_type;
-  const int dim = VALUE_NET_MODEL_DIM;
+  const int dim = builder->shape->model_dim;
+  const int hidden_dim = builder->shape->head_hidden;
   // Square tokens: [B, planes, squares] -> [B, squares, planes] -> proj.
   MPSGraphTensor *square_inputs = [graph transposeTensor:board
                                                dimension:1
@@ -358,7 +362,7 @@ static void builder_build(MetalBuilder *builder, MPSGraphTensor *board,
   MPSGraphTensor *x = [graph concatTensors:@[ cls_token, squares, tiles, game ]
                                  dimension:1
                                       name:nil];
-  for (int layer = 0; layer < VALUE_NET_LAYERS; layer++) {
+  for (int layer = 0; layer < builder->shape->layers; layer++) {
     x = builder_block(builder, x, layer);
   }
   MPSGraphTensor *first = [graph sliceTensor:x
@@ -370,10 +374,10 @@ static void builder_build(MetalBuilder *builder, MPSGraphTensor *board,
   MPSGraphTensor *normed = builder_layer_norm(builder, first, "ln_f");
   MPSGraphTensor *hidden = [graph
       reLUWithTensor:builder_linear(builder, normed, "fc1", dim,
-                                    VALUE_NET_HEAD_HIDDEN)
+                                    hidden_dim)
                 name:nil];
   MPSGraphTensor *logits = builder_linear(builder, hidden, "heads.wdl",
-                                          VALUE_NET_HEAD_HIDDEN, VALUE_NET_WDL);
+                                          hidden_dim, VALUE_NET_WDL);
   MPSGraphTensor *probabilities = [graph softMaxWithTensor:logits
                                                       axis:-1
                                                       name:nil];
@@ -395,7 +399,7 @@ static void builder_build(MetalBuilder *builder, MPSGraphTensor *board,
   *spread = [graph
       castTensor:[graph tanhWithTensor:builder_linear(builder, hidden,
                                                       "heads.spread",
-                                                      VALUE_NET_HEAD_HIDDEN, 1)
+                                                      hidden_dim, 1)
                                   name:nil]
           toType:MPSDataTypeFloat32
             name:nil];
@@ -419,6 +423,7 @@ static bool metal_slot_create(ValueNetMetalSlot *slot, id<MTLDevice> device,
   MetalBuilder builder = {
       .graph = graph,
       .net = net,
+      .shape = value_net_get_shape(net),
       .data_type = type,
       .ok = true,
       .error_stack = error_stack,
