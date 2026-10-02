@@ -256,3 +256,21 @@ P47, NWL23 weight grid for equity_reply. Each point played 800 pairs against equ
 - **Setup 0.75 is worse at every blocking weight**, significantly so for blocking 0.45 to 1.0. Under the prespecified rule, P47 selected 1.4 / 0.4 (51.12%, p = 0.25 alone).
 - **P48:** the refit point does not beat NWL23 score mode (49.46%). It does no better than 0.7 / 0.4 did in P42 (49.88%). P47's apparent preference for heavier blocking does not survive a fresh seed.
 - **Conclusion for NWL23:** neither equity-valued replies nor refit weights gain anything over score mode. Score, equity and equity_reply all play about equally there.
+
+## Speed: equity reply reconstruction and a static-ish PGO profile
+
+These are exact speedups; results are unchanged.
+
+- **Reply reconstruction.** Opponent replies chosen by equity are now rebuilt from the pass branch, as score-mode replies already were. The result is exact while the bag is non-empty, the board is not empty, and exchange legality matches.
+  - bsbench, exact teacher, 48 positions × 64 racks, one core, warm RIT+WIT: equity_reply 140 → 120 ms per position, equity 156 → 137, score 119 (unchanged).
+  - The output is identical. bsbench now fixes its seed, because equity mode's follow-ups read the opponent's random draws near the end of the bag.
+- **Warm profile.** What remains is ordinary move generation (shadow pruning and WMP lookups). Copying the game for each rack and candidate (~3%) and regenerating cross-sets after each reply (~3%) are the only teacher-side overheads, and the undo path that would avoid the copy copies the board too.
+- **PGO (`make pgo_simbs`).** Sims at 10 threads, 2 plies, 15 plays, 6 positions, two repeats (`bench-pgo/`):
+
+| binary | static-ish rollouts (research_v1) | static rollouts |
+|---|---:|---:|
+| no PGO | 117 it/s | 194k it/s |
+| release (static-autoplay profile) | 122 it/s (+4%) | 209k it/s (+8%) |
+| pgo_simbs (static-ish sim profile) | **125 it/s (+7%)** | **214k it/s (+10%)** |
+
+The ordering held in both repeats, though Spotlight indexing kept the load average above 10. The release default is unchanged.
