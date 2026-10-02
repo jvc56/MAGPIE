@@ -17,6 +17,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum {
   VALUE_NET_PLAYER_DEFAULT_CANDIDATES = 50,
@@ -40,6 +41,11 @@ struct ValueNetPlayer {
   float *scalar_rows;
   float *values;
   float *spreads;
+  // The cascade (value_net_player_set_rescorer); NULL when off.
+  ValueNetPlayer *rescorer;
+  int rescore_top;
+  double *utilities;
+  int *ranked;
 };
 
 ValueNetPlayer *
@@ -107,7 +113,23 @@ void value_net_player_destroy(ValueNetPlayer *player) {
   free(player->scalar_rows);
   free(player->values);
   free(player->spreads);
+  free(player->utilities);
+  free(player->ranked);
   free(player);
+}
+
+void value_net_player_set_rescorer(ValueNetPlayer *player,
+                                   ValueNetPlayer *rescorer, int rescore_top) {
+  player->rescorer = rescorer;
+  player->rescore_top = rescore_top < 1 ? 1 : rescore_top;
+  if (rescorer != NULL && player->rescore_top > rescorer->max_candidates) {
+    player->rescore_top = rescorer->max_candidates;
+  }
+  if (rescorer != NULL && player->utilities == NULL) {
+    player->utilities =
+        calloc_or_die((size_t)player->max_candidates, sizeof(double));
+    player->ranked = calloc_or_die((size_t)player->max_candidates, sizeof(int));
+  }
 }
 
 void value_net_player_evaluate_rows(void *context, int rows, const float *board,
@@ -144,6 +166,87 @@ void value_net_player_evaluate_rows(void *context, int rows, const float *board,
   }
 }
 
+// Whether candidate first_idx ranks above candidate second_idx: higher
+// utility, then more tiles played.
+static bool value_net_player_ranks_above(const MoveList *list,
+                                         const double *utilities, int first_idx,
+                                         int second_idx) {
+  if (utilities[first_idx] != utilities[second_idx]) {
+    return utilities[first_idx] > utilities[second_idx];
+  }
+  return move_get_tiles_played(move_list_get_move(list, first_idx)) >
+         move_get_tiles_played(move_list_get_move(list, second_idx));
+}
+
+// The cascade's choice among the count candidates player's net has
+// scored: the best by player's utility from the rescorer's outputs of the
+// top rescore_top by player's own.
+static int value_net_player_rescore(ValueNetPlayer *player, const Game *game,
+                                    int count) {
+  const MoveList *list = player->list;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    player->utilities[move_idx] = value_net_utility(
+        player->values[move_idx], player->spreads[move_idx],
+        value_net_spread_after_move(game, move_list_get_move(list, move_idx)),
+        player->utility_w_winpct, player->utility_w_spread,
+        player->utility_spread_scale);
+  }
+  // ranked[0..top): the top candidates, best first (among equals, the
+  // earlier).
+  const int top = count < player->rescore_top ? count : player->rescore_top;
+  int ranked_count = 0;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    int slot = ranked_count;
+    if (ranked_count < top) {
+      ranked_count++;
+    } else if (value_net_player_ranks_above(list, player->utilities, move_idx,
+                                            player->ranked[top - 1])) {
+      slot = top - 1;
+    } else {
+      continue;
+    }
+    while (slot > 0 &&
+           value_net_player_ranks_above(list, player->utilities, move_idx,
+                                        player->ranked[slot - 1])) {
+      player->ranked[slot] = player->ranked[slot - 1];
+      slot--;
+    }
+    player->ranked[slot] = move_idx;
+  }
+  ValueNetPlayer *rescorer = player->rescorer;
+  for (int slot = 0; slot < top; slot++) {
+    const size_t move_idx = (size_t)player->ranked[slot];
+    memcpy(rescorer->board_rows + ((size_t)slot * VALUE_NET_BOARD_FLOATS),
+           player->board_rows + (move_idx * VALUE_NET_BOARD_FLOATS),
+           sizeof(float) * VALUE_NET_BOARD_FLOATS);
+    memcpy(rescorer->scalar_rows + ((size_t)slot * VALUE_NET_SCALARS),
+           player->scalar_rows + (move_idx * VALUE_NET_SCALARS),
+           sizeof(float) * VALUE_NET_SCALARS);
+  }
+  value_net_player_evaluate_rows(
+      rescorer, top, rescorer->board_rows, rescorer->scalar_rows,
+      rescorer->values,
+      player->utility_w_spread > 0.0 ? rescorer->spreads : NULL);
+  int best = player->ranked[0];
+  double best_utility = 0.0;
+  for (int slot = 0; slot < top; slot++) {
+    const int move_idx = player->ranked[slot];
+    const Move *move = move_list_get_move(list, move_idx);
+    const double utility = value_net_utility(
+        rescorer->values[slot], rescorer->spreads[slot],
+        value_net_spread_after_move(game, move), player->utility_w_winpct,
+        player->utility_w_spread, player->utility_spread_scale);
+    if (slot == 0 || utility > best_utility ||
+        (utility == best_utility &&
+         move_get_tiles_played(move) >
+             move_get_tiles_played(move_list_get_move(list, best)))) {
+      best = move_idx;
+      best_utility = utility;
+    }
+  }
+  return best;
+}
+
 const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
                                     const ValueNetHistory *history) {
   MoveList *list = player->list;
@@ -176,6 +279,10 @@ const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
   value_net_player_evaluate_rows(
       player, count, player->board_rows, player->scalar_rows, player->values,
       player->utility_w_spread > 0.0 ? player->spreads : NULL);
+  if (player->rescorer != NULL) {
+    return move_list_get_move(list,
+                              value_net_player_rescore(player, game, count));
+  }
   int best = 0;
   double best_utility = 0.0;
   for (int move_idx = 0; move_idx < count; move_idx++) {

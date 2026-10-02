@@ -70,6 +70,25 @@ The student is written in the teacher's format (`weights.f32` +
 <out>:b=nn:model_a=<student_dir>
 ```
 
+`cands=` sets how many top static moves an nn player scores (default 50),
+and `rescore=<dir>` with `rescore_top=k` makes it a cascade: the net at
+`<dir>` rescores the player's top k and decides. The Metal backend pads
+each evaluation to a power of two rows (at least 8), so 50 candidates
+cost 64 rows, 17-32 cost 32 and 9-16 cost 16. Against the teacher at 50
+candidates (1,000 pairs, fp32, MAGPIE's default utility, seed 20266201;
+speed per move on an idle M5 Max GPU, 8 game processes / 1):
+
+| player a | a's score | speed vs teacher |
+|---|---|---|
+| teacher, `cands=32` | 50.05% +/- 0.27 | 1.98x / 2.08x |
+| teacher, `cands=16` | 49.35% +/- 0.47 | 3.94x / 3.76x |
+| student (blocks 0-3, 3,000 steps) + teacher on its top 5 | 48.95% +/- 0.56 | 1.49x / 1.52x |
+| student alone | 45.77% +/- 0.88 | 1.86x / 1.96x |
+
+Offline, the teacher's utility regret from scoring only static's top k
+is 0.00052 for k = 16 and 0.00017 for k = 32; each 0.001 of regret has
+cost about 1.1 points of win rate in these games.
+
 PyTorch training on this Mac's GPU ran at about half MLX's speed (the
 backward pass dominates), so MLX trains; `model.py` is the reference
 implementation and parity check.

@@ -47,4 +47,12 @@ void value_net_player_evaluate_rows(void *context, int rows, const float *board,
 const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
                                     const ValueNetHistory *history);
 
+// A cascade: after player's net ranks the candidates, rescorer's net
+// evaluates the top rescore_top of them (at most rescorer's
+// max_candidates), and player plays the best of those by player's utility
+// from rescorer's outputs. The player does not own rescorer. NULL turns
+// rescoring off.
+void value_net_player_set_rescorer(ValueNetPlayer *player,
+                                   ValueNetPlayer *rescorer, int rescore_top);
+
 #endif

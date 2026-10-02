@@ -314,10 +314,13 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // batch= (value net replies). uwin=, uspread= and uscale= set the utility
 // (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults otherwise) that an
 // nn player and each sim, value net replies included, rank by. model= sets
-// the net's directory (default <model_dir>). Any key may be given per
-// player as <key>_a or <key>_b. Both games of a pair use one seed
-// and the players swap seats, so each seat draws the same tiles. Writes
-// <out>.games.csv and per-decision timing to <out>.moves.csv.
+// the net's directory (default <model_dir>). An nn player scores the top
+// cands= static moves (default 50); with rescore=<dir> it cascades: the
+// net at <dir> rescores its top rescore_top= (default 5) candidates and
+// decides. Any key may be given per player as <key>_a or <key>_b. Both
+// games of a pair use one seed and the players swap seats, so each seat
+// draws the same tiles. Writes <out>.games.csv and per-decision timing to
+// <out>.moves.csv.
 static void vnt_games(const StringSplitter *fields) {
   if (string_splitter_get_number_of_items(fields) < 9) {
     log_fatal("games needs at least 8 fields");
@@ -360,10 +363,37 @@ static void vnt_games(const StringSplitter *fields) {
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     if (kinds[player_idx] == VNT_PLAYER_NN ||
         kinds[player_idx] == VNT_PLAYER_SIM_NN) {
+      // An nn player's cands= caps its candidates (default 50); a sim
+      // player's is its root candidates.
+      const int candidates =
+          kinds[player_idx] == VNT_PLAYER_NN
+              ? (int)vnt_option_double(fields, 9, "cands", player_idx, 0.0)
+              : 0;
       players[player_idx] = value_net_player_create(
-          vnt_option(fields, 9, "model", player_idx, model_dir), backend, 0,
-          utility_w_winpct[player_idx], utility_w_spread[player_idx],
-          utility_spread_scale[player_idx], error_stack);
+          vnt_option(fields, 9, "model", player_idx, model_dir), backend,
+          candidates, utility_w_winpct[player_idx],
+          utility_w_spread[player_idx], utility_spread_scale[player_idx],
+          error_stack);
+    }
+  }
+  // An nn player with rescore=<model_dir> cascades (see
+  // value_net_player_set_rescorer).
+  ValueNetPlayer *rescorers[2] = {NULL, NULL};
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const char *rescore_dir =
+        vnt_option(fields, 9, "rescore", player_idx, NULL);
+    if (kinds[player_idx] != VNT_PLAYER_NN || players[player_idx] == NULL ||
+        rescore_dir == NULL) {
+      continue;
+    }
+    rescorers[player_idx] = value_net_player_create(
+        rescore_dir, backend, 0, utility_w_winpct[player_idx],
+        utility_w_spread[player_idx], utility_spread_scale[player_idx],
+        error_stack);
+    if (rescorers[player_idx] != NULL) {
+      value_net_player_set_rescorer(
+          players[player_idx], rescorers[player_idx],
+          (int)vnt_option_double(fields, 9, "rescore_top", player_idx, 5.0));
     }
   }
   if (!error_stack_is_empty(error_stack)) {
@@ -496,6 +526,8 @@ static void vnt_games(const StringSplitter *fields) {
   move_list_destroy(static_list);
   value_net_player_destroy(players[0]);
   value_net_player_destroy(players[1]);
+  value_net_player_destroy(rescorers[0]);
+  value_net_player_destroy(rescorers[1]);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
