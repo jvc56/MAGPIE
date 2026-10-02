@@ -163,6 +163,22 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
+# The value net's Metal backend (src/impl/value_net_metal.m) builds on macOS;
+# VALUE_NET_METAL=0 leaves it out, and other systems never build it.
+ifeq ($(shell uname -s),Darwin)
+VALUE_NET_METAL ?= 1
+else
+VALUE_NET_METAL := 0
+endif
+ifeq ($(VALUE_NET_METAL),1)
+SRC_OBJC := $(wildcard $(SRC_DIR)/**/*.m)
+OBJ_SRC += $(SRC_OBJC:$(SRC_DIR)/%.m=$(OBJ_DIR)/$(SRC_DIR)/%.o)
+CFLAGS += -DVALUE_NET_METAL=1
+LDLIBS += -framework Foundation -framework Metal \
+          -framework MetalPerformanceShaders \
+          -framework MetalPerformanceShadersGraph
+endif
+
 .PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
 	pgo_toolchain_check \
 	pgo_eg peg_eg pgo_workload prepare_data libmagpie examples
@@ -221,6 +237,9 @@ magpie_convert: $(OBJ_SRC) $(CONVERT_OBJ) | $(BIN_DIR)
 
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.m | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
+	$(CC) $(CFLAGS) -fobjc-arc $(DEPFLAGS) -c $< -o $@
 
 # The training executable and CLI executable have different `main` functions.
 # Keep the CLI entry point out of profile use so its shared symbol name is not

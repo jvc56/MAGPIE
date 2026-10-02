@@ -2,6 +2,7 @@
 #define VALUE_NET_H
 
 #include "../util/io_util.h"
+#include <stddef.h>
 
 // The Macondo transformer value net (macondo-nn-tf): it scores the position
 // after a candidate move, from the mover's side, as value = P(win) - P(loss)
@@ -16,10 +17,11 @@ typedef struct ValueNet ValueNet;
 ValueNet *value_net_create(const char *dir, ErrorStack *error_stack);
 void value_net_destroy(ValueNet *net);
 
-// The float32 weights and the named tensor's offset into them, for
-// backends that upload the weights themselves.
-const float *value_net_get_weights(const ValueNet *net);
-size_t value_net_get_num_weights(const ValueNet *net);
+// The named tensor (manifest name, row-major, Linear weights stored
+// [out, in]), for backends that upload the weights themselves, or NULL
+// when it is missing or does not hold count floats.
+const float *value_net_get_tensor(const ValueNet *net, const char *name,
+                                  size_t count);
 
 // Evaluates rows rows on the CPU in float32: board holds rows x
 // VALUE_NET_BOARD_FLOATS floats (plane-major, then row, then column) and

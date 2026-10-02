@@ -4,6 +4,7 @@
 #include "../src/compat/endian_io.h"
 #include "../src/def/value_net_defs.h"
 #include "../src/ent/value_net.h"
+#include "../src/impl/value_net_metal.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include <math.h>
@@ -15,6 +16,7 @@
 
 enum {
   VALUE_NET_PARITY_ROWS = 64,
+  VALUE_NET_PARITY_REPEATS = 20,
 };
 
 // Reads count little-endian floats from path.
@@ -72,10 +74,31 @@ static void vnt_parity(const char *dir, const char *parity_dir, int rows) {
   free(path);
   float value[VALUE_NET_PARITY_ROWS];
   float spread[VALUE_NET_PARITY_ROWS];
-  const int64_t start = ctimer_monotonic_ns();
+  int64_t start = ctimer_monotonic_ns();
   value_net_evaluate_cpu(net, rows, board, scalars, value, spread);
   vnt_report("cpu", rows, value, spread, ref_value, ref_spread,
              (double)(ctimer_monotonic_ns() - start) / 1e9);
+  for (int half = 0; half <= 1; half++) {
+    ValueNetMetal *metal = value_net_metal_create(net, half, error_stack);
+    if (metal == NULL) {
+      error_stack_print_and_reset(error_stack);
+      continue;
+    }
+    // The first run compiles the graph for this batch size.
+    start = ctimer_monotonic_ns();
+    value_net_metal_evaluate(metal, rows, board, scalars, value, spread);
+    const double first = (double)(ctimer_monotonic_ns() - start) / 1e9;
+    start = ctimer_monotonic_ns();
+    for (int repeat = 0; repeat < VALUE_NET_PARITY_REPEATS; repeat++) {
+      value_net_metal_evaluate(metal, rows, board, scalars, value, spread);
+    }
+    const double seconds = (double)(ctimer_monotonic_ns() - start) / 1e9 /
+                           VALUE_NET_PARITY_REPEATS;
+    vnt_report(half ? "metal_fp16" : "metal_fp32", rows, value, spread,
+               ref_value, ref_spread, seconds);
+    printf("value_net_metal first_call_seconds=%.3f\n", first);
+    value_net_metal_destroy(metal);
+  }
   free(board);
   free(scalars);
   free(ref_value);

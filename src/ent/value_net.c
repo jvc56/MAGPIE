@@ -38,6 +38,7 @@ typedef struct ValueNetBlock {
 struct ValueNet {
   float *weights;
   size_t num_weights;
+  char *manifest;
   const float *pos_emb;
   const float *tile_emb;
   const float *cls;
@@ -243,7 +244,7 @@ ValueNet *value_net_create(const char *dir, ErrorStack *error_stack) {
                  &net->wdl_weight, error_stack);
   value_net_bind(net, manifest, "heads.wdl.bias", VALUE_NET_WDL, &net->wdl_bias,
                  error_stack);
-  free(manifest);
+  net->manifest = manifest;
   if (!error_stack_is_empty(error_stack)) {
     value_net_destroy(net);
     return NULL;
@@ -256,13 +257,19 @@ void value_net_destroy(ValueNet *net) {
     return;
   }
   free(net->weights);
+  free(net->manifest);
   free(net);
 }
 
-const float *value_net_get_weights(const ValueNet *net) { return net->weights; }
-
-size_t value_net_get_num_weights(const ValueNet *net) {
-  return net->num_weights;
+const float *value_net_get_tensor(const ValueNet *net, const char *name,
+                                  size_t count) {
+  size_t offset = 0;
+  size_t found = 0;
+  if (!manifest_find(net->manifest, name, &offset, &found) || found != count ||
+      offset + count > net->num_weights) {
+    return NULL;
+  }
+  return net->weights + offset;
 }
 
 static float dot(const float *a, const float *b, int length) {
