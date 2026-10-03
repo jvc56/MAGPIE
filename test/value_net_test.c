@@ -712,8 +712,10 @@ static void vnt_games(const StringSplitter *fields) {
   (void)fprintf(games_out,
                 "pair,game,a_seat,a_score,b_score,a_spread,a_win,turns,"
                 "a_seconds,b_seconds\n");
-  (void)fprintf(moves_out,
-                "pair,game,turn,player,bag,total_ms,sim_iterations\n");
+  (void)fprintf(moves_out, "pair,game,turn,player,bag,total_ms,sim_iterations,"
+                           "move,static_move,static_agree\n");
+  StringBuilder *move_names[2] = {string_builder_create(),
+                                  string_builder_create()};
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   Game *game = config_get_game(config);
@@ -772,11 +774,36 @@ static void vnt_games(const StringSplitter *fields) {
           break;
         }
         game_timer_end_turn(&game_timer);
-        (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%.3f,%llu\n", pair_idx,
-                      game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
-                      bag_get_letters(game_get_bag(game)),
-                      (double)(ctimer_monotonic_ns() - start) / 1e6,
-                      (unsigned long long)sim_iterations);
+        const double total_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
+        // A sim player's move against the plain static move (no PAT), as
+        // the static player would play it, off the clock.
+        string_builder_clear(move_names[0]);
+        string_builder_clear(move_names[1]);
+        int static_agree = -1;
+        if (kinds[player_idx] == VNT_PLAYER_SIM ||
+            kinds[player_idx] == VNT_PLAYER_SIM_NN) {
+          Player *mover = game_get_player(game, seat);
+          if (pat_name != NULL) {
+            player_set_pat_usage(mover, true, 0);
+          }
+          Move static_move;
+          move_copy(&static_move, vnt_static_move(game, static_list));
+          if (pat_name != NULL) {
+            player_set_pat_usage(mover, pat_names[player_idx] == NULL, 0);
+          }
+          static_agree =
+              compare_moves_without_equity(&move, &static_move, true) == -1;
+          string_builder_add_move(move_names[0], game_get_board(game), &move,
+                                  game_get_ld(game), false);
+          string_builder_add_move(move_names[1], game_get_board(game),
+                                  &static_move, game_get_ld(game), false);
+        }
+        (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%.3f,%llu,\"%s\",\"%s\",%d\n",
+                      pair_idx, game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
+                      bag_get_letters(game_get_bag(game)), total_ms,
+                      (unsigned long long)sim_iterations,
+                      string_builder_peek(move_names[0]),
+                      string_builder_peek(move_names[1]), static_agree);
         value_net_history_record_opponent_move(&histories[1 - seat], &move);
         play_move(&move, game, NULL);
         turn++;
@@ -798,6 +825,8 @@ static void vnt_games(const StringSplitter *fields) {
   }
   (void)fclose(games_out);
   (void)fclose(moves_out);
+  string_builder_destroy(move_names[0]);
+  string_builder_destroy(move_names[1]);
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     if (choosers[player_idx] != NULL) {
       play_chooser_destroy(choosers[player_idx]);
