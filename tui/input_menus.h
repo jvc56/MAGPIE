@@ -12,11 +12,6 @@
 bool tui_input_quit_confirm(TuiGameState *state, TuiUiState *ui,
                             TuiSession *session, uint32_t key, ncinput input);
 
-// Lexicon picker modal keys.
-// Returns true when the key was consumed.
-bool tui_input_lexicon_picker(TuiGameState *state, TuiUiState *ui,
-                              TuiSession *session, uint32_t key, ncinput input);
-
 // Time picker modal keys (starts a new Watch game on Enter).
 // Returns true when the key was consumed.
 bool tui_input_time_picker(TuiGameState *state, TuiUiState *ui,

@@ -3,7 +3,7 @@
 #include "bot_worker.h"
 #include "config.h"
 #include "game_state.h"
-#include "lexicon_picker.h"
+#include "list_nav.h"
 #include "render_hit_test.h"
 #include "time_picker.h"
 #include "tui_session.h"
@@ -12,6 +12,7 @@
 #include <notcurses/notcurses.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,68 +39,20 @@ bool tui_input_quit_confirm(TuiGameState *state, TuiUiState *ui,
         return true;
       }
     }
-    if (key == NCKEY_ESC || key == 'n' || key == 'N') {
+    const int nav = tui_list_nav(key, &input, ui->quit_confirm_focus, 2, NULL,
+                                 TUI_LIST_NAV_HOME_END | TUI_LIST_NAV_VI);
+    if (nav >= 0) {
+      ui->quit_confirm_focus = nav;
+    } else if (key == NCKEY_ESC || key == 'n' || key == 'N') {
       ui->modal = ui->quit_confirm_return;
     } else if (key == 'y' || key == 'Y') {
       ui->running = false;
-    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-      if (ui->quit_confirm_focus > 0) {
-        ui->quit_confirm_focus--;
-      }
-    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-      if (ui->quit_confirm_focus < 1) {
-        ui->quit_confirm_focus++;
-      }
     } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
       if (ui->quit_confirm_focus == 1) {
         ui->running = false;
       } else {
         ui->modal = ui->quit_confirm_return;
       }
-    }
-    return true;
-  }
-  return false;
-}
-
-// Lexicon picker modal keys.
-// Returns true when the key was consumed.
-bool tui_input_lexicon_picker(TuiGameState *state, TuiUiState *ui,
-                              TuiSession *session, uint32_t key,
-                              ncinput input) {
-  (void)input;
-  if (ui->modal == TUI_MODAL_LEXICON_PICKER) {
-    const int n = tui_lexicon_list_count(ui->lexicon_list);
-    if (key == NCKEY_ESC) {
-      ui->modal = TUI_MODAL_SETTINGS;
-    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-      if (ui->lexicon_focus > 0) {
-        ui->lexicon_focus--;
-      }
-    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-      if (ui->lexicon_focus < n - 1) {
-        ui->lexicon_focus++;
-      }
-    } else if (key == NCKEY_HOME || key == 'g') {
-      ui->lexicon_focus = 0;
-    } else if (key == NCKEY_END || key == 'G') {
-      ui->lexicon_focus = n - 1;
-    } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-      char picked[TUI_LEXICON_NAME_MAX] = {0};
-      if (tui_lexicon_list_name(ui->lexicon_list, ui->lexicon_focus, picked,
-                                sizeof(picked))) {
-        (void)snprintf(session->to_save.lexicon,
-                       sizeof(session->to_save.lexicon), "%s", picked);
-        session->to_save.lexicon_set = true;
-        pthread_mutex_lock(&state->mutex);
-        (void)snprintf(state->pending_lexicon, sizeof(state->pending_lexicon),
-                       "%s", picked);
-        pthread_mutex_unlock(&state->mutex);
-        if (!session->args.no_config) {
-          tui_config_save(&session->to_save);
-        }
-      }
-      ui->modal = TUI_MODAL_SETTINGS;
     }
     return true;
   }
@@ -121,16 +74,12 @@ bool tui_input_time_picker(TuiGameState *state, TuiUiState *ui,
         return true;
       }
     }
-    if (key == NCKEY_ESC) {
+    const int nav = tui_list_nav(key, &input, ui->time_focus, preset_count,
+                                 NULL, TUI_LIST_NAV_HOME_END | TUI_LIST_NAV_VI);
+    if (nav >= 0) {
+      ui->time_focus = nav;
+    } else if (key == NCKEY_ESC) {
       ui->modal = ui->time_picker_return;
-    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-      if (ui->time_focus > 0) {
-        ui->time_focus--;
-      }
-    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-      if (ui->time_focus < preset_count - 1) {
-        ui->time_focus++;
-      }
     } else if (key >= '1' && key <= (uint32_t)('0' + preset_count)) {
       ui->time_focus = (int)(key - '1');
     } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
@@ -193,16 +142,13 @@ bool tui_input_main_menu(TuiGameState *state, TuiUiState *ui,
         return true;
       }
     }
-    if (key == NCKEY_ESC) {
+    const int nav =
+        tui_list_nav(key, &input, ui->main_menu_focus, TUI_MENU_ITEM_COUNT,
+                     NULL, TUI_LIST_NAV_HOME_END | TUI_LIST_NAV_VI);
+    if (nav >= 0) {
+      ui->main_menu_focus = nav;
+    } else if (key == NCKEY_ESC) {
       ui->modal = TUI_MODAL_NONE;
-    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-      if (ui->main_menu_focus > 0) {
-        ui->main_menu_focus--;
-      }
-    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-      if (ui->main_menu_focus < TUI_MENU_ITEM_COUNT - 1) {
-        ui->main_menu_focus++;
-      }
     } else if (key == 'n' || key == 'N') {
       // Mnemonic shortcuts trigger the action immediately, matching
       // the hint shown to the right of each item in the modal. They
@@ -272,27 +218,17 @@ bool tui_input_startup_menu(TuiGameState *state, TuiUiState *ui,
         return true;
       }
     }
-    if (key == NCKEY_ESC) {
+    const int nav = tui_list_nav(key, &input, ui->startup_menu_focus,
+                                 TUI_STARTUP_ITEM_COUNT, su_enabled,
+                                 TUI_LIST_NAV_HOME_END | TUI_LIST_NAV_VI);
+    if (nav >= 0) {
+      ui->startup_menu_focus = nav;
+    } else if (key == NCKEY_ESC) {
       // Esc returns to whichever modal opened the startup menu.
       // First-launch: TUI_MODAL_NONE (dismisses to the bot game
       // already running underneath). Esc → New game: returns to
       // TUI_MODAL_MAIN_MENU so the user can pick Settings/Quit.
       ui->modal = ui->startup_menu_return;
-    } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-      for (int i = ui->startup_menu_focus - 1; i >= 0; i--) {
-        if (su_enabled[i]) {
-          ui->startup_menu_focus = i;
-          break;
-        }
-      }
-    } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-      for (int i = ui->startup_menu_focus + 1; i < TUI_STARTUP_ITEM_COUNT;
-           i++) {
-        if (su_enabled[i]) {
-          ui->startup_menu_focus = i;
-          break;
-        }
-      }
     } else if (key == 'w' || key == 'W') {
       // Mnemonic shortcut: open the Watch setup modal. The setup
       // modal handles starting the game once the user confirms.

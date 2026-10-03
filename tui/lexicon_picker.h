@@ -59,11 +59,4 @@ int tui_lexicon_list_step_same_language(const LexiconList *list, int idx,
 // belonging to the same language are contiguous.
 int tui_lexicon_list_step_language(const LexiconList *list, int idx, int dir);
 
-// Renders the modal-style lexicon picker into the shared modal plane.
-// `focus_idx` is the lexicon index (not display row) that's selected.
-// Only the language containing `focus_idx` is expanded; other
-// languages render as a single collapsed header row.
-void tui_game_render_lexicon_picker(struct ncplane *plane, const Theme *theme,
-                                    const LexiconList *list, int focus_idx);
-
 #endif
