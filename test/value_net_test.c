@@ -314,13 +314,14 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // batch= (value net replies). uwin=, uspread= and uscale= set the utility
 // (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults otherwise) that an
 // nn player and each sim, value net replies included, rank by. model= sets
-// the net's directory (default <model_dir>). An nn player scores the top
-// cands= static moves (default 50); with rescore=<dir> it cascades: the
-// net at <dir> rescores its top rescore_top= (default 5) candidates and
-// decides. Any key may be given per player as <key>_a or <key>_b. Both
-// games of a pair use one seed and the players swap seats, so each seat
-// draws the same tiles. Writes <out>.games.csv and per-decision timing to
-// <out>.moves.csv.
+// the net's directory (default <model_dir>). pat=<name> ranks a player's
+// moves by static equity with that PAT term (one file for both players).
+// An nn player scores the top cands= static moves (default 50); with
+// rescore=<dir> it cascades: the net at <dir> rescores its top
+// rescore_top= (default 5) candidates and decides. Any key may be given
+// per player as <key>_a or <key>_b. Both games of a pair use one seed and
+// the players swap seats, so each seat draws the same tiles. Writes
+// <out>.games.csv and per-decision timing to <out>.moves.csv.
 static void vnt_games(const StringSplitter *fields) {
   if (string_splitter_get_number_of_items(fields) < 9) {
     log_fatal("games needs at least 8 fields");
@@ -334,10 +335,21 @@ static void vnt_games(const StringSplitter *fields) {
   const long worker = strtol(string_splitter_get_item(fields, 6), NULL, 10);
   const long workers = strtol(string_splitter_get_item(fields, 7), NULL, 10);
   const char *out = string_splitter_get_item(fields, 8);
+  // A player with pat=<name> ranks its moves by static equity with that PAT
+  // term; both seats load the one file and each turn switches it on for the
+  // player to move only (the players swap seats).
+  const char *pat_names[2] = {vnt_option(fields, 9, "pat", 0, NULL),
+                              vnt_option(fields, 9, "pat", 1, NULL)};
+  if (pat_names[0] != NULL && pat_names[1] != NULL &&
+      !strings_equal(pat_names[0], pat_names[1])) {
+    log_fatal("pat_a and pat_b must name the same file");
+  }
+  const char *pat_name = pat_names[0] != NULL ? pat_names[0] : pat_names[1];
   char *settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads 1",
-      lexicon);
+      "-numplays 1 -threads 1%s%s",
+      lexicon, pat_name != NULL ? " -pat " : "",
+      pat_name != NULL ? pat_name : "");
   Config *config = config_create_or_die(settings);
   free(settings);
   ErrorStack *error_stack = error_stack_create();
@@ -474,6 +486,10 @@ static void vnt_games(const StringSplitter *fields) {
       while (!game_over(game) && turn < VNT_MAX_TURNS) {
         const int seat = game_get_player_on_turn_index(game);
         const int player_idx = seat == a_seat ? 0 : 1;
+        if (pat_name != NULL) {
+          player_set_pat_usage(game_get_player(game, seat),
+                               pat_names[player_idx] == NULL, 0);
+        }
         const int64_t start = ctimer_monotonic_ns();
         Move move;
         switch (kinds[player_idx]) {
