@@ -18,6 +18,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/value_net.h"
 #include "../src/ent/win_pct.h"
@@ -218,6 +219,199 @@ static void vnt_parity(const char *dir, const char *parity_dir, int rows) {
   free(ref_spread);
   value_net_destroy(net);
   error_stack_destroy(error_stack);
+}
+
+// The win% a sim gave move, or -1 if move was not among its plays.
+static double vnt_sim_win_pct(const SimResults *results, const Move *move) {
+  for (int play_idx = 0; play_idx < sim_results_get_number_of_plays(results);
+       play_idx++) {
+    const SimmedPlay *play = sim_results_get_simmed_play(results, play_idx);
+    if (compare_moves_without_equity(simmed_play_get_move(play), move, true) ==
+        -1) {
+      return stat_get_mean(simmed_play_get_win_pct_stat(play));
+    }
+  }
+  return -1.0;
+}
+
+// One sim of the top root_cands static plays for iterations iterations
+// (round robin, ranked by win%) from seed, its first nn_plies rollout plies
+// the value net's when player is set; results is filled.
+static void vnt_simcompare_sim(const Config *config, Game *game, MoveList *root,
+                               ValueNetPlayer *player, int plies, int threads,
+                               uint64_t iterations, int reply_cands, int batch,
+                               int nn_plies, uint64_t seed, SimResults *results,
+                               ErrorStack *error_stack) {
+  ThreadControl *control = thread_control_create();
+  thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+  SimArgs sim_args;
+  sim_args_fill(plies, root, move_list_get_count(root), NULL,
+                config_get_win_pcts(config), NULL, control, game, false, false,
+                threads, 0, move_list_get_count(root), plies, seed, iterations,
+                1, 0.0, BAI_THRESHOLD_NONE, 0.0, BAI_SAMPLING_RULE_ROUND_ROBIN,
+                0.0, 1.0, 0.0, 100.0, false, NULL, &sim_args);
+  if (player != NULL) {
+    sim_args.rollout_value_net_evaluate = value_net_player_evaluate_rows;
+    sim_args.rollout_value_net_context = player;
+    sim_args.rollout_value_net_candidates = reply_cands;
+    sim_args.rollout_value_net_batch = batch;
+    sim_args.rollout_value_net_plies = nn_plies;
+  }
+  simulate_without_ctx(&sim_args, results, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("sim failed");
+  }
+  thread_control_destroy(control);
+}
+
+// "simcompare:<model_dir>:<backend>:<plies>:<root_cands>:<threads>:
+// <iterations>:<reply_cands>:<batch>:<nn_plies>:<positions>:<out>": on
+// positions from static NWL23 games (even turns 2..20 with tiles in the
+// bag), a sim with static rollouts and one whose first nn_plies rollout
+// plies are the value net's (reply_cands candidates, batch iterations per
+// evaluation), from the same seed, plus a second static sim from another
+// seed as the sampling-noise baseline; all of the top root_cands static
+// plays for iterations iterations each (round robin, ranked by win%).
+// Writes <out>.csv with the picks and the win% the first two sims give both
+// of theirs, and prints how often the static and net picks agree and how
+// often the two static picks do.
+static void vnt_simcompare(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 12) {
+    log_fatal("simcompare needs 11 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const char *backend_name = string_splitter_get_item(fields, 2);
+  const int plies = (int)strtol(string_splitter_get_item(fields, 3), NULL, 10);
+  const int root_cands =
+      (int)strtol(string_splitter_get_item(fields, 4), NULL, 10);
+  const int threads =
+      (int)strtol(string_splitter_get_item(fields, 5), NULL, 10);
+  const uint64_t iterations =
+      strtoull(string_splitter_get_item(fields, 6), NULL, 10);
+  const int reply_cands =
+      (int)strtol(string_splitter_get_item(fields, 7), NULL, 10);
+  const int batch = (int)strtol(string_splitter_get_item(fields, 8), NULL, 10);
+  const int nn_plies =
+      (int)strtol(string_splitter_get_item(fields, 9), NULL, 10);
+  const int positions =
+      (int)strtol(string_splitter_get_item(fields, 10), NULL, 10);
+  const char *out = string_splitter_get_item(fields, 11);
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  // Pure win%, as the sims.
+  ValueNetPlayer *player =
+      value_net_player_create(model_dir, vnt_parse_backend(backend_name), 0,
+                              1.0, 0.0, 100.0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("simcompare setup failed");
+  }
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  MoveList *static_list = move_list_create(1);
+  MoveList *root = move_list_create(root_cands);
+  char *path = get_formatted_string("%s.csv", out);
+  FILE *csv = fopen_or_die(path, "w");
+  free(path);
+  fprintf(csv, "position,game,turn,bag,agree,static_agree,static_pick,"
+               "net_pick,static2_pick,static_sim_static_pick,"
+               "static_sim_net_pick,net_sim_net_pick,net_sim_static_pick\n");
+  StringBuilder *names[3] = {string_builder_create(), string_builder_create(),
+                             string_builder_create()};
+  int done = 0;
+  int agreed = 0;
+  int static_agreed = 0;
+  double static_gap_sum = 0.0;
+  double net_gap_sum = 0.0;
+  for (uint64_t game_idx = 0; done < positions; game_idx++) {
+    game_reset(game);
+    game_seed(game, vnt_mix(UINT64_C(4141) ^ game_idx));
+    draw_starting_racks(game);
+    for (int turn = 0; !game_over(game) && done < positions; turn++) {
+      const int bag = bag_get_letters(game_get_bag(game));
+      if (turn >= 2 && turn <= 20 && turn % 2 == 0 && bag > 0) {
+        move_list_reset(root);
+        const MoveGenArgs args = {
+            .game = game,
+            .move_list = root,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&args);
+        move_list_sort_moves(root);
+        // static (seed 7), net (seed 7), static (seed 8).
+        SimResults *results[3];
+        Move picks[3];
+        for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+          results[sim_idx] = sim_results_create(0.0);
+          vnt_simcompare_sim(config, game, root, sim_idx == 1 ? player : NULL,
+                             plies, threads, iterations, reply_cands, batch,
+                             nn_plies, sim_idx == 2 ? 8 : 7, results[sim_idx],
+                             error_stack);
+          move_copy(&picks[sim_idx],
+                    sim_results_get_best_move(results[sim_idx]));
+          string_builder_clear(names[sim_idx]);
+          string_builder_add_move(names[sim_idx], game_get_board(game),
+                                  &picks[sim_idx], ld, false);
+        }
+        const bool agree =
+            compare_moves_without_equity(&picks[0], &picks[1], true) == -1;
+        const bool static_agree =
+            compare_moves_without_equity(&picks[0], &picks[2], true) == -1;
+        const double static_static = vnt_sim_win_pct(results[0], &picks[0]);
+        const double static_net = vnt_sim_win_pct(results[0], &picks[1]);
+        const double net_net = vnt_sim_win_pct(results[1], &picks[1]);
+        const double net_static = vnt_sim_win_pct(results[1], &picks[0]);
+        fprintf(csv, "%d,%llu,%d,%d,%d,%d,%s,%s,%s,%.5f,%.5f,%.5f,%.5f\n", done,
+                (unsigned long long)game_idx, turn, bag, agree ? 1 : 0,
+                static_agree ? 1 : 0, string_builder_peek(names[0]),
+                string_builder_peek(names[1]), string_builder_peek(names[2]),
+                static_static, static_net, net_net, net_static);
+        (void)fflush(csv);
+        agreed += agree ? 1 : 0;
+        static_agreed += static_agree ? 1 : 0;
+        static_gap_sum += static_static - static_net;
+        net_gap_sum += net_net - net_static;
+        done++;
+        if (done % 25 == 0) {
+          printf("simcompare positions=%d agree=%.3f static_agree=%.3f\n", done,
+                 (double)agreed / done, (double)static_agreed / done);
+          (void)fflush(stdout);
+        }
+        for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+          sim_results_destroy(results[sim_idx]);
+        }
+      }
+      Move move;
+      move_copy(&move, vnt_static_move(game, static_list));
+      play_move(&move, game, NULL);
+    }
+  }
+  printf("simcompare backend=%s plies=%d nn_plies=%d iterations=%llu "
+         "positions=%d agree=%.3f static_agree=%.3f "
+         "mean_gap_static_sim=%.4f mean_gap_net_sim=%.4f\n",
+         backend_name, plies, nn_plies, (unsigned long long)iterations, done,
+         (double)agreed / done, (double)static_agreed / done,
+         static_gap_sum / done, net_gap_sum / done);
+  (void)fclose(csv);
+  for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+    string_builder_destroy(names[sim_idx]);
+  }
+  move_list_destroy(root);
+  move_list_destroy(static_list);
+  value_net_player_destroy(player);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
 }
 
 // "xsprobe": prints MAGPIE's cross sets in both directions around CAT
@@ -1287,6 +1481,8 @@ void value_net_test_run_spec(const char *spec) {
     vnt_distill(fields);
   } else if (strings_equal(mode, "dump")) {
     vnt_dump(fields);
+  } else if (strings_equal(mode, "simcompare")) {
+    vnt_simcompare(fields);
   } else if (strings_equal(mode, "games")) {
     vnt_games(fields);
   } else if (strings_equal(mode, "xsprobe")) {
