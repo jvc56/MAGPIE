@@ -575,6 +575,10 @@ static void metal_slot_evaluate_chunk(const ValueNetMetalSlot *slot,
   }
 }
 
+int value_net_metal_get_concurrency(const ValueNetMetal *metal) {
+  return metal->concurrency;
+}
+
 void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
                               const float *board, const float *scalars,
                               float *value, float *spread) {

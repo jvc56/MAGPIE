@@ -18,6 +18,9 @@ ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
                                       int concurrency, ErrorStack *error_stack);
 void value_net_metal_destroy(ValueNetMetal *metal);
 
+// How many evaluations run at once (see value_net_metal_create).
+int value_net_metal_get_concurrency(const ValueNetMetal *metal);
+
 // As value_net_evaluate_cpu; safe to call from several threads, which run
 // up to the ValueNetMetal's concurrency at once and otherwise wait. Each
 // call runs in chunks of at most VALUE_NET_MAX_GPU_ROWS rows.

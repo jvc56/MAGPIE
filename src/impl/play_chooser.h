@@ -50,14 +50,18 @@ typedef struct PlayChooserStrategy {
   // Total SIM iterations per decision, stopping before the time budget if
   // reached; 0 = no limit.
   uint64_t sim_max_iterations;
-  // Value net replies on the first SIM rollout ply (see SimArgs); NULL
+  // Value net plays on the first SIM rollout plies (see SimArgs); NULL
   // evaluate means static rollouts. history, when set, is the replier's
   // history before the candidate, read at each decision.
   value_net_rows_fn rollout_value_net_evaluate;
   void *rollout_value_net_context;
   int rollout_value_net_candidates;
   int rollout_value_net_batch;
+  // Rollout plies the value net chooses (see SimArgs; 0 or 1: the reply).
+  int rollout_value_net_plies;
   const ValueNetHistory *rollout_value_net_history;
+  // When set, the simming player's own history, read at each decision.
+  const ValueNetHistory *rollout_value_net_own_history;
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;

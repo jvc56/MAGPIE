@@ -21,15 +21,21 @@
 
 enum {
   VALUE_NET_PLAYER_DEFAULT_CANDIDATES = 50,
+  // With both engines, the Neural Engine calls in flight at most (see
+  // value_net_player_evaluate_rows).
+  VALUE_NET_PLAYER_COREML_SLOTS = 2,
 };
 
 struct ValueNetPlayer {
   ValueNet *net;
   ValueNetMetal *metal;
   ValueNetCoreML *coreml;
-  // Whether a call holds the GPU (with both engines; see
+  // With both engines, calls in flight (or waiting) on the GPU, its
+  // concurrency, and calls on the Neural Engine (see
   // value_net_player_evaluate_rows).
-  atomic_bool metal_busy;
+  atomic_int metal_in_flight;
+  int metal_slots;
+  atomic_int coreml_in_flight;
   int max_candidates;
   // The utility value_net_player_choose ranks candidates by.
   double utility_w_winpct;
@@ -83,6 +89,8 @@ value_net_player_create(const char *model_dir, value_net_backend_t backend,
   ValueNetPlayer *player = calloc_or_die(1, sizeof(ValueNetPlayer));
   player->net = net;
   player->metal = metal;
+  player->metal_slots =
+      metal != NULL ? value_net_metal_get_concurrency(metal) : 0;
   player->coreml = coreml;
   player->max_candidates =
       max_candidates > 0 ? max_candidates : VALUE_NET_PLAYER_DEFAULT_CANDIDATES;
@@ -132,6 +140,17 @@ void value_net_player_set_rescorer(ValueNetPlayer *player,
   }
 }
 
+// Takes one of slots places in in_flight if one is free.
+static bool value_net_player_try_take(atomic_int *in_flight, int slots) {
+  int current = atomic_load(in_flight);
+  while (current < slots) {
+    if (atomic_compare_exchange_weak(in_flight, &current, current + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void value_net_player_evaluate_rows(void *context, int rows, const float *board,
                                     const float *scalars, float *values,
                                     float *spreads) {
@@ -140,19 +159,27 @@ void value_net_player_evaluate_rows(void *context, int rows, const float *board,
     return;
   }
   if (player->coreml != NULL && player->metal != NULL) {
-    // Whole calls go to the GPU when it is idle and to the Neural Engine
-    // otherwise: splitting one call between them leaves the faster engine
-    // waiting, and the Neural Engine takes concurrent callers while the GPU
-    // runs one evaluation at a time.
-    bool idle = false;
-    if (atomic_compare_exchange_strong(&player->metal_busy, &idle, true)) {
-      value_net_metal_evaluate(player->metal, rows, board, scalars, values,
-                               spreads);
-      atomic_store(&player->metal_busy, false);
-    } else {
+    // Whole calls go to the GPU while one of its slots is free, then to the
+    // Neural Engine while it runs fewer than VALUE_NET_PLAYER_COREML_SLOTS
+    // calls, then to the GPU, which queues them. Splitting one call between
+    // the engines would leave the faster one waiting, and the Neural Engine,
+    // several times slower per row, would hold its callers up if it took
+    // every call the GPU had no slot for.
+    const bool on_gpu = value_net_player_try_take(&player->metal_in_flight,
+                                                  player->metal_slots);
+    if (!on_gpu && value_net_player_try_take(&player->coreml_in_flight,
+                                             VALUE_NET_PLAYER_COREML_SLOTS)) {
       value_net_coreml_evaluate(player->coreml, rows, board, scalars, values,
                                 spreads);
+      atomic_fetch_sub(&player->coreml_in_flight, 1);
+      return;
     }
+    if (!on_gpu) {
+      atomic_fetch_add(&player->metal_in_flight, 1);
+    }
+    value_net_metal_evaluate(player->metal, rows, board, scalars, values,
+                             spreads);
+    atomic_fetch_sub(&player->metal_in_flight, 1);
     return;
   }
   if (player->coreml != NULL) {

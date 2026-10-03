@@ -308,10 +308,11 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 
 // "games:<model_dir>:<backend>:<lexicon>:<pairs>:<seed>:<worker>:<workers>:
 // <out>[:key=value...]": game pairs between players a and b (a=, b=: nn,
-// static, sim with static rollouts, simnn with value net replies on the
-// first rollout ply; default nn vs static). Sim players take plies=,
-// cands= (root candidates), ms= (per move) and iters= (cap), rcands= and
-// batch= (value net replies). uwin=, uspread= and uscale= set the utility
+// static, sim with static rollouts, simnn with value net plays on the
+// first nnplies= rollout plies, default 1; default nn vs static). Sim
+// players take plies=, cands= (root candidates), ms= (per move) and iters=
+// (cap), rcands= and batch= (value net plays: candidates per position and
+// iterations per evaluation). uwin=, uspread= and uscale= set the utility
 // (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults otherwise) that an
 // nn player and each sim, value net replies included, rank by. model= sets
 // the net's directory (default <model_dir>). pat=<name> ranks a player's
@@ -412,12 +413,14 @@ static void vnt_games(const StringSplitter *fields) {
     error_stack_print_and_reset(error_stack);
     log_fatal("could not set up the players");
   }
-  // The replier's history for each sim player's rollouts, refreshed before
-  // each of its decisions.
+  // The replier's and the sim player's own histories for each sim player's
+  // rollouts, refreshed before each of its decisions.
   ValueNetHistory rollout_histories[2];
+  ValueNetHistory rollout_own_histories[2];
   PlayChooser *choosers[2] = {NULL, NULL};
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     value_net_history_reset(&rollout_histories[player_idx]);
+    value_net_history_reset(&rollout_own_histories[player_idx]);
     if (kinds[player_idx] != VNT_PLAYER_SIM &&
         kinds[player_idx] != VNT_PLAYER_SIM_NN) {
       continue;
@@ -451,7 +454,10 @@ static void vnt_games(const StringSplitter *fields) {
             vnt_option(fields, 9, "rcands", player_idx, "15"), NULL, 10),
         .rollout_value_net_batch = (int)strtol(
             vnt_option(fields, 9, "batch", player_idx, "8"), NULL, 10),
+        .rollout_value_net_plies = (int)strtol(
+            vnt_option(fields, 9, "nnplies", player_idx, "1"), NULL, 10),
         .rollout_value_net_history = &rollout_histories[player_idx],
+        .rollout_value_net_own_history = &rollout_own_histories[player_idx],
     };
     choosers[player_idx] = play_chooser_create(&strategy);
   }
@@ -503,6 +509,7 @@ static void vnt_games(const StringSplitter *fields) {
         case VNT_PLAYER_SIM:
         case VNT_PLAYER_SIM_NN:
           rollout_histories[player_idx] = histories[1 - seat];
+          rollout_own_histories[player_idx] = histories[seat];
           play_chooser_choose_move(choosers[player_idx], game, &move,
                                    error_stack);
           if (!error_stack_is_empty(error_stack)) {
@@ -1051,15 +1058,17 @@ static void vnt_throughput(const char *dir, const char *parity_dir,
   error_stack_destroy(error_stack);
 }
 
-// "simbench:<model_dir>:<none|cpu|fp32|fp16>:<plies>:<root_cands>:
-// <threads>:<iterations>:<reply_cands>:<batch>:<positions>": sims of the
-// top root_cands static plays, round robin, for a fixed number of
-// iterations on NWL23 positions from static games, with value net replies
-// on the first rollout ply (or static rollouts for "none"). Prints
-// iterations per second per position and overall.
+// "simbench:<model_dir>:<none|cpu|fp32|fp16|ane|anegpu>:<plies>:
+// <root_cands>:<threads>:<iterations>:<reply_cands>:<batch>:<positions>
+// [:<nn_plies>]": sims of the top root_cands static plays, round robin, for
+// a fixed number of iterations on NWL23 positions from static games, with
+// value net plays on the first nn_plies rollout plies (default 1; or static
+// rollouts for "none"). Prints iterations per second per position and
+// overall.
 static void vnt_simbench(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 10) {
-    log_fatal("simbench needs 9 fields");
+  const int num_fields = string_splitter_get_number_of_items(fields);
+  if (num_fields != 10 && num_fields != 11) {
+    log_fatal("simbench needs 9 or 10 fields");
   }
   const char *model_dir = string_splitter_get_item(fields, 1);
   const char *backend_name = string_splitter_get_item(fields, 2);
@@ -1075,6 +1084,10 @@ static void vnt_simbench(const StringSplitter *fields) {
   const int batch = (int)strtol(string_splitter_get_item(fields, 8), NULL, 10);
   const int positions =
       (int)strtol(string_splitter_get_item(fields, 9), NULL, 10);
+  const int nn_plies =
+      num_fields == 11
+          ? (int)strtol(string_splitter_get_item(fields, 10), NULL, 10)
+          : 1;
   Config *config = config_create_or_die(
       "set -lex NWL23 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 1 -threads 1");
@@ -1131,6 +1144,7 @@ static void vnt_simbench(const StringSplitter *fields) {
           sim_args.rollout_value_net_context = player;
           sim_args.rollout_value_net_candidates = reply_cands;
           sim_args.rollout_value_net_batch = batch;
+          sim_args.rollout_value_net_plies = nn_plies;
         }
         SimResults *results = sim_results_create(0.0);
         const int64_t start = ctimer_monotonic_ns();
@@ -1160,9 +1174,9 @@ static void vnt_simbench(const StringSplitter *fields) {
       play_move(&move, game, NULL);
     }
   }
-  printf("simbench backend=%s plies=%d threads=%d reply_cands=%d batch=%d "
-         "it_per_s=%.1f (positions after the first)\n",
-         backend_name, plies, threads, reply_cands, batch,
+  printf("simbench backend=%s plies=%d nn_plies=%d threads=%d reply_cands=%d "
+         "batch=%d it_per_s=%.1f (positions after the first)\n",
+         backend_name, plies, nn_plies, threads, reply_cands, batch,
          total_seconds > 0 ? (double)total_iterations / total_seconds : 0.0);
   move_list_destroy(root);
   move_list_destroy(static_list);
@@ -1224,13 +1238,13 @@ static void vnt_anebench(const char *dir, const char *parity_dir) {
     value_net_coreml_evaluate(coreml, rows, big_board, big_scalars, values,
                               NULL);
     const int repeats = 20;
-    const int64_t start = ctimer_monotonic_ns();
+    const int64_t loop_start = ctimer_monotonic_ns();
     for (int repeat = 0; repeat < repeats; repeat++) {
       value_net_coreml_evaluate(coreml, rows, big_board, big_scalars, values,
                                 NULL);
     }
     const double seconds =
-        (double)(ctimer_monotonic_ns() - start) / 1e9 / repeats;
+        (double)(ctimer_monotonic_ns() - loop_start) / 1e9 / repeats;
     printf("value_net_throughput ane rows=%d ms_per_call=%.2f "
            "rows_per_s=%.0f\n",
            rows, seconds * 1e3, rows / seconds);

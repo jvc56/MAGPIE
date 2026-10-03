@@ -22,6 +22,11 @@ ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
 
 void value_net_metal_destroy(ValueNetMetal *metal) { (void)metal; }
 
+int value_net_metal_get_concurrency(const ValueNetMetal *metal) {
+  (void)metal;
+  return 0;
+}
+
 void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
                               const float *board, const float *scalars,
                               float *value, float *spread) {

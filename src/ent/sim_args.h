@@ -66,21 +66,26 @@ typedef struct SimArgs {
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
   bool use_margin_forecast;
-  // When rollout_value_net_evaluate is set, the first rollout ply (the
-  // opponent's reply) is chosen by the value net: the top
-  // rollout_value_net_candidates static replies (0 for 15), the one with
-  // the highest utility by the weights above played (value_net_utility in
-  // value_net_features.h). Replies are computed rollout_value_net_batch
-  // iterations at a time per thread and play (0 for 8) in one call, which
-  // evaluates rows input rows (value_net_defs.h) into values, and spreads
-  // when the utility weighs spread. The replier's history before the
-  // candidate is rollout_value_net_history. sim_args_fill clears the
-  // evaluator; later plies are static.
+  // When rollout_value_net_evaluate is set, the first
+  // rollout_value_net_plies rollout plies (0 or 1: the opponent's reply
+  // only; at most num_plies) are chosen by the value net: the top
+  // rollout_value_net_candidates static plays (0 for 15), the one with the
+  // highest utility by the weights above played (value_net_utility in
+  // value_net_features.h). Iterations are computed
+  // rollout_value_net_batch at a time per thread and play (0 for 8),
+  // advanced together with one call per ply, which evaluates rows input
+  // rows (value_net_defs.h) into values, and spreads when the utility weighs
+  // spread. Before the candidate, the replier's history is
+  // rollout_value_net_history and the simming player's
+  // rollout_value_net_own_history. sim_args_fill clears the evaluator;
+  // later plies are static.
   value_net_rows_fn rollout_value_net_evaluate;
   void *rollout_value_net_context;
   int rollout_value_net_candidates;
   int rollout_value_net_batch;
+  int rollout_value_net_plies;
   ValueNetHistory rollout_value_net_history;
+  ValueNetHistory rollout_value_net_own_history;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -149,7 +154,9 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->rollout_value_net_context = NULL;
   sim_args->rollout_value_net_candidates = 0;
   sim_args->rollout_value_net_batch = 0;
+  sim_args->rollout_value_net_plies = 0;
   value_net_history_reset(&sim_args->rollout_value_net_history);
+  value_net_history_reset(&sim_args->rollout_value_net_own_history);
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
   // resume path sets this true; every other caller fills SimArgs through
   // here, so leaving it uninitialized let stack garbage spuriously trigger

@@ -504,8 +504,13 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   sim_args.rollout_value_net_candidates =
       strategy->rollout_value_net_candidates;
   sim_args.rollout_value_net_batch = strategy->rollout_value_net_batch;
+  sim_args.rollout_value_net_plies = strategy->rollout_value_net_plies;
   if (strategy->rollout_value_net_history != NULL) {
     sim_args.rollout_value_net_history = *strategy->rollout_value_net_history;
+  }
+  if (strategy->rollout_value_net_own_history != NULL) {
+    sim_args.rollout_value_net_own_history =
+        *strategy->rollout_value_net_own_history;
   }
   sim_args.pat_rollout_disabled = strategy->pat_rollout_disabled;
   sim_args.pat_rollout_disabled_classes_mask =
