@@ -384,46 +384,56 @@ enum {
   SIM_VALUE_NET_DEFAULT_BATCH = 8,
 };
 
-// Value net rollout plies (SimArgs.rollout_value_net_*). Each thread keeps,
-// per play, a queue of iterations it computed batch at a time: each one's
-// seed and the moves the net chose for its first value net plies. A refill
-// advances its batch iterations together, one evaluation per ply over every
-// iteration still going, so each evaluation scores batch positions'
+// Value net rollout plies (SimArgs.rollout_value_net_*). A thread sampling
+// a play takes an iteration from the play's queue, shared by all threads;
+// when it is empty, the thread computes batch iterations of the play at
+// once, samples the first and queues the rest. An iteration is its seed,
+// the moves the net chose for its first value net plies and its leaf. A
+// refill advances its batch iterations together, one evaluation per ply over
+// every iteration still going, so each evaluation scores batch positions'
 // candidates at once and no lock is held while it runs. A seed reproduces
 // an iteration's opening state only from the same bag order, which every
 // iteration changes (racks go back to the bag), so every value net
-// iteration, queued or played, starts from a copy of start, and
-// rv_sim_sample replays its queued moves. When the sim stops, each thread
-// can leave up to batch - 1 computed iterations per play unused.
+// iteration, queued or played, starts from a copy of start, and its queued
+// moves are replayed. When the sampling stops, rvs_sim_drain samples the
+// iterations still queued, so none computed goes unused.
 typedef struct SimValueNetShared {
   int plays;
   int batch;
   // Rollout plies the net chooses, 1..num_plies.
   int plies;
-  // Bumped by each sim start, so threads empty queues from an earlier sim.
-  uint64_t generation;
   Game *start;
+  // Per play, a stack of at most capacity queued iterations: their seeds,
+  // moves (plies each), move counts and leaves (see SimValueNetWorker).
+  cpthread_mutex_t mutex;
+  bool mutex_ready;
+  int capacity;
+  size_t allocated_entries;
+  size_t allocated_moves;
+  int *queued;          // [plays]
+  uint64_t *seeds;      // [plays * capacity]
+  int *move_count;      // [plays * capacity]
+  bool *leaf_set;       // [plays * capacity]
+  double *leaf_win_pct; // [plays * capacity]
+  double *leaf_spread;  // [plays * capacity]
+  Move *moves;          // [plays * capacity * plies]
 } SimValueNetShared;
 
-// One thread's queues and refill buffers.
+// One thread's refill buffers.
 typedef struct SimValueNetWorker {
-  int plays;
   int batch;
   int plies;
   int candidates;
-  uint64_t generation;
-  // Per play, batch iterations: their seeds, the moves chosen (plies each)
+  // A refill's batch iterations: their seeds, the moves chosen (plies each)
   // and how many (fewer than plies when the game ended first).
-  uint64_t *seeds; // [plays * batch]
-  Move *moves;     // [plays * batch * plies]
-  int *move_count; // [plays * batch]
+  uint64_t *seeds; // [batch]
+  Move *moves;     // [batch * plies]
+  int *move_count; // [batch]
   // With the net leaf, whether the net chose the final ply and, for the
   // simming player, its win% and predicted final spread in points.
-  bool *leaf_set;       // [plays * batch]
-  double *leaf_win_pct; // [plays * batch]
-  double *leaf_spread;  // [plays * batch]
-  int *count;           // [plays]
-  int *next;            // [plays]
+  bool *leaf_set;       // [batch]
+  double *leaf_win_pct; // [batch]
+  double *leaf_spread;  // [batch]
   // A refill's iterations: their games, each player's value net history
   // (by player index), and whether they still take value net moves.
   Game **games;               // [batch]
@@ -440,7 +450,9 @@ typedef struct SimValueNetWorker {
   double *spread_after;
   MoveList *list;
   Game *scratch;
-  // The moves of the iteration rv_sim_sample is playing, and its leaf.
+  // The iteration being sampled: its seed, moves and leaf.
+  uint64_t iteration_seed;
+  int iteration_move_count;
   Move *iteration_moves; // [plies]
   bool iteration_leaf_set;
   double iteration_leaf_win_pct;
@@ -503,8 +515,6 @@ static void sim_value_net_worker_free(SimValueNetWorker *worker) {
   free(worker->seeds);
   free(worker->moves);
   free(worker->move_count);
-  free(worker->count);
-  free(worker->next);
   if (worker->games != NULL) {
     for (int seed_idx = 0; seed_idx < worker->batch; seed_idx++) {
       game_destroy(worker->games[seed_idx]);
@@ -529,29 +539,25 @@ static void sim_value_net_worker_free(SimValueNetWorker *worker) {
   memset(worker, 0, sizeof(SimValueNetWorker));
 }
 
-// Sizes a thread's queues and buffers for the sim (plays, batch, plies) and
-// candidates per position, and empties its queues when a new sim started.
+// Sizes a thread's buffers for the sim (batch, plies) and candidates per
+// position.
 static void sim_value_net_worker_ensure(SimValueNetWorker *worker,
                                         const SimValueNetShared *shared,
                                         int candidates) {
-  if (worker->plays != shared->plays || worker->batch != shared->batch ||
-      worker->plies != shared->plies || worker->candidates != candidates) {
+  if (worker->batch != shared->batch || worker->plies != shared->plies ||
+      worker->candidates != candidates) {
     sim_value_net_worker_free(worker);
     const int batch = shared->batch;
-    worker->plays = shared->plays;
     worker->batch = batch;
     worker->plies = shared->plies;
     worker->candidates = candidates;
-    worker->generation = shared->generation;
-    const size_t slots = (size_t)shared->plays * (size_t)batch;
+    const size_t slots = (size_t)batch;
     worker->seeds = malloc_or_die(sizeof(uint64_t) * slots);
     worker->moves = malloc_or_die(sizeof(Move) * slots * (size_t)shared->plies);
     worker->move_count = malloc_or_die(sizeof(int) * slots);
     worker->leaf_set = calloc_or_die(slots, sizeof(bool));
     worker->leaf_win_pct = malloc_or_die(sizeof(double) * slots);
     worker->leaf_spread = malloc_or_die(sizeof(double) * slots);
-    worker->count = calloc_or_die((size_t)shared->plays, sizeof(int));
-    worker->next = calloc_or_die((size_t)shared->plays, sizeof(int));
     worker->games = malloc_or_die(sizeof(Game *) * (size_t)batch);
     for (int seed_idx = 0; seed_idx < batch; seed_idx++) {
       worker->games[seed_idx] = game_duplicate(shared->start);
@@ -575,30 +581,58 @@ static void sim_value_net_worker_ensure(SimValueNetWorker *worker,
     worker->list = move_list_create(candidates);
     worker->scratch = game_duplicate(shared->start);
   }
-  if (worker->generation != shared->generation) {
-    for (int play_idx = 0; play_idx < worker->plays; play_idx++) {
-      worker->count[play_idx] = 0;
-      worker->next[play_idx] = 0;
-    }
-    worker->generation = shared->generation;
-  }
 }
 
 static void sim_value_net_shared_free(SimValueNetShared *shared) {
   game_destroy(shared->start);
+  free(shared->queued);
+  free(shared->seeds);
+  free(shared->move_count);
+  free(shared->leaf_set);
+  free(shared->leaf_win_pct);
+  free(shared->leaf_spread);
+  free(shared->moves);
+  // No cpthread_mutex_destroy: project mutexes don't dynamically allocate.
   memset(shared, 0, sizeof(SimValueNetShared));
 }
 
-// Prepares a sim of plays plays, batch iterations per refill and plies
-// value net plies, taking game as every iteration's start; threads empty
-// their queues from any earlier sim.
+// Prepares a sim of plays plays, batch iterations per refill, plies value
+// net plies and threads sampling threads, taking game as every iteration's
+// start, with every play's queue empty.
 static void sim_value_net_shared_prepare(SimValueNetShared *shared, int plays,
-                                         int batch, int plies,
+                                         int batch, int plies, int threads,
                                          const Game *game) {
   shared->plays = plays;
   shared->batch = batch;
   shared->plies = plies;
-  shared->generation++;
+  if (!shared->mutex_ready) {
+    cpthread_mutex_init(&shared->mutex);
+    shared->mutex_ready = true;
+  }
+  // A thread queues batch - 1 iterations only after finding the queue
+  // empty, so at most every thread's are queued at once.
+  shared->capacity = threads * (batch > 1 ? batch - 1 : 1);
+  const size_t entries = (size_t)plays * (size_t)shared->capacity;
+  if (entries > shared->allocated_entries) {
+    free(shared->seeds);
+    free(shared->move_count);
+    free(shared->leaf_set);
+    free(shared->leaf_win_pct);
+    free(shared->leaf_spread);
+    shared->seeds = malloc_or_die(sizeof(uint64_t) * entries);
+    shared->move_count = malloc_or_die(sizeof(int) * entries);
+    shared->leaf_set = malloc_or_die(sizeof(bool) * entries);
+    shared->leaf_win_pct = malloc_or_die(sizeof(double) * entries);
+    shared->leaf_spread = malloc_or_die(sizeof(double) * entries);
+    shared->allocated_entries = entries;
+  }
+  if (entries * (size_t)plies > shared->allocated_moves) {
+    free(shared->moves);
+    shared->moves = malloc_or_die(sizeof(Move) * entries * (size_t)plies);
+    shared->allocated_moves = entries * (size_t)plies;
+  }
+  free(shared->queued);
+  shared->queued = calloc_or_die((size_t)plays, sizeof(int));
   if (shared->start == NULL) {
     shared->start = game_duplicate(game);
   } else {
@@ -699,20 +733,19 @@ static void sim_value_net_play(SimValueNetWorker *worker, int seed_idx,
   }
 }
 
-// Fills this thread's queue for play_index with batch iterations advanced
-// together from the candidate, ply by ply. At each ply, each iteration still
+// Fills this thread's batch slots with iterations of the candidate advanced
+// together, ply by ply. At each ply, each iteration still
 // going takes the top candidates by static equity for the player on turn;
 // one with an empty bag or a single candidate plays the top one, and the
 // rest are scored in one evaluation and play the best by the sim's utility
 // (value_net_utility; ties: more tiles played).
 static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
-                                 SimmedPlay *simmed_play, int play_index) {
+                                 SimmedPlay *simmed_play) {
   const SimValueNetShared *shared = &simmer->value_net_shared;
   SimValueNetWorker *worker = &simmer_worker->value_net;
   const Move *candidate = simmed_play_get_move(simmed_play);
-  const size_t slot_base = (size_t)play_index * (size_t)worker->batch;
   for (int seed_idx = 0; seed_idx < worker->batch; seed_idx++) {
-    const size_t slot = slot_base + (size_t)seed_idx;
+    const size_t slot = (size_t)seed_idx;
     const uint64_t seed = simmed_play_get_seed(simmed_play);
     worker->seeds[slot] = seed;
     worker->move_count[slot] = 0;
@@ -755,7 +788,7 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
       const int count = move_list_get_count(list);
       if (count <= 1 || bag_get_letters(game_get_bag(game)) == 0) {
         // Nothing to choose, or the net is not used with an empty bag.
-        sim_value_net_play(worker, seed_idx, slot_base + (size_t)seed_idx,
+        sim_value_net_play(worker, seed_idx, (size_t)seed_idx,
                            move_list_get_move(list, 0));
         continue;
       }
@@ -810,7 +843,7 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
       if (simmer->value_net_leaf && ply == worker->plies - 1) {
         // The net's view of the horizon: the chosen move's win% and final
         // spread, from its mover's side to the simming player's.
-        const size_t slot = slot_base + (size_t)seed_idx;
+        const size_t slot = (size_t)seed_idx;
         const int best_row = row + best;
         double win_pct = (1.0 + (double)worker->values[best_row]) / 2.0;
         double final_spread = value_net_final_spread(
@@ -824,13 +857,78 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
         worker->leaf_win_pct[slot] = win_pct;
         worker->leaf_spread[slot] = final_spread;
       }
-      sim_value_net_play(worker, seed_idx, slot_base + (size_t)seed_idx,
-                         &moves[best]);
+      sim_value_net_play(worker, seed_idx, (size_t)seed_idx, &moves[best]);
       row += count;
     }
   }
-  worker->count[play_index] = worker->batch;
-  worker->next[play_index] = 0;
+}
+
+// Copies queued iteration entry of shared (at index) to worker's iteration.
+static void sim_value_net_entry_to_iteration(const SimValueNetShared *shared,
+                                             size_t entry,
+                                             SimValueNetWorker *worker) {
+  worker->iteration_seed = shared->seeds[entry];
+  worker->iteration_move_count = shared->move_count[entry];
+  worker->iteration_leaf_set = shared->leaf_set[entry];
+  worker->iteration_leaf_win_pct = shared->leaf_win_pct[entry];
+  worker->iteration_leaf_spread = shared->leaf_spread[entry];
+  for (int ply = 0; ply < worker->iteration_move_count; ply++) {
+    move_copy(&worker->iteration_moves[ply],
+              &shared->moves[(entry * (size_t)shared->plies) + (size_t)ply]);
+  }
+}
+
+// Takes an iteration of play_index from its queue into worker's iteration.
+// Returns false when the queue is empty.
+static bool sim_value_net_pop(SimValueNetShared *shared, int play_index,
+                              SimValueNetWorker *worker) {
+  bool popped = false;
+  cpthread_mutex_lock(&shared->mutex);
+  if (shared->queued[play_index] > 0) {
+    shared->queued[play_index]--;
+    sim_value_net_entry_to_iteration(
+        shared,
+        ((size_t)play_index * (size_t)shared->capacity) +
+            (size_t)shared->queued[play_index],
+        worker);
+    popped = true;
+  }
+  cpthread_mutex_unlock(&shared->mutex);
+  return popped;
+}
+
+// Takes worker's refilled slot 0 as its iteration and queues the others for
+// play_index.
+static void sim_value_net_take_and_queue(SimValueNetShared *shared,
+                                         int play_index,
+                                         SimValueNetWorker *worker) {
+  worker->iteration_seed = worker->seeds[0];
+  worker->iteration_move_count = worker->move_count[0];
+  worker->iteration_leaf_set = worker->leaf_set[0];
+  worker->iteration_leaf_win_pct = worker->leaf_win_pct[0];
+  worker->iteration_leaf_spread = worker->leaf_spread[0];
+  for (int ply = 0; ply < worker->move_count[0]; ply++) {
+    move_copy(&worker->iteration_moves[ply], &worker->moves[ply]);
+  }
+  cpthread_mutex_lock(&shared->mutex);
+  for (int slot = 1; slot < worker->batch; slot++) {
+    if (shared->queued[play_index] >= shared->capacity) {
+      log_fatal("value net iteration queue overflow");
+    }
+    const size_t entry = ((size_t)play_index * (size_t)shared->capacity) +
+                         (size_t)shared->queued[play_index]++;
+    shared->seeds[entry] = worker->seeds[slot];
+    shared->move_count[entry] = worker->move_count[slot];
+    shared->leaf_set[entry] = worker->leaf_set[slot];
+    shared->leaf_win_pct[entry] = worker->leaf_win_pct[slot];
+    shared->leaf_spread[entry] = worker->leaf_spread[slot];
+    for (int ply = 0; ply < worker->move_count[slot]; ply++) {
+      move_copy(
+          &shared->moves[(entry * (size_t)shared->plies) + (size_t)ply],
+          &worker->moves[((size_t)slot * (size_t)worker->plies) + (size_t)ply]);
+    }
+  }
+  cpthread_mutex_unlock(&shared->mutex);
 }
 
 #ifndef NDEBUG
@@ -859,33 +957,29 @@ static bool sim_rack_holds_move(const Game *game, const Move *move) {
 }
 #endif
 
-// The next iteration for play_index from this thread's queue, refilled when
-// empty: its seed, with its value net moves copied to the worker's
-// iteration_moves. Returns how many there are.
-static int sim_value_net_next(Simmer *simmer, SimmerWorker *simmer_worker,
-                              SimmedPlay *simmed_play, int play_index,
-                              uint64_t *seed) {
-  SimValueNetWorker *worker = &simmer_worker->value_net;
-  const int candidates = simmer->value_net_candidates > 0
-                             ? simmer->value_net_candidates
-                             : SIM_VALUE_NET_DEFAULT_CANDIDATES;
-  sim_value_net_worker_ensure(worker, &simmer->value_net_shared, candidates);
-  if (worker->next[play_index] >= worker->count[play_index]) {
-    sim_value_net_refill(simmer, simmer_worker, simmed_play, play_index);
-  }
-  const size_t slot = ((size_t)play_index * (size_t)worker->batch) +
-                      (size_t)worker->next[play_index]++;
-  *seed = worker->seeds[slot];
-  worker->iteration_leaf_set = worker->leaf_set[slot];
-  worker->iteration_leaf_win_pct = worker->leaf_win_pct[slot];
-  worker->iteration_leaf_spread = worker->leaf_spread[slot];
-  const int moves = worker->move_count[slot];
-  for (int ply = 0; ply < moves; ply++) {
-    move_copy(&worker->iteration_moves[ply],
-              &worker->moves[(slot * (size_t)worker->plies) + (size_t)ply]);
-  }
-  return moves;
+static void sim_value_net_worker_ensure_for_simmer(const Simmer *simmer,
+                                                   SimValueNetWorker *worker) {
+  sim_value_net_worker_ensure(worker, &simmer->value_net_shared,
+                              simmer->value_net_candidates > 0
+                                  ? simmer->value_net_candidates
+                                  : SIM_VALUE_NET_DEFAULT_CANDIDATES);
 }
+
+// Sets the worker's iteration to the next one of play_index: from the
+// play's queue, or else from a refill whose other iterations are queued.
+static void sim_value_net_next(Simmer *simmer, SimmerWorker *simmer_worker,
+                               SimmedPlay *simmed_play, int play_index) {
+  SimValueNetWorker *worker = &simmer_worker->value_net;
+  sim_value_net_worker_ensure_for_simmer(simmer, worker);
+  if (!sim_value_net_pop(&simmer->value_net_shared, play_index, worker)) {
+    sim_value_net_refill(simmer, simmer_worker, simmed_play);
+    sim_value_net_take_and_queue(&simmer->value_net_shared, play_index, worker);
+  }
+}
+
+static double sim_sample_iteration(Simmer *simmer, SimmerWorker *simmer_worker,
+                                   SimmedPlay *simmed_play, uint64_t seed,
+                                   bool value_net, int value_net_moves);
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
                      const int thread_index, const uint64_t sample_count,
@@ -907,22 +1001,45 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
               simmer->parent_worker_thread_index);
   }
   SimmerWorker *simmer_worker = simmer->workers[local_worker_index];
+  const int plies = sim_results_get_num_plies(sim_results);
+  // Seeding shuffles the bag, so there is no need to call bag_shuffle
+  // explicitly. With value net plies the seed comes from the play's queue
+  // along with the moves chosen for it.
+  const bool value_net = simmer->value_net_evaluate != NULL && plies >= 1;
+  uint64_t seed;
+  int value_net_moves = 0;
+  if (value_net) {
+    sim_value_net_next(simmer, simmer_worker, simmed_play, (int)play_index);
+    seed = simmer_worker->value_net.iteration_seed;
+    value_net_moves = simmer_worker->value_net.iteration_move_count;
+  } else {
+    seed = simmed_play_get_seed(simmed_play);
+  }
+  const double utility = sim_sample_iteration(
+      simmer, simmer_worker, simmed_play, seed, value_net, value_net_moves);
+  if (simmer->print_interval > 0 &&
+      sample_count % simmer->print_interval == 0) {
+    sim_results_print(simmer->thread_control, simmer_worker->game,
+                      simmer->sim_results, simmer->max_num_display_plays,
+                      simmer->max_num_display_plies, true, false, NULL);
+  }
+  return utility;
+}
+
+// Plays one iteration of simmed_play from seed on simmer_worker's game,
+// replaying its first value_net_moves moves from the worker's iteration
+// (from a copy of the value net start when value_net), and records it in
+// the play's stats. Returns its utility.
+static double sim_sample_iteration(Simmer *simmer, SimmerWorker *simmer_worker,
+                                   SimmedPlay *simmed_play, uint64_t seed,
+                                   bool value_net, int value_net_moves) {
+  SimResults *sim_results = simmer->sim_results;
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
   const int plies = sim_results_get_num_plies(sim_results);
-
-  // Seeding shuffles the bag, so there is no need to call bag_shuffle
-  // explicitly. With value net plies the seed comes from this thread's
-  // queue for the play along with the moves chosen for it.
-  uint64_t seed = 0;
-  int value_net_moves = 0;
-  if (simmer->value_net_evaluate != NULL && plies >= 1) {
-    value_net_moves = sim_value_net_next(simmer, simmer_worker, simmed_play,
-                                         (int)play_index, &seed);
+  if (value_net) {
     game_copy(game, simmer->value_net_shared.start);
     sim_set_rollout_pat(simmer, game);
-  } else {
-    seed = simmed_play_get_seed(simmed_play);
   }
   const int player_off_turn_index =
       sim_start_iteration(simmer, game, simmer_worker->prng, seed);
@@ -1013,12 +1130,12 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
                               projected_leftover);
   // The net's horizon value, when it chose the final ply of a rollout that
   // did not end the game, replaces the win% table and the utility's spread.
-  const SimValueNetWorker *value_net = &simmer_worker->value_net;
-  const bool net_leaf = value_net_moves > 0 && value_net->iteration_leaf_set &&
+  const SimValueNetWorker *net_worker = &simmer_worker->value_net;
+  const bool net_leaf = value_net_moves > 0 && net_worker->iteration_leaf_set &&
                         game_end_reason == GAME_END_REASON_NONE;
   double wpct;
   if (net_leaf) {
-    wpct = value_net->iteration_leaf_win_pct;
+    wpct = net_worker->iteration_leaf_win_pct;
     simmed_play_add_win_pct_value(simmed_play, wpct);
   } else {
     wpct = simmed_play_add_win_pct_stat(
@@ -1029,18 +1146,12 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
 
-  if (simmer->print_interval > 0 &&
-      sample_count % simmer->print_interval == 0) {
-    sim_results_print(simmer->thread_control, simmer_worker->game,
-                      simmer->sim_results, simmer->max_num_display_plays,
-                      simmer->max_num_display_plies, true, false, NULL);
-  }
   sim_results_increment_iteration_count(sim_results);
 
   Equity utility_spread =
       simmer->use_margin_forecast ? spread + projected_leftover : spread;
   if (net_leaf) {
-    utility_spread = double_to_equity(value_net->iteration_leaf_spread);
+    utility_spread = double_to_equity(net_worker->iteration_leaf_spread);
   }
   const double utility =
       sim_utility_blend(wpct, utility_spread, simmer->utility_w_winpct,
@@ -1054,6 +1165,27 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     simmed_play_add_utility_stat(simmed_play, utility);
   }
   return utility;
+}
+
+void rvs_sim_drain(RandomVariables *rvs) {
+  Simmer *simmer = (Simmer *)rvs->data;
+  SimValueNetShared *shared = &simmer->value_net_shared;
+  if (simmer->value_net_evaluate == NULL || shared->queued == NULL ||
+      sim_results_get_num_plies(simmer->sim_results) < 1) {
+    return;
+  }
+  SimmerWorker *simmer_worker = simmer->workers[0];
+  SimValueNetWorker *worker = &simmer_worker->value_net;
+  sim_value_net_worker_ensure_for_simmer(simmer, worker);
+  for (int play_idx = 0; play_idx < shared->plays; play_idx++) {
+    SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(simmer->sim_results, play_idx);
+    while (sim_value_net_pop(shared, play_idx, worker)) {
+      sim_sample_iteration(simmer, simmer_worker, simmed_play,
+                           worker->iteration_seed, true,
+                           worker->iteration_move_count);
+    }
+  }
 }
 
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
@@ -1120,7 +1252,7 @@ static void simmer_set_value_net(Simmer *simmer, const SimArgs *sim_args) {
       &simmer->value_net_shared, move_list_get_count(sim_args->move_list),
       simmer->value_net_batch > 0 ? simmer->value_net_batch
                                   : SIM_VALUE_NET_DEFAULT_BATCH,
-      plies, sim_args->game);
+      plies, simmer->num_threads, sim_args->game);
 }
 
 RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,

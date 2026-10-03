@@ -43,5 +43,9 @@ bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);
 int rvs_get_best_arm_index(const RandomVariables *rvs);
+// For sim variables with value net rollout plies, samples every iteration
+// computed ahead but not yet sampled into the sim's stats. Call with no
+// sampling in flight.
+void rvs_sim_drain(RandomVariables *rvs);
 
 #endif

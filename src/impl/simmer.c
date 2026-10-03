@@ -151,6 +151,8 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
       sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));
+  // Value net rollouts are computed in batches; none computed goes unused.
+  rvs_sim_drain((*sim_ctx)->rvs);
 
   // Reset the sim args to their original values in case they were modified for
   // endgame sims
