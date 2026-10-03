@@ -11,6 +11,7 @@
 #include "../def/move_defs.h"
 #include "../def/peg_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../def/value_net_defs.h"
 #include "../ent/bag.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
@@ -24,6 +25,7 @@
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include "../ent/value_net_history.h"
 #include "../ent/words.h"
 #include "../util/io_util.h"
 #include "endgame.h"
@@ -31,6 +33,7 @@
 #include "move_gen.h"
 #include "peg.h"
 #include "simmer.h"
+#include "value_net_features.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -236,7 +239,24 @@ struct PlayChooser {
   EndgameCtx *challenge_endgame_ctx;
   // Lazily created on the first endgame solve; owned.
   TranspositionTable *endgame_tt;
+  // With a value net candidate filter: the pool of static plays, its rows
+  // and outputs, and a scratch game for the features (created on first
+  // use).
+  MoveList *pool_list;
+  float *pool_board;
+  float *pool_scalars;
+  float *pool_values;
+  float *pool_spreads;
+  double *pool_spread_after;
+  double *pool_utility;
+  int *pool_order;
+  Game *pool_scratch;
 };
+
+static int
+play_chooser_get_candidate_pool(const PlayChooserStrategy *strategy) {
+  return strategy->sim_candidate_pool > 0 ? strategy->sim_candidate_pool : 64;
+}
 
 static int
 play_chooser_get_sim_max_candidates(const PlayChooserStrategy *strategy) {
@@ -285,6 +305,30 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   play_chooser->challenge_endgame_results = endgame_results_create();
   play_chooser->challenge_endgame_ctx = endgame_ctx_create();
   play_chooser->endgame_tt = NULL;
+  play_chooser->pool_list = NULL;
+  play_chooser->pool_board = NULL;
+  play_chooser->pool_scalars = NULL;
+  play_chooser->pool_values = NULL;
+  play_chooser->pool_spreads = NULL;
+  play_chooser->pool_spread_after = NULL;
+  play_chooser->pool_utility = NULL;
+  play_chooser->pool_order = NULL;
+  play_chooser->pool_scratch = NULL;
+  if (strategy->sim_candidate_value_net_evaluate != NULL) {
+    const int pool = play_chooser_get_candidate_pool(strategy);
+    play_chooser->pool_list = move_list_create(pool);
+    play_chooser->pool_board =
+        malloc_or_die(sizeof(float) * (size_t)pool * VALUE_NET_BOARD_FLOATS);
+    play_chooser->pool_scalars =
+        malloc_or_die(sizeof(float) * (size_t)pool * VALUE_NET_SCALARS);
+    play_chooser->pool_values = malloc_or_die(sizeof(float) * (size_t)pool);
+    // Read by value_net_utility even when the utility does not weigh spread.
+    play_chooser->pool_spreads = calloc_or_die((size_t)pool, sizeof(float));
+    play_chooser->pool_spread_after =
+        malloc_or_die(sizeof(double) * (size_t)pool);
+    play_chooser->pool_utility = malloc_or_die(sizeof(double) * (size_t)pool);
+    play_chooser->pool_order = malloc_or_die(sizeof(int) * (size_t)pool);
+  }
   return play_chooser;
 }
 
@@ -302,6 +346,19 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
   endgame_results_destroy(play_chooser->challenge_endgame_results);
   endgame_ctx_destroy(play_chooser->challenge_endgame_ctx);
   transposition_table_destroy(play_chooser->endgame_tt);
+  if (play_chooser->pool_list != NULL) {
+    move_list_destroy(play_chooser->pool_list);
+  }
+  free(play_chooser->pool_board);
+  free(play_chooser->pool_scalars);
+  free(play_chooser->pool_values);
+  free(play_chooser->pool_spreads);
+  free(play_chooser->pool_spread_after);
+  free(play_chooser->pool_utility);
+  free(play_chooser->pool_order);
+  if (play_chooser->pool_scratch != NULL) {
+    game_destroy(play_chooser->pool_scratch);
+  }
   free(play_chooser);
 }
 
@@ -435,6 +492,69 @@ static double play_chooser_util_w_winpct(const PlayChooserStrategy *strategy);
 static double
 play_chooser_util_spread_scale(const PlayChooserStrategy *strategy);
 
+// Fills the chooser's move_list with the sim_max_candidates plays of
+// pool_list with the highest utility by the candidate value net, the
+// chooser's weights and the mover's history (ties: higher static equity).
+static void play_chooser_filter_candidates(PlayChooser *play_chooser,
+                                           const Game *game) {
+  const PlayChooserStrategy *strategy = &play_chooser->strategy;
+  MoveList *pool = play_chooser->pool_list;
+  move_list_sort_moves(pool);
+  const int count = move_list_get_count(pool);
+  if (play_chooser->pool_scratch == NULL) {
+    play_chooser->pool_scratch = game_duplicate(game);
+  }
+  ValueNetHistory empty_history;
+  value_net_history_reset(&empty_history);
+  const ValueNetHistory *history =
+      strategy->rollout_value_net_own_history != NULL
+          ? strategy->rollout_value_net_own_history
+          : &empty_history;
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const Move *move = move_list_get_move(pool, move_idx);
+    play_chooser->pool_spread_after[move_idx] =
+        value_net_spread_after_move(game, move);
+    value_net_features_for_move(
+        game, move, history, play_chooser->pool_scratch,
+        play_chooser->pool_board + ((size_t)move_idx * VALUE_NET_BOARD_FLOATS),
+        play_chooser->pool_scalars + ((size_t)move_idx * VALUE_NET_SCALARS));
+  }
+  if (count > 0) {
+    strategy->sim_candidate_value_net_evaluate(
+        strategy->sim_candidate_value_net_context, count,
+        play_chooser->pool_board, play_chooser->pool_scalars,
+        play_chooser->pool_values,
+        strategy->utility_w_spread > 0.0 ? play_chooser->pool_spreads : NULL);
+  }
+  // Insertion sort by utility, keeping the static order among ties.
+  for (int move_idx = 0; move_idx < count; move_idx++) {
+    const double utility = value_net_utility(
+        play_chooser->pool_values[move_idx],
+        play_chooser->pool_spreads[move_idx],
+        play_chooser->pool_spread_after[move_idx],
+        play_chooser_util_w_winpct(strategy), strategy->utility_w_spread,
+        play_chooser_util_spread_scale(strategy));
+    play_chooser->pool_utility[move_idx] = utility;
+    int pos = move_idx;
+    while (pos > 0 &&
+           play_chooser->pool_utility[play_chooser->pool_order[pos - 1]] <
+               utility) {
+      play_chooser->pool_order[pos] = play_chooser->pool_order[pos - 1];
+      pos--;
+    }
+    play_chooser->pool_order[pos] = move_idx;
+  }
+  MoveList *move_list = play_chooser->move_list;
+  move_list_reset(move_list);
+  const int keep = count < move_list_get_capacity(move_list)
+                       ? count
+                       : move_list_get_capacity(move_list);
+  for (int rank = 0; rank < keep; rank++) {
+    move_list_add_move(
+        move_list, move_list_get_move(pool, play_chooser->pool_order[rank]));
+  }
+}
+
 // Chooses the on-turn player's best move by simulation, returning it in
 // out_move. out_simulated (optional) reports whether a sim actually ran: a
 // single-candidate position is short-circuited to that move WITHOUT simming, so
@@ -448,6 +568,10 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
   MoveList *move_list = play_chooser->move_list;
   move_list_reset(move_list);
+  const bool net_filter = strategy->sim_candidate_value_net_evaluate != NULL;
+  if (net_filter) {
+    move_list_reset(play_chooser->pool_list);
+  }
   const MoveGenArgs gen_args = {
       .game = game,
       .move_record_type = MOVE_RECORD_ALL,
@@ -456,11 +580,14 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .move_list = move_list,
+      .move_list = net_filter ? play_chooser->pool_list : move_list,
       .tiles_played_bv = NULL,
       .initial_tiles_bv = 0,
   };
   generate_moves(&gen_args);
+  if (net_filter) {
+    play_chooser_filter_candidates(play_chooser, game);
+  }
   const int num_candidates = move_list_get_count(move_list);
   if (num_candidates == 0) {
     return false;

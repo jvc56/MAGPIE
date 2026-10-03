@@ -47,6 +47,15 @@ typedef struct PlayChooserStrategy {
   play_chooser_eval_t endgame_eval;
   int sim_plies;          // 0 = default
   int sim_max_candidates; // 0 = default
+  // When set, the SIM candidates are chosen by a value net: the top
+  // sim_candidate_pool static plays (0 for 64; PAT-ranked when the player
+  // uses PAT) are scored by sim_candidate_value_net_evaluate (context
+  // sim_candidate_value_net_context, the mover's history
+  // rollout_value_net_own_history), and the sim_max_candidates with the
+  // highest utility by the chooser's weights (value_net_utility) are simmed.
+  value_net_rows_fn sim_candidate_value_net_evaluate;
+  void *sim_candidate_value_net_context;
+  int sim_candidate_pool;
   // Total SIM iterations per decision, stopping before the time budget if
   // reached; 0 = no limit.
   uint64_t sim_max_iterations;

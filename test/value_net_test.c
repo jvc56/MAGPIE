@@ -519,17 +519,17 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // endgames static, or with egplies= > 0 by an endgame search that many
 // plies deep; with pre=static it plays static until the bag is empty. leaf=1
 // scores a simnn player's rollouts by the net at the horizon when it chose
-// the final ply (nnplies= equal to plies=). uwin=, uspread= and
-// uscale= set the utility
-// (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults otherwise) that an
-// nn player and each sim, value net replies included, rank by. model= sets
-// the net's directory (default <model_dir>). pat=<name> ranks a player's
-// moves by static equity with that PAT term (one file for both players).
-// An nn player scores the top cands= static moves (default 50); with
-// rescore=<dir> it cascades: the net at <dir> rescores its top
-// rescore_top= (default 5) candidates and decides. Any key may be given
-// per player as <key>_a or <key>_b. Both games of a pair use one seed and
-// the players swap seats, so each seat draws the same tiles. Writes
+// the final ply (nnplies= equal to plies=). pool= > 0 has a simnn player sim
+// the cands= plays its net rates best among the top pool= static plays. uwin=,
+// uspread= and uscale= set the utility (as -uwin, -uspread, -uspreadscale;
+// MAGPIE's defaults otherwise) that an nn player and each sim, value net
+// replies included, rank by. model= sets the net's directory (default
+// <model_dir>). pat=<name> ranks a player's moves by static equity with that
+// PAT term (one file for both players). An nn player scores the top cands=
+// static moves (default 50); with rescore=<dir> it cascades: the net at <dir>
+// rescores its top rescore_top= (default 5) candidates and decides. Any key may
+// be given per player as <key>_a or <key>_b. Both games of a pair use one seed
+// and the players swap seats, so each seat draws the same tiles. Writes
 // <out>.games.csv and per-decision timing to <out>.moves.csv.
 static void vnt_games(const StringSplitter *fields) {
   if (string_splitter_get_number_of_items(fields) < 9) {
@@ -644,6 +644,8 @@ static void vnt_games(const StringSplitter *fields) {
         strtod(vnt_option(fields, 9, "ms", player_idx, "0"), NULL);
     const int endgame_plies =
         (int)vnt_option_double(fields, 9, "egplies", player_idx, 0.0);
+    const int candidate_pool =
+        (int)vnt_option_double(fields, 9, "pool", player_idx, 0.0);
     // pre=static plays static while tiles remain (with egplies= for the
     // endgame).
     const bool pre_static = strings_equal(
@@ -688,6 +690,13 @@ static void vnt_games(const StringSplitter *fields) {
             vnt_option(fields, 9, "nnplies", player_idx, "1"), NULL, 10),
         .rollout_value_net_leaf =
             vnt_option_double(fields, 9, "leaf", player_idx, 0.0) > 0,
+        .sim_candidate_value_net_evaluate =
+            kinds[player_idx] == VNT_PLAYER_SIM_NN && candidate_pool > 0
+                ? value_net_player_evaluate_rows
+                : NULL,
+        .sim_candidate_value_net_context =
+            kinds[player_idx] == VNT_PLAYER_SIM_NN ? players[player_idx] : NULL,
+        .sim_candidate_pool = candidate_pool,
         .rollout_value_net_history = &rollout_histories[player_idx],
         .rollout_value_net_own_history = &rollout_own_histories[player_idx],
     };
@@ -703,7 +712,8 @@ static void vnt_games(const StringSplitter *fields) {
   (void)fprintf(games_out,
                 "pair,game,a_seat,a_score,b_score,a_spread,a_win,turns,"
                 "a_seconds,b_seconds\n");
-  (void)fprintf(moves_out, "pair,game,turn,player,bag,total_ms\n");
+  (void)fprintf(moves_out,
+                "pair,game,turn,player,bag,total_ms,sim_iterations\n");
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   Game *game = config_get_game(config);
@@ -733,6 +743,7 @@ static void vnt_games(const StringSplitter *fields) {
         }
         const int64_t start = ctimer_monotonic_ns();
         game_timer_start_turn(&game_timer, seat);
+        uint64_t sim_iterations = 0;
         Move move;
         switch (kinds[player_idx]) {
         case VNT_PLAYER_NN:
@@ -746,8 +757,14 @@ static void vnt_games(const StringSplitter *fields) {
         case VNT_PLAYER_SIM_NN:
           rollout_histories[player_idx] = histories[1 - seat];
           rollout_own_histories[player_idx] = histories[seat];
+          // The process-wide counters give this decision's sim iterations
+          // (decisions here are sequential).
+          play_chooser_benchmark_reset();
           play_chooser_choose_move(choosers[player_idx], game, &move,
                                    error_stack);
+          PlayChooserBenchmarkStats chooser_stats;
+          play_chooser_benchmark_get(&chooser_stats);
+          sim_iterations = chooser_stats.sim_iterations;
           if (!error_stack_is_empty(error_stack)) {
             error_stack_print_and_reset(error_stack);
             log_fatal("sim player failed");
@@ -755,10 +772,11 @@ static void vnt_games(const StringSplitter *fields) {
           break;
         }
         game_timer_end_turn(&game_timer);
-        (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%.3f\n", pair_idx,
+        (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%.3f,%llu\n", pair_idx,
                       game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
                       bag_get_letters(game_get_bag(game)),
-                      (double)(ctimer_monotonic_ns() - start) / 1e6);
+                      (double)(ctimer_monotonic_ns() - start) / 1e6,
+                      (unsigned long long)sim_iterations);
         value_net_history_record_opponent_move(&histories[1 - seat], &move);
         play_move(&move, game, NULL);
         turn++;
