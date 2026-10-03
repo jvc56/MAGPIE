@@ -756,7 +756,7 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
   case TUI_MODAL_MAIN_MENU:
   case TUI_MODAL_TIME_PICKER:
   case TUI_MODAL_QUIT_CONFIRM:
-  case TUI_MODAL_ANALYSIS_MENU:
+  case TUI_MODAL_PANEL_MENU:
   case TUI_MODAL_PHONY_CONFIRM:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
            "\xb7 Esc back ";
