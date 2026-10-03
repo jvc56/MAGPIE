@@ -15,8 +15,10 @@
 #include "onboarding.h"
 #include "render_bars.h"
 #include "render_board.h"
+#include "render_layout.h"
 #include "render_modals.h"
 #include "render_rack.h"
+#include "settings_table.h"
 #include "theme.h"
 #include "time_picker.h"
 #include "tui_cli_args.h"
@@ -186,8 +188,6 @@ static void init_ui_state(TuiUiState *ui, const TuiConfig *loaded) {
 // open modal has no per-row help.
 static int modal_focus(const TuiUiState *ui) {
   switch (ui->modal) {
-  case TUI_MODAL_SETTINGS:
-    return ui->settings_focus;
   case TUI_MODAL_WATCH_SETUP:
     return ui->watch_setup_focus;
   case TUI_MODAL_PLAY_SETUP:
@@ -206,7 +206,22 @@ static int modal_focus(const TuiUiState *ui) {
 // The open dialog's help line. The analysis menu's depends on the game:
 // a disabled item says why it can't run. Caller holds state->mutex.
 static const char *modal_help_line(const TuiGameState *state,
-                                   const TuiUiState *ui) {
+                                   const TuiUiState *ui,
+                                   const TuiSession *session) {
+  if (ui->modal == TUI_MODAL_SETTINGS) {
+    TuiSettingsRow rows[TUI_SETTINGS_MAX_ROWS];
+    const int row_count = tui_settings_rows(rows);
+    const int focus = ui->settings_focus;
+    if (focus < 0 || focus >= row_count) {
+      return NULL;
+    }
+    if (rows[focus].kind == TUI_SETTINGS_ROW_BACK) {
+      return "Close Settings.";
+    }
+    const char *reason =
+        tui_setting_unavailable_reason(state, session, rows[focus].id);
+    return reason != NULL ? reason : tui_setting_def(rows[focus].id)->help;
+  }
   if (ui->modal == TUI_MODAL_ANALYSIS_MENU) {
     const char *reason =
         tui_analysis_menu_reason(state, ui->analysis_menu_focus);
@@ -234,6 +249,56 @@ static void lexicon_language(TuiUiState *ui, const char *lexicon, char *out,
   }
 }
 
+// The Settings dialog: every setting from the settings table, under a
+// heading for the panel it belongs to.
+static void render_settings_dialog(struct ncplane *std_plane,
+                                   const Theme *theme, TuiGameState *state,
+                                   TuiUiState *ui, const TuiSession *session) {
+  TuiSettingsRow rows[TUI_SETTINGS_MAX_ROWS];
+  const int row_count = tui_settings_rows(rows);
+  const char *labels[TUI_SETTINGS_MAX_ROWS] = {NULL};
+  const char *values[TUI_SETTINGS_MAX_ROWS] = {NULL};
+  char value_bufs[TUI_SETTINGS_MAX_ROWS][32];
+  bool heading[TUI_SETTINGS_MAX_ROWS] = {false};
+  bool unavailable[TUI_SETTINGS_MAX_ROWS] = {false};
+  unsigned plane_rows = 0;
+  unsigned plane_cols = 0;
+  ncplane_dim_yx(std_plane, &plane_rows, &plane_cols);
+  pthread_mutex_lock(&state->mutex);
+  for (int row_idx = 0; row_idx < row_count; row_idx++) {
+    const TuiSettingsRow *row = &rows[row_idx];
+    heading[row_idx] = row->kind == TUI_SETTINGS_ROW_HEADING;
+    unavailable[row_idx] = false;
+    values[row_idx] = NULL;
+    if (row->kind == TUI_SETTINGS_ROW_HEADING) {
+      labels[row_idx] = tui_setting_panel_title(row->panel);
+      continue;
+    }
+    if (row->kind == TUI_SETTINGS_ROW_BACK) {
+      labels[row_idx] = "Back";
+      continue;
+    }
+    const TuiSettingDef *def = tui_setting_def(row->id);
+    labels[row_idx] = def->label;
+    unavailable[row_idx] =
+        tui_setting_unavailable_reason(state, session, row->id) != NULL;
+    tui_setting_format(def, tui_setting_get(state, row->id),
+                       value_bufs[row_idx], sizeof(value_bufs[row_idx]));
+    // 2x is kept when the terminal is too small to show it, so the user
+    // can step back to 1x without resizing first; say why it's at 1x.
+    if (row->id == TUI_SETTING_SCALE && state->board_scale >= 2 &&
+        compute_effective_scale(2, plane_cols, plane_rows) < 2) {
+      (void)snprintf(value_bufs[row_idx], sizeof(value_bufs[row_idx]),
+                     "2x (too small)");
+    }
+    values[row_idx] = value_bufs[row_idx];
+  }
+  pthread_mutex_unlock(&state->mutex);
+  tui_game_render_settings(std_plane, theme, "Settings", labels, values,
+                           heading, unavailable, row_count, ui->settings_focus,
+                           &ui->settings_scroll);
+}
+
 // Draws the open modal (if any) over the rendered game.
 // `state` is non-const because the analysis menu locks its mutex to read
 // which items can run.
@@ -243,15 +308,7 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
   if (ui->modal == TUI_MODAL_MAIN_MENU) {
     tui_game_render_menu(std_plane, theme, ui->main_menu_focus);
   } else if (ui->modal == TUI_MODAL_SETTINGS) {
-    const bool current_load_rit = session->to_save.load_rit_set
-                                      ? session->to_save.load_rit
-                                      : session->initial_load_rit;
-    tui_game_render_settings(std_plane, theme, ui->settings_focus,
-                             state->board_scale, state->antialias,
-                             state->score_subscripts, state->border_thickness,
-                             session->pixel_supported, session->font_available,
-                             state->premium_labels, state->blank_uppercase,
-                             state->rack_sort, current_load_rit);
+    render_settings_dialog(std_plane, theme, state, ui, session);
   } else if (ui->modal == TUI_MODAL_TIME_PICKER) {
     tui_game_render_time_picker(std_plane, theme, ui->time_focus);
   } else if (ui->modal == TUI_MODAL_QUIT_CONFIRM) {
@@ -788,6 +845,13 @@ int main(int argc, char *argv[]) {
                                     : TUI_SCORE_SUBSCRIPTS_OFF;
   game_state.rack_sort =
       loaded.rack_sort_set ? loaded.rack_sort : TUI_RACK_SORT_ALPHA;
+  game_state.theme = chosen_theme;
+  if (loaded.sim_plies_set) {
+    game_state.sim_plies = loaded.sim_plies;
+  }
+  if (loaded.sim_candidates_set) {
+    game_state.sim_candidates = loaded.sim_candidates;
+  }
   session.pixel_supported = notcurses_canpixel(nc);
   session.font_available = game_state.glyph_cache != NULL;
   // If the user's saved scale=2 can't be honored on this machine, fall
@@ -884,6 +948,12 @@ int main(int argc, char *argv[]) {
                              render_now.tv_sec != rendered_wall_sec ||
                              bot_animating || analysis_live;
     if (need_render) {
+      // Settings can switch the theme; the cached pixel composites hold
+      // the old colors, so rebuild them.
+      if (theme->name != game_state.theme) {
+        theme = theme_get(game_state.theme);
+        tui_game_render_reset_grids();
+      }
       // Time the FULL render path (cell composition + pixel ncblits AND
       // the notcurses_render emit) so the fps readout reflects the real
       // per-frame cost, not just the graphics emit. The mutex wait is
@@ -898,7 +968,7 @@ int main(int argc, char *argv[]) {
           (long)(lock_acquired.tv_sec - render_begin.tv_sec) * 1000000L +
           (lock_acquired.tv_nsec - render_begin.tv_nsec) / 1000L;
       tui_game_render(std_plane, theme, &game_state, session.chosen_time,
-                      ui.modal, modal_help_line(&game_state, &ui));
+                      ui.modal, modal_help_line(&game_state, &ui, &session));
       pthread_mutex_unlock(&game_state.mutex);
       render_modal_overlay(std_plane, theme, &game_state, &ui, &session);
       emit_frame_and_record_stats(nc, render_begin, lock_us, input_dirty_ts,

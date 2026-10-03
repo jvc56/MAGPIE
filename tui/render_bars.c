@@ -7,6 +7,7 @@
 #include "mach_compat.h"
 #include "render_common.h"
 #include "render_layout.h"
+#include "settings_table.h"
 #include "slash_commands.h"
 #include "theme.h"
 #include "tui_history_edit.h"
@@ -18,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 static _Atomic long g_max_frame_us;
@@ -212,95 +214,229 @@ void render_pending_bar(struct ncplane *plane, const Theme *theme,
 // message instead of an empty popup. Drawn directly on the std
 // plane and sized to the visible matches; the next frame's content
 // rendering naturally repaints over it when the popup goes away.
+// One popup row: blank it to theme->bg, then draw `cells` left to
+// right, each at its column; a cell's first `bright_len` characters draw
+// in theme->fg (the part the user typed), the rest dim.
+typedef struct {
+  const char *text;
+  int col;
+  int bright_len;
+} PaletteCell;
+
+static void render_palette_row(struct ncplane *plane, const Theme *theme,
+                               const Layout *L, int row,
+                               const PaletteCell *cells, int cell_count) {
+  theme_apply_fg(plane, theme->fg);
+  theme_apply_bg(plane, theme->bg);
+  ncplane_set_styles(plane, 0);
+  for (unsigned col = 0; col < L->plane_cols; col++) {
+    ncplane_putstr_yx(plane, row, (int)col, " ");
+  }
+  for (int cell_idx = 0; cell_idx < cell_count; cell_idx++) {
+    const PaletteCell *cell = &cells[cell_idx];
+    int col = cell->col;
+    for (int char_idx = 0; cell->text[char_idx] != '\0'; char_idx++) {
+      if (col >= (int)L->plane_cols - 1) {
+        break;
+      }
+      theme_apply_fg(plane, char_idx < cell->bright_len
+                                ? theme->fg
+                                : theme->modal_shortcut_fg);
+      const char ch[2] = {cell->text[char_idx], '\0'};
+      ncplane_putstr_yx(plane, row, col++, ch);
+    }
+  }
+}
+
+// "/set" autocomplete. While the setting's name is being typed: every
+// setting it could be, with its current value, the values it takes, and
+// what it does. Once the name is complete: the setting's values (for a
+// choice, those matching what's typed).
+static void render_set_palette(struct ncplane *plane, const Theme *theme,
+                               const TuiGameState *state, const Layout *L,
+                               const TuiSlashWords *words) {
+  const char *buf = state->slash_buf;
+  int def_count = 0;
+  const TuiSettingDef *defs = tui_setting_defs(&def_count);
+  const TuiSettingDef *chosen =
+      words->count >= 3
+          ? tui_setting_resolve(buf + words->start[1], words->len[1])
+          : NULL;
+  enum { KEY_COL = 1, MAX_ROWS = TUI_SETTING_COUNT + 1 };
+  // Column layout: "/set <key>", current value, accepted values, help.
+  int key_w = 0;
+  for (int def_idx = 0; def_idx < def_count; def_idx++) {
+    const int key_len = (int)strlen(defs[def_idx].key);
+    key_w = key_len > key_w ? key_len : key_w;
+  }
+  // Value and accepted-values columns fit their widest entries.
+  int value_w = 0;
+  int values_w = 0;
+  for (int def_idx = 0; def_idx < def_count; def_idx++) {
+    char text[128];
+    tui_setting_format(&defs[def_idx], tui_setting_get(state, defs[def_idx].id),
+                       text, sizeof(text));
+    value_w = (int)strlen(text) > value_w ? (int)strlen(text) : value_w;
+    tui_setting_describe_values(&defs[def_idx], text, sizeof(text));
+    values_w = (int)strlen(text) > values_w ? (int)strlen(text) : values_w;
+  }
+  const int value_col = KEY_COL + 5 + key_w + 3;
+  const int values_col = value_col + value_w + 3;
+  const int help_col = values_col + values_w + 3;
+  char lines[MAX_ROWS][4][128];
+  PaletteCell cells[MAX_ROWS][4];
+  int cell_counts[MAX_ROWS];
+  int row_count = 0;
+  if (chosen == NULL) {
+    const char *typed = words->count >= 2 ? buf + words->start[1] : "";
+    const int typed_len = words->count >= 2 ? words->len[1] : 0;
+    for (int def_idx = 0; def_idx < def_count && row_count < MAX_ROWS;
+         def_idx++) {
+      const TuiSettingDef *def = &defs[def_idx];
+      if ((int)strlen(def->key) < typed_len ||
+          strncasecmp(def->key, typed, (size_t)typed_len) != 0) {
+        continue;
+      }
+      char value[32];
+      tui_setting_format(def, tui_setting_get(state, def->id), value,
+                         sizeof(value));
+      (void)snprintf(lines[row_count][0], 128, "/set %s", def->key);
+      (void)snprintf(lines[row_count][1], 128, "%s", value);
+      tui_setting_describe_values(def, lines[row_count][2], 128);
+      (void)snprintf(lines[row_count][3], 128, "%s", def->help);
+      const int cols[4] = {KEY_COL, value_col, values_col, help_col};
+      // The typed part of the key and the current value stand out.
+      const int bright[4] = {5 + typed_len, (int)strlen(value), 0, 0};
+      for (int cell_idx = 0; cell_idx < 4; cell_idx++) {
+        cells[row_count][cell_idx] =
+            (PaletteCell){.text = lines[row_count][cell_idx],
+                          .col = cols[cell_idx],
+                          .bright_len = bright[cell_idx]};
+      }
+      cell_counts[row_count] = 4;
+      row_count++;
+    }
+  } else if (chosen->kind == TUI_SETTING_KIND_INT) {
+    char value[32];
+    tui_setting_format(chosen, tui_setting_get(state, chosen->id), value,
+                       sizeof(value));
+    tui_setting_describe_values(chosen, lines[0][1], 128);
+    (void)snprintf(lines[0][0], 128, "/set %s <number>", chosen->key);
+    (void)snprintf(lines[0][2], 128, "now %s. %s", value, chosen->help);
+    cells[0][0] = (PaletteCell){lines[0][0], KEY_COL, 0};
+    cells[0][1] =
+        (PaletteCell){lines[0][1], values_col, (int)strlen(lines[0][1])};
+    cells[0][2] = (PaletteCell){lines[0][2], help_col, 0};
+    cell_counts[0] = 3;
+    row_count = 1;
+  } else {
+    // A choice (or on/off): one row per value matching what's typed,
+    // the current one marked.
+    const char *typed = buf + words->start[2];
+    const int typed_len = words->len[2];
+    const int current = tui_setting_get(state, chosen->id);
+    char values[128];
+    tui_setting_describe_values(chosen, values, sizeof(values));
+    for (int value_idx = chosen->min;
+         value_idx <= chosen->max && row_count < MAX_ROWS; value_idx++) {
+      char name[32];
+      tui_setting_format(chosen, value_idx, name, sizeof(name));
+      if ((int)strlen(name) < typed_len ||
+          strncasecmp(name, typed, (size_t)typed_len) != 0) {
+        continue;
+      }
+      (void)snprintf(lines[row_count][0], 128, "/set %s %s", chosen->key, name);
+      (void)snprintf(lines[row_count][1], 128, "%s",
+                     value_idx == current ? "(current)" : "");
+      cells[row_count][0] =
+          (PaletteCell){lines[row_count][0], KEY_COL,
+                        5 + (int)strlen(chosen->key) + 1 + typed_len};
+      cells[row_count][1] = (PaletteCell){lines[row_count][1], values_col, 0};
+      cell_counts[row_count] = 2;
+      row_count++;
+    }
+    if (row_count > 0) {
+      (void)snprintf(lines[0][2], 128, "%s", chosen->help);
+      cells[0][2] = (PaletteCell){lines[0][2], help_col, 0};
+      cell_counts[0] = 3;
+    }
+  }
+  if (row_count == 0) {
+    (void)snprintf(lines[0][0], 128, "No setting matches \"/%s\"", buf);
+    cells[0][0] = (PaletteCell){lines[0][0], KEY_COL, 0};
+    cell_counts[0] = 1;
+    row_count = 1;
+  }
+  const int popup_top = L->command_bar_row - row_count;
+  if (popup_top < 0) {
+    return;
+  }
+  for (int row_idx = 0; row_idx < row_count; row_idx++) {
+    render_palette_row(plane, theme, L, popup_top + row_idx, cells[row_idx],
+                       cell_counts[row_idx]);
+  }
+}
+
+// Command palette popup: rendered above the command bar while slash
+// mode is active. Lists commands whose name starts with the typed
+// prefix and a short description, mirroring the Claude Code CLI's
+// `/`-prompt style: typed prefix in theme->fg, the rest of each name
+// and the descriptions dim. After "/set " it lists settings instead
+// (render_set_palette). Drawn directly on the std plane and sized to the
+// visible matches; the next frame's content rendering naturally repaints
+// over it when the popup goes away.
 void render_command_palette(struct ncplane *plane, const Theme *theme,
                             const TuiGameState *state, const Layout *L) {
   if (state == NULL || !state->slash_active) {
     return;
   }
+  TuiSlashWords words;
+  tui_slash_split(state->slash_buf, state->slash_len, &words);
+  const TuiSlashCommand *typed_cmd =
+      words.count > 1 ? tui_slash_command_resolve(
+                            state->slash_buf + words.start[0], words.len[0])
+                      : NULL;
+  if (typed_cmd != NULL && typed_cmd->id == TUI_SLASH_SET) {
+    render_set_palette(plane, theme, state, L, &words);
+    return;
+  }
+  const int typed_len = words.count > 0 ? words.len[0] : 0;
+  const char *typed = words.count > 0 ? state->slash_buf + words.start[0] : "";
   int n_cmds = 0;
   const TuiSlashCommand *cmds = tui_slash_commands(&n_cmds);
-
-  // Filter to prefix matches against the lowercase slash buffer.
-  int match_idx[16];
+  enum { MAX_MATCHES = 24 };
+  int match_idx[MAX_MATCHES];
   int n_match = 0;
-  for (int i = 0;
-       i < n_cmds && n_match < (int)(sizeof(match_idx) / sizeof(match_idx[0]));
-       i++) {
-    if (tui_slash_command_matches(&cmds[i], state->slash_buf,
-                                  state->slash_len)) {
-      match_idx[n_match++] = i;
+  int max_name = 0;
+  for (int cmd_idx = 0; cmd_idx < n_cmds && n_match < MAX_MATCHES; cmd_idx++) {
+    if (tui_slash_command_matches(&cmds[cmd_idx], typed, typed_len)) {
+      match_idx[n_match++] = cmd_idx;
+      const int name_len = (int)strlen(cmds[cmd_idx].name);
+      max_name = name_len > max_name ? name_len : max_name;
     }
   }
-
   const int popup_rows = n_match > 0 ? n_match : 1;
   const int popup_top = L->command_bar_row - popup_rows;
   if (popup_top < 0) {
     return;
   }
-
   if (n_match == 0) {
-    // Single-line "No commands match" message.
     char buf[128];
-    (void)snprintf(buf, sizeof(buf), " No commands match \"/%s\"",
+    (void)snprintf(buf, sizeof(buf), "No commands match \"/%s\"",
                    state->slash_buf);
-    theme_apply_fg(plane, theme->dim_fg);
-    theme_apply_bg(plane, theme->bg);
-    ncplane_set_styles(plane, 0);
-    // Clear the row then write.
-    for (unsigned c = 0; c < L->plane_cols; c++) {
-      ncplane_putstr_yx(plane, popup_top, (int)c, " ");
-    }
-    ncplane_putstr_yx(plane, popup_top, 1, buf);
+    const PaletteCell cell = {buf, 1, 0};
+    render_palette_row(plane, theme, L, popup_top, &cell, 1);
     return;
   }
-
-  // Compute description column: aligns the descriptions across all
-  // matching rows. Leading "/" plus the command name, plus a fixed
-  // gap of 3 cells.
-  int max_name = 0;
-  for (int i = 0; i < n_match; i++) {
-    const int w = (int)strlen(cmds[match_idx[i]].name);
-    if (w > max_name) {
-      max_name = w;
-    }
-  }
-  const int name_col = 1; // 1-cell left pad
-  const int desc_col = name_col + 1 /* "/" */ + max_name + 3;
-
-  for (int i = 0; i < n_match; i++) {
-    const int row = popup_top + i;
-    const TuiSlashCommand *c = &cmds[match_idx[i]];
-    // Clear row to theme->bg first so we don't inherit colored
-    // content from the panel that was drawn below.
-    theme_apply_fg(plane, theme->fg);
-    theme_apply_bg(plane, theme->bg);
-    ncplane_set_styles(plane, 0);
-    for (unsigned col = 0; col < L->plane_cols; col++) {
-      ncplane_putstr_yx(plane, row, (int)col, " ");
-    }
-    // Leading "/" in dim (it's the same for every row, not part of
-    // the matched-prefix highlight).
-    int col = name_col;
-    theme_apply_fg(plane, theme->modal_shortcut_fg);
-    theme_apply_bg(plane, theme->bg);
-    ncplane_putstr_yx(plane, row, col++, "/");
-    // Matched prefix portion in bright theme->fg.
-    theme_apply_fg(plane, theme->fg);
-    for (int k = 0; k < state->slash_len && c->name[k] != '\0'; k++) {
-      char ch[2] = {c->name[k], '\0'};
-      ncplane_putstr_yx(plane, row, col++, ch);
-    }
-    // Remainder of the command name in dim grey.
-    theme_apply_fg(plane, theme->modal_shortcut_fg);
-    for (int k = state->slash_len; c->name[k] != '\0'; k++) {
-      char ch[2] = {c->name[k], '\0'};
-      ncplane_putstr_yx(plane, row, col++, ch);
-    }
-    // Description column, dim grey.
-    if (desc_col < (int)L->plane_cols) {
-      theme_apply_fg(plane, theme->modal_shortcut_fg);
-      ncplane_putstr_yx(plane, row, desc_col, c->desc);
-    }
+  // Descriptions align in a column: "/" + the longest name + a 3-cell
+  // gap.
+  const int desc_col = 1 + 1 + max_name + 3;
+  for (int row_idx = 0; row_idx < n_match; row_idx++) {
+    const TuiSlashCommand *cmd = &cmds[match_idx[row_idx]];
+    // The leading "/" stays dim; it isn't part of the typed match.
+    const PaletteCell cells[3] = {
+        {"/", 1, 0}, {cmd->name, 2, typed_len}, {cmd->desc, desc_col, 0}};
+    render_palette_row(plane, theme, L, popup_top + row_idx, cells, 3);
   }
 }
 void render_command_bar(struct ncplane *plane, const Theme *theme,
