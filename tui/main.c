@@ -196,6 +196,8 @@ static int modal_focus(const TuiUiState *ui) {
     return ui->annotate_setup_focus;
   case TUI_MODAL_ANALYSIS_MENU:
     return ui->analysis_menu_focus;
+  case TUI_MODAL_PHONY_CONFIRM:
+    return ui->phony_confirm_focus;
   default:
     return -1;
   }
@@ -266,6 +268,13 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
     pthread_mutex_unlock(&state->mutex);
     tui_game_render_analysis_menu(std_plane, theme, ui->analysis_menu_focus,
                                   disabled, sim_continues);
+  } else if (ui->modal == TUI_MODAL_PHONY_CONFIRM) {
+    pthread_mutex_lock(&state->mutex);
+    char words[sizeof(state->phony_confirm_words)];
+    (void)snprintf(words, sizeof(words), "%s", state->phony_confirm_words);
+    pthread_mutex_unlock(&state->mutex);
+    tui_game_render_phony_confirm(std_plane, theme, ui->phony_confirm_focus,
+                                  state->active_lexicon, words);
   } else if (ui->modal == TUI_MODAL_STARTUP_MENU) {
     tui_game_render_startup_menu(std_plane, theme, ui->startup_menu_focus);
   } else if (ui->modal == TUI_MODAL_WATCH_SETUP) {
@@ -575,6 +584,10 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
     return;
   }
 
+  if (tui_input_phony_confirm(state, ui, key, input)) {
+    return;
+  }
+
   // When the History cursor sits on a pending entry and the
   // user hasn't opened the editor yet, Tab / Enter / → / ↓ all
   // drop into the move cell. Up / Left stay reserved for
@@ -582,6 +595,18 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
   // the click-to-edit path — annotation users shouldn't need
   // the mouse to start typing the next field.
   tui_input_game(state, ui, session, key, input);
+}
+
+// An annotation commit held back for phonies (phony_confirm_idx set by
+// the cell editor) asks first.
+static void open_phony_confirm(TuiGameState *state, TuiUiState *ui) {
+  pthread_mutex_lock(&state->mutex);
+  const bool phony_pending = state->phony_confirm_idx >= 0;
+  pthread_mutex_unlock(&state->mutex);
+  if (phony_pending && ui->modal == TUI_MODAL_NONE) {
+    ui->modal = TUI_MODAL_PHONY_CONFIRM;
+    ui->phony_confirm_focus = TUI_PHONY_CONFIRM_UNDO;
+  }
 }
 
 int main(int argc, char *argv[]) {
@@ -957,6 +982,7 @@ int main(int argc, char *argv[]) {
         continue;
       }
       dispatch_input(nc, std_plane, &game_state, &ui, &session, key, input);
+      open_phony_confirm(&game_state, &ui);
     } while (ui.running);
 
     // If this frame's input drain dirtied the frame, render it ASAP instead
