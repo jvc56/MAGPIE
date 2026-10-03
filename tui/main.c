@@ -846,6 +846,8 @@ int main(int argc, char *argv[]) {
   game_state.rack_sort =
       loaded.rack_sort_set ? loaded.rack_sort : TUI_RACK_SORT_ALPHA;
   game_state.theme = chosen_theme;
+  game_state.hide_spoilers =
+      loaded.hide_spoilers_set ? loaded.hide_spoilers : false;
   if (loaded.sim_plies_set) {
     game_state.sim_plies = loaded.sim_plies;
   }
