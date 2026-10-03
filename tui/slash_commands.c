@@ -16,6 +16,9 @@ static const TuiSlashCommand slash_commands[] = {
     {TUI_SLASH_KIBITZ, "kibitz",
      "Rank the selected turn's moves by static equity", "Kibitz (static eval)"},
     {TUI_SLASH_NEW, "new", "Start a new game", NULL},
+    {TUI_SLASH_PLAY_FROM, "playfrom",
+     "Take over the selected turn and play on against the computer",
+     "Play on from here"},
     {TUI_SLASH_QUIT, "quit", "Quit MAGPIE TUI", NULL},
     {TUI_SLASH_RESUME, "resume",
      "Continue the selected turn's saved analysis (finished games)",
@@ -27,6 +30,8 @@ static const TuiSlashCommand slash_commands[] = {
     {TUI_SLASH_SIM, "sim", "Simulate the selected turn (continues a saved sim)",
      "Simulate"},
     {TUI_SLASH_STOP, "stop", "Stop the running analysis", "Stop analysis"},
+    {TUI_SLASH_WATCH_FROM, "watchfrom",
+     "Let the computer play on from the selected turn", "Watch from here"},
 };
 
 const TuiSlashCommand *tui_slash_command(TuiSlashCommandId id) {
