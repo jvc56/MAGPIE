@@ -133,6 +133,9 @@ bool tui_config_load(TuiConfig *config) {
   config->sim_plies_set = false;
   config->sim_candidates_set = false;
   config->hide_spoilers_set = false;
+  config->auto_analyze_set = false;
+  config->analysis_time_limit_set = false;
+  config->thread_limit_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -264,6 +267,23 @@ bool tui_config_load(TuiConfig *config) {
         } else {
           config->sim_candidates = (int)parsed;
           config->sim_candidates_set = true;
+        }
+      }
+    } else if (strcmp(trimmed, "auto_analyze") == 0 ||
+               strcmp(trimmed, "analysis_time_limit") == 0 ||
+               strcmp(trimmed, "threads") == 0) {
+      char *endptr = NULL;
+      const long parsed = strtol(value, &endptr, 10);
+      if (endptr != value && parsed >= 0 && parsed <= 24L * 3600) {
+        if (strcmp(trimmed, "auto_analyze") == 0) {
+          config->auto_analyze = (int)parsed;
+          config->auto_analyze_set = true;
+        } else if (strcmp(trimmed, "analysis_time_limit") == 0) {
+          config->analysis_time_limit = (int)parsed;
+          config->analysis_time_limit_set = true;
+        } else {
+          config->thread_limit = (int)parsed;
+          config->thread_limit_set = true;
         }
       }
     } else if (strcmp(trimmed, "hide_spoilers") == 0) {
@@ -515,6 +535,16 @@ bool tui_config_save(const TuiConfig *config) {
   }
   if (config->load_rit_set) {
     (void)fprintf(file, "load_rit = %s\n", config->load_rit ? "true" : "false");
+  }
+  if (config->auto_analyze_set) {
+    (void)fprintf(file, "auto_analyze = %d\n", config->auto_analyze);
+  }
+  if (config->analysis_time_limit_set) {
+    (void)fprintf(file, "analysis_time_limit = %d\n",
+                  config->analysis_time_limit);
+  }
+  if (config->thread_limit_set) {
+    (void)fprintf(file, "threads = %d\n", config->thread_limit);
   }
   if (config->hide_spoilers_set) {
     (void)fprintf(file, "hide_spoilers = %s\n",
