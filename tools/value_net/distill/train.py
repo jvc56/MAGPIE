@@ -245,7 +245,15 @@ def batches(records, decisions, per_decision, top, seed, out_queue, stop):
         picks = records.train[rng.integers(0, len(records.train), decisions)]
         chunks = []
         for part_idx, start, count in picks:
-            rows = np.asarray(records.parts[part_idx][start:start + count])
+            part = records.parts[part_idx]
+            if not top:
+                # Only the sampled records (the data may not be in the page
+                # cache).
+                offsets = np.sort(rng.choice(count, per_decision,
+                                             replace=False))
+                chunks.append(part[start + offsets])
+                continue
+            rows = np.asarray(part[start:start + count])
             order = np.argsort(-utility(rows["value"], rows["spread"],
                                         rows["spread_after"]), kind="stable")
             offsets = np.concatenate([order[:top], rng.choice(
