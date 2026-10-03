@@ -507,6 +507,9 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   if (strategy->rollout_value_net_history != NULL) {
     sim_args.rollout_value_net_history = *strategy->rollout_value_net_history;
   }
+  sim_args.pat_rollout_disabled = strategy->pat_rollout_disabled;
+  sim_args.pat_rollout_disabled_classes_mask =
+      strategy->pat_rollout_disabled_classes_mask;
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).

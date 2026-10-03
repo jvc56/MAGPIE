@@ -107,6 +107,10 @@ typedef struct PlayChooserStrategy {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // The player's rollout PAT settings for SIM evaluation (see
+  // SimArgs.pat_rollout_disabled). Zero/unset: PAT on, every class.
+  bool pat_rollout_disabled;
+  uint32_t pat_rollout_disabled_classes_mask;
   uint64_t seed;
 } PlayChooserStrategy;
 
