@@ -30,4 +30,8 @@ double value_net_spread_after_move(const Game *game, const Move *move);
 double value_net_utility(float value, float spread, double spread_after,
                          double w_winpct, double w_spread, double spread_scale);
 
+// The predicted final spread in points of the row's mover: spread_after
+// plus 130 * atanh(spread), as in value_net_utility.
+double value_net_final_spread(float spread, double spread_after);
+
 #endif

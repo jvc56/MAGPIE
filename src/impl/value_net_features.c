@@ -289,10 +289,13 @@ double value_net_utility(float value, float spread, double spread_after,
   if (w_spread == 0.0) {
     return win_pct;
   }
+  return sim_utility_blend(
+      win_pct, double_to_equity(value_net_final_spread(spread, spread_after)),
+      w_winpct, w_spread, spread_scale);
+}
+
+double value_net_final_spread(float spread, double spread_after) {
   const double spread_output =
       fmax(-VNF_MAX_SPREAD_OUTPUT, fmin(VNF_MAX_SPREAD_OUTPUT, (double)spread));
-  const double final_spread =
-      spread_after + (VNF_SPREAD_SCALE * atanh(spread_output));
-  return sim_utility_blend(win_pct, double_to_equity(final_spread), w_winpct,
-                           w_spread, spread_scale);
+  return spread_after + (VNF_SPREAD_SCALE * atanh(spread_output));
 }

@@ -237,12 +237,13 @@ static double vnt_sim_win_pct(const SimResults *results, const Move *move) {
 
 // One sim of the top root_cands static plays for iterations iterations
 // (round robin, ranked by win%) from seed, its first nn_plies rollout plies
-// the value net's when player is set; results is filled.
+// the value net's when player is set, scored by the net at the horizon with
+// leaf; results is filled.
 static void vnt_simcompare_sim(const Config *config, Game *game, MoveList *root,
                                ValueNetPlayer *player, int plies, int threads,
                                uint64_t iterations, int reply_cands, int batch,
-                               int nn_plies, uint64_t seed, SimResults *results,
-                               ErrorStack *error_stack) {
+                               int nn_plies, bool leaf, uint64_t seed,
+                               SimResults *results, ErrorStack *error_stack) {
   ThreadControl *control = thread_control_create();
   thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
   SimArgs sim_args;
@@ -257,6 +258,7 @@ static void vnt_simcompare_sim(const Config *config, Game *game, MoveList *root,
     sim_args.rollout_value_net_candidates = reply_cands;
     sim_args.rollout_value_net_batch = batch;
     sim_args.rollout_value_net_plies = nn_plies;
+    sim_args.rollout_value_net_leaf = leaf;
   }
   simulate_without_ctx(&sim_args, results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -267,7 +269,7 @@ static void vnt_simcompare_sim(const Config *config, Game *game, MoveList *root,
 }
 
 // "simcompare:<model_dir>:<backend>:<plies>:<root_cands>:<threads>:
-// <iterations>:<reply_cands>:<batch>:<nn_plies>:<positions>:<out>": on
+// <iterations>:<reply_cands>:<batch>:<nn_plies>:<positions>:<out>[:leaf]": on
 // positions from static NWL23 games (even turns 2..20 with tiles in the
 // bag), a sim with static rollouts and one whose first nn_plies rollout
 // plies are the value net's (reply_cands candidates, batch iterations per
@@ -276,11 +278,15 @@ static void vnt_simcompare_sim(const Config *config, Game *game, MoveList *root,
 // plays for iterations iterations each (round robin, ranked by win%).
 // Writes <out>.csv with the picks and the win% the first two sims give both
 // of theirs, and prints how often the static and net picks agree and how
-// often the two static picks do.
+// often the two static picks do. leaf 1 scores the net sim's rollouts by
+// the net at the horizon.
 static void vnt_simcompare(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 12) {
-    log_fatal("simcompare needs 11 fields");
+  const int field_count = string_splitter_get_number_of_items(fields);
+  if (field_count != 12 && field_count != 13) {
+    log_fatal("simcompare needs 11 or 12 fields");
   }
+  const bool leaf = field_count == 13 &&
+                    strtol(string_splitter_get_item(fields, 12), NULL, 10) > 0;
   const char *model_dir = string_splitter_get_item(fields, 1);
   const char *backend_name = string_splitter_get_item(fields, 2);
   const int plies = (int)strtol(string_splitter_get_item(fields, 3), NULL, 10);
@@ -357,8 +363,8 @@ static void vnt_simcompare(const StringSplitter *fields) {
           results[sim_idx] = sim_results_create(0.0);
           vnt_simcompare_sim(config, game, root, sim_idx == 1 ? player : NULL,
                              plies, threads, iterations, reply_cands, batch,
-                             nn_plies, sim_idx == 2 ? 8 : 7, results[sim_idx],
-                             error_stack);
+                             nn_plies, leaf, sim_idx == 2 ? 8 : 7,
+                             results[sim_idx], error_stack);
           move_copy(&picks[sim_idx],
                     sim_results_get_best_move(results[sim_idx]));
           string_builder_clear(names[sim_idx]);
@@ -511,7 +517,9 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // seconds, from which a sim player without ms= budgets each move
 // (PlayChooser; after its flag falls it plays static). A sim player plays
 // endgames static, or with egplies= > 0 by an endgame search that many
-// plies deep. uwin=, uspread= and
+// plies deep; with pre=static it plays static until the bag is empty. leaf=1
+// scores a simnn player's rollouts by the net at the horizon when it chose
+// the final ply (nnplies= equal to plies=). uwin=, uspread= and
 // uscale= set the utility
 // (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults otherwise) that an
 // nn player and each sim, value net replies included, rank by. model= sets
@@ -636,8 +644,13 @@ static void vnt_games(const StringSplitter *fields) {
         strtod(vnt_option(fields, 9, "ms", player_idx, "0"), NULL);
     const int endgame_plies =
         (int)vnt_option_double(fields, 9, "egplies", player_idx, 0.0);
+    // pre=static plays static while tiles remain (with egplies= for the
+    // endgame).
+    const bool pre_static = strings_equal(
+        vnt_option(fields, 9, "pre", player_idx, "sim"), "static");
     const PlayChooserStrategy strategy = {
-        .pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM,
+        .pre_endgame_eval =
+            pre_static ? PLAY_CHOOSER_EVAL_STATIC : PLAY_CHOOSER_EVAL_SIM,
         // egplies= > 0 solves endgames that many plies deep (within the
         // move's budget); 0 plays them static.
         .endgame_eval = endgame_plies > 0 ? PLAY_CHOOSER_EVAL_ENDGAME
@@ -673,6 +686,8 @@ static void vnt_games(const StringSplitter *fields) {
             vnt_option(fields, 9, "batch", player_idx, "8"), NULL, 10),
         .rollout_value_net_plies = (int)strtol(
             vnt_option(fields, 9, "nnplies", player_idx, "1"), NULL, 10),
+        .rollout_value_net_leaf =
+            vnt_option_double(fields, 9, "leaf", player_idx, 0.0) > 0,
         .rollout_value_net_history = &rollout_histories[player_idx],
         .rollout_value_net_own_history = &rollout_own_histories[player_idx],
     };

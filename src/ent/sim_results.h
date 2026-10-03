@@ -49,6 +49,8 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     int off_turn_rack_tiles,
                                     bool plies_are_odd);
 void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility);
+// Records an iteration's win% computed by the caller.
+void simmed_play_add_win_pct_value(SimmedPlay *simmed_play, double wpct);
 
 typedef struct SimResults SimResults;
 

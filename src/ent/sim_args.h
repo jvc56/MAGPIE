@@ -78,12 +78,16 @@ typedef struct SimArgs {
   // spread. Before the candidate, the replier's history is
   // rollout_value_net_history and the simming player's
   // rollout_value_net_own_history. sim_args_fill clears the evaluator;
-  // later plies are static.
+  // later plies are static. With rollout_value_net_leaf, when the net chose
+  // the final rollout ply, the iteration is scored by the net's win% and
+  // predicted final spread for that move instead of the win% table (a
+  // rollout that ended the game still takes its result).
   value_net_rows_fn rollout_value_net_evaluate;
   void *rollout_value_net_context;
   int rollout_value_net_candidates;
   int rollout_value_net_batch;
   int rollout_value_net_plies;
+  bool rollout_value_net_leaf;
   ValueNetHistory rollout_value_net_history;
   ValueNetHistory rollout_value_net_own_history;
 } SimArgs;
@@ -155,6 +159,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->rollout_value_net_candidates = 0;
   sim_args->rollout_value_net_batch = 0;
   sim_args->rollout_value_net_plies = 0;
+  sim_args->rollout_value_net_leaf = false;
   value_net_history_reset(&sim_args->rollout_value_net_history);
   value_net_history_reset(&sim_args->rollout_value_net_own_history);
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-

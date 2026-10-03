@@ -417,8 +417,13 @@ typedef struct SimValueNetWorker {
   uint64_t *seeds; // [plays * batch]
   Move *moves;     // [plays * batch * plies]
   int *move_count; // [plays * batch]
-  int *count;      // [plays]
-  int *next;       // [plays]
+  // With the net leaf, whether the net chose the final ply and, for the
+  // simming player, its win% and predicted final spread in points.
+  bool *leaf_set;       // [plays * batch]
+  double *leaf_win_pct; // [plays * batch]
+  double *leaf_spread;  // [plays * batch]
+  int *count;           // [plays]
+  int *next;            // [plays]
   // A refill's iterations: their games, each player's value net history
   // (by player index), and whether they still take value net moves.
   Game **games;               // [batch]
@@ -435,8 +440,11 @@ typedef struct SimValueNetWorker {
   double *spread_after;
   MoveList *list;
   Game *scratch;
-  // The moves of the iteration rv_sim_sample is playing.
+  // The moves of the iteration rv_sim_sample is playing, and its leaf.
   Move *iteration_moves; // [plies]
+  bool iteration_leaf_set;
+  double iteration_leaf_win_pct;
+  double iteration_leaf_spread;
 } SimValueNetWorker;
 
 typedef struct SimmerWorker {
@@ -478,6 +486,8 @@ typedef struct Simmer {
   void *value_net_context;
   int value_net_candidates;
   int value_net_batch;
+  // SimArgs.rollout_value_net_leaf, when the net chooses the final ply.
+  bool value_net_leaf;
   ValueNetHistory value_net_history;
   ValueNetHistory value_net_own_history;
   SimValueNetShared value_net_shared;
@@ -511,6 +521,9 @@ static void sim_value_net_worker_free(SimValueNetWorker *worker) {
   free(worker->spreads);
   free(worker->spread_after);
   free(worker->iteration_moves);
+  free(worker->leaf_set);
+  free(worker->leaf_win_pct);
+  free(worker->leaf_spread);
   move_list_destroy(worker->list);
   game_destroy(worker->scratch);
   memset(worker, 0, sizeof(SimValueNetWorker));
@@ -534,6 +547,9 @@ static void sim_value_net_worker_ensure(SimValueNetWorker *worker,
     worker->seeds = malloc_or_die(sizeof(uint64_t) * slots);
     worker->moves = malloc_or_die(sizeof(Move) * slots * (size_t)shared->plies);
     worker->move_count = malloc_or_die(sizeof(int) * slots);
+    worker->leaf_set = calloc_or_die(slots, sizeof(bool));
+    worker->leaf_win_pct = malloc_or_die(sizeof(double) * slots);
+    worker->leaf_spread = malloc_or_die(sizeof(double) * slots);
     worker->count = calloc_or_die((size_t)shared->plays, sizeof(int));
     worker->next = calloc_or_die((size_t)shared->plays, sizeof(int));
     worker->games = malloc_or_die(sizeof(Game *) * (size_t)batch);
@@ -700,6 +716,7 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
     const uint64_t seed = simmed_play_get_seed(simmed_play);
     worker->seeds[slot] = seed;
     worker->move_count[slot] = 0;
+    worker->leaf_set[slot] = false;
     Game *game = worker->games[seed_idx];
     game_copy(game, shared->start);
     sim_set_rollout_pat(simmer, game);
@@ -790,6 +807,23 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
           best_utility = utility;
         }
       }
+      if (simmer->value_net_leaf && ply == worker->plies - 1) {
+        // The net's view of the horizon: the chosen move's win% and final
+        // spread, from its mover's side to the simming player's.
+        const size_t slot = slot_base + (size_t)seed_idx;
+        const int best_row = row + best;
+        double win_pct = (1.0 + (double)worker->values[best_row]) / 2.0;
+        double final_spread = value_net_final_spread(
+            worker->spreads[best_row], worker->spread_after[best_row]);
+        if (game_get_player_on_turn_index(worker->games[seed_idx]) !=
+            simmer->initial_player) {
+          win_pct = 1.0 - win_pct;
+          final_spread = -final_spread;
+        }
+        worker->leaf_set[slot] = true;
+        worker->leaf_win_pct[slot] = win_pct;
+        worker->leaf_spread[slot] = final_spread;
+      }
       sim_value_net_play(worker, seed_idx, slot_base + (size_t)seed_idx,
                          &moves[best]);
       row += count;
@@ -842,6 +876,9 @@ static int sim_value_net_next(Simmer *simmer, SimmerWorker *simmer_worker,
   const size_t slot = ((size_t)play_index * (size_t)worker->batch) +
                       (size_t)worker->next[play_index]++;
   *seed = worker->seeds[slot];
+  worker->iteration_leaf_set = worker->leaf_set[slot];
+  worker->iteration_leaf_win_pct = worker->leaf_win_pct[slot];
+  worker->iteration_leaf_spread = worker->leaf_spread[slot];
   const int moves = worker->move_count[slot];
   for (int ply = 0; ply < moves; ply++) {
     move_copy(&worker->iteration_moves[ply],
@@ -974,9 +1011,20 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
                               projected_leftover);
-  const double wpct = simmed_play_add_win_pct_stat(
-      simmer->win_pcts, simmed_play, spread, leftover, game_end_reason,
-      bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, plies % 2);
+  // The net's horizon value, when it chose the final ply of a rollout that
+  // did not end the game, replaces the win% table and the utility's spread.
+  const SimValueNetWorker *value_net = &simmer_worker->value_net;
+  const bool net_leaf = value_net_moves > 0 && value_net->iteration_leaf_set &&
+                        game_end_reason == GAME_END_REASON_NONE;
+  double wpct;
+  if (net_leaf) {
+    wpct = value_net->iteration_leaf_win_pct;
+    simmed_play_add_win_pct_value(simmed_play, wpct);
+  } else {
+    wpct = simmed_play_add_win_pct_stat(
+        simmer->win_pcts, simmed_play, spread, leftover, game_end_reason,
+        bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, plies % 2);
+  }
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
@@ -989,8 +1037,11 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
-  const Equity utility_spread =
+  Equity utility_spread =
       simmer->use_margin_forecast ? spread + projected_leftover : spread;
+  if (net_leaf) {
+    utility_spread = double_to_equity(value_net->iteration_leaf_spread);
+  }
   const double utility =
       sim_utility_blend(wpct, utility_spread, simmer->utility_w_winpct,
                         simmer->utility_w_spread, simmer->utility_spread_scale);
@@ -1052,6 +1103,7 @@ static void simmer_set_value_net(Simmer *simmer, const SimArgs *sim_args) {
   simmer->pat_rollout_disabled = sim_args->pat_rollout_disabled;
   simmer->pat_rollout_disabled_classes_mask =
       sim_args->pat_rollout_disabled_classes_mask;
+  simmer->value_net_leaf = false;
   if (simmer->value_net_evaluate == NULL) {
     return;
   }
@@ -1062,6 +1114,8 @@ static void simmer_set_value_net(Simmer *simmer, const SimArgs *sim_args) {
   if (plies < 1) {
     plies = 1;
   }
+  simmer->value_net_leaf =
+      sim_args->rollout_value_net_leaf && plies == sim_args->num_plies;
   sim_value_net_shared_prepare(
       &simmer->value_net_shared, move_list_get_count(sim_args->move_list),
       simmer->value_net_batch > 0 ? simmer->value_net_batch

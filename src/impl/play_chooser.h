@@ -59,6 +59,8 @@ typedef struct PlayChooserStrategy {
   int rollout_value_net_batch;
   // Rollout plies the value net chooses (see SimArgs; 0 or 1: the reply).
   int rollout_value_net_plies;
+  // Score iterations by the net at the horizon (see SimArgs).
+  bool rollout_value_net_leaf;
   const ValueNetHistory *rollout_value_net_history;
   // When set, the simming player's own history, read at each decision.
   const ValueNetHistory *rollout_value_net_own_history;
