@@ -3,8 +3,10 @@
 #include "bot_worker.h"
 #include "game_state.h"
 #include "move_entry.h"
+#include "slash_commands.h"
 #include "time_picker.h"
 #include "tui_clipboard.h"
+#include "tui_history_edit.h"
 #include "tui_ui_state.h"
 #include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
@@ -15,46 +17,33 @@
 #include <string.h>
 #include <time.h>
 
-// Whether the keyboard may open the history-cell editor on entry `idx`.
-// Play-vs-computer edits only the human's live pending turn (the cell is
-// its keyboard move-entry surface); reopening a committed turn would
-// replay history from text and desync the bag-drawn racks, which is
-// also why mouse clicks never open the editor in that mode.
-static bool history_entry_keyboard_editable(const TuiGameState *state,
-                                            int idx) {
-  if (idx < 0 || idx >= state->history_count) {
-    return false;
-  }
-  if (state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER) {
-    return true;
-  }
-  const TuiHistoryEntry *entry = &state->history[idx];
-  return idx == state->history_count - 1 && entry->pending &&
-         entry->player_idx == state->human_player_idx;
-}
-
 // Game-screen keys when no modal or cell editor is open: panel focus
 // (0-5, Tab), Esc menu, CGP copy, board / Analysis / History navigation,
 // and the command bar with its slash commands. Returns true when consumed.
 bool tui_input_game(TuiGameState *state, TuiUiState *ui,
                     const TuiSession *session, uint32_t key, ncinput input) {
+  // Opening the history-cell editor from the History cursor: Enter on
+  // any editable entry, and Tab / Right / Down too on the pending one
+  // (the turn being entered, so any key toward it starts typing).
+  const bool enter_key = key == NCKEY_ENTER || key == '\r' || key == '\n';
+  const bool pending_open_key = enter_key || key == NCKEY_TAB || key == '\t' ||
+                                key == NCKEY_RIGHT || key == NCKEY_DOWN;
   if (ui->modal == TUI_MODAL_NONE && state->edit_history_idx < 0 &&
       state->focused_panel == TUI_FOCUS_HISTORY && state->history_cursor >= 0 &&
       state->history_cursor < state->history_count &&
-      state->history[state->history_cursor].pending &&
-      history_entry_keyboard_editable(state, state->history_cursor) &&
-      (key == NCKEY_TAB || key == '\t' || key == NCKEY_ENTER || key == '\r' ||
-       key == '\n' || key == NCKEY_RIGHT || key == NCKEY_DOWN)) {
+      tui_history_entry_editable(state, state->history_cursor) &&
+      (state->history[state->history_cursor].pending ? pending_open_key
+                                                     : enter_key)) {
     pthread_mutex_lock(&state->mutex);
     const int target = state->history_cursor;
     const TuiHistoryEntry *e = &state->history[target];
-    // Seed the buffers from the entry only when nothing has
-    // been typed yet — preserves any in-flight text the user
-    // had left in the buffer.
-    if (state->edit_move_len == 0) {
+    // On the pending entry, seed the buffers only when nothing has
+    // been typed yet — preserves any in-flight text the user had left
+    // in the buffer. A committed entry always opens on its stored text.
+    if (state->edit_move_len == 0 || !e->pending) {
       tui_game_state_seed_edit_move(state, e->move_str);
     }
-    if (state->edit_rack_len == 0) {
+    if (state->edit_rack_len == 0 || !e->pending) {
       (void)snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
                      e->rack_str);
       state->edit_rack_len = (int)strlen(state->edit_rack_buf);
@@ -63,6 +52,9 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       // user-authored: don't snap it back to "match the
       // move's inferred letters" on the next keystroke.
       state->edit_rack_user_modified = e->rack_str[0] != '\0';
+    }
+    if (!e->pending) {
+      state->edit_rack_carryover[0] = '\0';
     }
     state->edit_history_idx = target;
     // ↓ lands on the RACK row (mirrors the inside-edit
@@ -269,7 +261,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
     const bool step_into = is_horizontal && !shift;
     if (step_into && forward && state->history_cursor >= 0 &&
         state->history_cursor <= last &&
-        history_entry_keyboard_editable(state, state->history_cursor)) {
+        tui_history_entry_editable(state, state->history_cursor)) {
       // N> → N.MOVE
       TuiHistoryEntry *e = &state->history[state->history_cursor];
       tui_game_state_seed_edit_move(state, e->move_str);
@@ -283,8 +275,7 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       state->edit_field = TUI_EDIT_FIELD_MOVE;
       tui_game_state_parse_edit_buf(state);
     } else if (step_into && !forward && state->history_cursor > 0 &&
-               history_entry_keyboard_editable(state,
-                                               state->history_cursor - 1)) {
+               tui_history_entry_editable(state, state->history_cursor - 1)) {
       // N> → (N-1).RACK
       const int target = state->history_cursor - 1;
       TuiHistoryEntry *e = &state->history[target];
@@ -379,95 +370,52 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
         pthread_mutex_unlock(&state->mutex);
       } else if (key == NCKEY_TAB || key == '\t') {
         // Tab completes against the unique prefix match.
-        static const char *cmd_names[] = {"copy",   "exit",     "new", "quit",
-                                          "resume", "settings", "stop"};
-        static const int n_cmds =
-            (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
-        const char *match = NULL;
-        int n_match = 0;
-        for (int i = 0; i < n_cmds; i++) {
-          if ((int)strlen(cmd_names[i]) >= state->slash_len &&
-              strncmp(cmd_names[i], state->slash_buf,
-                      (size_t)state->slash_len) == 0) {
-            match = cmd_names[i];
-            n_match++;
-          }
-        }
-        if (n_match == 1 && match != NULL) {
+        const TuiSlashCommand *match =
+            tui_slash_command_resolve(state->slash_buf, state->slash_len);
+        if (match != NULL) {
           pthread_mutex_lock(&state->mutex);
           (void)snprintf(state->slash_buf, sizeof(state->slash_buf), "%s",
-                         match);
-          state->slash_len = (int)strlen(match);
+                         match->name);
+          state->slash_len = (int)strlen(match->name);
           state->slash_cursor = state->slash_len;
           pthread_mutex_unlock(&state->mutex);
         }
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-        // Execute the typed-or-completed command. Fall back to a
-        // unique prefix match if user pressed Enter without
-        // completing first.
-        char cmd[64];
-        (void)snprintf(cmd, sizeof(cmd), "%s", state->slash_buf);
-        if (strcmp(cmd, "new") == 0 || strcmp(cmd, "n") == 0) {
+        // Execute the typed command: an exact name, or a unique prefix
+        // if the user pressed Enter without completing first.
+        const TuiSlashCommand *cmd =
+            tui_slash_command_resolve(state->slash_buf, state->slash_len);
+        switch (cmd != NULL ? cmd->id : TUI_SLASH_COUNT) {
+        case TUI_SLASH_NEW:
           ui->modal = TUI_MODAL_TIME_PICKER;
           ui->time_focus = tui_time_picker_closest_index(session->chosen_time);
           ui->time_picker_return = TUI_MODAL_NONE;
-        } else if (strcmp(cmd, "settings") == 0) {
+          break;
+        case TUI_SLASH_SETTINGS:
           ui->modal = TUI_MODAL_SETTINGS;
           ui->settings_focus = 0;
           ui->settings_return = TUI_MODAL_NONE;
-        } else if (strcmp(cmd, "quit") == 0 || strcmp(cmd, "exit") == 0) {
+          break;
+        case TUI_SLASH_QUIT:
+        case TUI_SLASH_EXIT:
           ui->modal = TUI_MODAL_QUIT_CONFIRM;
           ui->quit_confirm_focus = 0;
           ui->quit_confirm_return = TUI_MODAL_NONE;
-        } else if (strcmp(cmd, "copy") == 0) {
+          break;
+        case TUI_SLASH_COPY:
           tui_copy_position_cgp(state);
-        } else if (strcmp(cmd, "resume") == 0) {
+          break;
+        case TUI_SLASH_RESUME:
           pthread_mutex_lock(&state->mutex);
           tui_analysis_worker_start(state, state->history_cursor);
           pthread_mutex_unlock(&state->mutex);
-        } else if (strcmp(cmd, "stop") == 0) {
+          break;
+        case TUI_SLASH_STOP:
           tui_analysis_worker_stop_and_join(state);
-        } else {
-          // Try a unique prefix match.
-          static const char *cmd_names[] = {"copy",   "exit",     "new", "quit",
-                                            "resume", "settings", "stop"};
-          static const int n_cmds =
-              (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
-          const char *match = NULL;
-          int n_match = 0;
-          for (int i = 0; i < n_cmds; i++) {
-            if ((int)strlen(cmd_names[i]) >= state->slash_len &&
-                strncmp(cmd_names[i], state->slash_buf,
-                        (size_t)state->slash_len) == 0) {
-              match = cmd_names[i];
-              n_match++;
-            }
-          }
-          if (n_match == 1 && match != NULL) {
-            if (strcmp(match, "new") == 0) {
-              ui->modal = TUI_MODAL_TIME_PICKER;
-              ui->time_focus =
-                  tui_time_picker_closest_index(session->chosen_time);
-              ui->time_picker_return = TUI_MODAL_NONE;
-            } else if (strcmp(match, "settings") == 0) {
-              ui->modal = TUI_MODAL_SETTINGS;
-              ui->settings_focus = 0;
-              ui->settings_return = TUI_MODAL_NONE;
-            } else if (strcmp(match, "quit") == 0 ||
-                       strcmp(match, "exit") == 0) {
-              ui->modal = TUI_MODAL_QUIT_CONFIRM;
-              ui->quit_confirm_focus = 0;
-              ui->quit_confirm_return = TUI_MODAL_NONE;
-            } else if (strcmp(match, "copy") == 0) {
-              tui_copy_position_cgp(state);
-            } else if (strcmp(match, "resume") == 0) {
-              pthread_mutex_lock(&state->mutex);
-              tui_analysis_worker_start(state, state->history_cursor);
-              pthread_mutex_unlock(&state->mutex);
-            } else if (strcmp(match, "stop") == 0) {
-              tui_analysis_worker_stop_and_join(state);
-            }
-          }
+          break;
+        case TUI_SLASH_COUNT:
+        default:
+          break;
         }
         pthread_mutex_lock(&state->mutex);
         state->slash_active = false;
