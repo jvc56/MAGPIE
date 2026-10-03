@@ -14,6 +14,7 @@
 #include "render_planes.h"
 #include "render_view.h"
 #include "theme.h"
+#include "tile_input.h"
 #include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
 #include <stdatomic.h>
@@ -346,27 +347,10 @@ void render_rack_panel(struct ncplane *plane, const Theme *theme,
         theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
                                               : theme->rack_tile1_bg);
       }
-      if (halfwidth) {
-        // Halfwidth blank: just the "?" glyph. We used to splice a
-        // zero-width non-joiner in between adjacent blanks to defeat
-        // "??" font ligatures, but it caused the row containing
-        // blanks to drop out on some terminals; the ligature is the
-        // lesser evil.
-        const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-        ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset,
-                          ascii[0] != '\0' ? ascii : " ");
-      } else {
-        const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
-        if (fullwidth[0] != '\0') {
-          ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset,
-                            fullwidth);
-        } else {
-          const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-          ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset,
-                            " ");
-          ncplane_putstr(plane, ascii);
-        }
-      }
+      // A blank is "?"; see tile_face_cells for multi-letter tiles.
+      char face[TUI_TILE_TEXT_MAX];
+      tile_face_cells(ld, ml, halfwidth, face, sizeof(face));
+      ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset, face);
       col_offset += cell_w;
     }
   }
