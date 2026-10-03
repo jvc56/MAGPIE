@@ -13,6 +13,7 @@
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/game_timer.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -506,7 +507,12 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // first nnplies= rollout plies, default 1; default nn vs static). Sim
 // players take plies=, cands= (root candidates), ms= (per move) and iters=
 // (cap), rcands= and batch= (value net plays: candidates per position and
-// iterations per evaluation). uwin=, uspread= and uscale= set the utility
+// iterations per evaluation). clock= gives each player a game clock in
+// seconds, from which a sim player without ms= budgets each move
+// (PlayChooser; after its flag falls it plays static). A sim player plays
+// endgames static, or with egplies= > 0 by an endgame search that many
+// plies deep. uwin=, uspread= and
+// uscale= set the utility
 // (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults otherwise) that an
 // nn player and each sim, value net replies included, rank by. model= sets
 // the net's directory (default <model_dir>). pat=<name> ranks a player's
@@ -611,27 +617,44 @@ static void vnt_games(const StringSplitter *fields) {
   // rollouts, refreshed before each of its decisions.
   ValueNetHistory rollout_histories[2];
   ValueNetHistory rollout_own_histories[2];
+  // Each player's game clock in seconds (clock=; 0: untimed), run for every
+  // decision and budgeted from by sim players without ms= (PlayChooser).
+  double clock_seconds[2];
+  GameTimer game_timer;
+  game_timer_reset(&game_timer, 0.0);
   PlayChooser *choosers[2] = {NULL, NULL};
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     value_net_history_reset(&rollout_histories[player_idx]);
     value_net_history_reset(&rollout_own_histories[player_idx]);
+    clock_seconds[player_idx] =
+        vnt_option_double(fields, 9, "clock", player_idx, 0.0);
     if (kinds[player_idx] != VNT_PLAYER_SIM &&
         kinds[player_idx] != VNT_PLAYER_SIM_NN) {
       continue;
     }
     const double ms =
         strtod(vnt_option(fields, 9, "ms", player_idx, "0"), NULL);
+    const int endgame_plies =
+        (int)vnt_option_double(fields, 9, "egplies", player_idx, 0.0);
     const PlayChooserStrategy strategy = {
         .pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM,
-        .endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+        // egplies= > 0 solves endgames that many plies deep (within the
+        // move's budget); 0 plays them static.
+        .endgame_eval = endgame_plies > 0 ? PLAY_CHOOSER_EVAL_ENDGAME
+                                          : PLAY_CHOOSER_EVAL_STATIC,
+        .endgame_plies = endgame_plies,
         .sim_plies = (int)strtol(
             vnt_option(fields, 9, "plies", player_idx, "2"), NULL, 10),
         .sim_max_candidates = (int)strtol(
             vnt_option(fields, 9, "cands", player_idx, "15"), NULL, 10),
         .sim_max_iterations =
             strtoull(vnt_option(fields, 9, "iters", player_idx, "0"), NULL, 10),
-        // An iteration cap alone gets an ample time budget.
-        .fixed_seconds_per_move = ms > 0 ? ms / 1000.0 : 600.0,
+        // ms= is a flat budget; otherwise a clock budgets each move, and an
+        // iteration cap alone gets an ample time budget.
+        .fixed_seconds_per_move =
+            ms > 0 ? ms / 1000.0
+                   : (clock_seconds[player_idx] > 0 ? 0.0 : 600.0),
+        .game_timer = &game_timer,
         .win_pcts = config_get_win_pcts(config),
         .num_threads = (int)strtol(
             vnt_option(fields, 9, "threads", player_idx, "1"), NULL, 10),
@@ -663,7 +686,8 @@ static void vnt_games(const StringSplitter *fields) {
   FILE *moves_out = fopen_or_die(path, "w");
   free(path);
   (void)fprintf(games_out,
-                "pair,game,a_seat,a_score,b_score,a_spread,a_win,turns\n");
+                "pair,game,a_seat,a_score,b_score,a_spread,a_win,turns,"
+                "a_seconds,b_seconds\n");
   (void)fprintf(moves_out, "pair,game,turn,player,bag,total_ms\n");
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
@@ -682,6 +706,8 @@ static void vnt_games(const StringSplitter *fields) {
       draw_starting_racks(game);
       value_net_history_reset(&histories[0]);
       value_net_history_reset(&histories[1]);
+      game_timer_reset_for_players(&game_timer, clock_seconds[a_seat],
+                                   clock_seconds[1 - a_seat]);
       int turn = 0;
       while (!game_over(game) && turn < VNT_MAX_TURNS) {
         const int seat = game_get_player_on_turn_index(game);
@@ -691,6 +717,7 @@ static void vnt_games(const StringSplitter *fields) {
                                pat_names[player_idx] == NULL, 0);
         }
         const int64_t start = ctimer_monotonic_ns();
+        game_timer_start_turn(&game_timer, seat);
         Move move;
         switch (kinds[player_idx]) {
         case VNT_PLAYER_NN:
@@ -712,6 +739,7 @@ static void vnt_games(const StringSplitter *fields) {
           }
           break;
         }
+        game_timer_end_turn(&game_timer);
         (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%.3f\n", pair_idx,
                       game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
                       bag_get_letters(game_get_bag(game)),
@@ -726,9 +754,11 @@ static void vnt_games(const StringSplitter *fields) {
           equity_to_int(player_get_score(game_get_player(game, 1 - a_seat)));
       const int spread = a_score - b_score;
       const double result = spread > 0 ? 1.0 : (spread == 0 ? 0.5 : 0.0);
-      (void)fprintf(games_out, "%ld,%d,%d,%d,%d,%d,%.1f,%d\n", pair_idx,
-                    game_in_pair, a_seat, a_score, b_score, spread, result,
-                    turn);
+      (void)fprintf(games_out, "%ld,%d,%d,%d,%d,%d,%.1f,%d,%.2f,%.2f\n",
+                    pair_idx, game_in_pair, a_seat, a_score, b_score, spread,
+                    result, turn,
+                    game_timer_get_seconds_used(&game_timer, a_seat),
+                    game_timer_get_seconds_used(&game_timer, 1 - a_seat));
       (void)fflush(games_out);
     }
     (void)fflush(moves_out);
