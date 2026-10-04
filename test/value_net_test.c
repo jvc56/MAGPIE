@@ -2504,6 +2504,89 @@ static double vnt_throughput_run(ValueNetMetal *metal, int threads, int rows,
   return seconds;
 }
 
+typedef struct VntCpuThroughputWorker {
+  const ValueNet *net;
+  int rows;
+  int calls;
+  const float *board;
+  const float *scalars;
+} VntCpuThroughputWorker;
+
+static void *vnt_cpu_throughput_worker(void *arg) {
+  const VntCpuThroughputWorker *worker = arg;
+  float value = 0.0F;
+  for (int call_idx = 0; call_idx < worker->calls; call_idx++) {
+    const int row = call_idx % worker->rows;
+    value_net_evaluate_cpu(
+        worker->net, 1, worker->board + ((size_t)row * VALUE_NET_BOARD_FLOATS),
+        worker->scalars + ((size_t)row * VALUE_NET_SCALARS), &value, NULL);
+  }
+  return NULL;
+}
+
+// "cputhroughput:<dir>:<parity_dir>:<calls>:<threads>[,<threads>...]": CPU
+// rows per second with each thread count, every thread evaluating calls
+// single rows (cycling through the parity rows) at once.
+static void vnt_cpu_throughput(const char *dir, const char *parity_dir,
+                               int calls, const char *thread_list) {
+  ErrorStack *error_stack = error_stack_create();
+  ValueNet *net = value_net_create(dir, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("could not load the value net from %s", dir);
+  }
+  char *path = get_formatted_string("%s/board.f32", parity_dir);
+  float *board = vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS *
+                                           VALUE_NET_BOARD_FLOATS);
+  free(path);
+  path = get_formatted_string("%s/scalars.f32", parity_dir);
+  float *scalars =
+      vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS * VALUE_NET_SCALARS);
+  free(path);
+  double single = 0.0;
+  const char *cursor = thread_list;
+  while (*cursor != '\0') {
+    char *end = NULL;
+    const int threads = (int)strtol(cursor, &end, 10);
+    if (threads < 1 || threads > VNT_MAX_THROUGHPUT_THREADS) {
+      log_fatal("cputhroughput threads must be 1..%d",
+                VNT_MAX_THROUGHPUT_THREADS);
+    }
+    cpthread_t thread_ids[VNT_MAX_THROUGHPUT_THREADS];
+    VntCpuThroughputWorker workers[VNT_MAX_THROUGHPUT_THREADS];
+    const int64_t start = ctimer_monotonic_ns();
+    for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
+      workers[thread_idx] = (VntCpuThroughputWorker){
+          .net = net,
+          .rows = VALUE_NET_PARITY_ROWS,
+          .calls = calls,
+          .board = board,
+          .scalars = scalars,
+      };
+      cpthread_create(&thread_ids[thread_idx], vnt_cpu_throughput_worker,
+                      &workers[thread_idx]);
+    }
+    for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
+      cpthread_join(thread_ids[thread_idx]);
+    }
+    const double seconds = (double)(ctimer_monotonic_ns() - start) / 1e9;
+    const double rate = (double)threads * calls / seconds;
+    if (single == 0.0) {
+      single = rate / threads;
+    }
+    printf("cputhroughput kernels=%s threads=%d rows_per_s=%.1f "
+           "ms_per_row_per_thread=%.2f speedup=%.2f\n",
+           value_net_cpu_kernels(), threads, rate, 1e3 * threads / rate,
+           rate / single);
+    (void)fflush(stdout);
+    cursor = *end == ',' ? end + 1 : end;
+  }
+  free(board);
+  free(scalars);
+  value_net_destroy(net);
+  error_stack_destroy(error_stack);
+}
+
 // "throughput:<dir>:<parity_dir>:<fp32|fp16>[:<threads>[:<concurrency>]]":
 // Metal rows per second by batch size, the parity rows tiled to fill each
 // batch, with threads callers (default 1) sharing one ValueNetMetal of
@@ -2779,6 +2862,12 @@ void value_net_test_run_spec(const char *spec) {
                  string_splitter_get_item(fields, 2));
   } else if (strings_equal(mode, "simbench")) {
     vnt_simbench(fields);
+  } else if (strings_equal(mode, "cputhroughput") && num_fields == 5) {
+    vnt_cpu_throughput(
+        string_splitter_get_item(fields, 1),
+        string_splitter_get_item(fields, 2),
+        (int)strtol(string_splitter_get_item(fields, 3), NULL, 10),
+        string_splitter_get_item(fields, 4));
   } else if (strings_equal(mode, "throughput") && num_fields >= 4 &&
              num_fields <= 6) {
     const int threads =
