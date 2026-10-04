@@ -1,5 +1,5 @@
 {
-  "claim_token": "dc6c8849-bcea-4a8b-b0d3-d43bb395a64f",
+  "claim_token": "ff1473e0-9b38-44f3-a9d3-e78b2dd20c5e",
   "result": {
     "all_games": {
       "games": 4,
@@ -35,6 +35,8 @@
         "rack": "HHIRRUV",
         "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 HHIRRUV/AEFLMST 0/0 0",
         "analysis": "static",
+        "played_move": "8G HUH",
+        "played_move_score": 18,
         "num_moves": 79,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -78,6 +80,8 @@
         "rack": "HHIRRUV",
         "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEFLMST/HHIRRUV 0/0 0",
         "analysis": "static",
+        "played_move": "8F HUH",
+        "played_move_score": 18,
         "num_moves": 79,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -123,6 +127,8 @@
         "analysis": "static",
         "previous_move": "8D FARING",
         "previous_move_score": 28,
+        "played_move": "G7 V(I)GS",
+        "played_move_score": 14,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -168,6 +174,8 @@
         "analysis": "static",
         "previous_move": "8D FARING",
         "previous_move_score": 28,
+        "played_move": "F6 Ve(R)SOS",
+        "played_move_score": 18,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,

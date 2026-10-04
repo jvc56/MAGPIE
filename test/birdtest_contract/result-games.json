@@ -1,5 +1,5 @@
 {
-  "claim_token": "31d0f216-5023-47c8-83df-3dcc96f8c4cf",
+  "claim_token": "af764aba-95c4-497f-b65f-d52bea985a4f",
   "result": {
     "all_games": {
       "games": 2,
@@ -13,999 +13,13 @@
     },
     "positions": [
       {
-        "game_index": 1,
-        "turn_number": 0,
-        "rack": "AFGHINR",
-        "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 GGOSSV?/AFGHINR 0/0 0",
-        "analysis": "static",
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "8D FARING",
-            "score": 28,
-            "equity": 28.44,
-            "iterations": 0
-          },
-          {
-            "move": "8D FAGIN",
-            "score": 26,
-            "equity": 26.629,
-            "iterations": 0
-          },
-          {
-            "move": "8G FAH",
-            "score": 18,
-            "equity": 25.796,
-            "iterations": 0
-          },
-          {
-            "move": "8D HARING",
-            "score": 28,
-            "equity": 25.324,
-            "iterations": 0
-          },
-          {
-            "move": "8G FARING",
-            "score": 24,
-            "equity": 25.14,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 1,
-        "rack": "GGOSSV?",
-        "position": "15/15/15/15/15/15/15/3FARING6/15/15/15/15/15/15/15 GGOSSV?/AEEEHNR 0/28 0",
-        "analysis": "static",
-        "previous_move": "8D FARING",
-        "previous_move_score": 28,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "G7 V(I)GS",
-            "score": 14,
-            "equity": 47.434,
-            "iterations": 0
-          },
-          {
-            "move": "G7 V(I)G",
-            "score": 13,
-            "equity": 45.191,
-            "iterations": 0
-          },
-          {
-            "move": "G7 G(I)GS",
-            "score": 10,
-            "equity": 39.645,
-            "iterations": 0
-          },
-          {
-            "move": "F7 G(R)OGS",
-            "score": 11,
-            "equity": 39.336,
-            "iterations": 0
-          },
-          {
-            "move": "E8 (A)VOS",
-            "score": 14,
-            "equity": 38.653,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 2,
-        "rack": "AEEEHNR",
-        "position": "15/15/15/15/15/15/6V8/3FARING6/6G8/6S8/15/15/15/15/15 DGIOQS?/AEEEHNR 14/28 0",
-        "analysis": "static",
-        "previous_move": "G7 V(I)GS",
-        "previous_move_score": 14,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "7E HE(V)EA",
-            "score": 25,
-            "equity": 29.149,
-            "iterations": 0
-          },
-          {
-            "move": "7E HA(V)E",
-            "score": 19,
-            "equity": 21.512,
-            "iterations": 0
-          },
-          {
-            "move": "7E NE(V)E",
-            "score": 13,
-            "equity": 20.896,
-            "iterations": 0
-          },
-          {
-            "move": "9C RENE(G)E",
-            "score": 19,
-            "equity": 20.745,
-            "iterations": 0
-          },
-          {
-            "move": "10B HAERE(S)",
-            "score": 19,
-            "equity": 20.609,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 3,
-        "rack": "DGIOQS?",
-        "position": "15/15/15/15/15/15/4HEVEA6/3FARING6/6G8/6S8/15/15/15/15/15 DGIOQS?/EEEFNOR 14/53 0",
-        "analysis": "static",
-        "previous_move": "7E HE(V)EA",
-        "previous_move_score": 25,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "J5 QIS",
-            "score": 26,
-            "equity": 52.256,
-            "iterations": 0
-          },
-          {
-            "move": "10E QI(S)",
-            "score": 14,
-            "equity": 46.914,
-            "iterations": 0
-          },
-          {
-            "move": "J4 DOGS",
-            "score": 22,
-            "equity": 44.342,
-            "iterations": 0
-          },
-          {
-            "move": "J4 GODS",
-            "score": 22,
-            "equity": 44.342,
-            "iterations": 0
-          },
-          {
-            "move": "6C QIS",
-            "score": 18,
-            "equity": 44.256,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 4,
-        "rack": "EEEFNOR",
-        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/6G8/6S8/15/15/15/15/15 ADEEGO?/EEEFNOR 40/53 0",
-        "analysis": "static",
-        "previous_move": "J5 QIS",
-        "previous_move_score": 26,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "10C FORE(S)EEN",
-            "score": 65,
-            "equity": 65.0,
-            "iterations": 0
-          },
-          {
-            "move": "9C FEE",
-            "score": 21,
-            "equity": 24.267,
-            "iterations": 0
-          },
-          {
-            "move": "9C NEE",
-            "score": 15,
-            "equity": 18.664,
-            "iterations": 0
-          },
-          {
-            "move": "9B FREE",
-            "score": 19,
-            "equity": 17.896,
-            "iterations": 0
-          },
-          {
-            "move": "F3 REEF(ER)",
-            "score": 17,
-            "equity": 15.896,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 5,
-        "rack": "ADEEGO?",
-        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/6G8/2FORESEEN5/15/15/15/15/15 ADEEGO?/AEITWWY 40/118 0",
-        "analysis": "static",
-        "previous_move": "10C FORE(S)EEN",
-        "previous_move_score": 65,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "E7 (HA)G(R)ODE",
-            "score": 24,
-            "equity": 53.986,
-            "iterations": 0
-          },
-          {
-            "move": "C10 (F)ADGE",
-            "score": 20,
-            "equity": 47.594,
-            "iterations": 0
-          },
-          {
-            "move": "11I DOGE",
-            "score": 17,
-            "equity": 46.986,
-            "iterations": 0
-          },
-          {
-            "move": "9A EGO",
-            "score": 11,
-            "equity": 46.594,
-            "iterations": 0
-          },
-          {
-            "move": "C10 (F)EOD",
-            "score": 16,
-            "equity": 46.459,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 6,
-        "rack": "AEITWWY",
-        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/4G1G8/2FORESEEN5/4O10/4D10/4E10/15/15 AEILOU?/AEITWWY 64/118 0",
-        "analysis": "static",
-        "previous_move": "E7 (HA)G(R)ODE",
-        "previous_move_score": 24,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "8A WAY(FARING)",
-            "score": 57,
-            "equity": 54.635,
-            "iterations": 0
-          },
-          {
-            "move": "K3 WAIT",
-            "score": 38,
-            "equity": 37.556,
-            "iterations": 0
-          },
-          {
-            "move": "K4 WIT",
-            "score": 36,
-            "equity": 37.003,
-            "iterations": 0
-          },
-          {
-            "move": "K2 YETI",
-            "score": 36,
-            "equity": 27.459,
-            "iterations": 0
-          },
-          {
-            "move": "12C TI(D)EWAY",
-            "score": 30,
-            "equity": 26.605,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 7,
-        "rack": "AEILOU?",
-        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4D10/4E10/15/15 AEILOU?/DEIIOTW 64/175 0",
-        "analysis": "static",
-        "previous_move": "8A WAY(FARING)",
-        "previous_move_score": 57,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "12E (D)IALOgUE",
-            "score": 68,
-            "equity": 68.0,
-            "iterations": 0
-          },
-          {
-            "move": "9I EULOgIA",
-            "score": 65,
-            "equity": 65.0,
-            "iterations": 0
-          },
-          {
-            "move": "13E (E)ULOgIAE",
-            "score": 58,
-            "equity": 58.0,
-            "iterations": 0
-          },
-          {
-            "move": "5J (Q)UAI",
-            "score": 26,
-            "equity": 57.371,
-            "iterations": 0
-          },
-          {
-            "move": "K4 OI",
-            "score": 26,
-            "equity": 56.01,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 8,
-        "rack": "DEIIOTW",
-        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E10/15/15 ABIOPRT/DEIIOTW 132/175 0",
-        "analysis": "static",
-        "previous_move": "12E (D)IALOgUE",
-        "previous_move_score": 68,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "K4 WIT",
-            "score": 36,
-            "equity": 34.351,
-            "iterations": 0
-          },
-          {
-            "move": "K2 TEIID",
-            "score": 37,
-            "equity": 32.805,
-            "iterations": 0
-          },
-          {
-            "move": "K3 DOIT",
-            "score": 34,
-            "equity": 30.123,
-            "iterations": 0
-          },
-          {
-            "move": "K4 OI",
-            "score": 26,
-            "equity": 27.089,
-            "iterations": 0
-          },
-          {
-            "move": "K5 IT",
-            "score": 28,
-            "equity": 26.737,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 9,
-        "rack": "ABIOPRT",
-        "position": "15/15/15/10W4/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E10/15/15 ABIOPRT/DEILORY 132/211 0",
-        "analysis": "static",
-        "previous_move": "K4 WIT",
-        "previous_move_score": 36,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "13G BOP",
-            "score": 29,
-            "equity": 32.91,
-            "iterations": 0
-          },
-          {
-            "move": "C2 PROBIT(Y)",
-            "score": 30,
-            "equity": 29.532,
-            "iterations": 0
-          },
-          {
-            "move": "L1 BIRO",
-            "score": 28,
-            "equity": 29.126,
-            "iterations": 0
-          },
-          {
-            "move": "L1 BRIO",
-            "score": 28,
-            "equity": 29.126,
-            "iterations": 0
-          },
-          {
-            "move": "13G BAP",
-            "score": 29,
-            "equity": 28.843,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 10,
-        "rack": "DEILORY",
-        "position": "15/15/15/10W4/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/15/15 AACINRT/DEILORY 161/211 0",
-        "analysis": "static",
-        "previous_move": "13G BOP",
-        "previous_move_score": 29,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "4K (W)ORDY",
-            "score": 32,
-            "equity": 32.264,
-            "iterations": 0
-          },
-          {
-            "move": "L1 YORE",
-            "score": 32,
-            "equity": 31.458,
-            "iterations": 0
-          },
-          {
-            "move": "L3 YO",
-            "score": 20,
-            "equity": 28.795,
-            "iterations": 0
-          },
-          {
-            "move": "M10 OLDY",
-            "score": 26,
-            "equity": 28.459,
-            "iterations": 0
-          },
-          {
-            "move": "M11 ODYL",
-            "score": 26,
-            "equity": 28.459,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 11,
-        "rack": "AACINRT",
-        "position": "15/15/15/10WORDY/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/15/15 AACINRT/ADEIIIL 161/243 0",
-        "analysis": "static",
-        "previous_move": "4K (W)ORDY",
-        "previous_move_score": 32,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "14I ANTICAR",
-            "score": 77,
-            "equity": 77.0,
-            "iterations": 0
-          },
-          {
-            "move": "M6 ANTICAR",
-            "score": 70,
-            "equity": 70.0,
-            "iterations": 0
-          },
-          {
-            "move": "O1 RAC(Y)",
-            "score": 27,
-            "equity": 32.921,
-            "iterations": 0
-          },
-          {
-            "move": "14I ACINAR",
-            "score": 33,
-            "equity": 32.687,
-            "iterations": 0
-          },
-          {
-            "move": "M9 CAIRN",
-            "score": 29,
-            "equity": 29.939,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 12,
-        "rack": "ADEIIIL",
-        "position": "15/15/15/10WORDY/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/8ANTICAR/15 AEEOOTX/ADEIIIL 238/243 0",
-        "analysis": "static",
-        "previous_move": "14I ANTICAR",
-        "previous_move_score": 77,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "N2 DI(D)IE",
-            "score": 18,
-            "equity": 17.533,
-            "iterations": 0
-          },
-          {
-            "move": "O12 LI(R)I",
-            "score": 15,
-            "equity": 16.128,
-            "iterations": 0
-          },
-          {
-            "move": "M8 ILIAD",
-            "score": 17,
-            "equity": 14.585,
-            "iterations": 0
-          },
-          {
-            "move": "M12 DI(C)E",
-            "score": 24,
-            "equity": 13.857,
-            "iterations": 0
-          },
-          {
-            "move": "15H ILEA",
-            "score": 22,
-            "equity": 13.726,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 13,
-        "rack": "AEEOOTX",
-        "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/8ANTICAR/15 AEEOOTX/AAILMUU 238/261 0",
-        "analysis": "static",
-        "previous_move": "N2 DI(D)IE",
-        "previous_move_score": 18,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "O11 EXT(R)A",
-            "score": 60,
-            "equity": 48.614,
-            "iterations": 0
-          },
-          {
-            "move": "O11 EXE(R)T",
-            "score": 60,
-            "equity": 46.549,
-            "iterations": 0
-          },
-          {
-            "move": "11J OXO",
-            "score": 42,
-            "equity": 39.545,
-            "iterations": 0
-          },
-          {
-            "move": "11J OX",
-            "score": 38,
-            "equity": 27.027,
-            "iterations": 0
-          },
-          {
-            "move": "O1 OAT(Y)",
-            "score": 26,
-            "equity": 25.728,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 14,
-        "rack": "AAILMUU",
-        "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O9E/4DIALOgUE2X/4E1BOP5T/8ANTICAR/14A EELOOTT/AAILMUU 298/261 0",
-        "analysis": "static",
-        "previous_move": "O11 EXT(R)A",
-        "previous_move_score": 60,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "15E MIAUL",
-            "score": 27,
-            "equity": 19.933,
-            "iterations": 0
-          },
-          {
-            "move": "C10 (F)UMULI",
-            "score": 22,
-            "equity": 15.458,
-            "iterations": 0
-          },
-          {
-            "move": "O6 LUAU",
-            "score": 14,
-            "equity": 15.285,
-            "iterations": 0
-          },
-          {
-            "move": "C10 (F)AMULI",
-            "score": 22,
-            "equity": 14.933,
-            "iterations": 0
-          },
-          {
-            "move": "15H ULU",
-            "score": 17,
-            "equity": 13.328,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 15,
-        "rack": "EELOOTT",
-        "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O9E/4DIALOgUE2X/4E1BOP5T/8ANTICAR/4MIAUL5A EELOOTT/ADHKNPU 298/288 0",
-        "analysis": "static",
-        "previous_move": "15E MIAUL",
-        "previous_move_score": 27,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "C10 (F)OOTLE",
-            "score": 18,
-            "equity": 20.081,
-            "iterations": 0
-          },
-          {
-            "move": "N11 TOE(A)",
-            "score": 17,
-            "equity": 17.852,
-            "iterations": 0
-          },
-          {
-            "move": "N10 TOE",
-            "score": 16,
-            "equity": 16.852,
-            "iterations": 0
-          },
-          {
-            "move": "N10 TOO",
-            "score": 16,
-            "equity": 15.869,
-            "iterations": 0
-          },
-          {
-            "move": "N9 TOTE",
-            "score": 17,
-            "equity": 15.658,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 16,
-        "rack": "ADHKNPU",
-        "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/2O1DIALOgUE2X/2T1E1BOP5T/2L5ANTICAR/2E1MIAUL5A EEJMRTZ/ADHKNPU 316/288 0",
-        "analysis": "static",
-        "previous_move": "C10 (F)OOTLE",
-        "previous_move_score": 18,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "M3 P(R)ANK",
-            "score": 44,
-            "equity": 39.799,
-            "iterations": 0
-          },
-          {
-            "move": "O6 HUNK",
-            "score": 38,
-            "equity": 38.368,
-            "iterations": 0
-          },
-          {
-            "move": "M12 DU(C)K",
-            "score": 32,
-            "equity": 34.616,
-            "iterations": 0
-          },
-          {
-            "move": "M3 P(R)AHU",
-            "score": 37,
-            "equity": 34.582,
-            "iterations": 0
-          },
-          {
-            "move": "O6 HAKU",
-            "score": 38,
-            "equity": 33.894,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 17,
-        "rack": "EEJMRTZ",
-        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NE1/4HEVEAS2K2/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/2O1DIALOgUE2X/2T1E1BOP5T/2L5ANTICAR/2E1MIAUL5A EEJMRTZ/BDHNTU? 316/332 0",
-        "analysis": "static",
-        "previous_move": "M3 P(R)ANK",
-        "previous_move_score": 44,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "B12 JEER",
-            "score": 39,
-            "equity": 40.674,
-            "iterations": 0
-          },
-          {
-            "move": "15A JE(E)",
-            "score": 30,
-            "equity": 35.194,
-            "iterations": 0
-          },
-          {
-            "move": "B12 JEE",
-            "score": 35,
-            "equity": 34.25,
-            "iterations": 0
-          },
-          {
-            "move": "15A ZE(E)",
-            "score": 36,
-            "equity": 33.491,
-            "iterations": 0
-          },
-          {
-            "move": "3I JET",
-            "score": 25,
-            "equity": 32.616,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 18,
-        "rack": "BDHNTU?",
-        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NE1/4HEVEAS2K2/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A ILMNRTZ/BDHNTU? 355/332 0",
-        "analysis": "static",
-        "previous_move": "B12 JEER",
-        "previous_move_score": 39,
-        "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "O6 BHUT",
-            "score": 32,
-            "equity": 60.741,
-            "iterations": 0
-          },
-          {
-            "move": "O6 BUND",
-            "score": 26,
-            "equity": 56.819,
-            "iterations": 0
-          },
-          {
-            "move": "O6 BUNT",
-            "score": 23,
-            "equity": 52.529,
-            "iterations": 0
-          },
-          {
-            "move": "O6 THUD",
-            "score": 27,
-            "equity": 52.341,
-            "iterations": 0
-          },
-          {
-            "move": "O6 BUD",
-            "score": 23,
-            "equity": 51.96,
-            "iterations": 0
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 19,
-        "rack": "ILMNRTZ",
-        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NEB/4HEVEAS2K1H/WAYFARING5U/4G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A ILMNRTZ/DNOSSV? 355/364 0",
-        "analysis": "peg",
-        "previous_move": "O6 BHUT",
-        "previous_move_score": 32,
-        "num_moves": 224,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "6I Z(IT)",
-            "score": 25,
-            "equity": 15.387,
-            "iterations": 0,
-            "win_percentage": 68.055556,
-            "mean_spread": 11.597222,
-            "fidelity_plies": 2
-          },
-          {
-            "move": "A14 MI",
-            "score": 26,
-            "equity": 17.911,
-            "iterations": 0,
-            "win_percentage": 38.888889,
-            "mean_spread": -9.444444,
-            "fidelity_plies": 2
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 20,
-        "rack": "DNOSSV?",
-        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/4HEVEAS2K1H/WAYFARING5U/4G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A CILMNRT/DNOSSV? 380/364 0",
-        "analysis": "peg",
-        "previous_move": "6I Z(IT)",
-        "previous_move_score": 25,
-        "num_moves": 2247,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "B7 V(A)N",
-            "score": 6,
-            "equity": 40.107,
-            "iterations": 0,
-            "win_percentage": 37.5,
-            "mean_spread": -2.125,
-            "fidelity_plies": 2
-          },
-          {
-            "move": "13A V(ET)",
-            "score": 6,
-            "equity": 40.231,
-            "iterations": 0,
-            "win_percentage": 12.5,
-            "mean_spread": -17.25,
-            "fidelity_plies": 2
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 21,
-        "rack": "CILMNRT",
-        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING5U/1N2G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A CILMNRT/DOSSU? 380/370 0",
-        "analysis": "endgame",
-        "previous_move": "B7 V(A)N",
-        "previous_move_score": 6,
-        "num_moves": 191,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "L8 LIMN(E)T(I)C",
-            "score": 16,
-            "equity": 4.0,
-            "iterations": 0,
-            "mean_spread": 5.0,
-            "fidelity_plies": 2
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 22,
-        "rack": "DOSSU?",
-        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING2L2U/1N2G1G4I2T/2FORESEEN1M3/2O1O6N2E/1JO1DIALOgUE2X/1ET1E1BOP2T2T/1EL5ANTICAR/1RE1MIAUL2C2A R/DOSSU? 396/370 0",
-        "analysis": "endgame",
-        "previous_move": "L8 LIMN(E)T(I)C",
-        "previous_move_score": 16,
-        "num_moves": 691,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "M9 DUOS",
-            "score": 27,
-            "equity": 15.0,
-            "iterations": 0,
-            "mean_spread": -5.0,
-            "fidelity_plies": 2
-          }
-        ]
-      },
-      {
-        "game_index": 1,
-        "turn_number": 23,
-        "rack": "R",
-        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING2L2U/1N2G1G4ID1T/2FORESEEN1MU2/2O1O6NO1E/1JO1DIALOgUES1X/1ET1E1BOP2T2T/1EL5ANTICAR/1RE1MIAUL2C2A R/S? 396/397 0",
-        "analysis": "endgame",
-        "previous_move": "M9 DUOS",
-        "previous_move_score": 27,
-        "num_moves": 1,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
-        "moves": [
-          {
-            "move": "9K R(ID)",
-            "score": 4,
-            "equity": 6.0,
-            "iterations": 0,
-            "mean_spread": 5.0,
-            "fidelity_plies": 2
-          }
-        ]
-      },
-      {
         "game_index": 0,
         "turn_number": 0,
         "rack": "HHIRRUV",
         "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 HHIRRUV/AEFLMST 0/0 0",
         "analysis": "static",
+        "played_move": "8G HUH",
+        "played_move_score": 18,
         "num_moves": 79,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1051,6 +65,8 @@
         "analysis": "static",
         "previous_move": "8G HUH",
         "previous_move_score": 18,
+        "played_move": "9E FAM",
+        "played_move_score": 21,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1096,6 +112,8 @@
         "analysis": "static",
         "previous_move": "9E FAM",
         "previous_move_score": 21,
+        "played_move": "9I MURR",
+        "played_move_score": 19,
         "num_moves": 98,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1141,6 +159,8 @@
         "analysis": "static",
         "previous_move": "9I MURR",
         "previous_move_score": 19,
+        "played_move": "10D LEX",
+        "played_move_score": 56,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1186,6 +206,8 @@
         "analysis": "static",
         "previous_move": "10D LEX",
         "previous_move_score": 56,
+        "played_move": "C10 IVORY",
+        "played_move_score": 33,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1231,6 +253,8 @@
         "analysis": "static",
         "previous_move": "C10 IVORY",
         "previous_move_score": 33,
+        "played_move": "B12 GOB",
+        "played_move_score": 31,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1276,6 +300,8 @@
         "analysis": "static",
         "previous_move": "B12 GOB",
         "previous_move_score": 31,
+        "played_move": "11E YE",
+        "played_move_score": 38,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1321,6 +347,8 @@
         "analysis": "static",
         "previous_move": "11E YE",
         "previous_move_score": 38,
+        "played_move": "A8 ZLOTE",
+        "played_move_score": 50,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1366,6 +394,8 @@
         "analysis": "static",
         "previous_move": "A8 ZLOTE",
         "previous_move_score": 50,
+        "played_move": "7I OI",
+        "played_move_score": 12,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1411,6 +441,8 @@
         "analysis": "static",
         "previous_move": "7I OI",
         "previous_move_score": 12,
+        "played_move": "12F SEQUeNT",
+        "played_move_score": 111,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1456,6 +488,8 @@
         "analysis": "static",
         "previous_move": "12F SEQUeNT",
         "previous_move_score": 111,
+        "played_move": "H12 (Q)I",
+        "played_move_score": 11,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1501,6 +535,8 @@
         "analysis": "static",
         "previous_move": "H12 (Q)I",
         "previous_move_score": 11,
+        "played_move": "8L ACTA",
+        "played_move_score": 24,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1546,6 +582,8 @@
         "analysis": "static",
         "previous_move": "8L ACTA",
         "previous_move_score": 24,
+        "played_move": "11E (YE)T",
+        "played_move_score": 8,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1591,6 +629,8 @@
         "analysis": "static",
         "previous_move": "11E (YE)T",
         "previous_move_score": 8,
+        "played_move": "L4 WETW(AR)E",
+        "played_move_score": 26,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1636,6 +676,8 @@
         "analysis": "static",
         "previous_move": "L4 WETW(AR)E",
         "previous_move_score": 26,
+        "played_move": "N4 ROTA(T)ING",
+        "played_move_score": 63,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1681,6 +723,8 @@
         "analysis": "static",
         "previous_move": "N4 ROTA(T)ING",
         "previous_move_score": 63,
+        "played_move": "O1 LADED",
+        "played_move_score": 30,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1726,6 +770,8 @@
         "analysis": "static",
         "previous_move": "O1 LADED",
         "previous_move_score": 30,
+        "played_move": "K3 COB",
+        "played_move_score": 27,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1771,6 +817,8 @@
         "analysis": "static",
         "previous_move": "K3 COB",
         "previous_move_score": 27,
+        "played_move": "14F POSADA",
+        "played_move_score": 31,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1816,6 +864,8 @@
         "analysis": "static",
         "previous_move": "14F POSADA",
         "previous_move_score": 31,
+        "played_move": "5I JI(BE)",
+        "played_move_score": 13,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1861,6 +911,8 @@
         "analysis": "static",
         "previous_move": "5I JI(BE)",
         "previous_move_score": 13,
+        "played_move": "J4 P(I)L(I)",
+        "played_move_score": 16,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1906,6 +958,8 @@
         "analysis": "static",
         "previous_move": "J4 P(I)L(I)",
         "previous_move_score": 16,
+        "played_move": "15I READIES",
+        "played_move_score": 87,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1951,6 +1005,8 @@
         "analysis": "static",
         "previous_move": "15I READIES",
         "previous_move_score": 87,
+        "played_move": "2L VIN(A)",
+        "played_move_score": 14,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -1996,6 +1052,8 @@
         "analysis": "static",
         "previous_move": "2L VIN(A)",
         "previous_move_score": 14,
+        "played_move": "B3 GUINEA",
+        "played_move_score": 20,
         "num_moves": 100,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -2041,6 +1099,8 @@
         "analysis": "endgame",
         "previous_move": "B3 GUINEA",
         "previous_move_score": 20,
+        "played_move": "C1 SKiNNER",
+        "played_move_score": 85,
         "num_moves": 2837,
         "total_iterations": 0,
         "time_elapsed": 0.0,
@@ -2052,6 +1112,1042 @@
             "equity": 99.0,
             "iterations": 0,
             "mean_spread": 160.0,
+            "fidelity_plies": 2
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 0,
+        "rack": "AFGHINR",
+        "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 GGOSSV?/AFGHINR 0/0 0",
+        "analysis": "static",
+        "played_move": "8D FARING",
+        "played_move_score": 28,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "8D FARING",
+            "score": 28,
+            "equity": 28.44,
+            "iterations": 0
+          },
+          {
+            "move": "8D FAGIN",
+            "score": 26,
+            "equity": 26.629,
+            "iterations": 0
+          },
+          {
+            "move": "8G FAH",
+            "score": 18,
+            "equity": 25.796,
+            "iterations": 0
+          },
+          {
+            "move": "8D HARING",
+            "score": 28,
+            "equity": 25.324,
+            "iterations": 0
+          },
+          {
+            "move": "8G FARING",
+            "score": 24,
+            "equity": 25.14,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 1,
+        "rack": "GGOSSV?",
+        "position": "15/15/15/15/15/15/15/3FARING6/15/15/15/15/15/15/15 GGOSSV?/AEEEHNR 0/28 0",
+        "analysis": "static",
+        "previous_move": "8D FARING",
+        "previous_move_score": 28,
+        "played_move": "G7 V(I)GS",
+        "played_move_score": 14,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "G7 V(I)GS",
+            "score": 14,
+            "equity": 47.434,
+            "iterations": 0
+          },
+          {
+            "move": "G7 V(I)G",
+            "score": 13,
+            "equity": 45.191,
+            "iterations": 0
+          },
+          {
+            "move": "G7 G(I)GS",
+            "score": 10,
+            "equity": 39.645,
+            "iterations": 0
+          },
+          {
+            "move": "F7 G(R)OGS",
+            "score": 11,
+            "equity": 39.336,
+            "iterations": 0
+          },
+          {
+            "move": "E8 (A)VOS",
+            "score": 14,
+            "equity": 38.653,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 2,
+        "rack": "AEEEHNR",
+        "position": "15/15/15/15/15/15/6V8/3FARING6/6G8/6S8/15/15/15/15/15 DGIOQS?/AEEEHNR 14/28 0",
+        "analysis": "static",
+        "previous_move": "G7 V(I)GS",
+        "previous_move_score": 14,
+        "played_move": "7E HE(V)EA",
+        "played_move_score": 25,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "7E HE(V)EA",
+            "score": 25,
+            "equity": 29.149,
+            "iterations": 0
+          },
+          {
+            "move": "7E HA(V)E",
+            "score": 19,
+            "equity": 21.512,
+            "iterations": 0
+          },
+          {
+            "move": "7E NE(V)E",
+            "score": 13,
+            "equity": 20.896,
+            "iterations": 0
+          },
+          {
+            "move": "9C RENE(G)E",
+            "score": 19,
+            "equity": 20.745,
+            "iterations": 0
+          },
+          {
+            "move": "10B HAERE(S)",
+            "score": 19,
+            "equity": 20.609,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 3,
+        "rack": "DGIOQS?",
+        "position": "15/15/15/15/15/15/4HEVEA6/3FARING6/6G8/6S8/15/15/15/15/15 DGIOQS?/EEEFNOR 14/53 0",
+        "analysis": "static",
+        "previous_move": "7E HE(V)EA",
+        "previous_move_score": 25,
+        "played_move": "J5 QIS",
+        "played_move_score": 26,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "J5 QIS",
+            "score": 26,
+            "equity": 52.256,
+            "iterations": 0
+          },
+          {
+            "move": "10E QI(S)",
+            "score": 14,
+            "equity": 46.914,
+            "iterations": 0
+          },
+          {
+            "move": "J4 DOGS",
+            "score": 22,
+            "equity": 44.342,
+            "iterations": 0
+          },
+          {
+            "move": "J4 GODS",
+            "score": 22,
+            "equity": 44.342,
+            "iterations": 0
+          },
+          {
+            "move": "6C QIS",
+            "score": 18,
+            "equity": 44.256,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 4,
+        "rack": "EEEFNOR",
+        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/6G8/6S8/15/15/15/15/15 ADEEGO?/EEEFNOR 40/53 0",
+        "analysis": "static",
+        "previous_move": "J5 QIS",
+        "previous_move_score": 26,
+        "played_move": "10C FORE(S)EEN",
+        "played_move_score": 65,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "10C FORE(S)EEN",
+            "score": 65,
+            "equity": 65.0,
+            "iterations": 0
+          },
+          {
+            "move": "9C FEE",
+            "score": 21,
+            "equity": 24.267,
+            "iterations": 0
+          },
+          {
+            "move": "9C NEE",
+            "score": 15,
+            "equity": 18.664,
+            "iterations": 0
+          },
+          {
+            "move": "9B FREE",
+            "score": 19,
+            "equity": 17.896,
+            "iterations": 0
+          },
+          {
+            "move": "F3 REEF(ER)",
+            "score": 17,
+            "equity": 15.896,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 5,
+        "rack": "ADEEGO?",
+        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/6G8/2FORESEEN5/15/15/15/15/15 ADEEGO?/AEITWWY 40/118 0",
+        "analysis": "static",
+        "previous_move": "10C FORE(S)EEN",
+        "previous_move_score": 65,
+        "played_move": "E7 (HA)G(R)ODE",
+        "played_move_score": 24,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "E7 (HA)G(R)ODE",
+            "score": 24,
+            "equity": 53.986,
+            "iterations": 0
+          },
+          {
+            "move": "C10 (F)ADGE",
+            "score": 20,
+            "equity": 47.594,
+            "iterations": 0
+          },
+          {
+            "move": "11I DOGE",
+            "score": 17,
+            "equity": 46.986,
+            "iterations": 0
+          },
+          {
+            "move": "9A EGO",
+            "score": 11,
+            "equity": 46.594,
+            "iterations": 0
+          },
+          {
+            "move": "C10 (F)EOD",
+            "score": 16,
+            "equity": 46.459,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 6,
+        "rack": "AEITWWY",
+        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/4G1G8/2FORESEEN5/4O10/4D10/4E10/15/15 AEILOU?/AEITWWY 64/118 0",
+        "analysis": "static",
+        "previous_move": "E7 (HA)G(R)ODE",
+        "previous_move_score": 24,
+        "played_move": "8A WAY(FARING)",
+        "played_move_score": 57,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "8A WAY(FARING)",
+            "score": 57,
+            "equity": 54.635,
+            "iterations": 0
+          },
+          {
+            "move": "K3 WAIT",
+            "score": 38,
+            "equity": 37.556,
+            "iterations": 0
+          },
+          {
+            "move": "K4 WIT",
+            "score": 36,
+            "equity": 37.003,
+            "iterations": 0
+          },
+          {
+            "move": "K2 YETI",
+            "score": 36,
+            "equity": 27.459,
+            "iterations": 0
+          },
+          {
+            "move": "12C TI(D)EWAY",
+            "score": 30,
+            "equity": 26.605,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 7,
+        "rack": "AEILOU?",
+        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4D10/4E10/15/15 AEILOU?/DEIIOTW 64/175 0",
+        "analysis": "static",
+        "previous_move": "8A WAY(FARING)",
+        "previous_move_score": 57,
+        "played_move": "12E (D)IALOgUE",
+        "played_move_score": 68,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "12E (D)IALOgUE",
+            "score": 68,
+            "equity": 68.0,
+            "iterations": 0
+          },
+          {
+            "move": "9I EULOgIA",
+            "score": 65,
+            "equity": 65.0,
+            "iterations": 0
+          },
+          {
+            "move": "13E (E)ULOgIAE",
+            "score": 58,
+            "equity": 58.0,
+            "iterations": 0
+          },
+          {
+            "move": "5J (Q)UAI",
+            "score": 26,
+            "equity": 57.371,
+            "iterations": 0
+          },
+          {
+            "move": "K4 OI",
+            "score": 26,
+            "equity": 56.01,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 8,
+        "rack": "DEIIOTW",
+        "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E10/15/15 ABIOPRT/DEIIOTW 132/175 0",
+        "analysis": "static",
+        "previous_move": "12E (D)IALOgUE",
+        "previous_move_score": 68,
+        "played_move": "K4 WIT",
+        "played_move_score": 36,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "K4 WIT",
+            "score": 36,
+            "equity": 34.351,
+            "iterations": 0
+          },
+          {
+            "move": "K2 TEIID",
+            "score": 37,
+            "equity": 32.805,
+            "iterations": 0
+          },
+          {
+            "move": "K3 DOIT",
+            "score": 34,
+            "equity": 30.123,
+            "iterations": 0
+          },
+          {
+            "move": "K4 OI",
+            "score": 26,
+            "equity": 27.089,
+            "iterations": 0
+          },
+          {
+            "move": "K5 IT",
+            "score": 28,
+            "equity": 26.737,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 9,
+        "rack": "ABIOPRT",
+        "position": "15/15/15/10W4/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E10/15/15 ABIOPRT/DEILORY 132/211 0",
+        "analysis": "static",
+        "previous_move": "K4 WIT",
+        "previous_move_score": 36,
+        "played_move": "13G BOP",
+        "played_move_score": 29,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "13G BOP",
+            "score": 29,
+            "equity": 32.91,
+            "iterations": 0
+          },
+          {
+            "move": "C2 PROBIT(Y)",
+            "score": 30,
+            "equity": 29.532,
+            "iterations": 0
+          },
+          {
+            "move": "L1 BIRO",
+            "score": 28,
+            "equity": 29.126,
+            "iterations": 0
+          },
+          {
+            "move": "L1 BRIO",
+            "score": 28,
+            "equity": 29.126,
+            "iterations": 0
+          },
+          {
+            "move": "13G BAP",
+            "score": 29,
+            "equity": 28.843,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 10,
+        "rack": "DEILORY",
+        "position": "15/15/15/10W4/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/15/15 AACINRT/DEILORY 161/211 0",
+        "analysis": "static",
+        "previous_move": "13G BOP",
+        "previous_move_score": 29,
+        "played_move": "4K (W)ORDY",
+        "played_move_score": 32,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "4K (W)ORDY",
+            "score": 32,
+            "equity": 32.264,
+            "iterations": 0
+          },
+          {
+            "move": "L1 YORE",
+            "score": 32,
+            "equity": 31.458,
+            "iterations": 0
+          },
+          {
+            "move": "L3 YO",
+            "score": 20,
+            "equity": 28.795,
+            "iterations": 0
+          },
+          {
+            "move": "M10 OLDY",
+            "score": 26,
+            "equity": 28.459,
+            "iterations": 0
+          },
+          {
+            "move": "M11 ODYL",
+            "score": 26,
+            "equity": 28.459,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 11,
+        "rack": "AACINRT",
+        "position": "15/15/15/10WORDY/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/15/15 AACINRT/ADEIIIL 161/243 0",
+        "analysis": "static",
+        "previous_move": "4K (W)ORDY",
+        "previous_move_score": 32,
+        "played_move": "14I ANTICAR",
+        "played_move_score": 77,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "14I ANTICAR",
+            "score": 77,
+            "equity": 77.0,
+            "iterations": 0
+          },
+          {
+            "move": "M6 ANTICAR",
+            "score": 70,
+            "equity": 70.0,
+            "iterations": 0
+          },
+          {
+            "move": "O1 RAC(Y)",
+            "score": 27,
+            "equity": 32.921,
+            "iterations": 0
+          },
+          {
+            "move": "14I ACINAR",
+            "score": 33,
+            "equity": 32.687,
+            "iterations": 0
+          },
+          {
+            "move": "M9 CAIRN",
+            "score": 29,
+            "equity": 29.939,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 12,
+        "rack": "ADEIIIL",
+        "position": "15/15/15/10WORDY/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/8ANTICAR/15 AEEOOTX/ADEIIIL 238/243 0",
+        "analysis": "static",
+        "previous_move": "14I ANTICAR",
+        "previous_move_score": 77,
+        "played_move": "N2 DI(D)IE",
+        "played_move_score": 18,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "N2 DI(D)IE",
+            "score": 18,
+            "equity": 17.533,
+            "iterations": 0
+          },
+          {
+            "move": "O12 LI(R)I",
+            "score": 15,
+            "equity": 16.128,
+            "iterations": 0
+          },
+          {
+            "move": "M8 ILIAD",
+            "score": 17,
+            "equity": 14.585,
+            "iterations": 0
+          },
+          {
+            "move": "M12 DI(C)E",
+            "score": 24,
+            "equity": 13.857,
+            "iterations": 0
+          },
+          {
+            "move": "15H ILEA",
+            "score": 22,
+            "equity": 13.726,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 13,
+        "rack": "AEEOOTX",
+        "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/8ANTICAR/15 AEEOOTX/AAILMUU 238/261 0",
+        "analysis": "static",
+        "previous_move": "N2 DI(D)IE",
+        "previous_move_score": 18,
+        "played_move": "O11 EXT(R)A",
+        "played_move_score": 60,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "O11 EXT(R)A",
+            "score": 60,
+            "equity": 48.614,
+            "iterations": 0
+          },
+          {
+            "move": "O11 EXE(R)T",
+            "score": 60,
+            "equity": 46.549,
+            "iterations": 0
+          },
+          {
+            "move": "11J OXO",
+            "score": 42,
+            "equity": 39.545,
+            "iterations": 0
+          },
+          {
+            "move": "11J OX",
+            "score": 38,
+            "equity": 27.027,
+            "iterations": 0
+          },
+          {
+            "move": "O1 OAT(Y)",
+            "score": 26,
+            "equity": 25.728,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 14,
+        "rack": "AAILMUU",
+        "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O9E/4DIALOgUE2X/4E1BOP5T/8ANTICAR/14A EELOOTT/AAILMUU 298/261 0",
+        "analysis": "static",
+        "previous_move": "O11 EXT(R)A",
+        "previous_move_score": 60,
+        "played_move": "15E MIAUL",
+        "played_move_score": 27,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "15E MIAUL",
+            "score": 27,
+            "equity": 19.933,
+            "iterations": 0
+          },
+          {
+            "move": "C10 (F)UMULI",
+            "score": 22,
+            "equity": 15.458,
+            "iterations": 0
+          },
+          {
+            "move": "O6 LUAU",
+            "score": 14,
+            "equity": 15.285,
+            "iterations": 0
+          },
+          {
+            "move": "C10 (F)AMULI",
+            "score": 22,
+            "equity": 14.933,
+            "iterations": 0
+          },
+          {
+            "move": "15H ULU",
+            "score": 17,
+            "equity": 13.328,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 15,
+        "rack": "EELOOTT",
+        "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O9E/4DIALOgUE2X/4E1BOP5T/8ANTICAR/4MIAUL5A EELOOTT/ADHKNPU 298/288 0",
+        "analysis": "static",
+        "previous_move": "15E MIAUL",
+        "previous_move_score": 27,
+        "played_move": "C10 (F)OOTLE",
+        "played_move_score": 18,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "C10 (F)OOTLE",
+            "score": 18,
+            "equity": 20.081,
+            "iterations": 0
+          },
+          {
+            "move": "N11 TOE(A)",
+            "score": 17,
+            "equity": 17.852,
+            "iterations": 0
+          },
+          {
+            "move": "N10 TOE",
+            "score": 16,
+            "equity": 16.852,
+            "iterations": 0
+          },
+          {
+            "move": "N10 TOO",
+            "score": 16,
+            "equity": 15.869,
+            "iterations": 0
+          },
+          {
+            "move": "N9 TOTE",
+            "score": 17,
+            "equity": 15.658,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 16,
+        "rack": "ADHKNPU",
+        "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/2O1DIALOgUE2X/2T1E1BOP5T/2L5ANTICAR/2E1MIAUL5A EEJMRTZ/ADHKNPU 316/288 0",
+        "analysis": "static",
+        "previous_move": "C10 (F)OOTLE",
+        "previous_move_score": 18,
+        "played_move": "M3 P(R)ANK",
+        "played_move_score": 44,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "M3 P(R)ANK",
+            "score": 44,
+            "equity": 39.799,
+            "iterations": 0
+          },
+          {
+            "move": "O6 HUNK",
+            "score": 38,
+            "equity": 38.368,
+            "iterations": 0
+          },
+          {
+            "move": "M12 DU(C)K",
+            "score": 32,
+            "equity": 34.616,
+            "iterations": 0
+          },
+          {
+            "move": "M3 P(R)AHU",
+            "score": 37,
+            "equity": 34.582,
+            "iterations": 0
+          },
+          {
+            "move": "O6 HAKU",
+            "score": 38,
+            "equity": 33.894,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 17,
+        "rack": "EEJMRTZ",
+        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NE1/4HEVEAS2K2/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/2O1DIALOgUE2X/2T1E1BOP5T/2L5ANTICAR/2E1MIAUL5A EEJMRTZ/BDHNTU? 316/332 0",
+        "analysis": "static",
+        "previous_move": "M3 P(R)ANK",
+        "previous_move_score": 44,
+        "played_move": "B12 JEER",
+        "played_move_score": 39,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "B12 JEER",
+            "score": 39,
+            "equity": 40.674,
+            "iterations": 0
+          },
+          {
+            "move": "15A JE(E)",
+            "score": 30,
+            "equity": 35.194,
+            "iterations": 0
+          },
+          {
+            "move": "B12 JEE",
+            "score": 35,
+            "equity": 34.25,
+            "iterations": 0
+          },
+          {
+            "move": "15A ZE(E)",
+            "score": 36,
+            "equity": 33.491,
+            "iterations": 0
+          },
+          {
+            "move": "3I JET",
+            "score": 25,
+            "equity": 32.616,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 18,
+        "rack": "BDHNTU?",
+        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NE1/4HEVEAS2K2/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A ILMNRTZ/BDHNTU? 355/332 0",
+        "analysis": "static",
+        "previous_move": "B12 JEER",
+        "previous_move_score": 39,
+        "played_move": "O6 BHUT",
+        "played_move_score": 32,
+        "num_moves": 100,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "O6 BHUT",
+            "score": 32,
+            "equity": 60.741,
+            "iterations": 0
+          },
+          {
+            "move": "O6 BUND",
+            "score": 26,
+            "equity": 56.819,
+            "iterations": 0
+          },
+          {
+            "move": "O6 BUNT",
+            "score": 23,
+            "equity": 52.529,
+            "iterations": 0
+          },
+          {
+            "move": "O6 THUD",
+            "score": 27,
+            "equity": 52.341,
+            "iterations": 0
+          },
+          {
+            "move": "O6 BUD",
+            "score": 23,
+            "equity": 51.96,
+            "iterations": 0
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 19,
+        "rack": "ILMNRTZ",
+        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NEB/4HEVEAS2K1H/WAYFARING5U/4G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A ILMNRTZ/DNOSSV? 355/364 0",
+        "analysis": "peg",
+        "previous_move": "O6 BHUT",
+        "previous_move_score": 32,
+        "played_move": "6I Z(IT)",
+        "played_move_score": 25,
+        "num_moves": 224,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "6I Z(IT)",
+            "score": 25,
+            "equity": 15.387,
+            "iterations": 0,
+            "win_percentage": 68.055556,
+            "mean_spread": 11.597222,
+            "fidelity_plies": 2
+          },
+          {
+            "move": "A14 MI",
+            "score": 26,
+            "equity": 17.911,
+            "iterations": 0,
+            "win_percentage": 38.888889,
+            "mean_spread": -9.444444,
+            "fidelity_plies": 2
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 20,
+        "rack": "DNOSSV?",
+        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/4HEVEAS2K1H/WAYFARING5U/4G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A CILMNRT/DNOSSV? 380/364 0",
+        "analysis": "peg",
+        "previous_move": "6I Z(IT)",
+        "previous_move_score": 25,
+        "played_move": "B7 V(A)N",
+        "played_move_score": 6,
+        "num_moves": 2247,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "B7 V(A)N",
+            "score": 6,
+            "equity": 40.107,
+            "iterations": 0,
+            "win_percentage": 37.5,
+            "mean_spread": -2.125,
+            "fidelity_plies": 2
+          },
+          {
+            "move": "13A V(ET)",
+            "score": 6,
+            "equity": 40.231,
+            "iterations": 0,
+            "win_percentage": 12.5,
+            "mean_spread": -17.25,
+            "fidelity_plies": 2
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 21,
+        "rack": "CILMNRT",
+        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING5U/1N2G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A CILMNRT/DOSSU? 380/370 0",
+        "analysis": "endgame",
+        "previous_move": "B7 V(A)N",
+        "previous_move_score": 6,
+        "played_move": "L8 LIMN(E)T(I)C",
+        "played_move_score": 16,
+        "num_moves": 191,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "L8 LIMN(E)T(I)C",
+            "score": 16,
+            "equity": 4.0,
+            "iterations": 0,
+            "mean_spread": 5.0,
+            "fidelity_plies": 2
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 22,
+        "rack": "DOSSU?",
+        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING2L2U/1N2G1G4I2T/2FORESEEN1M3/2O1O6N2E/1JO1DIALOgUE2X/1ET1E1BOP2T2T/1EL5ANTICAR/1RE1MIAUL2C2A R/DOSSU? 396/370 0",
+        "analysis": "endgame",
+        "previous_move": "L8 LIMN(E)T(I)C",
+        "previous_move_score": 16,
+        "played_move": "M9 DUOS",
+        "played_move_score": 27,
+        "num_moves": 691,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "M9 DUOS",
+            "score": 27,
+            "equity": 15.0,
+            "iterations": 0,
+            "mean_spread": -5.0,
+            "fidelity_plies": 2
+          }
+        ]
+      },
+      {
+        "game_index": 1,
+        "turn_number": 23,
+        "rack": "R",
+        "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING2L2U/1N2G1G4ID1T/2FORESEEN1MU2/2O1O6NO1E/1JO1DIALOgUES1X/1ET1E1BOP2T2T/1EL5ANTICAR/1RE1MIAUL2C2A R/S? 396/397 0",
+        "analysis": "endgame",
+        "previous_move": "M9 DUOS",
+        "previous_move_score": 27,
+        "played_move": "9K R(ID)",
+        "played_move_score": 4,
+        "num_moves": 1,
+        "total_iterations": 0,
+        "time_elapsed": 0.0,
+        "status": 0,
+        "moves": [
+          {
+            "move": "9K R(ID)",
+            "score": 4,
+            "equity": 6.0,
+            "iterations": 0,
+            "mean_spread": 5.0,
             "fidelity_plies": 2
           }
         ]

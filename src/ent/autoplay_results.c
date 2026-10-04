@@ -1538,6 +1538,11 @@ typedef struct CapturedPosition {
   bool has_previous_move;
   char previous_move[CAPTURED_MOVE_STRING_SIZE];
   int previous_move_score;
+  // The move played from this position, and its score: the one chosen this
+  // turn, which need not be the top of the ranked plays below.
+  bool has_played_move;
+  char played_move[CAPTURED_MOVE_STRING_SIZE];
+  int played_move_score;
   int game_number;
   int pair_game_number;
   int turn_number;
@@ -1763,6 +1768,17 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
     position->previous_move[0] = '\0';
     position->previous_move_score = 0;
   }
+  // Written against the board it is about to be played on, as the ranked
+  // plays are, so a tile it plays through reads as one already there.
+  position->has_played_move = args->move != NULL;
+  if (position->has_played_move) {
+    move_get_string(args->move, game_get_board(game), ld, false,
+                    position->played_move, sizeof(position->played_move));
+    position->played_move_score = equity_to_int(move_get_score(args->move));
+  } else {
+    position->played_move[0] = '\0';
+    position->played_move_score = 0;
+  }
   position->game_number = args->game_number;
   position->pair_game_number = args->pair_game_number;
   position->turn_number = args->turn_number;
@@ -1957,6 +1973,12 @@ static void write_captured_position(StringBuilder *sb,
                             position->previous_move, &position_first);
     json_write_int_field(sb, CONTRIBUTE_KEY_PREVIOUS_MOVE_SCORE,
                          position->previous_move_score, &position_first);
+  }
+  if (position->has_played_move) {
+    json_write_string_field(sb, CONTRIBUTE_KEY_PLAYED_MOVE,
+                            position->played_move, &position_first);
+    json_write_int_field(sb, CONTRIBUTE_KEY_PLAYED_MOVE_SCORE,
+                         position->played_move_score, &position_first);
   }
   json_write_int_field(sb, CONTRIBUTE_KEY_NUM_MOVES, position->num_moves,
                        &position_first);

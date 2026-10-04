@@ -1,6 +1,6 @@
 {
-  "claim_token": "31d0f216-5023-47c8-83df-3dcc96f8c4cf",
-  "job_id": "981fca54-39a3-4c3f-b2cc-eac082140f42",
+  "claim_token": "af764aba-95c4-497f-b65f-d52bea985a4f",
+  "job_id": "68fed27e-0dcb-41d7-862c-6bfa1002dda3",
   "task_request": {
     "job_type": "games",
     "variant": "classic",
@@ -131,5 +131,5 @@
     ],
     "derived": []
   },
-  "worker_uuid": "54f552b8-3038-4315-a4d9-67efc42be8b4"
+  "worker_uuid": "9ae76351-608c-406c-b256-e79988e0dadb"
 }

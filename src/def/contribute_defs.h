@@ -158,6 +158,8 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_POSITION "position"
 #define CONTRIBUTE_KEY_PREVIOUS_MOVE "previous_move"
 #define CONTRIBUTE_KEY_PREVIOUS_MOVE_SCORE "previous_move_score"
+#define CONTRIBUTE_KEY_PLAYED_MOVE "played_move"
+#define CONTRIBUTE_KEY_PLAYED_MOVE_SCORE "played_move_score"
 #define CONTRIBUTE_KEY_NUM_MOVES "num_moves"
 #define CONTRIBUTE_KEY_TOTAL_ITERATIONS "total_iterations"
 #define CONTRIBUTE_KEY_TIME_ELAPSED "time_elapsed"
