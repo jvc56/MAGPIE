@@ -96,6 +96,11 @@ struct PATWeights {
   // over the racks the opponent might hold, hook_excess its part above
   // PAT_HOOK_EXCESS_THRESHOLD. Per file, like the floater flags.
   bool hook_value;
+  // Whether hook and floater flexibility is the chance the opponent holds a
+  // tile that fits rather than the count of unseen tiles that do. One tile
+  // is all the opponent needs, so thirty that fit are not ten times the
+  // threat of three. Per file, like the floater flags.
+  bool flex_prob;
   // Each tile's value as a one-tile leave under the player's leaves, blank
   // at BLANK_MACHINE_LETTER; set by pat_prepare_hook_leaves.
   Equity hook_leave_value[MAX_ALPHABET_SIZE];
@@ -171,6 +176,7 @@ void pat_set_exact_created_hooks(PATWeights *pat, bool exact_created_hooks);
 void pat_set_exact_fresh_runs(PATWeights *pat, bool exact_fresh_runs);
 void pat_set_hook_score_prob(PATWeights *pat, bool hook_score_prob);
 void pat_set_hook_value(PATWeights *pat, bool hook_value);
+void pat_set_flex_prob(PATWeights *pat, bool flex_prob);
 // A PAT_FIT_* value; see PAT_FIT_RESIDUAL_ROW_PREFIX.
 int pat_get_fit_residual(const PATWeights *pat);
 void pat_set_fit_residual(PATWeights *pat, int fit_residual);

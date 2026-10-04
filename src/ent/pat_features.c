@@ -318,6 +318,29 @@ static double pat_hook_miss_probability(int unseen_total, int fitting,
   return miss;
 }
 
+// The flexibility of a hook or extension point: the count of unseen tiles
+// that fit it (pat_set_flex), or under flex_prob the chance the opponent's
+// rack holds one, blanks included, times PAT_FLEX_PROB_SCALE.
+static int pat_flex_value(const uint8_t *unseen_counts, uint64_t letter_set,
+                          const PATHookScoreArgs *args) {
+  if (args == NULL || !args->pat->flex_prob) {
+    return pat_set_flex(unseen_counts, letter_set);
+  }
+  if ((letter_set & ~(uint64_t)1) == 0) {
+    return 0;
+  }
+  const int fitting = pat_set_flex(unseen_counts, letter_set) +
+                      unseen_counts[BLANK_MACHINE_LETTER];
+  int unseen_total = 0;
+  for (int machine_letter = 0; machine_letter < MAX_ALPHABET_SIZE;
+       machine_letter++) {
+    unseen_total += unseen_counts[machine_letter];
+  }
+  const double hit =
+      1.0 - pat_hook_miss_probability(unseen_total, fitting, args->rack_size);
+  return (int)(hit * PAT_FLEX_PROB_SCALE + 0.5);
+}
+
 // A hook's score exposure: what the opponent could score by filling it.
 // With args NULL it is the sum over admissible letters of unseen count
 // times the letter's exposure, divided by PAT_HOOK_SCORE_SCALE. That grows
@@ -386,7 +409,7 @@ static int pat_hook_score_exposure(const uint8_t *unseen_counts,
       num_values++;
     }
   }
-  if (args == NULL) {
+  if (args == NULL || (!args->pat->hook_score_prob && !hook_value)) {
     return (int)(exposure / PAT_HOOK_SCORE_SCALE);
   }
   const int blanks = unseen_counts[BLANK_MACHINE_LETTER];
@@ -497,7 +520,8 @@ static PATCrossInfo pat_effective_cross_info(
                               overlay, &cross_score);
       info.dead = (cross_set == 0);
       info.hooky = !info.dead && (cross_set != TRIVIAL_CROSS_SET);
-      info.flex = info.hooky ? pat_set_flex(unseen_counts, cross_set) : 0;
+      info.flex =
+          info.hooky ? pat_flex_value(unseen_counts, cross_set, score_args) : 0;
       info.letter_set = info.hooky ? cross_set : 0;
       info.score_exposure = 0;
       info.score_excess = 0;
@@ -515,7 +539,9 @@ static PATCrossInfo pat_effective_cross_info(
   info.dead = (base_cross_set == 0);
 
   info.hooky = !info.dead && (base_cross_set != TRIVIAL_CROSS_SET);
-  info.flex = info.hooky ? pat_set_flex(unseen_counts, base_cross_set) : 0;
+  info.flex = info.hooky
+                  ? pat_flex_value(unseen_counts, base_cross_set, score_args)
+                  : 0;
   info.letter_set = info.hooky ? base_cross_set : 0;
   info.score_exposure = 0;
   info.score_excess = 0;
@@ -611,7 +637,8 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   // move. The span starts at 2: a word through the premium itself.
   PATHookScoreArgs score_args = {.pat = pat, .rack_size = 0, .span = 2};
   const PATHookScoreArgs *score_args_ptr = NULL;
-  if (pat != NULL && (pat->hook_score_prob || pat->hook_value)) {
+  if (pat != NULL &&
+      (pat->hook_score_prob || pat->hook_value || pat->flex_prob)) {
     score_args.rack_size = (max_reach > 0) ? max_reach : RACK_SIZE;
     score_args_ptr = &score_args;
   }
@@ -805,7 +832,8 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
         if (run_has_fresh_tile && overlay != NULL && overlay->run_kwg != NULL) {
           const uint64_t extension_set = pat_fresh_run_extension_set(
               overlay->run_kwg, run_letters, run_length, side);
-          run_flex = pat_set_flex(unseen_counts, extension_set);
+          run_flex =
+              pat_flex_value(unseen_counts, extension_set, score_args_ptr);
           if (hook_letters_out) {
             *hook_letters_out |= extension_set;
           }
@@ -837,7 +865,8 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                     ? square_get_right_extension_set(&lane[prev_empty_idx])
                     : square_get_left_extension_set(&lane[prev_empty_idx]);
           }
-          run_flex = pat_set_flex(unseen_counts, extension_set);
+          run_flex =
+              pat_flex_value(unseen_counts, extension_set, score_args_ptr);
           if (hook_letters_out) {
             *hook_letters_out |= extension_set;
           }

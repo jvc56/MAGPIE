@@ -160,6 +160,14 @@ enum {
 #define PAT_HOOK_VALUE_ROW_PREFIX "hook_value,"
 #define PAT_DEFAULT_HOOK_VALUE false
 
+// Optional row (0 or 1): whether hook and floater flexibility is the chance
+// the opponent holds a tile that fits, blanks included, times
+// PAT_FLEX_PROB_SCALE, instead of the count of unseen tiles that fit (see
+// PATWeights.flex_prob). Absent means 0.
+#define PAT_FLEX_PROB_ROW_PREFIX "flex_prob,"
+#define PAT_DEFAULT_FLEX_PROB false
+#define PAT_FLEX_PROB_SCALE 100.0
+
 // Optional row (0 or 1): whether the floater through channels score a run of
 // tiles by the words containing the whole run at the required end, up to
 // PAT_RUN_THROUGH_MAX_KEY letters, instead of summing each tile's

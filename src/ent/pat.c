@@ -105,6 +105,10 @@ void pat_set_hook_value(PATWeights *pat, bool hook_value) {
   pat->hook_value = hook_value;
 }
 
+void pat_set_flex_prob(PATWeights *pat, bool flex_prob) {
+  pat->flex_prob = flex_prob;
+}
+
 int pat_get_fit_residual(const PATWeights *pat) { return pat->fit_residual; }
 
 void pat_set_fit_residual(PATWeights *pat, int fit_residual) {
@@ -223,6 +227,7 @@ PATWeights *pat_create_zeroed(const char *pat_name) {
   pat->exact_fresh_runs = PAT_DEFAULT_EXACT_FRESH_RUNS;
   pat->hook_score_prob = PAT_DEFAULT_HOOK_SCORE_PROB;
   pat->hook_value = PAT_DEFAULT_HOOK_VALUE;
+  pat->flex_prob = PAT_DEFAULT_FLEX_PROB;
   pat->run_through = PAT_DEFAULT_RUN_THROUGH;
   pat->utility_adjust = 0.0;
   pat->utility_max_bag = 0;
