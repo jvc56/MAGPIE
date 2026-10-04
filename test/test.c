@@ -58,6 +58,7 @@
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_test.h"
+#include "siminf_oracle_test.h"
 #include "simmedinf_benchmark.h"
 #include "simmedinf_test.h"
 #include "stats_test.h"
@@ -212,6 +213,9 @@ static TestEntry on_demand_test_table[] = {
     {"simmedinf_force_ins_eq", test_simmedinf_force_inserted_equity},
     {"simmedinf_exch_split", test_simmedinf_exchange_leave_split},
     {"simmedinf", test_simmedinf_benchmark},
+    // Simmed-inference oracle-eval pilot
+    {"siminfgenoracle", test_generate_siminf_oracle_positions},
+    {"siminforacle", test_siminf_oracle_eval},
     {"qintar", test_qintar_simmedinf},
     {"dings", test_dings_simmedinf},
     {"qi", test_qi_simmedinf},

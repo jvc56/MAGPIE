@@ -497,7 +497,8 @@ static double sim_evaluate_candidate_leave(SimmedInferCtx *ctx) {
         /*seed=*/ctx->eval_count, /*max_iterations=*/(uint64_t)(max_iters),    \
         /*min_play_iterations=*/1, /*scond=*/101.0, BAI_THRESHOLD_NONE,        \
         /*time_limit_seconds=*/9999, BAI_SAMPLING_RULE_ROUND_ROBIN,            \
-        /*cutoff=*/0.0, /*inference_args=*/NULL, &_sa);                        \
+        /*cutoff=*/0.0, /*utility_w_winpct=*/1.0, /*utility_w_spread=*/0.0,    \
+        /*utility_spread_scale=*/100.0, /*inference_args=*/NULL, &_sa);        \
     error_stack_reset(ctx->inner_error_stack);                                 \
     simulate(&_sa, &ctx->inner_sim_ctx, ctx->inner_sim_results,                \
              ctx->inner_error_stack);                                          \

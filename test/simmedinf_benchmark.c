@@ -47,6 +47,7 @@
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "simmedinf_benchmark.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <pthread.h>
@@ -55,13 +56,16 @@
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-#define NUM_SEEDS 200
+// Large so the overnight run doesn't terminate early; the CSV log fflushes
+// after every game, so a run can be stopped at any point and still leave
+// usable results.
+#define NUM_SEEDS 100000
 #define NUM_PLAYS 15
 #define NUM_PLIES 4
-#define NUM_THREADS 10
+#define NUM_THREADS 9
 
 // Outer sim time budget (seconds)
-#define SIM_BUDGET_S 30.0
+#define SIM_BUDGET_S 15.0
 
 // Simmed-inference time budget (seconds).  Must leave enough time for outer
 // sim.  The outer sim receives at least MIN_SIM_BUDGET_S seconds.
@@ -125,14 +129,11 @@ typedef struct {
 } MatchResults;
 
 // ── Timer thread (fires USER_INTERRUPT after a delay) ──────────────────────
+// Exposed (see simmedinf_benchmark.h) for reuse by other harnesses that need
+// the same "run simmed inference, then simulate with the precomputed
+// distribution" wiring, e.g. test/siminf_oracle_test.c.
 
-typedef struct {
-  ThreadControl *tc;
-  double seconds;
-  volatile bool done;
-} TimerArgs;
-
-static void *timer_thread_func(void *arg) {
+void *timer_thread_func(void *arg) {
   TimerArgs *ta = (TimerArgs *)arg;
   double remaining = ta->seconds;
   while (remaining > 0 && !ta->done) {
@@ -159,7 +160,7 @@ static double timespec_diff_s(const struct timespec *start,
 
 // ── Tiles unseen by the player on turn ────────────────────────────────────
 
-static int tiles_unseen(const Game *game) {
+int tiles_unseen(const Game *game) {
   return bag_get_letters(game_get_bag(game)) +
          rack_get_total_letters(player_get_rack(
              game_get_player(game, 1 - game_get_player_on_turn_index(game))));
@@ -182,22 +183,14 @@ static void extract_played_tiles(const Move *move, int ld_size,
 
 // ── Previous-move inference setup ──────────────────────────────────────────
 //
-// Rack storage plus the InferenceArgs that reference it, for inferring the
-// opponent's previous move. The setup must outlive any simmed_infer() or
-// simulate() call that uses its args (the args hold pointers into it).
+// PrevMoveInferSetup is declared in simmedinf_benchmark.h (exposed for reuse).
+// The setup must outlive any simmed_infer() or simulate() call that uses its
+// args (the args hold pointers into it).
 
-typedef struct {
-  Rack target_played_tiles;
-  Rack target_known_rack;
-  Rack nontarget_known_rack;
-  InferenceArgs args;
-} PrevMoveInferSetup;
-
-static void fill_prev_move_infer_args(PrevMoveInferSetup *setup,
-                                      const Game *game_before_prev,
-                                      const Move *prev_move,
-                                      int prev_player_index,
-                                      Equity equity_margin, ThreadControl *tc) {
+void fill_prev_move_infer_args(PrevMoveInferSetup *setup,
+                               const Game *game_before_prev,
+                               const Move *prev_move, int prev_player_index,
+                               Equity equity_margin, ThreadControl *tc) {
   const LetterDistribution *ld = game_get_ld(game_before_prev);
   const int ld_size = ld_get_size(ld);
 
@@ -234,11 +227,11 @@ static void fill_prev_move_infer_args(PrevMoveInferSetup *setup,
 // Populates inference_results with a weighted leave distribution based on
 // inner sims. Returns the elapsed time and whether it completed (vs interrupt).
 
-static bool run_simmed_inference(const Game *game_before_prev, WinPct *win_pcts,
-                                 ThreadControl *tc, const Move *prev_move,
-                                 int prev_player_index,
-                                 InferenceResults *inference_results,
-                                 ErrorStack *error_stack, double *elapsed_out) {
+bool run_simmed_inference(const Game *game_before_prev, WinPct *win_pcts,
+                         ThreadControl *tc, const Move *prev_move,
+                         int prev_player_index,
+                         InferenceResults *inference_results,
+                         ErrorStack *error_stack, double *elapsed_out) {
   PrevMoveInferSetup setup;
   fill_prev_move_infer_args(&setup, game_before_prev, prev_move,
                             prev_player_index, int_to_equity(0), tc);
@@ -294,7 +287,7 @@ static bool run_simmed_inference(const Game *game_before_prev, WinPct *win_pcts,
 // If a sim WITH inference fails, it is retried once without inference so an
 // inference edge case doesn't degrade the arm to equity-best play.
 
-static const Move *
+const Move *
 play_sim_turn(Game *game, MoveList *move_list, SimResults *sim_results,
               SimCtx **sim_ctx, WinPct *win_pcts, ThreadControl *tc,
               int num_plies, double budget_s,
@@ -350,7 +343,8 @@ play_sim_turn(Game *game, MoveList *move_list, SimResults *sim_results,
         num_plies, /*seed=*/0, UINT64_MAX,
         /*min_play_iterations=*/50, /*scond=*/101.0, BAI_THRESHOLD_NONE,
         /*time_limit_seconds=*/budget_s, BAI_SAMPLING_RULE_TOP_TWO_IDS,
-        /*cutoff=*/-1.0, infer_args, &sim_args);
+        /*cutoff=*/-1.0, /*utility_w_winpct=*/1.0, /*utility_w_spread=*/0.0,
+        /*utility_spread_scale=*/100.0, infer_args, &sim_args);
     if (with_inference && results_precomputed) {
       sim_args.inference_results_precomputed = true;
     }
@@ -609,11 +603,12 @@ static void record_game(MatchResults *results, player_type_t p0,
 
 void test_simmedinf_benchmark(void) {
   setbuf(stdout, NULL);
+  const int num_pairings = 1;
   printf("\n");
   printf("========================================================\n");
-  printf("  Inference round robin: NOINF / STATINF / SIMINF\n");
-  printf("  %d seeds x 3 pairings x 2 seats = %d games\n", NUM_SEEDS,
-         NUM_SEEDS * 6);
+  printf("  Inference match: SIMINF vs NOINF\n");
+  printf("  %d seeds x %d pairing x 2 seats = %d games (until stopped)\n",
+         NUM_SEEDS, num_pairings, NUM_SEEDS * num_pairings * 2);
   printf("  %d threads, %d candidates, %d-ply outer sims\n", NUM_THREADS,
          NUM_PLAYS, NUM_PLIES);
   printf("  Turn budget: %.0fs (SIMINF: up to %.0fs simmed-infer deducted; "
@@ -629,7 +624,7 @@ void test_simmedinf_benchmark(void) {
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads 10");
+      "-numplays 1 -threads 9");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   ErrorStack *wp_err = error_stack_create();
@@ -651,10 +646,11 @@ void test_simmedinf_benchmark(void) {
   MatchResults results;
   memset(&results, 0, sizeof(results));
 
-  static const player_type_t pairings[3][2] = {
-      {PLAYER_SIMMEDINF, PLAYER_STATICINF},
+  // Narrowed to just SIMINF vs NOINF (per request) so all compute goes to
+  // that one comparison's statistical power instead of splitting across the
+  // three-way round robin.
+  static const player_type_t pairings[1][2] = {
       {PLAYER_SIMMEDINF, PLAYER_NOINF},
-      {PLAYER_STATICINF, PLAYER_NOINF},
   };
 
   FILE *log_file = fopen(LOG_FILENAME, "w");
@@ -667,7 +663,7 @@ void test_simmedinf_benchmark(void) {
   for (int seed_idx = 0; seed_idx < NUM_SEEDS; seed_idx++) {
     const uint64_t seed = (uint64_t)(seed_idx + 1);
 
-    for (int pairing_idx = 0; pairing_idx < 3; pairing_idx++) {
+    for (int pairing_idx = 0; pairing_idx < num_pairings; pairing_idx++) {
       // Game pair: swap seats to cancel first-mover and draw advantage.
       for (int swap = 0; swap < 2; swap++) {
         const player_type_t p0 = pairings[pairing_idx][swap == 0 ? 0 : 1];
