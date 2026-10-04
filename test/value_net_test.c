@@ -624,18 +624,26 @@ static void vnt_leafcheck(const StringSplitter *fields) {
   config_destroy(config);
 }
 
-// "priorfit:<model_dir>:<backend>:<threads>:<iterations>:<positions>:<out>":
+// "priorfit:<model_dir>:<backend>:<threads>:<iterations>:<positions>:<out>
+// [:hist]":
 // data for fitting the net prior (PlayChooserStrategy.
 // sim_net_prior_iterations) as games use it. On positions from static
 // NWL23 games (even turns 2..20 with tiles in the bag), with PAT, the 8
 // plays of the PAT top 64 the net rates best by MAGPIE's utility (1, 0.5,
 // 100) are simmed 2 plies, net rollouts (PAT top 8) scored by the net at
-// the horizon, iterations iterations each, round robin. Writes <out>.csv:
+// the horizon, iterations iterations each, round robin; with hist 1, the
+// net sees each player's history from the game. Writes <out>.csv:
 // each play's net utility and its sim's mean, variance and iterations.
 static void vnt_priorfit(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 7) {
-    log_fatal("priorfit needs 6 fields");
+  const int field_count = string_splitter_get_number_of_items(fields);
+  if (field_count != 7 && field_count != 8) {
+    log_fatal("priorfit needs 6 or 7 fields");
   }
+  // hist 1: each player's value net history from the game, as in games;
+  // otherwise empty.
+  const bool use_history =
+      field_count == 8 &&
+      strtol(string_splitter_get_item(fields, 7), NULL, 10) > 0;
   const char *model_dir = string_splitter_get_item(fields, 1);
   const char *backend_name = string_splitter_get_item(fields, 2);
   const int threads =
@@ -671,8 +679,7 @@ static void vnt_priorfit(const StringSplitter *fields) {
   float spreads[POOL];
   double utility[POOL];
   int order[POOL];
-  ValueNetHistory history;
-  value_net_history_reset(&history);
+  ValueNetHistory histories[2];
   char *path = get_formatted_string("%s.csv", out);
   FILE *csv = fopen_or_die(path, "w");
   free(path);
@@ -682,7 +689,16 @@ static void vnt_priorfit(const StringSplitter *fields) {
     game_reset(game);
     game_seed(game, vnt_mix(UINT64_C(6161) ^ game_idx));
     draw_starting_racks(game);
+    value_net_history_reset(&histories[0]);
+    value_net_history_reset(&histories[1]);
     for (int turn = 0; !game_over(game) && done < positions; turn++) {
+      const int mover = game_get_player_on_turn_index(game);
+      ValueNetHistory empty_history;
+      value_net_history_reset(&empty_history);
+      const ValueNetHistory *own =
+          use_history ? &histories[mover] : &empty_history;
+      const ValueNetHistory *replier =
+          use_history ? &histories[1 - mover] : &empty_history;
       const int bag = bag_get_letters(game_get_bag(game));
       if (turn >= 2 && turn <= 20 && turn % 2 == 0 && bag > 0) {
         move_list_reset(pool);
@@ -702,7 +718,7 @@ static void vnt_priorfit(const StringSplitter *fields) {
         for (int move_idx = 0; move_idx < count; move_idx++) {
           const Move *move = move_list_get_move(pool, move_idx);
           value_net_features_for_move(
-              game, move, &history, scratch,
+              game, move, own, scratch,
               board + ((size_t)move_idx * VALUE_NET_BOARD_FLOATS),
               scalars + ((size_t)move_idx * VALUE_NET_SCALARS));
         }
@@ -742,6 +758,8 @@ static void vnt_priorfit(const StringSplitter *fields) {
           sim_args.rollout_value_net_batch = 8;
           sim_args.rollout_value_net_plies = 2;
           sim_args.rollout_value_net_leaf = true;
+          sim_args.rollout_value_net_history = *replier;
+          sim_args.rollout_value_net_own_history = *own;
           SimResults *results = sim_results_create(0.0);
           simulate_without_ctx(&sim_args, results, error_stack);
           if (!error_stack_is_empty(error_stack)) {
@@ -778,6 +796,7 @@ static void vnt_priorfit(const StringSplitter *fields) {
       }
       Move move;
       move_copy(&move, vnt_static_move(game, static_list));
+      value_net_history_record_opponent_move(&histories[1 - mover], &move);
       play_move(&move, game, NULL);
     }
   }
