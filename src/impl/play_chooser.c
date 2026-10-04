@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
+#include "../compat/memory_info.h"
 #include "../def/bai_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
@@ -629,9 +630,9 @@ play_chooser_best_with_net_prior(const PlayChooser *play_chooser) {
 // sim_inference_move, with the racks it points to. Returns false when there
 // is no inference to run.
 static bool play_chooser_fill_inference_args(
-    PlayChooser *play_chooser, const Game *game, int num_threads,
-    ThreadControl *thread_control, InferenceArgs *args, Rack *played_tiles,
-    Rack *target_known_rack, Rack *nontarget_known_rack) {
+    PlayChooser *play_chooser, const Game *game, ThreadControl *thread_control,
+    InferenceArgs *args, Rack *played_tiles, Rack *target_known_rack,
+    Rack *nontarget_known_rack) {
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
   const Move *move = strategy->sim_inference_move;
   const Game *before = strategy->sim_inference_game;
@@ -680,10 +681,13 @@ static bool play_chooser_fill_inference_args(
   if (play_chooser->inference_results == NULL) {
     play_chooser->inference_results = inference_results_create(NULL);
   }
+  const int infer_threads = strategy->sim_inference_threads > 0
+                                ? strategy->sim_inference_threads
+                                : get_num_cores();
   infer_args_fill(args, 20, strategy->sim_inference_margin, NULL, before,
-                  num_threads, 0, 0, thread_control, false, true, target_index,
-                  move_get_score(move), num_exchanged, played_tiles,
-                  target_known_rack, nontarget_known_rack);
+                  infer_threads, 0, 0, thread_control, false, true,
+                  target_index, move_get_score(move), num_exchanged,
+                  played_tiles, target_known_rack, nontarget_known_rack);
   return true;
 }
 
@@ -781,8 +785,8 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   InferenceArgs inference_args;
   Rack inference_racks[3];
   const bool use_inference = play_chooser_fill_inference_args(
-      play_chooser, game, num_threads, thread_control, &inference_args,
-      &inference_racks[0], &inference_racks[1], &inference_racks[2]);
+      play_chooser, game, thread_control, &inference_args, &inference_racks[0],
+      &inference_racks[1], &inference_racks[2]);
 
   // The utility weights are the chooser's own, so the sim ranks by (and
   // records) the same win%+spread blend used as the branch's value below.

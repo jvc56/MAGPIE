@@ -1404,6 +1404,8 @@ static void vnt_games(const StringSplitter *fields) {
             vnt_option_double(fields, 9, "imix", player_idx, 0.0),
         .sim_inference_max_leave =
             (int)vnt_option_double(fields, 9, "imaxleave", player_idx, 0.0),
+        .sim_inference_threads =
+            (int)vnt_option_double(fields, 9, "ithreads", player_idx, 0.0),
         .sim_leave_odds_evaluate =
             kinds[player_idx] == VNT_PLAYER_SIM_NN &&
                     vnt_option_double(fields, 9, "lodds", player_idx, 0.0) > 0

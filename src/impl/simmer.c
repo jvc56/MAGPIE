@@ -1,5 +1,6 @@
 #include "simmer.h"
 
+#include "../compat/ctime.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
@@ -24,6 +25,7 @@
 #include "inference.h"
 #include "move_gen.h"
 #include "random_variable.h"
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -51,6 +53,10 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   inference_ctx_destroy(sim_ctx->inference_ctx);
   free(sim_ctx);
 }
+
+// The least time sampling gets after an inference that took most of the
+// sim's time limit.
+static const double SIM_MIN_SECONDS_AFTER_INFERENCE = 0.02;
 
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
@@ -106,13 +112,24 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   }
 
   uint64_t num_infer_leaves = 0;
+  // The inference runs inside the sim's time limit: whatever it takes comes
+  // off the sampling's (which still gets a little).
+  const double original_time_limit = sim_args->bai_options.time_limit_seconds;
   if (sim_args->use_inference) {
+    const int64_t infer_start = ctimer_monotonic_ns();
     infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
           sim_args->inference_results, error_stack);
     if (!error_stack_is_empty(error_stack) ||
         thread_control_get_status(sim_args->thread_control) !=
             THREAD_CONTROL_STATUS_STARTED) {
       return;
+    }
+    if (original_time_limit > 0) {
+      const double inferred_seconds =
+          (double)(ctimer_monotonic_ns() - infer_start) / 1e9;
+      sim_args->bai_options.time_limit_seconds =
+          fmax(original_time_limit - inferred_seconds,
+               SIM_MIN_SECONDS_AFTER_INFERENCE);
     }
     num_infer_leaves =
         stat_get_num_unique_samples(inference_results_get_equity_values(
@@ -159,6 +176,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   sim_args->bai_options.sample_limit = original_sample_limit;
   sim_args->bai_options.sample_minimum = original_sample_minimum;
   sim_args->num_plies = original_num_plies;
+  sim_args->bai_options.time_limit_seconds = original_time_limit;
 }
 
 void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,

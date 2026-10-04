@@ -77,6 +77,9 @@ typedef struct PlayChooserStrategy {
   // enumerate are few; it is not run after an exchange. Other positions draw
   // the opponent's rack uniformly. 0 = always infer.
   int sim_inference_max_leave;
+  // Threads for the inference, which runs before the sim while the cores
+  // are otherwise idle; 0 = every core.
+  int sim_inference_threads;
   // When set (with the candidate value net), the sim also draws the
   // opponent's rack from an opponent-leave head (SimArgs.
   // opponent_leave_odds): sim_leave_odds_evaluate (context
