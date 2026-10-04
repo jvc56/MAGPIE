@@ -150,6 +150,18 @@ typedef struct VntInferRecord {
 static_assert(sizeof(VntInferRecord) == 4 + 2 + 2 + (8 * VNT_INFER_MARGINS),
               "VntInferRecord must have no padding");
 
+// How long each of a decision's inference runs took, in microseconds, in
+// <out>.inft beside the .inf records (same order).
+typedef struct VntInferTimeRecord {
+  uint32_t game_id;
+  uint16_t turn;
+  uint16_t reserved;
+  uint32_t micros[VNT_INFER_MARGINS];
+} VntInferTimeRecord;
+
+static_assert(sizeof(VntInferTimeRecord) == 4 + 2 + 2 + (4 * VNT_INFER_MARGINS),
+              "VntInferTimeRecord must have no padding");
+
 static const double VNT_INFER_MARGIN_POINTS[VNT_INFER_MARGINS] = {0.0, 10.0,
                                                                   25.0, 60.0};
 
@@ -1464,6 +1476,7 @@ typedef struct VntDistillThread {
   FILE *opponent_out;
   // Each decision's inference record (VntInferRecord), or NULL.
   FILE *infer_out;
+  FILE *infer_time_out;
   const char *out;
   // Shared progress, for the log.
   atomic_long *rows_written;
@@ -1599,6 +1612,10 @@ static void *vnt_distill_thread(void *arg) {
         if (args->infer_out != NULL) {
           VntInferRecord inferred;
           memset(&inferred, 0, sizeof(inferred));
+          VntInferTimeRecord timing;
+          memset(&timing, 0, sizeof(timing));
+          timing.game_id = (uint32_t)game_idx;
+          timing.turn = (uint16_t)turn;
           inferred.game_id = (uint32_t)game_idx;
           inferred.turn = (uint16_t)turn;
           const VntOpponentRecord *kept = &last[1 - seat];
@@ -1657,7 +1674,10 @@ static void *vnt_distill_thread(void *arg) {
                   before_last_move, 1, 0, 0, infer_control, false, true,
                   1 - seat, move_get_score(&last_move), exchanged,
                   &margin_played, &margin_known, &margin_mover);
+              const int64_t infer_start = ctimer_monotonic_ns();
               infer(&infer_args, &infer_ctx, infer_results, infer_errors);
+              timing.micros[margin_idx] =
+                  (uint32_t)((ctimer_monotonic_ns() - infer_start) / 1000);
               if (!error_stack_is_empty(infer_errors)) {
                 error_stack_reset(infer_errors);
                 continue;
@@ -1690,6 +1710,10 @@ static void *vnt_distill_thread(void *arg) {
           }
           if (fwrite(&inferred, sizeof(inferred), 1, args->infer_out) != 1) {
             log_fatal("could not write the inference records of %s", args->out);
+          }
+          if (args->infer_time_out != NULL &&
+              fwrite(&timing, sizeof(timing), 1, args->infer_time_out) != 1) {
+            log_fatal("could not write the inference times of %s", args->out);
           }
         }
         if (args->opponent_out != NULL) {
@@ -1864,11 +1888,16 @@ static void vnt_distill(const StringSplitter *fields) {
                              : string_duplicate(out);
     thread_args[thread_idx].records_out = fopen_or_die(path, "wb");
     free(path);
+    thread_args[thread_idx].infer_time_out = NULL;
     thread_args[thread_idx].infer_out = NULL;
     if (vnt_option_double(fields, 9, "inferq", 0, 0.0) > 0) {
       path = threads > 1 ? get_formatted_string("%s.t%d.inf", out, thread_idx)
                          : get_formatted_string("%s.inf", out);
       thread_args[thread_idx].infer_out = fopen_or_die(path, "wb");
+      free(path);
+      path = threads > 1 ? get_formatted_string("%s.t%d.inft", out, thread_idx)
+                         : get_formatted_string("%s.inft", out);
+      thread_args[thread_idx].infer_time_out = fopen_or_die(path, "wb");
       free(path);
     }
     thread_args[thread_idx].opponent_out = NULL;
@@ -1889,6 +1918,9 @@ static void vnt_distill(const StringSplitter *fields) {
     }
     if (thread_args[thread_idx].infer_out != NULL) {
       (void)fclose(thread_args[thread_idx].infer_out);
+    }
+    if (thread_args[thread_idx].infer_time_out != NULL) {
+      (void)fclose(thread_args[thread_idx].infer_time_out);
     }
   }
   const double seconds = (double)(ctimer_monotonic_ns() - args.start_ns) / 1e9;
