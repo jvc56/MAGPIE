@@ -797,6 +797,15 @@ static void vnt_rackparity(const StringSplitter *fields) {
   float scalars[VALUE_NET_SCALARS];
   XoshiroPRNG *prng = prng_create(17);
   double worst_sampling_error = 0.0;
+  // Seconds in each step of turning the head's output into leaves, and how
+  // often each ran.
+  double backend_seconds = 0.0;
+  double cpu_seconds = 0.0;
+  double prepare_seconds = 0.0;
+  double sample_seconds = 0.0;
+  int timed = 0;
+  int prepared = 0;
+  int64_t samples_drawn = 0;
   for (int decision = 0; decision < decisions; decision++) {
     VntOpponentRecord opponent;
     if (fread(&rows[0], sizeof(VntDistillRecord), 1, records) != 1 ||
@@ -832,8 +841,16 @@ static void vnt_rackparity(const StringSplitter *fields) {
         (opponent.flags & VNT_OPPONENT_MOVED) ? 0.0F : 1.0F;
     float theta[VALUE_NET_RACK_LETTERS];
     float theta_cpu[VALUE_NET_RACK_LETTERS];
+    int64_t start = ctimer_monotonic_ns();
     value_net_player_rack_odds(player, 1, board, scalars, side, theta);
+    const int64_t middle = ctimer_monotonic_ns();
     value_net_player_rack_odds(cpu, 1, board, scalars, side, theta_cpu);
+    // The first call compiles the backend's graph.
+    if (decision > 0) {
+      backend_seconds += (double)(middle - start) / 1e9;
+      cpu_seconds += (double)(ctimer_monotonic_ns() - middle) / 1e9;
+      timed++;
+    }
     fprintf(csv, "%d", decision);
     for (int letter = 0; letter < VALUE_NET_RACK_LETTERS; letter++) {
       fprintf(csv, ",%.6f", theta[letter]);
@@ -853,13 +870,24 @@ static void vnt_rackparity(const StringSplitter *fields) {
                                      (float)(rows[played].bag + RACK_SIZE));
       }
       LeaveOdds odds;
-      if (leave_odds_prepare(&odds, unseen, theta_cpu, VALUE_NET_TILE_TYPES,
-                             size)) {
+      start = ctimer_monotonic_ns();
+      const bool ready = leave_odds_prepare(&odds, unseen, theta_cpu,
+                                            VALUE_NET_TILE_TYPES, size);
+      prepare_seconds += (double)(ctimer_monotonic_ns() - start) / 1e9;
+      prepared++;
+      if (ready) {
         double expected[MAX_ALPHABET_SIZE];
         leave_odds_expected_counts(&odds, expected);
         double sampled[MAX_ALPHABET_SIZE] = {0};
         const int samples = 40000;
         Rack leave;
+        rack_set_dist_size(&leave, VALUE_NET_TILE_TYPES);
+        start = ctimer_monotonic_ns();
+        for (int sample = 0; sample < samples; sample++) {
+          leave_odds_sample(&odds, prng, &leave);
+        }
+        sample_seconds += (double)(ctimer_monotonic_ns() - start) / 1e9;
+        samples_drawn += samples;
         for (int sample = 0; sample < samples; sample++) {
           leave_odds_sample(&odds, prng, &leave);
           for (int letter = 0; letter < VALUE_NET_TILE_TYPES; letter++) {
@@ -881,6 +909,13 @@ static void vnt_rackparity(const StringSplitter *fields) {
     }
   }
   printf("rackparity worst_sampling_error=%.4f\n", worst_sampling_error);
+  printf("rackparity per-call ms: head on %s %.3f, head on cpu %.3f, "
+         "leave_odds_prepare %.4f (%d calls); per sample us %.4f\n",
+         backend_name, timed > 0 ? backend_seconds * 1e3 / timed : 0.0,
+         timed > 0 ? cpu_seconds * 1e3 / timed : 0.0,
+         prepared > 0 ? prepare_seconds * 1e3 / prepared : 0.0, prepared,
+         samples_drawn > 0 ? sample_seconds * 1e6 / (double)samples_drawn
+                           : 0.0);
   prng_destroy(prng);
   free(rows);
   free(board);
