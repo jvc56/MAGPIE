@@ -28,6 +28,7 @@
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/inference.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/play_chooser.h"
 #include "../src/impl/simmer.h"
@@ -127,6 +128,30 @@ typedef struct VntOpponentRecord {
 static_assert(sizeof(VntOpponentRecord) ==
                   4 + 2 + 2 + (3 * VNT_OPPONENT_LETTERS) + 2 + 2,
               "VntOpponentRecord must have no padding");
+
+enum { VNT_INFER_MARGINS = 4 };
+
+// What exact inference (MAGPIE's infer) made of the opponent's last move at
+// one decision, written beside the opponent records when inferq=1
+// (<out>.inf, <out>.t<k>.inf): for each of VNT_INFER_MARGINS equity margins,
+// the natural log of the probability it gave the leave the opponent
+// actually kept (-1e30 if that leave was not among those consistent with
+// the move) and how many leaves it found consistent. Written for every
+// decision (flags 0 when there was nothing to infer: no tiles played or
+// exchanged, or inference failed). Little-endian, no padding.
+typedef struct VntInferRecord {
+  uint32_t game_id;
+  uint16_t turn;
+  uint16_t flags;
+  float log_p[VNT_INFER_MARGINS];
+  uint32_t leaves[VNT_INFER_MARGINS];
+} VntInferRecord;
+
+static_assert(sizeof(VntInferRecord) == 4 + 2 + 2 + (8 * VNT_INFER_MARGINS),
+              "VntInferRecord must have no padding");
+
+static const double VNT_INFER_MARGIN_POINTS[VNT_INFER_MARGINS] = {0.0, 10.0,
+                                                                  25.0, 60.0};
 
 static uint64_t vnt_mix(uint64_t value) {
   value += UINT64_C(0x9e3779b97f4a7c15);
@@ -1421,6 +1446,8 @@ typedef struct VntDistillThread {
   FILE *records_out;
   // Each decision's opponent record (VntOpponentRecord), or NULL.
   FILE *opponent_out;
+  // Each decision's inference record (VntInferRecord), or NULL.
+  FILE *infer_out;
   const char *out;
   // Shared progress, for the log.
   atomic_long *rows_written;
@@ -1444,6 +1471,16 @@ static void *vnt_distill_thread(void *arg) {
   ValueNetHistory histories[2];
   // Each player's last move: the leave it kept, flags, score and tiles.
   VntOpponentRecord last[2];
+  // For inferq: the position before the last move and that move, and this
+  // thread's inference objects.
+  Game *before_last_move = game_duplicate(args->start_game);
+  Move last_move;
+  move_set_as_pass(&last_move);
+  InferenceCtx *infer_ctx = NULL;
+  InferenceResults *infer_results = inference_results_create(NULL);
+  ThreadControl *infer_control = thread_control_create();
+  thread_control_set_status(infer_control, THREAD_CONTROL_STATUS_STARTED);
+  ErrorStack *infer_errors = error_stack_create();
   const int ld_size = ld_get_size(game_get_ld(args->start_game));
   if (ld_size > VNT_OPPONENT_LETTERS) {
     log_fatal("opponent records hold %d letters, not %d", VNT_OPPONENT_LETTERS,
@@ -1460,6 +1497,7 @@ static void *vnt_distill_thread(void *arg) {
     value_net_history_reset(&histories[0]);
     value_net_history_reset(&histories[1]);
     memset(last, 0, sizeof(last));
+    move_set_as_pass(&last_move);
     for (int turn = 0; !game_over(game) && turn < VNT_MAX_TURNS; turn++) {
       const int seat = game_get_player_on_turn_index(game);
       move_list_reset(list);
@@ -1542,6 +1580,102 @@ static void *vnt_distill_thread(void *arg) {
                    args->records_out) != (size_t)written) {
           log_fatal("could not write %s", args->out);
         }
+        if (args->infer_out != NULL) {
+          VntInferRecord inferred;
+          memset(&inferred, 0, sizeof(inferred));
+          inferred.game_id = (uint32_t)game_idx;
+          inferred.turn = (uint16_t)turn;
+          const VntOpponentRecord *kept = &last[1 - seat];
+          int leave_size = 0;
+          for (int letter = 0; letter < ld_size; letter++) {
+            leave_size += kept->leave[letter];
+          }
+          const game_event_t last_type = move_get_type(&last_move);
+          const bool inferable = (kept->flags & VNT_OPPONENT_MOVED) > 0 &&
+                                 leave_size > 0 &&
+                                 (last_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+                                  (last_type == GAME_EVENT_EXCHANGE &&
+                                   bag + RACK_SIZE >= RACK_SIZE * 2));
+          for (int margin_idx = 0; margin_idx < VNT_INFER_MARGINS;
+               margin_idx++) {
+            inferred.log_p[margin_idx] = -1e30F;
+          }
+          if (inferable) {
+            Rack played_tiles;
+            Rack known;
+            Rack mover_rack;
+            rack_set_dist_size_and_reset(&played_tiles, ld_size);
+            rack_set_dist_size_and_reset(&known, ld_size);
+            rack_copy(&mover_rack,
+                      player_get_rack(game_get_player(game, seat)));
+            int exchanged = 0;
+            if (last_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+              for (int tile_idx = 0;
+                   tile_idx < move_get_tiles_length(&last_move); tile_idx++) {
+                const MachineLetter ml = move_get_tile(&last_move, tile_idx);
+                if (ml != PLAYED_THROUGH_MARKER) {
+                  rack_add_letter(&played_tiles, get_is_blanked(ml)
+                                                     ? BLANK_MACHINE_LETTER
+                                                     : ml);
+                }
+              }
+            } else {
+              exchanged = move_get_tiles_played(&last_move);
+            }
+            Rack actual;
+            rack_set_dist_size_and_reset(&actual, ld_size);
+            for (int letter = 0; letter < ld_size; letter++) {
+              for (int copy = 0; copy < kept->leave[letter]; copy++) {
+                rack_add_letter(&actual, (MachineLetter)letter);
+              }
+            }
+            for (int margin_idx = 0; margin_idx < VNT_INFER_MARGINS;
+                 margin_idx++) {
+              Rack margin_known = known;
+              Rack margin_mover = mover_rack;
+              Rack margin_played = played_tiles;
+              InferenceArgs infer_args;
+              infer_args_fill(
+                  &infer_args, 60000,
+                  double_to_equity(VNT_INFER_MARGIN_POINTS[margin_idx]), NULL,
+                  before_last_move, 1, 0, 0, infer_control, false, true,
+                  1 - seat, move_get_score(&last_move), exchanged,
+                  &margin_played, &margin_known, &margin_mover);
+              infer(&infer_args, &infer_ctx, infer_results, infer_errors);
+              if (!error_stack_is_empty(infer_errors)) {
+                error_stack_reset(infer_errors);
+                continue;
+              }
+              const LeaveRackList *list =
+                  inference_results_get_leave_rack_list(infer_results);
+              if (list == NULL) {
+                continue;
+              }
+              double total = 0.0;
+              double actual_draws = 0.0;
+              const int found = leave_rack_list_get_count(list);
+              for (int idx = 0; idx < found; idx++) {
+                const LeaveRack *entry = leave_rack_list_get_rack(list, idx);
+                Rack leave;
+                rack_set_dist_size_and_reset(&leave, ld_size);
+                leave_rack_get_leave(entry, &leave);
+                const double draws = (double)leave_rack_get_draws(entry);
+                total += draws;
+                if (racks_are_equal(&leave, &actual)) {
+                  actual_draws += draws;
+                }
+              }
+              inferred.leaves[margin_idx] = (uint32_t)found;
+              if (actual_draws > 0.0 && total > 0.0) {
+                inferred.log_p[margin_idx] = (float)log(actual_draws / total);
+              }
+              inferred.flags |= (uint16_t)(1U << margin_idx);
+            }
+          }
+          if (fwrite(&inferred, sizeof(inferred), 1, args->infer_out) != 1) {
+            log_fatal("could not write the inference records of %s", args->out);
+          }
+        }
         if (args->opponent_out != NULL) {
           VntOpponentRecord opponent = last[1 - seat];
           opponent.game_id = (uint32_t)game_idx;
@@ -1560,7 +1694,7 @@ static void *vnt_distill_thread(void *arg) {
       }
       Move move;
       move_copy(&move, move_list_get_move(list, chosen));
-      if (args->opponent_out != NULL) {
+      if (args->opponent_out != NULL || args->infer_out != NULL) {
         // The mover's leave: its rack less the tiles this move uses.
         Rack leave;
         rack_copy(&leave, player_get_rack(game_get_player(game, seat)));
@@ -1598,6 +1732,8 @@ static void *vnt_distill_thread(void *arg) {
         kept->last_tiles = (uint16_t)move_get_tiles_played(&move);
       }
       value_net_history_record_opponent_move(&histories[1 - seat], &move);
+      game_copy(before_last_move, game);
+      move_copy(&last_move, &move);
       play_move(&move, game, NULL);
     }
     const long games_done = atomic_fetch_add(args->games_played, 1) + 1;
@@ -1616,6 +1752,11 @@ static void *vnt_distill_thread(void *arg) {
   move_list_destroy(list);
   game_destroy(scratch);
   game_destroy(game);
+  game_destroy(before_last_move);
+  inference_ctx_destroy(infer_ctx);
+  inference_results_destroy(infer_results);
+  thread_control_destroy(infer_control);
+  error_stack_destroy(infer_errors);
   return NULL;
 }
 
@@ -1633,7 +1774,9 @@ static void *vnt_distill_thread(void *arg) {
 // over static equity with temperature temp= points (default 1). With an
 // empty bag (not recorded), the top static move. opp=1 also writes each
 // recorded decision's opponent rack, kept leave and played tiles
-// (VntOpponentRecord, .opp2), keep=<n> writes only the played row and the
+// (VntOpponentRecord, .opp2), inferq=1 also writes, per decision, what exact
+// inference gave the leave the opponent kept (VntInferRecord, .inf; needs
+// opp=1), keep=<n> writes only the played row and the
 // top n - 1 others by static equity per decision, and tables=1 uses the
 // lexicon's .rit and .wit tables in move generation.
 static void vnt_distill(const StringSplitter *fields) {
@@ -1705,6 +1848,13 @@ static void vnt_distill(const StringSplitter *fields) {
                              : string_duplicate(out);
     thread_args[thread_idx].records_out = fopen_or_die(path, "wb");
     free(path);
+    thread_args[thread_idx].infer_out = NULL;
+    if (vnt_option_double(fields, 9, "inferq", 0, 0.0) > 0) {
+      path = threads > 1 ? get_formatted_string("%s.t%d.inf", out, thread_idx)
+                         : get_formatted_string("%s.inf", out);
+      thread_args[thread_idx].infer_out = fopen_or_die(path, "wb");
+      free(path);
+    }
     thread_args[thread_idx].opponent_out = NULL;
     if (vnt_option_double(fields, 9, "opp", 0, 0.0) > 0) {
       path = threads > 1 ? get_formatted_string("%s.t%d.opp2", out, thread_idx)
@@ -1720,6 +1870,9 @@ static void vnt_distill(const StringSplitter *fields) {
     (void)fclose(thread_args[thread_idx].records_out);
     if (thread_args[thread_idx].opponent_out != NULL) {
       (void)fclose(thread_args[thread_idx].opponent_out);
+    }
+    if (thread_args[thread_idx].infer_out != NULL) {
+      (void)fclose(thread_args[thread_idx].infer_out);
     }
   }
   const double seconds = (double)(ctimer_monotonic_ns() - args.start_ns) / 1e9;
