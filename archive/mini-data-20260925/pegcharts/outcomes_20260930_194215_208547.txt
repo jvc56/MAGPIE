@@ -1,0 +1,72 @@
+PEG (last completed stage 1): 8 candidates, 60.02s
+stage  fidelity  cands  best win%  time   
+0      greedy    8/8    93.9%      0.1s   
+1      2-ply eg  8/8    95.6%      33.3s  
+2      3-ply eg  0/8    95.6%      26.7s  
+
+95040 weighted bag orderings (274 unique)
+depth  rank  move          wins  ties   loss  win%  spread  time  outcomes
+2-ply     1  I1 PED(A)NT  90840   120   4080  95.6   +31.2  4.0s  T: EIIIQx120, L: AAGIIx360
+                                                                  AAGIRx360 AGIIQx720 AGIIRx720
+                                                                  AIIIQx240 AIIITx240 AIIQTx720
+                                                                  GIIIQx120 GIIIUx120 GIITUx360
+                                                                  IIIQTx120
+2-ply     2  2A P(U)NTED  88440  1800   4800  94.0   +26.8  4.3s  T: AGIIUx720 AIIRUx720 GIITUx360,
+                                                                  L: AAGIIx360 AAIITx360 AAIIUx360
+                                                                  AGIIIx240 AGIITx720 AGIQUx720
+                                                                  AIIITx240 AIIQUx720 GIIIQx120
+                                                                  GIIITx120 GIIIUx120 GIIQUx360
+                                                                  IIIQTx120 IIIQUx120 IIITUx120
+2-ply     3  2I TEND(O)N  89280     0   5760  93.9   +27.8  3.0s  L: AAGIIx360 AAGITx360 AAIIQx360
+                                                                  AGIIIx240 AGIISx720 AGIITx720
+                                                                  AIIISx240 AIIIUx240 AIIQUx720
+                                                                  EGIIIx120 GIIISx120 GIIITx120
+                                                                  GIIIUx120 GIIQUx360 GIIRTx360
+                                                                  GIISUx360 IIIQTx120 IIIQUx120
+2-ply     4  2A P(U)NNED  87720  1440   5880  93.1   +24.1  4.3s  T: AEIITx720 AIIRUx720, L:
+                                                                  AAGIIx360 AAGITx360 AAIITx360
+                                                                  AAIIUx360 AGIIIx240 AGIITx720
+                                                                  AGIQUx720 AIIITx240 AIIIUx240
+                                                                  AIIQUx720 EGIIIx120 GIIIQx120
+                                                                  GIIITx120 GIIIUx120 GIIQUx360
+                                                                  GIITUx360 IIIQTx120 IIIQUx120
+                                                                  IIITUx120
+2-ply     5  2A P(U)NNET  86160  1560   7320  91.5   +23.8  4.6s  T: AEIITx720 AIIRUx720 GIIIRx120,
+                                                                  L: AAGIIx360 AAGITx360 AAIITx360
+                                                                  AAIIUx360 AGIIIx240 AGIITx720
+                                                                  AGIIUx720 AGIQUx720 AIIITx240
+                                                                  AIIIUx240 AIIQRx720 AIIQUx720
+                                                                  EGIIIx120 GIIIQx120 GIIITx120
+                                                                  GIIIUx120 GIIQUx360 GIITUx360
+                                                                  IIIQTx120 IIIQUx120 IIITUx120
+2-ply     6  2A F(U)NNED  85920  1080   8040  91.0   +24.3  4.2s  T: AAIIUx360 AIIIUx240 EIIIUx120
+                                                                  EIIRUx360, L: AAGIIx360 AAGISx360
+                                                                  AAGITx360 AAIITx360 AEGIIx720
+                                                                  AEIITx720 AGIIIx240 AGIISx720
+                                                                  AGIITx720 AGIIUx720 AGIQUx720
+                                                                  AIIITx240 AIIQUx720 EGIIIx120
+                                                                  GIIIRx120 GIIITx120 GIIIUx120
+                                                                  GIIQUx360 IIIQTx120 IIIQUx120
+2-ply     7  2B (U)NPENT  83400  1200  10440  88.4   +22.3  4.6s  T: AAGIIx360 AAGISx360 EGIIRx360
+                                                                  GIIIRx120, L: AAGIRx360 AAGITx360
+                                                                  AAIIUx360 AAIQSx360 AGIIRx720
+                                                                  AGIISx720 AGIITx720 AGIIUx720
+                                                                  AGIQUx720 AGITUx720 AIIIUx240
+                                                                  AIIQRx720 AIIQUx720 AIIRUx720
+                                                                  EGIIIx120 EGIQUx360 GIIIQx120
+                                                                  GIIITx120 GIIIUx120 GIIQUx360
+                                                                  GIITUx360 IIIQTx120 IIIQUx120
+                                                                  IIITUx120 IIQTUx360
+2-ply     8  2A T(U)NNED  80760  1440  12840  85.7   +20.3  4.3s  T: AIIIQx240 AIISUx720 EIITUx360
+                                                                  GIIIRx120, L: AAGIIx360 AAGISx360
+                                                                  AAGITx360 AAIIIx120 AAIISx360
+                                                                  AAIITx360 AAIIUx360 AEIIIx240
+                                                                  AEIITx720 AEIRUx720 AGIIIx240
+                                                                  AGIISx720 AGIITx720 AGIIUx720
+                                                                  AGIQUx720 AGITUx720 AIIIRx240
+                                                                  AIIITx240 AIIIUx240 AIIQUx720
+                                                                  AIIRUx720 EGIIIx120 EGIIRx360
+                                                                  EGIIUx360 EIIIUx120 EIIRUx360
+                                                                  GIIIQx120 GIIISx120 GIIITx120
+                                                                  GIIIUx120 GIIQUx360 GIISUx360
+                                                                  IIIQTx120 IIIQUx120 IIITUx120
