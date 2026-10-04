@@ -2596,6 +2596,205 @@ static void vnt_cpu_throughput(const char *dir, const char *parity_dir,
   error_stack_destroy(error_stack);
 }
 
+typedef enum {
+  VNT_DEVICE_CPU,
+  VNT_DEVICE_GPU,
+  VNT_DEVICE_ANE,
+  VNT_DEVICE_COUNT,
+} vnt_device_t;
+
+typedef struct VntDeviceWorker {
+  vnt_device_t device;
+  const ValueNet *net;
+  ValueNetMetal *metal;
+  ValueNetCoreML *coreml;
+  int rows;
+  const float *board;
+  const float *scalars;
+  float *values;
+  float *spreads;
+  atomic_bool *stop;
+  int64_t evaluated;
+} VntDeviceWorker;
+
+static void *vnt_device_worker(void *arg) {
+  VntDeviceWorker *worker = arg;
+  while (!atomic_load(worker->stop)) {
+    switch (worker->device) {
+    case VNT_DEVICE_CPU:
+      value_net_evaluate_cpu(worker->net, worker->rows, worker->board,
+                             worker->scalars, worker->values, worker->spreads);
+      break;
+    case VNT_DEVICE_GPU:
+      value_net_metal_evaluate(worker->metal, worker->rows, worker->board,
+                               worker->scalars, worker->values,
+                               worker->spreads);
+      break;
+    default:
+      value_net_coreml_evaluate(worker->coreml, worker->rows, worker->board,
+                                worker->scalars, worker->values,
+                                worker->spreads);
+      break;
+    }
+    worker->evaluated += worker->rows;
+  }
+  return NULL;
+}
+
+// "devices:<dir>:<parity_dir>:<seconds>:<cpu_threads>:<gpu_threads>:
+// <ane_threads>[:<gpu_rows>[:<ane_rows>]]": rows per second on each device
+// with the given threads running at once for seconds (after a warm-up):
+// CPU threads one row per call, the GPU (Metal fp16) gpu_rows (default 256)
+// and the Neural Engine (<dir>/ane.mlpackage) ane_rows (default 256), the
+// parity rows tiled. Values and spreads both computed.
+static void vnt_devices(const StringSplitter *fields) {
+  const int num_fields = (int)string_splitter_get_number_of_items(fields);
+  if (num_fields < 7) {
+    log_fatal("devices needs at least 6 fields");
+  }
+  const char *dir = string_splitter_get_item(fields, 1);
+  const char *parity_dir = string_splitter_get_item(fields, 2);
+  const double seconds = strtod(string_splitter_get_item(fields, 3), NULL);
+  int threads[VNT_DEVICE_COUNT];
+  for (int device = 0; device < VNT_DEVICE_COUNT; device++) {
+    threads[device] =
+        (int)strtol(string_splitter_get_item(fields, 4 + device), NULL, 10);
+  }
+  const int rows[VNT_DEVICE_COUNT] = {
+      1,
+      num_fields > 7
+          ? (int)strtol(string_splitter_get_item(fields, 7), NULL, 10)
+          : VALUE_NET_MAX_GPU_ROWS,
+      num_fields > 8
+          ? (int)strtol(string_splitter_get_item(fields, 8), NULL, 10)
+          : VALUE_NET_MAX_GPU_ROWS,
+  };
+  int total_threads = 0;
+  for (int device = 0; device < VNT_DEVICE_COUNT; device++) {
+    total_threads += threads[device];
+  }
+  if (total_threads < 1 || total_threads > VNT_MAX_THROUGHPUT_THREADS) {
+    log_fatal("devices needs 1..%d threads", VNT_MAX_THROUGHPUT_THREADS);
+  }
+  ErrorStack *error_stack = error_stack_create();
+  ValueNet *net = value_net_create(dir, error_stack);
+  ValueNetMetal *metal = NULL;
+  ValueNetCoreML *coreml = NULL;
+  if (error_stack_is_empty(error_stack) && threads[VNT_DEVICE_GPU] > 0) {
+    metal =
+        value_net_metal_create(net, true, threads[VNT_DEVICE_GPU], error_stack);
+  }
+  if (error_stack_is_empty(error_stack) && threads[VNT_DEVICE_ANE] > 0) {
+    char *path = get_formatted_string("%s/ane.mlpackage", dir);
+    coreml = value_net_coreml_create(path, 0, error_stack);
+    free(path);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("devices setup failed");
+  }
+  // The parity rows tiled to the largest call.
+  int most_rows = 1;
+  for (int device = 0; device < VNT_DEVICE_COUNT; device++) {
+    if (rows[device] > most_rows) {
+      most_rows = rows[device];
+    }
+  }
+  char *path = get_formatted_string("%s/board.f32", parity_dir);
+  float *parity_board = vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS *
+                                                  VALUE_NET_BOARD_FLOATS);
+  free(path);
+  path = get_formatted_string("%s/scalars.f32", parity_dir);
+  float *parity_scalars =
+      vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS * VALUE_NET_SCALARS);
+  free(path);
+  float *board =
+      malloc_or_die(sizeof(float) * (size_t)most_rows * VALUE_NET_BOARD_FLOATS);
+  float *scalars =
+      malloc_or_die(sizeof(float) * (size_t)most_rows * VALUE_NET_SCALARS);
+  for (int row = 0; row < most_rows; row++) {
+    const int source = row % VALUE_NET_PARITY_ROWS;
+    memcpy(board + ((size_t)row * VALUE_NET_BOARD_FLOATS),
+           parity_board + ((size_t)source * VALUE_NET_BOARD_FLOATS),
+           sizeof(float) * VALUE_NET_BOARD_FLOATS);
+    memcpy(scalars + ((size_t)row * VALUE_NET_SCALARS),
+           parity_scalars + ((size_t)source * VALUE_NET_SCALARS),
+           sizeof(float) * VALUE_NET_SCALARS);
+  }
+  // Warm-up: one call on each device in use (graph compilation).
+  float *warm = malloc_or_die(sizeof(float) * 2 * (size_t)most_rows);
+  if (metal != NULL) {
+    value_net_metal_evaluate(metal, rows[VNT_DEVICE_GPU], board, scalars, warm,
+                             warm + most_rows);
+  }
+  if (coreml != NULL) {
+    value_net_coreml_evaluate(coreml, rows[VNT_DEVICE_ANE], board, scalars,
+                              warm, warm + most_rows);
+  }
+  free(warm);
+  atomic_bool stop;
+  atomic_init(&stop, false);
+  cpthread_t thread_ids[VNT_MAX_THROUGHPUT_THREADS];
+  VntDeviceWorker workers[VNT_MAX_THROUGHPUT_THREADS];
+  int count = 0;
+  for (int device = 0; device < VNT_DEVICE_COUNT; device++) {
+    for (int thread_idx = 0; thread_idx < threads[device]; thread_idx++) {
+      workers[count] = (VntDeviceWorker){
+          .device = (vnt_device_t)device,
+          .net = net,
+          .metal = metal,
+          .coreml = coreml,
+          .rows = rows[device],
+          .board = board,
+          .scalars = scalars,
+          .values = malloc_or_die(sizeof(float) * (size_t)rows[device]),
+          .spreads = malloc_or_die(sizeof(float) * (size_t)rows[device]),
+          .stop = &stop,
+      };
+      count++;
+    }
+  }
+  const int64_t start = ctimer_monotonic_ns();
+  for (int worker_idx = 0; worker_idx < count; worker_idx++) {
+    cpthread_create(&thread_ids[worker_idx], vnt_device_worker,
+                    &workers[worker_idx]);
+  }
+  while ((double)(ctimer_monotonic_ns() - start) / 1e9 < seconds) {
+    struct timespec pause = {.tv_sec = 0, .tv_nsec = 50000000};
+    nanosleep(&pause, NULL);
+  }
+  atomic_store(&stop, true);
+  for (int worker_idx = 0; worker_idx < count; worker_idx++) {
+    cpthread_join(thread_ids[worker_idx]);
+  }
+  // Rows finished by the stop over the time until the last call returned.
+  const double elapsed = (double)(ctimer_monotonic_ns() - start) / 1e9;
+  int64_t evaluated[VNT_DEVICE_COUNT] = {0};
+  for (int worker_idx = 0; worker_idx < count; worker_idx++) {
+    evaluated[workers[worker_idx].device] += workers[worker_idx].evaluated;
+    free(workers[worker_idx].values);
+    free(workers[worker_idx].spreads);
+  }
+  const double cpu = (double)evaluated[VNT_DEVICE_CPU] / elapsed;
+  const double gpu = (double)evaluated[VNT_DEVICE_GPU] / elapsed;
+  const double ane = (double)evaluated[VNT_DEVICE_ANE] / elapsed;
+  printf("devices cpu_threads=%d gpu_threads=%d ane_threads=%d gpu_rows=%d "
+         "ane_rows=%d cpu_rows_per_s=%.0f gpu_rows_per_s=%.0f "
+         "ane_rows_per_s=%.0f total_rows_per_s=%.0f seconds=%.1f\n",
+         threads[VNT_DEVICE_CPU], threads[VNT_DEVICE_GPU],
+         threads[VNT_DEVICE_ANE], rows[VNT_DEVICE_GPU], rows[VNT_DEVICE_ANE],
+         cpu, gpu, ane, cpu + gpu + ane, elapsed);
+  (void)fflush(stdout);
+  free(board);
+  free(scalars);
+  free(parity_board);
+  free(parity_scalars);
+  value_net_coreml_destroy(coreml);
+  value_net_metal_destroy(metal);
+  value_net_destroy(net);
+  error_stack_destroy(error_stack);
+}
+
 // "throughput:<dir>:<parity_dir>:<fp32|fp16>[:<threads>[:<concurrency>]]":
 // Metal rows per second by batch size, the parity rows tiled to fill each
 // batch, with threads callers (default 1) sharing one ValueNetMetal of
@@ -2871,6 +3070,8 @@ void value_net_test_run_spec(const char *spec) {
                  string_splitter_get_item(fields, 2));
   } else if (strings_equal(mode, "simbench")) {
     vnt_simbench(fields);
+  } else if (strings_equal(mode, "devices")) {
+    vnt_devices(fields);
   } else if (strings_equal(mode, "cputhroughput") && num_fields == 5) {
     vnt_cpu_throughput(
         string_splitter_get_item(fields, 1),
