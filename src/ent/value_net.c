@@ -35,10 +35,10 @@ typedef struct ValueNetBlock {
   const float *fc2_weight;
   const float *fc2_bias;
   // The linear weights packed for the SIMD kernels (value_net_kernels.h).
-  float *qkv_packed;
-  float *proj_packed;
-  float *fc1_packed;
-  float *fc2_packed;
+  vnk_half *qkv_packed;
+  vnk_half *proj_packed;
+  vnk_half *fc1_packed;
+  vnk_half *fc2_packed;
 } ValueNetBlock;
 
 struct ValueNet {
@@ -65,9 +65,9 @@ struct ValueNet {
   const float *wdl_weight;
   const float *wdl_bias;
   // The SIMD kernels' packed weights (value_net_kernels.h).
-  float *square_proj_packed;
-  float *game_proj_packed;
-  float *fc1_packed;
+  vnk_half *square_proj_packed;
+  vnk_half *game_proj_packed;
+  vnk_half *fc1_packed;
   // The optional opponent-leave head (rack_units 0 when absent).
   int rack_units;
   const float *rack_fc_weight;
@@ -690,10 +690,10 @@ typedef struct ValueNetSimdScratch {
   float *qkv;
   float *attended;
   float *hidden;
-  float *scores;  // [tokens, scores_stride]
-  float *keys_t;  // [head_dim, scores_stride], zero padded
-  float *values;  // [tokens, values_stride], zero padded
-  float *squares; // [squares, planes]
+  float *scores;    // [tokens, scores_stride]
+  vnk_half *keys_t; // [head_dim, scores_stride], zero padded
+  vnk_half *values; // [tokens, values_stride], zero padded
+  float *squares;   // [squares, planes]
   float *cls;
   float *head;
   int scores_stride;
@@ -715,10 +715,10 @@ static void attention_simd(const ValueNetShape *shape,
       const float *row = scratch->qkv + ((size_t)token * width);
       for (int idx = 0; idx < head_dim; idx++) {
         scratch->keys_t[((size_t)idx * scratch->scores_stride) + token] =
-            row[dim + offset + idx];
+            vnk_to_half(row[dim + offset + idx]);
+        scratch->values[((size_t)token * scratch->values_stride) + idx] =
+            vnk_to_half(row[(2 * dim) + offset + idx]);
       }
-      memcpy(scratch->values + ((size_t)token * scratch->values_stride),
-             row + (2 * dim) + offset, sizeof(float) * (size_t)head_dim);
     }
     vnk_gemm(scratch->qkv + offset, width, VALUE_NET_TOKENS, head_dim,
              scratch->keys_t, scratch->scores_stride, NULL, VALUE_NET_TOKENS,
@@ -830,9 +830,13 @@ static void value_net_run_cpu_simd(const ValueNet *net, int rows,
   scratch.attended = malloc_or_die(sizeof(float) * tokens * dim);
   scratch.hidden = malloc_or_die(sizeof(float) * tokens * shape->ff_dim);
   scratch.scores = calloc_or_die(tokens * scratch.scores_stride, sizeof(float));
-  scratch.keys_t = calloc_or_die(
-      (size_t)shape->head_dim * scratch.scores_stride, sizeof(float));
-  scratch.values = calloc_or_die(tokens * scratch.values_stride, sizeof(float));
+  // The attention products' packed operands, their inputs padded.
+  scratch.keys_t = calloc_or_die((size_t)vnk_in_padded(shape->head_dim) *
+                                     scratch.scores_stride,
+                                 sizeof(vnk_half));
+  scratch.values = calloc_or_die((size_t)vnk_in_padded(VALUE_NET_TOKENS) *
+                                     scratch.values_stride,
+                                 sizeof(vnk_half));
   scratch.squares =
       malloc_or_die(sizeof(float) * VALUE_NET_SQUARES * VALUE_NET_PLANES);
   scratch.cls = malloc_or_die(sizeof(float) * dim);

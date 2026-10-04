@@ -1,16 +1,27 @@
 #ifndef VALUE_NET_KERNELS_AVX2_H
 #define VALUE_NET_KERNELS_AVX2_H
 
-// The AVX2 with FMA vector layer (x86-64, 8 lanes) for value_net_kernels.h.
+// The AVX2 with FMA and F16C vector layer (x86-64, 8 lanes; fp16 weights
+// widened to fp32 as they load: AVX2 has no fp16 arithmetic) for
+// value_net_kernels.h.
 
-#if defined(__AVX2__) && defined(__FMA__)
+#if defined(__AVX2__) && defined(__FMA__) && defined(__F16C__)
 #include <immintrin.h>
+#include <stdint.h>
 
 #define VNK_NAME "avx2"
 #define VNK_W 8
 #define VNK_NR_VECS 2
 #define VNK_MR 4
 typedef __m256 vnk_v;
+// An fp16 weight, as its bits.
+typedef uint16_t vnk_half;
+static inline vnk_half vnk_to_half(float x) {
+  return (vnk_half)_cvtss_sh(x, _MM_FROUND_TO_NEAREST_INT);
+}
+static inline vnk_v vnk_load_half(const vnk_half *p) {
+  return _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)p));
+}
 static inline vnk_v vnk_load(const float *p) { return _mm256_loadu_ps(p); }
 static inline void vnk_store(float *p, vnk_v v) { _mm256_storeu_ps(p, v); }
 static inline vnk_v vnk_set1(float x) { return _mm256_set1_ps(x); }

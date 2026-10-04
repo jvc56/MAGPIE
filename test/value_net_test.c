@@ -268,9 +268,18 @@ static void vnt_report(const char *backend, int rows, const float *value,
                        const float *ref_spread, double seconds) {
   double max_value = 0.0;
   double max_spread = 0.0;
+  int nonfinite = 0;
   for (int row = 0; row < rows; row++) {
+    // fmax skips NaN, so count non-finite outputs apart.
+    if (!isfinite(value[row]) || !isfinite(spread[row])) {
+      nonfinite++;
+    }
     max_value = fmax(max_value, fabs((double)value[row] - ref_value[row]));
     max_spread = fmax(max_spread, fabs((double)spread[row] - ref_spread[row]));
+  }
+  if (nonfinite > 0) {
+    printf("value_net_parity backend=%s nonfinite_rows=%d\n", backend,
+           nonfinite);
   }
   printf("value_net_parity backend=%s rows=%d max_abs_value_diff=%.3g "
          "max_abs_spread_diff=%.3g seconds=%.3f\n",

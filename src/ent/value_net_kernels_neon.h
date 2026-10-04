@@ -6,11 +6,24 @@
 #if defined(__ARM_NEON) && defined(__aarch64__)
 #include <arm_neon.h>
 
-#define VNK_NAME "neon"
 #define VNK_W 4
 #define VNK_NR_VECS 4
 #define VNK_MR 6
 typedef float32x4_t vnk_v;
+typedef float16_t vnk_half;
+static inline vnk_half vnk_to_half(float x) { return (float16_t)x; }
+static inline vnk_v vnk_load_half(const vnk_half *p) {
+  return vcvt_f32_f16(vld1_f16(p));
+}
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+// The matrix product runs in fp16 (value_net_kernels.h), 8 lanes, a tile of
+// 32 outputs.
+#define VNK_HALF_GEMM 1
+#define VNK_GEMM_NR 32
+#define VNK_NAME "neon-fp16"
+#else
+#define VNK_NAME "neon"
+#endif
 static inline vnk_v vnk_load(const float *p) { return vld1q_f32(p); }
 static inline void vnk_store(float *p, vnk_v v) { vst1q_f32(p, v); }
 static inline vnk_v vnk_set1(float x) { return vdupq_n_f32(x); }

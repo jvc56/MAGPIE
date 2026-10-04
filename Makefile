@@ -154,6 +154,11 @@ CFLAGS := ${cflags.${BUILD}}
 DEPFLAGS := -MMD -MP
 
 CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+# On arm64, the value net's fp16 matrix products need the core's fp16
+# arithmetic, which Apple clang's -march=native leaves off.
+ifeq ($(shell uname -m),arm64)
+CFLAGS := $(subst -march=native,-march=native+fp16,$(CFLAGS))
+endif
 ifeq ($(BUILD),pgo_use)
 CMD_CFLAGS := $(cflags.no_pgo_release) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
 else
