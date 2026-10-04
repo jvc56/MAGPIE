@@ -302,10 +302,27 @@ static void vnt_parity(const char *dir, const char *parity_dir, int rows) {
   free(path);
   float value[VALUE_NET_PARITY_ROWS];
   float spread[VALUE_NET_PARITY_ROWS];
-  int64_t start = ctimer_monotonic_ns();
-  value_net_evaluate_cpu(net, rows, board, scalars, value, spread);
-  vnt_report("cpu", rows, value, spread, ref_value, ref_spread,
+  // The SIMD kernels (best of the repeats) and the scalar reference.
+  double best = INFINITY;
+  int64_t start = 0;
+  for (int repeat = 0; repeat < VALUE_NET_PARITY_REPEATS; repeat++) {
+    start = ctimer_monotonic_ns();
+    value_net_evaluate_cpu(net, rows, board, scalars, value, spread);
+    best = fmin(best, (double)(ctimer_monotonic_ns() - start) / 1e9);
+  }
+  char *label = get_formatted_string("cpu-%s", value_net_cpu_kernels());
+  vnt_report(label, rows, value, spread, ref_value, ref_spread, best);
+  free(label);
+  float simd_value[VALUE_NET_PARITY_ROWS];
+  float simd_spread[VALUE_NET_PARITY_ROWS];
+  memcpy(simd_value, value, sizeof(float) * (size_t)rows);
+  memcpy(simd_spread, spread, sizeof(float) * (size_t)rows);
+  start = ctimer_monotonic_ns();
+  value_net_evaluate_cpu_reference(net, rows, board, scalars, value, spread);
+  vnt_report("cpu-reference", rows, value, spread, ref_value, ref_spread,
              (double)(ctimer_monotonic_ns() - start) / 1e9);
+  vnt_report("cpu-simd-vs-reference", rows, simd_value, simd_spread, value,
+             spread, 0.0);
   for (int half = 0; half <= 1; half++) {
     ValueNetMetal *metal = value_net_metal_create(net, half, 1, error_stack);
     if (metal == NULL) {

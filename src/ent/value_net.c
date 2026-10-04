@@ -4,6 +4,7 @@
 #include "../def/value_net_defs.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "value_net_kernels.h"
 #include <assert.h>
 #include <math.h>
 #include <stdbool.h>
@@ -33,6 +34,11 @@ typedef struct ValueNetBlock {
   const float *fc1_bias;
   const float *fc2_weight;
   const float *fc2_bias;
+  // The linear weights packed for the SIMD kernels (value_net_kernels.h).
+  float *qkv_packed;
+  float *proj_packed;
+  float *fc1_packed;
+  float *fc2_packed;
 } ValueNetBlock;
 
 struct ValueNet {
@@ -58,6 +64,10 @@ struct ValueNet {
   const float *spread_bias;
   const float *wdl_weight;
   const float *wdl_bias;
+  // The SIMD kernels' packed weights (value_net_kernels.h).
+  float *square_proj_packed;
+  float *game_proj_packed;
+  float *fc1_packed;
   // The optional opponent-leave head (rack_units 0 when absent).
   int rack_units;
   const float *rack_fc_weight;
@@ -253,6 +263,24 @@ static float *value_net_read_weights(const char *path, size_t *num_weights,
   return weights;
 }
 
+// Packs every large linear layer's weights for the SIMD kernels.
+static void value_net_pack(ValueNet *net) {
+  const ValueNetShape *shape = &net->shape;
+  const int dim = shape->model_dim;
+  for (int layer = 0; layer < shape->layers; layer++) {
+    ValueNetBlock *block = &net->blocks[layer];
+    block->qkv_packed = vnk_pack(block->qkv_weight, 3 * dim, dim);
+    block->proj_packed = vnk_pack(block->proj_weight, dim, dim);
+    block->fc1_packed = vnk_pack(block->fc1_weight, shape->ff_dim, dim);
+    block->fc2_packed = vnk_pack(block->fc2_weight, dim, shape->ff_dim);
+  }
+  net->square_proj_packed =
+      vnk_pack(net->square_proj_weight, dim, VALUE_NET_PLANES);
+  net->game_proj_packed =
+      vnk_pack(net->game_proj_weight, dim, VALUE_NET_SCALARS);
+  net->fc1_packed = vnk_pack(net->fc1_weight, shape->head_hidden, dim);
+}
+
 ValueNet *value_net_create(const char *dir, ErrorStack *error_stack) {
   char *weights_path = get_formatted_string("%s/weights.f32", dir);
   char *manifest_path = get_formatted_string("%s/manifest.json", dir);
@@ -331,6 +359,9 @@ ValueNet *value_net_create(const char *dir, ErrorStack *error_stack) {
                    &net->rack_out_bias, error_stack);
   }
   net->manifest = manifest;
+  if (error_stack_is_empty(error_stack)) {
+    value_net_pack(net);
+  }
   if (!error_stack_is_empty(error_stack)) {
     value_net_destroy(net);
     return NULL;
@@ -342,6 +373,17 @@ void value_net_destroy(ValueNet *net) {
   if (net == NULL) {
     return;
   }
+  if (net->blocks != NULL) {
+    for (int layer = 0; layer < net->shape.layers; layer++) {
+      free(net->blocks[layer].qkv_packed);
+      free(net->blocks[layer].proj_packed);
+      free(net->blocks[layer].fc1_packed);
+      free(net->blocks[layer].fc2_packed);
+    }
+  }
+  free(net->square_proj_packed);
+  free(net->game_proj_packed);
+  free(net->fc1_packed);
   free(net->weights);
   free(net->manifest);
   free(net->blocks);
@@ -520,6 +562,36 @@ static void embed(const ValueNet *net, const float *board, const float *scalars,
          tokens + ((size_t)(VALUE_NET_TOKENS - 1) * dim));
 }
 
+// The value and spread (either may be NULL) from the head's hidden vector.
+static void value_net_heads(const ValueNet *net, const float *head,
+                            float *value, float *spread) {
+  const int hidden = net->shape.head_hidden;
+  if (value != NULL) {
+    float logits[VALUE_NET_WDL];
+    linear(head, 1, hidden, net->wdl_weight, net->wdl_bias, VALUE_NET_WDL,
+           logits);
+    float highest = logits[0];
+    for (int idx = 1; idx < VALUE_NET_WDL; idx++) {
+      if (logits[idx] > highest) {
+        highest = logits[idx];
+      }
+    }
+    float probabilities[VALUE_NET_WDL];
+    float total = 0.0F;
+    for (int idx = 0; idx < VALUE_NET_WDL; idx++) {
+      probabilities[idx] = expf(logits[idx] - highest);
+      total += probabilities[idx];
+    }
+    // [loss, draw, win]
+    *value = (probabilities[2] - probabilities[0]) / total;
+  }
+  if (spread != NULL) {
+    float raw = 0.0F;
+    linear(head, 1, hidden, net->spread_weight, net->spread_bias, 1, &raw);
+    *spread = tanhf(raw);
+  }
+}
+
 static void value_net_evaluate_row(const ValueNet *net, const float *board,
                                    const float *scalars,
                                    ValueNetScratch *scratch, float *value,
@@ -567,35 +639,13 @@ static void value_net_evaluate_row(const ValueNet *net, const float *board,
   if (hidden_out != NULL) {
     memcpy(hidden_out, head, sizeof(float) * (size_t)hidden);
   }
-  if (value != NULL) {
-    float logits[VALUE_NET_WDL];
-    linear(head, 1, hidden, net->wdl_weight, net->wdl_bias, VALUE_NET_WDL,
-           logits);
-    float highest = logits[0];
-    for (int idx = 1; idx < VALUE_NET_WDL; idx++) {
-      if (logits[idx] > highest) {
-        highest = logits[idx];
-      }
-    }
-    float probabilities[VALUE_NET_WDL];
-    float total = 0.0F;
-    for (int idx = 0; idx < VALUE_NET_WDL; idx++) {
-      probabilities[idx] = expf(logits[idx] - highest);
-      total += probabilities[idx];
-    }
-    // [loss, draw, win]
-    *value = (probabilities[2] - probabilities[0]) / total;
-  }
-  if (spread != NULL) {
-    float raw = 0.0F;
-    linear(head, 1, hidden, net->spread_weight, net->spread_bias, 1, &raw);
-    *spread = tanhf(raw);
-  }
+  value_net_heads(net, head, value, spread);
 }
 
-static void value_net_run_cpu(const ValueNet *net, int rows, const float *board,
-                              const float *scalars, float *value, float *spread,
-                              float *hidden) {
+static void value_net_run_cpu_reference(const ValueNet *net, int rows,
+                                        const float *board,
+                                        const float *scalars, float *value,
+                                        float *spread, float *hidden) {
   const size_t tokens = VALUE_NET_TOKENS;
   const size_t dim = (size_t)net->shape.model_dim;
   const size_t head_dim = (size_t)net->shape.head_dim;
@@ -633,14 +683,198 @@ static void value_net_run_cpu(const ValueNet *net, int rows, const float *board,
   free(scratch.head);
 }
 
+// Scratch for one row's forward pass with the SIMD kernels.
+typedef struct ValueNetSimdScratch {
+  float *tokens;
+  float *normed;
+  float *qkv;
+  float *attended;
+  float *hidden;
+  float *scores;  // [tokens, scores_stride]
+  float *keys_t;  // [head_dim, scores_stride], zero padded
+  float *values;  // [tokens, values_stride], zero padded
+  float *squares; // [squares, planes]
+  float *cls;
+  float *head;
+  int scores_stride;
+  int values_stride;
+} ValueNetSimdScratch;
+
+// Multi-head self-attention with the SIMD kernels: scores = q k^T and the
+// output p v as packed products (k transposed into keys_t, v gathered into
+// values), softmax in between.
+static void attention_simd(const ValueNetShape *shape,
+                           ValueNetSimdScratch *scratch) {
+  const int dim = shape->model_dim;
+  const int head_dim = shape->head_dim;
+  const size_t width = 3 * (size_t)dim;
+  const float scale = 1.0F / sqrtf((float)head_dim);
+  for (int head = 0; head < shape->heads; head++) {
+    const int offset = head * head_dim;
+    for (int token = 0; token < VALUE_NET_TOKENS; token++) {
+      const float *row = scratch->qkv + ((size_t)token * width);
+      for (int idx = 0; idx < head_dim; idx++) {
+        scratch->keys_t[((size_t)idx * scratch->scores_stride) + token] =
+            row[dim + offset + idx];
+      }
+      memcpy(scratch->values + ((size_t)token * scratch->values_stride),
+             row + (2 * dim) + offset, sizeof(float) * (size_t)head_dim);
+    }
+    vnk_gemm(scratch->qkv + offset, width, VALUE_NET_TOKENS, head_dim,
+             scratch->keys_t, scratch->scores_stride, NULL, VALUE_NET_TOKENS,
+             scratch->scores, (size_t)scratch->scores_stride);
+    for (int query = 0; query < VALUE_NET_TOKENS; query++) {
+      vnk_softmax(scratch->scores + ((size_t)query * scratch->scores_stride),
+                  VALUE_NET_TOKENS, scale);
+    }
+    vnk_gemm(scratch->scores, (size_t)scratch->scores_stride, VALUE_NET_TOKENS,
+             VALUE_NET_TOKENS, scratch->values, scratch->values_stride, NULL,
+             head_dim, scratch->attended + offset, (size_t)dim);
+  }
+}
+
+static void value_net_add(float *into, const float *add, size_t count) {
+  for (size_t idx = 0; idx < count; idx += VNK_W) {
+    vnk_store(into + idx, vnk_add(vnk_load(into + idx), vnk_load(add + idx)));
+  }
+}
+
+static void value_net_evaluate_row_simd(const ValueNet *net, const float *board,
+                                        const float *scalars,
+                                        ValueNetSimdScratch *scratch,
+                                        float *value, float *spread,
+                                        float *hidden_out) {
+  const ValueNetShape *shape = &net->shape;
+  const int tokens = VALUE_NET_TOKENS;
+  const int dim = shape->model_dim;
+  const int ff_dim = shape->ff_dim;
+  const int hidden = shape->head_hidden;
+  // Embeddings: cls, the squares (one product over every square), the tile
+  // types and the game token.
+  memcpy(scratch->tokens, net->cls, sizeof(float) * (size_t)dim);
+  for (int square = 0; square < VALUE_NET_SQUARES; square++) {
+    for (int plane = 0; plane < VALUE_NET_PLANES; plane++) {
+      scratch->squares[((size_t)square * VALUE_NET_PLANES) + plane] =
+          board[(plane * VALUE_NET_SQUARES) + square];
+    }
+  }
+  vnk_gemm(scratch->squares, VALUE_NET_PLANES, VALUE_NET_SQUARES,
+           VALUE_NET_PLANES, net->square_proj_packed, vnk_padded(dim),
+           net->square_proj_bias, dim, scratch->tokens + dim, (size_t)dim);
+  value_net_add(scratch->tokens + dim, net->pos_emb,
+                (size_t)VALUE_NET_SQUARES * (size_t)dim);
+  for (int tile = 0; tile < VALUE_NET_TILE_TYPES; tile++) {
+    const float tile_inputs[2] = {scalars[tile],
+                                  scalars[VALUE_NET_TILE_TYPES + tile]};
+    float *token =
+        scratch->tokens + ((size_t)(1 + VALUE_NET_SQUARES + tile) * dim);
+    linear(tile_inputs, 1, 2, net->tile_proj_weight, net->tile_proj_bias, dim,
+           token);
+    value_net_add(token, net->tile_emb + ((size_t)tile * dim), (size_t)dim);
+  }
+  vnk_gemm(scalars, VALUE_NET_SCALARS, 1, VALUE_NET_SCALARS,
+           net->game_proj_packed, vnk_padded(dim), net->game_proj_bias, dim,
+           scratch->tokens + ((size_t)(tokens - 1) * dim), (size_t)dim);
+  for (int layer = 0; layer < shape->layers; layer++) {
+    const ValueNetBlock *block = &net->blocks[layer];
+    vnk_layer_norm(scratch->tokens, tokens, dim, block->ln1_weight,
+                   block->ln1_bias, VALUE_NET_LAYER_NORM_EPS, scratch->normed);
+    vnk_gemm(scratch->normed, (size_t)dim, tokens, dim, block->qkv_packed,
+             vnk_padded(3 * dim), block->qkv_bias, 3 * dim, scratch->qkv,
+             3 * (size_t)dim);
+    attention_simd(shape, scratch);
+    vnk_gemm(scratch->attended, (size_t)dim, tokens, dim, block->proj_packed,
+             vnk_padded(dim), block->proj_bias, dim, scratch->normed,
+             (size_t)dim);
+    value_net_add(scratch->tokens, scratch->normed, (size_t)tokens * dim);
+    vnk_layer_norm(scratch->tokens, tokens, dim, block->ln2_weight,
+                   block->ln2_bias, VALUE_NET_LAYER_NORM_EPS, scratch->normed);
+    vnk_gemm(scratch->normed, (size_t)dim, tokens, dim, block->fc1_packed,
+             vnk_padded(ff_dim), block->fc1_bias, ff_dim, scratch->hidden,
+             (size_t)ff_dim);
+    vnk_gelu(scratch->hidden, (size_t)tokens * (size_t)ff_dim);
+    vnk_gemm(scratch->hidden, (size_t)ff_dim, tokens, ff_dim, block->fc2_packed,
+             vnk_padded(dim), block->fc2_bias, dim, scratch->normed,
+             (size_t)dim);
+    value_net_add(scratch->tokens, scratch->normed, (size_t)tokens * dim);
+  }
+  vnk_layer_norm(scratch->tokens, 1, dim, net->ln_f_weight, net->ln_f_bias,
+                 VALUE_NET_LAYER_NORM_EPS, scratch->cls);
+  vnk_gemm(scratch->cls, (size_t)dim, 1, dim, net->fc1_packed,
+           vnk_padded(hidden), net->fc1_bias, hidden, scratch->head,
+           (size_t)hidden);
+  for (int idx = 0; idx < hidden; idx++) {
+    if (scratch->head[idx] < 0.0F) {
+      scratch->head[idx] = 0.0F;
+    }
+  }
+  if (hidden_out != NULL) {
+    memcpy(hidden_out, scratch->head, sizeof(float) * (size_t)hidden);
+  }
+  value_net_heads(net, scratch->head, value, spread);
+}
+
+static void value_net_run_cpu_simd(const ValueNet *net, int rows,
+                                   const float *board, const float *scalars,
+                                   float *value, float *spread, float *hidden) {
+  const ValueNetShape *shape = &net->shape;
+  const size_t tokens = VALUE_NET_TOKENS;
+  const size_t dim = (size_t)shape->model_dim;
+  ValueNetSimdScratch scratch = {
+      .scores_stride = vnk_padded(VALUE_NET_TOKENS),
+      .values_stride = vnk_padded(shape->head_dim),
+  };
+  scratch.tokens = malloc_or_die(sizeof(float) * tokens * dim);
+  scratch.normed = malloc_or_die(sizeof(float) * tokens * dim);
+  scratch.qkv = malloc_or_die(sizeof(float) * tokens * 3 * dim);
+  scratch.attended = malloc_or_die(sizeof(float) * tokens * dim);
+  scratch.hidden = malloc_or_die(sizeof(float) * tokens * shape->ff_dim);
+  scratch.scores = calloc_or_die(tokens * scratch.scores_stride, sizeof(float));
+  scratch.keys_t = calloc_or_die(
+      (size_t)shape->head_dim * scratch.scores_stride, sizeof(float));
+  scratch.values = calloc_or_die(tokens * scratch.values_stride, sizeof(float));
+  scratch.squares =
+      malloc_or_die(sizeof(float) * VALUE_NET_SQUARES * VALUE_NET_PLANES);
+  scratch.cls = malloc_or_die(sizeof(float) * dim);
+  scratch.head = malloc_or_die(sizeof(float) * (size_t)shape->head_hidden);
+  for (int row = 0; row < rows; row++) {
+    value_net_evaluate_row_simd(
+        net, board + ((size_t)row * VALUE_NET_BOARD_FLOATS),
+        scalars + ((size_t)row * VALUE_NET_SCALARS), &scratch,
+        value != NULL ? value + row : NULL,
+        spread != NULL ? spread + row : NULL,
+        hidden != NULL ? hidden + ((size_t)row * (size_t)shape->head_hidden)
+                       : NULL);
+  }
+  free(scratch.tokens);
+  free(scratch.normed);
+  free(scratch.qkv);
+  free(scratch.attended);
+  free(scratch.hidden);
+  free(scratch.scores);
+  free(scratch.keys_t);
+  free(scratch.values);
+  free(scratch.squares);
+  free(scratch.cls);
+  free(scratch.head);
+}
+
 void value_net_evaluate_cpu(const ValueNet *net, int rows, const float *board,
                             const float *scalars, float *value, float *spread) {
-  value_net_run_cpu(net, rows, board, scalars, value, spread, NULL);
+  value_net_run_cpu_simd(net, rows, board, scalars, value, spread, NULL);
 }
+
+void value_net_evaluate_cpu_reference(const ValueNet *net, int rows,
+                                      const float *board, const float *scalars,
+                                      float *value, float *spread) {
+  value_net_run_cpu_reference(net, rows, board, scalars, value, spread, NULL);
+}
+
+const char *value_net_cpu_kernels(void) { return VNK_NAME; }
 
 void value_net_hidden_cpu(const ValueNet *net, int rows, const float *board,
                           const float *scalars, float *hidden) {
-  value_net_run_cpu(net, rows, board, scalars, NULL, NULL, hidden);
+  value_net_run_cpu_simd(net, rows, board, scalars, NULL, NULL, hidden);
 }
 
 bool value_net_has_rack_head(const ValueNet *net) {

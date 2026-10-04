@@ -45,6 +45,15 @@ const float *value_net_get_tensor(const ValueNet *net, const char *name,
 void value_net_evaluate_cpu(const ValueNet *net, int rows, const float *board,
                             const float *scalars, float *value, float *spread);
 
+// value_net_evaluate_cpu runs the SIMD kernels (value_net_kernels.h); this is
+// the plain scalar reference it is checked against.
+void value_net_evaluate_cpu_reference(const ValueNet *net, int rows,
+                                      const float *board, const float *scalars,
+                                      float *value, float *spread);
+
+// The CPU kernels this build uses: "avx2", "neon" or "scalar".
+const char *value_net_cpu_kernels(void);
+
 // As value_net_evaluate_cpu, but hidden receives each row's head hidden
 // vector (rows x ValueNetShape.head_hidden floats), the input of the
 // output heads.
