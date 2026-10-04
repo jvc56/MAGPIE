@@ -1,0 +1,1 @@
+[2026-07-28 08:55:02] FATAL test/klv3_sim_oracle_test.c:1800: constant-node cell visited 283116 nodes; expected at least 284998 and at most 299997

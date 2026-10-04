@@ -1,0 +1,110 @@
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1785258985
+loaded config with command: set -lex CSW24 -k1 CSW24 -k2 CSW24 -wmp true -rit true -ritmmap true -wit true -winpct winpct -s1 equity -s2 equity -r1 all -r2 all -numplays 15 -plies 2 -tlim 0.10000000000000001 -it 2147483647 -minplayiterations 100000 -sinfer false -threads 10 -pfrequency 0 -hr false -savesettings false -autosavegcg false -fgrequired false -klv3fallback -1 -seed 5425806429448716611
+seed: 5425806429448716611
+
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1           0
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0
+ 1┃＝　　＇　　　＝　　　＇　　＝┃   
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 100 (42v | 56c)
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A 
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B B C C D D D D E 
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E 
+ 6┃　＂　　　＂　　　＂　　　＂　┃   E F F G G G H H I I 
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I I I J K L 
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L L L M M N N N N N 
+ 9┃　　＇　　　＇　＇　　　＇　　┃   N O O O O O O O O P 
+10┃　＂　　　＂　　　＂　　　＂　┃   P Q R R R R R R S S 
+11┃　　　　－　　　　　－　　　　┃   S S T T T T T T U U 
+12┃＇　　－　　　＇　　　－　　＇┃   U U V V W W X Y Y Z 
+13┃　　－　　　＇　＇　　　－　　┃   
+14┃　－　　　＂　　　＂　　　－　┃   
+15┃＝　　＇　　　＝　　　＇　　＝┃   
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ 
+
+loaded config with command: newgame
+seed: 5425806429448716612
+loaded config with command: rack AEINRST
+seed: 5425806429448716613
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  AEINRST  0    1:   8B ANESTRI  66 66.00 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    2:   8C RATINES  66 66.00 
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           3:   8C RETINAS  66 66.00 
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (39v | 52c)  4:   8C STAINER  66 66.00 
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     5:   8C STEARIN  66 66.00 
+ 4┃＇　　－　　　＇　　　－　　＇┃   B B C C D D D D E E     6:   8D ANESTRI  66 66.00 
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E F     7:   8D RETSINA  66 66.00 
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F G G G H H I I I I     8:   8F ANESTRI  66 66.00 
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I J K L L L L     9:   8F ANTSIER  66 66.00 
+ 8┃＝　　＇　　　－　　　＇　　＝┃   M M N N N N N O O O     10:  8F STARNIE  66 66.00 
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O P P Q R R     11:  8G NASTIER  66 66.00 
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R S S S T T T T     12:  8G RATINES  66 66.00 
+11┃　　　　－　　　　　－　　　　┃   T U U U U V V W W X     13:  8G RESIANT  66 66.00 
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   14:  8G RETAINS  66 66.00 
+13┃　　－　　　＇　＇　　　－　　┃                           15:  8G RETINAS  66 66.00 
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 15 of 15 plays
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: generate
+seed: 5425806429448716614
+loaded config with command: set -threads 1 -savesettings false -hr false -numplays 15 -ima 0 -minp 100 -autosave false -fgrequired false
+seed: 1785258986
+loaded config with command: set -lex CSW24 -k1 CSW24 -k2 CSW24 -wmp true -rit true -ritmmap true -wit true -winpct winpct -s1 equity -s2 equity -r1 all -r2 all -numplays 15 -plies 2 -tlim 0.10000000000000001 -it 2147483647 -minplayiterations 100000 -sinfer false -threads 10 -pfrequency 0 -hr false -savesettings false -autosavegcg false -fgrequired false -klv3fallback -1 -seed 5425806429448716611
+seed: 5425806429448716611
+
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1           0
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0
+ 1┃＝　　＇　　　＝　　　＇　　＝┃   
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 100 (42v | 56c)
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A 
+ 4┃＇　　－　　　＇　　　－　　＇┃   A B B C C D D D D E 
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E E 
+ 6┃　＂　　　＂　　　＂　　　＂　┃   E F F G G G H H I I 
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I I I I J K L 
+ 8┃＝　　＇　　　－　　　＇　　＝┃   L L L M M N N N N N 
+ 9┃　　＇　　　＇　＇　　　＇　　┃   N O O O O O O O O P 
+10┃　＂　　　＂　　　＂　　　＂　┃   P Q R R R R R R S S 
+11┃　　　　－　　　　　－　　　　┃   S S T T T T T T U U 
+12┃＇　　－　　　＇　　　－　　＇┃   U U V V W W X Y Y Z 
+13┃　　－　　　＇　＇　　　－　　┃   
+14┃　－　　　＂　　　＂　　　－　┃   
+15┃＝　　＇　　　＝　　　＇　　＝┃   
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ 
+
+loaded config with command: newgame
+seed: 5425806429448716612
+loaded config with command: rack AEINRST
+seed: 5425806429448716613
+   ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯ  ➤ Player 1  AEINRST  0    1:   8B ANESTRI  66 66.00 
+  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   Player 2           0    2:   8C RATINES  66 66.00 
+ 1┃＝　　＇　　　＝　　　＇　　＝┃                           3:   8C RETINAS  66 66.00 
+ 2┃　－　　　＂　　　＂　　　－　┃   Unseen: 93 (39v | 52c)  4:   8C STAINER  66 66.00 
+ 3┃　　－　　　＇　＇　　　－　　┃   ? ? A A A A A A A A     5:   8C STEARIN  66 66.00 
+ 4┃＇　　－　　　＇　　　－　　＇┃   B B C C D D D D E E     6:   8D ANESTRI  66 66.00 
+ 5┃　　　　－　　　　　－　　　　┃   E E E E E E E E E F     7:   8D RETSINA  66 66.00 
+ 6┃　＂　　　＂　　　＂　　　＂　┃   F G G G H H I I I I     8:   8F ANESTRI  66 66.00 
+ 7┃　　＇　　　＇　＇　　　＇　　┃   I I I I J K L L L L     9:   8F ANTSIER  66 66.00 
+ 8┃＝　　＇　　　－　　　＇　　＝┃   M M N N N N N O O O     10:  8F STARNIE  66 66.00 
+ 9┃　　＇　　　＇　＇　　　＇　　┃   O O O O O P P Q R R     11:  8G NASTIER  66 66.00 
+10┃　＂　　　＂　　　＂　　　＂　┃   R R R S S S T T T T     12:  8G RATINES  66 66.00 
+11┃　　　　－　　　　　－　　　　┃   T U U U U V V W W X     13:  8G RESIANT  66 66.00 
+12┃＇　　－　　　＇　　　－　　＇┃   Y Y Z                   14:  8G RETAINS  66 66.00 
+13┃　　－　　　＇　＇　　　－　　┃                           15:  8G RETINAS  66 66.00 
+14┃　－　　　＂　　　＂　　　－　┃                           
+15┃＝　　＇　　　＝　　　＇　　＝┃                           Showing 15 of 15 plays
+  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛                           
+                                                             
+                                                             
+loaded config with command: generate
+seed: 5425806429448716614
+KLV3_NESTED_CONFIG files=obj/depth-crossover-b1m-p246-disagreements-20260728.tsv outer_samples_per_candidate=100000 outer_plies=10 nested_plies=2 nested_samples_per_candidate=2 nested_policy_split=1+1 outer_threads=10 nested_threads=1 start_disagreement=0 max_positions=0 min_bag_tiles=50 wall_seconds=0.000
+KLV3_NESTED_POSITION disagreement=1 position=30218 game=8517 turn=3 bag=66 unique_roots=2 outer_samples=100000 klv2_root=0 hybrid_root=1 klv3_root=1 best_root=1 klv3_minus_klv2=+0.007115768 klv3_minus_klv2_sem=0.000865097 hybrid_minus_klv2=+0.007115768 hybrid_minus_klv2_sem=0.000865097 klv3_minus_hybrid=+0.000000000 klv3_minus_hybrid_sem=0.000000000 root0_utility=0.490870131 root0_utility_sem=0.000837505 root0_win=0.470078923 root0_spread=14.511370 root1_utility=0.497985899 root1_utility_sem=0.000816576 root1_win=0.478365399 root1_spread=16.496460
+KLV3_NESTED_POSITION disagreement=2 position=30230 game=8518 turn=3 bag=72 unique_roots=2 outer_samples=100000 klv2_root=0 hybrid_root=1 klv3_root=1 best_root=1 klv3_minus_klv2=+0.002660321 klv3_minus_klv2_sem=0.000827498 hybrid_minus_klv2=+0.002660321 hybrid_minus_klv2_sem=0.000827498 klv3_minus_hybrid=+0.000000000 klv3_minus_hybrid_sem=0.000000000 root0_utility=0.414031692 root0_utility_sem=0.000797683 root0_win=0.378852816 root0_spread=-6.900290 root1_utility=0.416692013 root1_utility_sem=0.000811908 root1_win=0.382630871 root1_spread=-6.821510
+KLV3_NESTED_POSITION disagreement=3 position=30239 game=8519 turn=0 bag=86 unique_roots=2 outer_samples=100000 klv2_root=0 hybrid_root=1 klv3_root=1 best_root=1 klv3_minus_klv2=+0.000173682 klv3_minus_klv2_sem=0.000443100 hybrid_minus_klv2=+0.000173682 hybrid_minus_klv2_sem=0.000443100 klv3_minus_hybrid=+0.000000000 klv3_minus_hybrid_sem=0.000000000 root0_utility=0.685493220 root0_utility_sem=0.000665168 root0_win=0.699640833 root0_spread=71.231510 root1_utility=0.685666902 root1_utility_sem=0.000666930 root1_win=0.699817820 root1_spread=71.362160
+KLV3_NESTED_POSITION disagreement=4 position=30267 game=8521 turn=2 bag=74 unique_roots=2 outer_samples=100000 klv2_root=0 hybrid_root=1 klv3_root=1 best_root=1 klv3_minus_klv2=+0.007826915 klv3_minus_klv2_sem=0.000814780 hybrid_minus_klv2=+0.007826915 hybrid_minus_klv2_sem=0.000814780 klv3_minus_hybrid=+0.000000000 klv3_minus_hybrid_sem=0.000000000 root0_utility=0.498232219 root0_utility_sem=0.000792233 root0_win=0.478480282 root0_spread=16.684170 root1_utility=0.506059133 root1_utility_sem=0.000752932 root1_win=0.487664638 root1_spread=18.726520
+KLV3_NESTED_POSITION disagreement=5 position=30278 game=8522 turn=1 bag=83 unique_roots=2 outer_samples=100000 klv2_root=0 hybrid_root=0 klv3_root=1 best_root=0 klv3_minus_klv2=-0.001016562 klv3_minus_klv2_sem=0.000571402 hybrid_minus_klv2=+0.000000000 hybrid_minus_klv2_sem=0.000000000 klv3_minus_hybrid=-0.001016562 klv3_minus_hybrid_sem=0.000571402 root0_utility=0.677006471 root0_utility_sem=0.000656101 root0_win=0.690508345 root0_spread=67.269710 root1_utility=0.675989909 root1_utility_sem=0.000655765 root1_win=0.689354485 root1_spread=66.864150
+KLV3_NESTED_SUMMARY positions=5 klv2_root_wins=1 hybrid_root_wins=5 klv3_root_wins=4 klv3_minus_klv2=+0.003352025 klv3_minus_klv2_sem=0.001786831 hybrid_minus_klv2=+0.003555337 hybrid_minus_klv2_sem=0.001670331 klv3_minus_hybrid=-0.000203312 klv3_minus_hybrid_sem=0.000203312 outer_candidate_rollouts=1000000 outer_nodes=10000000 static_agreements=10000000 nested_disagreements=0 nested_rate=0.000000 nested_ties=0 nested_policy_samples=0 nested_nodes=0 elapsed_seconds=66.682333
+KLV3_NESTED_POSITION disagreement=6 position=30395 game=8531 turn=0 bag=86 unique_roots=2 outer_samples=100000 klv2_root=0 hybrid_root=1 klv3_root=1 best_root=1 klv3_minus_klv2=+0.000790763 klv3_minus_klv2_sem=0.000641053 hybrid_minus_klv2=+0.000790763 hybrid_minus_klv2_sem=0.000641053 klv3_minus_hybrid=+0.000000000 klv3_minus_hybrid_sem=0.000000000 root0_utility=0.730705357 root0_utility_sem=0.000640798 root0_win=0.751790056 root0_spread=87.357760 root1_utility=0.731496121 root1_utility_sem=0.000633495 root1_win=0.752805485 root1_spread=87.365940
+KLV3_NESTED_SUMMARY positions=6 klv2_root_wins=1 hybrid_root_wins=6 klv3_root_wins=5 klv3_minus_klv2=+0.002925148 klv3_minus_klv2_sem=0.001520109 hybrid_minus_klv2=+0.003094575 hybrid_minus_klv2_sem=0.001439550 klv3_minus_hybrid=-0.000169427 klv3_minus_hybrid_sem=0.000169427 outer_candidate_rollouts=1200000 outer_nodes=12000000 static_agreements=12000000 nested_disagreements=0 nested_rate=0.000000 nested_ties=0 nested_policy_samples=0 nested_nodes=0 elapsed_seconds=78.932200
+KLV3_NESTED_DONE rows_read=6 rows_below_min_bag=0 all_same_roots=0 evaluated=6 last_disagreement=6 elapsed_seconds=78.932202 wall_limit_reached=0
