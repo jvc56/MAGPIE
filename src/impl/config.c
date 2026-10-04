@@ -194,6 +194,10 @@ typedef enum {
   ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_P1_SIM_WITH_INFERENCE,
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
+  ARG_TOKEN_P1_USE_PSYCHIC_RACK,
+  ARG_TOKEN_P2_USE_PSYCHIC_RACK,
+  ARG_TOKEN_USE_STATIC_ENDGAME,
+  ARG_TOKEN_LOG_GAME_PAIRS,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
   ARG_TOKEN_P1_THRESHOLD,
@@ -284,6 +288,10 @@ struct Config {
   uint64_t p2_min_play_iterations;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
+  bool p1_use_psychic_rack;
+  bool p2_use_psychic_rack;
+  bool use_static_endgame;
+  bool log_game_pairs;
   int p1_time_limit_seconds;
   int p2_time_limit_seconds;
   bai_threshold_t p1_threshold;
@@ -1757,6 +1765,22 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether to use inference during simulation for player "
              "1 or 2 during autoplay.";
       break;
+    case ARG_TOKEN_P1_USE_PSYCHIC_RACK:
+    case ARG_TOKEN_P2_USE_PSYCHIC_RACK:
+      usages[0] = "<true_or_false>";
+      text = "When true, sims for this player use the actual opponent rack "
+             "instead of random or inferred racks.";
+      break;
+    case ARG_TOKEN_USE_STATIC_ENDGAME:
+      usages[0] = "<true_or_false>";
+      text = "When true, autoplay uses static equity instead of simulation "
+             "when the bag is empty.";
+      break;
+    case ARG_TOKEN_LOG_GAME_PAIRS:
+      usages[0] = "<true_or_false>";
+      text = "When true, prints one line per game pair with both games' "
+             "scores and the player 2 spread advantage.";
+      break;
     case ARG_TOKEN_P1_TIME_LIMIT:
     case ARG_TOKEN_P2_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
@@ -1958,8 +1982,12 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SAMPLING_RULE,          /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,       /* sc1 */
         ARG_TOKEN_P2_STOP_COND_PCT,       /* sc2 */
+        ARG_TOKEN_P1_USE_PSYCHIC_RACK,    /* psy1 */
+        ARG_TOKEN_P2_USE_PSYCHIC_RACK,    /* psy2 */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,  /* si1 */
         ARG_TOKEN_P2_SIM_WITH_INFERENCE,  /* si2 */
+        ARG_TOKEN_USE_STATIC_ENDGAME,     /* staticeg */
+        ARG_TOKEN_LOG_GAME_PAIRS,        /* loggp */
         ARG_TOKEN_P1_SAMPLING_RULE,       /* sa1 */
         ARG_TOKEN_P2_SAMPLING_RULE,       /* sa2 */
         ARG_TOKEN_P1_THRESHOLD,           /* th1 */
@@ -2470,7 +2498,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
   sim_args_fill(
       config->plies, config->move_list, config->num_plays, known_opp_rack,
       config->win_pcts, config->inference_results, config->thread_control,
-      config->game, config->sim_with_inference, config->use_heat_map,
+      config->game, config->sim_with_inference, /*use_psychic_rack=*/false,
+      config->use_heat_map,
       config->num_threads, config->print_interval,
       config->max_num_display_plays, config->shplies, config->seed,
       config->max_iterations, config->min_play_iterations,
@@ -2870,6 +2899,8 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->num_games_or_min_rack_targets = num_games_or_min_rack_targets;
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
+  autoplay_args->use_static_endgame = config->use_static_endgame;
+  autoplay_args->log_game_pairs = config->log_game_pairs;
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
   autoplay_args->print_interval = config->print_interval;
@@ -2933,7 +2964,7 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_sim_plies, /*move_list=*/NULL, config->p1_num_plays,
       /*known_opp_rack=*/NULL, config->win_pcts, /*inference_results=*/NULL,
       config->thread_control, /*game=*/NULL, config->p1_sim_with_inference,
-      /*use_heat_map=*/false,
+      config->p1_use_psychic_rack, /*use_heat_map=*/false,
       /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
       config->p1_num_plays, config->shplies,
       /*seed=*/0, config->p1_max_iterations, config->p1_min_play_iterations,
@@ -2945,7 +2976,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
       /*known_opp_rack=*/NULL, config->win_pcts, /*inference_results=*/NULL,
       config->thread_control,
-      /*game=*/NULL, config->p2_sim_with_inference, /*use_heat_map=*/false,
+      /*game=*/NULL, config->p2_sim_with_inference,
+      config->p2_use_psychic_rack, /*use_heat_map=*/false,
       /*num_threads=*/num_worker_threads_per_sim, /*print_interval=*/0,
       config->p2_num_plays, config->shplies,
       /*seed=*/0, config->p2_max_iterations, config->p2_min_play_iterations,
@@ -6598,6 +6630,29 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_P1_USE_PSYCHIC_RACK,
+                   &config->p1_use_psychic_rack, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_USE_PSYCHIC_RACK,
+                   &config->p2_use_psychic_rack, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_bool(config, ARG_TOKEN_USE_STATIC_ENDGAME,
+                   &config->use_static_endgame, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_bool(config, ARG_TOKEN_LOG_GAME_PAIRS,
+                   &config->log_game_pairs, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   if (config_get_parg_value(config, ARG_TOKEN_TIME_LIMIT, 0) != NULL) {
     config->p1_time_limit_seconds = config->time_limit_seconds;
     config->p2_time_limit_seconds = config->time_limit_seconds;
@@ -7179,8 +7234,12 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MAX_ITERATIONS, "i2", 1, 1);
   arg(ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, "mi1", 1, 1);
   arg(ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, "mi2", 1, 1);
+  arg(ARG_TOKEN_P1_USE_PSYCHIC_RACK, "psy1", 1, 1);
+  arg(ARG_TOKEN_P2_USE_PSYCHIC_RACK, "psy2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_WITH_INFERENCE, "si1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
+  arg(ARG_TOKEN_USE_STATIC_ENDGAME, "staticeg", 1, 1);
+  arg(ARG_TOKEN_LOG_GAME_PAIRS, "loggp", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_P1_THRESHOLD, "th1", 1, 1);
@@ -7271,6 +7330,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_min_play_iterations = config->min_play_iterations;
   config->p1_sim_with_inference = config->sim_with_inference;
   config->p2_sim_with_inference = config->sim_with_inference;
+  config->p1_use_psychic_rack = false;
+  config->p2_use_psychic_rack = false;
+  config->use_static_endgame = false;
+  config->log_game_pairs = false;
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
   config->p1_threshold = config->threshold;
@@ -7692,6 +7755,22 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_SIM_WITH_INFERENCE:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->p2_sim_with_inference);
+      break;
+    case ARG_TOKEN_P1_USE_PSYCHIC_RACK:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_use_psychic_rack);
+      break;
+    case ARG_TOKEN_P2_USE_PSYCHIC_RACK:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_use_psychic_rack);
+      break;
+    case ARG_TOKEN_USE_STATIC_ENDGAME:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->use_static_endgame);
+      break;
+    case ARG_TOKEN_LOG_GAME_PAIRS:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->log_game_pairs);
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

@@ -15,6 +15,8 @@ typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
   int games_before_force_draw_start;
   bool use_game_pairs;
+  bool use_static_endgame;
+  bool log_game_pairs;
   bool human_readable;
   bool print_boards;
   autoplay_t type;

@@ -19,6 +19,7 @@ typedef struct SimArgs {
   Rack *known_opp_rack;
   WinPct *win_pcts;
   bool use_inference;
+  bool use_psychic_rack;
   bool use_heat_map;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
@@ -36,7 +37,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
               const int num_plays, Rack *known_opp_rack, WinPct *win_pcts,
               InferenceResults *inference_results,
               ThreadControl *thread_control, const Game *game,
-              const bool sim_with_inference, const bool use_heat_map,
+              const bool sim_with_inference, const bool use_psychic_rack,
+              const bool use_heat_map,
               const int num_threads, const int print_interval,
               const int max_num_display_plays, const int max_num_display_plies,
               const uint64_t seed, const uint64_t max_iterations,
@@ -53,6 +55,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->thread_control = thread_control;
   sim_args->game = game;
   sim_args->use_inference = sim_with_inference;
+  sim_args->use_psychic_rack = use_psychic_rack;
   sim_args->use_heat_map = use_heat_map;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;

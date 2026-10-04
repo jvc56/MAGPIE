@@ -418,6 +418,8 @@ typedef struct GameRunner {
   // inference
   Game *game_one_move_behind;
   Move previous_move;
+  // The leave of the player who just moved, for psychic rack mode.
+  Rack last_move_leave;
   AutoplaySharedData *shared_data;
 } GameRunner;
 
@@ -432,6 +434,8 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   }
   game_runner->pair_game_number =
       0; // Will be set in game_runner_start if using pairs
+  rack_set_dist_size_and_reset(&game_runner->last_move_leave,
+                               ld_get_size(args->game_args->ld));
   return game_runner;
 }
 
@@ -544,6 +548,14 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
         &autoplay_worker->nontarget_known_rack);
   }
 
+  // Set known opponent leave for psychic mode. set_random_rack will force
+  // these tiles onto the opponent and fill the rest randomly from the bag.
+  Rack *saved_known_opp_rack = sim_args->known_opp_rack;
+  if (sim_args->use_psychic_rack && game_runner->turn_number > 0 &&
+      move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS) {
+    sim_args->known_opp_rack = &game_runner->last_move_leave;
+  }
+
   ErrorStack *error_stack = autoplay_worker->error_stack;
   const Move *move = get_top_simming_move(
       game, autoplay_worker->worker_index, move_list, sim_args,
@@ -557,6 +569,7 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
               (unsigned long long)game_runner->game_number + 1,
               (unsigned long long)game_runner->seed);
   }
+  sim_args->known_opp_rack = saved_known_opp_rack;
   sim_args->use_inference = player_uses_inference;
   return move;
 }
@@ -568,7 +581,11 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
   const SimArgs *sim_args = (player_on_turn_index == 0)
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
-  if (sim_args->num_plies == 0) {
+  const bool use_static =
+      sim_args->num_plies == 0 ||
+      (autoplay_worker->args.use_static_endgame &&
+       bag_is_empty(game_get_bag(game_runner->game)));
+  if (use_static) {
     return get_top_equity_move(
         game_runner->game, autoplay_worker->worker_index,
         autoplay_worker->move_lists[player_on_turn_index]);
@@ -621,6 +638,8 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        equity_to_double(move_get_equity(move)));
   }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
+  // Save the leave for psychic rack mode on the next turn
+  rack_copy(&game_runner->last_move_leave, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, move, &rare_rack_or_move_leave);
 
@@ -780,6 +799,27 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
                          string_builder_peek(output));
     string_builder_destroy(output);
   }
+  // Log per-pair results for game pairs
+  if (game_runner2 && autoplay_worker->args.log_game_pairs) {
+    const int g1_p0 =
+        equity_to_int(player_get_score(game_get_player(game_runner1->game, 0)));
+    const int g1_p1 =
+        equity_to_int(player_get_score(game_get_player(game_runner1->game, 1)));
+    const int g2_p0 =
+        equity_to_int(player_get_score(game_get_player(game_runner2->game, 0)));
+    const int g2_p1 =
+        equity_to_int(player_get_score(game_get_player(game_runner2->game, 1)));
+    // p2_spread = how much better p1 (index 1) did across both games
+    const int p2_spread = (g1_p1 - g1_p0) + (g2_p1 - g2_p0);
+    char *pair_line = get_formatted_string(
+        "PAIR %llu seed=%llu g1=%d-%d g2=%d-%d p2_spread=%+d div=%d\n",
+        (unsigned long long)game_runner1->game_number + 1,
+        (unsigned long long)game_runner1->seed, g1_p0, g1_p1, g2_p0, g2_p1,
+        p2_spread, games_are_divergent ? 1 : 0);
+    thread_control_print(autoplay_worker->args.thread_control, pair_line);
+    free(pair_line);
+  }
+
   autoplay_add_game(autoplay_worker, game_runner1, games_are_divergent);
   if (game_runner2) {
     // We do not check for min leave counts here because leave gen
