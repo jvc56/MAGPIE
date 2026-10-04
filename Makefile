@@ -140,6 +140,8 @@ ldflags.vlg := -pthread
 ldflags.no_pgo_release := -pthread -flto
 ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
 ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
+ldflags.test_pgo_generate := $(ldflags.pgo_generate)
+ldflags.test_pgo_use := $(ldflags.pgo_use)
 ldflags.profile := -pthread
 ldflags.cov := -pthread
 

@@ -1043,9 +1043,12 @@ static void vnt_games(const StringSplitter *fields) {
   const char *pat_name = pat_names[0] != NULL ? pat_names[0] : pat_names[1];
   char *settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads 1%s%s",
+      "-numplays 1 -threads 1%s%s%s",
       lexicon, pat_name != NULL ? " -pat " : "",
-      pat_name != NULL ? pat_name : "");
+      pat_name != NULL ? pat_name : "",
+      vnt_option_double(fields, 9, "tables", 0, 0.0) > 0
+          ? " -rit true -wit true -ritmmap true"
+          : "");
   Config *config = config_create_or_die(settings);
   free(settings);
   ErrorStack *error_stack = error_stack_create();
@@ -1605,7 +1608,8 @@ static void *vnt_distill_thread(void *arg) {
 // otherwise with probability explore= (default 0.05), it is drawn by softmax
 // over static equity with temperature temp= points (default 1). With an
 // empty bag (not recorded), the top static move. opp=1 also writes each
-// recorded decision's opponent rack and kept leave (VntOpponentRecord).
+// recorded decision's opponent rack and kept leave (VntOpponentRecord), and
+// tables=1 uses the lexicon's .rit and .wit tables in move generation.
 static void vnt_distill(const StringSplitter *fields) {
   if (string_splitter_get_number_of_items(fields) < 9) {
     log_fatal("distill needs at least 8 fields");
@@ -1623,10 +1627,15 @@ static void vnt_distill(const StringSplitter *fields) {
   if (threads < 1 || threads > VNT_MAX_THROUGHPUT_THREADS) {
     log_fatal("distill threads must be 1..%d", VNT_MAX_THROUGHPUT_THREADS);
   }
+  // tables=1 also uses the lexicon's rack info and word info tables
+  // (.rit, .wit), which only speed up move generation.
   char *settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads 1",
-      lexicon);
+      "-numplays 1 -threads 1%s",
+      lexicon,
+      vnt_option_double(fields, 9, "tables", 0, 0.0) > 0
+          ? " -rit true -wit true -ritmmap true"
+          : "");
   Config *config = config_create_or_die(settings);
   free(settings);
   ErrorStack *error_stack = error_stack_create();
