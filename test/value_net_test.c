@@ -14,6 +14,8 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_timer.h"
+#include "../src/ent/inference_args.h"
+#include "../src/ent/inference_results.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -625,20 +627,25 @@ static void vnt_leafcheck(const StringSplitter *fields) {
 }
 
 // "priorfit:<model_dir>:<backend>:<threads>:<iterations>:<positions>:<out>
-// [:hist]":
+// [:hist[:infer]]":
 // data for fitting the net prior (PlayChooserStrategy.
 // sim_net_prior_iterations) as games use it. On positions from static
 // NWL23 games (even turns 2..20 with tiles in the bag), with PAT, the 8
 // plays of the PAT top 64 the net rates best by MAGPIE's utility (1, 0.5,
 // 100) are simmed 2 plies, net rollouts (PAT top 8) scored by the net at
 // the horizon, iterations iterations each, round robin; with hist 1, the
-// net sees each player's history from the game. Writes <out>.csv:
+// net sees each player's history from the game, and with infer 1, opponent
+// racks are drawn from an inference of their last move. Writes <out>.csv:
 // each play's net utility and its sim's mean, variance and iterations.
 static void vnt_priorfit(const StringSplitter *fields) {
   const int field_count = string_splitter_get_number_of_items(fields);
-  if (field_count != 7 && field_count != 8) {
-    log_fatal("priorfit needs 6 or 7 fields");
+  if (field_count < 7 || field_count > 9) {
+    log_fatal("priorfit needs 6 to 8 fields");
   }
+  // infer 1: opponent racks drawn from an inference of their last move.
+  const bool use_inference =
+      field_count == 9 &&
+      strtol(string_splitter_get_item(fields, 8), NULL, 10) > 0;
   // hist 1: each player's value net history from the game, as in games;
   // otherwise empty.
   const bool use_history =
@@ -670,6 +677,13 @@ static void vnt_priorfit(const StringSplitter *fields) {
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   Game *game = config_get_game(config);
   Game *scratch = game_duplicate(game);
+  Game *before_last_move = game_duplicate(game);
+  Move last_move;
+  InferenceResults *inference_results = inference_results_create(NULL);
+  const int ld_size = ld_get_size(game_get_ld(game));
+  Rack played_tiles;
+  Rack target_known_rack;
+  Rack nontarget_known_rack;
   MoveList *static_list = move_list_create(1);
   MoveList *pool = move_list_create(POOL);
   MoveList *root = move_list_create(KEEP);
@@ -691,6 +705,7 @@ static void vnt_priorfit(const StringSplitter *fields) {
     draw_starting_racks(game);
     value_net_history_reset(&histories[0]);
     value_net_history_reset(&histories[1]);
+    move_set_as_pass(&last_move);
     for (int turn = 0; !game_over(game) && done < positions; turn++) {
       const int mover = game_get_player_on_turn_index(game);
       ValueNetHistory empty_history;
@@ -745,13 +760,45 @@ static void vnt_priorfit(const StringSplitter *fields) {
           }
           ThreadControl *control = thread_control_create();
           thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+          // The opponent's last move: tiles played, or tiles exchanged.
+          bool infer = use_inference;
+          int num_exchanged = 0;
+          rack_set_dist_size_and_reset(&played_tiles, ld_size);
+          rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+          rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+          if (move_get_type(&last_move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+            for (int tile_idx = 0; tile_idx < move_get_tiles_length(&last_move);
+                 tile_idx++) {
+              const MachineLetter ml = move_get_tile(&last_move, tile_idx);
+              if (ml != PLAYED_THROUGH_MARKER) {
+                rack_add_letter(&played_tiles,
+                                get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+              }
+            }
+          } else if (move_get_type(&last_move) == GAME_EVENT_EXCHANGE &&
+                     bag + RACK_SIZE >= RACK_SIZE * 2) {
+            num_exchanged = move_get_tiles_played(&last_move);
+          } else {
+            infer = false;
+          }
+          InferenceArgs inference_args;
+          if (infer) {
+            rack_copy(&nontarget_known_rack,
+                      player_get_rack(game_get_player(game, mover)));
+            infer_args_fill(&inference_args, 20, 0, NULL, before_last_move,
+                            threads, 0, 0, control, false, true, 1 - mover,
+                            move_get_score(&last_move), num_exchanged,
+                            &played_tiles, &target_known_rack,
+                            &nontarget_known_rack);
+          }
           SimArgs sim_args;
-          sim_args_fill(2, root, keep, NULL, config_get_win_pcts(config), NULL,
-                        control, game, false, false, threads, 0, keep, 2,
-                        vnt_mix(UINT64_C(77) ^ (uint64_t)done),
-                        iterations * (uint64_t)keep, 1, 0.0, BAI_THRESHOLD_NONE,
-                        0.0, BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0, 1.0, 0.5,
-                        100.0, false, NULL, &sim_args);
+          sim_args_fill(
+              2, root, keep, NULL, config_get_win_pcts(config),
+              infer ? inference_results : NULL, control, game, infer, false,
+              threads, 0, keep, 2, vnt_mix(UINT64_C(77) ^ (uint64_t)done),
+              iterations * (uint64_t)keep, 1, 0.0, BAI_THRESHOLD_NONE, 0.0,
+              BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0, 1.0, 0.5, 100.0, false,
+              infer ? &inference_args : NULL, &sim_args);
           sim_args.rollout_value_net_evaluate = value_net_player_evaluate_rows;
           sim_args.rollout_value_net_context = player;
           sim_args.rollout_value_net_candidates = 8;
@@ -786,6 +833,16 @@ static void vnt_priorfit(const StringSplitter *fields) {
             }
           }
           (void)fflush(csv);
+          if (infer) {
+            StringBuilder *last_sb = string_builder_create();
+            string_builder_add_move(last_sb, game_get_board(before_last_move),
+                                    &last_move, game_get_ld(game), false);
+            printf(
+                "priorfit position=%d last_move=%s inferred_leaves=%llu\n",
+                done, string_builder_peek(last_sb),
+                (unsigned long long)sim_results_get_num_infer_leaves(results));
+            string_builder_destroy(last_sb);
+          }
           sim_results_destroy(results);
           done++;
           if (done % 10 == 0) {
@@ -797,6 +854,8 @@ static void vnt_priorfit(const StringSplitter *fields) {
       Move move;
       move_copy(&move, vnt_static_move(game, static_list));
       value_net_history_record_opponent_move(&histories[1 - mover], &move);
+      game_copy(before_last_move, game);
+      move_copy(&last_move, &move);
       play_move(&move, game, NULL);
     }
   }
@@ -804,6 +863,8 @@ static void vnt_priorfit(const StringSplitter *fields) {
   free(board);
   free(scalars);
   game_destroy(scratch);
+  game_destroy(before_last_move);
+  inference_results_destroy(inference_results);
   move_list_destroy(static_list);
   move_list_destroy(pool);
   move_list_destroy(root);
@@ -912,10 +973,12 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // scores a simnn player's rollouts by the net at the horizon when it chose
 // the final ply (nnplies= equal to plies=). pool= > 0 has a simnn player sim
 // the cands= plays its net rates best among the top pool= static plays, and
-// prior= > 0 counts each one's net utility as that many sim iterations. uwin=,
-// uspread= and uscale= set the utility (as -uwin, -uspread, -uspreadscale;
-// MAGPIE's defaults otherwise) that an nn player and each sim, value net
-// replies included, rank by. model= sets the net's directory (default
+// prior= > 0 counts each one's net utility as that many sim iterations.
+// infer=1 draws a sim player's opponent racks from an inference of the
+// opponent's last move (imargin= its equity margin in points, default 0).
+// uwin=, uspread= and uscale= set the utility (as -uwin, -uspread,
+// -uspreadscale; MAGPIE's defaults otherwise) that an nn player and each sim,
+// value net replies included, rank by. model= sets the net's directory (default
 // <model_dir>). pat=<name> ranks a player's moves by static equity with that
 // PAT term (one file for both players). An nn player scores the top cands=
 // static moves (default 50); with rescore=<dir> it cascades: the net at <dir>
@@ -955,6 +1018,10 @@ static void vnt_games(const StringSplitter *fields) {
   free(settings);
   ErrorStack *error_stack = error_stack_create();
   config_load_win_pcts(config, error_stack);
+  // The game exists from here on (players' choosers keep pointers to its
+  // copies).
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   vnt_player_t kinds[2];
   double utility_w_winpct[2];
   double utility_w_spread[2];
@@ -1020,6 +1087,11 @@ static void vnt_games(const StringSplitter *fields) {
   // Each player's game clock in seconds (clock=; 0: untimed), run for every
   // decision and budgeted from by sim players without ms= (PlayChooser).
   double clock_seconds[2];
+  // The position before the last move and the move, for sim players'
+  // opponent rack inference (infer=1).
+  Game *before_last_move = game_duplicate(config_get_game(config));
+  Move last_move;
+  move_set_as_pass(&last_move);
   GameTimer game_timer;
   game_timer_reset(&game_timer, 0.0);
   PlayChooser *choosers[2] = {NULL, NULL};
@@ -1091,6 +1163,13 @@ static void vnt_games(const StringSplitter *fields) {
         .sim_candidate_pool = candidate_pool,
         .sim_net_prior_iterations =
             vnt_option_double(fields, 9, "prior", player_idx, 0.0),
+        .sim_inference_game =
+            vnt_option_double(fields, 9, "infer", player_idx, 0.0) > 0
+                ? before_last_move
+                : NULL,
+        .sim_inference_move = &last_move,
+        .sim_inference_margin = double_to_equity(
+            vnt_option_double(fields, 9, "imargin", player_idx, 0.0)),
         .rollout_value_net_history = &rollout_histories[player_idx],
         .rollout_value_net_own_history = &rollout_own_histories[player_idx],
     };
@@ -1110,8 +1189,6 @@ static void vnt_games(const StringSplitter *fields) {
                            "move,static_move,static_agree\n");
   StringBuilder *move_names[2] = {string_builder_create(),
                                   string_builder_create()};
-  load_and_exec_config_or_die(
-      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
   Game *game = config_get_game(config);
   ValueNetHistory histories[2];
   for (long pair_idx = 0; pair_idx < pairs; pair_idx++) {
@@ -1129,6 +1206,7 @@ static void vnt_games(const StringSplitter *fields) {
       value_net_history_reset(&histories[1]);
       game_timer_reset_for_players(&game_timer, clock_seconds[a_seat],
                                    clock_seconds[1 - a_seat]);
+      move_set_as_pass(&last_move);
       int turn = 0;
       while (!game_over(game) && turn < VNT_MAX_TURNS) {
         const int seat = game_get_player_on_turn_index(game);
@@ -1199,6 +1277,8 @@ static void vnt_games(const StringSplitter *fields) {
                       string_builder_peek(move_names[0]),
                       string_builder_peek(move_names[1]), static_agree);
         value_net_history_record_opponent_move(&histories[1 - seat], &move);
+        game_copy(before_last_move, game);
+        move_copy(&last_move, &move);
         play_move(&move, game, NULL);
         turn++;
       }
@@ -1221,6 +1301,7 @@ static void vnt_games(const StringSplitter *fields) {
   (void)fclose(moves_out);
   string_builder_destroy(move_names[0]);
   string_builder_destroy(move_names[1]);
+  game_destroy(before_last_move);
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     if (choosers[player_idx] != NULL) {
       play_chooser_destroy(choosers[player_idx]);

@@ -373,6 +373,8 @@ void inference_reset(Inference *inference, const Game *game,
   // Only update fields that will change between
   // inferences that happen in autoplay simming.
   game_copy(inference->game, game);
+  // A caller may give each inference its own thread control.
+  inference->thread_control = args->thread_control;
 
   inference->target_index = args->target_index;
   inference->target_score = args->target_score;

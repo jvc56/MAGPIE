@@ -17,6 +17,8 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_timer.h"
+#include "../ent/inference_args.h"
+#include "../ent/inference_results.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -252,6 +254,8 @@ struct PlayChooser {
   double *pool_utility;
   int *pool_order;
   Game *pool_scratch;
+  // The opponent rack inference for SIM, created on first use.
+  InferenceResults *inference_results;
   // The candidates simmed and their net utilities.
   Move *kept_moves;
   double *kept_utility;
@@ -319,6 +323,7 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   play_chooser->pool_utility = NULL;
   play_chooser->pool_order = NULL;
   play_chooser->pool_scratch = NULL;
+  play_chooser->inference_results = NULL;
   play_chooser->kept_moves = NULL;
   play_chooser->kept_utility = NULL;
   play_chooser->kept_count = 0;
@@ -369,6 +374,9 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
   free(play_chooser->pool_order);
   free(play_chooser->kept_moves);
   free(play_chooser->kept_utility);
+  if (play_chooser->inference_results != NULL) {
+    inference_results_destroy(play_chooser->inference_results);
+  }
   if (play_chooser->pool_scratch != NULL) {
     game_destroy(play_chooser->pool_scratch);
   }
@@ -614,6 +622,60 @@ play_chooser_best_with_net_prior(const PlayChooser *play_chooser) {
   return best;
 }
 
+// Fills args for inferring the opponent's rack from the strategy's
+// sim_inference_move, with the racks it points to. Returns false when there
+// is no inference to run.
+static bool play_chooser_fill_inference_args(
+    PlayChooser *play_chooser, const Game *game, int num_threads,
+    ThreadControl *thread_control, InferenceArgs *args, Rack *played_tiles,
+    Rack *target_known_rack, Rack *nontarget_known_rack) {
+  const PlayChooserStrategy *strategy = &play_chooser->strategy;
+  const Move *move = strategy->sim_inference_move;
+  const Game *before = strategy->sim_inference_game;
+  if (before == NULL || move == NULL) {
+    return false;
+  }
+  const int ld_size = ld_get_size(game_get_ld(game));
+  rack_set_dist_size_and_reset(played_tiles, ld_size);
+  rack_set_dist_size_and_reset(target_known_rack, ld_size);
+  rack_set_dist_size_and_reset(nontarget_known_rack, ld_size);
+  const int target_index = 1 - game_get_player_on_turn_index(game);
+  int num_exchanged = 0;
+  switch (move_get_type(move)) {
+  case GAME_EVENT_TILE_PLACEMENT_MOVE:
+    for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+      const MachineLetter ml = move_get_tile(move, tile_idx);
+      if (ml != PLAYED_THROUGH_MARKER) {
+        rack_add_letter(played_tiles,
+                        get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+      }
+    }
+    break;
+  case GAME_EVENT_EXCHANGE:
+    // Inference needs at least two racks of tiles unseen by the inferrer.
+    if (bag_get_letters(game_get_bag(before)) +
+            rack_get_total_letters(
+                player_get_rack(game_get_player(before, target_index))) <
+        RACK_SIZE * 2) {
+      return false;
+    }
+    num_exchanged = move_get_tiles_played(move);
+    break;
+  default:
+    return false;
+  }
+  rack_copy(nontarget_known_rack,
+            player_get_rack(game_get_player(game, 1 - target_index)));
+  if (play_chooser->inference_results == NULL) {
+    play_chooser->inference_results = inference_results_create(NULL);
+  }
+  infer_args_fill(args, 20, strategy->sim_inference_margin, NULL, before,
+                  num_threads, 0, 0, thread_control, false, true, target_index,
+                  move_get_score(move), num_exchanged, played_tiles,
+                  target_known_rack, nontarget_known_rack);
+  return true;
+}
+
 // Chooses the on-turn player's best move by simulation, returning it in
 // out_move. out_simulated (optional) reports whether a sim actually ran: a
 // single-candidate position is short-circuited to that move WITHOUT simming, so
@@ -666,14 +728,20 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   const Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
+  InferenceArgs inference_args;
+  Rack inference_racks[3];
+  const bool use_inference = play_chooser_fill_inference_args(
+      play_chooser, game, num_threads, thread_control, &inference_args,
+      &inference_racks[0], &inference_racks[1], &inference_racks[2]);
+
   // The utility weights are the chooser's own, so the sim ranks by (and
   // records) the same win%+spread blend used as the branch's value below.
   SimArgs sim_args = {0};
   sim_args_fill(
       sim_plies, move_list, num_candidates,
       player_get_known_rack_from_phonies(opponent), strategy->win_pcts,
-      /*inference_results=*/NULL, thread_control, game,
-      /*sim_with_inference=*/false, /*use_heat_map=*/false, num_threads,
+      use_inference ? play_chooser->inference_results : NULL, thread_control,
+      game, use_inference, /*use_heat_map=*/false, num_threads,
       /*print_interval=*/0,
       /*max_num_display_plays=*/num_candidates,
       /*max_num_display_plies=*/sim_plies, strategy->seed,
@@ -684,7 +752,8 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
-      /*use_margin_forecast=*/false, /*inference_args=*/NULL, &sim_args);
+      /*use_margin_forecast=*/false, use_inference ? &inference_args : NULL,
+      &sim_args);
   sim_args.rollout_value_net_evaluate = strategy->rollout_value_net_evaluate;
   sim_args.rollout_value_net_context = strategy->rollout_value_net_context;
   sim_args.rollout_value_net_candidates =
@@ -707,6 +776,14 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   // (samples themselves are reset per simulation by the engine).
   simulate(&sim_args, &play_chooser->sim_ctx, play_chooser->sim_results,
            error_stack);
+  if (use_inference && !error_stack_is_empty(error_stack)) {
+    // The inference failed (it runs first); sim without it.
+    error_stack_reset(error_stack);
+    sim_args.use_inference = false;
+    sim_args.inference_results = NULL;
+    simulate(&sim_args, &play_chooser->sim_ctx, play_chooser->sim_results,
+             error_stack);
+  }
   if (play_chooser_benchmark_is_enabled()) {
     play_chooser_benchmark_add(&play_chooser_benchmark_stats.sim_calls, 1);
     play_chooser_benchmark_add(

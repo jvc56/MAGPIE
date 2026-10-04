@@ -60,6 +60,15 @@ typedef struct PlayChooserStrategy {
   // this many sim iterations: the move played has the highest
   // (prior * utility + n * sim mean) / (prior + n), n its sim iterations.
   double sim_net_prior_iterations;
+  // When set, SIM draws the opponent's rack from an inference of their last
+  // move, sim_inference_move, played from sim_inference_game (the position
+  // just before it, with the opponent on turn): the leaves with which it is
+  // within sim_inference_margin of their best static play. Not used after a
+  // pass, or an exchange with fewer than 14 tiles unseen; if the inference
+  // fails, the sim runs without it.
+  const Game *sim_inference_game;
+  const Move *sim_inference_move;
+  Equity sim_inference_margin;
   // Total SIM iterations per decision, stopping before the time budget if
   // reached; 0 = no limit.
   uint64_t sim_max_iterations;

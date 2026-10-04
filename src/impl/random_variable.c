@@ -1362,6 +1362,9 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+  // The results can change between sims (e.g. a sim without inference
+  // then one with).
+  simmer->inference_results = sim_args->inference_results;
 
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
