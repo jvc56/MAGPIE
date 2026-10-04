@@ -1,0 +1,8 @@
+437037916d83fc4335c0b8b75350b817  README.md
+73f7e9726fa8af54062a36ee46be7037  manifest.json
+1e0711e1fa1e884e77040d8112a371d9  weights.f32
+18972ca80122c42f11855d12893e1f2e  parity/board.f32
+61d4aeeb82f32d53b3e41f3200959e61  parity/fixture.json
+a877924ff1d1e1403491a3681a0cd939  parity/scalars.f32
+25b5c7a3fa113e8ba500d163a97bcde7  parity/spread.f32
+e0fc29b55414231e25d75e56e57efd8d  parity/value.f32
