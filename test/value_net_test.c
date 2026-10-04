@@ -1564,8 +1564,10 @@ static void vnt_games(const StringSplitter *fields) {
   (void)fprintf(games_out,
                 "pair,game,a_seat,a_score,b_score,a_spread,a_win,turns,"
                 "a_seconds,b_seconds\n");
-  (void)fprintf(moves_out, "pair,game,turn,player,bag,total_ms,sim_iterations,"
-                           "move,static_move,static_agree,net_inference_ms\n");
+  (void)fprintf(
+      moves_out,
+      "pair,game,turn,player,bag,total_ms,sim_iterations,"
+      "move,static_move,static_agree,net_inference_ms,net_rows,net_calls\n");
   StringBuilder *move_names[2] = {string_builder_create(),
                                   string_builder_create()};
   Game *game = config_get_game(config);
@@ -1598,6 +1600,13 @@ static void vnt_games(const StringSplitter *fields) {
         game_timer_start_turn(&game_timer, seat);
         uint64_t sim_iterations = 0;
         double net_inference_ms = -1.0;
+        // Rows and calls through this player's net during the move.
+        int64_t rows_before = 0;
+        int64_t calls_before = 0;
+        if (players[player_idx] != NULL) {
+          value_net_player_get_evaluated(players[player_idx], &rows_before,
+                                         &calls_before);
+        }
         Move move;
         switch (kinds[player_idx]) {
         case VNT_PLAYER_NN:
@@ -1628,6 +1637,14 @@ static void vnt_games(const StringSplitter *fields) {
           break;
         }
         game_timer_end_turn(&game_timer);
+        int64_t net_rows = 0;
+        int64_t net_calls = 0;
+        if (players[player_idx] != NULL) {
+          value_net_player_get_evaluated(players[player_idx], &net_rows,
+                                         &net_calls);
+          net_rows -= rows_before;
+          net_calls -= calls_before;
+        }
         const double total_ms = (double)(ctimer_monotonic_ns() - start) / 1e6;
         // A sim player's move against the plain static move (no PAT), as
         // the static player would play it, off the clock.
@@ -1653,12 +1670,14 @@ static void vnt_games(const StringSplitter *fields) {
                                   &static_move, game_get_ld(game), false);
         }
         (void)fprintf(
-            moves_out, "%ld,%d,%d,%c,%d,%.3f,%llu,\"%s\",\"%s\",%d,%.1f\n",
+            moves_out,
+            "%ld,%d,%d,%c,%d,%.3f,%llu,\"%s\",\"%s\",%d,%.1f,%lld,%lld\n",
             pair_idx, game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
             bag_get_letters(game_get_bag(game)), total_ms,
             (unsigned long long)sim_iterations,
             string_builder_peek(move_names[0]),
-            string_builder_peek(move_names[1]), static_agree, net_inference_ms);
+            string_builder_peek(move_names[1]), static_agree, net_inference_ms,
+            (long long)net_rows, (long long)net_calls);
         value_net_history_record_opponent_move(&histories[1 - seat], &move);
         game_copy(before_last_move, game);
         move_copy(&last_move, &move);

@@ -34,6 +34,9 @@ struct ValueNetPlayer {
   // concurrency, and calls on the Neural Engine (see
   // value_net_player_evaluate_rows).
   atomic_int metal_in_flight;
+  // Rows and calls evaluated through value_net_player_evaluate_rows.
+  atomic_llong rows_evaluated;
+  atomic_llong calls_evaluated;
   int metal_slots;
   atomic_int coreml_in_flight;
   int max_candidates;
@@ -158,6 +161,9 @@ void value_net_player_evaluate_rows(void *context, int rows, const float *board,
   if (rows <= 0) {
     return;
   }
+  atomic_fetch_add_explicit(&player->rows_evaluated, rows,
+                            memory_order_relaxed);
+  atomic_fetch_add_explicit(&player->calls_evaluated, 1, memory_order_relaxed);
   if (player->coreml != NULL && player->metal != NULL) {
     // Whole calls go to the GPU while one of its slots is free, then to the
     // Neural Engine while it runs fewer than VALUE_NET_PLAYER_COREML_SLOTS
@@ -327,6 +333,12 @@ const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
     }
   }
   return move_list_get_move(list, best);
+}
+
+void value_net_player_get_evaluated(ValueNetPlayer *player, int64_t *rows,
+                                    int64_t *calls) {
+  *rows = atomic_load_explicit(&player->rows_evaluated, memory_order_relaxed);
+  *calls = atomic_load_explicit(&player->calls_evaluated, memory_order_relaxed);
 }
 
 bool value_net_player_has_rack_head(const ValueNetPlayer *player) {

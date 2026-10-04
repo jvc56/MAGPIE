@@ -43,6 +43,11 @@ void value_net_player_evaluate_rows(void *context, int rows, const float *board,
                                     float *spreads);
 
 // Whether the player's net has an opponent-leave head (value_net.h).
+// The rows and calls evaluated so far through
+// value_net_player_evaluate_rows.
+void value_net_player_get_evaluated(ValueNetPlayer *player, int64_t *rows,
+                                    int64_t *calls);
+
 bool value_net_player_has_rack_head(const ValueNetPlayer *player);
 
 // The opponent-leave head's log odds for rows input rows with side inputs
