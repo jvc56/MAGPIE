@@ -50,12 +50,12 @@ class Data:
     """Every file's decisions: where its rows start, how many, which row was
     played, and the opponent record."""
 
-    def __init__(self, pattern, val_mod):
+    def __init__(self, pattern, val_mod, partial=False):
         self.parts, self.starts, self.counts, self.played = [], [], [], []
         self.paths = []
         self.opp, self.group = [], []
         for path in sorted(p for p in glob.glob(pattern)
-                           if not p.endswith((".opp2", ".inf", ".npy"))):
+                           if not p.endswith((".opp2", ".inf", ".inft", ".ninf", ".npy"))):
             part = open_record_file(path)
             try:
                 idx = decision_index(part)
@@ -67,6 +67,10 @@ class Data:
                                 np.asarray(part["game_id"]).astype(int)],
                                axis=1)
             opp = np.fromfile(path + ".opp2", dtype=OPP2)
+            if partial:
+                # Files still being written: the decisions in both.
+                common = min(len(idx), len(opp))
+                idx, opp = idx[:common], opp[:common]
             assert len(idx) == len(opp), (path, len(idx), len(opp))
             assert (np.asarray(part["game_id"])[idx[:, 0]]
                     == opp["game_id"]).all()
