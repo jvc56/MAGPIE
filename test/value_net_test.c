@@ -103,7 +103,7 @@ enum {
 };
 
 // One decision's hidden information, written beside distillation records
-// when opp=1 (<out>.opp, <out>.t<k>.opp with several threads): the
+// when opp=1 (<out>.opp2, <out>.t<k>.opp2 with several threads): the
 // opponent's rack at the decision and the leave they kept from their last
 // move (their rack before it less the tiles it played or exchanged),
 // counts by machine letter (the blank is 0). Joined with the records by
@@ -119,10 +119,13 @@ typedef struct VntOpponentRecord {
   // The opponent's last move's score and tiles played or exchanged.
   int16_t last_score;
   uint16_t last_tiles;
+  // Those tiles, counts by machine letter (a blank played as a letter
+  // counts as the blank).
+  uint8_t played[VNT_OPPONENT_LETTERS];
 } VntOpponentRecord;
 
 static_assert(sizeof(VntOpponentRecord) ==
-                  4 + 2 + 2 + (2 * VNT_OPPONENT_LETTERS) + 2 + 2,
+                  4 + 2 + 2 + (3 * VNT_OPPONENT_LETTERS) + 2 + 2,
               "VntOpponentRecord must have no padding");
 
 static uint64_t vnt_mix(uint64_t value) {
@@ -1412,6 +1415,9 @@ typedef struct VntDistillThread {
   double temperature;
   double explore;
   int explore_bag;
+  // With keep > 0, only the played row and the top keep - 1 others by static
+  // equity are written per decision (candidates counts those).
+  int keep;
   FILE *records_out;
   // Each decision's opponent record (VntOpponentRecord), or NULL.
   FILE *opponent_out;
@@ -1518,8 +1524,22 @@ static void *vnt_distill_thread(void *arg) {
           chosen = vnt_softmax_pick(list, count, args->temperature, &rng);
         }
         records[chosen].chosen = 1;
-        if (fwrite(records, sizeof(VntDistillRecord), (size_t)count,
-                   args->records_out) != (size_t)count) {
+        int written = count;
+        if (args->keep > 0 && args->keep < count) {
+          written = 0;
+          int others = 0;
+          for (int move_idx = 0; move_idx < count; move_idx++) {
+            if (move_idx == chosen || others < args->keep - 1) {
+              others += move_idx == chosen ? 0 : 1;
+              records[written++] = records[move_idx];
+            }
+          }
+          for (int move_idx = 0; move_idx < written; move_idx++) {
+            records[move_idx].candidates = (uint16_t)written;
+          }
+        }
+        if (fwrite(records, sizeof(VntDistillRecord), (size_t)written,
+                   args->records_out) != (size_t)written) {
           log_fatal("could not write %s", args->out);
         }
         if (args->opponent_out != NULL) {
@@ -1536,7 +1556,7 @@ static void *vnt_distill_thread(void *arg) {
             log_fatal("could not write the opponent records of %s", args->out);
           }
         }
-        atomic_fetch_add(args->rows_written, count);
+        atomic_fetch_add(args->rows_written, written);
       }
       Move move;
       move_copy(&move, move_list_get_move(list, chosen));
@@ -1544,6 +1564,7 @@ static void *vnt_distill_thread(void *arg) {
         // The mover's leave: its rack less the tiles this move uses.
         Rack leave;
         rack_copy(&leave, player_get_rack(game_get_player(game, seat)));
+        uint8_t played_counts[VNT_OPPONENT_LETTERS] = {0};
         const game_event_t move_type = move_get_type(&move);
         if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
             move_type == GAME_EVENT_EXCHANGE) {
@@ -1553,8 +1574,10 @@ static void *vnt_distill_thread(void *arg) {
             if (ml == PLAYED_THROUGH_MARKER) {
               continue;
             }
-            rack_take_letter(&leave,
-                             get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+            const MachineLetter unblanked =
+                get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml;
+            rack_take_letter(&leave, unblanked);
+            played_counts[unblanked]++;
           }
         }
         VntOpponentRecord *kept = &last[seat];
@@ -1570,6 +1593,7 @@ static void *vnt_distill_thread(void *arg) {
         } else if (move_get_tiles_played(&move) == RACK_SIZE) {
           kept->flags |= VNT_OPPONENT_BINGO;
         }
+        memcpy(kept->played, played_counts, sizeof(played_counts));
         kept->last_score = (int16_t)equity_to_int(move_get_score(&move));
         kept->last_tiles = (uint16_t)move_get_tiles_played(&move);
       }
@@ -1608,8 +1632,10 @@ static void *vnt_distill_thread(void *arg) {
 // otherwise with probability explore= (default 0.05), it is drawn by softmax
 // over static equity with temperature temp= points (default 1). With an
 // empty bag (not recorded), the top static move. opp=1 also writes each
-// recorded decision's opponent rack and kept leave (VntOpponentRecord), and
-// tables=1 uses the lexicon's .rit and .wit tables in move generation.
+// recorded decision's opponent rack, kept leave and played tiles
+// (VntOpponentRecord, .opp2), keep=<n> writes only the played row and the
+// top n - 1 others by static equity per decision, and tables=1 uses the
+// lexicon's .rit and .wit tables in move generation.
 static void vnt_distill(const StringSplitter *fields) {
   if (string_splitter_get_number_of_items(fields) < 9) {
     log_fatal("distill needs at least 8 fields");
@@ -1649,6 +1675,7 @@ static void vnt_distill(const StringSplitter *fields) {
       .temperature = vnt_option_double(fields, 9, "temp", 0, 1.0),
       .explore = vnt_option_double(fields, 9, "explore", 0, 0.05),
       .explore_bag = (int)vnt_option_double(fields, 9, "explore_bag", 0, 60.0),
+      .keep = (int)vnt_option_double(fields, 9, "keep", 0, 0.0),
       .games = games,
       .seed = seed,
       .game_stride = workers * threads,
@@ -1680,8 +1707,8 @@ static void vnt_distill(const StringSplitter *fields) {
     free(path);
     thread_args[thread_idx].opponent_out = NULL;
     if (vnt_option_double(fields, 9, "opp", 0, 0.0) > 0) {
-      path = threads > 1 ? get_formatted_string("%s.t%d.opp", out, thread_idx)
-                         : get_formatted_string("%s.opp", out);
+      path = threads > 1 ? get_formatted_string("%s.t%d.opp2", out, thread_idx)
+                         : get_formatted_string("%s.opp2", out);
       thread_args[thread_idx].opponent_out = fopen_or_die(path, "wb");
       free(path);
     }
