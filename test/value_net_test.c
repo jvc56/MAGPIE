@@ -1046,7 +1046,8 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // infer=1 draws a sim player's opponent racks from an inference of the
 // opponent's last move (imargin= its equity margin in points, default 0;
 // imix= the probability a rollout draws the opponent's rack uniformly
-// instead, default 0).
+// instead, default 0; imaxleave= > 0 infers only when the opponent kept at
+// most that many tiles, and never after an exchange).
 // uwin=, uspread= and uscale= set the utility (as -uwin, -uspread,
 // -uspreadscale; MAGPIE's defaults otherwise) that an nn player and each sim,
 // value net replies included, rank by. model= sets the net's directory (default
@@ -1246,6 +1247,8 @@ static void vnt_games(const StringSplitter *fields) {
             vnt_option_double(fields, 9, "imargin", player_idx, 0.0)),
         .sim_inference_uniform_mix =
             vnt_option_double(fields, 9, "imix", player_idx, 0.0),
+        .sim_inference_max_leave =
+            (int)vnt_option_double(fields, 9, "imaxleave", player_idx, 0.0),
         .rollout_value_net_history = &rollout_histories[player_idx],
         .rollout_value_net_own_history = &rollout_own_histories[player_idx],
     };

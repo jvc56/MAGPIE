@@ -72,6 +72,11 @@ typedef struct PlayChooserStrategy {
   // The probability that a rollout draws the opponent's rack uniformly from
   // the unseen tiles instead of from the inferred leaves (see SimArgs).
   double sim_inference_uniform_mix;
+  // When > 0, inference runs only when the opponent kept at most this many
+  // tiles (7 less the tiles their move played), where the leaves to
+  // enumerate are few; it is not run after an exchange. Other positions draw
+  // the opponent's rack uniformly. 0 = always infer.
+  int sim_inference_max_leave;
   // Total SIM iterations per decision, stopping before the time budget if
   // reached; 0 = no limit.
   uint64_t sim_max_iterations;

@@ -652,6 +652,9 @@ static bool play_chooser_fill_inference_args(
     }
     break;
   case GAME_EVENT_EXCHANGE:
+    if (strategy->sim_inference_max_leave > 0) {
+      return false;
+    }
     // Inference needs at least two racks of tiles unseen by the inferrer.
     if (bag_get_letters(game_get_bag(before)) +
             rack_get_total_letters(
@@ -662,6 +665,11 @@ static bool play_chooser_fill_inference_args(
     num_exchanged = move_get_tiles_played(move);
     break;
   default:
+    return false;
+  }
+  if (strategy->sim_inference_max_leave > 0 &&
+      RACK_SIZE - rack_get_total_letters(played_tiles) >
+          strategy->sim_inference_max_leave) {
     return false;
   }
   rack_copy(nontarget_known_rack,
