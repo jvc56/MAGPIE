@@ -52,16 +52,26 @@ class Data:
 
     def __init__(self, pattern, val_mod):
         self.parts, self.starts, self.counts, self.played = [], [], [], []
+        self.paths = []
         self.opp, self.group = [], []
         for path in sorted(p for p in glob.glob(pattern)
-                           if not p.endswith((".opp2", ".npy"))):
+                           if not p.endswith((".opp2", ".inf", ".npy"))):
             part = open_record_file(path)
-            idx = decision_index(part)
+            try:
+                idx = decision_index(part)
+            except ValueError:
+                # keep=1: one row per decision, which need not be rank 0.
+                if not (np.asarray(part["candidates"]) == 1).all():
+                    raise
+                idx = np.stack([np.arange(len(part)), np.ones(len(part), int),
+                                np.asarray(part["game_id"]).astype(int)],
+                               axis=1)
             opp = np.fromfile(path + ".opp2", dtype=OPP2)
             assert len(idx) == len(opp), (path, len(idx), len(opp))
             assert (np.asarray(part["game_id"])[idx[:, 0]]
                     == opp["game_id"]).all()
             self.parts.append(part)
+            self.paths.append(path)
             self.starts.append(idx[:, 0])
             self.counts.append(idx[:, 1])
             self.played.append(played_offsets(part, idx, path))
