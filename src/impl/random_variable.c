@@ -476,6 +476,8 @@ typedef struct Simmer {
   const WinPct *win_pcts;
   bool use_inference;
   bool use_alias_method;
+  // SimArgs.inference_uniform_mix.
+  double inference_uniform_mix;
   const InferenceResults *inference_results;
   int num_threads;
   // In PGP mode, each autoplay worker has its own simmer with num_threads
@@ -695,7 +697,11 @@ static int sim_start_iteration(const Simmer *simmer, Game *game,
   game_seed(game, seed);
   const int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
   bool set_player_off_turn_rack_with_known_opp_rack = false;
-  if (simmer->use_alias_method) {
+  if (simmer->use_alias_method && simmer->inference_uniform_mix > 0.0 &&
+      (double)prng_get_random_number(prng, XOSHIRO_MAX) / (double)XOSHIRO_MAX <
+          simmer->inference_uniform_mix) {
+    set_player_off_turn_rack_with_known_opp_rack = true;
+  } else if (simmer->use_alias_method) {
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
     if (alias_method_sample(
@@ -1301,6 +1307,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
+  simmer->inference_uniform_mix = sim_args->inference_uniform_mix;
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
@@ -1359,6 +1366,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
 
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
+  simmer->inference_uniform_mix = sim_args->inference_uniform_mix;
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));

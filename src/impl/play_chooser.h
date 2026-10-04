@@ -69,6 +69,9 @@ typedef struct PlayChooserStrategy {
   const Game *sim_inference_game;
   const Move *sim_inference_move;
   Equity sim_inference_margin;
+  // The probability that a rollout draws the opponent's rack uniformly from
+  // the unseen tiles instead of from the inferred leaves (see SimArgs).
+  double sim_inference_uniform_mix;
   // Total SIM iterations per decision, stopping before the time budget if
   // reached; 0 = no limit.
   uint64_t sim_max_iterations;

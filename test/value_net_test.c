@@ -687,7 +687,7 @@ static void vnt_leafcheck(const StringSplitter *fields) {
 }
 
 // "priorfit:<model_dir>:<backend>:<threads>:<iterations>:<positions>:<out>
-// [:hist[:infer]]":
+// [:hist[:infer[:margin[:mix]]]]":
 // data for fitting the net prior (PlayChooserStrategy.
 // sim_net_prior_iterations) as games use it. On positions from static
 // NWL23 games (even turns 2..20 with tiles in the bag), with PAT, the 8
@@ -699,12 +699,20 @@ static void vnt_leafcheck(const StringSplitter *fields) {
 // each play's net utility and its sim's mean, variance and iterations.
 static void vnt_priorfit(const StringSplitter *fields) {
   const int field_count = string_splitter_get_number_of_items(fields);
-  if (field_count < 7 || field_count > 9) {
-    log_fatal("priorfit needs 6 to 8 fields");
+  if (field_count < 7 || field_count > 11) {
+    log_fatal("priorfit needs 6 to 10 fields");
   }
+  // Fields 9 and 10: the inference's equity margin in points and the
+  // probability a rollout draws the opponent's rack uniformly instead.
+  const double infer_margin =
+      field_count >= 10 ? strtod(string_splitter_get_item(fields, 9), NULL)
+                        : 0.0;
+  const double infer_mix =
+      field_count >= 11 ? strtod(string_splitter_get_item(fields, 10), NULL)
+                        : 0.0;
   // infer 1: opponent racks drawn from an inference of their last move.
   const bool use_inference =
-      field_count == 9 &&
+      field_count >= 9 &&
       strtol(string_splitter_get_item(fields, 8), NULL, 10) > 0;
   // hist 1: each player's value net history from the game, as in games;
   // otherwise empty.
@@ -845,10 +853,10 @@ static void vnt_priorfit(const StringSplitter *fields) {
           if (infer) {
             rack_copy(&nontarget_known_rack,
                       player_get_rack(game_get_player(game, mover)));
-            infer_args_fill(&inference_args, 20, 0, NULL, before_last_move,
-                            threads, 0, 0, control, false, true, 1 - mover,
-                            move_get_score(&last_move), num_exchanged,
-                            &played_tiles, &target_known_rack,
+            infer_args_fill(&inference_args, 20, double_to_equity(infer_margin),
+                            NULL, before_last_move, threads, 0, 0, control,
+                            false, true, 1 - mover, move_get_score(&last_move),
+                            num_exchanged, &played_tiles, &target_known_rack,
                             &nontarget_known_rack);
           }
           SimArgs sim_args;
@@ -865,6 +873,7 @@ static void vnt_priorfit(const StringSplitter *fields) {
           sim_args.rollout_value_net_batch = 8;
           sim_args.rollout_value_net_plies = 2;
           sim_args.rollout_value_net_leaf = true;
+          sim_args.inference_uniform_mix = infer ? infer_mix : 0.0;
           sim_args.rollout_value_net_history = *replier;
           sim_args.rollout_value_net_own_history = *own;
           SimResults *results = sim_results_create(0.0);
@@ -1035,7 +1044,9 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // the cands= plays its net rates best among the top pool= static plays, and
 // prior= > 0 counts each one's net utility as that many sim iterations.
 // infer=1 draws a sim player's opponent racks from an inference of the
-// opponent's last move (imargin= its equity margin in points, default 0).
+// opponent's last move (imargin= its equity margin in points, default 0;
+// imix= the probability a rollout draws the opponent's rack uniformly
+// instead, default 0).
 // uwin=, uspread= and uscale= set the utility (as -uwin, -uspread,
 // -uspreadscale; MAGPIE's defaults otherwise) that an nn player and each sim,
 // value net replies included, rank by. model= sets the net's directory (default
@@ -1233,6 +1244,8 @@ static void vnt_games(const StringSplitter *fields) {
         .sim_inference_move = &last_move,
         .sim_inference_margin = double_to_equity(
             vnt_option_double(fields, 9, "imargin", player_idx, 0.0)),
+        .sim_inference_uniform_mix =
+            vnt_option_double(fields, 9, "imix", player_idx, 0.0),
         .rollout_value_net_history = &rollout_histories[player_idx],
         .rollout_value_net_own_history = &rollout_own_histories[player_idx],
     };

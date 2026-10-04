@@ -30,6 +30,10 @@ typedef struct SimArgs {
   Rack *known_opp_rack;
   WinPct *win_pcts;
   bool use_inference;
+  // With use_inference, each iteration draws the opponent's rack uniformly
+  // from the unseen tiles instead of from the inferred leaves with this
+  // probability, so a leave the inference ruled out is still possible.
+  double inference_uniform_mix;
   bool use_heat_map;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
@@ -121,6 +125,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->thread_control = thread_control;
   sim_args->game = game;
   sim_args->use_inference = sim_with_inference;
+  sim_args->inference_uniform_mix = 0.0;
   sim_args->use_heat_map = use_heat_map;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;

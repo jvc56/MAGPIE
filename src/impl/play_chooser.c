@@ -761,6 +761,8 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   sim_args.rollout_value_net_batch = strategy->rollout_value_net_batch;
   sim_args.rollout_value_net_plies = strategy->rollout_value_net_plies;
   sim_args.rollout_value_net_leaf = strategy->rollout_value_net_leaf;
+  sim_args.inference_uniform_mix =
+      use_inference ? strategy->sim_inference_uniform_mix : 0.0;
   if (strategy->rollout_value_net_history != NULL) {
     sim_args.rollout_value_net_history = *strategy->rollout_value_net_history;
   }
