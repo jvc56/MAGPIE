@@ -688,6 +688,11 @@ static bool play_chooser_fill_inference_args(
                   infer_threads, 0, 0, thread_control, false, true,
                   target_index, move_get_score(move), num_exchanged,
                   played_tiles, target_known_rack, nontarget_known_rack);
+  // PAT in the inference when the opponent plays with it.
+  args->use_pat =
+      player_get_pat(game_get_player(before, target_index)) != NULL &&
+      !player_get_pat_disabled(game_get_player(before, target_index));
+  args->target_move = move;
   return true;
 }
 

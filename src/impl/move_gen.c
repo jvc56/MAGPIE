@@ -3832,6 +3832,14 @@ void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
   }
 }
 
+Equity gen_last_pat_term(const Move *move, const Rack *leave) {
+  const MoveGen *gen = get_movegen();
+  if (!gen_pat_is_active(gen)) {
+    return 0;
+  }
+  return pat_eval_move_penalty(&gen->pat_eval_ctx, move, leave);
+}
+
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
   gen_load_position(gen, args);

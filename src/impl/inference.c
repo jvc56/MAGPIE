@@ -59,6 +59,9 @@ typedef struct Inference {
   // the top move.
   Equity equity_margin;
   bool use_infer_cutoff_optimization;
+  // InferenceArgs.use_pat with a target move (a tile placement): its copy.
+  bool use_pat;
+  Move target_move;
   uint64_t current_rack_index;
   int num_threads;
   int print_interval;
@@ -155,6 +158,36 @@ void evaluate_possible_leave(Inference *inference) {
 
   const Equity target_equity_cutoff =
       inference->target_score + current_leave_value + inference->equity_margin;
+  if (inference->use_pat) {
+    // The best move with the PAT term, searched in full: the target move's
+    // own term is known only once this rack's generation has loaded it, and
+    // can be positive, so no cutoff is safe.
+    const Move *top_move = get_top_equity_move_for_inferences(
+        inference->game, inference->move_list, EQUITY_MAX_VALUE,
+        UNSET_LEAVE_SIZE, 0, true);
+    const Equity target_pat_term = gen_last_pat_term(
+        &inference->target_move, inference->current_target_leave);
+    if (target_equity_cutoff + target_pat_term >= move_get_equity(top_move) ||
+        rack_is_empty(inference->bag_as_rack)) {
+      const uint64_t number_of_draws_for_leave = get_number_of_draws_for_rack(
+          inference->bag_as_rack, inference->current_target_leave);
+      record_valid_leave(inference->current_target_leave, inference->results,
+                         INFERENCE_TYPE_LEAVE,
+                         equity_to_double(current_leave_value),
+                         number_of_draws_for_leave);
+      alias_method_add_rack(
+          inference_results_get_alias_method(inference->results),
+          inference->current_target_leave, (int)number_of_draws_for_leave);
+      LeaveRackList *lrl =
+          inference_results_get_leave_rack_list(inference->results);
+      if (lrl) {
+        leave_rack_list_insert_rack(inference->current_target_leave, NULL,
+                                    (int)number_of_draws_for_leave,
+                                    current_leave_value, lrl);
+      }
+    }
+    return;
+  }
   int target_leave_size = UNSET_LEAVE_SIZE;
   Equity eq_margin_movegen = 0;
   if (inference->use_infer_cutoff_optimization &&
@@ -170,7 +203,7 @@ void evaluate_possible_leave(Inference *inference) {
       inference->game, inference->move_list,
       inference->use_infer_cutoff_optimization ? target_equity_cutoff
                                                : EQUITY_MAX_VALUE,
-      target_leave_size, eq_margin_movegen);
+      target_leave_size, eq_margin_movegen, false);
 
   const bool is_within_equity_margin =
       target_equity_cutoff >= move_get_equity(top_move);
@@ -338,6 +371,13 @@ Inference *inference_create(const Game *game, const InferenceArgs *args,
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
+  inference->use_pat =
+      args->use_pat && args->target_move != NULL &&
+      move_get_type(args->target_move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+      args->target_num_exch == 0;
+  if (inference->use_pat) {
+    move_copy(&inference->target_move, args->target_move);
+  }
   // Disable cutoff optimization for exchanges with large leaves
   // as benchmarks show it hurts performance for small exchanges
   const int leave_size = RACK_SIZE - args->target_num_exch;
@@ -380,6 +420,13 @@ void inference_reset(Inference *inference, const Game *game,
   inference->target_score = args->target_score;
   inference->target_number_of_tiles_exchanged = args->target_num_exch;
   inference->equity_margin = args->equity_margin;
+  inference->use_pat =
+      args->use_pat && args->target_move != NULL &&
+      move_get_type(args->target_move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+      args->target_num_exch == 0;
+  if (inference->use_pat) {
+    move_copy(&inference->target_move, args->target_move);
+  }
   // Disable cutoff optimization for exchanges with large leaves
   const int leave_size = RACK_SIZE - args->target_num_exch;
   const bool is_small_exchange =

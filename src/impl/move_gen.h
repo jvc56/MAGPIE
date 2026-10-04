@@ -329,6 +329,11 @@ void gen_destroy_cache(void);
 // solving.
 void generate_moves(const MoveGenArgs *args);
 
+// The PAT term (pat_eval_move_penalty) the most recent generate_moves call on
+// this thread gave or would give move with leave: 0 when that generation did
+// not use PAT.
+Equity gen_last_pat_term(const Move *move, const Rack *leave);
+
 // The MOVE_RECORD_ALL_SMALL plays of the lanes whose bit is set in
 // `lane_mask` (bit dir * BOARD_DIM + row_or_col: the BOARD_DIM horizontal
 // rows, then the BOARD_DIM vertical columns), appended to args->move_list in

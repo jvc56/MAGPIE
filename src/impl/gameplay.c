@@ -938,9 +938,11 @@ const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list) {
   return move_list_get_move(move_list, 0);
 }
 
-Move *get_top_equity_move_for_inferences(
-    Game *game, MoveList *move_list, Equity target_equity,
-    int target_leave_size_for_exchange_cutoff, Equity equity_margin) {
+Move *
+get_top_equity_move_for_inferences(Game *game, MoveList *move_list,
+                                   Equity target_equity,
+                                   int target_leave_size_for_exchange_cutoff,
+                                   Equity equity_margin, bool use_pat) {
   const MoveGenArgs args = {.game = game,
                             .move_list = move_list,
                             .move_record_type = MOVE_RECORD_BEST,
@@ -951,9 +953,10 @@ Move *get_top_equity_move_for_inferences(
                             .target_leave_size_for_exchange_cutoff =
                                 target_leave_size_for_exchange_cutoff,
                             // Inference thresholds are built from score plus
-                            // leave; the PAT term would misalign
-                            // recorded equities with them.
-                            .disable_pat = true};
+                            // leave; the PAT term would misalign recorded
+                            // equities with them unless the caller adds the
+                            // target move's own term (use_pat).
+                            .disable_pat = !use_pat};
   generate_moves(&args);
   return move_list_get_move(move_list, 0);
 }

@@ -36,6 +36,7 @@
 #include "../src/impl/simmer.h"
 #include "../src/impl/value_net_coreml.h"
 #include "../src/impl/value_net_features.h"
+#include "../src/impl/value_net_inference.h"
 #include "../src/impl/value_net_metal.h"
 #include "../src/impl/value_net_player.h"
 #include "../src/str/move_string.h"
@@ -164,8 +165,44 @@ typedef struct VntInferTimeRecord {
 static_assert(sizeof(VntInferTimeRecord) == 4 + 2 + 2 + (4 * VNT_INFER_MARGINS),
               "VntInferTimeRecord must have no padding");
 
+enum { VNT_NET_INFER_TEMPERATURES = 8 };
+
+// Slots of VntNetInferRecord.log_p: the net (0 the teacher, 1 the student
+// given by student=, -1 unused), whether the candidates take the PAT term,
+// and the temperature.
+static const int VNT_NET_INFER_MODEL[VNT_NET_INFER_TEMPERATURES] = {
+    0, 0, 0, 0, 1, 1, 1, -1};
+static const bool VNT_NET_INFER_PAT[VNT_NET_INFER_TEMPERATURES] = {
+    true, true, true, false, true, true, true, false};
+static const double VNT_NET_INFER_TEMPERATURE[VNT_NET_INFER_TEMPERATURES] = {
+    0.001, 0.003, 0.01, 0.003, 0.001, 0.003, 0.01, 0.003};
+
+// Net-based inference (value_net_inference.h, a net as the opponent's
+// policy, 16 candidates per rack) of the leave the opponent kept, for each
+// decision where they kept 1 or 2 tiles from a tile placement: the natural
+// log of the probability it gave the actual leave at each temperature
+// (-1e30 if none), the leaves it weighed, the rows the net evaluated and
+// the time. In <out>.ninf with inferq=1, one per decision (flags 0 when not
+// run). Little-endian, no padding.
+typedef struct VntNetInferRecord {
+  uint32_t game_id;
+  uint16_t turn;
+  uint16_t flags;
+  float log_p[VNT_NET_INFER_TEMPERATURES];
+  uint32_t leaves;
+  uint32_t rows;
+  uint32_t micros;
+} VntNetInferRecord;
+
+static_assert(sizeof(VntNetInferRecord) ==
+                  4 + 2 + 2 + (4 * VNT_NET_INFER_TEMPERATURES) + 12,
+              "VntNetInferRecord must have no padding");
+
+// Slots of VntInferRecord: equity margin, and whether the inference takes
+// the PAT term (when the target has PAT).
 static const double VNT_INFER_MARGIN_POINTS[VNT_INFER_MARGINS] = {0.0, 10.0,
-                                                                  25.0, 60.0};
+                                                                  0.0, 10.0};
+static const bool VNT_INFER_PAT[VNT_INFER_MARGINS] = {true, true, false, false};
 
 static uint64_t vnt_mix(uint64_t value) {
   value += UINT64_C(0x9e3779b97f4a7c15);
@@ -1611,6 +1648,8 @@ static void vnt_pack_board(const float *board_row, uint8_t *bits) {
 // One game-playing thread of vnt_distill.
 typedef struct VntDistillThread {
   ValueNetPlayer *teacher;
+  // A second net for net-based inference (student=), or NULL.
+  ValueNetPlayer *student;
   const Game *start_game;
   long first_game;
   long game_stride;
@@ -1630,7 +1669,10 @@ typedef struct VntDistillThread {
   FILE *opponent_out;
   // Each decision's inference record (VntInferRecord), or NULL.
   FILE *infer_out;
+  // With inferq, the largest leave inferred (inferqmax=; 0 for every size).
+  int infer_max_leave;
   FILE *infer_time_out;
+  FILE *net_infer_out;
   const char *out;
   // Shared progress, for the log.
   atomic_long *rows_written;
@@ -1664,6 +1706,7 @@ static void *vnt_distill_thread(void *arg) {
   ThreadControl *infer_control = thread_control_create();
   thread_control_set_status(infer_control, THREAD_CONTROL_STATUS_STARTED);
   ErrorStack *infer_errors = error_stack_create();
+  ValueNetLeaveInference *net_inference = value_net_leave_inference_create();
   const int ld_size = ld_get_size(game_get_ld(args->start_game));
   if (ld_size > VNT_OPPONENT_LETTERS) {
     log_fatal("opponent records hold %d letters, not %d", VNT_OPPONENT_LETTERS,
@@ -1780,6 +1823,8 @@ static void *vnt_distill_thread(void *arg) {
           const game_event_t last_type = move_get_type(&last_move);
           const bool inferable = (kept->flags & VNT_OPPONENT_MOVED) > 0 &&
                                  leave_size > 0 &&
+                                 (args->infer_max_leave == 0 ||
+                                  leave_size <= args->infer_max_leave) &&
                                  (last_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
                                   (last_type == GAME_EVENT_EXCHANGE &&
                                    bag + RACK_SIZE >= RACK_SIZE * 2));
@@ -1828,6 +1873,13 @@ static void *vnt_distill_thread(void *arg) {
                   before_last_move, 1, 0, 0, infer_control, false, true,
                   1 - seat, move_get_score(&last_move), exchanged,
                   &margin_played, &margin_known, &margin_mover);
+              infer_args.use_pat =
+                  VNT_INFER_PAT[margin_idx] &&
+                  player_get_pat(game_get_player(before_last_move, 1 - seat)) !=
+                      NULL &&
+                  !player_get_pat_disabled(
+                      game_get_player(before_last_move, 1 - seat));
+              infer_args.target_move = &last_move;
               const int64_t infer_start = ctimer_monotonic_ns();
               infer(&infer_args, &infer_ctx, infer_results, infer_errors);
               timing.micros[margin_idx] =
@@ -1868,6 +1920,95 @@ static void *vnt_distill_thread(void *arg) {
           if (args->infer_time_out != NULL &&
               fwrite(&timing, sizeof(timing), 1, args->infer_time_out) != 1) {
             log_fatal("could not write the inference times of %s", args->out);
+          }
+          if (args->net_infer_out != NULL) {
+            VntNetInferRecord net_record;
+            memset(&net_record, 0, sizeof(net_record));
+            net_record.game_id = (uint32_t)game_idx;
+            net_record.turn = (uint16_t)turn;
+            for (int temp_idx = 0; temp_idx < VNT_NET_INFER_TEMPERATURES;
+                 temp_idx++) {
+              net_record.log_p[temp_idx] = -1e30F;
+            }
+            if (inferable && last_type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+                leave_size <= 2) {
+              Rack actual;
+              rack_set_dist_size_and_reset(&actual, ld_size);
+              for (int letter = 0; letter < ld_size; letter++) {
+                for (int copy = 0; copy < kept->leave[letter]; copy++) {
+                  rack_add_letter(&actual, (MachineLetter)letter);
+                }
+              }
+              const Player *target =
+                  game_get_player(before_last_move, 1 - seat);
+              const ValueNetLeaveInferenceArgs net_args = {
+                  .before_move = before_last_move,
+                  .target_index = 1 - seat,
+                  .move = &last_move,
+                  .target_history = &histories[1 - seat],
+                  .nontarget_rack =
+                      player_get_rack(game_get_player(game, seat)),
+                  .leave_size = leave_size,
+                  .candidates = 16,
+                  .temperature = VNT_NET_INFER_TEMPERATURE[0],
+                  .utility_w_winpct = args->w_winpct,
+                  .utility_w_spread = args->w_spread,
+                  .utility_spread_scale = args->spread_scale,
+                  .use_pat = player_get_pat(target) != NULL &&
+                             !player_get_pat_disabled(target),
+                  .evaluate = value_net_player_evaluate_rows,
+                  .evaluate_context = args->teacher,
+              };
+              const int64_t net_start = ctimer_monotonic_ns();
+              // Passes: the teacher with and without PAT, the student with.
+              static const int pass_model[3] = {0, 0, 1};
+              static const bool pass_pat[3] = {true, false, true};
+              for (int pass = 0; pass < 3; pass++) {
+                ValueNetPlayer *model =
+                    pass_model[pass] == 0 ? args->teacher : args->student;
+                if (model == NULL || (pass_pat[pass] && !net_args.use_pat)) {
+                  continue;
+                }
+                ValueNetLeaveInferenceArgs pass_args = net_args;
+                pass_args.use_pat = pass_pat[pass];
+                pass_args.evaluate_context = model;
+                if (!value_net_leave_inference_run(net_inference, &pass_args)) {
+                  continue;
+                }
+                net_record.flags |= (uint16_t)(1U << pass);
+                if (pass == 0) {
+                  net_record.leaves =
+                      (uint32_t)value_net_leave_inference_get_count(
+                          net_inference);
+                  net_record.rows =
+                      (uint32_t)value_net_leave_inference_get_rows(
+                          net_inference);
+                }
+                for (int slot = 0; slot < VNT_NET_INFER_TEMPERATURES; slot++) {
+                  if (VNT_NET_INFER_MODEL[slot] != pass_model[pass] ||
+                      VNT_NET_INFER_PAT[slot] != pass_pat[pass]) {
+                    continue;
+                  }
+                  value_net_leave_inference_set_temperature(
+                      net_inference, VNT_NET_INFER_TEMPERATURE[slot]);
+                  const double probability =
+                      value_net_leave_inference_probability_of(net_inference,
+                                                               &actual);
+                  if (probability > 0.0) {
+                    net_record.log_p[slot] = (float)log(probability);
+                  }
+                }
+                if (pass == 0) {
+                  net_record.micros =
+                      (uint32_t)((ctimer_monotonic_ns() - net_start) / 1000);
+                }
+              }
+            }
+            if (fwrite(&net_record, sizeof(net_record), 1,
+                       args->net_infer_out) != 1) {
+              log_fatal("could not write the net inference records of %s",
+                        args->out);
+            }
           }
         }
         if (args->opponent_out != NULL) {
@@ -1951,6 +2092,7 @@ static void *vnt_distill_thread(void *arg) {
   inference_results_destroy(infer_results);
   thread_control_destroy(infer_control);
   error_stack_destroy(infer_errors);
+  value_net_leave_inference_destroy(net_inference);
   return NULL;
 }
 
@@ -1991,13 +2133,18 @@ static void vnt_distill(const StringSplitter *fields) {
     log_fatal("distill threads must be 1..%d", VNT_MAX_THROUGHPUT_THREADS);
   }
   // tables=1 also uses the lexicon's rack info and word info tables
-  // (.rit, .wit), which only speed up move generation.
+  // (.rit, .wit), which only speed up move generation; pat=<name> loads PAT
+  // weights, so both players take their candidates by the PAT term.
   char *settings = get_formatted_string(
       "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -threads 1%s",
+      "-numplays 1 -threads 1%s%s%s",
       lexicon,
       vnt_option_double(fields, 9, "tables", 0, 0.0) > 0
           ? " -rit true -wit true -ritmmap true"
+          : "",
+      vnt_option(fields, 9, "pat", 0, NULL) != NULL ? " -pat " : "",
+      vnt_option(fields, 9, "pat", 0, NULL) != NULL
+          ? vnt_option(fields, 9, "pat", 0, NULL)
           : "");
   Config *config = config_create_or_die(settings);
   free(settings);
@@ -2013,6 +2160,7 @@ static void vnt_distill(const StringSplitter *fields) {
       .explore = vnt_option_double(fields, 9, "explore", 0, 0.05),
       .explore_bag = (int)vnt_option_double(fields, 9, "explore_bag", 0, 60.0),
       .keep = (int)vnt_option_double(fields, 9, "keep", 0, 0.0),
+      .infer_max_leave = (int)vnt_option_double(fields, 9, "inferqmax", 0, 0.0),
       .games = games,
       .seed = seed,
       .game_stride = workers * threads,
@@ -2021,6 +2169,13 @@ static void vnt_distill(const StringSplitter *fields) {
   args.teacher = value_net_player_create(
       model_dir, backend, VNT_DISTILL_CANDIDATES, args.w_winpct, args.w_spread,
       args.spread_scale, error_stack);
+  args.student = NULL;
+  const char *student_dir = vnt_option(fields, 9, "student", 0, NULL);
+  if (student_dir != NULL && error_stack_is_empty(error_stack)) {
+    args.student = value_net_player_create(
+        student_dir, backend, VNT_DISTILL_CANDIDATES, args.w_winpct,
+        args.w_spread, args.spread_scale, error_stack);
+  }
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("could not load the teacher");
@@ -2043,6 +2198,7 @@ static void vnt_distill(const StringSplitter *fields) {
     thread_args[thread_idx].records_out = fopen_or_die(path, "wb");
     free(path);
     thread_args[thread_idx].infer_time_out = NULL;
+    thread_args[thread_idx].net_infer_out = NULL;
     thread_args[thread_idx].infer_out = NULL;
     if (vnt_option_double(fields, 9, "inferq", 0, 0.0) > 0) {
       path = threads > 1 ? get_formatted_string("%s.t%d.inf", out, thread_idx)
@@ -2052,6 +2208,10 @@ static void vnt_distill(const StringSplitter *fields) {
       path = threads > 1 ? get_formatted_string("%s.t%d.inft", out, thread_idx)
                          : get_formatted_string("%s.inft", out);
       thread_args[thread_idx].infer_time_out = fopen_or_die(path, "wb");
+      free(path);
+      path = threads > 1 ? get_formatted_string("%s.t%d.ninf", out, thread_idx)
+                         : get_formatted_string("%s.ninf", out);
+      thread_args[thread_idx].net_infer_out = fopen_or_die(path, "wb");
       free(path);
     }
     thread_args[thread_idx].opponent_out = NULL;
@@ -2076,12 +2236,16 @@ static void vnt_distill(const StringSplitter *fields) {
     if (thread_args[thread_idx].infer_time_out != NULL) {
       (void)fclose(thread_args[thread_idx].infer_time_out);
     }
+    if (thread_args[thread_idx].net_infer_out != NULL) {
+      (void)fclose(thread_args[thread_idx].net_infer_out);
+    }
   }
   const double seconds = (double)(ctimer_monotonic_ns() - args.start_ns) / 1e9;
   printf("distill worker=%ld done games=%ld rows=%ld rows_per_s=%.0f\n", worker,
          atomic_load(&games_played), atomic_load(&rows_written),
          (double)atomic_load(&rows_written) / seconds);
   value_net_player_destroy(args.teacher);
+  value_net_player_destroy(args.student);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }

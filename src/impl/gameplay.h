@@ -23,9 +23,13 @@ void set_random_rack(const Game *game, int player_index,
                      const Rack *known_rack);
 const Move *get_top_equity_move(Game *game, MoveList *move_list);
 const Move *get_top_move_for_player_on_turn(Game *game, MoveList *move_list);
-Move *get_top_equity_move_for_inferences(
-    Game *game, MoveList *move_list, Equity target_equity,
-    int target_leave_size_for_exchange_cutoff, Equity equity_margin);
+// With use_pat, the best move is found with the PAT term (see
+// InferenceArgs.use_pat).
+Move *
+get_top_equity_move_for_inferences(Game *game, MoveList *move_list,
+                                   Equity target_equity,
+                                   int target_leave_size_for_exchange_cutoff,
+                                   Equity equity_margin, bool use_pat);
 void generate_moves_for_game_override_record_type(
     const MoveGenArgs *args, move_record_t move_record_type);
 void generate_moves_for_game(const MoveGenArgs *args);

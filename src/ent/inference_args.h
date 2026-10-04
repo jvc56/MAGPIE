@@ -22,6 +22,13 @@ typedef struct InferenceArgs {
   Rack *target_played_tiles;
   Rack *target_known_rack;
   Rack *nontarget_known_rack;
+  // With use_pat (and target_move, the move inferred from, a tile
+  // placement), each candidate rack's best move is found with the target's
+  // PAT term, and the target move's PAT term for that rack is added to its
+  // score and leave, so both sides of the comparison carry it. infer_args_fill
+  // clears both; callers set them after.
+  bool use_pat;
+  const Move *target_move;
   const Game *game;
   int num_threads;
   int parent_worker_thread_index;
@@ -54,6 +61,8 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->parent_worker_thread_index = parent_worker_thread_index;
   args->print_interval = print_interval;
   args->thread_control = thread_control;
+  args->use_pat = false;
+  args->target_move = NULL;
 }
 
 #endif
