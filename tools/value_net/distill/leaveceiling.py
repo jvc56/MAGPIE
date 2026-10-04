@@ -187,6 +187,28 @@ def main():
     for margin, (ran, hit) in covered.items():
         print(f"  margin {margin:3d}: ran on {ran:.1%} of decisions, covered "
               f"{hit:.1%}")
+    # By the size of the leave kept (7 less the tiles played; an exchange is
+    # its own row): the gain of each model over the exact uniform, and how
+    # many leaves inference enumerated.
+    exch = (opps["flags"] & 4) > 0
+    exact = results["uniform (exact)"]
+    print("\ngain over the exact uniform, nats/decision, by leave kept "
+          "(n, leaves enumerated at margin 0 / 10):")
+    keys = [k_ for k_ in results if k_.endswith("(without replacement)")
+            or k_ == "inference m=10 eps=0.05"
+            or k_.startswith("inference m=0 + head, eps=0.5")]
+    print(f"{'group':14s} {'n':>6s} {'leaves0':>8s} {'leaves10':>9s}  "
+          + "  ".join(k_[:26] for k_ in keys))
+    groups = [(f"keep {size}", (k == size) & ~exch) for size in range(1, 7)]
+    groups.append(("exchange", exch))
+    for label, sel in groups:
+        if sel.sum() == 0:
+            continue
+        print(f"{label:14s} {int(sel.sum()):6d} "
+              f"{inf['leaves'][sel, 0].mean():8.0f} "
+              f"{inf['leaves'][sel, 1].mean():9.0f}  " + "  ".join(
+                  f"{(results[k_][sel] - exact[sel]).mean():+26.3f}"
+                  for k_ in keys))
     # Subset where inference ran: every model on the same decisions.
     ran = ((inf["flags"] >> 1) & 1) > 0
     print(f"\non the {int(ran.sum())} decisions where inference ran:")
