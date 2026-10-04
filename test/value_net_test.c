@@ -93,6 +93,38 @@ static_assert(sizeof(VntDistillRecord) == VNT_DISTILL_BOARD_BYTES +
                                               12,
               "VntDistillRecord must have no padding");
 
+enum {
+  // Letters in an opponent record's rack and leave: the blank, then A-Z.
+  VNT_OPPONENT_LETTERS = 28,
+  VNT_OPPONENT_MOVED = 1,
+  VNT_OPPONENT_BINGO = 2,
+  VNT_OPPONENT_EXCHANGE = 4,
+  VNT_OPPONENT_PASS = 8,
+};
+
+// One decision's hidden information, written beside distillation records
+// when opp=1 (<out>.opp, <out>.t<k>.opp with several threads): the
+// opponent's rack at the decision and the leave they kept from their last
+// move (their rack before it less the tiles it played or exchanged),
+// counts by machine letter (the blank is 0). Joined with the records by
+// game_id and turn. Little-endian, no padding.
+typedef struct VntOpponentRecord {
+  uint32_t game_id;
+  uint16_t turn;
+  // VNT_OPPONENT_* bits: the opponent has moved (else leave is empty), and
+  // whether that move was a bingo, an exchange or a pass.
+  uint16_t flags;
+  uint8_t rack[VNT_OPPONENT_LETTERS];
+  uint8_t leave[VNT_OPPONENT_LETTERS];
+  // The opponent's last move's score and tiles played or exchanged.
+  int16_t last_score;
+  uint16_t last_tiles;
+} VntOpponentRecord;
+
+static_assert(sizeof(VntOpponentRecord) ==
+                  4 + 2 + 2 + (2 * VNT_OPPONENT_LETTERS) + 2 + 2,
+              "VntOpponentRecord must have no padding");
+
 static uint64_t vnt_mix(uint64_t value) {
   value += UINT64_C(0x9e3779b97f4a7c15);
   value = (value ^ (value >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
@@ -1378,6 +1410,8 @@ typedef struct VntDistillThread {
   double explore;
   int explore_bag;
   FILE *records_out;
+  // Each decision's opponent record (VntOpponentRecord), or NULL.
+  FILE *opponent_out;
   const char *out;
   // Shared progress, for the log.
   atomic_long *rows_written;
@@ -1399,6 +1433,13 @@ static void *vnt_distill_thread(void *arg) {
   VntDistillRecord *records =
       malloc_or_die(sizeof(VntDistillRecord) * VNT_DISTILL_CANDIDATES);
   ValueNetHistory histories[2];
+  // Each player's last move: the leave it kept, flags, score and tiles.
+  VntOpponentRecord last[2];
+  const int ld_size = ld_get_size(game_get_ld(args->start_game));
+  if (ld_size > VNT_OPPONENT_LETTERS) {
+    log_fatal("opponent records hold %d letters, not %d", VNT_OPPONENT_LETTERS,
+              ld_size);
+  }
   uint64_t rng =
       vnt_mix(args->seed ^ UINT64_C(0xd1571d) ^ (uint64_t)args->first_game);
   for (long game_idx = args->first_game; game_idx < args->games;
@@ -1409,6 +1450,7 @@ static void *vnt_distill_thread(void *arg) {
     draw_starting_racks(game);
     value_net_history_reset(&histories[0]);
     value_net_history_reset(&histories[1]);
+    memset(last, 0, sizeof(last));
     for (int turn = 0; !game_over(game) && turn < VNT_MAX_TURNS; turn++) {
       const int seat = game_get_player_on_turn_index(game);
       move_list_reset(list);
@@ -1477,10 +1519,57 @@ static void *vnt_distill_thread(void *arg) {
                    args->records_out) != (size_t)count) {
           log_fatal("could not write %s", args->out);
         }
+        if (args->opponent_out != NULL) {
+          VntOpponentRecord opponent = last[1 - seat];
+          opponent.game_id = (uint32_t)game_idx;
+          opponent.turn = (uint16_t)turn;
+          const Rack *opponent_rack =
+              player_get_rack(game_get_player(game, 1 - seat));
+          for (int letter = 0; letter < ld_size; letter++) {
+            opponent.rack[letter] =
+                (uint8_t)rack_get_letter(opponent_rack, letter);
+          }
+          if (fwrite(&opponent, sizeof(opponent), 1, args->opponent_out) != 1) {
+            log_fatal("could not write the opponent records of %s", args->out);
+          }
+        }
         atomic_fetch_add(args->rows_written, count);
       }
       Move move;
       move_copy(&move, move_list_get_move(list, chosen));
+      if (args->opponent_out != NULL) {
+        // The mover's leave: its rack less the tiles this move uses.
+        Rack leave;
+        rack_copy(&leave, player_get_rack(game_get_player(game, seat)));
+        const game_event_t move_type = move_get_type(&move);
+        if (move_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+            move_type == GAME_EVENT_EXCHANGE) {
+          for (int tile_idx = 0; tile_idx < move_get_tiles_length(&move);
+               tile_idx++) {
+            MachineLetter ml = move_get_tile(&move, tile_idx);
+            if (ml == PLAYED_THROUGH_MARKER) {
+              continue;
+            }
+            rack_take_letter(&leave,
+                             get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+          }
+        }
+        VntOpponentRecord *kept = &last[seat];
+        memset(kept, 0, sizeof(*kept));
+        for (int letter = 0; letter < ld_size; letter++) {
+          kept->leave[letter] = (uint8_t)rack_get_letter(&leave, letter);
+        }
+        kept->flags = VNT_OPPONENT_MOVED;
+        if (move_type == GAME_EVENT_EXCHANGE) {
+          kept->flags |= VNT_OPPONENT_EXCHANGE;
+        } else if (move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          kept->flags |= VNT_OPPONENT_PASS;
+        } else if (move_get_tiles_played(&move) == RACK_SIZE) {
+          kept->flags |= VNT_OPPONENT_BINGO;
+        }
+        kept->last_score = (int16_t)equity_to_int(move_get_score(&move));
+        kept->last_tiles = (uint16_t)move_get_tiles_played(&move);
+      }
       value_net_history_record_opponent_move(&histories[1 - seat], &move);
       play_move(&move, game, NULL);
     }
@@ -1515,7 +1604,8 @@ static void *vnt_distill_thread(void *arg) {
 // that while the bag holds more than explore_bag= tiles (default 60), and
 // otherwise with probability explore= (default 0.05), it is drawn by softmax
 // over static equity with temperature temp= points (default 1). With an
-// empty bag (not recorded), the top static move.
+// empty bag (not recorded), the top static move. opp=1 also writes each
+// recorded decision's opponent rack and kept leave (VntOpponentRecord).
 static void vnt_distill(const StringSplitter *fields) {
   if (string_splitter_get_number_of_items(fields) < 9) {
     log_fatal("distill needs at least 8 fields");
@@ -1579,12 +1669,22 @@ static void vnt_distill(const StringSplitter *fields) {
                              : string_duplicate(out);
     thread_args[thread_idx].records_out = fopen_or_die(path, "wb");
     free(path);
+    thread_args[thread_idx].opponent_out = NULL;
+    if (vnt_option_double(fields, 9, "opp", 0, 0.0) > 0) {
+      path = threads > 1 ? get_formatted_string("%s.t%d.opp", out, thread_idx)
+                         : get_formatted_string("%s.opp", out);
+      thread_args[thread_idx].opponent_out = fopen_or_die(path, "wb");
+      free(path);
+    }
     cpthread_create(&thread_ids[thread_idx], vnt_distill_thread,
                     &thread_args[thread_idx]);
   }
   for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
     cpthread_join(thread_ids[thread_idx]);
     (void)fclose(thread_args[thread_idx].records_out);
+    if (thread_args[thread_idx].opponent_out != NULL) {
+      (void)fclose(thread_args[thread_idx].opponent_out);
+    }
   }
   const double seconds = (double)(ctimer_monotonic_ns() - args.start_ns) / 1e9;
   printf("distill worker=%ld done games=%ld rows=%ld rows_per_s=%.0f\n", worker,
