@@ -105,9 +105,11 @@ def _norm(p, x):
     return out.astype(x.dtype)
 
 
-def forward(params, board, scalars, heads, dtype=mx.float16):
+def forward(params, board, scalars, heads, dtype=mx.float16,
+            return_hidden=False):
     """board (B, 85, 225), scalars (B, 72) -> value, spread logit (float32;
-    the spread output is its tanh)."""
+    the spread output is its tanh), or with return_hidden the hidden vector
+    the output heads read (B, hidden), float32."""
     p = tree_map(lambda a: a.astype(dtype), params)
     board, scalars = board.astype(dtype), scalars.astype(dtype)
     batch = board.shape[0]
@@ -131,6 +133,8 @@ def forward(params, board, scalars, heads, dtype=mx.float16):
         x = x + _linear(block["fc2"], mx.erf(hidden * 0.7071067811865476)
                         * hidden * 0.5 + hidden * 0.5)
     hidden = mx.maximum(_linear(p["fc1"], _norm(p["ln_f"], x[:, 0])), 0)
+    if return_hidden:
+        return hidden.astype(mx.float32)
     probs = mx.softmax(_linear(p["heads"]["wdl"], hidden).astype(mx.float32),
                        axis=-1)
     spread = _linear(p["heads"]["spread"], hidden).astype(mx.float32)
