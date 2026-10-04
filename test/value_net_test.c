@@ -2814,6 +2814,124 @@ static void vnt_devices(const StringSplitter *fields) {
   error_stack_destroy(error_stack);
 }
 
+typedef struct VntPlayerWorker {
+  ValueNetPlayer *player;
+  int rows;
+  const float *board;
+  const float *scalars;
+  float *values;
+  float *spreads;
+  atomic_bool *stop;
+  int64_t evaluated;
+} VntPlayerWorker;
+
+static void *vnt_player_worker(void *arg) {
+  VntPlayerWorker *worker = arg;
+  while (!atomic_load(worker->stop)) {
+    value_net_player_evaluate_rows(worker->player, worker->rows, worker->board,
+                                   worker->scalars, worker->values,
+                                   worker->spreads);
+    worker->evaluated += worker->rows;
+  }
+  return NULL;
+}
+
+// "playerthroughput:<dir>:<backend>:<parity_dir>:<seconds>:<threads>:<rows>":
+// rows per second through value_net_player_evaluate_rows (the games' path,
+// with its routing between engines) from threads threads, each calling with
+// rows rows (the parity rows tiled), for seconds after a warm-up call.
+static void vnt_player_throughput(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 7) {
+    log_fatal("playerthroughput needs 6 fields, got %d",
+              (int)string_splitter_get_number_of_items(fields) - 1);
+  }
+  const char *dir = string_splitter_get_item(fields, 1);
+  const char *backend_name = string_splitter_get_item(fields, 2);
+  const char *parity_dir = string_splitter_get_item(fields, 3);
+  const double seconds = strtod(string_splitter_get_item(fields, 4), NULL);
+  const int threads =
+      (int)strtol(string_splitter_get_item(fields, 5), NULL, 10);
+  const int rows = (int)strtol(string_splitter_get_item(fields, 6), NULL, 10);
+  if (threads < 1 || threads > VNT_MAX_THROUGHPUT_THREADS || rows < 1 ||
+      rows > VALUE_NET_MAX_GPU_ROWS) {
+    log_fatal("playerthroughput needs 1..%d threads and 1..%d rows",
+              VNT_MAX_THROUGHPUT_THREADS, VALUE_NET_MAX_GPU_ROWS);
+  }
+  ErrorStack *error_stack = error_stack_create();
+  ValueNetPlayer *player = value_net_player_create(
+      dir, vnt_parse_backend(backend_name), 0, 1.0, 0.5, 100.0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("playerthroughput setup failed");
+  }
+  char *path = get_formatted_string("%s/board.f32", parity_dir);
+  float *parity_board = vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS *
+                                                  VALUE_NET_BOARD_FLOATS);
+  free(path);
+  path = get_formatted_string("%s/scalars.f32", parity_dir);
+  float *parity_scalars =
+      vnt_read_floats(path, (size_t)VALUE_NET_PARITY_ROWS * VALUE_NET_SCALARS);
+  free(path);
+  float *board =
+      malloc_or_die(sizeof(float) * (size_t)rows * VALUE_NET_BOARD_FLOATS);
+  float *scalars =
+      malloc_or_die(sizeof(float) * (size_t)rows * VALUE_NET_SCALARS);
+  for (int row = 0; row < rows; row++) {
+    const int source = row % VALUE_NET_PARITY_ROWS;
+    memcpy(board + ((size_t)row * VALUE_NET_BOARD_FLOATS),
+           parity_board + ((size_t)source * VALUE_NET_BOARD_FLOATS),
+           sizeof(float) * VALUE_NET_BOARD_FLOATS);
+    memcpy(scalars + ((size_t)row * VALUE_NET_SCALARS),
+           parity_scalars + ((size_t)source * VALUE_NET_SCALARS),
+           sizeof(float) * VALUE_NET_SCALARS);
+  }
+  float *warm = malloc_or_die(sizeof(float) * 2 * (size_t)rows);
+  value_net_player_evaluate_rows(player, rows, board, scalars, warm,
+                                 warm + rows);
+  free(warm);
+  atomic_bool stop;
+  atomic_init(&stop, false);
+  cpthread_t thread_ids[VNT_MAX_THROUGHPUT_THREADS];
+  VntPlayerWorker workers[VNT_MAX_THROUGHPUT_THREADS];
+  const int64_t start = ctimer_monotonic_ns();
+  for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
+    workers[thread_idx] = (VntPlayerWorker){
+        .player = player,
+        .rows = rows,
+        .board = board,
+        .scalars = scalars,
+        .values = malloc_or_die(sizeof(float) * (size_t)rows),
+        .spreads = malloc_or_die(sizeof(float) * (size_t)rows),
+        .stop = &stop,
+    };
+    cpthread_create(&thread_ids[thread_idx], vnt_player_worker,
+                    &workers[thread_idx]);
+  }
+  while ((double)(ctimer_monotonic_ns() - start) / 1e9 < seconds) {
+    struct timespec pause = {.tv_sec = 0, .tv_nsec = 50000000};
+    nanosleep(&pause, NULL);
+  }
+  atomic_store(&stop, true);
+  int64_t evaluated = 0;
+  for (int thread_idx = 0; thread_idx < threads; thread_idx++) {
+    cpthread_join(thread_ids[thread_idx]);
+    evaluated += workers[thread_idx].evaluated;
+    free(workers[thread_idx].values);
+    free(workers[thread_idx].spreads);
+  }
+  const double elapsed = (double)(ctimer_monotonic_ns() - start) / 1e9;
+  printf("playerthroughput backend=%s threads=%d rows=%d rows_per_s=%.0f "
+         "seconds=%.1f\n",
+         backend_name, threads, rows, (double)evaluated / elapsed, elapsed);
+  (void)fflush(stdout);
+  free(board);
+  free(scalars);
+  free(parity_board);
+  free(parity_scalars);
+  value_net_player_destroy(player);
+  error_stack_destroy(error_stack);
+}
+
 // "throughput:<dir>:<parity_dir>:<fp32|fp16>[:<threads>[:<concurrency>]]":
 // Metal rows per second by batch size, the parity rows tiled to fill each
 // batch, with threads callers (default 1) sharing one ValueNetMetal of
@@ -3089,6 +3207,8 @@ void value_net_test_run_spec(const char *spec) {
                  string_splitter_get_item(fields, 2));
   } else if (strings_equal(mode, "simbench")) {
     vnt_simbench(fields);
+  } else if (strings_equal(mode, "playerthroughput")) {
+    vnt_player_throughput(fields);
   } else if (strings_equal(mode, "devices")) {
     vnt_devices(fields);
   } else if (strings_equal(mode, "cputhroughput") && num_fields == 5) {
