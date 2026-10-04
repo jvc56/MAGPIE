@@ -77,6 +77,16 @@ typedef struct PlayChooserStrategy {
   // enumerate are few; it is not run after an exchange. Other positions draw
   // the opponent's rack uniformly. 0 = always infer.
   int sim_inference_max_leave;
+  // When set (with the candidate value net), the sim also draws the
+  // opponent's rack from an opponent-leave head (SimArgs.
+  // opponent_leave_odds): sim_leave_odds_evaluate (context
+  // sim_leave_odds_context) reads the net's best candidate's row and the
+  // opponent's last move from rollout_value_net_own_history. With inferred
+  // leaves too, it supplies sim_leave_odds_share of the draws that are not
+  // uniform; sim_inference_uniform_mix applies to it as well.
+  value_net_rack_odds_fn sim_leave_odds_evaluate;
+  void *sim_leave_odds_context;
+  double sim_leave_odds_share;
   // Total SIM iterations per decision, stopping before the time budget if
   // reached; 0 = no limit.
   uint64_t sim_max_iterations;

@@ -7,6 +7,7 @@
 #include "../ent/game_history.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
+#include "../ent/leave_odds.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
@@ -22,6 +23,13 @@ typedef void (*value_net_rows_fn)(void *context, int rows, const float *board,
                                   const float *scalars, float *values,
                                   float *spreads);
 
+// The opponent-leave head (value_net.h's value_net_rack_head) for rows
+// input rows with VALUE_NET_RACK_SIDE side inputs each: theta receives
+// VALUE_NET_RACK_LETTERS log odds per row; context is the evaluator.
+typedef void (*value_net_rack_odds_fn)(void *context, int rows,
+                                       const float *board, const float *scalars,
+                                       const float *side, float *theta);
+
 typedef struct SimArgs {
   int num_plies;
   const Game *game;
@@ -34,6 +42,13 @@ typedef struct SimArgs {
   // from the unseen tiles instead of from the inferred leaves with this
   // probability, so a leave the inference ruled out is still possible.
   double inference_uniform_mix;
+  // When set, a learned distribution over the leave the opponent kept from
+  // their last move: an iteration draws their rack as a leave from it plus
+  // tiles from the bag. With inferred leaves too (use_inference), it supplies
+  // opponent_leave_odds_share of the draws that are not uniform. Owned by
+  // the caller; inference_uniform_mix applies to it as well.
+  const LeaveOdds *opponent_leave_odds;
+  double opponent_leave_odds_share;
   bool use_heat_map;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
@@ -126,6 +141,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->game = game;
   sim_args->use_inference = sim_with_inference;
   sim_args->inference_uniform_mix = 0.0;
+  sim_args->opponent_leave_odds = NULL;
+  sim_args->opponent_leave_odds_share = 0.0;
   sim_args->use_heat_map = use_heat_map;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;

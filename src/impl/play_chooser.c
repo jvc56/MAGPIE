@@ -19,6 +19,7 @@
 #include "../ent/game_timer.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
+#include "../ent/leave_odds.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -256,6 +257,8 @@ struct PlayChooser {
   Game *pool_scratch;
   // The opponent rack inference for SIM, created on first use.
   InferenceResults *inference_results;
+  // The opponent-leave distribution for the current sim.
+  LeaveOdds leave_odds;
   // The candidates simmed and their net utilities.
   Move *kept_moves;
   double *kept_utility;
@@ -684,6 +687,45 @@ static bool play_chooser_fill_inference_args(
   return true;
 }
 
+// Prepares the chooser's leave_odds from the opponent-leave head, reading
+// the row of the candidate its value net rated best (from the candidate
+// filter) and the opponent's last move. Returns false when there is no
+// leave to model (no last move, a pass or a bingo) or no filter row.
+static bool play_chooser_prepare_leave_odds(PlayChooser *play_chooser,
+                                            const Game *game) {
+  const PlayChooserStrategy *strategy = &play_chooser->strategy;
+  const ValueNetHistory *history = strategy->rollout_value_net_own_history;
+  if (strategy->sim_leave_odds_evaluate == NULL || history == NULL ||
+      play_chooser->pool_list == NULL ||
+      move_list_get_count(play_chooser->pool_list) == 0) {
+    return false;
+  }
+  const int size = value_net_rack_leave_size(history);
+  const int letters = ld_get_size(game_get_ld(game));
+  if (size < 1 || letters != VALUE_NET_RACK_LETTERS) {
+    return false;
+  }
+  const int best = play_chooser->pool_order[0];
+  float side[VALUE_NET_RACK_SIDE];
+  value_net_rack_side_features(history, side);
+  float theta[VALUE_NET_RACK_LETTERS];
+  strategy->sim_leave_odds_evaluate(
+      strategy->sim_leave_odds_context, 1,
+      play_chooser->pool_board + ((size_t)best * VALUE_NET_BOARD_FLOATS),
+      play_chooser->pool_scalars + ((size_t)best * VALUE_NET_SCALARS), side,
+      theta);
+  // The tiles unseen by the player on turn: the bag and the opponent's rack.
+  int unseen[MAX_ALPHABET_SIZE] = {0};
+  bag_increment_unseen_count(game_get_bag(game), unseen);
+  const Rack *opponent_rack = player_get_rack(
+      game_get_player(game, 1 - game_get_player_on_turn_index(game)));
+  for (int letter = 0; letter < letters; letter++) {
+    unseen[letter] += rack_get_letter(opponent_rack, letter);
+  }
+  return leave_odds_prepare(&play_chooser->leave_odds, unseen, theta, letters,
+                            size);
+}
+
 // Chooses the on-turn player's best move by simulation, returning it in
 // out_move. out_simulated (optional) reports whether a sim actually ran: a
 // single-candidate position is short-circuited to that move WITHOUT simming, so
@@ -769,8 +811,12 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   sim_args.rollout_value_net_batch = strategy->rollout_value_net_batch;
   sim_args.rollout_value_net_plies = strategy->rollout_value_net_plies;
   sim_args.rollout_value_net_leaf = strategy->rollout_value_net_leaf;
+  const bool use_odds =
+      net_filter && play_chooser_prepare_leave_odds(play_chooser, game);
   sim_args.inference_uniform_mix =
-      use_inference ? strategy->sim_inference_uniform_mix : 0.0;
+      use_inference || use_odds ? strategy->sim_inference_uniform_mix : 0.0;
+  sim_args.opponent_leave_odds = use_odds ? &play_chooser->leave_odds : NULL;
+  sim_args.opponent_leave_odds_share = strategy->sim_leave_odds_share;
   if (strategy->rollout_value_net_history != NULL) {
     sim_args.rollout_value_net_history = *strategy->rollout_value_net_history;
   }

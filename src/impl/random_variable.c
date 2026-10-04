@@ -12,6 +12,7 @@
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
+#include "../ent/leave_odds.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -476,8 +477,11 @@ typedef struct Simmer {
   const WinPct *win_pcts;
   bool use_inference;
   bool use_alias_method;
-  // SimArgs.inference_uniform_mix.
+  // SimArgs.inference_uniform_mix, opponent_leave_odds and
+  // opponent_leave_odds_share.
   double inference_uniform_mix;
+  const LeaveOdds *leave_odds;
+  double leave_odds_share;
   const InferenceResults *inference_results;
   int num_threads;
   // In PGP mode, each autoplay worker has its own simmer with num_threads
@@ -697,10 +701,30 @@ static int sim_start_iteration(const Simmer *simmer, Game *game,
   game_seed(game, seed);
   const int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
   bool set_player_off_turn_rack_with_known_opp_rack = false;
-  if (simmer->use_alias_method && simmer->inference_uniform_mix > 0.0 &&
+  // A uniform draw (inference_uniform_mix), else a leave from the learned
+  // odds (all of the rest without inferred leaves, else
+  // leave_odds_share of it), else an inferred leave. Coins are drawn only
+  // for choices that are open, so a sim without them is unchanged.
+  const bool has_odds = simmer->leave_odds != NULL;
+  const bool has_choice = simmer->use_alias_method || has_odds;
+  bool use_odds = false;
+  if (has_choice && simmer->inference_uniform_mix > 0.0 &&
       (double)prng_get_random_number(prng, XOSHIRO_MAX) / (double)XOSHIRO_MAX <
           simmer->inference_uniform_mix) {
     set_player_off_turn_rack_with_known_opp_rack = true;
+  } else if (has_odds && (!simmer->use_alias_method ||
+                          (simmer->leave_odds_share > 0.0 &&
+                           (double)prng_get_random_number(prng, XOSHIRO_MAX) /
+                                   (double)XOSHIRO_MAX <
+                               simmer->leave_odds_share))) {
+    use_odds = true;
+  }
+  if (use_odds) {
+    Rack leave;
+    leave_odds_sample(simmer->leave_odds, prng, &leave);
+    set_random_rack(game, player_off_turn_index, &leave);
+  } else if (set_player_off_turn_rack_with_known_opp_rack) {
+    // Drawn below.
   } else if (simmer->use_alias_method) {
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
@@ -1308,6 +1332,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
   simmer->inference_uniform_mix = sim_args->inference_uniform_mix;
+  simmer->leave_odds = sim_args->opponent_leave_odds;
+  simmer->leave_odds_share = sim_args->opponent_leave_odds_share;
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
@@ -1367,6 +1393,8 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->win_pcts = sim_args->win_pcts;
   simmer->use_inference = sim_args->use_inference;
   simmer->inference_uniform_mix = sim_args->inference_uniform_mix;
+  simmer->leave_odds = sim_args->opponent_leave_odds;
+  simmer->leave_odds_share = sim_args->opponent_leave_odds_share;
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));

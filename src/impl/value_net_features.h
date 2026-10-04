@@ -17,6 +17,17 @@ void value_net_features_for_move(const Game *game, const Move *move,
                                  const ValueNetHistory *history, Game *scratch,
                                  float *board_row, float *scalars_row);
 
+// The opponent-leave head's side inputs (VALUE_NET_RACK_SIDE floats, see
+// value_net_defs.h) from the history of the player on turn: the tiles the
+// opponent's last move played or exchanged by tile type over 7 (a blank as
+// the blank), its score over 100, and whether it was an exchange, a bingo,
+// or there was none.
+void value_net_rack_side_features(const ValueNetHistory *history, float *side);
+
+// How many tiles the opponent kept from their last move (7 less the tiles
+// it played or exchanged), or -1 when there was none or it was a pass.
+int value_net_rack_leave_size(const ValueNetHistory *history);
+
 // The spread in points of the player on turn in game just after making
 // move, from that player's side (the input row's spread scalar).
 double value_net_spread_after_move(const Game *game, const Move *move);

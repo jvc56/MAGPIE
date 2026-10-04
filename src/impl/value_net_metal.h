@@ -28,4 +28,8 @@ void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
                               const float *board, const float *scalars,
                               float *value, float *spread);
 
+// As value_net_hidden_cpu (value_net.h), on the GPU.
+void value_net_metal_hidden(ValueNetMetal *metal, int rows, const float *board,
+                            const float *scalars, float *hidden);
+
 #endif

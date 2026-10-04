@@ -27,6 +27,13 @@ enum {
   // run in chunks. Unbounded batches of 1,024+ rows exhausted a 16 GB
   // machine.
   VALUE_NET_MAX_GPU_ROWS = 256,
+  // The optional opponent-leave head (value_net.h): one odds logit per tile
+  // type, read from the head's hidden vector and these side inputs about
+  // the opponent's last move: tiles it played or exchanged by tile type,
+  // over 7; its score over 100; and whether it was an exchange, a bingo,
+  // or there was none.
+  VALUE_NET_RACK_LETTERS = VALUE_NET_TILE_TYPES,
+  VALUE_NET_RACK_SIDE = VALUE_NET_TILE_TYPES + 4,
 };
 
 #endif

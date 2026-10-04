@@ -58,6 +58,12 @@ struct ValueNet {
   const float *spread_bias;
   const float *wdl_weight;
   const float *wdl_bias;
+  // The optional opponent-leave head (rack_units 0 when absent).
+  int rack_units;
+  const float *rack_fc_weight;
+  const float *rack_fc_bias;
+  const float *rack_out_weight;
+  const float *rack_out_bias;
 };
 
 // Finds "name": "<name>" in the manifest and reads the offset_floats and
@@ -93,8 +99,7 @@ static bool manifest_find(const char *manifest, const char *name,
 
 // Reads "key": <integer> from the manifest's hparams object. Returns false
 // when it is missing.
-static bool manifest_hparam(const char *manifest, const char *key,
-                            int *value) {
+static bool manifest_hparam(const char *manifest, const char *key, int *value) {
   const char *hparams = strstr(manifest, "\"hparams\"");
   if (hparams == NULL) {
     return false;
@@ -135,9 +140,8 @@ static void value_net_read_shape(ValueNet *net, const char *manifest,
   }
   if (shape->model_dim < 1 || shape->model_dim > VALUE_NET_MAX_MODEL_DIM ||
       shape->layers < 1 || shape->layers > VALUE_NET_MAX_LAYERS ||
-      shape->heads < 1 || shape->model_dim % shape->heads != 0 ||
-      ff_mult < 1 || ff_mult > VALUE_NET_MAX_FF_MULT ||
-      shape->head_hidden < 1 ||
+      shape->heads < 1 || shape->model_dim % shape->heads != 0 || ff_mult < 1 ||
+      ff_mult > VALUE_NET_MAX_FF_MULT || shape->head_hidden < 1 ||
       shape->head_hidden > VALUE_NET_MAX_MODEL_DIM) {
     error_stack_push(
         error_stack, ERROR_STATUS_VALUE_NET_MALFORMED_MANIFEST,
@@ -310,6 +314,22 @@ ValueNet *value_net_create(const char *dir, ErrorStack *error_stack) {
                  &net->wdl_weight, error_stack);
   value_net_bind(net, manifest, "heads.wdl.bias", VALUE_NET_WDL, &net->wdl_bias,
                  error_stack);
+  int rack_units = 0;
+  if (manifest_hparam(manifest, "rack_head_units", &rack_units) &&
+      rack_units > 0) {
+    const size_t rack_in = hidden + VALUE_NET_RACK_SIDE;
+    net->rack_units = rack_units;
+    value_net_bind(net, manifest, "rack_head.fc.weight",
+                   (size_t)rack_units * rack_in, &net->rack_fc_weight,
+                   error_stack);
+    value_net_bind(net, manifest, "rack_head.fc.bias", (size_t)rack_units,
+                   &net->rack_fc_bias, error_stack);
+    value_net_bind(net, manifest, "rack_head.out.weight",
+                   VALUE_NET_RACK_LETTERS * (size_t)rack_units,
+                   &net->rack_out_weight, error_stack);
+    value_net_bind(net, manifest, "rack_head.out.bias", VALUE_NET_RACK_LETTERS,
+                   &net->rack_out_bias, error_stack);
+  }
   net->manifest = manifest;
   if (!error_stack_is_empty(error_stack)) {
     value_net_destroy(net);
@@ -503,7 +523,7 @@ static void embed(const ValueNet *net, const float *board, const float *scalars,
 static void value_net_evaluate_row(const ValueNet *net, const float *board,
                                    const float *scalars,
                                    ValueNetScratch *scratch, float *value,
-                                   float *spread) {
+                                   float *spread, float *hidden_out) {
   const ValueNetShape *shape = &net->shape;
   const int tokens = VALUE_NET_TOKENS;
   const int dim = shape->model_dim;
@@ -512,8 +532,8 @@ static void value_net_evaluate_row(const ValueNet *net, const float *board,
   embed(net, board, scalars, scratch->tokens);
   for (int layer = 0; layer < shape->layers; layer++) {
     const ValueNetBlock *block = &net->blocks[layer];
-    layer_norm(scratch->tokens, tokens, dim, block->ln1_weight,
-               block->ln1_bias, scratch->normed);
+    layer_norm(scratch->tokens, tokens, dim, block->ln1_weight, block->ln1_bias,
+               scratch->normed);
     linear(scratch->normed, tokens, dim, block->qkv_weight, block->qkv_bias,
            3 * dim, scratch->qkv);
     attention(shape, scratch);
@@ -522,8 +542,8 @@ static void value_net_evaluate_row(const ValueNet *net, const float *board,
     for (int idx = 0; idx < tokens * dim; idx++) {
       scratch->tokens[idx] += scratch->normed[idx];
     }
-    layer_norm(scratch->tokens, tokens, dim, block->ln2_weight,
-               block->ln2_bias, scratch->normed);
+    layer_norm(scratch->tokens, tokens, dim, block->ln2_weight, block->ln2_bias,
+               scratch->normed);
     linear(scratch->normed, tokens, dim, block->fc1_weight, block->fc1_bias,
            ff_dim, scratch->hidden);
     for (int idx = 0; idx < tokens * ff_dim; idx++) {
@@ -543,6 +563,9 @@ static void value_net_evaluate_row(const ValueNet *net, const float *board,
     if (head[idx] < 0.0F) {
       head[idx] = 0.0F;
     }
+  }
+  if (hidden_out != NULL) {
+    memcpy(hidden_out, head, sizeof(float) * (size_t)hidden);
   }
   if (value != NULL) {
     float logits[VALUE_NET_WDL];
@@ -570,8 +593,9 @@ static void value_net_evaluate_row(const ValueNet *net, const float *board,
   }
 }
 
-void value_net_evaluate_cpu(const ValueNet *net, int rows, const float *board,
-                            const float *scalars, float *value, float *spread) {
+static void value_net_run_cpu(const ValueNet *net, int rows, const float *board,
+                              const float *scalars, float *value, float *spread,
+                              float *hidden) {
   const size_t tokens = VALUE_NET_TOKENS;
   const size_t dim = (size_t)net->shape.model_dim;
   const size_t head_dim = (size_t)net->shape.head_dim;
@@ -589,10 +613,13 @@ void value_net_evaluate_cpu(const ValueNet *net, int rows, const float *board,
       .head = malloc_or_die(sizeof(float) * (size_t)net->shape.head_hidden),
   };
   for (int row = 0; row < rows; row++) {
-    value_net_evaluate_row(net, board + ((size_t)row * VALUE_NET_BOARD_FLOATS),
-                           scalars + ((size_t)row * VALUE_NET_SCALARS),
-                           &scratch, value != NULL ? value + row : NULL,
-                           spread != NULL ? spread + row : NULL);
+    value_net_evaluate_row(
+        net, board + ((size_t)row * VALUE_NET_BOARD_FLOATS),
+        scalars + ((size_t)row * VALUE_NET_SCALARS), &scratch,
+        value != NULL ? value + row : NULL,
+        spread != NULL ? spread + row : NULL,
+        hidden != NULL ? hidden + ((size_t)row * (size_t)net->shape.head_hidden)
+                       : NULL);
   }
   free(scratch.tokens);
   free(scratch.normed);
@@ -604,4 +631,39 @@ void value_net_evaluate_cpu(const ValueNet *net, int rows, const float *board,
   free(scratch.values);
   free(scratch.cls);
   free(scratch.head);
+}
+
+void value_net_evaluate_cpu(const ValueNet *net, int rows, const float *board,
+                            const float *scalars, float *value, float *spread) {
+  value_net_run_cpu(net, rows, board, scalars, value, spread, NULL);
+}
+
+void value_net_hidden_cpu(const ValueNet *net, int rows, const float *board,
+                          const float *scalars, float *hidden) {
+  value_net_run_cpu(net, rows, board, scalars, NULL, NULL, hidden);
+}
+
+bool value_net_has_rack_head(const ValueNet *net) {
+  return net->rack_units > 0;
+}
+
+void value_net_rack_head(const ValueNet *net, const float *hidden,
+                         const float *side, float *theta) {
+  const int head_hidden = net->shape.head_hidden;
+  const int rack_in = head_hidden + VALUE_NET_RACK_SIDE;
+  float *input = malloc_or_die(sizeof(float) * (size_t)rack_in);
+  float *units = malloc_or_die(sizeof(float) * (size_t)net->rack_units);
+  memcpy(input, hidden, sizeof(float) * (size_t)head_hidden);
+  memcpy(input + head_hidden, side, sizeof(float) * VALUE_NET_RACK_SIDE);
+  linear(input, 1, rack_in, net->rack_fc_weight, net->rack_fc_bias,
+         net->rack_units, units);
+  for (int idx = 0; idx < net->rack_units; idx++) {
+    if (units[idx] < 0.0F) {
+      units[idx] = 0.0F;
+    }
+  }
+  linear(units, 1, net->rack_units, net->rack_out_weight, net->rack_out_bias,
+         VALUE_NET_RACK_LETTERS, theta);
+  free(input);
+  free(units);
 }

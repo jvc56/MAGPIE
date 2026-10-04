@@ -37,6 +37,8 @@ typedef struct ValueNetMetalSlot {
   void *scalars_input;
   void *value_output;
   void *spread_output;
+  // The head's hidden vector, read only when asked for.
+  void *hidden_output;
   void *board_buffer;
   void *scalars_buffer;
 } ValueNetMetalSlot;
@@ -44,6 +46,8 @@ typedef struct ValueNetMetalSlot {
 struct ValueNetMetal {
   void *device;
   int concurrency;
+  // The head's hidden width (ValueNetShape.head_hidden).
+  int hidden_dim;
   // The slots not running an evaluation, under mutex; callers wait on
   // slot_freed while every slot is busy.
   cpthread_mutex_t mutex;
@@ -294,7 +298,8 @@ static MPSGraphTensor *builder_block(MetalBuilder *builder, MPSGraphTensor *x,
 
 static void builder_build(MetalBuilder *builder, MPSGraphTensor *board,
                           MPSGraphTensor *scalars, MPSGraphTensor **value,
-                          MPSGraphTensor **spread) {
+                          MPSGraphTensor **spread,
+                          MPSGraphTensor **hidden_output) {
   MPSGraph *graph = builder->graph;
   const MPSDataType type = builder->data_type;
   const int dim = builder->shape->model_dim;
@@ -376,6 +381,9 @@ static void builder_build(MetalBuilder *builder, MPSGraphTensor *board,
       reLUWithTensor:builder_linear(builder, normed, "fc1", dim,
                                     hidden_dim)
                 name:nil];
+  *hidden_output = [graph castTensor:hidden
+                              toType:MPSDataTypeFloat32
+                                name:nil];
   MPSGraphTensor *logits = builder_linear(builder, hidden, "heads.wdl",
                                           hidden_dim, VALUE_NET_WDL);
   MPSGraphTensor *probabilities = [graph softMaxWithTensor:logits
@@ -430,10 +438,11 @@ static bool metal_slot_create(ValueNetMetalSlot *slot, id<MTLDevice> device,
   };
   MPSGraphTensor *value = nil;
   MPSGraphTensor *spread = nil;
+  MPSGraphTensor *hidden = nil;
   builder_build(&builder,
                 [graph castTensor:board_input toType:type name:nil],
                 [graph castTensor:scalars_input toType:type name:nil],
-                &value, &spread);
+                &value, &spread, &hidden);
   if (!builder.ok) {
     return false;
   }
@@ -443,6 +452,7 @@ static bool metal_slot_create(ValueNetMetalSlot *slot, id<MTLDevice> device,
   slot->scalars_input = (__bridge_retained void *)scalars_input;
   slot->value_output = (__bridge_retained void *)value;
   slot->spread_output = (__bridge_retained void *)spread;
+  slot->hidden_output = (__bridge_retained void *)hidden;
   slot->board_buffer = (__bridge_retained void *)[device
       newBufferWithLength:sizeof(float) * (size_t)VALUE_NET_MAX_GPU_ROWS *
                           VALUE_NET_BOARD_FLOATS
@@ -458,6 +468,7 @@ static void metal_slot_destroy(ValueNetMetalSlot *slot) {
   // Transfer ownership back to ARC, which releases each object.
   (void)(__bridge_transfer id)slot->scalars_buffer;
   (void)(__bridge_transfer id)slot->board_buffer;
+  (void)(__bridge_transfer id)slot->hidden_output;
   (void)(__bridge_transfer id)slot->spread_output;
   (void)(__bridge_transfer id)slot->value_output;
   (void)(__bridge_transfer id)slot->scalars_input;
@@ -483,6 +494,7 @@ ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
             ? concurrency
             : VALUE_NET_METAL_DEFAULT_CONCURRENCY;
     ValueNetMetal *metal = calloc_or_die(1, sizeof(ValueNetMetal));
+    metal->hidden_dim = value_net_get_shape(net)->head_hidden;
     for (int slot_idx = 0; slot_idx < slots; slot_idx++) {
       if (!metal_slot_create(&metal->slots[slot_idx], device, net, type,
                              error_stack)) {
@@ -515,9 +527,10 @@ void value_net_metal_destroy(ValueNetMetal *metal) {
 // the caller holds: the rows are copied into the slot's buffers and padded
 // (repeating the first row) to a batch size the slot compiles once.
 static void metal_slot_evaluate_chunk(const ValueNetMetalSlot *slot,
-                                      int rows, const float *board,
+                                      int rows, int hidden_dim,
+                                      const float *board,
                                       const float *scalars, float *value,
-                                      float *spread) {
+                                      float *spread, float *hidden) {
   @autoreleasepool {
     int batch = VALUE_NET_METAL_MIN_BATCH;
     while (batch < rows) {
@@ -545,6 +558,18 @@ static void metal_slot_evaluate_chunk(const ValueNetMetalSlot *slot,
         (__bridge MPSGraphTensor *)slot->value_output;
     MPSGraphTensor *spread_output =
         (__bridge MPSGraphTensor *)slot->spread_output;
+    MPSGraphTensor *hidden_output =
+        (__bridge MPSGraphTensor *)slot->hidden_output;
+    NSMutableArray<MPSGraphTensor *> *targets = [NSMutableArray array];
+    if (value != NULL) {
+      [targets addObject:value_output];
+    }
+    if (spread != NULL) {
+      [targets addObject:spread_output];
+    }
+    if (hidden != NULL) {
+      [targets addObject:hidden_output];
+    }
     MPSGraphTensorData *board_feed = [[MPSGraphTensorData alloc]
         initWithMTLBuffer:board_buffer
                     shape:@[
@@ -561,7 +586,7 @@ static void metal_slot_evaluate_chunk(const ValueNetMetalSlot *slot,
                                   board_input : board_feed,
                                   scalars_input : scalars_feed
                                 }
-                        targetTensors:@[ value_output, spread_output ]
+                        targetTensors:targets
                      targetOperations:nil];
     float padded[VALUE_NET_MAX_GPU_ROWS];
     if (value != NULL) {
@@ -572,6 +597,15 @@ static void metal_slot_evaluate_chunk(const ValueNetMetalSlot *slot,
       [[results[spread_output] mpsndarray] readBytes:padded strideBytes:nil];
       memcpy(spread, padded, sizeof(float) * (size_t)rows);
     }
+    if (hidden != NULL) {
+      float *padded_hidden =
+          malloc_or_die(sizeof(float) * (size_t)batch * (size_t)hidden_dim);
+      [[results[hidden_output] mpsndarray] readBytes:padded_hidden
+                                         strideBytes:nil];
+      memcpy(hidden, padded_hidden,
+             sizeof(float) * (size_t)rows * (size_t)hidden_dim);
+      free(padded_hidden);
+    }
   }
 }
 
@@ -579,9 +613,9 @@ int value_net_metal_get_concurrency(const ValueNetMetal *metal) {
   return metal->concurrency;
 }
 
-void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
-                              const float *board, const float *scalars,
-                              float *value, float *spread) {
+static void metal_run(ValueNetMetal *metal, int rows, const float *board,
+                      const float *scalars, float *value, float *spread,
+                      float *hidden) {
   cpthread_mutex_lock(&metal->mutex);
   while (metal->free_count == 0) {
     cpthread_cond_wait(&metal->slot_freed, &metal->mutex);
@@ -595,14 +629,27 @@ void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
                           ? rows - start
                           : VALUE_NET_MAX_GPU_ROWS;
     metal_slot_evaluate_chunk(
-        &metal->slots[slot_idx], chunk,
+        &metal->slots[slot_idx], chunk, metal->hidden_dim,
         board + ((size_t)start * VALUE_NET_BOARD_FLOATS),
         scalars + ((size_t)start * VALUE_NET_SCALARS),
         value != NULL ? value + start : NULL,
-        spread != NULL ? spread + start : NULL);
+        spread != NULL ? spread + start : NULL,
+        hidden != NULL ? hidden + ((size_t)start * (size_t)metal->hidden_dim)
+                       : NULL);
   }
   cpthread_mutex_lock(&metal->mutex);
   metal->free_slots[metal->free_count++] = slot_idx;
   cpthread_cond_signal(&metal->slot_freed);
   cpthread_mutex_unlock(&metal->mutex);
+}
+
+void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
+                              const float *board, const float *scalars,
+                              float *value, float *spread) {
+  metal_run(metal, rows, board, scalars, value, spread, NULL);
+}
+
+void value_net_metal_hidden(ValueNetMetal *metal, int rows, const float *board,
+                            const float *scalars, float *hidden) {
+  metal_run(metal, rows, board, scalars, NULL, NULL, hidden);
 }

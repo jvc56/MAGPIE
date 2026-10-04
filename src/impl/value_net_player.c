@@ -328,3 +328,29 @@ const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,
   }
   return move_list_get_move(list, best);
 }
+
+bool value_net_player_has_rack_head(const ValueNetPlayer *player) {
+  return value_net_has_rack_head(player->net);
+}
+
+void value_net_player_rack_odds(void *context, int rows, const float *board,
+                                const float *scalars, const float *side,
+                                float *theta) {
+  ValueNetPlayer *player = context;
+  if (!value_net_has_rack_head(player->net)) {
+    log_fatal("the value net has no opponent-leave head");
+  }
+  const int hidden_dim = value_net_get_shape(player->net)->head_hidden;
+  float *hidden = malloc_or_die(sizeof(float) * (size_t)rows * hidden_dim);
+  if (player->metal != NULL) {
+    value_net_metal_hidden(player->metal, rows, board, scalars, hidden);
+  } else {
+    value_net_hidden_cpu(player->net, rows, board, scalars, hidden);
+  }
+  for (int row = 0; row < rows; row++) {
+    value_net_rack_head(player->net, hidden + ((size_t)row * hidden_dim),
+                        side + ((size_t)row * VALUE_NET_RACK_SIDE),
+                        theta + ((size_t)row * VALUE_NET_RACK_LETTERS));
+  }
+  free(hidden);
+}

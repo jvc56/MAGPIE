@@ -42,6 +42,17 @@ void value_net_player_evaluate_rows(void *context, int rows, const float *board,
                                     const float *scalars, float *values,
                                     float *spreads);
 
+// Whether the player's net has an opponent-leave head (value_net.h).
+bool value_net_player_has_rack_head(const ValueNetPlayer *player);
+
+// The opponent-leave head's log odds for rows input rows with side inputs
+// (a value_net_rack_odds_fn, context being the ValueNetPlayer): the hidden
+// vectors come from the GPU when the player has it, else the CPU. Safe to
+// call from several threads.
+void value_net_player_rack_odds(void *context, int rows, const float *board,
+                                const float *scalars, const float *side,
+                                float *theta);
+
 // The chosen move for the player on turn in game, whose history (see
 // ValueNetHistory) is history; valid until the next call.
 const Move *value_net_player_choose(ValueNetPlayer *player, const Game *game,

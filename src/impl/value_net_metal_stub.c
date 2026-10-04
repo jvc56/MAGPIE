@@ -39,4 +39,14 @@ void value_net_metal_evaluate(ValueNetMetal *metal, int rows,
   log_fatal("value_net_metal_evaluate called without a Metal backend");
 }
 
+void value_net_metal_hidden(ValueNetMetal *metal, int rows, const float *board,
+                            const float *scalars, float *hidden) {
+  (void)metal;
+  (void)rows;
+  (void)board;
+  (void)scalars;
+  (void)hidden;
+  log_fatal("value_net_metal_hidden called without a Metal backend");
+}
+
 #endif

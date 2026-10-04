@@ -299,3 +299,46 @@ double value_net_final_spread(float spread, double spread_after) {
       fmax(-VNF_MAX_SPREAD_OUTPUT, fmin(VNF_MAX_SPREAD_OUTPUT, (double)spread));
   return spread_after + (VNF_SPREAD_SCALE * atanh(spread_output));
 }
+
+void value_net_rack_side_features(const ValueNetHistory *history, float *side) {
+  memset(side, 0, sizeof(float) * VALUE_NET_RACK_SIDE);
+  if (!history->has_opponent_last_move) {
+    side[VALUE_NET_TILE_TYPES + 3] = 1.0F;
+    return;
+  }
+  const Move *move = &history->opponent_last_move;
+  const game_event_t type = move_get_type(move);
+  if (type == GAME_EVENT_TILE_PLACEMENT_MOVE || type == GAME_EVENT_EXCHANGE) {
+    for (int tile_idx = 0; tile_idx < move_get_tiles_length(move); tile_idx++) {
+      const MachineLetter ml = move_get_tile(move, tile_idx);
+      if (ml == PLAYED_THROUGH_MARKER) {
+        continue;
+      }
+      const MachineLetter letter =
+          get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml;
+      if (letter < VALUE_NET_TILE_TYPES) {
+        side[letter] += 1.0F / (float)RACK_SIZE;
+      }
+    }
+  }
+  side[VALUE_NET_TILE_TYPES] =
+      (float)(equity_to_double(move_get_score(move)) / 100.0);
+  side[VALUE_NET_TILE_TYPES + 1] = type == GAME_EVENT_EXCHANGE ? 1.0F : 0.0F;
+  side[VALUE_NET_TILE_TYPES + 2] =
+      type == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+              move_get_tiles_played(move) == RACK_SIZE
+          ? 1.0F
+          : 0.0F;
+}
+
+int value_net_rack_leave_size(const ValueNetHistory *history) {
+  if (!history->has_opponent_last_move) {
+    return -1;
+  }
+  const Move *move = &history->opponent_last_move;
+  const game_event_t type = move_get_type(move);
+  if (type != GAME_EVENT_TILE_PLACEMENT_MOVE && type != GAME_EVENT_EXCHANGE) {
+    return -1;
+  }
+  return RACK_SIZE - move_get_tiles_played(move);
+}

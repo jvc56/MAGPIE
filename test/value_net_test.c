@@ -16,6 +16,7 @@
 #include "../src/ent/game_timer.h"
 #include "../src/ent/inference_args.h"
 #include "../src/ent/inference_results.h"
+#include "../src/ent/leave_odds.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -25,6 +26,7 @@
 #include "../src/ent/thread_control.h"
 #include "../src/ent/value_net.h"
 #include "../src/ent/win_pct.h"
+#include "../src/ent/xoshiro.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -698,6 +700,144 @@ static void vnt_leafcheck(const StringSplitter *fields) {
   config_destroy(config);
 }
 
+// "rackparity:<model_dir>:<backend>:<records file>:<decisions>:<out>": the
+// opponent-leave head's log odds for the played row of each of the first
+// decisions of a distill records file written with opp=1 (opponent records
+// in <file>.opp2), through backend and through the CPU, written to
+// <out>.csv (decision, then 27 odds from each). For the first ten, prints
+// how far 40,000 leaves sampled from the odds (leave_odds.h) land from the
+// exact expected counts.
+static void vnt_rackparity(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 6) {
+    log_fatal("rackparity needs 5 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const char *backend_name = string_splitter_get_item(fields, 2);
+  const char *records_path = string_splitter_get_item(fields, 3);
+  const int decisions =
+      (int)strtol(string_splitter_get_item(fields, 4), NULL, 10);
+  const char *out = string_splitter_get_item(fields, 5);
+  ErrorStack *error_stack = error_stack_create();
+  ValueNetPlayer *player =
+      value_net_player_create(model_dir, vnt_parse_backend(backend_name), 0,
+                              1.0, 0.5, 100.0, error_stack);
+  ValueNetPlayer *cpu = value_net_player_create(
+      model_dir, vnt_parse_backend("cpu"), 0, 1.0, 0.5, 100.0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("rackparity setup failed");
+  }
+  if (!value_net_player_has_rack_head(player)) {
+    log_fatal("%s has no opponent-leave head", model_dir);
+  }
+  FILE *records = fopen_or_die(records_path, "rb");
+  char *opp_path = get_formatted_string("%s.opp2", records_path);
+  FILE *opponents = fopen_or_die(opp_path, "rb");
+  free(opp_path);
+  char *path = get_formatted_string("%s.csv", out);
+  FILE *csv = fopen_or_die(path, "w");
+  free(path);
+  VntDistillRecord *rows =
+      malloc_or_die(sizeof(VntDistillRecord) * VNT_DISTILL_CANDIDATES);
+  float *board = malloc_or_die(sizeof(float) * VALUE_NET_BOARD_FLOATS);
+  float scalars[VALUE_NET_SCALARS];
+  XoshiroPRNG *prng = prng_create(17);
+  double worst_sampling_error = 0.0;
+  for (int decision = 0; decision < decisions; decision++) {
+    VntOpponentRecord opponent;
+    if (fread(&rows[0], sizeof(VntDistillRecord), 1, records) != 1 ||
+        fread(&opponent, sizeof(opponent), 1, opponents) != 1) {
+      break;
+    }
+    const int count = rows[0].candidates;
+    if (count > 1 && fread(&rows[1], sizeof(VntDistillRecord),
+                           (size_t)count - 1, records) != (size_t)count - 1) {
+      break;
+    }
+    int played = 0;
+    for (int row = 0; row < count; row++) {
+      if (rows[row].chosen) {
+        played = row;
+      }
+    }
+    for (int idx = 0; idx < VALUE_NET_BOARD_FLOATS; idx++) {
+      board[idx] =
+          (float)((rows[played].board_bits[idx / 8] >> (7 - (idx % 8))) & 1);
+    }
+    memcpy(scalars, rows[played].scalars, sizeof(scalars));
+    float side[VALUE_NET_RACK_SIDE] = {0};
+    for (int letter = 0; letter < VALUE_NET_TILE_TYPES; letter++) {
+      side[letter] = (float)opponent.played[letter] / 7.0F;
+    }
+    side[VALUE_NET_TILE_TYPES] = (float)opponent.last_score / 100.0F;
+    side[VALUE_NET_TILE_TYPES + 1] =
+        (opponent.flags & VNT_OPPONENT_EXCHANGE) ? 1.0F : 0.0F;
+    side[VALUE_NET_TILE_TYPES + 2] =
+        (opponent.flags & VNT_OPPONENT_BINGO) ? 1.0F : 0.0F;
+    side[VALUE_NET_TILE_TYPES + 3] =
+        (opponent.flags & VNT_OPPONENT_MOVED) ? 0.0F : 1.0F;
+    float theta[VALUE_NET_RACK_LETTERS];
+    float theta_cpu[VALUE_NET_RACK_LETTERS];
+    value_net_player_rack_odds(player, 1, board, scalars, side, theta);
+    value_net_player_rack_odds(cpu, 1, board, scalars, side, theta_cpu);
+    fprintf(csv, "%d", decision);
+    for (int letter = 0; letter < VALUE_NET_RACK_LETTERS; letter++) {
+      fprintf(csv, ",%.6f", theta[letter]);
+    }
+    for (int letter = 0; letter < VALUE_NET_RACK_LETTERS; letter++) {
+      fprintf(csv, ",%.6f", theta_cpu[letter]);
+    }
+    fprintf(csv, "\n");
+    int size = 0;
+    for (int letter = 0; letter < VALUE_NET_TILE_TYPES; letter++) {
+      size += opponent.leave[letter];
+    }
+    if (decision < 10 && size > 0) {
+      int unseen[MAX_ALPHABET_SIZE] = {0};
+      for (int letter = 0; letter < VALUE_NET_TILE_TYPES; letter++) {
+        unseen[letter] = (int)lround(scalars[VALUE_NET_TILE_TYPES + letter] *
+                                     (float)(rows[played].bag + RACK_SIZE));
+      }
+      LeaveOdds odds;
+      if (leave_odds_prepare(&odds, unseen, theta_cpu, VALUE_NET_TILE_TYPES,
+                             size)) {
+        double expected[MAX_ALPHABET_SIZE];
+        leave_odds_expected_counts(&odds, expected);
+        double sampled[MAX_ALPHABET_SIZE] = {0};
+        const int samples = 40000;
+        Rack leave;
+        for (int sample = 0; sample < samples; sample++) {
+          leave_odds_sample(&odds, prng, &leave);
+          for (int letter = 0; letter < VALUE_NET_TILE_TYPES; letter++) {
+            sampled[letter] += rack_get_letter(&leave, letter);
+          }
+        }
+        double error = 0.0;
+        double total = 0.0;
+        for (int letter = 0; letter < VALUE_NET_TILE_TYPES; letter++) {
+          error =
+              fmax(error, fabs(sampled[letter] / samples - expected[letter]));
+          total += expected[letter];
+        }
+        printf("rackparity decision=%d leave=%d expected_total=%.4f "
+               "max_sampling_error=%.4f\n",
+               decision, size, total, error);
+        worst_sampling_error = fmax(worst_sampling_error, error);
+      }
+    }
+  }
+  printf("rackparity worst_sampling_error=%.4f\n", worst_sampling_error);
+  prng_destroy(prng);
+  free(rows);
+  free(board);
+  (void)fclose(records);
+  (void)fclose(opponents);
+  (void)fclose(csv);
+  value_net_player_destroy(player);
+  value_net_player_destroy(cpu);
+  error_stack_destroy(error_stack);
+}
+
 // "priorfit:<model_dir>:<backend>:<threads>:<iterations>:<positions>:<out>
 // [:hist[:infer[:margin[:mix]]]]":
 // data for fitting the net prior (PlayChooserStrategy.
@@ -1059,7 +1199,10 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // opponent's last move (imargin= its equity margin in points, default 0;
 // imix= the probability a rollout draws the opponent's rack uniformly
 // instead, default 0; imaxleave= > 0 infers only when the opponent kept at
-// most that many tiles, and never after an exchange).
+// most that many tiles, and never after an exchange). lodds=1 also draws a
+// simnn player's opponent racks from its model's opponent-leave head
+// (lshare= its share of the non-uniform draws when leaves are also
+// inferred, default 0.5).
 // uwin=, uspread= and uscale= set the utility (as -uwin, -uspread,
 // -uspreadscale; MAGPIE's defaults otherwise) that an nn player and each sim,
 // value net replies included, rank by. model= sets the net's directory (default
@@ -1261,6 +1404,15 @@ static void vnt_games(const StringSplitter *fields) {
             vnt_option_double(fields, 9, "imix", player_idx, 0.0),
         .sim_inference_max_leave =
             (int)vnt_option_double(fields, 9, "imaxleave", player_idx, 0.0),
+        .sim_leave_odds_evaluate =
+            kinds[player_idx] == VNT_PLAYER_SIM_NN &&
+                    vnt_option_double(fields, 9, "lodds", player_idx, 0.0) > 0
+                ? value_net_player_rack_odds
+                : NULL,
+        .sim_leave_odds_context =
+            kinds[player_idx] == VNT_PLAYER_SIM_NN ? players[player_idx] : NULL,
+        .sim_leave_odds_share =
+            vnt_option_double(fields, 9, "lshare", player_idx, 0.5),
         .rollout_value_net_history = &rollout_histories[player_idx],
         .rollout_value_net_own_history = &rollout_own_histories[player_idx],
     };
@@ -1682,16 +1834,16 @@ static void *vnt_distill_thread(void *arg) {
                 error_stack_reset(infer_errors);
                 continue;
               }
-              const LeaveRackList *list =
+              const LeaveRackList *leaves =
                   inference_results_get_leave_rack_list(infer_results);
-              if (list == NULL) {
+              if (leaves == NULL) {
                 continue;
               }
               double total = 0.0;
               double actual_draws = 0.0;
-              const int found = leave_rack_list_get_count(list);
+              const int found = leave_rack_list_get_count(leaves);
               for (int idx = 0; idx < found; idx++) {
-                const LeaveRack *entry = leave_rack_list_get_rack(list, idx);
+                const LeaveRack *entry = leave_rack_list_get_rack(leaves, idx);
                 Rack leave;
                 rack_set_dist_size_and_reset(&leave, ld_size);
                 leave_rack_get_leave(entry, &leave);
@@ -2391,6 +2543,8 @@ void value_net_test_run_spec(const char *spec) {
     vnt_leafcheck(fields);
   } else if (strings_equal(mode, "priorfit")) {
     vnt_priorfit(fields);
+  } else if (strings_equal(mode, "rackparity")) {
+    vnt_rackparity(fields);
   } else if (strings_equal(mode, "games")) {
     vnt_games(fields);
   } else if (strings_equal(mode, "xsprobe")) {

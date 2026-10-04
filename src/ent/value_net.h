@@ -2,6 +2,7 @@
 #define VALUE_NET_H
 
 #include "../util/io_util.h"
+#include <stdbool.h>
 #include <stddef.h>
 
 // The Macondo transformer value net (macondo-nn-tf): it scores the position
@@ -43,5 +44,25 @@ const float *value_net_get_tensor(const ValueNet *net, const char *name,
 // receive one float per row.
 void value_net_evaluate_cpu(const ValueNet *net, int rows, const float *board,
                             const float *scalars, float *value, float *spread);
+
+// As value_net_evaluate_cpu, but hidden receives each row's head hidden
+// vector (rows x ValueNetShape.head_hidden floats), the input of the
+// output heads.
+void value_net_hidden_cpu(const ValueNet *net, int rows, const float *board,
+                          const float *scalars, float *hidden);
+
+// Whether the net has an opponent-leave head: tensors rack_head.fc
+// ([units, head_hidden + VALUE_NET_RACK_SIDE]) and rack_head.out
+// ([VALUE_NET_RACK_LETTERS, units]), units the manifest's hparams
+// rack_head_units. It predicts the tiles the opponent kept from their last
+// move as odds on the unseen tiles: theta[l] is the log of the factor by
+// which a tile of type l is likelier to be among them than a uniform draw
+// from the unseen tiles makes it.
+bool value_net_has_rack_head(const ValueNet *net);
+
+// The opponent-leave head's theta (VALUE_NET_RACK_LETTERS floats) from a
+// row's hidden vector and VALUE_NET_RACK_SIDE side inputs.
+void value_net_rack_head(const ValueNet *net, const float *hidden,
+                         const float *side, float *theta);
 
 #endif
