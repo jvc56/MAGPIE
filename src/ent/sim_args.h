@@ -89,21 +89,21 @@ typedef struct SimArgs {
   // rv_sim_sample).
   bool use_margin_forecast;
   // When rollout_value_net_evaluate is set, the first
-  // rollout_value_net_plies rollout plies (0 or 1: the opponent's reply
-  // only; at most num_plies) are chosen by the value net: the top
-  // rollout_value_net_candidates static plays (0 for 15), the one with the
-  // highest utility by the weights above played (value_net_utility in
-  // value_net_features.h). Iterations are computed
-  // rollout_value_net_batch at a time per thread and play (0 for 8),
-  // advanced together with one call per ply, which evaluates rows input
-  // rows (value_net_defs.h) into values, and spreads when the utility weighs
-  // spread. Before the candidate, the replier's history is
-  // rollout_value_net_history and the simming player's
-  // rollout_value_net_own_history. sim_args_fill clears the evaluator;
-  // later plies are static. With rollout_value_net_leaf, when the net chose
-  // the final rollout ply, the iteration is scored by the net's win% and
-  // predicted final spread for that move instead of the win% table (a
-  // rollout that ended the game still takes its result).
+  // rollout_value_net_plies rollout plies (0..num_plies) are chosen by the
+  // value net: the top rollout_value_net_candidates static plays (0 for 15),
+  // the one with the highest utility by the weights above played
+  // (value_net_utility in value_net_features.h); later plies play the top
+  // static move. With rollout_value_net_leaf, the net also scores the final
+  // ply's move (its own choice, or the static one), and an iteration whose
+  // rollout did not end the game takes the net's win% and predicted final
+  // spread for it instead of the win% table; so with 0 policy plies the
+  // rollouts are static and only the leaf is the net's. Iterations are
+  // computed rollout_value_net_batch at a time per thread and play (0 for 8),
+  // advanced together with one call per ply that needs the net, which
+  // evaluates rows input rows (value_net_defs.h) into values, and spreads
+  // when the utility weighs spread. Before the candidate, the replier's
+  // history is rollout_value_net_history and the simming player's
+  // rollout_value_net_own_history. sim_args_fill clears the evaluator.
   value_net_rows_fn rollout_value_net_evaluate;
   void *rollout_value_net_context;
   int rollout_value_net_candidates;

@@ -1281,8 +1281,8 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // "games:<model_dir>:<backend>:<lexicon>:<pairs>:<seed>:<worker>:<workers>:
 // <out>[:key=value...]": game pairs between players a and b (a=, b=: nn,
 // static, sim with static rollouts, simnn with value net plays on the
-// first nnplies= rollout plies, default 1, or with nnplies=0 static
-// rollouts and the net only for pool= and prior=; default nn vs static). Sim
+// first nnplies= rollout plies, default 1, the rest static; default nn vs
+// static). Sim
 // players take plies=, cands= (root candidates), ms= (per move) and iters=
 // (cap), rcands= and batch= (value net plays: candidates per position and
 // iterations per evaluation). clock= gives each player a game clock in
@@ -1290,8 +1290,9 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // (PlayChooser; after its flag falls it plays static). A sim player plays
 // endgames static, or with egplies= > 0 by an endgame search that many
 // plies deep; with pre=static it plays static until the bag is empty. leaf=1
-// scores a simnn player's rollouts by the net at the horizon when it chose
-// the final ply (nnplies= equal to plies=). pool= > 0 has a simnn player sim
+// scores a simnn player's rollouts by the net at the horizon: its value for
+// the final ply's move, the net's or (past nnplies=, which may be 0) the top
+// static one. pool= > 0 has a simnn player sim
 // the cands= plays its net rates best among the top pool= static plays, and
 // prior= > 0 counts each one's net utility as that many sim iterations.
 // infer=1 draws a sim player's opponent racks from an inference of the
@@ -1467,6 +1468,9 @@ static void vnt_games(const StringSplitter *fields) {
         vnt_option(fields, 9, "pre", player_idx, "sim"), "static");
     const int rollout_net_plies = (int)strtol(
         vnt_option(fields, 9, "nnplies", player_idx, "1"), NULL, 10);
+    const bool rollout_net_used =
+        rollout_net_plies > 0 ||
+        vnt_option_double(fields, 9, "leaf", player_idx, 0.0) > 0;
     const PlayChooserStrategy strategy = {
         .pre_endgame_eval =
             pre_static ? PLAY_CHOOSER_EVAL_STATIC : PLAY_CHOOSER_EVAL_SIM,
@@ -1494,14 +1498,14 @@ static void vnt_games(const StringSplitter *fields) {
         .utility_w_spread = utility_w_spread[player_idx],
         .utility_spread_scale = utility_spread_scale[player_idx],
         .seed = seed + (uint64_t)player_idx,
-        // nnplies=0: static rollouts, the net only choosing and weighing
-        // the root candidates (pool=, prior=).
+        // nnplies=0 without leaf=1: static rollouts and leaf, the net only
+        // choosing and weighing the root candidates (pool=, prior=).
         .rollout_value_net_evaluate =
-            kinds[player_idx] == VNT_PLAYER_SIM_NN && rollout_net_plies > 0
+            kinds[player_idx] == VNT_PLAYER_SIM_NN && rollout_net_used
                 ? value_net_player_evaluate_rows
                 : NULL,
         .rollout_value_net_context =
-            kinds[player_idx] == VNT_PLAYER_SIM_NN && rollout_net_plies > 0
+            kinds[player_idx] == VNT_PLAYER_SIM_NN && rollout_net_used
                 ? players[player_idx]
                 : NULL,
         .rollout_value_net_candidates = (int)strtol(

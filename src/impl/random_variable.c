@@ -385,14 +385,18 @@ enum {
   SIM_VALUE_NET_DEFAULT_BATCH = 8,
 };
 
-// Value net rollout plies (SimArgs.rollout_value_net_*). A thread sampling
+// Value net rollouts (SimArgs.rollout_value_net_*): the net chooses the first
+// policy plies, and with the net leaf scores the final ply's move, the other
+// plies playing the top static move. A thread sampling
 // a play takes an iteration from the play's queue, shared by all threads;
 // when it is empty, the thread computes batch iterations of the play at
 // once, samples the first and queues the rest. An iteration is its seed,
-// the moves the net chose for its first value net plies and its leaf. A
-// refill advances its batch iterations together, one evaluation per ply over
-// every iteration still going, so each evaluation scores batch positions'
-// candidates at once and no lock is held while it runs. A seed reproduces
+// its recorded moves (the net's policy plies, or every rollout ply with the
+// net leaf) and its leaf. A refill advances its batch iterations together,
+// one evaluation per ply that needs the net over every iteration still
+// going, so each evaluation scores batch positions' candidates (or, on a
+// static final ply with the net leaf, their one move) at once and no lock is
+// held while it runs. A seed reproduces
 // an iteration's opening state only from the same bag order, which every
 // iteration changes (racks go back to the bag), so every value net
 // iteration, queued or played, starts from a copy of start, and its queued
@@ -401,7 +405,8 @@ enum {
 typedef struct SimValueNetShared {
   int plays;
   int batch;
-  // Rollout plies the net chooses, 1..num_plies.
+  // Rollout plies recorded per iteration: the net's policy plies, or every
+  // rollout ply with the net leaf.
   int plies;
   Game *start;
   // Per play, a stack of at most capacity queued iterations: their seeds,
@@ -504,7 +509,10 @@ typedef struct Simmer {
   void *value_net_context;
   int value_net_candidates;
   int value_net_batch;
-  // SimArgs.rollout_value_net_leaf, when the net chooses the final ply.
+  // Rollout plies the net chooses (SimArgs.rollout_value_net_plies, at most
+  // num_plies; may be 0 with the net leaf).
+  int value_net_policy_plies;
+  // SimArgs.rollout_value_net_leaf: the net scores the final ply's move.
   bool value_net_leaf;
   ValueNetHistory value_net_history;
   ValueNetHistory value_net_own_history;
@@ -764,11 +772,13 @@ static void sim_value_net_play(SimValueNetWorker *worker, int seed_idx,
 }
 
 // Fills this thread's batch slots with iterations of the candidate advanced
-// together, ply by ply. At each ply, each iteration still
-// going takes the top candidates by static equity for the player on turn;
-// one with an empty bag or a single candidate plays the top one, and the
-// rest are scored in one evaluation and play the best by the sim's utility
-// (value_net_utility; ties: more tiles played).
+// together, ply by ply. On a policy ply each iteration still going takes the
+// top candidates by static equity for the player on turn; one with an empty
+// bag or a single candidate plays the top one, and the rest are scored in one
+// evaluation and play the best by the sim's utility (value_net_utility; ties:
+// more tiles played). Other plies play the top static move, which on the
+// final ply with the net leaf (and tiles in the bag) is scored as the one
+// candidate.
 static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
                                  SimmedPlay *simmed_play) {
   const SimValueNetShared *shared = &simmer->value_net_shared;
@@ -802,6 +812,29 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
       }
       Game *game = worker->games[seed_idx];
       MoveList *list = worker->list;
+      if (ply >= simmer->value_net_policy_plies) {
+        const Move *top = get_top_equity_move(game, list);
+        if (!simmer->value_net_leaf || ply != worker->plies - 1 ||
+            bag_get_letters(game_get_bag(game)) == 0) {
+          sim_value_net_play(worker, seed_idx, (size_t)seed_idx, top);
+          continue;
+        }
+        // The final ply's static move, for the net leaf.
+        const ValueNetHistory *history =
+            &worker->histories[((size_t)seed_idx * 2) +
+                               (size_t)game_get_player_on_turn_index(game)];
+        Move *moves =
+            worker->candidate_moves + ((size_t)seed_idx * worker->candidates);
+        move_copy(&moves[0], top);
+        worker->spread_after[rows] = value_net_spread_after_move(game, top);
+        value_net_features_for_move(
+            game, &moves[0], history, worker->scratch,
+            worker->board + ((size_t)rows * VALUE_NET_BOARD_FLOATS),
+            worker->scalars + ((size_t)rows * VALUE_NET_SCALARS));
+        rows++;
+        worker->candidate_count[seed_idx] = 1;
+        continue;
+      }
       move_list_reset(list);
       const MoveGenArgs args = {
           .game = game,
@@ -1266,18 +1299,26 @@ static void simmer_set_value_net(Simmer *simmer, const SimArgs *sim_args) {
   simmer->pat_rollout_disabled_classes_mask =
       sim_args->pat_rollout_disabled_classes_mask;
   simmer->value_net_leaf = false;
+  simmer->value_net_policy_plies = 0;
   if (simmer->value_net_evaluate == NULL) {
     return;
   }
-  int plies = sim_args->rollout_value_net_plies;
-  if (plies > sim_args->num_plies) {
-    plies = sim_args->num_plies;
+  int policy_plies = sim_args->rollout_value_net_plies;
+  if (policy_plies > sim_args->num_plies) {
+    policy_plies = sim_args->num_plies;
   }
-  if (plies < 1) {
-    plies = 1;
+  if (policy_plies < 0) {
+    policy_plies = 0;
   }
-  simmer->value_net_leaf =
-      sim_args->rollout_value_net_leaf && plies == sim_args->num_plies;
+  const bool leaf = sim_args->rollout_value_net_leaf;
+  if (sim_args->num_plies < 1 || (policy_plies == 0 && !leaf)) {
+    // Nothing for the net to do: plain static rollouts.
+    simmer->value_net_evaluate = NULL;
+    return;
+  }
+  simmer->value_net_policy_plies = policy_plies;
+  simmer->value_net_leaf = leaf;
+  const int plies = leaf ? sim_args->num_plies : policy_plies;
   sim_value_net_shared_prepare(
       &simmer->value_net_shared, move_list_get_count(sim_args->move_list),
       simmer->value_net_batch > 0 ? simmer->value_net_batch
