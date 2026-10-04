@@ -1281,7 +1281,8 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // "games:<model_dir>:<backend>:<lexicon>:<pairs>:<seed>:<worker>:<workers>:
 // <out>[:key=value...]": game pairs between players a and b (a=, b=: nn,
 // static, sim with static rollouts, simnn with value net plays on the
-// first nnplies= rollout plies, default 1; default nn vs static). Sim
+// first nnplies= rollout plies, default 1, or with nnplies=0 static
+// rollouts and the net only for pool= and prior=; default nn vs static). Sim
 // players take plies=, cands= (root candidates), ms= (per move) and iters=
 // (cap), rcands= and batch= (value net plays: candidates per position and
 // iterations per evaluation). clock= gives each player a game clock in
@@ -1464,6 +1465,8 @@ static void vnt_games(const StringSplitter *fields) {
     // endgame).
     const bool pre_static = strings_equal(
         vnt_option(fields, 9, "pre", player_idx, "sim"), "static");
+    const int rollout_net_plies = (int)strtol(
+        vnt_option(fields, 9, "nnplies", player_idx, "1"), NULL, 10);
     const PlayChooserStrategy strategy = {
         .pre_endgame_eval =
             pre_static ? PLAY_CHOOSER_EVAL_STATIC : PLAY_CHOOSER_EVAL_SIM,
@@ -1491,11 +1494,16 @@ static void vnt_games(const StringSplitter *fields) {
         .utility_w_spread = utility_w_spread[player_idx],
         .utility_spread_scale = utility_spread_scale[player_idx],
         .seed = seed + (uint64_t)player_idx,
-        .rollout_value_net_evaluate = kinds[player_idx] == VNT_PLAYER_SIM_NN
-                                          ? value_net_player_evaluate_rows
-                                          : NULL,
+        // nnplies=0: static rollouts, the net only choosing and weighing
+        // the root candidates (pool=, prior=).
+        .rollout_value_net_evaluate =
+            kinds[player_idx] == VNT_PLAYER_SIM_NN && rollout_net_plies > 0
+                ? value_net_player_evaluate_rows
+                : NULL,
         .rollout_value_net_context =
-            kinds[player_idx] == VNT_PLAYER_SIM_NN ? players[player_idx] : NULL,
+            kinds[player_idx] == VNT_PLAYER_SIM_NN && rollout_net_plies > 0
+                ? players[player_idx]
+                : NULL,
         .rollout_value_net_candidates = (int)strtol(
             vnt_option(fields, 9, "rcands", player_idx, "15"), NULL, 10),
         .rollout_value_net_batch = (int)strtol(
