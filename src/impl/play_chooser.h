@@ -80,6 +80,24 @@ typedef struct PlayChooserStrategy {
   // Threads for the inference, which runs before the sim while the cores
   // are otherwise idle; 0 = every core.
   int sim_inference_threads;
+  // Whether the static inference takes the PAT term when the opponent has
+  // PAT (InferenceArgs.use_pat).
+  bool sim_inference_use_pat;
+  // When set, opponent leaves of at most sim_net_inference_max_leave tiles
+  // after a tile placement are inferred with a value net as the opponent's
+  // policy (value_net_inference.h) instead of statically:
+  // sim_net_inference_evaluate (context sim_net_inference_context) scores
+  // the top sim_net_inference_candidates of each possible rack, at
+  // sim_net_inference_temperature, reading the opponent's history at their
+  // move from rollout_value_net_history. Its time comes off the move's
+  // budget. With the opponent-leave head, the head supplies
+  // sim_net_inference_head_share of the draws that are not uniform.
+  value_net_rows_fn sim_net_inference_evaluate;
+  void *sim_net_inference_context;
+  int sim_net_inference_max_leave;
+  int sim_net_inference_candidates;
+  double sim_net_inference_temperature;
+  double sim_net_inference_head_share;
   // When set (with the candidate value net), the sim also draws the
   // opponent's rack from an opponent-leave head (SimArgs.
   // opponent_leave_odds): sim_leave_odds_evaluate (context
@@ -174,6 +192,9 @@ typedef struct PlayChooserBenchmarkStats {
   uint64_t sim_calls;
   uint64_t sim_iterations;
   uint64_t sim_nodes;
+  // Net-based leave inferences run, and their microseconds.
+  uint64_t net_inference_calls;
+  uint64_t net_inference_micros;
   uint64_t peg_calls;
   uint64_t peg_candidate_completions;
   uint64_t peg_candidate_events_dropped;

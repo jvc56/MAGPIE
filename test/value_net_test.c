@@ -1233,13 +1233,18 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // the cands= plays its net rates best among the top pool= static plays, and
 // prior= > 0 counts each one's net utility as that many sim iterations.
 // infer=1 draws a sim player's opponent racks from an inference of the
-// opponent's last move (imargin= its equity margin in points, default 0;
+// opponent's last move (ipat=1 with the PAT term when the opponent has it;
+// imargin= its equity margin in points, default 0;
 // imix= the probability a rollout draws the opponent's rack uniformly
 // instead, default 0; imaxleave= > 0 infers only when the opponent kept at
 // most that many tiles, and never after an exchange). lodds=1 also draws a
 // simnn player's opponent racks from its model's opponent-leave head
 // (lshare= its share of the non-uniform draws when leaves are also
-// inferred, default 0.5).
+// inferred, default 0.5). ninfer=1 infers opponent leaves of at most
+// nmaxleave= tiles (default 2) with a net (nimodel=, default the games'
+// model) as the opponent's policy: ncands= candidates per rack (16),
+// temperature ntemp= (0.003), and with lodds= the head taking nhead= of the
+// non-uniform draws (0.1).
 // uwin=, uspread= and uscale= set the utility (as -uwin, -uspread,
 // -uspreadscale; MAGPIE's defaults otherwise) that an nn player and each sim,
 // value net replies included, rank by. model= sets the net's directory (default
@@ -1362,6 +1367,23 @@ static void vnt_games(const StringSplitter *fields) {
   GameTimer game_timer;
   game_timer_reset(&game_timer, 0.0);
   PlayChooser *choosers[2] = {NULL, NULL};
+  // Each sim player's net for net-based leave inference (ninfer=1; the
+  // model nimodel=, default the games' model), or NULL.
+  ValueNetPlayer *net_inference_players[2] = {NULL, NULL};
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if ((kinds[player_idx] == VNT_PLAYER_SIM ||
+         kinds[player_idx] == VNT_PLAYER_SIM_NN) &&
+        vnt_option_double(fields, 9, "ninfer", player_idx, 0.0) > 0) {
+      net_inference_players[player_idx] = value_net_player_create(
+          vnt_option(fields, 9, "nimodel", player_idx, model_dir), backend, 0,
+          utility_w_winpct[player_idx], utility_w_spread[player_idx],
+          utility_spread_scale[player_idx], error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        error_stack_print_and_reset(error_stack);
+        log_fatal("could not load the leave inference net");
+      }
+    }
+  }
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     value_net_history_reset(&rollout_histories[player_idx]);
     value_net_history_reset(&rollout_own_histories[player_idx]);
@@ -1443,6 +1465,20 @@ static void vnt_games(const StringSplitter *fields) {
             (int)vnt_option_double(fields, 9, "imaxleave", player_idx, 0.0),
         .sim_inference_threads =
             (int)vnt_option_double(fields, 9, "ithreads", player_idx, 0.0),
+        .sim_inference_use_pat =
+            vnt_option_double(fields, 9, "ipat", player_idx, 0.0) > 0,
+        .sim_net_inference_evaluate = net_inference_players[player_idx] != NULL
+                                          ? value_net_player_evaluate_rows
+                                          : NULL,
+        .sim_net_inference_context = net_inference_players[player_idx],
+        .sim_net_inference_max_leave =
+            (int)vnt_option_double(fields, 9, "nmaxleave", player_idx, 2.0),
+        .sim_net_inference_candidates =
+            (int)vnt_option_double(fields, 9, "ncands", player_idx, 16.0),
+        .sim_net_inference_temperature =
+            vnt_option_double(fields, 9, "ntemp", player_idx, 0.003),
+        .sim_net_inference_head_share =
+            vnt_option_double(fields, 9, "nhead", player_idx, 0.1),
         .sim_leave_odds_evaluate =
             kinds[player_idx] == VNT_PLAYER_SIM_NN &&
                     vnt_option_double(fields, 9, "lodds", player_idx, 0.0) > 0
@@ -1468,7 +1504,7 @@ static void vnt_games(const StringSplitter *fields) {
                 "pair,game,a_seat,a_score,b_score,a_spread,a_win,turns,"
                 "a_seconds,b_seconds\n");
   (void)fprintf(moves_out, "pair,game,turn,player,bag,total_ms,sim_iterations,"
-                           "move,static_move,static_agree\n");
+                           "move,static_move,static_agree,net_inference_ms\n");
   StringBuilder *move_names[2] = {string_builder_create(),
                                   string_builder_create()};
   Game *game = config_get_game(config);
@@ -1500,6 +1536,7 @@ static void vnt_games(const StringSplitter *fields) {
         const int64_t start = ctimer_monotonic_ns();
         game_timer_start_turn(&game_timer, seat);
         uint64_t sim_iterations = 0;
+        double net_inference_ms = -1.0;
         Move move;
         switch (kinds[player_idx]) {
         case VNT_PLAYER_NN:
@@ -1521,6 +1558,8 @@ static void vnt_games(const StringSplitter *fields) {
           PlayChooserBenchmarkStats chooser_stats;
           play_chooser_benchmark_get(&chooser_stats);
           sim_iterations = chooser_stats.sim_iterations;
+          net_inference_ms =
+              (double)chooser_stats.net_inference_micros / 1000.0;
           if (!error_stack_is_empty(error_stack)) {
             error_stack_print_and_reset(error_stack);
             log_fatal("sim player failed");
@@ -1552,12 +1591,13 @@ static void vnt_games(const StringSplitter *fields) {
           string_builder_add_move(move_names[1], game_get_board(game),
                                   &static_move, game_get_ld(game), false);
         }
-        (void)fprintf(moves_out, "%ld,%d,%d,%c,%d,%.3f,%llu,\"%s\",\"%s\",%d\n",
-                      pair_idx, game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
-                      bag_get_letters(game_get_bag(game)), total_ms,
-                      (unsigned long long)sim_iterations,
-                      string_builder_peek(move_names[0]),
-                      string_builder_peek(move_names[1]), static_agree);
+        (void)fprintf(
+            moves_out, "%ld,%d,%d,%c,%d,%.3f,%llu,\"%s\",\"%s\",%d,%.1f\n",
+            pair_idx, game_in_pair, turn, player_idx == 0 ? 'a' : 'b',
+            bag_get_letters(game_get_bag(game)), total_ms,
+            (unsigned long long)sim_iterations,
+            string_builder_peek(move_names[0]),
+            string_builder_peek(move_names[1]), static_agree, net_inference_ms);
         value_net_history_record_opponent_move(&histories[1 - seat], &move);
         game_copy(before_last_move, game);
         move_copy(&last_move, &move);
@@ -1594,6 +1634,8 @@ static void vnt_games(const StringSplitter *fields) {
   value_net_player_destroy(players[1]);
   value_net_player_destroy(rescorers[0]);
   value_net_player_destroy(rescorers[1]);
+  value_net_player_destroy(net_inference_players[0]);
+  value_net_player_destroy(net_inference_players[1]);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }

@@ -49,6 +49,9 @@ typedef struct SimArgs {
   // the caller; inference_uniform_mix applies to it as well.
   const LeaveOdds *opponent_leave_odds;
   double opponent_leave_odds_share;
+  // With use_inference: inference_results already holds the inferred leaves
+  // (their alias method's tables generated), so simulate does not infer.
+  bool inference_precomputed;
   bool use_heat_map;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
@@ -143,6 +146,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->inference_uniform_mix = 0.0;
   sim_args->opponent_leave_odds = NULL;
   sim_args->opponent_leave_odds_share = 0.0;
+  sim_args->inference_precomputed = false;
   sim_args->use_heat_map = use_heat_map;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;

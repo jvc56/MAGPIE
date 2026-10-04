@@ -39,6 +39,7 @@
 #include "peg.h"
 #include "simmer.h"
 #include "value_net_features.h"
+#include "value_net_inference.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -81,6 +82,8 @@ typedef struct PlayChooserBenchmarkAtomicStats {
   _Atomic uint64_t sim_calls;
   _Atomic uint64_t sim_iterations;
   _Atomic uint64_t sim_nodes;
+  _Atomic uint64_t net_inference_calls;
+  _Atomic uint64_t net_inference_micros;
   _Atomic uint64_t peg_calls;
   _Atomic uint64_t peg_candidate_completions;
   _Atomic uint64_t peg_candidate_events_dropped;
@@ -123,6 +126,8 @@ void play_chooser_benchmark_reset(void) {
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_calls);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_iterations);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_nodes);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(net_inference_calls);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(net_inference_micros);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_calls);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_completions);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_events_dropped);
@@ -149,6 +154,8 @@ void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats) {
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_calls);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_iterations);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_nodes);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(net_inference_calls);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(net_inference_micros);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_calls);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_completions);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_events_dropped);
@@ -260,6 +267,8 @@ struct PlayChooser {
   InferenceResults *inference_results;
   // The opponent-leave distribution for the current sim.
   LeaveOdds leave_odds;
+  // Net-based leave inference, created on first use.
+  ValueNetLeaveInference *net_inference;
   // The candidates simmed and their net utilities.
   Move *kept_moves;
   double *kept_utility;
@@ -328,6 +337,7 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   play_chooser->pool_order = NULL;
   play_chooser->pool_scratch = NULL;
   play_chooser->inference_results = NULL;
+  play_chooser->net_inference = NULL;
   play_chooser->kept_moves = NULL;
   play_chooser->kept_utility = NULL;
   play_chooser->kept_count = 0;
@@ -381,6 +391,7 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
   if (play_chooser->inference_results != NULL) {
     inference_results_destroy(play_chooser->inference_results);
   }
+  value_net_leave_inference_destroy(play_chooser->net_inference);
   if (play_chooser->pool_scratch != NULL) {
     game_destroy(play_chooser->pool_scratch);
   }
@@ -688,8 +699,9 @@ static bool play_chooser_fill_inference_args(
                   infer_threads, 0, 0, thread_control, false, true,
                   target_index, move_get_score(move), num_exchanged,
                   played_tiles, target_known_rack, nontarget_known_rack);
-  // PAT in the inference when the opponent plays with it.
+  // PAT in the inference when asked and the opponent plays with it.
   args->use_pat =
+      strategy->sim_inference_use_pat &&
       player_get_pat(game_get_player(before, target_index)) != NULL &&
       !player_get_pat_disabled(game_get_player(before, target_index));
   args->target_move = move;
@@ -733,6 +745,60 @@ static bool play_chooser_prepare_leave_odds(PlayChooser *play_chooser,
   }
   return leave_odds_prepare(&play_chooser->leave_odds, unseen, theta, letters,
                             size);
+}
+
+// Infers the opponent's leave with the net (sim_net_inference_*) when it
+// applies: a tile placement keeping at most sim_net_inference_max_leave
+// tiles. Fills the chooser's inference results' alias method with the
+// leaves. Returns false when it does not apply or finds nothing.
+static bool play_chooser_run_net_inference(PlayChooser *play_chooser,
+                                           const Game *game) {
+  const PlayChooserStrategy *strategy = &play_chooser->strategy;
+  const Move *move = strategy->sim_inference_move;
+  const Game *before = strategy->sim_inference_game;
+  if (strategy->sim_net_inference_evaluate == NULL || before == NULL ||
+      move == NULL || strategy->rollout_value_net_history == NULL ||
+      move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return false;
+  }
+  const int leave_size = RACK_SIZE - move_get_tiles_played(move);
+  if (leave_size < 1 || leave_size > strategy->sim_net_inference_max_leave) {
+    return false;
+  }
+  if (play_chooser->net_inference == NULL) {
+    play_chooser->net_inference = value_net_leave_inference_create();
+  }
+  if (play_chooser->inference_results == NULL) {
+    play_chooser->inference_results = inference_results_create(NULL);
+  }
+  const int target_index = 1 - game_get_player_on_turn_index(game);
+  const ValueNetLeaveInferenceArgs args = {
+      .before_move = before,
+      .target_index = target_index,
+      .move = move,
+      .target_history = strategy->rollout_value_net_history,
+      .nontarget_rack =
+          player_get_rack(game_get_player(game, 1 - target_index)),
+      .leave_size = leave_size,
+      .candidates = strategy->sim_net_inference_candidates > 0
+                        ? strategy->sim_net_inference_candidates
+                        : 16,
+      .temperature = strategy->sim_net_inference_temperature > 0.0
+                         ? strategy->sim_net_inference_temperature
+                         : 0.003,
+      .utility_w_winpct = play_chooser_util_w_winpct(strategy),
+      .utility_w_spread = strategy->utility_w_spread,
+      .utility_spread_scale = play_chooser_util_spread_scale(strategy),
+      .use_pat = true,
+      .evaluate = strategy->sim_net_inference_evaluate,
+      .evaluate_context = strategy->sim_net_inference_context,
+  };
+  if (!value_net_leave_inference_run(play_chooser->net_inference, &args)) {
+    return false;
+  }
+  return value_net_leave_inference_fill_alias(
+      play_chooser->net_inference,
+      inference_results_get_alias_method(play_chooser->inference_results));
 }
 
 // Chooses the on-turn player's best move by simulation, returning it in
@@ -787,11 +853,31 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   const Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
+  // Net-based inference for small leaves, else static inference; the net's
+  // time comes off this move's budget.
+  const int64_t net_inference_start = ctimer_monotonic_ns();
+  const bool use_net_inference =
+      play_chooser_run_net_inference(play_chooser, game);
+  if (use_net_inference && play_chooser_benchmark_is_enabled()) {
+    play_chooser_benchmark_add(
+        &play_chooser_benchmark_stats.net_inference_calls, 1);
+    play_chooser_benchmark_add(
+        &play_chooser_benchmark_stats.net_inference_micros,
+        (uint64_t)((ctimer_monotonic_ns() - net_inference_start) / 1000));
+  }
+  if (use_net_inference) {
+    budget_seconds =
+        fmax(budget_seconds -
+                 (double)(ctimer_monotonic_ns() - net_inference_start) / 1e9,
+             PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS);
+  }
   InferenceArgs inference_args;
   Rack inference_racks[3];
-  const bool use_inference = play_chooser_fill_inference_args(
-      play_chooser, game, thread_control, &inference_args, &inference_racks[0],
-      &inference_racks[1], &inference_racks[2]);
+  const bool use_inference =
+      use_net_inference ||
+      play_chooser_fill_inference_args(
+          play_chooser, game, thread_control, &inference_args,
+          &inference_racks[0], &inference_racks[1], &inference_racks[2]);
 
   // The utility weights are the chooser's own, so the sim ranks by (and
   // records) the same win%+spread blend used as the branch's value below.
@@ -825,7 +911,10 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   sim_args.inference_uniform_mix =
       use_inference || use_odds ? strategy->sim_inference_uniform_mix : 0.0;
   sim_args.opponent_leave_odds = use_odds ? &play_chooser->leave_odds : NULL;
-  sim_args.opponent_leave_odds_share = strategy->sim_leave_odds_share;
+  sim_args.opponent_leave_odds_share =
+      use_net_inference ? strategy->sim_net_inference_head_share
+                        : strategy->sim_leave_odds_share;
+  sim_args.inference_precomputed = use_net_inference;
   if (strategy->rollout_value_net_history != NULL) {
     sim_args.rollout_value_net_history = *strategy->rollout_value_net_history;
   }

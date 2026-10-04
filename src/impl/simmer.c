@@ -115,7 +115,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   // The inference runs inside the sim's time limit: whatever it takes comes
   // off the sampling's (which still gets a little).
   const double original_time_limit = sim_args->bai_options.time_limit_seconds;
-  if (sim_args->use_inference) {
+  if (sim_args->use_inference && !sim_args->inference_precomputed) {
     const int64_t infer_start = ctimer_monotonic_ns();
     infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
           sim_args->inference_results, error_stack);
