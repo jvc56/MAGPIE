@@ -23,6 +23,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../ent/value_net_history.h"
@@ -251,6 +252,10 @@ struct PlayChooser {
   double *pool_utility;
   int *pool_order;
   Game *pool_scratch;
+  // The candidates simmed and their net utilities.
+  Move *kept_moves;
+  double *kept_utility;
+  int kept_count;
 };
 
 static int
@@ -314,7 +319,13 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   play_chooser->pool_utility = NULL;
   play_chooser->pool_order = NULL;
   play_chooser->pool_scratch = NULL;
+  play_chooser->kept_moves = NULL;
+  play_chooser->kept_utility = NULL;
+  play_chooser->kept_count = 0;
   if (strategy->sim_candidate_value_net_evaluate != NULL) {
+    const int kept = play_chooser_get_sim_max_candidates(strategy);
+    play_chooser->kept_moves = malloc_or_die(sizeof(Move) * (size_t)kept);
+    play_chooser->kept_utility = malloc_or_die(sizeof(double) * (size_t)kept);
     const int pool = play_chooser_get_candidate_pool(strategy);
     play_chooser->pool_list = move_list_create(pool);
     play_chooser->pool_board =
@@ -356,6 +367,8 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
   free(play_chooser->pool_spread_after);
   free(play_chooser->pool_utility);
   free(play_chooser->pool_order);
+  free(play_chooser->kept_moves);
+  free(play_chooser->kept_utility);
   if (play_chooser->pool_scratch != NULL) {
     game_destroy(play_chooser->pool_scratch);
   }
@@ -550,9 +563,55 @@ static void play_chooser_filter_candidates(PlayChooser *play_chooser,
                        ? count
                        : move_list_get_capacity(move_list);
   for (int rank = 0; rank < keep; rank++) {
-    move_list_add_move(
-        move_list, move_list_get_move(pool, play_chooser->pool_order[rank]));
+    const int move_idx = play_chooser->pool_order[rank];
+    move_list_add_move(move_list, move_list_get_move(pool, move_idx));
+    move_copy(&play_chooser->kept_moves[rank],
+              move_list_get_move(pool, move_idx));
+    play_chooser->kept_utility[rank] = play_chooser->pool_utility[move_idx];
   }
+  play_chooser->kept_count = keep;
+}
+
+// The simmed play with the highest posterior utility: its net utility
+// counted as sim_net_prior_iterations iterations, then its sim mean over its
+// iterations (utility, or win% when the utility does not weigh spread).
+static const Move *
+play_chooser_best_with_net_prior(const PlayChooser *play_chooser) {
+  const SimResults *results = play_chooser->sim_results;
+  const double prior = play_chooser->strategy.sim_net_prior_iterations;
+  const bool weighs_spread = play_chooser->strategy.utility_w_spread > 0.0;
+  const Move *best = NULL;
+  double best_value = 0.0;
+  for (int play_idx = 0; play_idx < sim_results_get_number_of_plays(results);
+       play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(results, play_idx);
+    const Move *move = simmed_play_get_move(simmed_play);
+    int kept = -1;
+    for (int kept_idx = 0; kept_idx < play_chooser->kept_count; kept_idx++) {
+      if (compare_moves_without_equity(
+              move, &play_chooser->kept_moves[kept_idx], true) == -1) {
+        kept = kept_idx;
+        break;
+      }
+    }
+    if (kept < 0) {
+      continue;
+    }
+    const Stat *stat = weighs_spread
+                           ? simmed_play_get_utility_stat(simmed_play)
+                           : simmed_play_get_win_pct_stat(simmed_play);
+    const double samples = (double)stat_get_num_samples(stat);
+    const double mean = samples > 0.0 ? stat_get_mean(stat) : 0.0;
+    const double value =
+        ((prior * play_chooser->kept_utility[kept]) + (samples * mean)) /
+        (prior + samples);
+    if (best == NULL || value > best_value) {
+      best = move;
+      best_value = value;
+    }
+  }
+  return best;
 }
 
 // Chooses the on-turn player's best move by simulation, returning it in
@@ -663,6 +722,13 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   }
 
   const Move *best_move = sim_results_get_best_move(play_chooser->sim_results);
+  if (best_move != NULL && net_filter &&
+      strategy->sim_net_prior_iterations > 0.0) {
+    const Move *prior_best = play_chooser_best_with_net_prior(play_chooser);
+    if (prior_best != NULL) {
+      best_move = prior_best;
+    }
+  }
   if (best_move == NULL) {
     // The sim could not pick a winner; fall back to the top equity move
     // from the candidates already generated.

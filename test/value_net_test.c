@@ -421,6 +421,378 @@ static void vnt_simcompare(const StringSplitter *fields) {
   config_destroy(config);
 }
 
+// Correlation of xs and ys (n values each); 0 when either is constant.
+static double vnt_correlation(const double *xs, const double *ys, int n) {
+  double mx = 0.0;
+  double my = 0.0;
+  for (int idx = 0; idx < n; idx++) {
+    mx += xs[idx] / n;
+    my += ys[idx] / n;
+  }
+  double sxy = 0.0;
+  double sxx = 0.0;
+  double syy = 0.0;
+  for (int idx = 0; idx < n; idx++) {
+    sxy += (xs[idx] - mx) * (ys[idx] - my);
+    sxx += (xs[idx] - mx) * (xs[idx] - mx);
+    syy += (ys[idx] - my) * (ys[idx] - my);
+  }
+  return sxx > 0.0 && syy > 0.0 ? sxy / sqrt(sxx * syy) : 0.0;
+}
+
+// "leafcheck:<model_dir>:<backend>:<cands>:<threads>:<iterations>:
+// <positions>": a consistency check of value net sims. On positions from
+// static NWL23 games (even turns 2..20 with tiles in the bag), the top cands
+// static plays get the net's own win% (1 + value) / 2 and the mean win% of
+// three 2-ply sims of iterations iterations, round robin: net rollouts
+// scored by the net at the horizon, net rollouts scored by the win% table,
+// and static rollouts. Prints, for each sim against the net's win%, the mean
+// difference and absolute difference, the correlation of both within each
+// position (each centered on its position's mean) and how often their best
+// plays agree.
+static void vnt_leafcheck(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 7) {
+    log_fatal("leafcheck needs 6 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const char *backend_name = string_splitter_get_item(fields, 2);
+  const int cands = (int)strtol(string_splitter_get_item(fields, 3), NULL, 10);
+  const int threads =
+      (int)strtol(string_splitter_get_item(fields, 4), NULL, 10);
+  const uint64_t iterations =
+      strtoull(string_splitter_get_item(fields, 5), NULL, 10);
+  const int positions =
+      (int)strtol(string_splitter_get_item(fields, 6), NULL, 10);
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  ValueNetPlayer *player =
+      value_net_player_create(model_dir, vnt_parse_backend(backend_name), 0,
+                              1.0, 0.0, 100.0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("leafcheck setup failed");
+  }
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  Game *scratch = game_duplicate(game);
+  MoveList *static_list = move_list_create(1);
+  MoveList *root = move_list_create(cands);
+  float *board =
+      malloc_or_die(sizeof(float) * (size_t)cands * VALUE_NET_BOARD_FLOATS);
+  float *scalars =
+      malloc_or_die(sizeof(float) * (size_t)cands * VALUE_NET_SCALARS);
+  float *values = malloc_or_die(sizeof(float) * (size_t)cands);
+  const int max_rows = positions * cands;
+  double *net = malloc_or_die(sizeof(double) * (size_t)max_rows);
+  double *sims[3];
+  for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+    sims[sim_idx] = malloc_or_die(sizeof(double) * (size_t)max_rows);
+  }
+  double *centered_net = malloc_or_die(sizeof(double) * (size_t)max_rows);
+  double *centered_sim = malloc_or_die(sizeof(double) * (size_t)max_rows);
+  int best_agree[3] = {0, 0, 0};
+  ValueNetHistory history;
+  value_net_history_reset(&history);
+  int rows = 0;
+  int done = 0;
+  for (uint64_t game_idx = 0; done < positions; game_idx++) {
+    game_reset(game);
+    game_seed(game, vnt_mix(UINT64_C(5151) ^ game_idx));
+    draw_starting_racks(game);
+    for (int turn = 0; !game_over(game) && done < positions; turn++) {
+      const int bag = bag_get_letters(game_get_bag(game));
+      if (turn >= 2 && turn <= 20 && turn % 2 == 0 && bag > 0) {
+        move_list_reset(root);
+        const MoveGenArgs args = {
+            .game = game,
+            .move_list = root,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&args);
+        move_list_sort_moves(root);
+        const int count = move_list_get_count(root);
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          value_net_features_for_move(
+              game, move_list_get_move(root, move_idx), &history, scratch,
+              board + ((size_t)move_idx * VALUE_NET_BOARD_FLOATS),
+              scalars + ((size_t)move_idx * VALUE_NET_SCALARS));
+        }
+        value_net_player_evaluate_rows(player, count, board, scalars, values,
+                                       NULL);
+        for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+          SimResults *results = sim_results_create(0.0);
+          vnt_simcompare_sim(config, game, root, sim_idx < 2 ? player : NULL, 2,
+                             threads, iterations, 8, 8, 2, sim_idx == 0, 7,
+                             results, error_stack);
+          for (int move_idx = 0; move_idx < count; move_idx++) {
+            sims[sim_idx][rows + move_idx] =
+                vnt_sim_win_pct(results, move_list_get_move(root, move_idx));
+          }
+          sim_results_destroy(results);
+        }
+        int net_best = 0;
+        int sim_best[3] = {0, 0, 0};
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          net[rows + move_idx] = (1.0 + (double)values[move_idx]) / 2.0;
+          if (net[rows + move_idx] > net[rows + net_best]) {
+            net_best = move_idx;
+          }
+          for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+            if (sims[sim_idx][rows + move_idx] >
+                sims[sim_idx][rows + sim_best[sim_idx]]) {
+              sim_best[sim_idx] = move_idx;
+            }
+          }
+        }
+        printf("leafcheck position=%d bag=%d net:", done, bag);
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          printf(" %.3f", net[rows + move_idx]);
+        }
+        printf(" | netleaf:");
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          printf(" %.3f", sims[0][rows + move_idx]);
+        }
+        printf("\n");
+        (void)fflush(stdout);
+        for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+          best_agree[sim_idx] += sim_best[sim_idx] == net_best ? 1 : 0;
+        }
+        rows += count;
+        done++;
+      }
+      Move move;
+      move_copy(&move, vnt_static_move(game, static_list));
+      play_move(&move, game, NULL);
+    }
+  }
+  const char *sim_names[3] = {"net rollouts, net leaf",
+                              "net rollouts, table leaf",
+                              "static rollouts, table leaf"};
+  for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+    double diff = 0.0;
+    double abs_diff = 0.0;
+    for (int row = 0; row < rows; row++) {
+      diff += (sims[sim_idx][row] - net[row]) / rows;
+      abs_diff += fabs(sims[sim_idx][row] - net[row]) / rows;
+    }
+    // Center each position's values on its mean.
+    int row = 0;
+    for (int position = 0; position < done; position++) {
+      const int count = rows / done;
+      double net_mean = 0.0;
+      double sim_mean = 0.0;
+      for (int idx = 0; idx < count; idx++) {
+        net_mean += net[row + idx] / count;
+        sim_mean += sims[sim_idx][row + idx] / count;
+      }
+      for (int idx = 0; idx < count; idx++) {
+        centered_net[row + idx] = net[row + idx] - net_mean;
+        centered_sim[row + idx] = sims[sim_idx][row + idx] - sim_mean;
+      }
+      row += count;
+    }
+    printf("leafcheck %s vs net: mean_diff=%+.4f mean_abs_diff=%.4f "
+           "corr=%.3f within_position_corr=%.3f best_agree=%.2f\n",
+           sim_names[sim_idx], diff, abs_diff,
+           vnt_correlation(sims[sim_idx], net, rows),
+           vnt_correlation(centered_sim, centered_net, rows),
+           (double)best_agree[sim_idx] / done);
+  }
+  free(board);
+  free(scalars);
+  free(values);
+  free(net);
+  for (int sim_idx = 0; sim_idx < 3; sim_idx++) {
+    free(sims[sim_idx]);
+  }
+  free(centered_net);
+  free(centered_sim);
+  game_destroy(scratch);
+  move_list_destroy(static_list);
+  move_list_destroy(root);
+  value_net_player_destroy(player);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// "priorfit:<model_dir>:<backend>:<threads>:<iterations>:<positions>:<out>":
+// data for fitting the net prior (PlayChooserStrategy.
+// sim_net_prior_iterations) as games use it. On positions from static
+// NWL23 games (even turns 2..20 with tiles in the bag), with PAT, the 8
+// plays of the PAT top 64 the net rates best by MAGPIE's utility (1, 0.5,
+// 100) are simmed 2 plies, net rollouts (PAT top 8) scored by the net at
+// the horizon, iterations iterations each, round robin. Writes <out>.csv:
+// each play's net utility and its sim's mean, variance and iterations.
+static void vnt_priorfit(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 7) {
+    log_fatal("priorfit needs 6 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const char *backend_name = string_splitter_get_item(fields, 2);
+  const int threads =
+      (int)strtol(string_splitter_get_item(fields, 3), NULL, 10);
+  const uint64_t iterations =
+      strtoull(string_splitter_get_item(fields, 4), NULL, 10);
+  const int positions =
+      (int)strtol(string_splitter_get_item(fields, 5), NULL, 10);
+  const char *out = string_splitter_get_item(fields, 6);
+  enum { POOL = 64, KEEP = 8 };
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -pat NWL23");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  ValueNetPlayer *player =
+      value_net_player_create(model_dir, vnt_parse_backend(backend_name), 0,
+                              1.0, 0.5, 100.0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("priorfit setup failed");
+  }
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  Game *scratch = game_duplicate(game);
+  MoveList *static_list = move_list_create(1);
+  MoveList *pool = move_list_create(POOL);
+  MoveList *root = move_list_create(KEEP);
+  float *board = malloc_or_die(sizeof(float) * POOL * VALUE_NET_BOARD_FLOATS);
+  float *scalars = malloc_or_die(sizeof(float) * POOL * VALUE_NET_SCALARS);
+  float values[POOL];
+  float spreads[POOL];
+  double utility[POOL];
+  int order[POOL];
+  ValueNetHistory history;
+  value_net_history_reset(&history);
+  char *path = get_formatted_string("%s.csv", out);
+  FILE *csv = fopen_or_die(path, "w");
+  free(path);
+  fprintf(csv, "position,bag,rank,prior,mean,variance,iterations\n");
+  int done = 0;
+  for (uint64_t game_idx = 0; done < positions; game_idx++) {
+    game_reset(game);
+    game_seed(game, vnt_mix(UINT64_C(6161) ^ game_idx));
+    draw_starting_racks(game);
+    for (int turn = 0; !game_over(game) && done < positions; turn++) {
+      const int bag = bag_get_letters(game_get_bag(game));
+      if (turn >= 2 && turn <= 20 && turn % 2 == 0 && bag > 0) {
+        move_list_reset(pool);
+        const MoveGenArgs args = {
+            .game = game,
+            .move_list = pool,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&args);
+        move_list_sort_moves(pool);
+        const int count = move_list_get_count(pool);
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          const Move *move = move_list_get_move(pool, move_idx);
+          value_net_features_for_move(
+              game, move, &history, scratch,
+              board + ((size_t)move_idx * VALUE_NET_BOARD_FLOATS),
+              scalars + ((size_t)move_idx * VALUE_NET_SCALARS));
+        }
+        value_net_player_evaluate_rows(player, count, board, scalars, values,
+                                       spreads);
+        for (int move_idx = 0; move_idx < count; move_idx++) {
+          utility[move_idx] =
+              value_net_utility(values[move_idx], spreads[move_idx],
+                                value_net_spread_after_move(
+                                    game, move_list_get_move(pool, move_idx)),
+                                1.0, 0.5, 100.0);
+          int pos = move_idx;
+          while (pos > 0 && utility[order[pos - 1]] < utility[move_idx]) {
+            order[pos] = order[pos - 1];
+            pos--;
+          }
+          order[pos] = move_idx;
+        }
+        const int keep = count < KEEP ? count : KEEP;
+        if (keep >= 2) {
+          move_list_reset(root);
+          for (int rank = 0; rank < keep; rank++) {
+            move_list_add_move(root, move_list_get_move(pool, order[rank]));
+          }
+          ThreadControl *control = thread_control_create();
+          thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+          SimArgs sim_args;
+          sim_args_fill(2, root, keep, NULL, config_get_win_pcts(config), NULL,
+                        control, game, false, false, threads, 0, keep, 2,
+                        vnt_mix(UINT64_C(77) ^ (uint64_t)done),
+                        iterations * (uint64_t)keep, 1, 0.0, BAI_THRESHOLD_NONE,
+                        0.0, BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0, 1.0, 0.5,
+                        100.0, false, NULL, &sim_args);
+          sim_args.rollout_value_net_evaluate = value_net_player_evaluate_rows;
+          sim_args.rollout_value_net_context = player;
+          sim_args.rollout_value_net_candidates = 8;
+          sim_args.rollout_value_net_batch = 8;
+          sim_args.rollout_value_net_plies = 2;
+          sim_args.rollout_value_net_leaf = true;
+          SimResults *results = sim_results_create(0.0);
+          simulate_without_ctx(&sim_args, results, error_stack);
+          if (!error_stack_is_empty(error_stack)) {
+            error_stack_print_and_reset(error_stack);
+            log_fatal("priorfit sim failed");
+          }
+          thread_control_destroy(control);
+          for (int rank = 0; rank < keep; rank++) {
+            const Move *move = move_list_get_move(pool, order[rank]);
+            for (int play_idx = 0;
+                 play_idx < sim_results_get_number_of_plays(results);
+                 play_idx++) {
+              const SimmedPlay *play =
+                  sim_results_get_simmed_play(results, play_idx);
+              if (compare_moves_without_equity(simmed_play_get_move(play), move,
+                                               true) != -1) {
+                continue;
+              }
+              const Stat *stat = simmed_play_get_utility_stat(play);
+              fprintf(csv, "%d,%d,%d,%.6f,%.6f,%.8f,%llu\n", done, bag, rank,
+                      utility[order[rank]], stat_get_mean(stat),
+                      stat_get_variance(stat),
+                      (unsigned long long)stat_get_num_samples(stat));
+            }
+          }
+          (void)fflush(csv);
+          sim_results_destroy(results);
+          done++;
+          if (done % 10 == 0) {
+            printf("priorfit positions=%d\n", done);
+            (void)fflush(stdout);
+          }
+        }
+      }
+      Move move;
+      move_copy(&move, vnt_static_move(game, static_list));
+      play_move(&move, game, NULL);
+    }
+  }
+  (void)fclose(csv);
+  free(board);
+  free(scalars);
+  game_destroy(scratch);
+  move_list_destroy(static_list);
+  move_list_destroy(pool);
+  move_list_destroy(root);
+  value_net_player_destroy(player);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // "xsprobe": prints MAGPIE's cross sets in both directions around CAT
 // played across at 8H, to pin down which direction holds which constraint.
 static void vnt_cross_set_probe(void) {
@@ -520,7 +892,8 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // plies deep; with pre=static it plays static until the bag is empty. leaf=1
 // scores a simnn player's rollouts by the net at the horizon when it chose
 // the final ply (nnplies= equal to plies=). pool= > 0 has a simnn player sim
-// the cands= plays its net rates best among the top pool= static plays. uwin=,
+// the cands= plays its net rates best among the top pool= static plays, and
+// prior= > 0 counts each one's net utility as that many sim iterations. uwin=,
 // uspread= and uscale= set the utility (as -uwin, -uspread, -uspreadscale;
 // MAGPIE's defaults otherwise) that an nn player and each sim, value net
 // replies included, rank by. model= sets the net's directory (default
@@ -697,6 +1070,8 @@ static void vnt_games(const StringSplitter *fields) {
         .sim_candidate_value_net_context =
             kinds[player_idx] == VNT_PLAYER_SIM_NN ? players[player_idx] : NULL,
         .sim_candidate_pool = candidate_pool,
+        .sim_net_prior_iterations =
+            vnt_option_double(fields, 9, "prior", player_idx, 0.0),
         .rollout_value_net_history = &rollout_histories[player_idx],
         .rollout_value_net_own_history = &rollout_own_histories[player_idx],
     };
@@ -1575,6 +1950,10 @@ void value_net_test_run_spec(const char *spec) {
     vnt_dump(fields);
   } else if (strings_equal(mode, "simcompare")) {
     vnt_simcompare(fields);
+  } else if (strings_equal(mode, "leafcheck")) {
+    vnt_leafcheck(fields);
+  } else if (strings_equal(mode, "priorfit")) {
+    vnt_priorfit(fields);
   } else if (strings_equal(mode, "games")) {
     vnt_games(fields);
   } else if (strings_equal(mode, "xsprobe")) {

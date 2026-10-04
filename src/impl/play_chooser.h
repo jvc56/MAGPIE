@@ -56,6 +56,10 @@ typedef struct PlayChooserStrategy {
   value_net_rows_fn sim_candidate_value_net_evaluate;
   void *sim_candidate_value_net_context;
   int sim_candidate_pool;
+  // With the candidate value net, > 0 counts each candidate's net utility as
+  // this many sim iterations: the move played has the highest
+  // (prior * utility + n * sim mean) / (prior + n), n its sim iterations.
+  double sim_net_prior_iterations;
   // Total SIM iterations per decision, stopping before the time budget if
   // reached; 0 = no limit.
   uint64_t sim_max_iterations;
