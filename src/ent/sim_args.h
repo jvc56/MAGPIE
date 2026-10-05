@@ -13,6 +13,7 @@
 #include "../ent/thread_control.h"
 #include "../ent/value_net_history.h"
 #include <math.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -29,6 +30,19 @@ typedef void (*value_net_rows_fn)(void *context, int rows, const float *board,
 typedef void (*value_net_rack_odds_fn)(void *context, int rows,
                                        const float *board, const float *scalars,
                                        const float *side, float *theta);
+
+// An optional record of each play's sampled iterations, for offline
+// analysis: the sim stores the seed and utility of each play's first
+// capacity iterations (in the order they finish) at
+// [play * capacity + n], counts[play] counting every iteration (it may
+// exceed capacity). The caller owns the arrays and zeroes counts.
+typedef struct SimSampleRecord {
+  int plays;
+  int capacity;
+  uint64_t *seeds;
+  float *utilities;
+  _Atomic int *counts;
+} SimSampleRecord;
 
 typedef struct SimArgs {
   int num_plies;
@@ -117,6 +131,9 @@ typedef struct SimArgs {
   // utility less the static one. The mean is the net leaf's; the others
   // cost no net row.
   int rollout_value_net_leaf_every;
+  // When set, every iteration's seed and utility is recorded (see
+  // SimSampleRecord); NULL (sim_args_fill's) for none.
+  SimSampleRecord *sample_record;
   ValueNetHistory rollout_value_net_history;
   ValueNetHistory rollout_value_net_own_history;
 } SimArgs;
@@ -194,6 +211,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->rollout_value_net_plies = 0;
   sim_args->rollout_value_net_leaf = false;
   sim_args->rollout_value_net_leaf_every = 1;
+  sim_args->sample_record = NULL;
   value_net_history_reset(&sim_args->rollout_value_net_history);
   value_net_history_reset(&sim_args->rollout_value_net_own_history);
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-

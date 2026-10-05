@@ -560,6 +560,492 @@ static void vnt_simcompare(const StringSplitter *fields) {
   config_destroy(config);
 }
 
+enum {
+  // Cheap features for the diversity extras (kinship): score, leave value,
+  // tiles played, row and column of the tiles placed, exchange.
+  VNT_KIN_CHEAP = 6,
+  VNT_KIN_MAX_POOL = 256,
+  VNT_KIN_ALL_MOVES = 20000,
+};
+
+// The cheap feature vector of move (see VNT_KIN_CHEAP): an exchange sits at
+// the center of the board.
+static void vnt_kin_cheap(const Game *game, const Move *move, double *f) {
+  const Player *mover =
+      game_get_player(game, game_get_player_on_turn_index(game));
+  Rack rack;
+  rack_copy(&rack, player_get_rack(mover));
+  f[0] = equity_to_double(move_get_score(move));
+  f[1] = equity_to_double(
+      get_leave_value_for_move(player_get_klv(mover), move, &rack));
+  f[2] = move_get_tiles_played(move);
+  f[3] = 7.0;
+  f[4] = 7.0;
+  f[5] = 0.0;
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    f[5] = 1.0;
+    return;
+  }
+  double rows = 0.0;
+  double cols = 0.0;
+  int placed = 0;
+  const bool horizontal = move_get_dir(move) == BOARD_HORIZONTAL_DIRECTION;
+  for (int idx = 0; idx < move_get_tiles_length(move); idx++) {
+    if (move_get_tile(move, idx) == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    rows += move_get_row_start(move) + (horizontal ? 0 : idx);
+    cols += move_get_col_start(move) + (horizontal ? idx : 0);
+    placed++;
+  }
+  if (placed > 0) {
+    f[3] = rows / placed;
+    f[4] = cols / placed;
+  }
+}
+
+// "kinship:<model_dir>:<backend>:<positions>:<first_game>:<iterations>:
+// <base>:<extras>:<margin>:<racks>:<threads>:<out>": data for how similar
+// candidate moves are and whether similar moves have similar values. On
+// positions from static NWL23 self-play (every 4th turn from 2 with tiles in
+// the bag; games first_game on), the pool is the mover's top base moves by
+// static equity with PAT plus up to extras more, chosen by farthest-point
+// selection in standardized cheap features (score, leave value, tiles
+// played, placement row and column, exchange) among the moves within margin
+// points of the best. Every pool move is simmed for iterations iterations
+// (round robin, shared seeds, 4 plies of static rollouts scored by the
+// net's leaf, uniform opponent racks, utility 1 win + 0.5 spread / 100) and
+// its features recorded: the cheap ones, static equity and the PAT term,
+// the net's win% and final spread, and board openness (the opponent's best
+// reply score and whether it bingoes, over racks racks drawn from the tiles
+// unseen to the mover, the same draws for every move). Writes
+// <out>.cands.csv (one row per candidate, with its sim mean, sd and count)
+// and <out>.samples (per position: int32 position, candidates, iterations,
+// then candidates x iterations float32 utilities, each candidate's samples
+// placed by their seed's index in the shared seed sequence, NaN where
+// missing).
+static void vnt_kinship(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 12) {
+    log_fatal("kinship needs 11 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const char *backend_name = string_splitter_get_item(fields, 2);
+  const int positions =
+      (int)strtol(string_splitter_get_item(fields, 3), NULL, 10);
+  const uint64_t first_game =
+      strtoull(string_splitter_get_item(fields, 4), NULL, 10);
+  const int iterations =
+      (int)strtol(string_splitter_get_item(fields, 5), NULL, 10);
+  const int base = (int)strtol(string_splitter_get_item(fields, 6), NULL, 10);
+  const int extras = (int)strtol(string_splitter_get_item(fields, 7), NULL, 10);
+  const double margin = strtod(string_splitter_get_item(fields, 8), NULL);
+  const int racks = (int)strtol(string_splitter_get_item(fields, 9), NULL, 10);
+  const int threads =
+      (int)strtol(string_splitter_get_item(fields, 10), NULL, 10);
+  const char *out = string_splitter_get_item(fields, 11);
+  if (base + extras > VNT_KIN_MAX_POOL || base < 1 || iterations < 2) {
+    log_fatal("kinship: pool at most %d, iterations at least 2",
+              VNT_KIN_MAX_POOL);
+  }
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -pat NWL23");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  ValueNetPlayer *player =
+      value_net_player_create(model_dir, vnt_parse_backend(backend_name), 0,
+                              1.0, 0.5, 100.0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("kinship setup failed");
+  }
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  Game *scratch = game_duplicate(game);
+  Game *open_game = game_duplicate(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  MoveList *all = move_list_create(VNT_KIN_ALL_MOVES);
+  MoveList *pool = move_list_create(VNT_KIN_MAX_POOL);
+  MoveList *static_list = move_list_create(1);
+  MoveList *reply_list = move_list_create(1);
+  float *board =
+      malloc_or_die(sizeof(float) * VNT_KIN_MAX_POOL * VALUE_NET_BOARD_FLOATS);
+  float *scalars =
+      malloc_or_die(sizeof(float) * VNT_KIN_MAX_POOL * VALUE_NET_SCALARS);
+  float values[VNT_KIN_MAX_POOL];
+  float spreads[VNT_KIN_MAX_POOL];
+  double pat_terms[VNT_KIN_MAX_POOL];
+  // The extras' selection: each candidate move's cheap features and its
+  // distance to the nearest move chosen so far.
+  double (*cheap)[VNT_KIN_CHEAP] =
+      malloc_or_die(sizeof(double[VNT_KIN_CHEAP]) * VNT_KIN_ALL_MOVES);
+  double *nearest = malloc_or_die(sizeof(double) * VNT_KIN_ALL_MOVES);
+  // The shared seed sequence, to place each sample by its seed.
+  const uint64_t sim_seed = 7;
+  const int sequence = iterations * 4;
+  uint64_t *seed_order = malloc_or_die(sizeof(uint64_t) * sequence);
+  int *seed_rank = malloc_or_die(sizeof(int) * sequence);
+  {
+    XoshiroPRNG *prng = prng_create(sim_seed);
+    for (int idx = 0; idx < sequence; idx++) {
+      seed_order[idx] = prng_next(prng);
+      seed_rank[idx] = idx;
+    }
+    prng_destroy(prng);
+    // Sort seeds (with their ranks) for binary search.
+    for (int i = 1; i < sequence; i++) {
+      const uint64_t key = seed_order[i];
+      const int rank = seed_rank[i];
+      int j = i - 1;
+      while (j >= 0 && seed_order[j] > key) {
+        seed_order[j + 1] = seed_order[j];
+        seed_rank[j + 1] = seed_rank[j];
+        j--;
+      }
+      seed_order[j + 1] = key;
+      seed_rank[j + 1] = rank;
+    }
+  }
+  const int capacity = sequence;
+  SimSampleRecord record = {
+      .plays = VNT_KIN_MAX_POOL,
+      .capacity = capacity,
+      .seeds = malloc_or_die(sizeof(uint64_t) * VNT_KIN_MAX_POOL * capacity),
+      .utilities = malloc_or_die(sizeof(float) * VNT_KIN_MAX_POOL * capacity),
+      .counts = calloc_or_die(VNT_KIN_MAX_POOL, sizeof(_Atomic int)),
+  };
+  float *matrix = malloc_or_die(sizeof(float) * VNT_KIN_MAX_POOL * iterations);
+  char *path = get_formatted_string("%s.cands.csv", out);
+  FILE *csv = fopen_or_die(path, "w");
+  free(path);
+  path = get_formatted_string("%s.samples", out);
+  FILE *samples = fopen_or_die(path, "wb");
+  free(path);
+  fprintf(csv, "position,game,turn,bag,mover_spread,cand,source,move,score,"
+               "leave,tiles,row,col,exchange,static_equity,pat_term,net_win,"
+               "net_spread,open_mean,open_max,open_bingo,sim_mean,sim_sd,"
+               "sim_n\n");
+  StringBuilder *name = string_builder_create();
+  ValueNetHistory histories[2];
+  int done = 0;
+  for (uint64_t game_idx = first_game; done < positions; game_idx++) {
+    game_reset(game);
+    game_seed(game, vnt_mix(UINT64_C(9191) ^ game_idx));
+    draw_starting_racks(game);
+    value_net_history_reset(&histories[0]);
+    value_net_history_reset(&histories[1]);
+    for (int turn = 0; !game_over(game) && done < positions; turn++) {
+      const int mover = game_get_player_on_turn_index(game);
+      const int bag = bag_get_letters(game_get_bag(game));
+      // Both players without PAT, except the mover's pool generation.
+      player_set_pat_usage(game_get_player(game, 0), true, 0);
+      player_set_pat_usage(game_get_player(game, 1), true, 0);
+      if (turn >= 2 && turn % 4 == 2 && bag > 0) {
+        const int64_t start = ctimer_monotonic_ns();
+        // Every legal move by static equity with PAT, and each one's PAT
+        // term (read right after this generation).
+        player_set_pat_usage(game_get_player(game, mover), false, 0);
+        move_list_reset(all);
+        const MoveGenArgs args = {
+            .game = game,
+            .move_list = all,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&args);
+        move_list_sort_moves(all);
+        // Passes stay out of the pool (moves sort by equity, passes last).
+        int count = move_list_get_count(all);
+        while (count > 0 && move_get_type(move_list_get_move(all, count - 1)) ==
+                                GAME_EVENT_PASS) {
+          count--;
+        }
+        if (count == 0) {
+          Move move;
+          move_copy(&move, vnt_static_move(game, static_list));
+          value_net_history_record_opponent_move(&histories[1 - mover], &move);
+          play_move(&move, game, NULL);
+          continue;
+        }
+        // The pool: the top base, then extras by farthest point.
+        move_list_reset(pool);
+        const int base_count = count < base ? count : base;
+        for (int idx = 0; idx < base_count; idx++) {
+          move_list_add_move(pool, move_list_get_move(all, idx));
+        }
+        const double best =
+            equity_to_double(move_get_equity(move_list_get_move(all, 0)));
+        int eligible = 0;
+        while (eligible < count &&
+               equity_to_double(move_get_equity(
+                   move_list_get_move(all, eligible))) >= best - margin) {
+          eligible++;
+        }
+        double mean[VNT_KIN_CHEAP] = {0};
+        double sd[VNT_KIN_CHEAP] = {0};
+        for (int idx = 0; idx < eligible; idx++) {
+          vnt_kin_cheap(game, move_list_get_move(all, idx), cheap[idx]);
+          for (int dim = 0; dim < VNT_KIN_CHEAP; dim++) {
+            mean[dim] += cheap[idx][dim] / eligible;
+          }
+        }
+        for (int idx = 0; idx < eligible; idx++) {
+          for (int dim = 0; dim < VNT_KIN_CHEAP; dim++) {
+            const double d = cheap[idx][dim] - mean[dim];
+            sd[dim] += d * d / eligible;
+          }
+        }
+        for (int dim = 0; dim < VNT_KIN_CHEAP; dim++) {
+          sd[dim] = sd[dim] > 1e-9 ? sqrt(sd[dim]) : 1.0;
+        }
+        for (int idx = base_count; idx < eligible; idx++) {
+          nearest[idx] = INFINITY;
+          for (int chosen = 0; chosen < base_count; chosen++) {
+            double dist = 0.0;
+            for (int dim = 0; dim < VNT_KIN_CHEAP; dim++) {
+              const double d = (cheap[idx][dim] - cheap[chosen][dim]) / sd[dim];
+              dist += d * d;
+            }
+            nearest[idx] = fmin(nearest[idx], dist);
+          }
+        }
+        for (int pick = 0; pick < extras && base_count + pick < eligible;
+             pick++) {
+          int far = -1;
+          for (int idx = base_count; idx < eligible; idx++) {
+            if (nearest[idx] >= 0.0 &&
+                (far < 0 || nearest[idx] > nearest[far])) {
+              far = idx;
+            }
+          }
+          if (far < 0 || nearest[far] <= 0.0) {
+            break;
+          }
+          move_list_add_move(pool, move_list_get_move(all, far));
+          for (int idx = base_count; idx < eligible; idx++) {
+            if (nearest[idx] < 0.0) {
+              continue;
+            }
+            double dist = 0.0;
+            for (int dim = 0; dim < VNT_KIN_CHEAP; dim++) {
+              const double d = (cheap[idx][dim] - cheap[far][dim]) / sd[dim];
+              dist += d * d;
+            }
+            nearest[idx] = fmin(nearest[idx], dist);
+          }
+          nearest[far] = -1.0;
+        }
+        move_list_sort_moves(pool);
+        const int cands = move_list_get_count(pool);
+        // PAT terms need the PAT generation's state: regenerate it for the
+        // pool's moves' leaves now (the extras changed nothing in game).
+        move_list_reset(all);
+        generate_moves(&args);
+        for (int idx = 0; idx < cands; idx++) {
+          Rack leave;
+          get_leave_for_move(move_list_get_move(pool, idx), game, &leave);
+          pat_terms[idx] = equity_to_double(
+              gen_last_pat_term(move_list_get_move(pool, idx), &leave));
+        }
+        player_set_pat_usage(game_get_player(game, mover), true, 0);
+        // The net's view of each candidate.
+        for (int idx = 0; idx < cands; idx++) {
+          value_net_features_for_move(
+              game, move_list_get_move(pool, idx), &histories[mover], scratch,
+              board + ((size_t)idx * VALUE_NET_BOARD_FLOATS),
+              scalars + ((size_t)idx * VALUE_NET_SCALARS));
+        }
+        value_net_player_evaluate_rows(player, cands, board, scalars, values,
+                                       spreads);
+        // The sim, every sample recorded.
+        for (int idx = 0; idx < cands; idx++) {
+          atomic_store(&record.counts[idx], 0);
+        }
+        ThreadControl *control = thread_control_create();
+        thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+        SimArgs sim_args;
+        sim_args_fill(4, pool, cands, NULL, config_get_win_pcts(config), NULL,
+                      control, game, false, false, threads, 0, cands, 4,
+                      sim_seed, (uint64_t)iterations * (uint64_t)cands, 1, 0.0,
+                      BAI_THRESHOLD_NONE, 0.0, BAI_SAMPLING_RULE_ROUND_ROBIN,
+                      0.0, 1.0, 0.5, 100.0, false, NULL, &sim_args);
+        sim_args.rollout_value_net_evaluate = value_net_player_evaluate_rows;
+        sim_args.rollout_value_net_context = player;
+        sim_args.rollout_value_net_batch = 64;
+        sim_args.rollout_value_net_plies = 0;
+        sim_args.rollout_value_net_leaf = true;
+        sim_args.rollout_value_net_history = histories[1 - mover];
+        sim_args.rollout_value_net_own_history = histories[mover];
+        sim_args.sample_record = &record;
+        // Static rollouts without PAT.
+        sim_args.pat_rollout_disabled = true;
+        SimResults *results = sim_results_create(0.0);
+        simulate_without_ctx(&sim_args, results, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_print_and_reset(error_stack);
+          log_fatal("kinship sim failed");
+        }
+        thread_control_destroy(control);
+        // Each candidate's samples by seed index.
+        for (int idx = 0; idx < cands * iterations; idx++) {
+          matrix[idx] = NAN;
+        }
+        double sim_sum[VNT_KIN_MAX_POOL] = {0};
+        double sim_sq[VNT_KIN_MAX_POOL] = {0};
+        int sim_n[VNT_KIN_MAX_POOL] = {0};
+        for (int play = 0; play < cands; play++) {
+          // The play's index in the pool: the sim keeps the move list's
+          // order.
+          int stored = atomic_load(&record.counts[play]);
+          if (stored > capacity) {
+            stored = capacity;
+          }
+          for (int sample = 0; sample < stored; sample++) {
+            const size_t at = ((size_t)play * capacity) + (size_t)sample;
+            const uint64_t seed = record.seeds[at];
+            int low = 0;
+            int high = sequence - 1;
+            while (low < high) {
+              const int middle = (low + high) / 2;
+              if (seed_order[middle] < seed) {
+                low = middle + 1;
+              } else {
+                high = middle;
+              }
+            }
+            if (seed_order[low] != seed) {
+              log_fatal("kinship: a sample's seed is not in the sequence");
+            }
+            const int rank = seed_rank[low];
+            const double utility = record.utilities[at];
+            sim_sum[play] += utility;
+            sim_sq[play] += utility * utility;
+            sim_n[play]++;
+            if (rank < iterations) {
+              matrix[((size_t)play * iterations) + (size_t)rank] =
+                  (float)utility;
+            }
+          }
+        }
+        // Openness: the opponent's best reply by score over racks drawn
+        // from the tiles unseen to the mover, the same draws for every
+        // candidate.
+        double open_mean[VNT_KIN_MAX_POOL];
+        double open_max[VNT_KIN_MAX_POOL];
+        double open_bingo[VNT_KIN_MAX_POOL];
+        const int opponent = 1 - mover;
+        for (int idx = 0; idx < cands; idx++) {
+          open_mean[idx] = 0.0;
+          open_max[idx] = 0.0;
+          open_bingo[idx] = 0.0;
+          for (int rack_idx = 0; rack_idx < racks; rack_idx++) {
+            game_copy(open_game, game);
+            player_set_pat_usage(game_get_player(open_game, 0), true, 0);
+            player_set_pat_usage(game_get_player(open_game, 1), true, 0);
+            return_rack_to_bag(open_game, opponent);
+            play_move_without_drawing_tiles(move_list_get_move(pool, idx),
+                                            open_game);
+            game_seed(open_game, vnt_mix(UINT64_C(5151) ^ (uint64_t)rack_idx ^
+                                         (game_idx << 20)));
+            set_random_rack(open_game, opponent, NULL);
+            move_list_reset(reply_list);
+            const MoveGenArgs reply_args = {
+                .game = open_game,
+                .move_list = reply_list,
+                .move_record_type = MOVE_RECORD_BEST,
+                .move_sort_type = MOVE_SORT_SCORE,
+                .override_kwg = NULL,
+                .eq_margin_movegen = 0,
+                .target_equity = EQUITY_MAX_VALUE,
+                .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+            };
+            generate_moves(&reply_args);
+            if (move_list_get_count(reply_list) > 0) {
+              const Move *reply = move_list_get_move(reply_list, 0);
+              const double reply_score =
+                  equity_to_double(move_get_score(reply));
+              open_mean[idx] += reply_score / racks;
+              open_max[idx] = fmax(open_max[idx], reply_score);
+              open_bingo[idx] +=
+                  (move_get_tiles_played(reply) == RACK_SIZE ? 1.0 : 0.0) /
+                  racks;
+            }
+          }
+        }
+        const double mover_spread =
+            equity_to_double(player_get_score(game_get_player(game, mover)) -
+                             player_get_score(game_get_player(game, opponent)));
+        for (int idx = 0; idx < cands; idx++) {
+          const Move *move = move_list_get_move(pool, idx);
+          double f[VNT_KIN_CHEAP];
+          vnt_kin_cheap(game, move, f);
+          string_builder_clear(name);
+          string_builder_add_move(name, game_get_board(game), move, ld, false);
+          const double n = sim_n[idx];
+          const double sim_mean = n > 0 ? sim_sum[idx] / n : NAN;
+          const double sim_sd =
+              n > 1 ? sqrt(fmax(0.0, (sim_sq[idx] - (n * sim_mean * sim_mean)) /
+                                         (n - 1)))
+                    : NAN;
+          const double net_spread = value_net_final_spread(
+              spreads[idx], value_net_spread_after_move(game, move));
+          fprintf(csv,
+                  "%d,%llu,%d,%d,%.0f,%d,%d,\"%s\",%.1f,%.3f,%.0f,%.2f,%.2f,"
+                  "%.0f,%.3f,%.3f,%.5f,%.2f,%.2f,%.0f,%.3f,%.6f,%.6f,%d\n",
+                  done, (unsigned long long)game_idx, turn, bag, mover_spread,
+                  idx, idx < base_count ? 0 : 1, string_builder_peek(name),
+                  f[0], f[1], f[2], f[3], f[4], f[5],
+                  equity_to_double(move_get_equity(move)) - pat_terms[idx],
+                  pat_terms[idx], (1.0 + (double)values[idx]) / 2.0, net_spread,
+                  open_mean[idx], open_max[idx], open_bingo[idx], sim_mean,
+                  sim_sd, sim_n[idx]);
+        }
+        const int32_t header[3] = {done, cands, iterations};
+        fwrite(header, sizeof(int32_t), 3, samples);
+        fwrite(matrix, sizeof(float), (size_t)cands * iterations, samples);
+        (void)fflush(csv);
+        (void)fflush(samples);
+        sim_results_destroy(results);
+        done++;
+        printf("kinship position=%d cands=%d seconds=%.1f\n", done, cands,
+               (double)(ctimer_monotonic_ns() - start) / 1e9);
+        (void)fflush(stdout);
+      }
+      Move move;
+      move_copy(&move, vnt_static_move(game, static_list));
+      value_net_history_record_opponent_move(&histories[1 - mover], &move);
+      play_move(&move, game, NULL);
+    }
+  }
+  string_builder_destroy(name);
+  (void)fclose(csv);
+  (void)fclose(samples);
+  free(record.seeds);
+  free(record.utilities);
+  free((void *)record.counts);
+  free(matrix);
+  free(seed_order);
+  free(seed_rank);
+  free(cheap);
+  free(nearest);
+  free(board);
+  free(scalars);
+  move_list_destroy(all);
+  move_list_destroy(pool);
+  move_list_destroy(static_list);
+  move_list_destroy(reply_list);
+  game_destroy(scratch);
+  game_destroy(open_game);
+  value_net_player_destroy(player);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // Correlation of xs and ys (n values each); 0 when either is constant.
 static double vnt_correlation(const double *xs, const double *ys, int n) {
   double mx = 0.0;
@@ -3327,6 +3813,8 @@ void value_net_test_run_spec(const char *spec) {
                  string_splitter_get_item(fields, 2));
   } else if (strings_equal(mode, "simbench")) {
     vnt_simbench(fields);
+  } else if (strings_equal(mode, "kinship")) {
+    vnt_kinship(fields);
   } else if (strings_equal(mode, "leaveklvcheck") && num_fields == 2) {
     vnt_leaveklvcheck(string_splitter_get_item(fields, 1));
   } else if (strings_equal(mode, "playerthroughput")) {

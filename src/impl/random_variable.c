@@ -520,6 +520,8 @@ typedef struct Simmer {
   bool value_net_leaf;
   // SimArgs.rollout_value_net_leaf_every (at least 1).
   int value_net_leaf_every;
+  // SimArgs.sample_record, or NULL.
+  SimSampleRecord *sample_record;
   ValueNetHistory value_net_history;
   ValueNetHistory value_net_own_history;
   SimValueNetShared value_net_shared;
@@ -1324,6 +1326,16 @@ static double sim_sample_iteration(Simmer *simmer, SimmerWorker *simmer_worker,
   if (simmer->utility_w_spread > 0.0) {
     simmed_play_add_utility_stat(simmed_play, utility);
   }
+  SimSampleRecord *record = simmer->sample_record;
+  if (record != NULL && play_index < record->plays) {
+    const int slot = atomic_fetch_add(&record->counts[play_index], 1);
+    if (slot < record->capacity) {
+      const size_t at =
+          ((size_t)play_index * (size_t)record->capacity) + (size_t)slot;
+      record->seeds[at] = seed;
+      record->utilities[at] = (float)utility;
+    }
+  }
   return utility;
 }
 
@@ -1398,6 +1410,7 @@ static void simmer_set_value_net(Simmer *simmer, const SimArgs *sim_args) {
       sim_args->pat_rollout_disabled_classes_mask;
   simmer->value_net_leaf = false;
   simmer->value_net_policy_plies = 0;
+  simmer->sample_record = sim_args->sample_record;
   if (simmer->value_net_evaluate == NULL) {
     return;
   }
