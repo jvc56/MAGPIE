@@ -1089,7 +1089,8 @@ typedef struct VntKinrefEntry {
   char names[VNT_KINREF_MAX][64];
 } VntKinrefEntry;
 
-// "kinref:<model_dir>:<backend>:<contenders>:<iterations>:<threads>:<out>":
+// "kinref:<model_dir>:<backend>:<contenders>:<iterations>:<threads>:<out>
+// [:<leaf>]":
 // an independent reference sim for chosen candidates of positions from
 // valuenet:kinship. Each line of <contenders> is tab-separated: game index,
 // turn, bag size, then up to VNT_KINREF_MAX move names as kinship writes
@@ -1099,12 +1100,18 @@ typedef struct VntKinrefEntry {
 // they are simmed as kinship sims them (4 plies of static rollouts without
 // PAT, the net's leaf, uniform opponent racks, round robin) for iterations
 // iterations each from a different seed, so the reference is independent
-// of the samples that chose the contenders. Writes <out>.csv: game, turn,
-// bag, move, mean utility, its sd and the samples.
+// of the samples that chose the contenders. With leaf 0 the rollouts are
+// scored by the static win% table instead of the net, so no net judges the
+// candidates. Writes <out>.csv: game, turn, bag, move, mean utility, its sd
+// and the samples.
 static void vnt_kinref(const StringSplitter *fields) {
-  if (string_splitter_get_number_of_items(fields) != 7) {
-    log_fatal("kinref needs 6 fields");
+  const int kinref_fields = (int)string_splitter_get_number_of_items(fields);
+  if (kinref_fields != 7 && kinref_fields != 8) {
+    log_fatal("kinref needs 6 or 7 fields");
   }
+  const bool net_leaf =
+      kinref_fields == 7 ||
+      strtol(string_splitter_get_item(fields, 7), NULL, 10) != 0;
   const char *model_dir = string_splitter_get_item(fields, 1);
   const char *backend_name = string_splitter_get_item(fields, 2);
   const char *contenders_path = string_splitter_get_item(fields, 3);
@@ -1252,13 +1259,15 @@ static void vnt_kinref(const StringSplitter *fields) {
                       1, 0.0, BAI_THRESHOLD_NONE, 0.0,
                       BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0, 1.0, 0.5, 100.0,
                       false, NULL, &sim_args);
-        sim_args.rollout_value_net_evaluate = value_net_player_evaluate_rows;
-        sim_args.rollout_value_net_context = player;
-        sim_args.rollout_value_net_batch = 64;
-        sim_args.rollout_value_net_plies = 0;
-        sim_args.rollout_value_net_leaf = true;
-        sim_args.rollout_value_net_history = histories[1 - mover];
-        sim_args.rollout_value_net_own_history = histories[mover];
+        if (net_leaf) {
+          sim_args.rollout_value_net_evaluate = value_net_player_evaluate_rows;
+          sim_args.rollout_value_net_context = player;
+          sim_args.rollout_value_net_batch = 64;
+          sim_args.rollout_value_net_plies = 0;
+          sim_args.rollout_value_net_leaf = true;
+          sim_args.rollout_value_net_history = histories[1 - mover];
+          sim_args.rollout_value_net_own_history = histories[mover];
+        }
         sim_args.sample_record = &record;
         sim_args.pat_rollout_disabled = true;
         SimResults *results = sim_results_create(0.0);
