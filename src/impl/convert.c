@@ -50,8 +50,8 @@ enum { RACK_EQUITY_CSV_MAX_LINE_LENGTH = 512 };
 // generation. The individual games are long gone. This is the conversion from
 // those aggregates to the leave values they imply, so that the server no
 // longer has to carry its own translation of rack_list_write_to_klv and
-// generate_leaves and keep it in step by hand (see birdtest's
-// MAGPIE_DEPENDENCY.md, part 2).
+// generate_leaves and keep it in step by hand (see birdtest's README.md,
+// "Leave-generation KLVs").
 //
 // The input is `lexica/<input_name>.csv`, one `rack,count,equity_sum` row per
 // full rack, and the output is `lexica/<output_name>.klv2`. Every full rack

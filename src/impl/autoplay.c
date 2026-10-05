@@ -300,9 +300,9 @@ void postgen_prebroadcast_func(void *data) {
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
   rack_list_write_to_klv(lg_shared_data->rack_list, lg_shared_data->ld,
                          lg_shared_data->klv);
-  // The direct-RackList-read MAGPIE-CLIENT.md's contribute leave_generation
-  // executor calls for: the results go back in the task's JSON response
-  // rather than through a file.
+  // The direct RackList read that contribute's leave_generation executor
+  // needs (birdtest's PLAN.md, "Leave generation on the client"): the
+  // results go back in the task's JSON response rather than through a file.
   autoplay_results_set_leave_results_json(
       lg_shared_data->primary_autoplay_results,
       rack_list_get_rack_equity_json(lg_shared_data->rack_list,

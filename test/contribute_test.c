@@ -433,6 +433,8 @@ static const char *const BIRDTEST_LEAVE_FIXTURE =
     "test/birdtest_contract/assignment-leave-generation.json";
 static const char *const BIRDTEST_OPENING_RACK_FIXTURE =
     "test/birdtest_contract/assignment-opening-rack.json";
+static const char *const BIRDTEST_DECLINE_FIXTURE =
+    "test/birdtest_contract/decline-missing-data.json";
 // Captured from a real exchange between this client and birdtest by
 // birdtest's scripts/capture_contract.py, not written by hand.
 static const char *const BIRDTEST_GAME_PAIRS_FIXTURE =
@@ -1820,6 +1822,79 @@ static void test_the_claim_body_matches_the_claim_fixture(void) {
   (void)remove(path);
 }
 
+// The decline body, against birdtest's decline-missing-data.json, built the
+// way a missing_data decline builds it: one entry per file the fixture names,
+// one not found and one found with other bytes. The same keys at every depth
+// and the same values -- except that a file not found has no "actual" here,
+// which birdtest reads as the fixture's null. birdtest parses the same file
+// as the body it accepts, so a key renamed on either side fails a test.
+static void test_the_decline_body_matches_the_decline_fixture(void) {
+  const JsonValue *fixture = load_fixture(BIRDTEST_DECLINE_FIXTURE);
+  const JsonValue *fixture_missing = json_object_get(fixture, "missing");
+  const int missing_count = json_array_length(fixture_missing);
+  StringBuilder *sb = string_builder_create();
+  bool names_an_absent_file = false;
+  bool names_a_mismatched_file = false;
+  for (int missing_idx = 0; missing_idx < missing_count; missing_idx++) {
+    const JsonValue *file = json_array_get(fixture_missing, missing_idx);
+    const char *actual = json_get_string_or_null(file, "actual");
+    if (actual) {
+      names_a_mismatched_file = true;
+    } else {
+      names_an_absent_file = true;
+    }
+    if (missing_idx > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    char *entry = contribute_missing_file_json(
+        json_get_string_or_null(file, "role"),
+        json_get_string_or_null(file, "name"),
+        json_get_string_or_null(file, "expected"), actual);
+    string_builder_add_string(sb, entry);
+    free(entry);
+  }
+  assert(names_an_absent_file && names_a_mismatched_file);
+  char *missing_json = string_builder_dump_and_destroy(sb, NULL);
+  char *body = contribute_decline_body(
+      json_get_string_or_null(fixture, "claim_token"),
+      json_get_string_or_null(fixture, "reason"), missing_json);
+  free(missing_json);
+
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *ours = json_parse(body, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_produces_every_fixture_key(fixture, ours, BIRDTEST_DECLINE_FIXTURE);
+  assert(json_object_size(ours) == json_object_size(fixture));
+  assert_strings_equal(json_get_string_or_null(ours, "claim_token"),
+                       json_get_string_or_null(fixture, "claim_token"));
+  assert_strings_equal(json_get_string_or_null(ours, "reason"),
+                       json_get_string_or_null(fixture, "reason"));
+  const JsonValue *our_missing = json_object_get(ours, "missing");
+  assert(json_array_length(our_missing) == missing_count);
+  const char *const entry_keys[] = {"role", "name", "expected"};
+  for (int missing_idx = 0; missing_idx < missing_count; missing_idx++) {
+    const JsonValue *mine = json_array_get(our_missing, missing_idx);
+    const JsonValue *theirs = json_array_get(fixture_missing, missing_idx);
+    for (size_t key_idx = 0;
+         key_idx < sizeof(entry_keys) / sizeof(entry_keys[0]); key_idx++) {
+      assert_strings_equal(
+          json_get_string_or_null(mine, entry_keys[key_idx]),
+          json_get_string_or_null(theirs, entry_keys[key_idx]));
+    }
+    const char *actual = json_get_string_or_null(theirs, "actual");
+    if (actual) {
+      assert(json_object_size(mine) == json_object_size(theirs));
+      assert_strings_equal(json_get_string_or_null(mine, "actual"), actual);
+    } else {
+      assert(!json_object_get(mine, "actual"));
+    }
+  }
+  json_destroy(ours);
+  json_destroy(fixture);
+  free(body);
+  error_stack_destroy(error_stack);
+}
+
 // contribute's tasks run in a config of their own. The caller's session and
 // the settings file the REPL saves from it stay as they were: a task's
 // lexicon and derived-file flags -- a wordmap or word info table this machine
@@ -2474,5 +2549,6 @@ void test_contribute(void) {
   test_a_set_aside_job_is_left_out_of_claims_for_a_while();
   test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job();
   test_the_claim_body_matches_the_claim_fixture();
+  test_the_decline_body_matches_the_decline_fixture();
   test_an_unverifiable_assignment_is_refused();
 }

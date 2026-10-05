@@ -20,12 +20,12 @@
 // **These are not arbitrary constants to update when the test goes red.** A
 // wordmap and a rack info table are built on every contributor's own machine
 // and are far too large to ship, so birdtest checks them by building its own
-// copy on the server and comparing hashes (see MAGPIE_DEPENDENCY.md). That
-// only works while a hash means something, and a hash means something only
-// together with the builder that produced it: a CSW24 wordmap built in
-// December 2025 and one built nine months later differ in 72,852,152 bytes
-// with the same inputs and the same format version 3, because the builder
-// changed and the format did not have to.
+// copy on the server and comparing hashes (see birdtest's README.md, "MAGPIE
+// on the server"). That only works while a hash means something, and a hash
+// means something only together with the builder that produced it: a CSW24
+// wordmap built in December 2025 and one built nine months later differ in
+// 72,852,152 bytes with the same inputs and the same format version 3, because
+// the builder changed and the format did not have to.
 //
 // So when this test fails, the builder's output has changed. The fix is to
 // bump WMP_BUILDER_VERSION, RIT_BUILDER_VERSION, WIT_BUILDER_VERSION or

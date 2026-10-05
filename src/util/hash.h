@@ -19,8 +19,8 @@
 // more, and there is no reason to hold one in memory to hash it.
 char *sha256_hash_file(const char *path, ErrorStack *error_stack);
 
-// SHA-256 of a memory buffer, same hex form. Used for the wordmap sidecar and
-// in tests.
+// SHA-256 of a memory buffer, same hex form. Used to verify a fetched
+// leave-generation KLV, and in tests.
 char *sha256_hash_bytes(const void *data, size_t length);
 
 #endif

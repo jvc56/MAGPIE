@@ -34,7 +34,8 @@ endif
 # This exists because a wordmap's and a rack info table's bytes have to be a
 # function of their inputs alone. birdtest's server builds a reference copy of
 # each derived file and sends its SHA-256 to workers, which build their own and
-# refuse to use one whose hash differs (see birdtest's MAGPIE_DEPENDENCY.md).
+# refuse to use one whose hash differs (see birdtest's README.md, "MAGPIE on
+# the server").
 # -march=native makes the binary's instruction set a property of the machine
 # that compiled it, so two builds of the same commit can vectorize the same
 # floating-point reduction differently and produce different bytes for the same

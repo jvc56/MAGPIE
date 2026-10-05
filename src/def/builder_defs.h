@@ -7,7 +7,7 @@
 // machine builds its own from files it already has. birdtest turns that into
 // something it can check by building a reference copy on the server and sending
 // its SHA-256 to workers, which build their own and refuse to use one whose
-// bytes differ (see birdtest's MAGPIE_DEPENDENCY.md).
+// bytes differ (see birdtest's README.md, "MAGPIE on the server").
 //
 // That only works while a builder's output is a function of its inputs, and a
 // builder's output is not a function of its inputs across MAGPIE versions. A

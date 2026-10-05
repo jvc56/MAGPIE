@@ -433,15 +433,10 @@ static bool expected_data_matches(ContributeState *state,
       string_builder_add_string(missing, ",");
     }
     first_missing = false;
-    json_write_object_start(missing);
-    bool field_first = true;
-    json_write_string_field(missing, "role", role, &field_first);
-    json_write_string_field(missing, "name", name, &field_first);
-    json_write_string_field(missing, "expected", expected_digest, &field_first);
-    if (actual) {
-      json_write_string_field(missing, "actual", actual, &field_first);
-    }
-    json_write_object_end(missing);
+    char *entry =
+        contribute_missing_file_json(role, name, expected_digest, actual);
+    string_builder_add_string(missing, entry);
+    free(entry);
 
     // Keyed by resolved path and expected digest: the same gap logs once, and
     // logs again only when the file or the expectation changes. The resolved
@@ -558,10 +553,8 @@ bool contribute_find_derived(const ContributeState *state, const char *role,
   return false;
 }
 
-void contribute_record_derived_mismatch(ContributeState *state,
-                                        const char *role, const char *name,
-                                        const char *expected,
-                                        const char *actual) {
+char *contribute_missing_file_json(const char *role, const char *name,
+                                   const char *expected, const char *actual) {
   StringBuilder *sb = string_builder_create();
   bool first = true;
   json_write_object_start(sb);
@@ -572,7 +565,14 @@ void contribute_record_derived_mismatch(ContributeState *state,
     json_write_string_field(sb, "actual", actual, &first);
   }
   json_write_object_end(sb);
-  char *entry = string_builder_dump_and_destroy(sb, NULL);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+void contribute_record_derived_mismatch(ContributeState *state,
+                                        const char *role, const char *name,
+                                        const char *expected,
+                                        const char *actual) {
+  char *entry = contribute_missing_file_json(role, name, expected, actual);
   string_list_add_string(state->derived_mismatches, entry);
   free(entry);
 
@@ -848,16 +848,12 @@ static void remember_unsupported(ContributeState *state, const char *job_id) {
   string_list_add_string(state->unsupported_jobs, job_id);
 }
 
-// POST /api/worker/decline: hand the claim straight back rather than letting
-// it lapse on the heartbeat timeout, and tell the server which files did not
-// match so an admin can see what the fleet is missing.
-static void decline_over_http(ContributeState *state, const char *reason,
-                              const char *missing_json,
-                              ErrorStack *error_stack) {
+char *contribute_decline_body(const char *claim_token, const char *reason,
+                              const char *missing_json) {
   StringBuilder *sb = string_builder_create();
   bool first = true;
   json_write_object_start(sb);
-  json_write_string_field(sb, "claim_token", state->claim_token, &first);
+  json_write_string_field(sb, "claim_token", claim_token, &first);
   json_write_string_field(sb, "reason", reason, &first);
   json_write_array_start(sb, "missing", &first);
   if (missing_json) {
@@ -865,7 +861,17 @@ static void decline_over_http(ContributeState *state, const char *reason,
   }
   json_write_array_end(sb);
   json_write_object_end(sb);
-  char *body = string_builder_dump_and_destroy(sb, NULL);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+// POST /api/worker/decline: hand the claim straight back rather than letting
+// it lapse on the heartbeat timeout, and tell the server which files did not
+// match so an admin can see what the fleet is missing.
+static void decline_over_http(ContributeState *state, const char *reason,
+                              const char *missing_json,
+                              ErrorStack *error_stack) {
+  char *body =
+      contribute_decline_body(state->claim_token, reason, missing_json);
 
   ChttpResponse response;
   http_client_post_json(state->http_client, "/api/worker/decline", body,

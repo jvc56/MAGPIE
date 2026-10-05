@@ -173,6 +173,20 @@ void contribute_unlock_build(int lock_fd);
 char *contribute_hash_file(ContributeState *state, const char *path,
                            ErrorStack *error_stack);
 
+// One entry of a decline's "missing" array, as a JSON object: a file whose
+// bytes are not the ones the claim pins, with the digest it pins and the one
+// found -- `actual` NULL for a file not found at all, which leaves the key out
+// (birdtest reads its absence as null). The caller frees. Exposed for tests.
+char *contribute_missing_file_json(const char *role, const char *name,
+                                   const char *expected, const char *actual);
+
+// The body of POST /api/worker/decline: the claim handed back, why, and the
+// files behind it -- `missing_json` is the "missing" array's members, comma
+// separated (contribute_missing_file_json each), or NULL for none. The caller
+// frees. Exposed for tests.
+char *contribute_decline_body(const char *claim_token, const char *reason,
+                              const char *missing_json);
+
 // Records a derived file whose bytes do not match what the claim pins, to be
 // sent with the decline. Both digests go to the server so that a fleet-wide
 // disagreement shows up in the admin view instead of being worked around
