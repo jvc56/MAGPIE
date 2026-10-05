@@ -47,5 +47,18 @@ int rvs_get_best_arm_index(const RandomVariables *rvs);
 // computed ahead but not yet sampled into the sim's stats. Call with no
 // sampling in flight.
 void rvs_sim_drain(RandomVariables *rvs);
+// Process-wide moments of the net and static horizon utilities over
+// iterations that took both (the net leaf), within each candidate (each
+// sim's per-play sums folded in by rvs_sim_drain): iterations, and the
+// within-play sums of squares of the net utility, the static one and their
+// cross products. For choosing SimArgs.rollout_value_net_leaf_every.
+typedef struct SimLeafMoments {
+  double iterations;
+  double net_ss;
+  double static_ss;
+  double cross_ss;
+} SimLeafMoments;
+void sim_leaf_moments_reset(void);
+void sim_leaf_moments_get(SimLeafMoments *moments);
 
 #endif

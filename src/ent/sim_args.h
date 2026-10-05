@@ -110,6 +110,13 @@ typedef struct SimArgs {
   int rollout_value_net_batch;
   int rollout_value_net_plies;
   bool rollout_value_net_leaf;
+  // With the net leaf, every rollout_value_net_leaf_every-th iteration of a
+  // refill (by batch slot; 0 or 1 for all) takes the net leaf, and each
+  // iteration is valued by a control variate: its static horizon utility
+  // (the win% table) plus, on those iterations, every times the net's
+  // utility less the static one. The mean is the net leaf's; the others
+  // cost no net row.
+  int rollout_value_net_leaf_every;
   ValueNetHistory rollout_value_net_history;
   ValueNetHistory rollout_value_net_own_history;
 } SimArgs;
@@ -186,6 +193,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->rollout_value_net_batch = 0;
   sim_args->rollout_value_net_plies = 0;
   sim_args->rollout_value_net_leaf = false;
+  sim_args->rollout_value_net_leaf_every = 1;
   value_net_history_reset(&sim_args->rollout_value_net_history);
   value_net_history_reset(&sim_args->rollout_value_net_own_history);
   // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-

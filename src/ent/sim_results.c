@@ -608,12 +608,10 @@ void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility) {
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
-double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
-                                    Equity spread, Equity leftover,
-                                    game_end_reason_t game_end_reason,
-                                    int bag_tiles, int on_turn_rack_tiles,
-                                    int off_turn_rack_tiles,
-                                    bool plies_are_odd) {
+double sim_horizon_win_pct(const WinPct *wp, Equity spread, Equity leftover,
+                           game_end_reason_t game_end_reason, int bag_tiles,
+                           int on_turn_rack_tiles, int off_turn_rack_tiles,
+                           bool plies_are_odd) {
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
     // the game ended; use the actual result.
@@ -641,6 +639,18 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
       wpct = 1.0 - wpct;
     }
   }
+  return wpct;
+}
+
+double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
+                                    Equity spread, Equity leftover,
+                                    game_end_reason_t game_end_reason,
+                                    int bag_tiles, int on_turn_rack_tiles,
+                                    int off_turn_rack_tiles,
+                                    bool plies_are_odd) {
+  const double wpct = sim_horizon_win_pct(wp, spread, leftover, game_end_reason,
+                                          bag_tiles, on_turn_rack_tiles,
+                                          off_turn_rack_tiles, plies_are_odd);
   simmed_play_add_win_pct_value(simmed_play, wpct);
   return wpct;
 }

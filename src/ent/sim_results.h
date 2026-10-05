@@ -42,6 +42,13 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
                                    const Move *move);
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover);
+// The simming player's win% at a rollout's horizon from the win% table (the
+// actual result when the game ended), as simmed_play_add_win_pct_stat
+// records it.
+double sim_horizon_win_pct(const WinPct *wp, Equity spread, Equity leftover,
+                           game_end_reason_t game_end_reason, int bag_tiles,
+                           int on_turn_rack_tiles, int off_turn_rack_tiles,
+                           bool plies_are_odd);
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,

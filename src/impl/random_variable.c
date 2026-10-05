@@ -456,6 +456,10 @@ typedef struct SimValueNetWorker {
   double *spread_after;
   MoveList *list;
   Game *scratch;
+  // Per play, sums over its iterations that took both leaves: count, net
+  // and static utility, their squares and product (see SimLeafMoments).
+  double *leaf_sums; // [moment_plays * 6]
+  int moment_plays;
   // The iteration being sampled: its seed, moves and leaf.
   uint64_t iteration_seed;
   int iteration_move_count;
@@ -514,6 +518,8 @@ typedef struct Simmer {
   int value_net_policy_plies;
   // SimArgs.rollout_value_net_leaf: the net scores the final ply's move.
   bool value_net_leaf;
+  // SimArgs.rollout_value_net_leaf_every (at least 1).
+  int value_net_leaf_every;
   ValueNetHistory value_net_history;
   ValueNetHistory value_net_own_history;
   SimValueNetShared value_net_shared;
@@ -548,6 +554,7 @@ static void sim_value_net_worker_free(SimValueNetWorker *worker) {
   free(worker->leaf_set);
   free(worker->leaf_win_pct);
   free(worker->leaf_spread);
+  free(worker->leaf_sums);
   move_list_destroy(worker->list);
   game_destroy(worker->scratch);
   memset(worker, 0, sizeof(SimValueNetWorker));
@@ -815,7 +822,8 @@ static void sim_value_net_refill(Simmer *simmer, SimmerWorker *simmer_worker,
       if (ply >= simmer->value_net_policy_plies) {
         const Move *top = get_top_equity_move(game, list);
         if (!simmer->value_net_leaf || ply != worker->plies - 1 ||
-            bag_get_letters(game_get_bag(game)) == 0) {
+            bag_get_letters(game_get_bag(game)) == 0 ||
+            seed_idx % simmer->value_net_leaf_every != 0) {
           sim_value_net_play(worker, seed_idx, (size_t)seed_idx, top);
           continue;
         }
@@ -1026,6 +1034,68 @@ static void sim_value_net_worker_ensure_for_simmer(const Simmer *simmer,
                               simmer->value_net_candidates > 0
                                   ? simmer->value_net_candidates
                                   : SIM_VALUE_NET_DEFAULT_CANDIDATES);
+  const int plays = simmer->value_net_shared.plays;
+  if (worker->moment_plays != plays) {
+    free(worker->leaf_sums);
+    worker->leaf_sums = calloc_or_die((size_t)plays * 6, sizeof(double));
+    worker->moment_plays = plays;
+  }
+}
+
+// The process-wide SimLeafMoments, folded in by rvs_sim_drain.
+static cpthread_mutex_t sim_leaf_moments_mutex = PTHREAD_MUTEX_INITIALIZER;
+static SimLeafMoments sim_leaf_moments_total;
+
+void sim_leaf_moments_reset(void) {
+  cpthread_mutex_lock(&sim_leaf_moments_mutex);
+  memset(&sim_leaf_moments_total, 0, sizeof(sim_leaf_moments_total));
+  cpthread_mutex_unlock(&sim_leaf_moments_mutex);
+}
+
+void sim_leaf_moments_get(SimLeafMoments *moments) {
+  cpthread_mutex_lock(&sim_leaf_moments_mutex);
+  *moments = sim_leaf_moments_total;
+  cpthread_mutex_unlock(&sim_leaf_moments_mutex);
+}
+
+// Adds each play's within-play sums of squares from every worker's sums
+// and clears them.
+static void sim_leaf_moments_fold(Simmer *simmer) {
+  const int plays = simmer->value_net_shared.plays;
+  SimLeafMoments add = {0};
+  for (int play = 0; play < plays; play++) {
+    double sums[6] = {0};
+    for (int thread = 0; thread < simmer->num_threads; thread++) {
+      SimValueNetWorker *worker = &simmer->workers[thread]->value_net;
+      if (worker->leaf_sums == NULL || worker->moment_plays != plays) {
+        continue;
+      }
+      for (int idx = 0; idx < 6; idx++) {
+        sums[idx] += worker->leaf_sums[((size_t)play * 6) + (size_t)idx];
+      }
+    }
+    const double count = sums[0];
+    if (count < 2) {
+      continue;
+    }
+    add.iterations += count;
+    add.net_ss += sums[3] - (sums[1] * sums[1] / count);
+    add.static_ss += sums[4] - (sums[2] * sums[2] / count);
+    add.cross_ss += sums[5] - (sums[1] * sums[2] / count);
+  }
+  for (int thread = 0; thread < simmer->num_threads; thread++) {
+    SimValueNetWorker *worker = &simmer->workers[thread]->value_net;
+    if (worker->leaf_sums != NULL) {
+      memset(worker->leaf_sums, 0,
+             sizeof(double) * (size_t)worker->moment_plays * 6);
+    }
+  }
+  cpthread_mutex_lock(&sim_leaf_moments_mutex);
+  sim_leaf_moments_total.iterations += add.iterations;
+  sim_leaf_moments_total.net_ss += add.net_ss;
+  sim_leaf_moments_total.static_ss += add.static_ss;
+  sim_leaf_moments_total.cross_ss += add.cross_ss;
+  cpthread_mutex_unlock(&sim_leaf_moments_mutex);
 }
 
 // Sets the worker's iteration to the next one of play_index: from the
@@ -1041,8 +1111,9 @@ static void sim_value_net_next(Simmer *simmer, SimmerWorker *simmer_worker,
 }
 
 static double sim_sample_iteration(Simmer *simmer, SimmerWorker *simmer_worker,
-                                   SimmedPlay *simmed_play, uint64_t seed,
-                                   bool value_net, int value_net_moves);
+                                   SimmedPlay *simmed_play, int play_index,
+                                   uint64_t seed, bool value_net,
+                                   int value_net_moves);
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
                      const int thread_index, const uint64_t sample_count,
@@ -1078,8 +1149,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   } else {
     seed = simmed_play_get_seed(simmed_play);
   }
-  const double utility = sim_sample_iteration(
-      simmer, simmer_worker, simmed_play, seed, value_net, value_net_moves);
+  const double utility =
+      sim_sample_iteration(simmer, simmer_worker, simmed_play, (int)play_index,
+                           seed, value_net, value_net_moves);
   if (simmer->print_interval > 0 &&
       sample_count % simmer->print_interval == 0) {
     sim_results_print(simmer->thread_control, simmer_worker->game,
@@ -1094,8 +1166,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 // (from a copy of the value net start when value_net), and records it in
 // the play's stats. Returns its utility.
 static double sim_sample_iteration(Simmer *simmer, SimmerWorker *simmer_worker,
-                                   SimmedPlay *simmed_play, uint64_t seed,
-                                   bool value_net, int value_net_moves) {
+                                   SimmedPlay *simmed_play, int play_index,
+                                   uint64_t seed, bool value_net,
+                                   int value_net_moves) {
   SimResults *sim_results = simmer->sim_results;
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
@@ -1196,29 +1269,53 @@ static double sim_sample_iteration(Simmer *simmer, SimmerWorker *simmer_worker,
   const SimValueNetWorker *net_worker = &simmer_worker->value_net;
   const bool net_leaf = value_net_moves > 0 && net_worker->iteration_leaf_set &&
                         game_end_reason == GAME_END_REASON_NONE;
-  double wpct;
+  // The static horizon: the win% table (or the result) and the spread.
+  const double static_wpct = sim_horizon_win_pct(
+      simmer->win_pcts, spread, leftover, game_end_reason, bag_tiles,
+      on_turn_rack_tiles, off_turn_rack_tiles, plies % 2);
+  const Equity static_utility_spread =
+      simmer->use_margin_forecast ? spread + projected_leftover : spread;
+  double wpct = static_wpct;
+  double utility = sim_utility_blend(
+      static_wpct, static_utility_spread, simmer->utility_w_winpct,
+      simmer->utility_w_spread, simmer->utility_spread_scale);
   if (net_leaf) {
-    wpct = net_worker->iteration_leaf_win_pct;
-    simmed_play_add_win_pct_value(simmed_play, wpct);
-  } else {
-    wpct = simmed_play_add_win_pct_stat(
-        simmer->win_pcts, simmed_play, spread, leftover, game_end_reason,
-        bag_tiles, on_turn_rack_tiles, off_turn_rack_tiles, plies % 2);
+    const double net_wpct = net_worker->iteration_leaf_win_pct;
+    const double net_utility = sim_utility_blend(
+        net_wpct, double_to_equity(net_worker->iteration_leaf_spread),
+        simmer->utility_w_winpct, simmer->utility_w_spread,
+        simmer->utility_spread_scale);
+    const int every = simmer->value_net_leaf_every;
+    if (every == 1) {
+      wpct = net_wpct;
+      utility = net_utility;
+    } else {
+      // The control variate: unbiased for the net leaf's mean.
+      wpct = static_wpct + ((double)every * (net_wpct - static_wpct));
+      utility = utility + ((double)every * (net_utility - utility));
+    }
+    SimValueNetWorker *moments_worker = &simmer_worker->value_net;
+    if (moments_worker->leaf_sums != NULL &&
+        play_index < moments_worker->moment_plays) {
+      const double static_utility = sim_utility_blend(
+          static_wpct, static_utility_spread, simmer->utility_w_winpct,
+          simmer->utility_w_spread, simmer->utility_spread_scale);
+      double *sums = moments_worker->leaf_sums + ((size_t)play_index * 6);
+      sums[0] += 1.0;
+      sums[1] += net_utility;
+      sums[2] += static_utility;
+      sums[3] += net_utility * net_utility;
+      sums[4] += static_utility * static_utility;
+      sums[5] += net_utility * static_utility;
+    }
   }
+  simmed_play_add_win_pct_value(simmed_play, wpct);
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
 
   sim_results_increment_iteration_count(sim_results);
 
-  Equity utility_spread =
-      simmer->use_margin_forecast ? spread + projected_leftover : spread;
-  if (net_leaf) {
-    utility_spread = double_to_equity(net_worker->iteration_leaf_spread);
-  }
-  const double utility =
-      sim_utility_blend(wpct, utility_spread, simmer->utility_w_winpct,
-                        simmer->utility_w_spread, simmer->utility_spread_scale);
   // With a zero spread weight, utility_stat is never read: BU is hidden from
   // display (see show_bu in sim_string.c) and both the best-move choice and
   // sort comparator fall back to win_pct_stat/equity_stat instead (see
@@ -1244,11 +1341,12 @@ void rvs_sim_drain(RandomVariables *rvs) {
     SimmedPlay *simmed_play =
         sim_results_get_simmed_play(simmer->sim_results, play_idx);
     while (sim_value_net_pop(shared, play_idx, worker)) {
-      sim_sample_iteration(simmer, simmer_worker, simmed_play,
+      sim_sample_iteration(simmer, simmer_worker, simmed_play, play_idx,
                            worker->iteration_seed, true,
                            worker->iteration_move_count);
     }
   }
+  sim_leaf_moments_fold(simmer);
 }
 
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
@@ -1318,6 +1416,9 @@ static void simmer_set_value_net(Simmer *simmer, const SimArgs *sim_args) {
   }
   simmer->value_net_policy_plies = policy_plies;
   simmer->value_net_leaf = leaf;
+  simmer->value_net_leaf_every = sim_args->rollout_value_net_leaf_every > 1
+                                     ? sim_args->rollout_value_net_leaf_every
+                                     : 1;
   const int plies = leaf ? sim_args->num_plies : policy_plies;
   sim_value_net_shared_prepare(
       &simmer->value_net_shared, move_list_get_count(sim_args->move_list),

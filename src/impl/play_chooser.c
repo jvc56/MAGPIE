@@ -906,6 +906,10 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   sim_args.rollout_value_net_batch = strategy->rollout_value_net_batch;
   sim_args.rollout_value_net_plies = strategy->rollout_value_net_plies;
   sim_args.rollout_value_net_leaf = strategy->rollout_value_net_leaf;
+  sim_args.rollout_value_net_leaf_every =
+      strategy->rollout_value_net_leaf_every > 1
+          ? strategy->rollout_value_net_leaf_every
+          : 1;
   const bool use_odds =
       net_filter && play_chooser_prepare_leave_odds(play_chooser, game);
   sim_args.inference_uniform_mix =

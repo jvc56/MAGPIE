@@ -1292,7 +1292,9 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // plies deep; with pre=static it plays static until the bag is empty. leaf=1
 // scores a simnn player's rollouts by the net at the horizon: its value for
 // the final ply's move, the net's or (past nnplies=, which may be 0) the top
-// static one. pool= > 0 has a simnn player sim
+// static one; with leafevery=m > 1 only every m-th iteration takes the net
+// leaf, the rest valued by a control variate (SimArgs). pool= > 0 has a simnn
+// player sim
 // the cands= plays its net rates best among the top pool= static plays, and
 // prior= > 0 counts each one's net utility as that many sim iterations.
 // infer=1 draws a sim player's opponent racks from an inference of the
@@ -1516,6 +1518,8 @@ static void vnt_games(const StringSplitter *fields) {
             vnt_option(fields, 9, "nnplies", player_idx, "1"), NULL, 10),
         .rollout_value_net_leaf =
             vnt_option_double(fields, 9, "leaf", player_idx, 0.0) > 0,
+        .rollout_value_net_leaf_every =
+            (int)vnt_option_double(fields, 9, "leafevery", player_idx, 1.0),
         .sim_candidate_value_net_evaluate =
             kinds[player_idx] == VNT_PLAYER_SIM_NN && candidate_pool > 0
                 ? value_net_player_evaluate_rows
@@ -1726,6 +1730,20 @@ static void vnt_games(const StringSplitter *fields) {
   value_net_player_destroy(players[1]);
   value_net_player_destroy(rescorers[0]);
   value_net_player_destroy(rescorers[1]);
+  // The net and static horizon utilities' agreement on iterations that took
+  // both (see SimLeafMoments), for choosing leafevery=.
+  SimLeafMoments moments;
+  sim_leaf_moments_get(&moments);
+  if (moments.iterations > 1) {
+    const double var_net = moments.net_ss / moments.iterations;
+    const double var_static = moments.static_ss / moments.iterations;
+    const double cov = moments.cross_ss / moments.iterations;
+    printf("leaf_moments iterations=%.0f sd_net=%.4f sd_static=%.4f "
+           "corr=%.3f sd_diff=%.4f\n",
+           moments.iterations, sqrt(var_net), sqrt(var_static),
+           cov / sqrt(var_net * var_static),
+           sqrt(var_net + var_static - (2.0 * cov)));
+  }
   value_net_player_destroy(net_inference_players[0]);
   value_net_player_destroy(net_inference_players[1]);
   error_stack_destroy(error_stack);
