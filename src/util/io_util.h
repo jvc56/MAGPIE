@@ -284,9 +284,6 @@ typedef enum {
   ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
   ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
   ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-  ERROR_STATUS_CONTRIBUTE_MAGPIE_TOO_OLD,
-  ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE,
-  ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
   // A wordmap or rack info table built here does not have the SHA-256 the
   // claimed job pins for it. Handled by handing the claim back with reason
   // "derived_mismatch" rather than by submitting a failed result: the task is

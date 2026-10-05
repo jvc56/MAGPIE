@@ -78,7 +78,7 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_SIM_CUTOFF "sim_cutoff"
 
 // Remaining per-player options (-l1/-l2, -w1/-w2, -rit1/-rit2, -wit1/-wit2,
-// -mi1/-mi2, -pc1/-pc2, -th1/-th2, -sa1/-sa2, -im1/-im2, -uwin1/-uwin2,
+// -mi1/-mi2, -th1/-th2, -sa1/-sa2, -im1/-im2, -uwin1/-uwin2,
 // -uspread1/-uspread2, -uspreadscale1/-uspreadscale2), sent inside "player"/
 // "player1"/"player2" alongside the existing keys above.
 #define CONTRIBUTE_KEY_PLAYER_LEXICON "lexicon"
@@ -161,9 +161,6 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_PLAYED_MOVE "played_move"
 #define CONTRIBUTE_KEY_PLAYED_MOVE_SCORE "played_move_score"
 #define CONTRIBUTE_KEY_NUM_MOVES "num_moves"
-#define CONTRIBUTE_KEY_TOTAL_ITERATIONS "total_iterations"
-#define CONTRIBUTE_KEY_TIME_ELAPSED "time_elapsed"
-#define CONTRIBUTE_KEY_STATUS "status"
 #define CONTRIBUTE_KEY_MOVES "moves"
 #define CONTRIBUTE_KEY_MOVE "move"
 #define CONTRIBUTE_KEY_SCORE "score"
@@ -199,7 +196,6 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_ANALYSIS_ENDGAME "endgame"
 
 // Leave generation ("leave_generation" job type).
-#define CONTRIBUTE_KEY_GENERATION "generation"
 #define CONTRIBUTE_KEY_FORCED_RACKS "forced_racks"
 #define CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_KEY "previous_artifact_key"
 #define CONTRIBUTE_KEY_PREVIOUS_ARTIFACT_SHA256 "previous_artifact_sha256"

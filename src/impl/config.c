@@ -1034,6 +1034,16 @@ int config_get_player_sim_plies(const Config *config, int player_index) {
   return player_index == 0 ? config->p1_sim_plies : config->p2_sim_plies;
 }
 
+bool config_get_player_sim_margin_forecast(const Config *config,
+                                           int player_index) {
+  return player_index == 0 ? config->p1_sim_margin_forecast
+                           : config->p2_sim_margin_forecast;
+}
+
+bool config_get_sim_margin_forecast(const Config *config) {
+  return config->sim_margin_forecast;
+}
+
 int config_get_player_num_plays(const Config *config, int player_index) {
   return player_index == 0 ? config->p1_num_plays : config->p2_num_plays;
 }
@@ -7685,45 +7695,6 @@ static bool contribute_wants_wit(const JsonValue *settings) {
   return json_get_bool_or(settings, CONTRIBUTE_KEY_USE_WIT, false);
 }
 
-// The sidecar beside a wordmap, naming the .kwg digest it was built from.
-//
-// This is the weaker of the two checks and is now the fallback. A wordmap is
-// derived from a lexicon, and nothing else notices when the lexicon changes
-// underneath it: download_data.sh overwrites the .kwg in place and leaves the
-// old .wmp sitting next to it, which passes every check -- the .kwg genuinely
-// is the right lexicon, and the .wmp was covered by no digest because the
-// server never pinned a file the contributor generated locally. The worker
-// then plays with a wordmap describing a lexicon that no longer exists on its
-// disk.
-//
-// A server that pins the wordmap's own hash (expected_data.derived) supersedes
-// this entirely: the recorded input digest says a file was built from the
-// right things and still trusts the builder, where the output hash checks the
-// bytes that will actually load. The sidecar stays for servers that do not
-// send one, and for the CLI, which has no server at all.
-static char *wordmap_source_path(const char *wmp_path) {
-  return get_formatted_string("%s.src", wmp_path);
-}
-
-// True when `wmp_path` was built from the .kwg currently on disk. A wordmap
-// with no sidecar at all -- every wordmap a contributor already has -- is
-// stale by this rule, and is rebuilt once. That is correct: nothing recorded
-// what it was built from.
-static bool wordmap_is_current(const char *wmp_path, const char *kwg_digest) {
-  if (!kwg_digest) {
-    return true;
-  }
-  char *src_path = wordmap_source_path(wmp_path);
-  ErrorStack *errors = error_stack_create();
-  char *recorded = get_string_from_file(src_path, errors);
-  const bool current = error_stack_is_empty(errors) && recorded &&
-                       has_prefix(kwg_digest, recorded);
-  free(recorded);
-  error_stack_destroy(errors);
-  free(src_path);
-  return current;
-}
-
 // The SHA-256 of the derived file `name` of type `type`, or NULL if it is not
 // on disk. Never an error: absent is the ordinary first-run case.
 static char *contribute_derived_digest(const Config *config,
@@ -7790,68 +7761,6 @@ static int config_contribute_lock_build(Config *config, const char *name,
   return lock_fd;
 }
 
-// Whether the wordmap on disk for `lexicon` was built from the .kwg whose
-// digest is `kwg_digest`: the check when the claim pins no hash.
-static bool config_contribute_wordmap_current(const Config *config,
-                                              const char *lexicon,
-                                              const char *kwg_digest) {
-  ErrorStack *errors = error_stack_create();
-  char *wmp_path = data_filepaths_get_readable_filename(
-      config->data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, errors);
-  const bool current =
-      error_stack_is_empty(errors) && wordmap_is_current(wmp_path, kwg_digest);
-  error_stack_destroy(errors);
-  free(wmp_path);
-  return current;
-}
-
-// Builds the wordmap for `lexicon` with no pinned hash to check, and records
-// the .kwg digest it was built from beside it.
-static void config_contribute_build_unpinned_wordmap(Config *config,
-                                                     const char *lexicon,
-                                                     const char *ld_name,
-                                                     const char *kwg_digest,
-                                                     ErrorStack *error_stack) {
-  const char *data_paths = config_get_data_paths(config);
-  // Built from a lexicon that is no longer here, or never built. Rebuilding
-  // costs about a second; playing with it costs a corrupt contribution
-  // nobody would catch.
-  thread_control_print_formatted(config->thread_control,
-                                 "building the wordmap for %s\n", lexicon);
-  contribute_convert(config, "dawg2wordmap", lexicon, ld_name,
-                     /*klv_name=*/NULL, /*wmp_name=*/NULL, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-  // Written only now, *after* the wordmap itself is in place: a sidecar
-  // written first and then interrupted claims a wordmap that does not
-  // exist, and the next run would trust it.
-  char *built_path = data_filepaths_get_readable_filename(
-      data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
-    free(built_path);
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONTRIBUTE_DATA_NOT_WRITABLE,
-        get_formatted_string(
-            "could not build a wordmap for %s. The data directory must be "
-            "writable; this job's settings ask for a wordmap.",
-            lexicon));
-    return;
-  }
-  if (kwg_digest) {
-    char *src_path = wordmap_source_path(built_path);
-    ErrorStack *sidecar_errors = error_stack_create();
-    write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
-    // A missing sidecar only costs one rebuild next time, which is not
-    // worth failing a task over.
-    error_stack_reset(sidecar_errors);
-    error_stack_destroy(sidecar_errors);
-    free(src_path);
-  }
-  free(built_path);
-}
-
 // Builds the wordmap for `lexicon` and checks it against the hash the claim
 // pins.
 static void
@@ -7859,7 +7768,6 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
                                        const char *lexicon, const char *ld_name,
                                        const ContributeDerived *pinned,
                                        ErrorStack *error_stack) {
-  const char *data_paths = config_get_data_paths(config);
   // Build from the .kwg this task's expected_data has already verified, and
   // check the result.
   //
@@ -7876,29 +7784,6 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
   char *built = contribute_derived_digest(config, state, lexicon,
                                           DATA_FILEPATH_TYPE_WORDMAP);
   if (built && strings_equal(built, pinned->sha256)) {
-    // The sidecar is redundant next to a pinned hash, but a later task on a
-    // server that pins nothing reads it, so keep it accurate.
-    ErrorStack *sidecar_errors = error_stack_create();
-    char *kwg_path = data_filepaths_get_readable_filename(
-        data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, sidecar_errors);
-    char *kwg_digest = error_stack_is_empty(sidecar_errors)
-                           ? sha256_hash_file(kwg_path, sidecar_errors)
-                           : NULL;
-    char *wmp_path = error_stack_is_empty(sidecar_errors)
-                         ? data_filepaths_get_readable_filename(
-                               data_paths, lexicon, DATA_FILEPATH_TYPE_WORDMAP,
-                               sidecar_errors)
-                         : NULL;
-    if (error_stack_is_empty(sidecar_errors) && kwg_digest && wmp_path) {
-      char *src_path = wordmap_source_path(wmp_path);
-      write_string_to_file(src_path, "w", kwg_digest, sidecar_errors);
-      free(src_path);
-    }
-    error_stack_reset(sidecar_errors);
-    error_stack_destroy(sidecar_errors);
-    free(kwg_path);
-    free(kwg_digest);
-    free(wmp_path);
     free(built);
     return;
   }
@@ -7923,11 +7808,15 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
 // has, which costs about a second per lexicon, once. Only a lexicon some
 // player's settings actually asked to use a wordmap for reaches this.
 //
-// When the claim pins the wordmap's SHA-256, that is the check: build if the
+// The claim pins the wordmap's SHA-256, and that is the check: build if the
 // file on disk does not have that hash, and if the rebuilt file still does
 // not, record the mismatch and give up rather than playing with bytes the
-// server did not mean. When it does not -- an older server, or a CLI-style
-// run -- fall back to the .kwg sidecar, which is what this did before.
+// server did not mean. Like a rack or word info table, a wordmap the claim
+// pins no hash for is refused: birdtest pins one for every player that asks
+// for a wordmap (or a rack info table, which is built from one), so a claim
+// without it is a server bug, and a wordmap nothing checked could describe a
+// lexicon that is no longer on this disk -- download_data.sh replaces a .kwg
+// in place and leaves the old .wmp beside it.
 //
 // `ld_name` is the letter distribution the job pins. It is passed rather than
 // inferred from the lexicon's name because a wordmap is built against a letter
@@ -7942,72 +7831,42 @@ static void config_contribute_ensure_wordmap(Config *config,
                                              const char *lexicon,
                                              const char *ld_name,
                                              ErrorStack *error_stack) {
-  const char *data_paths = config_get_data_paths(config);
-
   ContributeDerived pinned;
-  const bool have_pin = contribute_find_derived(state, "wmp", lexicon, &pinned);
-
-  if (have_pin) {
-    if (config_contribute_derived_matches(config, state, lexicon,
-                                          DATA_FILEPATH_TYPE_WORDMAP,
-                                          pinned.sha256)) {
-      return;
-    }
-    char *what = get_formatted_string("the wordmap for %s", lexicon);
-    const int lock_fd = config_contribute_lock_build(
-        config, lexicon, DATA_FILEPATH_TYPE_WORDMAP, what, error_stack);
-    free(what);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    if (!config_contribute_derived_matches(config, state, lexicon,
-                                           DATA_FILEPATH_TYPE_WORDMAP,
-                                           pinned.sha256)) {
-      config_contribute_build_pinned_wordmap(config, state, lexicon, ld_name,
-                                             &pinned, error_stack);
-    }
-    contribute_unlock_build(lock_fd);
+  if (!contribute_find_derived(state, "wmp", lexicon, &pinned)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+        get_formatted_string(
+            "this job asks for the wordmap for %s but pins no hash for it; a "
+            "wordmap that cannot be checked could describe a different lexicon",
+            lexicon));
     return;
   }
-
-  // The digest of the lexicon the wordmap must match. Missing is not an
-  // error here: without a .kwg there is nothing to build from either, and
-  // the conversion reports that far better than this could.
-  char *kwg_path = data_filepaths_get_readable_filename(
-      data_paths, lexicon, DATA_FILEPATH_TYPE_KWG, error_stack);
-  char *kwg_digest = NULL;
-  if (error_stack_is_empty(error_stack)) {
-    kwg_digest = sha256_hash_file(kwg_path, error_stack);
-  }
-  error_stack_reset(error_stack);
-  free(kwg_path);
-
-  if (config_contribute_wordmap_current(config, lexicon, kwg_digest)) {
-    free(kwg_digest);
+  if (config_contribute_derived_matches(
+          config, state, lexicon, DATA_FILEPATH_TYPE_WORDMAP, pinned.sha256)) {
     return;
   }
   char *what = get_formatted_string("the wordmap for %s", lexicon);
   const int lock_fd = config_contribute_lock_build(
       config, lexicon, DATA_FILEPATH_TYPE_WORDMAP, what, error_stack);
   free(what);
-  if (error_stack_is_empty(error_stack) &&
-      !config_contribute_wordmap_current(config, lexicon, kwg_digest)) {
-    config_contribute_build_unpinned_wordmap(config, lexicon, ld_name,
-                                             kwg_digest, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (!config_contribute_derived_matches(
+          config, state, lexicon, DATA_FILEPATH_TYPE_WORDMAP, pinned.sha256)) {
+    config_contribute_build_pinned_wordmap(config, state, lexicon, ld_name,
+                                           &pinned, error_stack);
   }
   contribute_unlock_build(lock_fd);
-  free(kwg_digest);
 }
 
 // Makes the rack info table `table_name` available, building it if what is on
 // disk is absent or does not match.
 //
-// Unlike a wordmap this is only ever done against a pinned hash. A table is
-// 1.9 GB and stores precomputed leave values that move generation uses in
-// place of the loaded KLV, so a wrong one silently reranks every full-rack
-// position; with nothing to check it against, the only safe answer is not to
-// load one, which is what this build did until now and what it still does
-// when the claim pins nothing.
+// Like a wordmap, only ever against a pinned hash. A table is 1.9 GB and
+// stores precomputed leave values that move generation uses in place of the
+// loaded KLV, so a wrong one silently reranks every full-rack position; with
+// nothing to check it against, the only safe answer is not to load one.
 //
 // The table is built from the player's .klv2 and the wordmap for its lexicon,
 // so `config_contribute_ensure_wordmap` must have run first -- which also
@@ -8385,13 +8244,11 @@ static void config_contribute_record_loaded_data(Config *config) {
 // to compare bots on different lexicons; NULL means "use the shared lexicon".
 //
 // letter_distribution and board_layout are the files the job pins and the
-// worker has just verified by digest. Every executor passes both: a task
-// request must state them (config_contribute_validate_common). NULL for either
-// is still accepted here and means MAGPIE's default -- the lexicon's own
-// distribution, standard15 -- and never the one an earlier task or the
-// contributor's settings.txt last loaded: a worker whose settings left
-// standard21 loaded would otherwise verify standard15.txt and play every game
-// on the other board.
+// worker has just verified by digest, and are never NULL: a task request must
+// state them (config_contribute_validate_common). Loaded by name every task,
+// never left to whatever an earlier task or the contributor's settings.txt
+// last loaded: a worker whose settings left standard21 loaded would otherwise
+// verify standard15.txt and play every game on the other board.
 //
 // Every one of these flags is stated here, *before* the lexical data loads:
 // config_load_lexicon_dependent_data decides whether to load a wordmap or a
@@ -8450,32 +8307,19 @@ void config_contribute_load_lexicon_and_variant(
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *default_layout = board_layout_get_default_name();
-  config_load_board_layout(config, board_layout ? board_layout : default_layout,
-                           error_stack);
-  free(default_layout);
+  config_load_board_layout(config, board_layout, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  const char *ld_source_lexicon = p1_lexicon ? p1_lexicon : lexicon;
-  char *default_ld = NULL;
-  if (!letter_distribution && ld_source_lexicon) {
-    default_ld =
-        ld_get_default_name_from_lexicon_name(ld_source_lexicon, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-  }
   config_load_lexicon_dependent_data(
       config, lexicon, p1_lexicon, p2_lexicon, NULL, p1_leaves, p2_leaves,
-      letter_distribution ? letter_distribution : default_ld,
-      /*use_wmp_has_value=*/false, /*p1_use_wmp_has_value=*/false,
+      letter_distribution, /*use_wmp_has_value=*/false,
+      /*p1_use_wmp_has_value=*/false,
       /*p2_use_wmp_has_value=*/false, /*use_rit_has_value=*/false,
       /*p1_use_rit_has_value=*/false, /*p2_use_rit_has_value=*/false,
       /*use_mmap_for_rit_has_value=*/false, /*use_wit_has_value=*/false,
       /*p1_use_wit_has_value=*/false, /*p2_use_wit_has_value=*/false,
       /*disable_rit=*/false, /*is_loading_game_history=*/false, error_stack);
-  free(default_ld);
   if (error_stack_is_empty(error_stack)) {
     config_contribute_reload_changed_ld_and_layout(config, error_stack);
   }
@@ -8572,6 +8416,11 @@ static void config_contribute_reset_player_settings(Config *config,
       CONFIG_DEFAULT_UTILITY_SPREAD_SCALE;
   *(p1 ? &config->p1_play_chooser_time_ms : &config->p2_play_chooser_time_ms) =
       -1.0;
+  // Margin forecast off: birdtest has no field for it (-sm1/-sm2), and it
+  // changes a simmed play's equity and utility, so it is reset rather than
+  // left to the build's default or a contributor's -smargin.
+  *(p1 ? &config->p1_sim_margin_forecast : &config->p2_sim_margin_forecast) =
+      false;
   // Solving off: a request turns it on per player, and a contributor's
   // -eplies1 must not.
   autoplay_solver_settings_set_defaults(&config->solver_settings[p1 ? 0 : 1]);
@@ -9083,6 +8932,10 @@ void config_contribute_reset_shared_settings(Config *config) {
   config->use_heat_map = false;
   config->leavegen_max_games = 0;
   config->print_interval = 0;
+  // Read by the opening-rack analysis, which simulates with the run-wide
+  // settings rather than a player's. Off for the reason
+  // config_contribute_reset_player_settings gives.
+  config->sim_margin_forecast = false;
 }
 
 // Applies the run-wide settings a task request states, on top of
@@ -9567,19 +9420,6 @@ static char *config_contribute_opening_rack(Config *config,
   if (!config_contribute_validate_common(request, &lexicon, &variant,
                                          &letter_distribution, &board_layout,
                                          error_stack)) {
-    return NULL;
-  }
-
-  // birdtest's request carries `previous_play` and always sends null: every
-  // rack is analysed on an empty board. This path has no way to play one
-  // first, so a request that names one is refused rather than analysed as if
-  // it did not.
-  const JsonValue *previous_play = json_object_get(request, "previous_play");
-  if (previous_play && !json_is_null(previous_play)) {
-    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
-                     string_duplicate("server sent an opening rack task with a "
-                                      "previous play, which this build cannot "
-                                      "analyse"));
     return NULL;
   }
 
@@ -10197,8 +10037,7 @@ void impl_contribute(Config *config, const char *settings_path,
       error_message = error_stack_get_string_and_reset(error_stack);
     }
     contribute_submit_result(state, config_get_thread_control(config),
-                             result_json, error_message, /*fatal=*/false,
-                             error_stack);
+                             result_json, error_message, error_stack);
     free(result_json);
     free(error_message);
   }

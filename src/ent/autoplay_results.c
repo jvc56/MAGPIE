@@ -20,7 +20,6 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "bag.h"
-#include "bai_result.h"
 #include "data_filepaths.h"
 #include "equity.h"
 #include "game.h"
@@ -1476,9 +1475,6 @@ typedef struct CapturedPosition {
   position_analysis_t analysis;
   // How many plays were ranked, before the report cap.
   int num_moves;
-  uint64_t total_iterations;
-  double time_elapsed;
-  bai_result_status_t status;
   CapturedPlay *plays;
   int num_stored_plays;
   int plays_capacity;
@@ -1759,9 +1755,6 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
         solver->num_plays < play_cap ? solver->num_plays : play_cap;
     position->plays = captured_plays_create(position->num_stored_plays,
                                             &position->plays_capacity);
-    position->total_iterations = 0;
-    position->time_elapsed = 0.0;
-    position->status = BAI_RESULT_STATUS_NONE;
     for (int i = 0; i < position->num_stored_plays; i++) {
       captured_play_fill_from_solver(&position->plays[i], &solver->plays[i],
                                      game, ld);
@@ -1783,11 +1776,6 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
                                           &position->plays_capacity);
 
   if (simmed) {
-    BAIResult *bai_result = sim_results_get_bai_result(args->sim_results);
-    position->total_iterations =
-        sim_results_get_iteration_count(args->sim_results);
-    position->time_elapsed = bai_result_get_elapsed_seconds(bai_result);
-    position->status = bai_result_get_status(bai_result);
     const int num_plies = sim_results_get_num_plies(args->sim_results);
     // Stored in the simulation's ranking, not move-list order: the first play
     // recorded is the one the simulation rated best.
@@ -1807,9 +1795,6 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
                               ld);
     }
   } else {
-    position->total_iterations = 0;
-    position->time_elapsed = 0.0;
-    position->status = BAI_RESULT_STATUS_NONE;
     for (int i = 0; i < position->num_stored_plays; i++) {
       const Move *move = move_list_get_move(args->move_list, i);
       captured_play_fill_from_move(&position->plays[i], move, game, ld);
@@ -1953,12 +1938,6 @@ static void write_captured_position(StringBuilder *sb,
                          position->played_move_score, &position_first);
   }
   json_write_int_field(sb, CONTRIBUTE_KEY_NUM_MOVES, position->num_moves,
-                       &position_first);
-  json_write_int_field(sb, CONTRIBUTE_KEY_TOTAL_ITERATIONS,
-                       (int64_t)position->total_iterations, &position_first);
-  json_write_double_field(sb, CONTRIBUTE_KEY_TIME_ELAPSED,
-                          position->time_elapsed, &position_first);
-  json_write_int_field(sb, CONTRIBUTE_KEY_STATUS, (int64_t)position->status,
                        &position_first);
   if (position->has_inference) {
     const CapturedInference *inference = &position->inference;

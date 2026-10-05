@@ -44,6 +44,9 @@ const char *config_get_magpie_version(void);
 const AutoplaySolverSettings *
 config_get_player_solver_settings(const Config *config, int player_index);
 int config_get_player_sim_plies(const Config *config, int player_index);
+bool config_get_player_sim_margin_forecast(const Config *config,
+                                           int player_index);
+bool config_get_sim_margin_forecast(const Config *config);
 int config_get_player_num_plays(const Config *config, int player_index);
 uint64_t config_get_player_max_iterations(const Config *config,
                                           int player_index);

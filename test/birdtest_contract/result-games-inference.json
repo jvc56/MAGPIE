@@ -21,9 +21,6 @@
         "played_move": "8G HUH",
         "played_move_score": 18,
         "num_moves": 3,
-        "total_iterations": 30,
-        "time_elapsed": 0.012,
-        "status": 3,
         "moves": [
           {
             "move": "8G HUH",
@@ -78,9 +75,6 @@
         "played_move": "10D LEX",
         "played_move_score": 56,
         "num_moves": 3,
-        "total_iterations": 30,
-        "time_elapsed": 0.015,
-        "status": 3,
         "inference": {
           "num_leaves": 212,
           "total_draws": 5310,

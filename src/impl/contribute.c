@@ -4,8 +4,10 @@
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../compat/memory_info.h"
+#include "../def/board_defs.h"
 #include "../def/contribute_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/client_state.h"
 #include "../ent/data_filepaths.h"
@@ -324,39 +326,40 @@ static bool already_logged(ContributeState *state, const char *key) {
   return false;
 }
 
+// Every assignment states the files its task loads under `expected_data`,
+// with the algorithm their digests use. birdtest always sends it, naming
+// sha256; an assignment without it, or naming an algorithm this build does
+// not know, is one whose input data this build cannot check, and is refused
+// rather than run unverified -- results computed from different bytes are
+// worse than none, because nothing downstream would notice.
+void contribute_check_expected_data(const JsonValue *assignment,
+                                    ErrorStack *error_stack) {
+  const JsonValue *expected = json_object_get(assignment, "expected_data");
+  const char *algorithm =
+      expected ? json_get_string_or_null(expected, "algorithm") : NULL;
+  if (!algorithm || !strings_equal(algorithm, "sha256")) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string(
+            "the server sent a task whose input data this build cannot check "
+            "(expected_data algorithm: %s; this build knows sha256)",
+            algorithm ? algorithm : "none"));
+  }
+}
+
 // Checks every file the claimed task will load against the digest the job
 // pins, writing the mismatches into `missing` as the JSON array the decline
 // carries. Returns true when everything matches.
 //
 // The check runs before the heartbeat starts: hashing is milliseconds, and a
-// decline should not look like a worker that started and died.
+// decline should not look like a worker that started and died. The claim has
+// already checked that `expected_data` is there and names sha256.
 static bool expected_data_matches(ContributeState *state,
                                   const char *data_paths,
                                   ThreadControl *thread_control,
                                   StringBuilder *missing) {
   const JsonValue *expected =
       json_object_get(state->assignment, "expected_data");
-  if (!expected) {
-    // A job that pins nothing. Nothing to verify, nothing to decline.
-    return true;
-  }
-
-  const char *algorithm = json_get_string_or_null(expected, "algorithm");
-  if (algorithm && !strings_equal(algorithm, "sha256")) {
-    // Run unverified rather than refusing: an algorithm this build does not
-    // know is a server that moved on, and refusing work over it would turn an
-    // algorithm change into a fleet-wide outage. min_magpie_version is the
-    // correct lever for that.
-    if (!already_logged(state, algorithm)) {
-      thread_control_print_formatted(
-          thread_control,
-          "server verifies input data with '%s', which this MAGPIE does not "
-          "know; contributing unverified\n",
-          algorithm);
-    }
-    return true;
-  }
-
   const JsonValue *files = json_object_get(expected, "files");
   const int count = json_array_length(files);
   bool all_matched = true;
@@ -648,8 +651,8 @@ static DeferredJob *find_deferral(ContributeState *state, const char *job_id) {
 bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
                                             bool claim_named_deferred) {
   // Only a shutdown about data: one about this build's version
-  // (`magpie_too_old`) has nothing to do with the jobs set aside, and is
-  // obeyed at once.
+  // (`magpie_too_old`) or its board and rack (`unsupported_build`) has
+  // nothing to do with the jobs set aside, and is obeyed at once.
   const char *reason = json_get_string_or_null(shutdown, "reason");
   return claim_named_deferred && reason &&
          (strings_equal(reason, "data_out_of_date") ||
@@ -660,11 +663,6 @@ bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
 // up to CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS). Returns the interval.
 int contribute_defer_job(ContributeState *state, const char *job_id) {
   const int idle = state->client_state->idle_wait_seconds;
-  if (!job_id) {
-    // A claim without a job id cannot be set aside by id: the caller waits
-    // the interval instead (birdtest always sends one).
-    return idle > 0 ? idle : 1;
-  }
   DeferredJob *deferred = find_deferral(state, job_id);
   if (!deferred) {
     if (state->deferred_count == state->deferred_capacity) {
@@ -880,6 +878,18 @@ static void print_shutdown(const ContributeState *state,
   if (message) {
     thread_control_print_formatted(thread_control, "\n%s\n", message);
   }
+  const char *reason = json_get_string_or_null(shutdown, "reason");
+  if (reason && strings_equal(reason, "unsupported_build")) {
+    // Not a version or data problem, so neither of the fixes below: this
+    // binary was compiled for another board or rack, and only a rebuild with
+    // the defaults changes that.
+    thread_control_print_formatted(
+        thread_control,
+        "This MAGPIE was built with BOARD_DIM=%d and RACK_SIZE=%d. Rebuild it "
+        "without setting either (make magpie with no BOARD_DIM= or "
+        "RACK_SIZE=), then start contribute again.\n",
+        BOARD_DIM, RACK_SIZE);
+  }
   const char *required_version =
       json_get_string_or_null(shutdown, "required_magpie_version");
   const char *download_url = json_get_string_or_null(shutdown, "download_url");
@@ -902,16 +912,22 @@ static void print_shutdown(const ContributeState *state,
   }
 }
 
-// The body is required. Both fields are load-bearing: the version drives the
-// per-job floor filter, and the unsupported set is what keeps the server from
-// offering work this worker has already found it cannot do -- for good, or
-// (the set-aside jobs, after the others) for now.
+// The body is required. Every field is load-bearing: the version drives the
+// per-job floor filter; the board dimension and rack size are this build's
+// compile-time BOARD_DIM and RACK_SIZE, which no version or digest reveals
+// and which the server refuses unless they are the ones its jobs play with
+// (a build with another rack size would score every bingo differently and
+// pass every other check); and the unsupported set is what keeps the server
+// from offering work this worker has already found it cannot do -- for good,
+// or (the set-aside jobs, after the others) for now.
 char *contribute_claim_body(ContributeState *state,
                             const char *this_magpie_version) {
   StringBuilder *sb = string_builder_create();
   bool first = true;
   json_write_object_start(sb);
   json_write_string_field(sb, "magpie_version", this_magpie_version, &first);
+  json_write_int_field(sb, "board_dim", BOARD_DIM, &first);
+  json_write_int_field(sb, "rack_size", RACK_SIZE, &first);
   json_write_array_start(sb, "unsupported_jobs", &first);
   const int unsupported_count = string_list_get_count(state->unsupported_jobs);
   bool first_job = true;
@@ -1059,18 +1075,22 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
 
   const char *claim_token =
       json_get_string(state->assignment, "claim_token", error_stack);
+  const char *job_id =
+      json_get_string(state->assignment, "job_id", error_stack);
   const JsonValue *request = json_object_get(state->assignment, "task_request");
   const char *job_type =
       request ? json_get_string(request, "job_type", error_stack) : "";
+  if (error_stack_is_empty(error_stack)) {
+    contribute_check_expected_data(state->assignment, error_stack);
+  }
   if (!error_stack_is_empty(error_stack)) {
     json_destroy(state->assignment);
     state->assignment = NULL;
     return CONTRIBUTE_CLAIM_FAILED;
   }
 
-  const char *job_id = json_get_string_or_null(state->assignment, "job_id");
   state->claim_token = string_duplicate(claim_token);
-  state->claimed_job_id = job_id ? string_duplicate(job_id) : NULL;
+  state->claimed_job_id = string_duplicate(job_id);
 
   // The server filters on version before it dispatches, so reaching this with
   // a job above this build is a server bug or a race with a floor that was
@@ -1150,8 +1170,8 @@ void contribute_decline_derived_mismatch(ContributeState *state,
     thread_control_print_formatted(
         thread_control,
         "declining this task: the server's leave file is missing or does not "
-        "match the hash it recorded for it; %s %d seconds\n",
-        state->claimed_job_id ? "setting the job aside for" : "waiting",
+        "match the hash it recorded for it; setting the job aside for %d "
+        "seconds\n",
         wait_seconds);
   } else {
     thread_control_print_formatted(
@@ -1172,15 +1192,10 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   // with the server's "every active job needs input data you do not have"
   // sending the contributor to the wrong fix; and napping the whole worker,
   // as it next did, idled it for every other job too.
-  const bool unnamed = state->claimed_job_id == NULL;
   if (!server_artifact) {
     remember_unsupported(state, state->claimed_job_id);
   }
   release_claim(state);
-  if (server_artifact && unnamed) {
-    // Nothing to set aside by id; wait instead, or the same task comes back.
-    nap_unless_interrupted(thread_control, wait_seconds);
-  }
 }
 
 typedef enum {
@@ -1263,7 +1278,7 @@ static void decline_failed_task(ContributeState *state) {
 void contribute_submit_result(ContributeState *state,
                               ThreadControl *thread_control,
                               const char *result_json,
-                              const char *error_message, bool fatal,
+                              const char *error_message,
                               ErrorStack *error_stack) {
   // The heartbeat is kept going through the submission below, not stopped
   // here as it used to be. A claim is only as alive as its last heartbeat, and
@@ -1287,11 +1302,6 @@ void contribute_submit_result(ContributeState *state,
     state->consecutive_failures++;
     free(state->last_failure);
     state->last_failure = string_duplicate(error_message);
-    if (fatal) {
-      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_UNKNOWN_JOB_TYPE,
-                       string_duplicate(error_message));
-      state->stop = true;
-    }
   }
 
   if (result_json) {

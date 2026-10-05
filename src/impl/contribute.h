@@ -40,9 +40,9 @@ typedef enum {
   // claim again -- this is an ordinary outcome, not a failure.
   CONTRIBUTE_CLAIM_DECLINED,
   // The server says nothing it has is doable until this worker changes
-  // something -- its data, its MAGPIE, or both. The reason and the
-  // accumulated gaps have already been printed; the caller should stop, and
-  // contribute_should_stop is true from here on.
+  // something -- its data, its MAGPIE (version or build), or both. The reason
+  // and the accumulated gaps have already been printed; the caller should
+  // stop, and contribute_should_stop is true from here on.
   CONTRIBUTE_CLAIM_SHUTDOWN,
   // error_stack has the reason (a request failure or a bad HTTP status); the
   // caller should stop.
@@ -85,10 +85,10 @@ contribute_claim_task(ContributeState **state, const char *settings_path,
                       ErrorStack *error_stack);
 
 // Hands a claimed task back without running it, for a reason the caller
-// discovered after the claim -- currently only a job type this build does not
-// know. Stops the heartbeat, releases the claim immediately rather than
-// letting it lapse on the timeout, and remembers the job as unsupported so it
-// is not claimed again this run.
+// discovered after the claim -- a job type this build does not know, or a
+// stop request that cut the task short. Stops the heartbeat, releases the claim
+// immediately rather than letting it lapse on the timeout, and remembers the
+// job as unsupported so it is not claimed again this run.
 //
 // An unrecognised job type is not fatal: a client that predates the
 // leave_generation executor can still play games all day. Exit is reserved
@@ -102,18 +102,19 @@ void contribute_decline_task(ContributeState *state,
 // Derived files
 // ---------------------------------------------------------------------------
 
-// A wordmap or rack info table is derived on the contributor's own machine
-// from files the job pins, and is far too large to ship -- 179 MB and 1.9 GB
-// for CSW24 -- so birdtest cannot send one. What it sends instead is the
-// SHA-256 its own pinned MAGPIE got when it built the same file from the same
-// inputs, under `expected_data.derived`. The worker builds its own and uses it
-// only if the bytes agree.
+// A wordmap, rack info table or word info table is derived on the
+// contributor's own machine from files the job pins, and is far too large to
+// ship -- 179 MB and 1.9 GB for CSW24's wordmap and rack info table -- so
+// birdtest cannot send one. What it sends instead is the SHA-256 its own
+// pinned MAGPIE got when it built the same file from the same inputs, under
+// `expected_data.derived`. The worker builds its own and uses it only if the
+// bytes agree; a derived file the claim pins no hash for is not loaded at all.
 //
-// That is a stronger check than recording what a file was built *from*, which
-// is what the .wmp.src sidecar does: a CSW24 wordmap built in December 2025
-// and one built nine months later differ in 72 million bytes with the same
-// inputs and the same format version, because the builder changed underneath
-// them. Comparing the output catches that; comparing the inputs does not.
+// That is a stronger check than recording what a file was built *from*: a
+// CSW24 wordmap built in December 2025 and one built nine months later differ
+// in 72 million bytes with the same inputs and the same format version,
+// because the builder changed underneath them. Comparing the output catches
+// that; comparing the inputs does not.
 typedef struct ContributeDerived {
   // "wmp", "rit" or "wit".
   const char *role;
@@ -136,10 +137,9 @@ typedef struct ContributeDerived {
 
 // The derived file the current claim pins for (role, name), if any.
 //
-// False means the server pinned nothing for it, which is the case for every
-// server older than this protocol and for every job that asks for no derived
-// file. The caller then keeps its previous behaviour rather than refusing to
-// run.
+// False means the server pinned nothing for it. birdtest pins every derived
+// file a job's players ask for, so the caller refuses the task rather than
+// load a file nothing checked.
 bool contribute_find_derived(const ContributeState *state, const char *role,
                              const char *name, ContributeDerived *out);
 
@@ -187,8 +187,9 @@ void contribute_record_derived_mismatch(ContributeState *state,
 // records. Like every other decline this remembers the job as unsupported, so
 // the worker does not spend another three minutes rebuilding a table it has
 // just found it cannot match -- except when the mismatch is the server's leave
-// KLV, which the server can put right: then it waits the idle interval and
-// leaves the job claimable.
+// KLV, which the server can put right: then the job is set aside for a while
+// (contribute_defer_job: from the idle interval, doubling up to
+// CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS) and claimed again after.
 void contribute_decline_derived_mismatch(ContributeState *state,
                                          ThreadControl *thread_control,
                                          ErrorStack *error_stack);
@@ -197,14 +198,14 @@ void contribute_decline_derived_mismatch(ContributeState *state,
 // call and stops its heartbeat. Exactly one of result_json/error_message
 // should be non-NULL: result_json on success, error_message (printed for the
 // contributor, not sent to the server) on failure -- a failed task is never
-// submitted, so its claim lapses via the heartbeat timeout and another
-// worker picks it up. `fatal` means the caller has decided (e.g. an
-// unrecognized job_type) that this run should stop after reporting; too many
-// consecutive failures or reaching max_tasks stop it the same way.
+// submitted but handed straight back (a decline with reason `task_failed`),
+// so another worker can pick it up at once. A result the server refuses is
+// handed back the same way. Too many consecutive failures or reaching
+// max_tasks stop the run.
 void contribute_submit_result(ContributeState *state,
                               ThreadControl *thread_control,
                               const char *result_json,
-                              const char *error_message, bool fatal,
+                              const char *error_message,
                               ErrorStack *error_stack);
 
 // True once the loop in config.c should stop.
@@ -237,14 +238,16 @@ ContributeState *contribute_state_create(const char *settings_path,
                                          ErrorStack *error_stack);
 void contribute_state_destroy(ContributeState *state);
 
-// The body of a claim: this build's version and the jobs to leave out --
-// those it cannot run, and those set aside for now. Exposed for tests.
+// The body of a claim: this build's version, its BOARD_DIM and RACK_SIZE, and
+// the jobs to leave out -- those it cannot run, and those set aside for now.
+// Exposed for tests.
 char *contribute_claim_body(ContributeState *state,
                             const char *this_magpie_version);
 
 // Whether a shutdown is waited out rather than obeyed: a data shutdown
 // (`data_out_of_date`, `both`) answering a claim that named a set-aside job.
-// A version shutdown is always obeyed. Exposed for tests.
+// A version or build shutdown (`magpie_too_old`, `unsupported_build`) is
+// always obeyed. Exposed for tests.
 bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
                                             bool claim_named_deferred);
 
@@ -252,6 +255,13 @@ bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
 // CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS); returns the interval. Exposed
 // for tests.
 int contribute_defer_job(ContributeState *state, const char *job_id);
+
+// Refuses an assignment that states no `expected_data`, or one whose digests
+// use an algorithm this build does not know (anything but sha256): its input
+// data could not be checked, and a task is never run unverified. Exposed for
+// tests.
+void contribute_check_expected_data(const JsonValue *assignment,
+                                    ErrorStack *error_stack);
 
 // Compares dotted numeric versions, returning <0, 0 or >0. Missing components
 // count as zero, so "1.4" and "1.4.0" are equal. Exposed for testing: naive

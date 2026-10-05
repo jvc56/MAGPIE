@@ -68,7 +68,6 @@
       "?AEILNT",
       "AABBCDE"
     ],
-    "previous_play": null,
     "bingo_bonus": 50,
     "sim_cutoff": 0.005,
     "player": {

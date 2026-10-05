@@ -1,5 +1,5 @@
 {
-  "claim_token": "346cfe84-3250-411e-b9ff-15d2a81ca549",
+  "claim_token": "a263ec96-b7a8-4fe5-914a-b2ecfe04498b",
   "result": {
     "all_games": {
       "games": 2,
@@ -21,9 +21,6 @@
         "played_move": "8G HUH",
         "played_move_score": 18,
         "num_moves": 79,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "8G HUH",
@@ -68,9 +65,6 @@
         "played_move": "9E FAM",
         "played_move_score": 21,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "9E FAM",
@@ -115,9 +109,6 @@
         "played_move": "9I MURR",
         "played_move_score": 19,
         "num_moves": 98,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "9I MURR",
@@ -162,9 +153,6 @@
         "played_move": "10D LEX",
         "played_move_score": 56,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "10D LEX",
@@ -209,9 +197,6 @@
         "played_move": "C10 IVORY",
         "played_move_score": 33,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "C10 IVORY",
@@ -256,9 +241,6 @@
         "played_move": "B12 GOB",
         "played_move_score": 31,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "B12 GOB",
@@ -303,9 +285,6 @@
         "played_move": "11E YE",
         "played_move_score": 38,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "11E YE",
@@ -350,9 +329,6 @@
         "played_move": "A8 ZLOTE",
         "played_move_score": 50,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "A8 ZLOTE",
@@ -397,9 +373,6 @@
         "played_move": "7I OI",
         "played_move_score": 12,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "7I OI",
@@ -444,9 +417,6 @@
         "played_move": "12F SEQUeNT",
         "played_move_score": 111,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "12F SEQUeNT",
@@ -491,9 +461,6 @@
         "played_move": "H12 (Q)I",
         "played_move_score": 11,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "H12 (Q)I",
@@ -538,9 +505,6 @@
         "played_move": "8L ACTA",
         "played_move_score": 24,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "8L ACTA",
@@ -585,9 +549,6 @@
         "played_move": "11E (YE)T",
         "played_move_score": 8,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "11E (YE)T",
@@ -632,9 +593,6 @@
         "played_move": "L4 WETW(AR)E",
         "played_move_score": 26,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "L4 WETW(AR)E",
@@ -679,9 +637,6 @@
         "played_move": "N4 ROTA(T)ING",
         "played_move_score": 63,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "N4 ROTA(T)ING",
@@ -726,9 +681,6 @@
         "played_move": "O1 LADED",
         "played_move_score": 30,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "O1 LADED",
@@ -773,9 +725,6 @@
         "played_move": "K3 COB",
         "played_move_score": 27,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "K3 COB",
@@ -820,9 +769,6 @@
         "played_move": "14F POSADA",
         "played_move_score": 31,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "14F POSADA",
@@ -867,9 +813,6 @@
         "played_move": "5I JI(BE)",
         "played_move_score": 13,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "5I JI(BE)",
@@ -914,9 +857,6 @@
         "played_move": "J4 P(I)L(I)",
         "played_move_score": 16,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "J4 P(I)L(I)",
@@ -961,9 +901,6 @@
         "played_move": "15I READIES",
         "played_move_score": 87,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "15I READIES",
@@ -1008,9 +945,6 @@
         "played_move": "2L VIN(A)",
         "played_move_score": 14,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "2L VIN(A)",
@@ -1055,9 +989,6 @@
         "played_move": "B3 GUINEA",
         "played_move_score": 20,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "B3 GUINEA",
@@ -1102,9 +1033,6 @@
         "played_move": "C1 SKiNNER",
         "played_move_score": 85,
         "num_moves": 2837,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "C1 SKiNNER",
@@ -1125,9 +1053,6 @@
         "played_move": "8D FARING",
         "played_move_score": 28,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "8D FARING",
@@ -1172,9 +1097,6 @@
         "played_move": "G7 V(I)GS",
         "played_move_score": 14,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "G7 V(I)GS",
@@ -1219,9 +1141,6 @@
         "played_move": "7E HE(V)EA",
         "played_move_score": 25,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "7E HE(V)EA",
@@ -1266,9 +1185,6 @@
         "played_move": "J5 QIS",
         "played_move_score": 26,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "J5 QIS",
@@ -1313,9 +1229,6 @@
         "played_move": "10C FORE(S)EEN",
         "played_move_score": 65,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "10C FORE(S)EEN",
@@ -1360,9 +1273,6 @@
         "played_move": "E7 (HA)G(R)ODE",
         "played_move_score": 24,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "E7 (HA)G(R)ODE",
@@ -1407,9 +1317,6 @@
         "played_move": "8A WAY(FARING)",
         "played_move_score": 57,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "8A WAY(FARING)",
@@ -1454,9 +1361,6 @@
         "played_move": "12E (D)IALOgUE",
         "played_move_score": 68,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "12E (D)IALOgUE",
@@ -1501,9 +1405,6 @@
         "played_move": "K4 WIT",
         "played_move_score": 36,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "K4 WIT",
@@ -1548,9 +1449,6 @@
         "played_move": "13G BOP",
         "played_move_score": 29,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "13G BOP",
@@ -1595,9 +1493,6 @@
         "played_move": "4K (W)ORDY",
         "played_move_score": 32,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "4K (W)ORDY",
@@ -1642,9 +1537,6 @@
         "played_move": "14I ANTICAR",
         "played_move_score": 77,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "14I ANTICAR",
@@ -1689,9 +1581,6 @@
         "played_move": "N2 DI(D)IE",
         "played_move_score": 18,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "N2 DI(D)IE",
@@ -1736,9 +1625,6 @@
         "played_move": "O11 EXT(R)A",
         "played_move_score": 60,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "O11 EXT(R)A",
@@ -1783,9 +1669,6 @@
         "played_move": "15E MIAUL",
         "played_move_score": 27,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "15E MIAUL",
@@ -1830,9 +1713,6 @@
         "played_move": "C10 (F)OOTLE",
         "played_move_score": 18,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "C10 (F)OOTLE",
@@ -1877,9 +1757,6 @@
         "played_move": "M3 P(R)ANK",
         "played_move_score": 44,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "M3 P(R)ANK",
@@ -1924,9 +1801,6 @@
         "played_move": "B12 JEER",
         "played_move_score": 39,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "B12 JEER",
@@ -1971,9 +1845,6 @@
         "played_move": "O6 BHUT",
         "played_move_score": 32,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "O6 BHUT",
@@ -2018,9 +1889,6 @@
         "played_move": "6I Z(IT)",
         "played_move_score": 25,
         "num_moves": 224,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "6I Z(IT)",
@@ -2053,9 +1921,6 @@
         "played_move": "B7 V(A)N",
         "played_move_score": 6,
         "num_moves": 2247,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "B7 V(A)N",
@@ -2088,9 +1953,6 @@
         "played_move": "L8 LIMN(E)T(I)C",
         "played_move_score": 16,
         "num_moves": 191,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "L8 LIMN(E)T(I)C",
@@ -2113,9 +1975,6 @@
         "played_move": "M9 DUOS",
         "played_move_score": 27,
         "num_moves": 691,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "M9 DUOS",
@@ -2138,9 +1997,6 @@
         "played_move": "9K R(ID)",
         "played_move_score": 4,
         "num_moves": 1,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "9K R(ID)",

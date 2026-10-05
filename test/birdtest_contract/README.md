@@ -8,9 +8,12 @@ server's half of it: `test/contribute_test.c` asserts that
 
 - every key `config_contribute_*` and `contribute_claim_task` read is present
   in each assignment fixture (`assignment-*.json`, `anon-uuid-assignment.json`,
-  `expected-data.json`, `heartbeat.json`), and
+  `expected-data.json`, `heartbeat.json`),
 - the serializers a task's result is built with still produce every key the
   result fixtures carry (`result-*.json`),
+- the claim body has the keys of `claim-request.json`, its `board_dim` and
+  `rack_size` this build's `BOARD_DIM` and `RACK_SIZE`, and
+- each `shutdown-*.json` reason is waited out or obeyed as intended,
 
 so a key renamed on either side fails a test here rather than a
 contributor's run.

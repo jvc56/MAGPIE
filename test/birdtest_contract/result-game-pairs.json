@@ -1,5 +1,5 @@
 {
-  "claim_token": "d3664a1c-1158-42a2-b02c-3b9bf76f73e2",
+  "claim_token": "d79e8e3a-d5b4-49c6-96d8-de0d10b4a8cd",
   "result": {
     "all_games": {
       "games": 4,
@@ -38,9 +38,6 @@
         "played_move": "8G HUH",
         "played_move_score": 18,
         "num_moves": 79,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "8G HUH",
@@ -83,9 +80,6 @@
         "played_move": "8F HUH",
         "played_move_score": 18,
         "num_moves": 79,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "8F HUH",
@@ -130,9 +124,6 @@
         "played_move": "G7 V(I)GS",
         "played_move_score": 14,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "G7 V(I)GS",
@@ -177,9 +168,6 @@
         "played_move": "F6 Ve(R)SOS",
         "played_move_score": 18,
         "num_moves": 100,
-        "total_iterations": 0,
-        "time_elapsed": 0.0,
-        "status": 0,
         "moves": [
           {
             "move": "F6 Ve(R)SOS",

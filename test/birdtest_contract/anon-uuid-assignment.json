@@ -1,6 +1,6 @@
 {
-  "claim_token": "346cfe84-3250-411e-b9ff-15d2a81ca549",
-  "job_id": "d10e6104-338e-4c03-9050-202b5a749062",
+  "claim_token": "a263ec96-b7a8-4fe5-914a-b2ecfe04498b",
+  "job_id": "e41faa44-d314-4c46-87f4-6516f2cb8d74",
   "task_request": {
     "job_type": "games",
     "variant": "classic",
@@ -8,7 +8,6 @@
     "board_layout": "standard15",
     "seed": "1",
     "num_games": 2,
-    "game_pairs": false,
     "capture_positions": true,
     "capture_first_divergence": false,
     "bingo_bonus": 50,
@@ -131,5 +130,5 @@
     ],
     "derived": []
   },
-  "worker_uuid": "de42cc3a-033f-4bfc-ad42-135265cee6dc"
+  "worker_uuid": "56640a75-c58e-40d3-9525-fc20784ee88d"
 }

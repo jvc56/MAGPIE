@@ -1,6 +1,6 @@
 {
-  "claim_token": "d3664a1c-1158-42a2-b02c-3b9bf76f73e2",
-  "job_id": "c8a3d856-e5c1-460d-9295-76b2d52c5cbc",
+  "claim_token": "d79e8e3a-d5b4-49c6-96d8-de0d10b4a8cd",
+  "job_id": "7843042c-9ef3-48f6-9c54-280a7e6f8203",
   "task_request": {
     "job_type": "game_pairs",
     "variant": "classic",
@@ -8,7 +8,6 @@
     "board_layout": "standard15",
     "seed": "1",
     "num_games": 2,
-    "game_pairs": true,
     "capture_positions": true,
     "capture_first_divergence": true,
     "bingo_bonus": 50,

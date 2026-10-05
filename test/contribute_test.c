@@ -1,13 +1,16 @@
 #include "contribute_test.h"
 
 #include "../src/compat/endian_conv.h"
+#include "../src/def/board_defs.h"
 #include "../src/def/config_defs.h"
 #include "../src/def/contribute_defs.h"
 #include "../src/def/peg_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_results.h"
 #include "../src/ent/autoplay_solver_settings.h"
+#include "../src/ent/board_layout.h"
 #include "../src/ent/bonus_square.h"
 #include "../src/ent/client_state.h"
 #include "../src/ent/conversion_results.h"
@@ -630,13 +633,14 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   json_destroy(leave);
 
   // A game_pairs task is run by the games executor, told apart only by its
-  // job_type, so it needs every key a games request does.
+  // job_type -- the request carries no flag of its own saying so -- so it
+  // needs every key a games request does.
   const JsonValue *pairs =
       load_task_request_fixture(BIRDTEST_GAME_PAIRS_FIXTURE, &request);
   assert_fixture_is_an_assignment(pairs, "game_pairs assignment");
   assert_strings_equal(json_get_string_or_null(request, "job_type"),
                        "game_pairs");
-  assert(json_get_bool_or(request, "game_pairs", false));
+  assert(!json_object_get(request, "game_pairs"));
   assert_fixture_has_keys(request, request_keys,
                           sizeof(request_keys) / sizeof(request_keys[0]),
                           "game_pairs task_request");
@@ -1082,7 +1086,8 @@ static void test_capturing_positions_does_not_change_the_games(void) {
 // had. The case this pins: a static player applied after a simming one -- or
 // after the contributor's own settings asked for plies -- must not simulate.
 static void test_player_settings_do_not_leak_between_tasks(void) {
-  Config *config = config_create_or_die("set -lex CSW21 -plies 5");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -plies 5 -sm1 true -sm2 true");
   const JsonValue *request = NULL;
   const JsonValue *games =
       load_task_request_fixture(BIRDTEST_GAMES_FIXTURE, &request);
@@ -1092,6 +1097,8 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
   ErrorStack *error_stack = error_stack_create();
 
   assert(config_get_player_sim_plies(config, 1) == 5);
+  assert(config_get_player_sim_margin_forecast(config, 0));
+  assert(config_get_player_sim_margin_forecast(config, 1));
   config_contribute_apply_player_settings(config, simmer, 0, error_stack);
   config_contribute_apply_player_settings(config, static_player, 1,
                                           error_stack);
@@ -1101,6 +1108,10 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
   assert(config_get_player_max_iterations(config, 0) == 1000);
   // The contributor's -plies 5 does not survive a request that says static.
   assert(config_get_player_sim_plies(config, 1) == 0);
+  // Nor does a margin forecast, which no request field states: it changes a
+  // simmed play's equity, so it is off rather than the contributor's.
+  assert(!config_get_player_sim_margin_forecast(config, 0));
+  assert(!config_get_player_sim_margin_forecast(config, 1));
 
   // Nor does the previous task's simulation.
   config_contribute_apply_player_settings(config, static_player, 0,
@@ -1118,13 +1129,18 @@ static void test_player_settings_do_not_leak_between_tasks(void) {
 // case this pins: a contributor whose settings.txt changes the bingo bonus
 // would otherwise score every game of every job differently from the fleet.
 static void test_shared_settings_do_not_leak_between_tasks(void) {
-  Config *config = config_create_or_die("set -lex CSW21 -bb 35 -sp true");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -bb 35 -sp true -smargin true");
   assert(config_get_bingo_bonus(config) == 35);
   assert(config_get_use_small_plays(config));
+  assert(config_get_sim_margin_forecast(config));
 
   config_contribute_reset_shared_settings(config);
   assert(config_get_bingo_bonus(config) == DEFAULT_BINGO_BONUS);
   assert(!config_get_use_small_plays(config));
+  // The opening-rack analysis simulates with the run-wide settings, so the
+  // run-wide margin forecast is reset as each player's is.
+  assert(!config_get_sim_margin_forecast(config));
 
   // The bingo bonus is then the request's, not this build's default.
   ErrorStack *error_stack = error_stack_create();
@@ -1275,9 +1291,12 @@ static void test_lexical_flags_are_set_before_the_load(void) {
                                         player_index, true);
   }
   ErrorStack *error_stack = error_stack_create();
+  // A request always states its layout; this build's own is the one that
+  // loads at either BOARD_DIM.
+  char *layout = board_layout_get_default_name();
 
   config_contribute_load_lexicon_and_variant(
-      config, "CSW21", "classic", NULL, NULL, "CSW21", "CSW21", "CSW21",
+      config, "CSW21", "classic", "english", layout, "CSW21", "CSW21", "CSW21",
       "CSW21", false, false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   for (int player_index = 0; player_index < 2; player_index++) {
@@ -1289,7 +1308,7 @@ static void test_lexical_flags_are_set_before_the_load(void) {
 
   // A task that asks for a wordmap gets it for itself, not for the next task.
   config_contribute_load_lexicon_and_variant(
-      config, "CSW21", "classic", NULL, NULL, "CSW21", "CSW21", "CSW21",
+      config, "CSW21", "classic", "english", layout, "CSW21", "CSW21", "CSW21",
       "CSW21", true, false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(players_data_get_wmp(players_data, 0));
@@ -1308,16 +1327,16 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   convert(&wit_args, results, error_stack);
   assert(error_stack_is_empty(error_stack));
   config_contribute_load_lexicon_and_variant(
-      config, "CSW21_ab", "classic", "english_ab", NULL, "CSW21_ab", "CSW21_ab",
-      "CSW21_ab", "CSW21_ab", false, false, NULL, NULL, true, false,
+      config, "CSW21_ab", "classic", "english_ab", layout, "CSW21_ab",
+      "CSW21_ab", "CSW21_ab", "CSW21_ab", false, false, NULL, NULL, true, false,
       error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(players_data_get_word_info_table(players_data, 0));
   assert(!players_data_get_word_info_table(players_data, 1));
   config_contribute_load_lexicon_and_variant(
-      config, "CSW21_ab", "classic", "english_ab", NULL, "CSW21_ab", "CSW21_ab",
-      "CSW21_ab", "CSW21_ab", false, false, NULL, NULL, false, false,
-      error_stack);
+      config, "CSW21_ab", "classic", "english_ab", layout, "CSW21_ab",
+      "CSW21_ab", "CSW21_ab", "CSW21_ab", false, false, NULL, NULL, false,
+      false, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(!players_data_get_word_info_table(players_data, 0));
   assert(!players_data_get_word_info_table(players_data, 1));
@@ -1329,6 +1348,7 @@ static void test_lexical_flags_are_set_before_the_load(void) {
   free(wit_path);
   conversion_results_destroy(results);
 
+  free(layout);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
@@ -1645,13 +1665,16 @@ static void test_a_set_aside_job_is_left_out_of_claims_for_a_while(void) {
   assert(error_stack_is_empty(error_stack));
 
   char *body = contribute_claim_body(state, "0.1.1");
-  assert_strings_equal(
-      body, "{\"magpie_version\":\"0.1.1\",\"unsupported_jobs\":[]}");
+  char *expected_body = get_formatted_string(
+      "{\"magpie_version\":\"0.1.1\",\"board_dim\":%d,\"rack_size\":%d,"
+      "\"unsupported_jobs\":[]}",
+      BOARD_DIM, RACK_SIZE);
+  assert_strings_equal(body, expected_body);
+  free(expected_body);
   free(body);
 
   assert(contribute_defer_job(state, "job-a") == 3);
   assert(contribute_defer_job(state, "job-a") == 6);
-  assert(contribute_defer_job(state, NULL) == 3);
   body = contribute_claim_body(state, "0.1.1");
   assert(strstr(body, "\"unsupported_jobs\":[\"job-a\"]"));
   free(body);
@@ -1673,9 +1696,9 @@ static void test_a_set_aside_job_is_left_out_of_claims_for_a_while(void) {
 
 // The wait-or-exit decision on a shutdown, against birdtest's own shutdown
 // fixtures: a data shutdown answering a claim that named a set-aside job is
-// waited out; a version shutdown never is; and nothing is waited out for a
-// claim that named none. A reason renamed on either side fails here rather
-// than sending every worker away with the wrong advice.
+// waited out; a version or build shutdown never is; and nothing is waited out
+// for a claim that named none. A reason renamed on either side fails here
+// rather than sending every worker away with the wrong advice.
 static void test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job(void) {
   const struct {
     const char *path;
@@ -1684,6 +1707,7 @@ static void test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job(void) {
       {"test/birdtest_contract/shutdown-data-out-of-date.json", true},
       {"test/birdtest_contract/shutdown-both.json", true},
       {"test/birdtest_contract/shutdown-magpie-too-old.json", false},
+      {"test/birdtest_contract/shutdown-unsupported-build.json", false},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
     const JsonValue *fixture = load_fixture(cases[i].path);
@@ -1696,9 +1720,36 @@ static void test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job(void) {
   }
 }
 
+// An assignment whose input data this build cannot check is refused, not run
+// unverified: one with no `expected_data`, and one whose digests use an
+// algorithm other than sha256. Every fixture assignment passes.
+static void test_an_unverifiable_assignment_is_refused(void) {
+  ErrorStack *error_stack = error_stack_create();
+  const char *const refused[] = {
+      "{\"claim_token\":\"t\",\"job_id\":\"j\"}",
+      "{\"expected_data\":{\"files\":[]}}",
+      "{\"expected_data\":{\"algorithm\":\"blake3\",\"files\":[]}}",
+  };
+  for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++) {
+    const JsonValue *assignment = json_parse(refused[i], error_stack);
+    assert(error_stack_is_empty(error_stack));
+    contribute_check_expected_data(assignment, error_stack);
+    assert(error_stack_top(error_stack) ==
+           ERROR_STATUS_CONTRIBUTE_SERVER_ERROR);
+    error_stack_reset(error_stack);
+    json_destroy(assignment);
+  }
+  const JsonValue *games = load_fixture(BIRDTEST_GAMES_FIXTURE);
+  contribute_check_expected_data(games, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  json_destroy(games);
+  error_stack_destroy(error_stack);
+}
+
 // The claim body has the shape of birdtest's claim-request fixture: built
 // from the fixture's own version and ids, it has the same keys and the same
-// values.
+// values -- except the board dimension and rack size, which are this build's
+// (BOARD_DIM and RACK_SIZE), whatever the fixture's build was.
 static void test_the_claim_body_matches_the_claim_fixture(void) {
   const char *path = "contribute_test_claim_settings.txt";
   write_settings_file(path, "server https://birdtest.example\n");
@@ -1721,6 +1772,10 @@ static void test_the_claim_body_matches_the_claim_fixture(void) {
   assert(json_object_size(ours) == json_object_size(fixture));
   assert_strings_equal(json_get_string_or_null(ours, "magpie_version"),
                        json_get_string_or_null(fixture, "magpie_version"));
+  assert(json_get_int_or(fixture, "board_dim", 0) > 0);
+  assert(json_get_int_or(fixture, "rack_size", 0) > 0);
+  assert(json_get_int_or(ours, "board_dim", 0) == BOARD_DIM);
+  assert(json_get_int_or(ours, "rack_size", 0) == RACK_SIZE);
   const JsonValue *jobs = json_object_get(ours, "unsupported_jobs");
   assert(json_array_length(jobs) == job_count);
   for (int i = 0; i < job_count; i++) {
@@ -1879,7 +1934,7 @@ static void test_a_high_byte_is_not_a_bonus_square(void) {
 }
 
 // A static player's games are a function of the seed alone, whatever the thread
-// count: birdtest relies on it for redundancy and game pairs. Simulating and
+// count: birdtest relies on it for game pairs. Simulating and
 // solving players are multithreaded and make no such promise; this pins that
 // adding the solvers did not disturb the static case.
 static void test_static_games_are_identical_across_thread_counts(void) {
@@ -2318,4 +2373,5 @@ void test_contribute(void) {
   test_a_set_aside_job_is_left_out_of_claims_for_a_while();
   test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job();
   test_the_claim_body_matches_the_claim_fixture();
+  test_an_unverifiable_assignment_is_refused();
 }
