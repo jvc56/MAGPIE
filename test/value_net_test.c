@@ -1077,8 +1077,8 @@ static void vnt_kinship(const StringSplitter *fields) {
 enum {
   // Contenders per position in a kinship reference pass, and the longest
   // contenders line.
-  VNT_KINREF_MAX = 32,
-  VNT_KINREF_LINE = 8192,
+  VNT_KINREF_MAX = 128,
+  VNT_KINREF_LINE = 16384,
 };
 
 typedef struct VntKinrefEntry {
