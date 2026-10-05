@@ -1074,6 +1074,257 @@ static void vnt_kinship(const StringSplitter *fields) {
   config_destroy(config);
 }
 
+enum {
+  // Contenders per position in a kinship reference pass, and the longest
+  // contenders line.
+  VNT_KINREF_MAX = 32,
+  VNT_KINREF_LINE = 8192,
+};
+
+typedef struct VntKinrefEntry {
+  long game;
+  int turn;
+  int bag;
+  int count;
+  char names[VNT_KINREF_MAX][64];
+} VntKinrefEntry;
+
+// "kinref:<model_dir>:<backend>:<contenders>:<iterations>:<threads>:<out>":
+// an independent reference sim for chosen candidates of positions from
+// valuenet:kinship. Each line of <contenders> is tab-separated: game index,
+// turn, bag size, then up to VNT_KINREF_MAX move names as kinship writes
+// them; lines sorted by game and turn. Each game is replayed as kinship
+// plays it (static self-play without PAT from the same seed; the bag size
+// must match), the named moves are found among the mover's legal moves, and
+// they are simmed as kinship sims them (4 plies of static rollouts without
+// PAT, the net's leaf, uniform opponent racks, round robin) for iterations
+// iterations each from a different seed, so the reference is independent
+// of the samples that chose the contenders. Writes <out>.csv: game, turn,
+// bag, move, mean utility, its sd and the samples.
+static void vnt_kinref(const StringSplitter *fields) {
+  if (string_splitter_get_number_of_items(fields) != 7) {
+    log_fatal("kinref needs 6 fields");
+  }
+  const char *model_dir = string_splitter_get_item(fields, 1);
+  const char *backend_name = string_splitter_get_item(fields, 2);
+  const char *contenders_path = string_splitter_get_item(fields, 3);
+  const int iterations =
+      (int)strtol(string_splitter_get_item(fields, 4), NULL, 10);
+  const int threads =
+      (int)strtol(string_splitter_get_item(fields, 5), NULL, 10);
+  const char *out = string_splitter_get_item(fields, 6);
+  // The contenders.
+  FILE *in = fopen_or_die(contenders_path, "r");
+  int capacity_entries = 1024;
+  int num_entries = 0;
+  VntKinrefEntry *entries =
+      malloc_or_die(sizeof(VntKinrefEntry) * (size_t)capacity_entries);
+  char *line = malloc_or_die(VNT_KINREF_LINE);
+  while (fgets(line, VNT_KINREF_LINE, in) != NULL) {
+    line[strcspn(line, "\r\n")] = '\0';
+    if (line[0] == '\0') {
+      continue;
+    }
+    if (num_entries == capacity_entries) {
+      capacity_entries *= 2;
+      entries = realloc_or_die(entries, sizeof(VntKinrefEntry) *
+                                            (size_t)capacity_entries);
+    }
+    VntKinrefEntry *entry = &entries[num_entries];
+    memset(entry, 0, sizeof(*entry));
+    char *save = NULL;
+    char *token = strtok_r(line, "\t", &save);
+    for (int field = 0; token != NULL; field++) {
+      if (field == 0) {
+        entry->game = strtol(token, NULL, 10);
+      } else if (field == 1) {
+        entry->turn = (int)strtol(token, NULL, 10);
+      } else if (field == 2) {
+        entry->bag = (int)strtol(token, NULL, 10);
+      } else if (entry->count < VNT_KINREF_MAX) {
+        (void)snprintf(entry->names[entry->count], 64, "%s", token);
+        entry->count++;
+      }
+      token = strtok_r(NULL, "\t", &save);
+    }
+    num_entries++;
+  }
+  (void)fclose(in);
+  free(line);
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1 -pat NWL23");
+  ErrorStack *error_stack = error_stack_create();
+  config_load_win_pcts(config, error_stack);
+  ValueNetPlayer *player =
+      value_net_player_create(model_dir, vnt_parse_backend(backend_name), 0,
+                              1.0, 0.5, 100.0, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("kinref setup failed");
+  }
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  MoveList *all = move_list_create(VNT_KIN_ALL_MOVES);
+  MoveList *pool = move_list_create(VNT_KINREF_MAX);
+  MoveList *static_list = move_list_create(1);
+  StringBuilder *name = string_builder_create();
+  const int capacity = (iterations * 2) + (threads * 64 * 4);
+  SimSampleRecord record = {
+      .plays = VNT_KINREF_MAX,
+      .capacity = capacity,
+      .seeds = malloc_or_die(sizeof(uint64_t) * VNT_KINREF_MAX * capacity),
+      .utilities = malloc_or_die(sizeof(float) * VNT_KINREF_MAX * capacity),
+      .counts = calloc_or_die(VNT_KINREF_MAX, sizeof(_Atomic int)),
+  };
+  char *path = get_formatted_string("%s.csv", out);
+  FILE *csv = fopen_or_die(path, "w");
+  free(path);
+  fprintf(csv, "game,turn,bag,move,ref_mean,ref_sd,ref_n\n");
+  ValueNetHistory histories[2];
+  int next = 0;
+  int done = 0;
+  while (next < num_entries) {
+    const long game_idx = entries[next].game;
+    game_reset(game);
+    game_seed(game, vnt_mix(UINT64_C(9191) ^ (uint64_t)game_idx));
+    draw_starting_racks(game);
+    value_net_history_reset(&histories[0]);
+    value_net_history_reset(&histories[1]);
+    for (int turn = 0; !game_over(game) && next < num_entries &&
+                       entries[next].game == game_idx;
+         turn++) {
+      const int mover = game_get_player_on_turn_index(game);
+      player_set_pat_usage(game_get_player(game, 0), true, 0);
+      player_set_pat_usage(game_get_player(game, 1), true, 0);
+      if (entries[next].turn == turn) {
+        const VntKinrefEntry *entry = &entries[next];
+        const int64_t start = ctimer_monotonic_ns();
+        if (bag_get_letters(game_get_bag(game)) != entry->bag) {
+          log_fatal("kinref: game %ld turn %d has %d tiles in the bag, not %d",
+                    game_idx, turn, bag_get_letters(game_get_bag(game)),
+                    entry->bag);
+        }
+        player_set_pat_usage(game_get_player(game, mover), false, 0);
+        move_list_reset(all);
+        const MoveGenArgs args = {
+            .game = game,
+            .move_list = all,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&args);
+        player_set_pat_usage(game_get_player(game, mover), true, 0);
+        move_list_reset(pool);
+        for (int cand = 0; cand < entry->count; cand++) {
+          bool found = false;
+          for (int idx = 0; idx < move_list_get_count(all) && !found; idx++) {
+            const Move *move = move_list_get_move(all, idx);
+            string_builder_clear(name);
+            string_builder_add_move(name, game_get_board(game), move, ld,
+                                    false);
+            if (strings_equal(string_builder_peek(name), entry->names[cand])) {
+              move_list_add_move(pool, move);
+              found = true;
+            }
+          }
+          if (!found) {
+            log_fatal("kinref: game %ld turn %d has no move %s", game_idx, turn,
+                      entry->names[cand]);
+          }
+        }
+        const int cands = move_list_get_count(pool);
+        for (int idx = 0; idx < cands; idx++) {
+          atomic_store(&record.counts[idx], 0);
+        }
+        ThreadControl *control = thread_control_create();
+        thread_control_set_status(control, THREAD_CONTROL_STATUS_STARTED);
+        SimArgs sim_args;
+        sim_args_fill(4, pool, cands, NULL, config_get_win_pcts(config), NULL,
+                      control, game, false, false, threads, 0, cands, 4,
+                      UINT64_C(1000003), (uint64_t)iterations * (uint64_t)cands,
+                      1, 0.0, BAI_THRESHOLD_NONE, 0.0,
+                      BAI_SAMPLING_RULE_ROUND_ROBIN, 0.0, 1.0, 0.5, 100.0,
+                      false, NULL, &sim_args);
+        sim_args.rollout_value_net_evaluate = value_net_player_evaluate_rows;
+        sim_args.rollout_value_net_context = player;
+        sim_args.rollout_value_net_batch = 64;
+        sim_args.rollout_value_net_plies = 0;
+        sim_args.rollout_value_net_leaf = true;
+        sim_args.rollout_value_net_history = histories[1 - mover];
+        sim_args.rollout_value_net_own_history = histories[mover];
+        sim_args.sample_record = &record;
+        sim_args.pat_rollout_disabled = true;
+        SimResults *results = sim_results_create(0.0);
+        simulate_without_ctx(&sim_args, results, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_print_and_reset(error_stack);
+          log_fatal("kinref sim failed");
+        }
+        thread_control_destroy(control);
+        for (int play = 0; play < cands; play++) {
+          int stored = atomic_load(&record.counts[play]);
+          if (stored > capacity) {
+            stored = capacity;
+          }
+          double sum = 0.0;
+          double squares = 0.0;
+          for (int sample = 0; sample < stored; sample++) {
+            const double utility =
+                record.utilities[((size_t)play * capacity) + (size_t)sample];
+            sum += utility;
+            squares += utility * utility;
+          }
+          const double mean = stored > 0 ? sum / stored : NAN;
+          const double sd =
+              stored > 1 ? sqrt(fmax(0.0, (squares - (stored * mean * mean)) /
+                                              (stored - 1)))
+                         : NAN;
+          string_builder_clear(name);
+          string_builder_add_move(name, game_get_board(game),
+                                  move_list_get_move(pool, play), ld, false);
+          fprintf(csv, "%ld,%d,%d,\"%s\",%.6f,%.6f,%d\n", game_idx, turn,
+                  entry->bag, string_builder_peek(name), mean, sd, stored);
+        }
+        (void)fflush(csv);
+        sim_results_destroy(results);
+        next++;
+        done++;
+        printf("kinref position=%d/%d cands=%d seconds=%.1f\n", done,
+               num_entries, cands,
+               (double)(ctimer_monotonic_ns() - start) / 1e9);
+        (void)fflush(stdout);
+      }
+      Move move;
+      move_copy(&move, vnt_static_move(game, static_list));
+      value_net_history_record_opponent_move(&histories[1 - mover], &move);
+      play_move(&move, game, NULL);
+    }
+    if (next < num_entries && entries[next].game == game_idx) {
+      log_fatal("kinref: game %ld ended before turn %d", game_idx,
+                entries[next].turn);
+    }
+  }
+  (void)fclose(csv);
+  free(record.seeds);
+  free(record.utilities);
+  free((void *)record.counts);
+  free(entries);
+  string_builder_destroy(name);
+  move_list_destroy(all);
+  move_list_destroy(pool);
+  move_list_destroy(static_list);
+  value_net_player_destroy(player);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // Correlation of xs and ys (n values each); 0 when either is constant.
 static double vnt_correlation(const double *xs, const double *ys, int n) {
   double mx = 0.0;
@@ -3862,6 +4113,8 @@ void value_net_test_run_spec(const char *spec) {
                  string_splitter_get_item(fields, 2));
   } else if (strings_equal(mode, "simbench")) {
     vnt_simbench(fields);
+  } else if (strings_equal(mode, "kinref")) {
+    vnt_kinref(fields);
   } else if (strings_equal(mode, "kinship")) {
     vnt_kinship(fields);
   } else if (strings_equal(mode, "leaveklvcheck") && num_fields == 2) {
