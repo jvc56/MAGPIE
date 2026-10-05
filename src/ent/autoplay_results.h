@@ -5,6 +5,7 @@
 #include "../util/json.h"
 #include "../util/string_util.h"
 #include "game.h"
+#include "inference_results.h"
 #include "klv.h"
 #include "move.h"
 #include "sim_results.h"
@@ -70,11 +71,18 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
 
+// The most inferred leaves a captured position keeps: inference for a
+// position that is captured keeps a list of at least this many.
+enum { AUTOPLAY_CAPTURED_INFERENCE_LEAVES = 10 };
+
+// inference_results is the inference behind this turn's simulation, when the
+// player inferred the opponent's leave before simming; NULL otherwise.
 void autoplay_results_add_move(
     AutoplayResults *autoplay_results, const Game *game, const Move *move,
     const Move *previous_move, const Rack *leave, const MoveList *move_list,
-    SimResults *sim_results, const SolverAnalysis *solver_analysis,
-    int game_number, int pair_game_number, int turn_number, int play_cap);
+    SimResults *sim_results, InferenceResults *inference_results,
+    const SolverAnalysis *solver_analysis, int game_number,
+    int pair_game_number, int turn_number, int play_cap);
 // Appends a "moves" array field -- the ranked plays of one analysed position --
 // to the JSON object being written to sb. With sim_results (a simming player)
 // the plays come in the simulation's ranking, each with its win percentage,

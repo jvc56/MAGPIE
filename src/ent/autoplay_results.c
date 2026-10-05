@@ -23,8 +23,10 @@
 #include "data_filepaths.h"
 #include "equity.h"
 #include "game.h"
+#include "inference_results.h"
 #include "klv.h"
 #include "klv_csv.h"
+#include "leave_rack.h"
 #include "letter_distribution.h"
 #include "move.h"
 #include "player.h"
@@ -52,6 +54,9 @@ typedef struct RecorderArgs {
   // The simulation behind this turn, when the player simmed. Carries the
   // per-play win percentage and per-ply statistics the move list does not.
   SimResults *sim_results;
+  // The inference behind that simulation, when the player inferred the
+  // opponent's leave from their previous move before simming; NULL otherwise.
+  InferenceResults *inference_results;
   // The solve behind this turn, when an endgame or PEG solve chose the move.
   // Takes precedence over move_list and sim_results, which then describe an
   // earlier turn.
@@ -1529,6 +1534,23 @@ typedef struct CapturedPlay {
   CapturedPly plies[CAPTURED_PLAY_MAX_PLIES];
 } CapturedPlay;
 
+typedef struct CapturedLeave {
+  char leave[CAPTURED_RACK_STRING_SIZE];
+  int draws;
+  double equity;
+} CapturedLeave;
+
+// What the opponent's leave was inferred to be before the position was
+// simmed: how many distinct leaves, how many drawn in all, their mean
+// equity, and the most drawn, most drawn first.
+typedef struct CapturedInference {
+  uint64_t num_leaves;
+  uint64_t total_draws;
+  double average_equity;
+  int num_top_leaves;
+  CapturedLeave top_leaves[AUTOPLAY_CAPTURED_INFERENCE_LEAVES];
+} CapturedInference;
+
 typedef struct CapturedPosition {
   char rack[CAPTURED_RACK_STRING_SIZE];
   // CGP of the position as it stood before the move was played.
@@ -1555,6 +1577,8 @@ typedef struct CapturedPosition {
   CapturedPlay *plays;
   int num_stored_plays;
   int plays_capacity;
+  bool has_inference;
+  CapturedInference inference;
 } CapturedPosition;
 
 // Per worker thread: a plain growing array, no synchronization needed since
@@ -1737,6 +1761,43 @@ static void positions_data_commit_unless_held(Recorder *recorder) {
   }
 }
 
+// The leave-type figures, as the inference printer reports them: a previous
+// move that was an exchange totals its draws over whole racks, since each
+// listed leave stands for the racks it was kept from.
+static void captured_inference_fill(CapturedInference *captured,
+                                    InferenceResults *results,
+                                    const LetterDistribution *ld) {
+  const Stat *leaves =
+      inference_results_get_equity_values(results, INFERENCE_TYPE_LEAVE);
+  captured->num_leaves = stat_get_num_unique_samples(leaves);
+  captured->average_equity = stat_get_mean(leaves);
+  const bool is_exchange =
+      inference_results_get_target_number_of_tiles_exchanged(results) > 0;
+  captured->total_draws =
+      stat_get_num_samples(inference_results_get_equity_values(
+          results, is_exchange ? INFERENCE_TYPE_RACK : INFERENCE_TYPE_LEAVE));
+  captured->num_top_leaves = 0;
+  const LeaveRackList *list = inference_results_get_leave_rack_list(results);
+  if (!list) {
+    return;
+  }
+  int count = leave_rack_list_get_count(list);
+  if (count > AUTOPLAY_CAPTURED_INFERENCE_LEAVES) {
+    count = AUTOPLAY_CAPTURED_INFERENCE_LEAVES;
+  }
+  Rack leave;
+  rack_set_dist_size(&leave, ld_get_size(ld));
+  for (int i = 0; i < count; i++) {
+    const LeaveRack *leave_rack = leave_rack_list_get_rack(list, i);
+    CapturedLeave *top = &captured->top_leaves[i];
+    leave_rack_get_leave(leave_rack, &leave);
+    rack_get_string(&leave, ld, false, top->leave, sizeof(top->leave));
+    top->draws = leave_rack_get_draws(leave_rack);
+    top->equity = equity_to_double(leave_rack_get_equity(leave_rack));
+  }
+  captured->num_top_leaves = count;
+}
+
 void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   PositionsData *data = (PositionsData *)recorder->data;
   if (!args->move_list) {
@@ -1782,6 +1843,7 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   position->game_number = args->game_number;
   position->pair_game_number = args->pair_game_number;
   position->turn_number = args->turn_number;
+  position->has_inference = false;
 
   const int play_cap = args->play_cap > 0 ? args->play_cap : 0;
   const SolverAnalysis *solver = args->solver_analysis;
@@ -1833,6 +1895,11 @@ void positions_data_add_move(Recorder *recorder, const RecorderArgs *args) {
     }
     if (sorted) {
       sim_results_unlock_display_infos(args->sim_results);
+    }
+    if (args->inference_results) {
+      position->has_inference = true;
+      captured_inference_fill(&position->inference, args->inference_results,
+                              ld);
     }
   } else {
     position->total_iterations = 0;
@@ -1988,6 +2055,35 @@ static void write_captured_position(StringBuilder *sb,
                           position->time_elapsed, &position_first);
   json_write_int_field(sb, CONTRIBUTE_KEY_STATUS, (int64_t)position->status,
                        &position_first);
+  if (position->has_inference) {
+    const CapturedInference *inference = &position->inference;
+    json_write_raw_key(sb, CONTRIBUTE_KEY_INFERENCE, &position_first);
+    bool inference_first = true;
+    json_write_object_start(sb);
+    json_write_int_field(sb, CONTRIBUTE_KEY_NUM_LEAVES,
+                         (int64_t)inference->num_leaves, &inference_first);
+    json_write_int_field(sb, CONTRIBUTE_KEY_TOTAL_DRAWS,
+                         (int64_t)inference->total_draws, &inference_first);
+    json_write_double_field(sb, CONTRIBUTE_KEY_AVERAGE_EQUITY,
+                            inference->average_equity, &inference_first);
+    json_write_array_start(sb, CONTRIBUTE_KEY_LEAVES, &inference_first);
+    for (int i = 0; i < inference->num_top_leaves; i++) {
+      if (i > 0) {
+        string_builder_add_string(sb, ",");
+      }
+      bool leave_first = true;
+      json_write_object_start(sb);
+      json_write_string_field(sb, CONTRIBUTE_KEY_LEAVE,
+                              inference->top_leaves[i].leave, &leave_first);
+      json_write_int_field(sb, CONTRIBUTE_KEY_DRAWS,
+                           inference->top_leaves[i].draws, &leave_first);
+      json_write_double_field(sb, CONTRIBUTE_KEY_EQUITY,
+                              inference->top_leaves[i].equity, &leave_first);
+      json_write_object_end(sb);
+    }
+    json_write_array_end(sb);
+    json_write_object_end(sb);
+  }
   json_write_array_start(sb, CONTRIBUTE_KEY_MOVES, &position_first);
 
   for (int p = 0; p < position->num_stored_plays; p++) {
@@ -2271,8 +2367,9 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 void autoplay_results_add_move(
     AutoplayResults *autoplay_results, const Game *game, const Move *move,
     const Move *previous_move, const Rack *leave, const MoveList *move_list,
-    SimResults *sim_results, const SolverAnalysis *solver_analysis,
-    int game_number, int pair_game_number, int turn_number, int play_cap) {
+    SimResults *sim_results, InferenceResults *inference_results,
+    const SolverAnalysis *solver_analysis, int game_number,
+    int pair_game_number, int turn_number, int play_cap) {
   RecorderArgs args = {0};
   args.game = game;
   args.move = move;
@@ -2280,6 +2377,7 @@ void autoplay_results_add_move(
   args.leave = leave;
   args.move_list = move_list;
   args.sim_results = sim_results;
+  args.inference_results = inference_results;
   args.solver_analysis = solver_analysis;
   args.game_number = game_number;
   args.pair_game_number = pair_game_number;

@@ -390,6 +390,20 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   if (autoplay_worker->args.p2_sim_args.num_plays < position_play_cap) {
     autoplay_worker->args.p2_sim_args.num_plays = position_play_cap;
   }
+  // A captured position keeps the opponent's most drawn inferred leaves,
+  // which inference lists only when asked to keep a list of them; nothing
+  // else in autoplay asks.
+  if (autoplay_worker->captures_positions) {
+    SimArgs *seats[] = {&autoplay_worker->args.p1_sim_args,
+                        &autoplay_worker->args.p2_sim_args};
+    for (int i = 0; i < 2; i++) {
+      if (seats[i]->inference_args.leave_list_capacity <
+          AUTOPLAY_CAPTURED_INFERENCE_LEAVES) {
+        seats[i]->inference_args.leave_list_capacity =
+            AUTOPLAY_CAPTURED_INFERENCE_LEAVES;
+      }
+    }
+  }
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
@@ -896,6 +910,19 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        equity_to_double(move_get_equity(move)));
   }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
+  // Only when this player actually simmed this turn: sim_results holds
+  // whatever the last simulation produced, so passing it on a static player's
+  // turn -- or on a turn a solver decided -- would attribute another turn's
+  // analysis to this one.
+  const bool simmed_this_turn =
+      sim_args_for_player->num_plies > 0 && !autoplay_worker->turn_was_solved;
+  // And it inferred first exactly when game_runner_get_sim_move turned
+  // inference on for the sim: the player infers, and the opponent has a
+  // previous move that was not a pass to infer from.
+  const bool inferred_this_turn =
+      simmed_this_turn && sim_args_for_player->use_inference &&
+      game_runner->turn_number > 0 &&
+      move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS;
   // The move list holds the candidates this turn; it is reused next turn, so a
   // recorder that keeps them must copy.
   autoplay_results_add_move(
@@ -906,13 +933,8 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       &rare_rack_or_move_leave,
       autoplay_worker
           ->move_lists[game_get_player_on_turn_index(game_runner->game)],
-      // Only when this player actually simmed: sim_results holds whatever the
-      // last simulation produced, so passing it on a static player's turn
-      // -- or on a turn a solver decided -- would attribute another turn's
-      // analysis to this one.
-      (sim_args_for_player->num_plies > 0 && !autoplay_worker->turn_was_solved)
-          ? autoplay_worker->sim_results
-          : NULL,
+      simmed_this_turn ? autoplay_worker->sim_results : NULL,
+      inferred_this_turn ? autoplay_worker->inference_results : NULL,
       autoplay_worker->turn_was_solved
           ? autoplay_solver_get_analysis(autoplay_worker->solver_ctx)
           : NULL,

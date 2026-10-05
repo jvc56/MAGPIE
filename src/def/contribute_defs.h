@@ -182,6 +182,17 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_ANALYSIS "analysis"
 #define CONTRIBUTE_KEY_MEAN_SPREAD "mean_spread"
 #define CONTRIBUTE_KEY_FIDELITY_PLIES "fidelity_plies"
+// A simmed in-game position whose player inferred the opponent's leave from
+// their previous move: how many distinct leaves the inference found, how many
+// it drew in all, their mean equity, and the most drawn of them, each with its
+// draws and equity, most drawn first. Absent on any other position.
+#define CONTRIBUTE_KEY_INFERENCE "inference"
+#define CONTRIBUTE_KEY_NUM_LEAVES "num_leaves"
+#define CONTRIBUTE_KEY_TOTAL_DRAWS "total_draws"
+#define CONTRIBUTE_KEY_AVERAGE_EQUITY "average_equity"
+#define CONTRIBUTE_KEY_LEAVES "leaves"
+#define CONTRIBUTE_KEY_LEAVE "leave"
+#define CONTRIBUTE_KEY_DRAWS "draws"
 #define CONTRIBUTE_ANALYSIS_STATIC "static"
 #define CONTRIBUTE_ANALYSIS_SIM "sim"
 #define CONTRIBUTE_ANALYSIS_PEG "peg"

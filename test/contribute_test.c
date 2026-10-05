@@ -434,6 +434,8 @@ static const char *const BIRDTEST_HEARTBEAT_FIXTURE =
     "test/birdtest_contract/heartbeat.json";
 static const char *const BIRDTEST_RESULT_GAMES_FIXTURE =
     "test/birdtest_contract/result-games.json";
+static const char *const BIRDTEST_RESULT_GAMES_INFERENCE_FIXTURE =
+    "test/birdtest_contract/result-games-inference.json";
 static const char *const BIRDTEST_RESULT_GAME_PAIRS_FIXTURE =
     "test/birdtest_contract/result-game-pairs.json";
 static const char *const BIRDTEST_RESULT_OPENING_RACK_FIXTURE =
@@ -2193,6 +2195,91 @@ static void test_solving_players_report_their_solves(void) {
   config_destroy(config);
 }
 
+// A simming player that infers its opponent's leave before simming reports,
+// on each captured position it inferred for, how many distinct leaves the
+// inference found, how many it drew, their mean equity, and the most drawn
+// of them, most drawn first. A position it did not infer for -- the first
+// turn of a game, with no previous move to infer from -- reports none, and a
+// player that does not infer reports none anywhere.
+static void test_inferring_players_report_their_inference(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 3 -plies 2 -minp 2 -iter 10 -threads 2 -maxnumdplays 3 "
+      "-sinfer true");
+  load_and_exec_config_or_die(config, "autoplay games,positions 2 -seed 4");
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *result = json_parse(
+      autoplay_results_get_json(config_get_autoplay_results(config), false),
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *positions = json_object_get(result, "positions");
+  int inferred = 0;
+  for (int i = 0; i < json_array_length(positions); i++) {
+    const JsonValue *position = json_array_get(positions, i);
+    const JsonValue *inference =
+        json_object_get(position, CONTRIBUTE_KEY_INFERENCE);
+    if (json_get_int(position, CONTRIBUTE_KEY_TURN_NUMBER, error_stack) == 0 ||
+        !json_object_get(position, CONTRIBUTE_KEY_PREVIOUS_MOVE)) {
+      assert(!inference);
+      continue;
+    }
+    assert(strings_equal(json_get_string_or_null(position, "analysis"),
+                         CONTRIBUTE_ANALYSIS_SIM));
+    if (!inference) {
+      // The opponent passed: nothing to infer from.
+      continue;
+    }
+    inferred++;
+    const int64_t num_leaves =
+        json_get_int(inference, CONTRIBUTE_KEY_NUM_LEAVES, error_stack);
+    const int64_t total_draws =
+        json_get_int(inference, CONTRIBUTE_KEY_TOTAL_DRAWS, error_stack);
+    const double average =
+        json_get_double(inference, CONTRIBUTE_KEY_AVERAGE_EQUITY, error_stack);
+    const JsonValue *leaves = json_object_get(inference, CONTRIBUTE_KEY_LEAVES);
+    assert(error_stack_is_empty(error_stack));
+    assert(average > -1000.0 && average < 1000.0);
+    const int listed = json_array_length(leaves);
+    assert(listed <= AUTOPLAY_CAPTURED_INFERENCE_LEAVES);
+    assert(num_leaves >= listed);
+    assert(listed > 0 || num_leaves == 0);
+    int64_t previous = INT64_MAX;
+    for (int l = 0; l < listed; l++) {
+      const JsonValue *leave = json_array_get(leaves, l);
+      const int64_t draws =
+          json_get_int(leave, CONTRIBUTE_KEY_DRAWS, error_stack);
+      assert(json_get_string_or_null(leave, CONTRIBUTE_KEY_LEAVE));
+      (void)json_get_double(leave, CONTRIBUTE_KEY_EQUITY, error_stack);
+      assert(error_stack_is_empty(error_stack));
+      assert(draws > 0 && draws <= total_draws && draws <= previous);
+      previous = draws;
+    }
+  }
+  assert(inferred > 0);
+  json_destroy(result);
+  // And birdtest's fixture for such a result holds nothing this output lacks.
+  assert_result_produces_fixture_keys(
+      BIRDTEST_RESULT_GAMES_INFERENCE_FIXTURE,
+      autoplay_results_get_json(config_get_autoplay_results(config), false));
+
+  // Without inference, no position reports one.
+  load_and_exec_config_or_die(config, "set -sinfer false");
+  load_and_exec_config_or_die(config, "autoplay games,positions 1 -seed 4");
+  result = json_parse(
+      autoplay_results_get_json(config_get_autoplay_results(config), false),
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  positions = json_object_get(result, "positions");
+  assert(json_array_length(positions) > 0);
+  for (int i = 0; i < json_array_length(positions); i++) {
+    assert(!json_object_get(json_array_get(positions, i),
+                            CONTRIBUTE_KEY_INFERENCE));
+  }
+  json_destroy(result);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_contribute(void) {
   test_static_games_are_identical_across_thread_counts();
   test_a_player_states_its_solving();
@@ -2217,6 +2304,7 @@ void test_contribute(void) {
   test_contract_fixtures_carry_every_key_contribute_reads();
   test_results_carry_every_key_the_server_reads();
   test_capturing_positions_does_not_change_the_games();
+  test_inferring_players_report_their_inference();
   test_a_pairs_first_divergence_is_both_games_at_one_turn();
   test_player_settings_do_not_leak_between_tasks();
   test_a_rewritten_klv_is_read_again();

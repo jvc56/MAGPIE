@@ -1,0 +1,151 @@
+{
+  "claim_token": "4c1b6f0e-2a8d-4f53-9c7e-3d5a1b2c9e70",
+  "result": {
+    "all_games": {
+      "games": 2,
+      "wins": 1,
+      "losses": 1,
+      "ties": 0,
+      "p1_score_mean": 402.5,
+      "p1_score_sd": 41.7193,
+      "p2_score_mean": 418.0,
+      "p2_score_sd": 33.941125
+    },
+    "positions": [
+      {
+        "game_index": 0,
+        "turn_number": 0,
+        "rack": "AHHMRUU",
+        "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AHHMRUU/AFIMORR 0/0 0",
+        "analysis": "sim",
+        "played_move": "8G HUH",
+        "played_move_score": 18,
+        "num_moves": 3,
+        "total_iterations": 30,
+        "time_elapsed": 0.012,
+        "status": 3,
+        "moves": [
+          {
+            "move": "8G HUH",
+            "score": 18,
+            "equity": 19.344,
+            "iterations": 10,
+            "win_percentage": 51.2,
+            "blended_utility": 0.512,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 10.0,
+                "average_score": 31.5
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 0.0,
+                "average_score": 28.2
+              }
+            ]
+          },
+          {
+            "move": "8F HUH",
+            "score": 18,
+            "equity": 18.871,
+            "iterations": 10,
+            "win_percentage": 49.8,
+            "blended_utility": 0.498,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 0.0,
+                "average_score": 33.1
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 10.0,
+                "average_score": 30.0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "game_index": 0,
+        "turn_number": 3,
+        "rack": "BEGLSTX",
+        "position": "15/15/15/15/15/15/15/6HUH6/4FAM1MURR3/15/15/15/15/15/15 AIORRVY/BEGLSTX 37/21 0",
+        "analysis": "sim",
+        "previous_move": "9I MURR",
+        "previous_move_score": 19,
+        "played_move": "10D LEX",
+        "played_move_score": 56,
+        "num_moves": 3,
+        "total_iterations": 30,
+        "time_elapsed": 0.015,
+        "status": 3,
+        "inference": {
+          "num_leaves": 212,
+          "total_draws": 5310,
+          "average_equity": 9.874,
+          "leaves": [
+            {
+              "leave": "AEIOT",
+              "draws": 96,
+              "equity": 7.215
+            },
+            {
+              "leave": "AEINT",
+              "draws": 81,
+              "equity": 14.902
+            },
+            {
+              "leave": "AEIOV",
+              "draws": 60,
+              "equity": -1.338
+            }
+          ]
+        },
+        "moves": [
+          {
+            "move": "10D LEX",
+            "score": 56,
+            "equity": 52.063,
+            "iterations": 10,
+            "win_percentage": 63.4,
+            "blended_utility": 0.634,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 20.0,
+                "average_score": 34.9
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 10.0,
+                "average_score": 36.4
+              }
+            ]
+          },
+          {
+            "move": "10E EX",
+            "score": 55,
+            "equity": 47.826,
+            "iterations": 10,
+            "win_percentage": 58.0,
+            "blended_utility": 0.58,
+            "plies": [
+              {
+                "ply": 0,
+                "bingo_percentage": 10.0,
+                "average_score": 31.0
+              },
+              {
+                "ply": 1,
+                "bingo_percentage": 20.0,
+                "average_score": 33.8
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
