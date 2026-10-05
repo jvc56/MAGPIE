@@ -4,6 +4,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/config_defs.h"
 #include "../src/def/contribute_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/peg_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
@@ -15,17 +16,22 @@
 #include "../src/ent/client_state.h"
 #include "../src/ent/conversion_results.h"
 #include "../src/ent/data_filepaths.h"
+#include "../src/ent/game.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/contribute.h"
 #include "../src/impl/convert.h"
+#include "../src/impl/gameplay.h"
 #include "../src/impl/rack_list.h"
+#include "../src/impl/simmer.h"
 #include "../src/util/hash.h"
 #include "../src/util/http_client.h"
 #include "../src/util/io_util.h"
@@ -34,6 +40,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1512,6 +1519,10 @@ static void test_a_rewritten_klv_is_read_again(void) {
   Config *config = config_create_or_die("set -lex CSW21");
   const PlayersData *players_data = config_get_players_data(config);
   ErrorStack *error_stack = error_stack_create();
+  // A request always states its distribution and layout, which are never NULL
+  // on this path; this build's own layout is the one that loads at either
+  // BOARD_DIM.
+  char *layout = board_layout_get_default_name();
 
   // From wherever the test data path resolves each name, which is where the
   // two reference KLVs above were read from.
@@ -1523,24 +1534,24 @@ static void test_a_rewritten_klv_is_read_again(void) {
 
   copy_file_bytes(csw21_path, path);
   config_contribute_load_lexicon_and_variant(
-      config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
-      false, NULL, NULL, false, false, error_stack);
+      config, "CSW21", "classic", "english", layout, NULL, NULL, name, name,
+      false, false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(klv_values_match(players_data_get_klv(players_data, 0), csw21));
   const KLV *first = players_data_get_klv(players_data, 0);
 
   // Unchanged on disk: the loaded copy is kept.
   config_contribute_load_lexicon_and_variant(
-      config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
-      false, NULL, NULL, false, false, error_stack);
+      config, "CSW21", "classic", "english", layout, NULL, NULL, name, name,
+      false, false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(players_data_get_klv(players_data, 0) == first);
 
   // The next generation's artifact, written under the same name.
   copy_file_bytes(csw24_path, path);
   config_contribute_load_lexicon_and_variant(
-      config, "CSW21", "classic", NULL, NULL, NULL, NULL, name, name, false,
-      false, NULL, NULL, false, false, error_stack);
+      config, "CSW21", "classic", "english", layout, NULL, NULL, name, name,
+      false, false, NULL, NULL, false, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   for (int player_index = 0; player_index < 2; player_index++) {
     assert(klv_values_match(players_data_get_klv(players_data, player_index),
@@ -1551,6 +1562,7 @@ static void test_a_rewritten_klv_is_read_again(void) {
   config_destroy(config);
   klv_destroy(csw21);
   klv_destroy(csw24);
+  free(layout);
   free(csw21_path);
   free(csw24_path);
   (void)remove(path);
@@ -1721,14 +1733,26 @@ static void test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job(void) {
 }
 
 // An assignment whose input data this build cannot check is refused, not run
-// unverified: one with no `expected_data`, and one whose digests use an
-// algorithm other than sha256. Every fixture assignment passes.
+// unverified: one with no `expected_data`, one whose digests use an
+// algorithm other than sha256, and one listing a file it cannot check. Every
+// fixture assignment passes.
 static void test_an_unverifiable_assignment_is_refused(void) {
   ErrorStack *error_stack = error_stack_create();
   const char *const refused[] = {
       "{\"claim_token\":\"t\",\"job_id\":\"j\"}",
       "{\"expected_data\":{\"files\":[]}}",
       "{\"expected_data\":{\"algorithm\":\"blake3\",\"files\":[]}}",
+      // A file list this build cannot read is no check at all.
+      "{\"expected_data\":{\"algorithm\":\"sha256\"}}",
+      // An entry missing its digest, or naming a role this build does not
+      // know, was skipped, and the file it named loaded unchecked.
+      "{\"expected_data\":{\"algorithm\":\"sha256\",\"files\":["
+      "{\"role\":\"kwg\",\"name\":\"CSW21\",\"sha256\":\"ab\"},"
+      "{\"role\":\"klv\",\"name\":\"CSW21\"}]}}",
+      "{\"expected_data\":{\"algorithm\":\"sha256\",\"files\":["
+      "{\"role\":\"lexicon\",\"name\":\"CSW21\",\"sha256\":\"ab\"}]}}",
+      "{\"expected_data\":{\"algorithm\":\"sha256\",\"files\":["
+      "{\"name\":\"CSW21\",\"sha256\":\"ab\"}]}}",
   };
   for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++) {
     const JsonValue *assignment = json_parse(refused[i], error_stack);
@@ -1739,10 +1763,15 @@ static void test_an_unverifiable_assignment_is_refused(void) {
     error_stack_reset(error_stack);
     json_destroy(assignment);
   }
-  const JsonValue *games = load_fixture(BIRDTEST_GAMES_FIXTURE);
-  contribute_check_expected_data(games, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  json_destroy(games);
+  const char *const fixtures[] = {
+      BIRDTEST_GAMES_FIXTURE, BIRDTEST_GAME_PAIRS_FIXTURE,
+      BIRDTEST_OPENING_RACK_FIXTURE, BIRDTEST_LEAVE_FIXTURE};
+  for (size_t i = 0; i < sizeof(fixtures) / sizeof(fixtures[0]); i++) {
+    const JsonValue *assignment = load_fixture(fixtures[i]);
+    contribute_check_expected_data(assignment, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    json_destroy(assignment);
+  }
   error_stack_destroy(error_stack);
 }
 
@@ -2252,6 +2281,67 @@ static void test_solving_players_report_their_solves(void) {
   config_destroy(config);
 }
 
+// A simming player's turn with one legal play -- a forced pass -- runs no
+// simulation, and says so. The sim results then still hold the last
+// simulation's plays, which autoplay's positions recorder used to capture as
+// that turn's analysis, under "sim": it now records the turn as the static
+// analysis of its one play. A position with more than one play is simulated.
+static void test_a_forced_turn_is_not_simulated(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 3 -plies 2 -minp 2 -iter 10 -threads 1 -sinfer false");
+  load_and_exec_config_or_die(config, "cgp " OPENING_CGP);
+  ErrorStack *error_stack = error_stack_create();
+  // As a simulation loads it, lazily: the win percentages sim_args point at.
+  config_load_win_pcts(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const LetterDistribution *ld = config_get_ld(config);
+  const int ld_size = ld_get_size(ld);
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+  SimArgs sim_args;
+  config_fill_sim_args(config, NULL, &target_played_tiles,
+                       &nontarget_known_tiles, &target_known_inference_tiles,
+                       &sim_args);
+  MoveList *move_list = move_list_create(3);
+  sim_args.move_list = move_list;
+  SimResults *sim_results = config_get_sim_results(config);
+  SimCtx *sim_ctx = NULL;
+
+  Game *game = config_get_game(config);
+  bool simulated = false;
+  const Move *move = get_top_simming_move(game, move_list, &sim_args, &sim_ctx,
+                                          sim_results, &simulated, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(move && simulated);
+  assert(sim_results_get_number_of_plays(sim_results) == 3);
+
+  // UNPLAYABLE_V_CGP with a lone V: nothing to play, and with the opponent's
+  // rack full, too few tiles in the bag to exchange. Only a pass is legal.
+  load_and_exec_config_or_die(config, "cgp " UNPLAYABLE_V_CGP);
+  game = config_get_game(config);
+  rack_set_to_string(ld, player_get_rack(game_get_player(game, 0)), "V");
+  draw_to_full_rack(game, 1);
+  sim_args.game = game;
+  move = get_top_simming_move(game, move_list, &sim_args, &sim_ctx, sim_results,
+                              &simulated, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!simulated);
+  assert(move_list_get_count(move_list) == 1);
+  assert(move_get_type(move) == GAME_EVENT_PASS);
+  // The opening's simulation, which describes another position.
+  assert(sim_results_get_number_of_plays(sim_results) == 3);
+
+  error_stack_destroy(error_stack);
+  sim_ctx_destroy(sim_ctx);
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
 // A simming player that infers its opponent's leave before simming reports,
 // on each captured position it inferred for, how many distinct leaves the
 // inference found, how many it drew, their mean equity, and the most drawn
@@ -2280,8 +2370,18 @@ static void test_inferring_players_report_their_inference(void) {
       assert(!inference);
       continue;
     }
+    if (strings_equal(json_get_string_or_null(position, "analysis"),
+                      CONTRIBUTE_ANALYSIS_STATIC)) {
+      // A turn with one legal play, which is not simulated: no inference,
+      // and the one play as its analysis.
+      assert(!inference);
+      assert(json_get_int(position, CONTRIBUTE_KEY_NUM_MOVES, error_stack) ==
+             1);
+      continue;
+    }
     assert(strings_equal(json_get_string_or_null(position, "analysis"),
                          CONTRIBUTE_ANALYSIS_SIM));
+    assert(json_get_int(position, CONTRIBUTE_KEY_NUM_MOVES, error_stack) > 1);
     if (!inference) {
       // The opponent passed: nothing to infer from.
       continue;
@@ -2362,6 +2462,7 @@ void test_contribute(void) {
   test_results_carry_every_key_the_server_reads();
   test_capturing_positions_does_not_change_the_games();
   test_inferring_players_report_their_inference();
+  test_a_forced_turn_is_not_simulated();
   test_a_pairs_first_divergence_is_both_games_at_one_turn();
   test_player_settings_do_not_leak_between_tasks();
   test_a_rewritten_klv_is_read_again();

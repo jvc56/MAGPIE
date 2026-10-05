@@ -24,6 +24,7 @@
 #include "inference.h"
 #include "move_gen.h"
 #include "random_variable.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -169,10 +170,15 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
 // but they are passed in separately because this function needs to generate
 // moves on a nonconst MoveList pointer but the SimArgs MoveList pointer is
 // const.
+//
+// Sets *simulated to whether a simulation ran. A position with one legal play
+// (a forced pass) is not simulated, and sim_results then still holds whatever
+// the last simulation left in it, which describes another position.
 const Move *get_top_simming_move(Game *game, MoveList *move_list,
                                  SimArgs *sim_args, SimCtx **sim_ctx,
-                                 SimResults *sim_results,
+                                 SimResults *sim_results, bool *simulated,
                                  ErrorStack *error_stack) {
+  *simulated = false;
   const MoveGenArgs gen_args = {
       .game = game,
       .move_list = move_list,
@@ -193,6 +199,7 @@ const Move *get_top_simming_move(Game *game, MoveList *move_list,
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
+  *simulated = true;
 
   return sim_results_get_best_move(sim_results);
 }

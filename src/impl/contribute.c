@@ -332,6 +332,10 @@ static bool already_logged(ContributeState *state, const char *key) {
 // not know, is one whose input data this build cannot check, and is refused
 // rather than run unverified -- results computed from different bytes are
 // worse than none, because nothing downstream would notice.
+//
+// So is an entry of its `files` this build cannot check: one without a role,
+// name or digest, or with a role this build does not know. Skipped, it named
+// a file the task then loaded unchecked.
 void contribute_check_expected_data(const JsonValue *assignment,
                                     ErrorStack *error_stack) {
   const JsonValue *expected = json_object_get(assignment, "expected_data");
@@ -344,6 +348,30 @@ void contribute_check_expected_data(const JsonValue *assignment,
             "the server sent a task whose input data this build cannot check "
             "(expected_data algorithm: %s; this build knows sha256)",
             algorithm ? algorithm : "none"));
+    return;
+  }
+  const JsonValue *files = json_object_get(expected, "files");
+  if (!json_is_array(files)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     string_duplicate("the server sent a task whose "
+                                      "expected_data lists no files"));
+    return;
+  }
+  for (int i = 0; i < json_array_length(files); i++) {
+    const JsonValue *file = json_array_get(files, i);
+    const char *role = json_get_string_or_null(file, "role");
+    data_filepath_t type;
+    if (!role || !json_get_string_or_null(file, "name") ||
+        !json_get_string_or_null(file, "sha256") ||
+        !role_to_filepath_type(role, &type)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+          get_formatted_string(
+              "the server sent a task whose input data this build cannot "
+              "check (expected_data file %d, role %s)",
+              i, role ? role : "none"));
+      return;
+    }
   }
 }
 
@@ -353,7 +381,9 @@ void contribute_check_expected_data(const JsonValue *assignment,
 //
 // The check runs before the heartbeat starts: hashing is milliseconds, and a
 // decline should not look like a worker that started and died. The claim has
-// already checked that `expected_data` is there and names sha256.
+// already checked that `expected_data` is there, names sha256, and lists only
+// files with a role, name and digest, each role one this build knows
+// (contribute_check_expected_data).
 static bool expected_data_matches(ContributeState *state,
                                   const char *data_paths,
                                   ThreadControl *thread_control,
@@ -373,11 +403,10 @@ static bool expected_data_matches(ContributeState *state,
     const char *expected_digest = json_get_string_or_null(file, "sha256");
     const char *tarball_date = json_get_string_or_null(file, "tarball_date");
     const char *display_path = json_get_string_or_null(file, "path");
-    data_filepath_t type;
-    if (!role || !name || !expected_digest ||
-        !role_to_filepath_type(role, &type)) {
-      continue;
-    }
+    // Every entry has its three fields and a known role: the claim refused
+    // the assignment otherwise.
+    data_filepath_t type = DATA_FILEPATH_TYPE_KWG;
+    (void)role_to_filepath_type(role, &type);
 
     // The name is the server's, and becomes a path: one that could leave the
     // data directory is never resolved, and so never hashed and reported

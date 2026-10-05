@@ -358,6 +358,11 @@ typedef struct AutoplayWorker {
   // the solver's analysis instead of the move list and sim results, which then
   // describe an earlier turn.
   bool turn_was_solved;
+  // Whether a simulation ran this turn, so the positions recorder takes the
+  // sim results only then. A simming player's turn with one legal play (a
+  // forced pass) runs none, and sim_results still holds the last simulation
+  // this worker ran -- another turn's, or another game's.
+  bool turn_was_simmed;
   // Whether the positions recorder is active for this run. A static player
   // otherwise only ever ranks the one move it plays; this asks it to keep the
   // whole ranked list instead, the same way a simming player already does.
@@ -428,6 +433,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->error_stack = NULL;
   autoplay_worker->solver_ctx = NULL;
   autoplay_worker->turn_was_solved = false;
+  autoplay_worker->turn_was_simmed = false;
 
   const bool any_player_sims =
       ap_args->p1_sim_args.num_plies > 0 || ap_args->p2_sim_args.num_plies > 0;
@@ -765,8 +771,9 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   ErrorStack *error_stack = autoplay_worker->error_stack;
   const Move *move =
       get_top_simming_move(game, move_list, sim_args, &autoplay_worker->sim_ctx,
-                           autoplay_worker->sim_results, error_stack);
-  if (autoplay_worker->sim_results != NULL) {
+                           autoplay_worker->sim_results,
+                           &autoplay_worker->turn_was_simmed, error_stack);
+  if (autoplay_worker->turn_was_simmed) {
     atomic_fetch_add_explicit(
         &autoplay_total_sim_iterations,
         sim_results_get_iteration_count(autoplay_worker->sim_results),
@@ -794,6 +801,7 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
 const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                       GameRunner *game_runner) {
   autoplay_worker->turn_was_solved = false;
+  autoplay_worker->turn_was_simmed = false;
   const int player_on_turn_index =
       game_get_player_on_turn_index(game_runner->game);
   PlayChooser *play_chooser = game_runner->play_choosers[player_on_turn_index];
@@ -911,15 +919,16 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        equity_to_double(move_get_equity(move)));
   }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
-  // Only when this player actually simmed this turn: sim_results holds
+  // Only when a simulation actually ran this turn: sim_results holds
   // whatever the last simulation produced, so passing it on a static player's
-  // turn -- or on a turn a solver decided -- would attribute another turn's
-  // analysis to this one.
-  const bool simmed_this_turn =
-      sim_args_for_player->num_plies > 0 && !autoplay_worker->turn_was_solved;
+  // turn, on a turn a solver decided, or on a simmer's turn with one legal
+  // play -- which is recorded as the static analysis of that play -- would
+  // attribute another turn's analysis to this one.
+  const bool simmed_this_turn = autoplay_worker->turn_was_simmed;
   // And it inferred first exactly when game_runner_get_sim_move turned
   // inference on for the sim: the player infers, and the opponent has a
-  // previous move that was not a pass to infer from.
+  // previous move that was not a pass to infer from. The inference runs
+  // inside the simulation, so a turn that did not simulate did not infer.
   const bool inferred_this_turn =
       simmed_this_turn && sim_args_for_player->use_inference &&
       game_runner->turn_number > 0 &&
@@ -964,7 +973,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     const SimArgs *sim_args = (player_on_turn_index == 0)
                                   ? &autoplay_worker->args.p1_sim_args
                                   : &autoplay_worker->args.p2_sim_args;
-    if (sim_args->num_plies > 0 && !autoplay_worker->turn_was_solved &&
+    if (autoplay_worker->turn_was_simmed &&
         !autoplay_worker->args.use_play_chooser[player_on_turn_index]) {
       char *sim_str = sim_results_get_string(
           game, autoplay_worker->sim_results, sim_args->max_num_display_plays,

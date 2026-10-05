@@ -3327,20 +3327,30 @@ void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
   config_ensure_win_pcts(config, error_stack);
 }
 
-// A job's simming player names the win percentage table it plays with, or
-// leaves it to MAGPIE's default for the distribution. Named, it becomes the
-// config's explicit table, as -winpct would make it: loaded now, checked for
-// coverage, and kept by the lazy load a simulation does, which otherwise puts
-// the distribution's default (winpct_<distribution>) in its place. Unnamed,
-// any earlier task's choice is dropped and the default is loaded.
+// A job's simming player names the win percentage table it plays with, and
+// it becomes the config's explicit table, as -winpct would make it: loaded
+// now, checked for coverage, and kept by the lazy load a simulation does,
+// which otherwise puts the distribution's default (winpct_<distribution>) in
+// its place -- a file the server pinned no hash for. A simulating task that
+// names none -- or names it with something other than a string, which the
+// required-key check lets through -- is refused rather than given that
+// default.
 static void config_contribute_use_win_pct(Config *config, const char *name,
                                           ErrorStack *error_stack) {
+  if (!name) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        string_duplicate("server sent a simulating player with no win% model"));
+    return;
+  }
   free(config->win_pct_explicit_name);
-  config->win_pct_explicit_name = name ? string_duplicate(name) : NULL;
-  if (name) {
-    config_ensure_win_pcts(config, error_stack);
-  } else {
-    config_load_win_pcts(config, error_stack);
+  config->win_pct_explicit_name = string_duplicate(name);
+  config_ensure_win_pcts(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+        string_duplicate(
+            "encountered an error loading the win percentage file"));
   }
 }
 
@@ -7590,8 +7600,8 @@ static bool contribute_is_safe_data_name(const char *name) {
 // could leave to the build that ran it. birdtest states both on every request
 // of every job type -- the job pins the two files by digest and the worker has
 // just verified them -- so a request without one comes from a server this
-// build does not understand, and is refused rather than filled in. (The load
-// below still accepts NULLs; nothing on this path passes one any more.)
+// build does not understand, and is refused rather than filled in, so both
+// are non-NULL whenever this returns true.
 bool config_contribute_validate_common(const JsonValue *request,
                                        const char **lexicon,
                                        const char **variant,
@@ -7638,17 +7648,15 @@ bool config_contribute_validate_common(const JsonValue *request,
   }
   if ((*lexicon && !contribute_is_safe_data_name(*lexicon)) ||
       !contribute_is_safe_data_name(*variant) ||
-      (*letter_distribution &&
-       !contribute_is_safe_data_name(*letter_distribution)) ||
-      (*board_layout && !contribute_is_safe_data_name(*board_layout))) {
+      !contribute_is_safe_data_name(*letter_distribution) ||
+      !contribute_is_safe_data_name(*board_layout)) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
         get_formatted_string(
             "server sent an unusable data name: lexicon '%s', variant '%s', "
             "letter distribution '%s', board layout '%s'",
-            *lexicon ? *lexicon : "(absent)", *variant,
-            *letter_distribution ? *letter_distribution : "(absent)",
-            *board_layout ? *board_layout : "(absent)"));
+            *lexicon ? *lexicon : "(absent)", *variant, *letter_distribution,
+            *board_layout));
     return false;
   }
   return true;
@@ -9193,6 +9201,11 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   // validates that two players stating one agree before a job is even
   // created, since MAGPIE has one value for the whole run; each is read from
   // whichever player states it, because a static player states no win% model.
+  // The movegen margin is not among them: autoplay generates every move with
+  // a margin of 0 and its own record type (get_top_move_for_player_on_turn,
+  // get_top_simming_move), so a player's movegen_margin and recorder_type
+  // are read only by an opening-rack static analysis, and are not applied
+  // here.
   config_contribute_reset_shared_settings(config);
   config_contribute_apply_run_settings(config, request, /*states_cutoff=*/true,
                                        error_stack);
@@ -9203,14 +9216,6 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
       contribute_stated_by_either(player1, player2,
                                   CONTRIBUTE_KEY_WIN_PCT_MODEL),
       CONTRIBUTE_KEY_WIN_PCT_MODEL);
-  config_contribute_apply_movegen_margin(
-      config,
-      contribute_stated_by_either(player1, player2,
-                                  CONTRIBUTE_KEY_MOVEGEN_MARGIN),
-      error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
 
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -9218,20 +9223,9 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
     return NULL;
   }
   if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
-    if (win_pct_model) {
-      config_contribute_use_win_pct(config, win_pct_model, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
-            string_duplicate(
-                "encountered an error loading the win percentage file"));
-        return NULL;
-      }
-    } else {
-      config_contribute_use_win_pct(config, NULL, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        return NULL;
-      }
+    config_contribute_use_win_pct(config, win_pct_model, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return NULL;
     }
   }
   // A worker analyses a position on every turn regardless; the job decides
@@ -9932,6 +9926,18 @@ void config_destroy_for_contribute(Config *task_config) {
 
 void impl_contribute(Config *config, const char *settings_path,
                      ErrorStack *error_stack) {
+  // Every task is claimed and returned over HTTP. A build that cannot make a
+  // request (wasm, or a host with no loadable libcurl) says so now: otherwise
+  // the first claim spends its whole retry budget on what looks like a server
+  // that is down, and only then reports why.
+  if (!chttp_is_available()) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_HTTP_UNAVAILABLE,
+        string_duplicate("contribute needs HTTP, which this build cannot "
+                         "make: libcurl was not found (Debian/Ubuntu: "
+                         "libcurl4, Fedora: libcurl, macOS: preinstalled)"));
+    return;
+  }
   // The tasks run in a config of their own (config_create_for_contribute):
   // the caller's session, and the settings file the REPL saves from it,
   // stay exactly as they were.

@@ -256,10 +256,11 @@ bool contribute_shutdown_waits_for_deferral(const JsonValue *shutdown,
 // for tests.
 int contribute_defer_job(ContributeState *state, const char *job_id);
 
-// Refuses an assignment that states no `expected_data`, or one whose digests
-// use an algorithm this build does not know (anything but sha256): its input
-// data could not be checked, and a task is never run unverified. Exposed for
-// tests.
+// Refuses an assignment that states no `expected_data`, one whose digests
+// use an algorithm this build does not know (anything but sha256), or one
+// listing a file without a role, name or digest, or with a role this build
+// does not know: its input data could not be checked, and a task is never run
+// unverified. Exposed for tests.
 void contribute_check_expected_data(const JsonValue *assignment,
                                     ErrorStack *error_stack);
 
