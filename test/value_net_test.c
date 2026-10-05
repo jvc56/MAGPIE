@@ -693,7 +693,9 @@ static void vnt_kinship(const StringSplitter *fields) {
   double *nearest = malloc_or_die(sizeof(double) * VNT_KIN_ALL_MOVES);
   // The shared seed sequence, to place each sample by its seed.
   const uint64_t sim_seed = 7;
-  const int sequence = iterations * 4;
+  // Refills compute iterations ahead in batches (64 per thread), all of
+  // which are sampled, so a play can take this many seeds beyond its share.
+  const int sequence = (iterations * 2) + (threads * 64 * 4);
   uint64_t *seed_order = malloc_or_die(sizeof(uint64_t) * sequence);
   int *seed_rank = malloc_or_die(sizeof(int) * sequence);
   {
