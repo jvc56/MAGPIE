@@ -2,7 +2,7 @@
 set -e
 
 # Versioned data configuration
-DATA_VERSION="20251004"
+DATA_VERSION="20260925"
 TESTDATA_VERSION="20260101"
 
 # GitHub repository details

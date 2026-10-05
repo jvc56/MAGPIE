@@ -20,6 +20,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -616,7 +617,59 @@ void test_board_get_playable_tiles_bv(void) {
   config_destroy(config);
 }
 
+// Tile owners start unknown, round-trip through set / get / clear, survive
+// board_duplicate, and share their byte with the anchor and cross-word
+// bits without disturbing them.
+static void test_board_square_owner(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  Board *board = game_get_board(game);
+  load_cgp_or_die(game, VS_OXY);
+
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      assert(board_get_square_owner(board, row, col) == BOARD_OWNER_UNKNOWN);
+    }
+  }
+
+  const int row = 7;
+  const int col = 7;
+  bool anchors[2];
+  bool cross_words[2];
+  for (int dir = 0; dir < 2; dir++) {
+    anchors[dir] = board_get_anchor(board, row, col, dir);
+    cross_words[dir] = board_get_is_cross_word(board, row, col, dir);
+  }
+
+  board_set_square_owner(board, row, col, 1);
+  board_set_square_owner(board, row, col + 1, 0);
+  assert(board_get_square_owner(board, row, col) == 1);
+  assert(board_get_square_owner(board, row, col + 1) == 0);
+  for (int dir = 0; dir < 2; dir++) {
+    assert(board_get_anchor(board, row, col, dir) == anchors[dir]);
+    assert(board_get_is_cross_word(board, row, col, dir) == cross_words[dir]);
+  }
+
+  Board *copy = board_duplicate(board);
+  assert(board_get_square_owner(copy, row, col) == 1);
+  assert(board_get_square_owner(copy, row, col + 1) == 0);
+  board_destroy(copy);
+
+  board_clear_square_owners(board);
+  assert(board_get_square_owner(board, row, col) == BOARD_OWNER_UNKNOWN);
+  assert(board_get_square_owner(board, row, col + 1) == BOARD_OWNER_UNKNOWN);
+  for (int dir = 0; dir < 2; dir++) {
+    assert(board_get_anchor(board, row, col, dir) == anchors[dir]);
+    assert(board_get_is_cross_word(board, row, col, dir) == cross_words[dir]);
+  }
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_board(void) {
   test_board_all();
   test_board_get_playable_tiles_bv();
+  test_board_square_owner();
 }

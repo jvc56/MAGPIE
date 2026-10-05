@@ -24,8 +24,19 @@ typedef struct Square {
   Equity cross_score;
   MachineLetter letter;
   BonusSquare bonus_square;
-  bool anchor;
-  bool is_cross_word;
+  // anchor, is_cross_word, and player_idx pack into a single byte
+  // so adding owner tracking didn't grow Square past 32 bytes.
+  // player_idx is the player who placed the tile (0 or 1); only
+  // meaningful when letter != ALPHABET_EMPTY_SQUARE_MARKER and
+  // owner_known is set, and only updated by callers that explicitly
+  // want to track it (sim/endgame board copies leave it as-is).
+  // owner_known is clear for tiles whose player isn't recorded, such
+  // as a position loaded from CGP.
+  uint8_t anchor : 1;
+  uint8_t is_cross_word : 1;
+  uint8_t player_idx : 1;
+  uint8_t owner_known : 1;
+  uint8_t _pad : 4;
 } Square;
 
 typedef struct Board {
@@ -207,6 +218,45 @@ board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
 static inline MachineLetter board_get_letter(const Board *b, int row, int col) {
   // Cross index doesn't matter for letter reads.
   return square_get_letter(board_get_readonly_square(b, row, col, 0, 0));
+}
+
+// Marks every sub-board copy of (row, col) with `player_idx` (0 or 1).
+// Only meaningful when the square actually has a letter. Sim and
+// endgame board copies don't call this — only the "live" game's
+// play_move flow does (via the TUI), which is why callers must invoke
+// it explicitly rather than having board_set_letter touch the owner
+// bit. Reading: `board_get_writable_square(b, row, col, 0, 0)->player_idx`
+// or the inline accessor below.
+static inline void board_set_square_owner(Board *b, int row, int col,
+                                          int player_idx) {
+  for (int ci = 0; ci < 2; ci++) {
+    for (int dir = 0; dir < 2; dir++) {
+      Square *square = board_get_writable_square(b, row, col, dir, ci);
+      square->player_idx = (uint8_t)(player_idx & 1);
+      square->owner_known = 1;
+    }
+  }
+}
+
+// The player who placed the tile at (row, col), or BOARD_OWNER_UNKNOWN
+// when that isn't recorded.
+static inline int board_get_square_owner(const Board *b, int row, int col) {
+  const Square *square = board_get_readonly_square(b, row, col, 0, 0);
+  return square->owner_known ? square->player_idx : BOARD_OWNER_UNKNOWN;
+}
+
+// Forgets every square's owner, e.g. after loading a position whose
+// tiles have no recorded player.
+static inline void board_clear_square_owners(Board *b) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      for (int ci = 0; ci < 2; ci++) {
+        for (int dir = 0; dir < 2; dir++) {
+          board_get_writable_square(b, row, col, dir, ci)->owner_known = 0;
+        }
+      }
+    }
+  }
 }
 
 static inline void board_set_letter(Board *b, int row, int col,
@@ -775,6 +825,9 @@ static inline void board_reset(Board *board) {
   board_set_all_crosses(board);
   board_reset_all_cross_scores(board);
   board_update_all_anchors(board);
+  // Boards are allocated uninitialized, so a fresh or reused board starts
+  // with no recorded tile owners.
+  board_clear_square_owners(board);
 
   // Clear the WIT parallel arrays so that, when no word info table is loaded,
   // move generation reads NULL block rows (skipping the prune) instead of

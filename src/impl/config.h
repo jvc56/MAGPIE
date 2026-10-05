@@ -16,6 +16,8 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/players_data.h"
+#include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
@@ -127,6 +129,10 @@ int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
 WinPct *config_get_win_pcts(const Config *config);
+// Loads the win percentage table the config uses (see -winpct and
+// DEFAULT_WIN_PCT_PREFIX) when it is not loaded yet, and checks that it
+// covers the letter distribution's bag (ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL).
+void config_load_win_pcts(Config *config, ErrorStack *error_stack);
 int config_get_num_plays(const Config *config);
 int config_get_num_small_plays(const Config *config);
 int config_get_plies(const Config *config);
@@ -198,6 +204,11 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      int games_before_force_draw_start,
                      const char *const *forced_racks, int num_forced_racks,
                      ErrorStack *error_stack);
+void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
+                          Rack *target_played_tiles,
+                          Rack *nontarget_known_tiles,
+                          Rack *target_known_inference_tiles,
+                          SimArgs *sim_args);
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
                      SimResults *sim_results, int *arm_avoid_prune,
                      int num_arm_avoid_prune, ErrorStack *error_stack);

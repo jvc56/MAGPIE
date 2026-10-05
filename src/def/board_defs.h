@@ -22,7 +22,9 @@ enum {
   DEFAULT_BOARD_DIM = 15,
   DEFAULT_SUPER_BOARD_DIM = 21,
   ANCHOR_HEAP_CAPACITY = BOARD_DIM * BOARD_DIM * RACK_SIZE * RACK_SIZE,
-  BITS_PER_BOARD_DIM = BITS_TO_REPRESENT(BOARD_DIM)
+  BITS_PER_BOARD_DIM = BITS_TO_REPRESENT(BOARD_DIM),
+  // board_get_square_owner's result for a tile with no recorded player.
+  BOARD_OWNER_UNKNOWN = -1
 };
 
 #endif
