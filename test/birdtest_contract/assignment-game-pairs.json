@@ -1,6 +1,6 @@
 {
-  "claim_token": "ff1473e0-9b38-44f3-a9d3-e78b2dd20c5e",
-  "job_id": "9a65774d-b796-4c9e-aab2-f0216b33e024",
+  "claim_token": "d3664a1c-1158-42a2-b02c-3b9bf76f73e2",
+  "job_id": "c8a3d856-e5c1-460d-9295-76b2d52c5cbc",
   "task_request": {
     "job_type": "game_pairs",
     "variant": "classic",
@@ -98,7 +98,7 @@
         "path": "lexica/NWL23.klv2",
         "sha256": "37dea945c29c3773eb4cd5a4117f3d3256c8b548cd3bf3b5ce8a219cb5e0a3fa",
         "bytes": 3667340,
-        "tarball_date": "20251004"
+        "tarball_date": "20260925"
       },
       {
         "role": "kwg",
@@ -106,7 +106,7 @@
         "path": "lexica/NWL23.kwg",
         "sha256": "3e74af981fdd974e107283f686da0fe4b7ec84ad0d825d444330c338c33b91ba",
         "bytes": 4719596,
-        "tarball_date": "20251004"
+        "tarball_date": "20260925"
       },
       {
         "role": "layout",
@@ -114,7 +114,7 @@
         "path": "layouts/standard15.txt",
         "sha256": "c1a81c35a7730f64abcca23c8c56cc872e892a68f95289a4189b373c8cc5a01f",
         "bytes": 244,
-        "tarball_date": "20251004"
+        "tarball_date": "20260925"
       },
       {
         "role": "letterdist",
@@ -122,7 +122,7 @@
         "path": "letterdistributions/english.csv",
         "sha256": "e698ce0b93e025daccd3390107a914d74581c4603de38df65131768b1c6f9102",
         "bytes": 489,
-        "tarball_date": "20251004"
+        "tarball_date": "20260925"
       }
     ],
     "derived": [

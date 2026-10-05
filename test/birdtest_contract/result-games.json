@@ -1,5 +1,5 @@
 {
-  "claim_token": "af764aba-95c4-497f-b65f-d52bea985a4f",
+  "claim_token": "346cfe84-3250-411e-b9ff-15d2a81ca549",
   "result": {
     "all_games": {
       "games": 2,
@@ -2036,8 +2036,8 @@
             "score": 26,
             "equity": 17.911,
             "iterations": 0,
-            "win_percentage": 38.888889,
-            "mean_spread": -9.444444,
+            "win_percentage": 33.333333,
+            "mean_spread": -14.027778,
             "fidelity_plies": 2
           }
         ]
@@ -2062,8 +2062,8 @@
             "score": 6,
             "equity": 40.107,
             "iterations": 0,
-            "win_percentage": 37.5,
-            "mean_spread": -2.125,
+            "win_percentage": 12.5,
+            "mean_spread": -8.5,
             "fidelity_plies": 2
           },
           {
@@ -2072,7 +2072,7 @@
             "equity": 40.231,
             "iterations": 0,
             "win_percentage": 12.5,
-            "mean_spread": -17.25,
+            "mean_spread": -21.75,
             "fidelity_plies": 2
           }
         ]

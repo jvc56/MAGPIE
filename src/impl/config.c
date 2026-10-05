@@ -3317,6 +3317,23 @@ void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
   config_ensure_win_pcts(config, error_stack);
 }
 
+// A job's simming player names the win percentage table it plays with, or
+// leaves it to MAGPIE's default for the distribution. Named, it becomes the
+// config's explicit table, as -winpct would make it: loaded now, checked for
+// coverage, and kept by the lazy load a simulation does, which otherwise puts
+// the distribution's default (winpct_<distribution>) in its place. Unnamed,
+// any earlier task's choice is dropped and the default is loaded.
+static void config_contribute_use_win_pct(Config *config, const char *name,
+                                          ErrorStack *error_stack) {
+  free(config->win_pct_explicit_name);
+  config->win_pct_explicit_name = name ? string_duplicate(name) : NULL;
+  if (name) {
+    config_ensure_win_pcts(config, error_stack);
+  } else {
+    config_load_win_pcts(config, error_stack);
+  }
+}
+
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
                      SimResults *sim_results, int *arm_avoid_prune,
                      int num_arm_avoid_prune, ErrorStack *error_stack) {
@@ -9349,9 +9366,7 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   }
   if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
     if (win_pct_model) {
-      win_pct_destroy(config->win_pcts);
-      config->win_pcts =
-          win_pct_create(config->data_paths, win_pct_model, error_stack);
+      config_contribute_use_win_pct(config, win_pct_model, error_stack);
       if (!error_stack_is_empty(error_stack)) {
         error_stack_push(
             error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
@@ -9360,7 +9375,7 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
         return NULL;
       }
     } else {
-      config_load_win_pcts(config, error_stack);
+      config_contribute_use_win_pct(config, NULL, error_stack);
       if (!error_stack_is_empty(error_stack)) {
         return NULL;
       }
@@ -9667,15 +9682,9 @@ static char *config_contribute_opening_rack(Config *config,
   // so a player config means the same thing in both job types.
   const bool simming = config->p1_sim_plies > 0;
   if (simming) {
-    const char *win_pct_model =
-        json_get_string_or_null(player, CONTRIBUTE_KEY_WIN_PCT_MODEL);
-    if (win_pct_model) {
-      win_pct_destroy(config->win_pcts);
-      config->win_pcts =
-          win_pct_create(config->data_paths, win_pct_model, error_stack);
-    } else {
-      config_load_win_pcts(config, error_stack);
-    }
+    config_contribute_use_win_pct(
+        config, json_get_string_or_null(player, CONTRIBUTE_KEY_WIN_PCT_MODEL),
+        error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return NULL;
     }

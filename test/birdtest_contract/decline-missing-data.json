@@ -10,8 +10,8 @@
     },
     {
       "role": "winpct",
-      "name": "winpct",
-      "expected": "51b651f149760a2b3385e8c2ef979032299a1e35ccb23170b4f492126e363a81",
+      "name": "winpct_english",
+      "expected": "34c072d285e64973cfa0bd044f4d70f128677578c30993a35d85a5c607bc0417",
       "actual": "4f2a1c3e9b7d05a8c6e4f2b1d3a509c7e8b6d4f2a0c8e6b4d2f0a8c6e4b2d0f8"
     }
   ]

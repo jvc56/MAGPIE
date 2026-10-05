@@ -11,7 +11,7 @@
         "path": "lexica/NWL23.kwg",
         "sha256": "3e74af981fdd974e107283f686da0fe4b7ec84ad0d825d444330c338c33b91ba",
         "bytes": 4719596,
-        "tarball_date": "20251004"
+        "tarball_date": "20260925"
       },
       {
         "role": "klv",
@@ -19,15 +19,15 @@
         "path": "lexica/NWL23.klv2",
         "sha256": "37dea945c29c3773eb4cd5a4117f3d3256c8b548cd3bf3b5ce8a219cb5e0a3fa",
         "bytes": 3667340,
-        "tarball_date": "20251004"
+        "tarball_date": "20260925"
       },
       {
         "role": "winpct",
-        "name": "winpct",
-        "path": "strategy/winpct.csv",
-        "sha256": "51b651f149760a2b3385e8c2ef979032299a1e35ccb23170b4f492126e363a81",
-        "bytes": 836150,
-        "tarball_date": "20251004"
+        "name": "winpct_english",
+        "path": "strategy/winpct_english.csv",
+        "sha256": "34c072d285e64973cfa0bd044f4d70f128677578c30993a35d85a5c607bc0417",
+        "bytes": 397459,
+        "tarball_date": "20260925"
       },
       {
         "role": "letterdist",
@@ -35,7 +35,7 @@
         "path": "letterdistributions/english.csv",
         "sha256": "e698ce0b93e025daccd3390107a914d74581c4603de38df65131768b1c6f9102",
         "bytes": 489,
-        "tarball_date": "20251004"
+        "tarball_date": "20260925"
       },
       {
         "role": "layout",
@@ -43,7 +43,7 @@
         "path": "layouts/standard15.txt",
         "sha256": "c1a81c35a7730f64abcca23c8c56cc872e892a68f95289a4189b373c8cc5a01f",
         "bytes": 244,
-        "tarball_date": "20251004"
+        "tarball_date": "20260925"
       }
     ],
     "derived": [
@@ -72,12 +72,12 @@
     "bingo_bonus": 50,
     "sim_cutoff": 0.005,
     "player": {
-      "name": "simmer-NWL23-4ply@20251004",
+      "name": "simmer-NWL23-4ply@20260925",
       "recorder_type": "best",
       "sort_strategy": "equity",
       "lexicon": "NWL23",
       "leaves": "NWL23",
-      "win_pct_model": "winpct",
+      "win_pct_model": "winpct_english",
       "max_iterations": 1000,
       "num_plies": 4,
       "num_plies_recorded": 2,

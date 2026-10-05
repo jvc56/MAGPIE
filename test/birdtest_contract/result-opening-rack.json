@@ -1,5 +1,5 @@
 {
-  "claim_token": "dfb5b214-8146-4b7b-9324-f8a6e8da9d1a",
+  "claim_token": "7bfe4ee1-1cf9-467c-851e-8fb28cde2518",
   "result": {
     "racks": [
       {
@@ -10,8 +10,8 @@
             "score": 0,
             "equity": 9.482,
             "iterations": 500,
-            "win_percentage": 46.291316,
-            "blended_utility": 0.480135,
+            "win_percentage": 46.271705,
+            "blended_utility": 0.480004,
             "plies": [
               {
                 "ply": 0,
@@ -30,8 +30,8 @@
             "score": 0,
             "equity": 5.76,
             "iterations": 500,
-            "win_percentage": 45.949953,
-            "blended_utility": 0.480061,
+            "win_percentage": 45.934257,
+            "blended_utility": 0.479956,
             "plies": [
               {
                 "ply": 0,
@@ -50,8 +50,8 @@
             "score": 0,
             "equity": 8.18,
             "iterations": 500,
-            "win_percentage": 45.859958,
-            "blended_utility": 0.476484,
+            "win_percentage": 45.838713,
+            "blended_utility": 0.476342,
             "plies": [
               {
                 "ply": 0,
@@ -70,8 +70,8 @@
             "score": 0,
             "equity": 6.601,
             "iterations": 500,
-            "win_percentage": 45.430275,
-            "blended_utility": 0.475068,
+            "win_percentage": 45.415194,
+            "blended_utility": 0.474967,
             "plies": [
               {
                 "ply": 0,
@@ -90,8 +90,8 @@
             "score": 0,
             "equity": 5.959,
             "iterations": 500,
-            "win_percentage": 44.755332,
-            "blended_utility": 0.46851,
+            "win_percentage": 44.734761,
+            "blended_utility": 0.468372,
             "plies": [
               {
                 "ply": 0,
@@ -116,8 +116,8 @@
             "score": 0,
             "equity": 3.664,
             "iterations": 500,
-            "win_percentage": 44.888467,
-            "blended_utility": 0.472705,
+            "win_percentage": 44.871628,
+            "blended_utility": 0.472592,
             "plies": [
               {
                 "ply": 0,
@@ -136,8 +136,8 @@
             "score": 0,
             "equity": 0.596,
             "iterations": 500,
-            "win_percentage": 44.647279,
-            "blended_utility": 0.47207,
+            "win_percentage": 44.640374,
+            "blended_utility": 0.472024,
             "plies": [
               {
                 "ply": 0,
@@ -156,8 +156,8 @@
             "score": 0,
             "equity": 4.194,
             "iterations": 500,
-            "win_percentage": 44.72352,
-            "blended_utility": 0.470948,
+            "win_percentage": 44.708788,
+            "blended_utility": 0.47085,
             "plies": [
               {
                 "ply": 0,
@@ -176,8 +176,8 @@
             "score": 0,
             "equity": 4.214,
             "iterations": 500,
-            "win_percentage": 44.724954,
-            "blended_utility": 0.470873,
+            "win_percentage": 44.710195,
+            "blended_utility": 0.470775,
             "plies": [
               {
                 "ply": 0,
@@ -196,8 +196,8 @@
             "score": 0,
             "equity": 3.61,
             "iterations": 500,
-            "win_percentage": 44.533577,
-            "blended_utility": 0.469608,
+            "win_percentage": 44.517492,
+            "blended_utility": 0.469501,
             "plies": [
               {
                 "ply": 0,
