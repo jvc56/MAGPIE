@@ -225,7 +225,7 @@ void config_add_settings_to_string_builder(const Config *config,
 // Writes config's current settings to config_get_settings_filename(config)
 // (settings.txt by default), the same file the REPL loop keeps in sync after
 // every command. No-op if config_get_save_settings(config) is false.
-void save_config_settings(Config *config, ErrorStack *error_stack);
+void save_config_settings(const Config *config, ErrorStack *error_stack);
 // The Config contribute's tasks run in, sharing the caller's thread control
 // and never saving settings, so the caller's session and settings file are
 // left as they were; and its destruction, which leaves the thread control to

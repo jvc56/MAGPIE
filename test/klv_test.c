@@ -10,6 +10,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 void test_small_klv(void) {
@@ -110,10 +111,10 @@ static void test_a_leave_with_no_index_is_refused(void) {
     char *leaves_filename = data_filepaths_get_writable_filename(
         data_path, "badleaves", DATA_FILEPATH_TYPE_LEAVES, error_stack);
     assert(error_stack_is_empty(error_stack));
-    FILE *stream = fopen(leaves_filename, "w");
+    FILE *stream = fopen(leaves_filename, "we");
     assert(stream);
-    fprintf(stream, "?,1.0\n%s,1.0\n", bad_leaves[i]);
-    fclose(stream);
+    (void)fprintf(stream, "?,1.0\n%s,1.0\n", bad_leaves[i]);
+    (void)fclose(stream);
 
     KLV *klv = klv_read_from_csv(ld, data_path, "badleaves", error_stack);
     assert(error_stack_top(error_stack) == ERROR_STATUS_KLV_INVALID_LEAVE);

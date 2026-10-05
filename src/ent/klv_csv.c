@@ -1,5 +1,6 @@
 #include "klv_csv.h"
 
+#include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"

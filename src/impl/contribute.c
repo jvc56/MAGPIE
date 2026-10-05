@@ -6,6 +6,7 @@
 #include "../compat/memory_info.h"
 #include "../def/contribute_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/client_state.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/thread_control.h"
@@ -16,6 +17,7 @@
 #include "../util/string_util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
@@ -676,8 +678,12 @@ int contribute_defer_job(ContributeState *state, const char *job_id) {
     deferred->job_id = string_duplicate(job_id);
     deferred->wait_seconds = 0;
   }
-  int wait = deferred->wait_seconds <= 0 ? (idle > 0 ? idle : 1)
-                                         : deferred->wait_seconds * 2;
+  // The first wait is the idle wait (at least a second), each after it
+  // twice the last.
+  int wait = deferred->wait_seconds * 2;
+  if (deferred->wait_seconds <= 0) {
+    wait = idle > 0 ? idle : 1;
+  }
   if (wait > CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS) {
     wait = CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS;
   }
@@ -1001,7 +1007,7 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
   if (*state_ptr == NULL) {
     *state_ptr =
         contribute_state_create(settings_path, thread_control, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
+    if (!error_stack_is_empty(error_stack) || *state_ptr == NULL) {
       return CONTRIBUTE_CLAIM_FAILED;
     }
   }

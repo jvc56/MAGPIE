@@ -4,6 +4,7 @@
 #include "../def/convert_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/conversion_results.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/dawg_packed.h"

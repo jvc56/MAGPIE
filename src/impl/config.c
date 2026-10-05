@@ -1169,6 +1169,56 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
 }
 
 // Help
+// The contribute and convert commands' help, apart from
+// add_help_arg_to_string_builder to keep it under the function-size limit:
+// each fills usages and examples and returns the text.
+static const char *contribute_help(const char **usages, const char **examples) {
+  usages[0] = "[<settings_path>]";
+  examples[0] = "";
+  examples[1] = "my_contribute.txt";
+  return "Contributes to birdtest: claims tasks, executes them with MAGPIE's "
+         "own command API, and submits the results, repeating until the "
+         "server has no more work or the settings file's maxtasks is "
+         "reached. Settings (server, apikey, threads, ...) come from the "
+         "given file, or contribute.txt in the working directory if no path "
+         "is given -- never from the command line, since an API key there "
+         "ends up in shell history and ps output. Rack info tables are "
+         "memory-mapped unless -ritmmap false is given here, so workers "
+         "sharing a data directory share one copy.";
+}
+
+static const char *convert_help(const char **usages, const char **examples) {
+  usages[0] = "<type> <name_without_extension> [<letter_distribution>] "
+              "[<klv_name>] [<wmp_name>]";
+  examples[0] = "klv2csv CSW21";
+  examples[1] = "kwg2wit CSW24";
+  examples[2] = "dawg2wordmap NWL20 english";
+  examples[3] = "klvwmp2rit CSW24.CSW_quackle_leaves english "
+                "CSW_quackle_leaves CSW24";
+  examples[4] = "rackequity2klv gen1 english";
+  examples[5] = "text2wordmap NWL20";
+  examples[6] = "kwg2witifneeded CSW24";
+  examples[7] = "winpct CSW24_winpct_record CSW24_winpct";
+  return "Runs the convert command for the specified type with the given "
+         "input and output name, using different file extensions. The letter "
+         "distribution defaults to the lexicon's distribution. Types include "
+         "text2kwg, text2wordmap, dawg2wordmap, dawg2text, csv2klv, klv2csv, "
+         "klvwmp2rit, rackequity2klv, kwg2wit, kwg2witifneeded and winpct. "
+         "kwg2wit reads the KWG and creates ordinary and positional "
+         "word-info tables; kwg2witifneeded preserves a current matching "
+         "table and otherwise rebuilds it before use. klvwmp2rit optionally "
+         "takes the KLV's and the wordmap's names separately, since a rack "
+         "info table stores precomputed leave values and so belongs to a "
+         "(lexicon, leaves) pair rather than to either input. rackequity2klv "
+         "reads lexica/<name>.csv, one 'rack,count,equity_sum' row per full "
+         "rack, and writes the KLV those results imply; every full rack the "
+         "distribution draws must appear exactly once. winpct takes a "
+         "recorded win percentage table (autoplay winpct) and an output table "
+         "name in place of the letter distribution, chooses smoothing by "
+         "cross-validating the record's two independent samples, and writes "
+         "the smoothed table.";
+}
+
 void add_help_arg_to_string_builder(const Config *config, int token,
                                     StringBuilder *sb,
                                     const bool show_async_commands,
@@ -1343,51 +1393,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "two games play different moves.";
       break;
     case ARG_TOKEN_CONTRIBUTE:
-      usages[0] = "[<settings_path>]";
-      examples[0] = "";
-      examples[1] = "my_contribute.txt";
-      text =
-          "Contributes to birdtest: claims tasks, executes them with MAGPIE's "
-          "own command API, and submits the results, repeating until the "
-          "server has no more work or the settings file's maxtasks is "
-          "reached. Settings (server, apikey, threads, ...) come from the "
-          "given file, or contribute.txt in the working directory if no path "
-          "is given -- never from the command line, since an API key there "
-          "ends up in shell history and ps output. Rack info tables are "
-          "memory-mapped unless -ritmmap false is given here, so workers "
-          "sharing a data directory share one copy.";
+      text = contribute_help(usages, examples);
       break;
     case ARG_TOKEN_CONVERT:
-      usages[0] = "<type> <name_without_extension> [<letter_distribution>] "
-                  "[<klv_name>] [<wmp_name>]";
-      examples[0] = "klv2csv CSW21";
-      examples[1] = "kwg2wit CSW24";
-      examples[2] = "dawg2wordmap NWL20 english";
-      examples[3] = "klvwmp2rit CSW24.CSW_quackle_leaves english "
-                    "CSW_quackle_leaves CSW24";
-      examples[4] = "rackequity2klv gen1 english";
-      examples[5] = "text2wordmap NWL20";
-      examples[6] = "kwg2witifneeded CSW24";
-      examples[7] = "winpct CSW24_winpct_record CSW24_winpct";
-      text =
-          "Runs the convert command for the specified type with the given "
-          "input and output name, using different file extensions. The letter "
-          "distribution defaults to the lexicon's distribution. Types include "
-          "text2kwg, text2wordmap, dawg2wordmap, dawg2text, csv2klv, klv2csv, "
-          "klvwmp2rit, rackequity2klv, kwg2wit, kwg2witifneeded and winpct. "
-          "kwg2wit reads the KWG and creates ordinary and positional "
-          "word-info tables; kwg2witifneeded preserves a current matching "
-          "table and otherwise rebuilds it before use. klvwmp2rit optionally "
-          "takes the KLV's and the wordmap's names separately, since a rack "
-          "info table stores precomputed leave values and so belongs to a "
-          "(lexicon, leaves) pair rather than to either input. rackequity2klv "
-          "reads lexica/<name>.csv, one 'rack,count,equity_sum' row per full "
-          "rack, and writes the KLV those results imply; every full rack the "
-          "distribution draws must appear exactly once. winpct takes a "
-          "recorded win percentage table (autoplay winpct) and an output table "
-          "name in place of the letter distribution, chooses smoothing by "
-          "cross-validating the record's two independent samples, and writes "
-          "the smoothed table.";
+      text = convert_help(usages, examples);
       break;
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
@@ -9888,10 +9897,13 @@ static char *config_contribute_leave_gen(Config *config,
   // name made from the task.
   char *temp_path = temporary_sibling(klv_path);
   FILE *klv_file = fopen(temp_path, "wbxe");
-  bool written = klv_file && fwrite(artifact.body, 1, artifact.body_length,
-                                    klv_file) == artifact.body_length;
+  // Whether this process created the file, kept apart from the stream, which
+  // is closed below.
+  const bool created = klv_file != NULL;
+  bool written = created && fwrite(artifact.body, 1, artifact.body_length,
+                                   klv_file) == artifact.body_length;
   // A failed close can lose buffered bytes, which is a failed write too.
-  if (klv_file && fclose(klv_file) != 0) {
+  if (created && fclose(klv_file) != 0) {
     written = false;
   }
   if (written && rename(temp_path, klv_path) != 0) {
@@ -9900,7 +9912,7 @@ static char *config_contribute_leave_gen(Config *config,
   if (!written) {
     // Only a file this process created: an exclusive open that failed found
     // someone else's.
-    if (klv_file) {
+    if (created) {
       (void)remove(temp_path);
     }
     error_stack_push(
@@ -13635,7 +13647,7 @@ void config_add_settings_to_string_builder(const Config *config,
   }
 }
 
-void save_config_settings(Config *config, ErrorStack *error_stack) {
+void save_config_settings(const Config *config, ErrorStack *error_stack) {
   if (!config_get_save_settings(config)) {
     return;
   }

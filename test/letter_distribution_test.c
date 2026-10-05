@@ -318,14 +318,15 @@ static void test_a_distribution_past_the_alphabet_limit_is_refused(void) {
   char *path = data_filepaths_get_writable_filename(
       data_path, "toomanyletters", DATA_FILEPATH_TYPE_LD, error_stack);
   assert(error_stack_is_empty(error_stack));
-  FILE *stream = fopen(path, "w");
+  FILE *stream = fopen(path, "we");
   assert(stream);
   for (int i = 0; i <= MAX_ALPHABET_SIZE; i++) {
-    fprintf(stream, "%c,%c,1,1,0\n", 'A' + i % 26, 'a' + i % 26);
+    (void)fprintf(stream, "%c,%c,1,1,0\n", 'A' + i % 26, 'a' + i % 26);
   }
-  fclose(stream);
+  (void)fclose(stream);
 
-  LetterDistribution *ld = ld_create(data_path, "toomanyletters", error_stack);
+  const LetterDistribution *ld =
+      ld_create(data_path, "toomanyletters", error_stack);
   // Removed before asserting, so a failure does not leave it in testdata.
   delete_file(path);
   free(path);
@@ -349,11 +350,12 @@ static void test_a_row_past_what_magpie_holds_is_refused(void) {
     char *path = data_filepaths_get_writable_filename(
         data_path, "rowpastlimit", DATA_FILEPATH_TYPE_LD, error_stack);
     assert(error_stack_is_empty(error_stack));
-    FILE *stream = fopen(path, "w");
+    FILE *stream = fopen(path, "we");
     assert(stream);
-    fputs(rows[i], stream);
-    fclose(stream);
-    LetterDistribution *ld = ld_create(data_path, "rowpastlimit", error_stack);
+    (void)fputs(rows[i], stream);
+    (void)fclose(stream);
+    const LetterDistribution *ld =
+        ld_create(data_path, "rowpastlimit", error_stack);
     delete_file(path);
     free(path);
     assert(ld == NULL);

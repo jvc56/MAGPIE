@@ -1,6 +1,7 @@
 #include "builder_hash_test.h"
 
 #include "../src/def/builder_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/conversion_results.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/impl/config.h"
@@ -209,10 +210,8 @@ static void write_every_full_rack(const char *data_paths, const char *name) {
     error_stack_print_and_reset(error_stack);
     log_fatal("no writable path for %s", name);
   }
-  FILE *stream = fopen(path, "w");
-  if (!stream) {
-    log_fatal("could not write %s", path);
-  }
+  FILE *stream = fopen(path, "we");
+  assert(stream);
   for (int a = 0; a <= RACK_SIZE; a++) {
     char rack[RACK_SIZE + 1];
     for (int i = 0; i < RACK_SIZE; i++) {
@@ -220,9 +219,9 @@ static void write_every_full_rack(const char *data_paths, const char *name) {
     }
     rack[RACK_SIZE] = '\0';
     const int count = a + 1;
-    fprintf(stream, "%s,%d,%d\n", rack, count, (8 * a - 20) * count);
+    (void)fprintf(stream, "%s,%d,%d\n", rack, count, (8 * a - 20) * count);
   }
-  fclose(stream);
+  (void)fclose(stream);
   free(path);
   error_stack_destroy(error_stack);
 }

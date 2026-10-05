@@ -3,6 +3,7 @@
 #include "../src/compat/endian_conv.h"
 #include "../src/def/config_defs.h"
 #include "../src/def/contribute_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/autoplay_results.h"
@@ -930,7 +931,7 @@ static int assert_first_divergences(Config *config, const char *settings,
   load_and_exec_config_or_die(config, command);
   free(command);
   ErrorStack *error_stack = error_stack_create();
-  JsonValue *result = json_parse(
+  const JsonValue *result = json_parse(
       autoplay_results_get_json(config_get_autoplay_results(config), true),
       error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -1446,6 +1447,7 @@ static void test_http_retries_outlast_a_server_deployment(void) {
   assert(http_client_rate_limit_wait_seconds(3) == 3);
   assert(http_client_rate_limit_wait_seconds(45000) ==
          HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS);
+  // cppcheck-suppress knownConditionTrueFalse
   assert(HTTP_CLIENT_MAX_RATE_LIMIT_WAIT_SECONDS <= 60);
 }
 
@@ -1488,7 +1490,7 @@ static void test_a_rewritten_klv_is_read_again(void) {
   assert(!klv_values_match(csw21, csw24));
 
   Config *config = config_create_or_die("set -lex CSW21");
-  PlayersData *players_data = config_get_players_data(config);
+  const PlayersData *players_data = config_get_players_data(config);
   ErrorStack *error_stack = error_stack_create();
 
   // From wherever the test data path resolves each name, which is where the
@@ -1562,11 +1564,11 @@ static void test_an_abandoned_temporary_is_removed(void) {
   const char *in_progress = "contribute_test_table.rit.23456.tmp";
   const char *not_ours = "contribute_test_table.rit.backup.tmp";
   const char *other_file = "contribute_test_other.rit.12345.tmp";
-  touch_file(abandoned, 2 * 60 * 60);
-  touch_file(abandoned_old_form, 2 * 60 * 60);
+  touch_file(abandoned, (time_t)2 * 60 * 60);
+  touch_file(abandoned_old_form, (time_t)2 * 60 * 60);
   touch_file(in_progress, 0);
-  touch_file(not_ours, 2 * 60 * 60);
-  touch_file(other_file, 2 * 60 * 60);
+  touch_file(not_ours, (time_t)2 * 60 * 60);
+  touch_file(other_file, (time_t)2 * 60 * 60);
 
   char *temporary = temporary_sibling(target);
   assert(!file_exists(abandoned));
@@ -1684,7 +1686,7 @@ static void test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job(void) {
       {"test/birdtest_contract/shutdown-magpie-too-old.json", false},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-    JsonValue *fixture = load_fixture(cases[i].path);
+    const JsonValue *fixture = load_fixture(cases[i].path);
     const JsonValue *shutdown = json_object_get(fixture, "shutdown");
     assert(shutdown);
     assert(contribute_shutdown_waits_for_deferral(shutdown, true) ==
@@ -1705,7 +1707,7 @@ static void test_the_claim_body_matches_the_claim_fixture(void) {
   ContributeState *state =
       contribute_state_create(path, thread_control, error_stack);
   assert(error_stack_is_empty(error_stack));
-  JsonValue *fixture =
+  const JsonValue *fixture =
       load_fixture("test/birdtest_contract/claim-request.json");
   const JsonValue *fixture_jobs = json_object_get(fixture, "unsupported_jobs");
   const int job_count = json_array_length(fixture_jobs);
@@ -1714,7 +1716,7 @@ static void test_the_claim_body_matches_the_claim_fixture(void) {
   }
   char *body = contribute_claim_body(
       state, json_get_string_or_null(fixture, "magpie_version"));
-  JsonValue *ours = json_parse(body, error_stack);
+  const JsonValue *ours = json_parse(body, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(json_object_size(ours) == json_object_size(fixture));
   assert_strings_equal(json_get_string_or_null(ours, "magpie_version"),

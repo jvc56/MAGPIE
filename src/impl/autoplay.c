@@ -12,6 +12,7 @@
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/autoplay_results.h"
+#include "../ent/autoplay_solver_settings.h"
 #include "../ent/bag.h"
 #include "../ent/checkpoint.h"
 #include "../ent/data_filepaths.h"
