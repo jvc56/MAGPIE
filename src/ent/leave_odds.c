@@ -2,6 +2,8 @@
 
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+#include "equity.h"
+#include "klv.h"
 #include "rack.h"
 #include "xoshiro.h"
 #include <math.h>
@@ -32,6 +34,9 @@ bool leave_odds_prepare(LeaveOdds *odds, const int *unseen, const float *theta,
   }
   odds->letters = letters;
   odds->size = size;
+  odds->pool = NULL;
+  odds->pool_cumulative = NULL;
+  odds->pool_size = 0;
   for (int letter = 0; letter < letters; letter++) {
     odds->unseen[letter] = unseen[letter];
     for (int count = 0; count <= size; count++) {
@@ -93,7 +98,9 @@ void leave_odds_expected_counts(const LeaveOdds *odds, double *mean) {
   }
 }
 
-void leave_odds_sample(const LeaveOdds *odds, XoshiroPRNG *prng, Rack *leave) {
+// Draws a leave from the Fisher distribution itself.
+static void leave_odds_sample_exact(const LeaveOdds *odds, XoshiroPRNG *prng,
+                                    Rack *leave) {
   rack_set_dist_size_and_reset(leave, odds->letters);
   int remaining = odds->size;
   for (int letter = 0; letter < odds->letters && remaining > 0; letter++) {
@@ -118,4 +125,52 @@ void leave_odds_sample(const LeaveOdds *odds, XoshiroPRNG *prng, Rack *leave) {
     }
     remaining -= chosen;
   }
+}
+
+void leave_odds_sample(const LeaveOdds *odds, XoshiroPRNG *prng, Rack *leave) {
+  if (odds->pool_size <= 0) {
+    leave_odds_sample_exact(odds, prng, leave);
+    return;
+  }
+  const double total = odds->pool_cumulative[odds->pool_size - 1];
+  const double draw = (double)prng_get_random_number(prng, XOSHIRO_MAX) /
+                      (double)XOSHIRO_MAX * total;
+  int low = 0;
+  int high = odds->pool_size - 1;
+  while (low < high) {
+    const int middle = (low + high) / 2;
+    if (odds->pool_cumulative[middle] > draw) {
+      high = middle;
+    } else {
+      low = middle + 1;
+    }
+  }
+  rack_copy(leave, &odds->pool[low]);
+}
+
+void leave_odds_reweight(LeaveOdds *odds, XoshiroPRNG *prng, const KLV *klv,
+                         double beta, Rack *pool, double *cumulative,
+                         int pool_size) {
+  odds->pool_size = 0;
+  if (pool_size <= 0 || klv == NULL) {
+    return;
+  }
+  // cumulative holds each leave's log weight first, then the running sums.
+  double top = -INFINITY;
+  for (int idx = 0; idx < pool_size; idx++) {
+    leave_odds_sample_exact(odds, prng, &pool[idx]);
+    cumulative[idx] =
+        beta * equity_to_double(klv_get_leave_value(klv, &pool[idx]));
+    if (cumulative[idx] > top) {
+      top = cumulative[idx];
+    }
+  }
+  double sum = 0.0;
+  for (int idx = 0; idx < pool_size; idx++) {
+    sum += exp(cumulative[idx] - top);
+    cumulative[idx] = sum;
+  }
+  odds->pool = pool;
+  odds->pool_cumulative = cumulative;
+  odds->pool_size = pool_size;
 }

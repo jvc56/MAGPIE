@@ -108,6 +108,10 @@ typedef struct PlayChooserStrategy {
   value_net_rack_odds_fn sim_leave_odds_evaluate;
   void *sim_leave_odds_context;
   double sim_leave_odds_share;
+  // With the head: scale its log odds by a factor and tilt long kept leaves
+  // toward valuable ones by exp(beta * KLV) (leave_odds_reweight), both by
+  // kept-leave size as fitted on held-out decisions (leaveklv.py).
+  bool sim_leave_odds_klv;
   // Total SIM iterations per decision, stopping before the time budget if
   // reached; 0 = no limit.
   uint64_t sim_max_iterations;
@@ -197,6 +201,10 @@ typedef struct PlayChooserBenchmarkStats {
   uint64_t sim_nodes;
   // Net-based leave inferences run, and their microseconds.
   uint64_t net_inference_calls;
+  // KLV-tilted leave pools built (sim_leave_odds_klv), and leave-odds sims
+  // without one.
+  uint64_t leave_klv_pools;
+  uint64_t leave_odds_untilted;
   uint64_t net_inference_micros;
   uint64_t peg_calls;
   uint64_t peg_candidate_completions;

@@ -763,6 +763,83 @@ static void vnt_leafcheck(const StringSplitter *fields) {
   config_destroy(config);
 }
 
+// "leaveklvcheck:<lexicon>": checks leave_odds_reweight's resampling pool
+// against an independent estimate. With the full bag unseen and fixed
+// pseudo-random head odds, for kept leaves of 5 and 6 tiles: the mean KLV of
+// leaves drawn from the pool tilted by beta, against the mean KLV of exact
+// draws weighted by exp(beta * KLV) (the same expectation), and the untilted
+// mean.
+static void vnt_leaveklvcheck(const char *lexicon) {
+  char *settings = get_formatted_string(
+      "set -lex %s -wmp true -s1 equity -s2 equity", lexicon);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+  const Game *game = config_get_game(config);
+  const KLV *klv = player_get_klv(game_get_player(game, 0));
+  const int letters = ld_get_size(game_get_ld(game));
+  int unseen[MAX_ALPHABET_SIZE] = {0};
+  bag_increment_unseen_count(game_get_bag(game), unseen);
+  for (int player = 0; player < 2; player++) {
+    const Rack *rack = player_get_rack(game_get_player(game, player));
+    for (int letter = 0; letter < letters; letter++) {
+      unseen[letter] += rack_get_letter(rack, letter);
+    }
+  }
+  XoshiroPRNG *prng = prng_create(11);
+  float theta[MAX_ALPHABET_SIZE];
+  for (int letter = 0; letter < letters; letter++) {
+    theta[letter] = (float)(((double)prng_get_random_number(prng, XOSHIRO_MAX) /
+                             (double)XOSHIRO_MAX) -
+                            0.5);
+  }
+  const int pool_size = 2048;
+  Rack *pool = malloc_or_die(sizeof(Rack) * pool_size);
+  double *cumulative = malloc_or_die(sizeof(double) * pool_size);
+  for (int size = 5; size <= 6; size++) {
+    const double beta = size == 5 ? 0.03 : 0.06;
+    LeaveOdds odds;
+    if (!leave_odds_prepare(&odds, unseen, theta, letters, size)) {
+      log_fatal("leaveklvcheck: no leaves of %d", size);
+    }
+    // Exact draws: untilted mean and the exp(beta KLV)-weighted mean.
+    const int exact_draws = 400000;
+    double plain = 0.0;
+    double weighted = 0.0;
+    double weights = 0.0;
+    Rack leave;
+    for (int draw = 0; draw < exact_draws; draw++) {
+      leave_odds_sample(&odds, prng, &leave);
+      const double value = equity_to_double(klv_get_leave_value(klv, &leave));
+      plain += value;
+      weighted += exp(beta * value) * value;
+      weights += exp(beta * value);
+    }
+    // Pool draws, averaged over several pools.
+    const int pools = 20;
+    const int pool_draws = 20000;
+    double tilted = 0.0;
+    for (int pool_idx = 0; pool_idx < pools; pool_idx++) {
+      LeaveOdds tilted_odds = odds;
+      leave_odds_reweight(&tilted_odds, prng, klv, beta, pool, cumulative,
+                          pool_size);
+      for (int draw = 0; draw < pool_draws; draw++) {
+        leave_odds_sample(&tilted_odds, prng, &leave);
+        tilted += equity_to_double(klv_get_leave_value(klv, &leave));
+      }
+    }
+    printf("leaveklvcheck size=%d beta=%.2f untilted_mean_klv=%.3f "
+           "weighted_exact_mean_klv=%.3f pool_mean_klv=%.3f\n",
+           size, beta, plain / exact_draws, weighted / weights,
+           tilted / (pools * pool_draws));
+  }
+  free(pool);
+  free(cumulative);
+  prng_destroy(prng);
+  config_destroy(config);
+}
+
 // "rackparity:<model_dir>:<backend>:<records file>:<decisions>:<out>": the
 // opponent-leave head's log odds for the played row of each of the first
 // decisions of a distill records file written with opp=1 (opponent records
@@ -1305,21 +1382,22 @@ static double vnt_option_double(const StringSplitter *fields, int first,
 // most that many tiles, and never after an exchange). lodds=1 also draws a
 // simnn player's opponent racks from its model's opponent-leave head
 // (lshare= its share of the non-uniform draws when leaves are also
-// inferred, default 0.5). ninfer=1 infers opponent leaves of at most
-// nmaxleave= tiles (default 2) with a net (nimodel=, default the games'
-// model) as the opponent's policy: ncands= candidates per rack (16),
-// temperature ntemp= (0.003), and with lodds= the head taking nhead= of the
-// non-uniform draws (0.1).
-// uwin=, uspread= and uscale= set the utility (as -uwin, -uspread,
-// -uspreadscale; MAGPIE's defaults otherwise) that an nn player and each sim,
-// value net replies included, rank by. model= sets the net's directory (default
-// <model_dir>). pat=<name> ranks a player's moves by static equity with that
-// PAT term (one file for both players). An nn player scores the top cands=
-// static moves (default 50); with rescore=<dir> it cascades: the net at <dir>
-// rescores its top rescore_top= (default 5) candidates and decides. Any key may
-// be given per player as <key>_a or <key>_b. Both games of a pair use one seed
-// and the players swap seats, so each seat draws the same tiles. Writes
-// <out>.games.csv and per-decision timing to <out>.moves.csv.
+// inferred, default 0.5; lklv=1 scales its odds and tilts long kept leaves
+// by their KLV as fitted, PlayChooserStrategy.sim_leave_odds_klv). ninfer=1
+// infers opponent leaves of at most nmaxleave= tiles (default 2) with a net
+// (nimodel=, default the games' model) as the opponent's policy: ncands=
+// candidates per rack (16), temperature ntemp= (0.003), and with lodds= the
+// head taking nhead= of the non-uniform draws (0.1). uwin=, uspread= and
+// uscale= set the utility (as -uwin, -uspread, -uspreadscale; MAGPIE's defaults
+// otherwise) that an nn player and each sim, value net replies included, rank
+// by. model= sets the net's directory (default <model_dir>). pat=<name> ranks a
+// player's moves by static equity with that PAT term (one file for both
+// players). An nn player scores the top cands= static moves (default 50); with
+// rescore=<dir> it cascades: the net at <dir> rescores its top rescore_top=
+// (default 5) candidates and decides. Any key may be given per player as
+// <key>_a or <key>_b. Both games of a pair use one seed and the players swap
+// seats, so each seat draws the same tiles. Writes <out>.games.csv and
+// per-decision timing to <out>.moves.csv.
 static void vnt_games(const StringSplitter *fields) {
   if (string_splitter_get_number_of_items(fields) < 9) {
     log_fatal("games needs at least 8 fields");
@@ -1435,6 +1513,9 @@ static void vnt_games(const StringSplitter *fields) {
   // Each sim player's net for net-based leave inference (ninfer=1; the
   // model nimodel=, default the games' model), or NULL.
   ValueNetPlayer *net_inference_players[2] = {NULL, NULL};
+  // Leave-odds sims with and without a KLV-tilted pool, over every move.
+  uint64_t leave_klv_pools = 0;
+  uint64_t leave_odds_untilted = 0;
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     if ((kinds[player_idx] == VNT_PLAYER_SIM ||
          kinds[player_idx] == VNT_PLAYER_SIM_NN) &&
@@ -1563,6 +1644,8 @@ static void vnt_games(const StringSplitter *fields) {
                 : NULL,
         .sim_leave_odds_context =
             kinds[player_idx] == VNT_PLAYER_SIM_NN ? players[player_idx] : NULL,
+        .sim_leave_odds_klv =
+            vnt_option_double(fields, 9, "lklv", player_idx, 0.0) > 0,
         .sim_leave_odds_share =
             vnt_option_double(fields, 9, "lshare", player_idx, 0.5),
         .rollout_value_net_history = &rollout_histories[player_idx],
@@ -1646,6 +1729,8 @@ static void vnt_games(const StringSplitter *fields) {
           sim_iterations = chooser_stats.sim_iterations;
           net_inference_ms =
               (double)chooser_stats.net_inference_micros / 1000.0;
+          leave_klv_pools += chooser_stats.leave_klv_pools;
+          leave_odds_untilted += chooser_stats.leave_odds_untilted;
           if (!error_stack_is_empty(error_stack)) {
             error_stack_print_and_reset(error_stack);
             log_fatal("sim player failed");
@@ -1730,6 +1815,11 @@ static void vnt_games(const StringSplitter *fields) {
   value_net_player_destroy(players[1]);
   value_net_player_destroy(rescorers[0]);
   value_net_player_destroy(rescorers[1]);
+  if (leave_klv_pools + leave_odds_untilted > 0) {
+    printf("leave_odds sims: %llu with a KLV-tilted pool, %llu without\n",
+           (unsigned long long)leave_klv_pools,
+           (unsigned long long)leave_odds_untilted);
+  }
   // The net and static horizon utilities' agreement on iterations that took
   // both (see SimLeafMoments), for choosing leafevery=.
   SimLeafMoments moments;
@@ -3237,6 +3327,8 @@ void value_net_test_run_spec(const char *spec) {
                  string_splitter_get_item(fields, 2));
   } else if (strings_equal(mode, "simbench")) {
     vnt_simbench(fields);
+  } else if (strings_equal(mode, "leaveklvcheck") && num_fields == 2) {
+    vnt_leaveklvcheck(string_splitter_get_item(fields, 1));
   } else if (strings_equal(mode, "playerthroughput")) {
     vnt_player_throughput(fields);
   } else if (strings_equal(mode, "devices")) {

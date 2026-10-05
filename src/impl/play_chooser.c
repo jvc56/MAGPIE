@@ -57,6 +57,20 @@ enum {
 static const double PLAY_CHOOSER_DEFAULT_UNTIMED_MOVE_SECONDS = 5.0;
 static const double PLAY_CHOOSER_DEFAULT_CHALLENGE_SECONDS = 5.0;
 static const double PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS = 0.05;
+
+// sim_leave_odds_klv: the head's log-odds scale (alpha) and the KLV tilt
+// (beta, per KLV point) by kept-leave size, and for an exchange, fitted on
+// 11,308 held-out NWL23 decisions with the student's head (leaveklv.py;
+// out of sample by game). KLV added +0.06 nats at 5 kept tiles and +0.25
+// at 6, nothing below 4.
+static const double PLAY_CHOOSER_LEAVE_ALPHA[RACK_SIZE] = {1.0, 1.1, 1.1, 1.15,
+                                                           1.1, 1.0, 0.8};
+static const double PLAY_CHOOSER_LEAVE_BETA[RACK_SIZE] = {0.0,  0.0,  0.0, 0.0,
+                                                          0.01, 0.03, 0.06};
+static const double PLAY_CHOOSER_EXCHANGE_ALPHA = 0.9;
+static const double PLAY_CHOOSER_EXCHANGE_BETA = 0.03;
+// Leaves drawn for the KLV tilt's resampling pool.
+enum { PLAY_CHOOSER_LEAVE_POOL = 2048 };
 static const double PLAY_CHOOSER_MIN_ENDGAME_BUDGET_SECONDS = 0.25;
 // Hold back enough clock for static fallbacks and solver teardown. During
 // overtime, also reserve one percent of the penalty period so normal timing
@@ -83,6 +97,8 @@ typedef struct PlayChooserBenchmarkAtomicStats {
   _Atomic uint64_t sim_iterations;
   _Atomic uint64_t sim_nodes;
   _Atomic uint64_t net_inference_calls;
+  _Atomic uint64_t leave_klv_pools;
+  _Atomic uint64_t leave_odds_untilted;
   _Atomic uint64_t net_inference_micros;
   _Atomic uint64_t peg_calls;
   _Atomic uint64_t peg_candidate_completions;
@@ -127,6 +143,8 @@ void play_chooser_benchmark_reset(void) {
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_iterations);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_nodes);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(net_inference_calls);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(leave_klv_pools);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(leave_odds_untilted);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(net_inference_micros);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_calls);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_completions);
@@ -155,6 +173,8 @@ void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats) {
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_iterations);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_nodes);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(net_inference_calls);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(leave_klv_pools);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(leave_odds_untilted);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(net_inference_micros);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_calls);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_completions);
@@ -269,6 +289,11 @@ struct PlayChooser {
   LeaveOdds leave_odds;
   // Net-based leave inference, created on first use.
   ValueNetLeaveInference *net_inference;
+  // The KLV tilt's resampling pool (sim_leave_odds_klv), created on first
+  // use.
+  Rack *leave_pool;
+  double *leave_pool_cumulative;
+  XoshiroPRNG *leave_prng;
   // The candidates simmed and their net utilities.
   Move *kept_moves;
   double *kept_utility;
@@ -338,6 +363,9 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   play_chooser->pool_scratch = NULL;
   play_chooser->inference_results = NULL;
   play_chooser->net_inference = NULL;
+  play_chooser->leave_pool = NULL;
+  play_chooser->leave_pool_cumulative = NULL;
+  play_chooser->leave_prng = NULL;
   play_chooser->kept_moves = NULL;
   play_chooser->kept_utility = NULL;
   play_chooser->kept_count = 0;
@@ -392,6 +420,9 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
     inference_results_destroy(play_chooser->inference_results);
   }
   value_net_leave_inference_destroy(play_chooser->net_inference);
+  free(play_chooser->leave_pool);
+  free(play_chooser->leave_pool_cumulative);
+  prng_destroy(play_chooser->leave_prng);
   if (play_chooser->pool_scratch != NULL) {
     game_destroy(play_chooser->pool_scratch);
   }
@@ -743,8 +774,47 @@ static bool play_chooser_prepare_leave_odds(PlayChooser *play_chooser,
   for (int letter = 0; letter < letters; letter++) {
     unseen[letter] += rack_get_letter(opponent_rack, letter);
   }
-  return leave_odds_prepare(&play_chooser->leave_odds, unseen, theta, letters,
-                            size);
+  if (!strategy->sim_leave_odds_klv) {
+    return leave_odds_prepare(&play_chooser->leave_odds, unseen, theta, letters,
+                              size);
+  }
+  const bool exchange = side[VALUE_NET_TILE_TYPES + 1] > 0.5F;
+  const double alpha = exchange || size >= RACK_SIZE
+                           ? PLAY_CHOOSER_EXCHANGE_ALPHA
+                           : PLAY_CHOOSER_LEAVE_ALPHA[size];
+  const double beta = exchange || size >= RACK_SIZE
+                          ? PLAY_CHOOSER_EXCHANGE_BETA
+                          : PLAY_CHOOSER_LEAVE_BETA[size];
+  for (int letter = 0; letter < letters; letter++) {
+    theta[letter] = (float)(alpha * theta[letter]);
+  }
+  if (!leave_odds_prepare(&play_chooser->leave_odds, unseen, theta, letters,
+                          size)) {
+    return false;
+  }
+  if (beta > 0.0) {
+    if (play_chooser->leave_pool == NULL) {
+      play_chooser->leave_pool =
+          malloc_or_die(sizeof(Rack) * PLAY_CHOOSER_LEAVE_POOL);
+      play_chooser->leave_pool_cumulative =
+          malloc_or_die(sizeof(double) * PLAY_CHOOSER_LEAVE_POOL);
+      play_chooser->leave_prng = prng_create(strategy->seed ^ 0x6c656176U);
+    }
+    const int opponent = 1 - game_get_player_on_turn_index(game);
+    leave_odds_reweight(&play_chooser->leave_odds, play_chooser->leave_prng,
+                        player_get_klv(game_get_player(game, opponent)), beta,
+                        play_chooser->leave_pool,
+                        play_chooser->leave_pool_cumulative,
+                        PLAY_CHOOSER_LEAVE_POOL);
+    if (play_chooser_benchmark_is_enabled()) {
+      play_chooser_benchmark_add(&play_chooser_benchmark_stats.leave_klv_pools,
+                                 1);
+    }
+  } else if (play_chooser_benchmark_is_enabled()) {
+    play_chooser_benchmark_add(
+        &play_chooser_benchmark_stats.leave_odds_untilted, 1);
+  }
+  return true;
 }
 
 // Infers the opponent's leave with the net (sim_net_inference_*) when it
