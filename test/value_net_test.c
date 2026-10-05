@@ -27,6 +27,7 @@
 #include "../src/ent/value_net.h"
 #include "../src/ent/win_pct.h"
 #include "../src/ent/xoshiro.h"
+#include "../src/impl/blocking_setup.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -566,6 +567,7 @@ enum {
   VNT_KIN_CHEAP = 6,
   VNT_KIN_MAX_POOL = 256,
   VNT_KIN_ALL_MOVES = 20000,
+  VNT_KIN_BS_RACKS = 64,
 };
 
 // The cheap feature vector of move (see VNT_KIN_CHEAP): an exchange sits at
@@ -618,7 +620,9 @@ static void vnt_kin_cheap(const Game *game, const Move *move, double *f) {
 // its features recorded: the cheap ones, static equity and the PAT term,
 // the net's win% and final spread, and board openness (the opponent's best
 // reply score and whether it bingoes, over racks racks drawn from the tiles
-// unseen to the mover, the same draws for every move). Writes
+// unseen to the mover, the same draws for every move), and the
+// blocking/setup teacher's pass-relative blocking and setup deltas with its
+// reply and follow-up means over 64 racks (blocking_setup.h). Writes
 // <out>.cands.csv (one row per candidate, with its sim mean, sd and count)
 // and <out>.samples (per position: int32 position, candidates, iterations,
 // then candidates x iterations float32 utilities, each candidate's samples
@@ -676,6 +680,12 @@ static void vnt_kinship(const StringSplitter *fields) {
   float values[VNT_KIN_MAX_POOL];
   float spreads[VNT_KIN_MAX_POOL];
   double pat_terms[VNT_KIN_MAX_POOL];
+  // The pass-relative blocking/setup teacher (blocking_setup.h) at
+  // VNT_KIN_BS_RACKS racks, as the blocking/setup studies deal them.
+  BlockingSetupSamples *bs_samples = blocking_setup_samples_create(
+      VNT_KIN_BS_RACKS, ld_get_total_tiles(game_get_ld(game)));
+  BlockingSetupChecker *bs_checker = blocking_setup_checker_create();
+  BlockingSetupResult bs_results[VNT_KIN_MAX_POOL];
   // The extras' selection: each candidate move's cheap features and its
   // distance to the nearest move chosen so far.
   double (*cheap)[VNT_KIN_CHEAP] =
@@ -724,8 +734,8 @@ static void vnt_kinship(const StringSplitter *fields) {
   free(path);
   fprintf(csv, "position,game,turn,bag,mover_spread,cand,source,move,score,"
                "leave,tiles,row,col,exchange,static_equity,pat_term,net_win,"
-               "net_spread,open_mean,open_max,open_bingo,sim_mean,sim_sd,"
-               "sim_n\n");
+               "net_spread,open_mean,open_max,open_bingo,blocking,setup,"
+               "reply64,followup64,sim_mean,sim_sd,sim_n\n");
   StringBuilder *name = string_builder_create();
   ValueNetHistory histories[2];
   int done = 0;
@@ -853,6 +863,16 @@ static void vnt_kinship(const StringSplitter *fields) {
               gen_last_pat_term(move_list_get_move(pool, idx), &leave));
         }
         player_set_pat_usage(game_get_player(game, mover), true, 0);
+        // Blocking and setup against a pass, every candidate on the same
+        // racks.
+        blocking_setup_samples_deal(
+            bs_samples, game, VNT_KIN_BS_RACKS, true, true,
+            vnt_mix(UINT64_C(7171) ^ (game_idx << 8) ^ (uint64_t)turn));
+        blocking_setup_checker_load(bs_checker, game, bs_samples, 1);
+        for (int idx = 0; idx < cands; idx++) {
+          blocking_setup_checker_measure(
+              bs_checker, move_list_get_move(pool, idx), &bs_results[idx]);
+        }
         // The net's view of each candidate.
         for (int idx = 0; idx < cands; idx++) {
           value_net_features_for_move(
@@ -996,14 +1016,18 @@ static void vnt_kinship(const StringSplitter *fields) {
               spreads[idx], value_net_spread_after_move(game, move));
           fprintf(csv,
                   "%d,%llu,%d,%d,%.0f,%d,%d,\"%s\",%.1f,%.3f,%.0f,%.2f,%.2f,"
-                  "%.0f,%.3f,%.3f,%.5f,%.2f,%.2f,%.0f,%.3f,%.6f,%.6f,%d\n",
+                  "%.0f,%.3f,%.3f,%.5f,%.2f,%.2f,%.0f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+                  "%.6f,%.6f,%d\n",
                   done, (unsigned long long)game_idx, turn, bag, mover_spread,
                   idx, idx < base_count ? 0 : 1, string_builder_peek(name),
                   f[0], f[1], f[2], f[3], f[4], f[5],
                   equity_to_double(move_get_equity(move)) - pat_terms[idx],
                   pat_terms[idx], (1.0 + (double)values[idx]) / 2.0, net_spread,
-                  open_mean[idx], open_max[idx], open_bingo[idx], sim_mean,
-                  sim_sd, sim_n[idx]);
+                  open_mean[idx], open_max[idx], open_bingo[idx],
+                  bs_results[idx].blocking_delta, bs_results[idx].setup_delta,
+                  bs_results[idx].candidate_reply_mean,
+                  bs_results[idx].candidate_followup_mean, sim_mean, sim_sd,
+                  sim_n[idx]);
         }
         const int32_t header[3] = {done, cands, iterations};
         fwrite(header, sizeof(int32_t), 3, samples);
@@ -1023,6 +1047,8 @@ static void vnt_kinship(const StringSplitter *fields) {
     }
   }
   string_builder_destroy(name);
+  blocking_setup_samples_destroy(bs_samples);
+  blocking_setup_checker_destroy(bs_checker);
   (void)fclose(csv);
   (void)fclose(samples);
   free(record.seeds);
