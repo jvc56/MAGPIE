@@ -12,6 +12,8 @@
 #include "benchmark_endgame_test.h"
 #include "benchmark_peg_test.h"
 #include "bit_rack_test.h"
+#include "blocking_setup_gen_test.h"
+#include "blocking_setup_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
 #include "board_test.h"
@@ -157,6 +159,7 @@ static TestEntry test_table[] = {
     {"patutility", test_pat_utility},
     {"patfeatures", test_pat_features},
     {"pateval", test_pat_eval},
+    {"blockingsetup", test_blocking_setup},
     {"winpctcoverage", test_win_pct_coverage},
     {"winpctstate", test_win_pct_state},
     {"winpctrecord", test_win_pct_record},
@@ -273,6 +276,22 @@ void run_test(const char *subtest) {
   }
   if (has_prefix("pattablecheck:", subtest)) {
     pat_run_through_table_check(subtest + strlen("pattablecheck:"));
+    return;
+  }
+  if (has_prefix("bsgen:", subtest)) {
+    blocking_setup_gen_run_spec(subtest + strlen("bsgen:"));
+    return;
+  }
+  if (has_prefix("bsrace:", subtest)) {
+    blocking_setup_race_run_spec(subtest + strlen("bsrace:"));
+    return;
+  }
+  if (has_prefix("bsbench:", subtest)) {
+    blocking_setup_bench_run_spec(subtest + strlen("bsbench:"));
+    return;
+  }
+  if (has_prefix("blockingsetupreplay:", subtest)) {
+    blocking_setup_replay_run_spec(subtest + strlen("blockingsetupreplay:"));
     return;
   }
   if (has_prefix("patopeningsim:", subtest)) {
