@@ -3833,6 +3833,27 @@ static void vnt_anebench(const char *dir, const char *parity_dir) {
 }
 
 void value_net_test_run_spec(const char *spec) {
+#ifdef VALUE_NET_METAL_DEVICE_SELECTION
+  // "gpu=<name>:<spec>": <spec> with the Metal backends on the GPU whose
+  // name contains <name> (value_net_metal_select_device).
+  if (has_prefix("gpu=", spec)) {
+    const char *rest = strchr(spec, ':');
+    if (rest == NULL) {
+      log_fatal("gpu=<name> needs a spec after it: %s", spec);
+    }
+    char *name = get_formatted_string("%.*s", (int)(rest - spec) - 4, spec + 4);
+    ErrorStack *error_stack = error_stack_create();
+    if (!value_net_metal_select_device(name, error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("could not select the GPU %s", name);
+    }
+    error_stack_destroy(error_stack);
+    free(name);
+    value_net_test_run_spec(rest + 1);
+    value_net_metal_select_device(NULL, NULL);
+    return;
+  }
+#endif
   StringSplitter *fields = split_string(spec, ':', true);
   const int num_fields = string_splitter_get_number_of_items(fields);
   const char *mode = string_splitter_get_item(fields, 0);

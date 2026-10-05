@@ -20,6 +20,18 @@ ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
   return NULL;
 }
 
+#ifdef VALUE_NET_METAL_DEVICE_SELECTION
+bool value_net_metal_select_device(const char *name, ErrorStack *error_stack) {
+  if (name == NULL) {
+    return true;
+  }
+  error_stack_push(
+      error_stack, ERROR_STATUS_VALUE_NET_BACKEND_UNAVAILABLE,
+      string_duplicate("this build has no Metal value net backend"));
+  return false;
+}
+#endif
+
 void value_net_metal_destroy(ValueNetMetal *metal) { (void)metal; }
 
 int value_net_metal_get_concurrency(const ValueNetMetal *metal) {

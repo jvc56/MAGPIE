@@ -18,6 +18,22 @@ ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
                                       int concurrency, ErrorStack *error_stack);
 void value_net_metal_destroy(ValueNetMetal *metal);
 
+// Intel Macs can have two GPUs, an integrated Intel one and a discrete AMD
+// one, and there the backend can run on either; Apple Silicon Macs have
+// one GPU, so the choice exists only on Intel.
+// (Keyed on the platform, not VALUE_NET_METAL, which test files built
+// for release do not get.)
+#if defined(__APPLE__) && defined(__x86_64__)
+#define VALUE_NET_METAL_DEVICE_SELECTION
+
+// From now on value_net_metal_create uses the GPU whose name contains name
+// (ignoring case), or the system default when name is NULL. Returns false,
+// with an error listing the GPUs, unless exactly one GPU matches (or, in a
+// build without Metal, always unless name is NULL). Not thread-safe: call
+// before creating backends.
+bool value_net_metal_select_device(const char *name, ErrorStack *error_stack);
+#endif
+
 // How many evaluations run at once (see value_net_metal_create).
 int value_net_metal_get_concurrency(const ValueNetMetal *metal);
 

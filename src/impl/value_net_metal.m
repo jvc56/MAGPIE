@@ -507,11 +507,65 @@ static void metal_slot_destroy(ValueNetMetalSlot *slot) {
   (void)(__bridge_transfer id)slot->queue;
 }
 
+#ifdef VALUE_NET_METAL_DEVICE_SELECTION
+// The full name of the GPU value_net_metal_select_device chose, or NULL for
+// the system default.
+static char *selected_device_name = NULL;
+
+bool value_net_metal_select_device(const char *name, ErrorStack *error_stack) {
+  @autoreleasepool {
+    free(selected_device_name);
+    selected_device_name = NULL;
+    if (name == NULL) {
+      return true;
+    }
+    NSString *wanted = [NSString stringWithUTF8String:name];
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    id<MTLDevice> match = nil;
+    int matches = 0;
+    for (id<MTLDevice> device in MTLCopyAllDevices()) {
+      [names addObject:device.name];
+      if ([device.name rangeOfString:wanted options:NSCaseInsensitiveSearch]
+              .location != NSNotFound) {
+        match = device;
+        matches++;
+      }
+    }
+    if (matches != 1) {
+      error_stack_push(error_stack, ERROR_STATUS_VALUE_NET_BACKEND_UNAVAILABLE,
+                       get_formatted_string(
+                           "%s GPU matches \"%s\"; the GPUs are: %s",
+                           matches == 0 ? "no" : "more than one", name,
+                           [names componentsJoinedByString:@", "].UTF8String));
+      return false;
+    }
+    selected_device_name = string_duplicate(match.name.UTF8String);
+    return true;
+  }
+}
+#endif
+
+// The GPU value_net_metal_create uses: the one value_net_metal_select_device
+// chose, where there is that choice, else the system default.
+static id<MTLDevice> metal_device(void) {
+#ifdef VALUE_NET_METAL_DEVICE_SELECTION
+  if (selected_device_name != NULL) {
+    for (id<MTLDevice> device in MTLCopyAllDevices()) {
+      if (strings_equal(device.name.UTF8String, selected_device_name)) {
+        return device;
+      }
+    }
+    return nil;
+  }
+#endif
+  return MTLCreateSystemDefaultDevice();
+}
+
 ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
                                       int concurrency,
                                       ErrorStack *error_stack) {
   @autoreleasepool {
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    id<MTLDevice> device = metal_device();
     if (device == nil) {
       error_stack_push(error_stack, ERROR_STATUS_VALUE_NET_BACKEND_UNAVAILABLE,
                        string_duplicate("no Metal device"));
