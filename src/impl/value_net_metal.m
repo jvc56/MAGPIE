@@ -104,6 +104,8 @@ typedef struct MetalBuilder {
   const ValueNet *net;
   const ValueNetShape *shape;
   MPSDataType data_type;
+  // Whether attention uses MPSGraph's fused op (Apple GPUs only).
+  bool fused_attention;
   bool ok;
   ErrorStack *error_stack;
 } MetalBuilder;
@@ -256,15 +258,42 @@ static MPSGraphTensor *builder_block(MetalBuilder *builder, MPSGraphTensor *x,
                                           name:nil];
     parts[part] = [graph squeezeTensor:slice axis:0 name:nil];
   }
-  // softmax(q k^T / sqrt(head_dim)) v as one fused op, without the
-  // [B, heads, T, T] score tensor.
-  MPSGraphTensor *attended = [graph
-      scaledDotProductAttentionWithQueryTensor:parts[0]
-                                     keyTensor:parts[1]
-                                   valueTensor:parts[2]
-                                         scale:(float)(1.0 /
-                                                       sqrt(shape->head_dim))
-                                          name:nil];
+  // softmax(q k^T / sqrt(head_dim)) v: on Apple GPUs as one fused op,
+  // without the [B, heads, T, T] score tensor.
+  MPSGraphTensor *attended = nil;
+  if (builder->fused_attention) {
+    attended = [graph
+        scaledDotProductAttentionWithQueryTensor:parts[0]
+                                       keyTensor:parts[1]
+                                     valueTensor:parts[2]
+                                           scale:(float)(1.0 /
+                                                         sqrt(shape->head_dim))
+                                            name:nil];
+  } else {
+    // Unfused, for GPUs where the fused op is wrong (Intel UHD 630 on
+    // macOS 15 and 26). The identity keeps MPSGraph from fusing
+    // softmax with the matmuls around it, which is also wrong there.
+    MPSGraphTensor *scores = [graph
+        matrixMultiplicationWithPrimaryTensor:parts[0]
+                              secondaryTensor:[graph transposeTensor:parts[1]
+                                                           dimension:2
+                                                       withDimension:3
+                                                                name:nil]
+                                         name:nil];
+    scores = [graph
+        multiplicationWithPrimaryTensor:scores
+                        secondaryTensor:
+                            [graph
+                                constantWithScalar:1.0 / sqrt(shape->head_dim)
+                                          dataType:builder->data_type]
+                                   name:nil];
+    MPSGraphTensor *weights = [graph
+        identityWithTensor:[graph softMaxWithTensor:scores axis:-1 name:nil]
+                      name:nil];
+    attended = [graph matrixMultiplicationWithPrimaryTensor:weights
+                                            secondaryTensor:parts[2]
+                                                       name:nil];
+  }
   // [B, heads, T, head_dim] -> [B, T, dim]
   attended = [graph transposeTensor:attended dimension:1 withDimension:2 name:nil];
   attended = [graph
@@ -433,6 +462,7 @@ static bool metal_slot_create(ValueNetMetalSlot *slot, id<MTLDevice> device,
       .net = net,
       .shape = value_net_get_shape(net),
       .data_type = type,
+      .fused_attention = [device supportsFamily:MTLGPUFamilyApple7],
       .ok = true,
       .error_stack = error_stack,
   };
