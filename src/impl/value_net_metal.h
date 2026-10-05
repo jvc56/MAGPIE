@@ -12,8 +12,8 @@ typedef struct ValueNetMetal ValueNetMetal;
 
 // Uploads net's weights; half_precision computes in float16 (inputs,
 // weights and activations), else float32. At most concurrency evaluations
-// run at once (0 for 2), each with its own copy of the graph. net may be
-// destroyed afterwards.
+// run at once (0 for 2; always 1 on GPUs other than Apple's), each with
+// its own copy of the graph. net may be destroyed afterwards.
 ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
                                       int concurrency, ErrorStack *error_stack);
 void value_net_metal_destroy(ValueNetMetal *metal);

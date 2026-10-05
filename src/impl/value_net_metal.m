@@ -442,6 +442,12 @@ static void builder_build(MetalBuilder *builder, MPSGraphTensor *board,
             name:nil];
 }
 
+// Whether device is an Apple GPU, where MPSGraph's fused attention is
+// right and evaluations can run at once.
+static bool metal_is_apple_gpu(id<MTLDevice> device) {
+  return [device supportsFamily:MTLGPUFamilyApple7];
+}
+
 // Builds slot's graph from net's weights, its command queue, and its input
 // buffers (VALUE_NET_MAX_GPU_ROWS rows each). Returns false, with an error
 // on error_stack, if the weights do not fit the graph.
@@ -462,7 +468,7 @@ static bool metal_slot_create(ValueNetMetalSlot *slot, id<MTLDevice> device,
       .net = net,
       .shape = value_net_get_shape(net),
       .data_type = type,
-      .fused_attention = [device supportsFamily:MTLGPUFamilyApple7],
+      .fused_attention = metal_is_apple_gpu(device),
       .ok = true,
       .error_stack = error_stack,
   };
@@ -573,10 +579,16 @@ ValueNetMetal *value_net_metal_create(const ValueNet *net, bool half_precision,
     }
     const MPSDataType type =
         half_precision ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
-    const int slots =
+    int slots =
         concurrency > 0 && concurrency <= VALUE_NET_METAL_MAX_CONCURRENCY
             ? concurrency
             : VALUE_NET_METAL_DEFAULT_CONCURRENCY;
+    // On the AMD Radeon Pro 5300M (macOS 26.7.1) two evaluations at once
+    // crash in the driver's matmul library (Tensile), so GPUs other than
+    // Apple's get one slot.
+    if (!metal_is_apple_gpu(device)) {
+      slots = 1;
+    }
     ValueNetMetal *metal = calloc_or_die(1, sizeof(ValueNetMetal));
     metal->hidden_dim = value_net_get_shape(net)->head_hidden;
     for (int slot_idx = 0; slot_idx < slots; slot_idx++) {

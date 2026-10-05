@@ -3869,7 +3869,7 @@ static void vnt_throughput(const char *dir, const char *parity_dir,
     printf("value_net_throughput %s threads=%d concurrency=%d rows=%d "
            "ms_per_call=%.2f rows_per_s=%.0f\n",
            half_precision ? "fp16" : "fp32", threads,
-           concurrency > 0 ? concurrency : threads, rows, seconds * 1e3 / calls,
+           value_net_metal_get_concurrency(metal), rows, seconds * 1e3 / calls,
            (double)threads * calls * rows / seconds);
   }
   free(big_board);
