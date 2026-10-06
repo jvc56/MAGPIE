@@ -21,9 +21,11 @@ server's half of it: `test/contribute_test.c` asserts that
 so a key renamed on either side fails a test here rather than a
 contributor's run.
 
-The `result-*`, `heartbeat`, `expected-data`, `anon-uuid-assignment` and
-`assignment-game-pairs` fixtures were captured from a real exchange between
-this client and a birdtest server by birdtest's `scripts/capture_contract.py`
-(see birdtest's `contract-fixtures/README.md`), not written by hand.
+The `result-*` fixtures except `result-games-inference.json` (written by hand
+in MAGPIE's key layout), and the `heartbeat`, `expected-data`,
+`anon-uuid-assignment` and `assignment-game-pairs` fixtures, were captured from
+a real exchange between this client and a birdtest server by birdtest's
+`scripts/capture_contract.py` (see birdtest's `contract-fixtures/README.md`),
+not written by hand.
 
 When birdtest changes a fixture, copy the new file here in the same change.
