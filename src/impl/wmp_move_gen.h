@@ -779,6 +779,15 @@ wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
   return &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size].subrack;
 }
 
+// 1 when the subrack's leave plus score_bound reaches leave_cutoff, else 0.
+static inline __attribute__((always_inline)) uint64_t
+wmp_move_gen_subrack_leave_kept(const SubrackInfo *nonplaythrough_info,
+                                Equity score_bound, int64_t leave_cutoff) {
+  const int64_t leave_bound =
+      (int64_t)nonplaythrough_info->leave_value + score_bound;
+  return (uint64_t)(leave_bound >= leave_cutoff);
+}
+
 // Bit i of the result marks subrack first_idx + i of the current anchor's size
 // as a candidate, one that might record a play. A clear bit means the subrack
 // would record nothing:
@@ -796,7 +805,10 @@ wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
 // nothing reads: a playthrough entry is written before every read.
 //
 // Every subrack gets the same straight-line work with no branch on what it
-// holds, so the filter loads overlap and no branch mispredicts.
+// holds, so the filter loads overlap and no branch mispredicts. The eager
+// path looks up every nonplaythrough subrack before generation, so for a
+// nonplaythrough anchor there the entry alone decides and the filter, which
+// would only repeat it, is skipped.
 static inline __attribute__((always_inline)) uint64_t
 wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
                                     int first_idx, int count, bool lazy,
@@ -807,17 +819,28 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
       subracks_get_combination_offset(wmp_move_gen->tiles_to_play) + first_idx;
   const bool is_playthrough =
       wmp_move_gen->word_length > wmp_move_gen->tiles_to_play;
-  const bool may_be_unresolved = lazy && !is_playthrough;
   const SubrackInfo *nonplaythrough_infos =
       &wmp_move_gen->nonplaythrough_infos[offset];
+  // With no prune every subrack passes, whatever its leave value holds: the
+  // leave sum is 64 bits wide and cannot fall below INT64_MIN.
+  const int64_t leave_cutoff = prune_by_leave ? (int64_t)cutoff : INT64_MIN;
+  uint64_t candidates = 0;
+  if (!lazy && !is_playthrough) {
+    for (int bit_idx = 0; bit_idx < count; bit_idx++) {
+      const uint64_t may_record =
+          (uint64_t)(nonplaythrough_infos[bit_idx].wmp_entry != NULL);
+      const uint64_t leave_kept = wmp_move_gen_subrack_leave_kept(
+          &nonplaythrough_infos[bit_idx], score_bound, leave_cutoff);
+      candidates |= (may_record & leave_kept) << bit_idx;
+    }
+    *filter_misses = 0;
+    return candidates;
+  }
+  const bool may_be_unresolved = lazy && !is_playthrough;
   const SubrackInfo *lookup_infos =
       is_playthrough ? &wmp_move_gen->playthrough_infos[offset]
                      : nonplaythrough_infos;
   const WMPForLength *wfl = &wmp_move_gen->wmp->wfls[wmp_move_gen->word_length];
-  // With no prune every subrack passes, whatever its leave value holds: the
-  // sum below is 64 bits wide and cannot fall below INT64_MIN.
-  const int64_t leave_cutoff = prune_by_leave ? (int64_t)cutoff : INT64_MIN;
-  uint64_t candidates = 0;
   uint64_t misses = 0;
   for (int bit_idx = 0; bit_idx < count; bit_idx++) {
     // Each test is a 0 or 1 combined with bitwise operators, so the filter
@@ -836,9 +859,8 @@ wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
     const uint64_t looked_up = (uint64_t)is_playthrough | unresolved;
     const uint64_t may_record =
         looked_up != 0 ? may_have_words : (uint64_t)(entry != NULL);
-    const int64_t leave_bound =
-        (int64_t)nonplaythrough_infos[bit_idx].leave_value + score_bound;
-    const uint64_t leave_kept = (uint64_t)(leave_bound >= leave_cutoff);
+    const uint64_t leave_kept = wmp_move_gen_subrack_leave_kept(
+        &nonplaythrough_infos[bit_idx], score_bound, leave_cutoff);
     candidates |= (may_record & leave_kept) << bit_idx;
     misses |= (unresolved & (may_have_words ^ 1) & leave_kept) << bit_idx;
   }
