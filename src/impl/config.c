@@ -9929,6 +9929,39 @@ void config_destroy_for_contribute(Config *task_config) {
   config_destroy(task_config);
 }
 
+bool config_contribute_execute(Config *task_config, const char *job_type,
+                               const JsonValue *request, int threads,
+                               ContributeState *state, char **result_json,
+                               uint64_t *movegens, ErrorStack *error_stack) {
+  *result_json = NULL;
+  *movegens = 0;
+  // Before the executor, not only inside it: a task's derived files are
+  // built first, with the config's thread count, which in a fresh task
+  // config is every core rather than the count contribute.txt asks for.
+  task_config->num_threads = threads;
+  // Read on this thread with every thread the executor started joined: each
+  // thread counts on its own move generator, unsynchronized
+  // (gen_get_movegen_count).
+  const uint64_t movegens_before = gen_get_movegen_count();
+  if (strings_equal(job_type, "games")) {
+    *result_json = config_contribute_games(task_config, request, false, threads,
+                                           state, error_stack);
+  } else if (strings_equal(job_type, "game_pairs")) {
+    *result_json = config_contribute_games(task_config, request, true, threads,
+                                           state, error_stack);
+  } else if (strings_equal(job_type, "opening_rack")) {
+    *result_json = config_contribute_opening_rack(task_config, request, threads,
+                                                  state, error_stack);
+  } else if (strings_equal(job_type, "leave_generation")) {
+    *result_json = config_contribute_leave_gen(task_config, request, threads,
+                                               state, error_stack);
+  } else {
+    return false;
+  }
+  *movegens = gen_get_movegen_count() - movegens_before;
+  return true;
+}
+
 void impl_contribute(Config *config, const char *settings_path,
                      ErrorStack *error_stack) {
   // Every task is claimed and returned over HTTP. A build that cannot make a
@@ -9974,25 +10007,11 @@ void impl_contribute(Config *config, const char *settings_path,
       continue;
     }
 
-    const int threads = contribute_get_threads(state);
-    // Before the executor, not only inside it: a task's derived files are
-    // built first, with the config's thread count, which in a fresh task
-    // config is every core rather than the count contribute.txt asks for.
-    task_config->num_threads = threads;
     char *result_json = NULL;
-    if (strings_equal(job_type, "games")) {
-      result_json = config_contribute_games(task_config, request, false,
-                                            threads, state, error_stack);
-    } else if (strings_equal(job_type, "game_pairs")) {
-      result_json = config_contribute_games(task_config, request, true, threads,
-                                            state, error_stack);
-    } else if (strings_equal(job_type, "opening_rack")) {
-      result_json = config_contribute_opening_rack(task_config, request,
-                                                   threads, state, error_stack);
-    } else if (strings_equal(job_type, "leave_generation")) {
-      result_json = config_contribute_leave_gen(task_config, request, threads,
-                                                state, error_stack);
-    } else {
+    uint64_t movegens = 0;
+    if (!config_contribute_execute(task_config, job_type, request,
+                                   contribute_get_threads(state), state,
+                                   &result_json, &movegens, error_stack)) {
       // A job type this build does not recognise means the server is newer
       // than this MAGPIE for *this job* -- not for every job. A client that
       // predates the leave_generation executor can still play games all day,
@@ -10048,7 +10067,7 @@ void impl_contribute(Config *config, const char *settings_path,
       error_message = error_stack_get_string_and_reset(error_stack);
     }
     contribute_submit_result(state, config_get_thread_control(config),
-                             result_json, error_message, error_stack);
+                             result_json, movegens, error_message, error_stack);
     free(result_json);
     free(error_message);
   }

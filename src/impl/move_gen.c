@@ -60,6 +60,9 @@ const WMPEntry wmp_entry_unresolved_sentinel = {0};
 static MoveGen *cached_gens[MAX_THREADS];
 static bool slot_in_use[MAX_THREADS];
 static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
+// The move generations counted on gens gen_destroy_cache has freed, so the
+// process's count never goes back (gen_get_movegen_count). Under cache_mutex.
+static uint64_t freed_gens_movegen_count = 0;
 
 void generator_destroy(MoveGen *gen) {
   if (!gen) {
@@ -147,6 +150,9 @@ void gen_destroy_cache(void) {
   // can race it.
   cpthread_mutex_lock(&cache_mutex);
   for (int i = 0; i < (MAX_THREADS); i++) {
+    if (cached_gens[i]) {
+      freed_gens_movegen_count += cached_gens[i]->movegen_count;
+    }
     generator_destroy(cached_gens[i]);
     cached_gens[i] = NULL;
     slot_in_use[i] = false;
@@ -158,6 +164,21 @@ void gen_destroy_cache(void) {
   // returns that dangling pointer instead of acquiring a fresh slot/gen.
   cpthread_once(&gen_key_once, gen_key_init);
   cpthread_setspecific(gen_key, NULL);
+}
+
+uint64_t gen_get_movegen_count(void) {
+  // A gen's slot is released when its thread exits, but the gen and its count
+  // stay in cached_gens for the next thread, so summing every allocated gen
+  // counts the work of threads that have come and gone as well.
+  cpthread_mutex_lock(&cache_mutex);
+  uint64_t total = freed_gens_movegen_count;
+  for (int i = 0; i < MAX_THREADS; i++) {
+    if (cached_gens[i]) {
+      total += cached_gens[i]->movegen_count;
+    }
+  }
+  cpthread_mutex_unlock(&cache_mutex);
+  return total;
 }
 
 // Cache getter functions
@@ -3653,6 +3674,7 @@ void gen_record_pass(MoveGen *gen) {
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
                                    int *lane_end) {
   MoveGen *gen = get_movegen();
+  gen->movegen_count++;
   gen_load_position(gen, args);
   assert(gen->move_record_type == MOVE_RECORD_ALL_SMALL);
   gen->tiles_played = 0;
@@ -3672,6 +3694,7 @@ void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
 
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
+  gen->movegen_count++;
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {

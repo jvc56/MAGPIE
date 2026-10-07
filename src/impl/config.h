@@ -26,6 +26,7 @@
 #include "../util/json.h"
 #include "peg.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct Config Config;
 
@@ -235,5 +236,21 @@ void save_config_settings(const Config *config, ErrorStack *error_stack);
 // the caller.
 Config *config_create_for_contribute(Config *parent, ErrorStack *error_stack);
 void config_destroy_for_contribute(Config *task_config);
+
+struct ContributeState;
+// Runs one claimed contribute task of `job_type` in `task_config` (see
+// config_create_for_contribute) on `threads` threads. Returns false, running
+// nothing, for a job type this build does not know. Otherwise *result_json is
+// the result the caller submits and frees -- NULL, with the reason on
+// error_stack, if the task failed -- and *movegens the move generations it
+// made on every thread (gen_get_movegen_count), simulations, inferences and
+// endgame and pre-endgame solves included. `state` supplies the derived files
+// the claim pins, and may be NULL for a task that asks for none. Exposed for
+// tests.
+bool config_contribute_execute(Config *task_config, const char *job_type,
+                               const JsonValue *request, int threads,
+                               struct ContributeState *state,
+                               char **result_json, uint64_t *movegens,
+                               ErrorStack *error_stack);
 
 #endif

@@ -901,11 +901,30 @@ static void assert_produces_every_fixture_key(const JsonValue *fixture,
   }
 }
 
-// The result a fixture holds, under the envelope submit_result_over_http
-// writes around it.
+// The result a fixture holds, under the envelope contribute_result_body
+// writes around it: every key of the fixture's envelope is one that body
+// has. (A fixture captured before results carried `movegens` has none.)
 static const JsonValue *fixture_result(const JsonValue *fixture) {
-  assert(json_object_size(fixture) == 2);
+  char *body = contribute_result_body("token", "{}", 1);
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *envelope = json_parse(body, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  for (int i = 0; i < json_object_size(fixture); i++) {
+    const char *key = json_object_key_at(fixture, i);
+    if (!json_object_get(envelope, key)) {
+      log_fatal("birdtest's result fixture has '%s' beside the result, which "
+                "MAGPIE's submission does not",
+                key);
+    }
+  }
+  json_destroy(envelope);
+  free(body);
   assert(json_get_string_or_null(fixture, "claim_token"));
+  if (json_object_get(fixture, "movegens")) {
+    assert(json_get_int(fixture, "movegens", error_stack) >= 0);
+    assert(error_stack_is_empty(error_stack));
+  }
+  error_stack_destroy(error_stack);
   const JsonValue *result = json_object_get(fixture, "result");
   assert(json_is_object(result));
   return result;
@@ -1002,6 +1021,151 @@ static void test_results_carry_every_key_the_server_reads(void) {
   string_builder_destroy(sb);
   error_stack_destroy(error_stack);
   config_destroy(config);
+}
+
+// A submission is the claim token, the task's result as it was computed, and
+// beside it the move generations the task took -- what the contributor is
+// credited with, a whole number however large.
+static void test_the_result_body_carries_movegens(void) {
+  const char *result_json = "{\"racks\":[{\"rack\":\"AEINRST\"}]}";
+  char *body = contribute_result_body("2b1c4e7a", result_json, 12345);
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *parsed = json_parse(body, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(json_object_size(parsed) == 3);
+  assert_strings_equal(json_get_string(parsed, "claim_token", error_stack),
+                       "2b1c4e7a");
+  const JsonValue *result = json_object_get(parsed, "result");
+  assert(json_is_object(result));
+  assert_strings_equal(
+      json_get_string(json_array_get(json_object_get(result, "racks"), 0),
+                      "rack", error_stack),
+      "AEINRST");
+  assert(json_get_int(parsed, "movegens", error_stack) == 12345);
+  assert(error_stack_is_empty(error_stack));
+  json_destroy(parsed);
+  free(body);
+
+  // Written in full, not as a double: a count past 2^53 keeps its last digit.
+  body = contribute_result_body("t", "{}", UINT64_MAX);
+  assert(strstr(body, "\"movegens\":18446744073709551615}"));
+  parsed = json_parse(body, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  json_destroy(parsed);
+  free(body);
+  body = contribute_result_body("t", "{}", 0);
+  assert(strstr(body, "\"movegens\":0}"));
+  free(body);
+  error_stack_destroy(error_stack);
+}
+
+// A static player in a request: no simulation, no derived files, no solving.
+#define STATIC_CSW21_PLAYER                                                    \
+  "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "                           \
+  "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "               \
+  "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "          \
+  "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "                      \
+  "\"use_wordmap\": false, \"use_rit\": false, \"use_wit\": false, "           \
+  "\"endgame_plies\": 0, \"peg_max_bag\": 0}"
+
+// Runs a task through the executor contribute runs every claim through,
+// returning its result and setting *movegens.
+static char *execute_task(const char *job_type, const char *request_json,
+                          int threads, uint64_t *movegens) {
+  Config *config = config_create_default_test();
+  ErrorStack *error_stack = error_stack_create();
+  Config *task_config = config_create_for_contribute(config, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *request = json_parse(request_json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *result_json = NULL;
+  assert(config_contribute_execute(task_config, job_type, request, threads,
+                                   NULL, &result_json, movegens, error_stack));
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    assert(false);
+  }
+  assert(result_json);
+  json_destroy(request);
+  error_stack_destroy(error_stack);
+  config_destroy_for_contribute(task_config);
+  config_destroy(config);
+  return result_json;
+}
+
+// A task reports the move generations it made, on every thread it ran. The
+// cases this pins: a static opening-rack analysis is one generation a rack;
+// a batch of static games is at least one a turn, and the same count however
+// many threads play it, since the games themselves are the same; and a job
+// type this build does not know runs nothing.
+static void test_a_task_counts_its_move_generations(void) {
+  const char *racks[] = {"AEINRST", "?AEILNT", "AABBCDE", "QI", "EEEIIOU"};
+  const int num_racks = (int)(sizeof(racks) / sizeof(racks[0]));
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(
+      sb, "{\"job_type\": \"opening_rack\", \"variant\": \"classic\", "
+          "\"letter_distribution\": \"english\", "
+          "\"board_layout\": \"standard15\", \"seed\": \"7\", "
+          "\"bingo_bonus\": 50, \"sim_cutoff\": 0.005, \"racks\": [");
+  for (int i = 0; i < num_racks; i++) {
+    string_builder_add_formatted_string(sb, "%s\"%s\"", i ? ", " : "",
+                                        racks[i]);
+  }
+  string_builder_add_string(sb, "], \"player\": " STATIC_CSW21_PLAYER "}");
+  uint64_t movegens = 0;
+  char *result =
+      execute_task("opening_rack", string_builder_peek(sb), 2, &movegens);
+  string_builder_destroy(sb);
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *parsed = json_parse(result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(json_array_length(json_object_get(parsed, CONTRIBUTE_KEY_RACKS)) ==
+         num_racks);
+  json_destroy(parsed);
+  free(result);
+  assert(movegens == (uint64_t)num_racks);
+
+  const char *games_request =
+      "{\"job_type\": \"games\", \"variant\": \"classic\", "
+      "\"letter_distribution\": \"english\", "
+      "\"board_layout\": \"standard15\", \"seed\": \"41\", "
+      "\"num_games\": 6, \"capture_positions\": true, "
+      "\"capture_first_divergence\": false, \"bingo_bonus\": 50, "
+      "\"sim_cutoff\": 0.005, \"player1\": " STATIC_CSW21_PLAYER
+      ", \"player2\": " STATIC_CSW21_PLAYER "}";
+  uint64_t first_movegens = 0;
+  const int thread_counts[] = {1, 3};
+  for (size_t t = 0; t < sizeof(thread_counts) / sizeof(thread_counts[0]);
+       t++) {
+    result = execute_task("games", games_request, thread_counts[t], &movegens);
+    parsed = json_parse(result, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    // A captured position for every turn played.
+    const int turns =
+        json_array_length(json_object_get(parsed, CONTRIBUTE_KEY_POSITIONS));
+    assert(turns >= 6 * 10);
+    assert(movegens >= (uint64_t)turns);
+    if (t == 0) {
+      first_movegens = movegens;
+    } else {
+      assert(movegens == first_movegens);
+    }
+    json_destroy(parsed);
+    free(result);
+  }
+
+  // Nothing run, nothing counted.
+  Config *config = config_create_default_test();
+  const JsonValue *request = json_parse("{}", error_stack);
+  char *none = NULL;
+  movegens = 99;
+  assert(!config_contribute_execute(config, "no_such_job", request, 1, NULL,
+                                    &none, &movegens, error_stack));
+  assert(error_stack_is_empty(error_stack));
+  assert(!none && movegens == 0);
+  json_destroy(request);
+  config_destroy(config);
+  error_stack_destroy(error_stack);
 }
 
 // The board of a CGP: everything before its first space.
@@ -2696,5 +2860,7 @@ void test_contribute(void) {
   test_only_a_data_shutdown_is_waited_out_for_a_set_aside_job();
   test_the_claim_body_matches_the_claim_fixture();
   test_the_decline_body_matches_the_decline_fixture();
+  test_the_result_body_carries_movegens();
+  test_a_task_counts_its_move_generations();
   test_an_unverifiable_assignment_is_refused();
 }

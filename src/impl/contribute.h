@@ -16,6 +16,7 @@
 #include "../util/io_util.h"
 #include "../util/json.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct ContributeState ContributeState;
 
@@ -208,8 +209,16 @@ void contribute_decline_derived_mismatch(ContributeState *state,
                                          ThreadControl *thread_control,
                                          ErrorStack *error_stack);
 
+// The body of POST /api/worker/result: the claim it answers, the task's
+// result (`result_json`, an object, as is), and `movegens`, the move
+// generations this machine made computing it -- what the server credits the
+// contributor with. The caller frees. Exposed for tests.
+char *contribute_result_body(const char *claim_token, const char *result_json,
+                             uint64_t movegens);
+
 // Submits the result for the task claimed by the last contribute_claim_task
-// call and stops its heartbeat. Exactly one of result_json/error_message
+// call, with the move generations it took (see contribute_result_body), and
+// stops its heartbeat. Exactly one of result_json/error_message
 // should be non-NULL: result_json on success, error_message (printed for the
 // contributor, not sent to the server) on failure -- a failed task is never
 // submitted but handed straight back (a decline with reason `task_failed`),
@@ -218,7 +227,7 @@ void contribute_decline_derived_mismatch(ContributeState *state,
 // max_tasks stop the run.
 void contribute_submit_result(ContributeState *state,
                               ThreadControl *thread_control,
-                              const char *result_json,
+                              const char *result_json, uint64_t movegens,
                               const char *error_message,
                               ErrorStack *error_stack);
 

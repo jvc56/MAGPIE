@@ -19,6 +19,7 @@
 #include "../util/string_util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1282,6 +1283,22 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   release_claim(state);
 }
 
+char *contribute_result_body(const char *claim_token, const char *result_json,
+                             uint64_t movegens) {
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_string_field(sb, "claim_token", claim_token, &first);
+  json_write_raw_key(sb, "result", &first);
+  string_builder_add_string(sb, result_json);
+  // Beside the result, not in it: it is what this machine spent on the task,
+  // credited to the contributor, not part of what the task computed.
+  json_write_raw_key(sb, "movegens", &first);
+  string_builder_add_formatted_string(sb, "%" PRIu64, movegens);
+  json_write_object_end(sb);
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
 typedef enum {
   CONTRIBUTE_SUBMIT_ACCEPTED,
   // 200 with {"accepted": false}: the claim had lapsed and been reassigned,
@@ -1299,16 +1316,9 @@ typedef enum {
 // goes on error_stack and ends the run, as before.
 static contribute_submit_outcome_t
 submit_result_over_http(HttpClient *client, const char *claim_token,
-                        const char *result_json, char **rejection,
-                        ErrorStack *error_stack) {
-  StringBuilder *sb = string_builder_create();
-  bool first = true;
-  json_write_object_start(sb);
-  json_write_string_field(sb, "claim_token", claim_token, &first);
-  json_write_raw_key(sb, "result", &first);
-  string_builder_add_string(sb, result_json);
-  json_write_object_end(sb);
-  char *body = string_builder_dump_and_destroy(sb, NULL);
+                        const char *result_json, uint64_t movegens,
+                        char **rejection, ErrorStack *error_stack) {
+  char *body = contribute_result_body(claim_token, result_json, movegens);
 
   ChttpResponse response;
   http_client_post_json(client, "/api/worker/result", body, &response,
@@ -1361,7 +1371,7 @@ static void decline_failed_task(ContributeState *state) {
 
 void contribute_submit_result(ContributeState *state,
                               ThreadControl *thread_control,
-                              const char *result_json,
+                              const char *result_json, uint64_t movegens,
                               const char *error_message,
                               ErrorStack *error_stack) {
   // The heartbeat is kept going through the submission below, not stopped
@@ -1392,7 +1402,7 @@ void contribute_submit_result(ContributeState *state,
     char *rejection = NULL;
     const contribute_submit_outcome_t outcome =
         submit_result_over_http(state->http_client, state->claim_token,
-                                result_json, &rejection, error_stack);
+                                result_json, movegens, &rejection, error_stack);
     heartbeat_stop(&state->heartbeat);
     if (error_stack_is_empty(error_stack)) {
       switch (outcome) {
