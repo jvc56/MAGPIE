@@ -11,6 +11,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -451,8 +452,95 @@ static inline uint32_t max_inlined_words(uint32_t word_length) {
   return WMP_INLINE_VALUE_BYTES / word_length;
 }
 
+// For one word length, the last byte of every inline word slot after the
+// first, as masks over the low and high 8 inline bytes read little-endian.
+typedef struct WMPInlineSlotEnds {
+  uint64_t low_mask;
+  uint64_t high_mask;
+  // The byte count when no slot after the first ends in a letter: the length,
+  // or 0 for a length too long for any slot.
+  uint8_t first_slot_bytes;
+  // ceil(2^WMP_INLINE_INVERSE_LENGTH_SHIFT / length). For k words, the byte
+  // count times this is k << WMP_INLINE_INVERSE_LENGTH_SHIFT plus less than
+  // k * length <= WMP_INLINE_VALUE_BYTES, so the shift leaves exactly k.
+  uint8_t inverse_length;
+} WMPInlineSlotEnds;
+
+// The masks are written for two 64-bit halves. The shift keeps the inverse
+// length multiply exact for every byte count and the inverse length of 2
+// within a byte.
+static_assert(WMP_INLINE_VALUE_BYTES == 2 * (int)sizeof(uint64_t),
+              "the slot masks cover two 64-bit halves");
+static_assert(WMP_INLINE_VALUE_BYTES <= (1 << WMP_INLINE_INVERSE_LENGTH_SHIFT),
+              "the word count multiply must be exact for every byte count");
+static_assert((1 << WMP_INLINE_INVERSE_LENGTH_SHIFT) / 2 <= UINT8_MAX,
+              "the inverse length of 2 must fit in a byte");
+
+// Words have at least two letters, so the entries for lengths 0 and 1 are
+// never read and stay zero.
+static const WMPInlineSlotEnds
+    wmp_inline_slot_ends[WMP_INLINE_SLOT_TABLE_SIZE] = {
+        // Bytes 3, 5, 7, 9, 11, 13 and 15.
+        [2] = {0xFF00FF00FF000000ULL, 0xFF00FF00FF00FF00ULL, 2, 128},
+        // Bytes 5, 8, 11 and 14.
+        [3] = {0x0000FF0000000000ULL, 0x00FF0000FF0000FFULL, 3, 86},
+        // Bytes 7, 11 and 15.
+        [4] = {0xFF00000000000000ULL, 0xFF000000FF000000ULL, 4, 64},
+        // Bytes 9 and 14.
+        [5] = {0, 0x00FF00000000FF00ULL, 5, 52},
+        // Byte 11.
+        [6] = {0, 0x00000000FF000000ULL, 6, 43},
+        // Byte 13.
+        [7] = {0, 0x0000FF0000000000ULL, 7, 37},
+        // Byte 15.
+        [8] = {0, 0xFF00000000000000ULL, 8, 32},
+        // A single slot.
+        [9] = {0, 0, 9, 29},
+        [10] = {0, 0, 10, 26},
+        [11] = {0, 0, 11, 24},
+        [12] = {0, 0, 12, 22},
+        [13] = {0, 0, 13, 20},
+        [14] = {0, 0, 14, 19},
+        [15] = {0, 0, 15, 18},
+        [16] = {0, 0, 16, 16},
+        // Longer words never fit, and their entries stay zero.
+};
+
+// The number of bytes of a little-endian load up to and including its last
+// nonzero byte. Zero is counted as one byte; callers choose their own value
+// for it.
+static inline int wmp_bytes_through_last_nonzero(uint64_t bits) {
+  bits |= 1;
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return 8 - (__builtin_clzll(bits) >> 3);
+#else
+  int num_bytes = 8;
+  while ((bits >> 56) == 0) {
+    bits <<= 8;
+    num_bytes--;
+  }
+  return num_bytes;
+#endif
+}
+
+// The inlined words end with the last word slot that ends in a letter. Only
+// the last byte of each slot after the first is tested, so the bytes past the
+// words need not be zero.
 static inline int wmp_entry_number_of_inlined_bytes(const WMPEntry *entry,
                                                     int word_length) {
+#if IS_LITTLE_ENDIAN
+  const WMPInlineSlotEnds *slot_ends = &wmp_inline_slot_ends[word_length];
+  uint64_t low;
+  uint64_t high;
+  memcpy(&low, entry->bucket_or_inline, sizeof(low));
+  memcpy(&high, entry->bucket_or_inline + sizeof(low), sizeof(high));
+  low &= slot_ends->low_mask;
+  high &= slot_ends->high_mask;
+  const int low_bytes = low != 0 ? wmp_bytes_through_last_nonzero(low)
+                                 : slot_ends->first_slot_bytes;
+  return high != 0 ? (int)sizeof(low) + wmp_bytes_through_last_nonzero(high)
+                   : low_bytes;
+#else
   int num_bytes = (int)max_inlined_words(word_length) * word_length;
   while (num_bytes > word_length) {
     const int byte_idx = num_bytes - 1;
@@ -462,6 +550,14 @@ static inline int wmp_entry_number_of_inlined_bytes(const WMPEntry *entry,
     num_bytes -= word_length;
   }
   return num_bytes;
+#endif
+}
+
+static inline int wmp_entry_number_of_inlined_words(const WMPEntry *entry,
+                                                    int word_length) {
+  return (wmp_entry_number_of_inlined_bytes(entry, word_length) *
+          wmp_inline_slot_ends[word_length].inverse_length) >>
+         WMP_INLINE_INVERSE_LENGTH_SHIFT;
 }
 
 static inline int wmp_entry_write_inlined_blankless_words_to_buffer(
@@ -489,8 +585,7 @@ static inline const MachineLetter *
 wmp_entry_get_blankless_words(const WMPEntry *entry, const WMPForLength *wfl,
                               int word_length, int *num_words_out) {
   if (wmp_entry_is_inlined(entry)) {
-    *num_words_out =
-        wmp_entry_number_of_inlined_bytes(entry, word_length) / word_length;
+    *num_words_out = wmp_entry_number_of_inlined_words(entry, word_length);
     return entry->bucket_or_inline;
   }
   *num_words_out = (int)entry->num_words;

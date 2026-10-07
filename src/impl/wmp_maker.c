@@ -861,7 +861,7 @@ static uint32_t wfl_get_word_count(const WMPForLength *wfl,
     if (bit_rack_equals(&entry_rack, bit_rack)) {
       const WMPEntry *e = &wfl->word_map_entries[i];
       if (wmp_entry_is_inlined(e)) {
-        return wmp_entry_number_of_inlined_bytes(e, word_length) / word_length;
+        return (uint32_t)wmp_entry_number_of_inlined_words(e, word_length);
       }
       return e->num_words;
     }

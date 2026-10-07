@@ -1,12 +1,22 @@
 #ifndef WMP_DEFS_H
 #define WMP_DEFS_H
 
+#include "board_defs.h"
 #include <stdint.h>
 
 enum {
   WMP_INLINE_VALUE_BYTES = 16,
   WMP_NONINLINE_PADDING_BYTES =
       WMP_INLINE_VALUE_BYTES - 2 * sizeof(uint32_t) - 1,
+  // The inline slot table covers every word length an entry can be read at
+  // and every length a word slot can have.
+  WMP_INLINE_SLOT_TABLE_SIZE =
+      (BOARD_DIM > WMP_INLINE_VALUE_BYTES ? BOARD_DIM
+                                          : WMP_INLINE_VALUE_BYTES) +
+      1,
+  // An inlined byte count times the table's inverse length, shifted right by
+  // this, is the word count.
+  WMP_INLINE_INVERSE_LENGTH_SHIFT = 8,
   WMP_BITRACK_BYTES = 16,
   WMP_BUCKET_ITEMS_CAPACITY = 1,
   WMP_EARLIEST_SUPPORTED_VERSION = 3,
