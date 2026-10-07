@@ -525,16 +525,17 @@ static inline void wmp_entry_write_bit_rack(WMPEntry *entry,
 #endif
 }
 
-static inline int wmp_index_lowest_slot(uint32_t slot_bits) {
+// bits must be nonzero.
+static inline int wmp_lowest_set_bit(uint32_t bits) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctz)
-  return __builtin_ctz(slot_bits);
+  return __builtin_ctz(bits);
 #else
-  int slot_idx = 0;
-  while ((slot_bits & 1U) == 0) {
-    slot_bits >>= 1;
-    slot_idx++;
+  int bit_idx = 0;
+  while ((bits & 1U) == 0) {
+    bits >>= 1;
+    bit_idx++;
   }
-  return slot_idx;
+  return bit_idx;
 #endif
 }
 
@@ -560,7 +561,7 @@ static inline const WMPEntry *wfl_index_get_entry(const WMPForLength *wfl,
       empty_slots |= (uint32_t)((key_low | key_high) == 0) << slot_idx;
     }
     if (matching_slots != 0) {
-      return &bucket[wmp_index_lowest_slot(matching_slots)];
+      return &bucket[wmp_lowest_set_bit(matching_slots)];
     }
     if (empty_slots != 0) {
       return NULL;
@@ -606,22 +607,25 @@ static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
                                                    buffer);
 }
 
+// Writes the words for each letter at or above min_ml that the blank
+// designates in the entry, in letter order. Each word rack is built in a
+// copy, so *bit_rack is never written.
 static inline int
 wmp_entry_write_blanks_to_buffer(const WMPEntry *entry, const WMPForLength *wfl,
-                                 BitRack *bit_rack, int word_length,
+                                 const BitRack *bit_rack, int word_length,
                                  MachineLetter min_ml, uint8_t *buffer) {
+  BitRack blankless_rack = *bit_rack;
+  bit_rack_set_letter_count(&blankless_rack, BLANK_MACHINE_LETTER, 0);
+  uint32_t letters = entry->blank_letters & ~((1U << min_ml) - 1U);
   int bytes_written = 0;
-  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
-  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
-  for (MachineLetter ml = min_ml; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-    if (entry->blank_letters & (1ULL << ml)) {
-      bit_rack_add_letter(bit_rack, ml);
-      bytes_written += wfl_write_blankless_words_to_buffer(
-          wfl, bit_rack, word_length, buffer + bytes_written);
-      bit_rack_take_letter(bit_rack, ml);
-    }
+  while (letters != 0) {
+    const MachineLetter ml = (MachineLetter)wmp_lowest_set_bit(letters);
+    letters &= letters - 1U;
+    BitRack word_rack = blankless_rack;
+    bit_rack_add_letter(&word_rack, ml);
+    bytes_written += wfl_write_blankless_words_to_buffer(
+        wfl, &word_rack, word_length, buffer + bytes_written);
   }
-  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 1);
   return bytes_written;
 }
 
@@ -712,7 +716,8 @@ wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
 }
 
 static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
-                                             BitRack *bit_rack, int word_length,
+                                             const BitRack *bit_rack,
+                                             int word_length,
                                              MachineLetter min_ml,
                                              uint8_t *buffer) {
   const WMPEntry *entry = wfl_get_blank_entry(wfl, bit_rack);
@@ -723,27 +728,31 @@ static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
                                           min_ml, buffer);
 }
 
+// Expands the first blank over the letters the entry designates, in letter
+// order, and the second over the same letter or later ones. Each one-blank
+// rack is built in a copy, so *bit_rack is never written.
 static inline int wmp_entry_write_double_blanks_to_buffer(
-    const WMPEntry *entry, const WMPForLength *wfl, BitRack *bit_rack,
+    const WMPEntry *entry, const WMPForLength *wfl, const BitRack *bit_rack,
     int word_length, uint8_t *buffer) {
+  BitRack one_blank_rack = *bit_rack;
+  bit_rack_set_letter_count(&one_blank_rack, BLANK_MACHINE_LETTER, 1);
+  // Bit 0 would be the blank itself.
+  uint32_t letters = entry->first_blank_letters & ~1U;
   int bytes_written = 0;
-  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 1);
-  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
-  for (MachineLetter ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-    if (entry->blank_letters & (1ULL << ml)) {
-      bit_rack_add_letter(bit_rack, ml);
-      bytes_written += wfl_write_blanks_to_buffer(wfl, bit_rack, word_length,
-                                                  ml, buffer + bytes_written);
-      bit_rack_take_letter(bit_rack, ml);
-    }
+  while (letters != 0) {
+    const MachineLetter ml = (MachineLetter)wmp_lowest_set_bit(letters);
+    letters &= letters - 1U;
+    BitRack blank_rack = one_blank_rack;
+    bit_rack_add_letter(&blank_rack, ml);
+    bytes_written += wfl_write_blanks_to_buffer(wfl, &blank_rack, word_length,
+                                                ml, buffer + bytes_written);
   }
-  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 2);
   return bytes_written;
 }
 
 static inline int wmp_entry_write_words_to_buffer(const WMPEntry *entry,
                                                   const WMP *wmp,
-                                                  BitRack *bit_rack,
+                                                  const BitRack *bit_rack,
                                                   int word_length,
                                                   uint8_t *buffer) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
@@ -767,7 +776,8 @@ static inline int wmp_entry_write_words_to_buffer(const WMPEntry *entry,
   return result;
 }
 
-static inline int wmp_write_words_to_buffer(const WMP *wmp, BitRack *bit_rack,
+static inline int wmp_write_words_to_buffer(const WMP *wmp,
+                                            const BitRack *bit_rack,
                                             int word_length, uint8_t *buffer) {
   const WMPEntry *entry = wmp_get_word_entry(wmp, bit_rack, word_length);
   if (entry == NULL) {
