@@ -164,7 +164,7 @@ static void test_combined_wit_format(void) {
   WordInfoTable *wit = make_word_info_table_from_words(words);
   wit->kwg_hash = 1234567;
   // A table with a KWG hash carries position lengths, as the maker builds.
-  word_info_table_build_position_lengths(wit);
+  word_info_table_build_position_lengths(wit, 1);
   size_t positional_bytes = 0;
   for (int length = WIT_POSITION_MIN_BASE_LENGTH;
        length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {

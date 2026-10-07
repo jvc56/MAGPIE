@@ -210,7 +210,7 @@ static void write_wit_with_copied_identity(const char *filename,
                                            const KWG *contents,
                                            uint64_t copied_identity) {
   ErrorStack *error_stack = error_stack_create();
-  WordInfoTable *wit = make_word_info_table_from_kwg(contents);
+  WordInfoTable *wit = make_word_info_table_from_kwg(contents, 1);
   make_word_plus_floater_from_kwg(contents, wit, error_stack);
   assert(error_stack_is_empty(error_stack));
   wit->kwg_hash = copied_identity;

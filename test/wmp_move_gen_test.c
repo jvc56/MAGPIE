@@ -835,8 +835,8 @@ static void test_shadow_playthrough_restoration(void) {
   for (int wit_enabled = 0; wit_enabled <= 1; wit_enabled++) {
     if (wit_enabled) {
       PlayersData *players_data = config_get_players_data(config);
-      WordInfoTable *wit =
-          make_word_info_table_from_kwg(players_data_get_kwg(players_data, 0));
+      WordInfoTable *wit = make_word_info_table_from_kwg(
+          players_data_get_kwg(players_data, 0), 1);
       players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, wit);
       players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, wit);
     }

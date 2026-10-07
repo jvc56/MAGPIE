@@ -441,7 +441,7 @@ void convert_with_names(const LetterDistribution *ld,
           data_paths, output_name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
           error_stack);
       if (error_stack_is_empty(error_stack)) {
-        WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+        WordInfoTable *wit = make_word_info_table_from_kwg(kwg, num_threads);
         make_word_plus_floater_from_kwg(kwg, wit, error_stack);
         if (error_stack_is_empty(error_stack)) {
           word_info_table_write_to_file(wit, wit_output_filename, error_stack);

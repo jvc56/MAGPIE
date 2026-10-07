@@ -2,7 +2,6 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/endian_io.h"
-#include "../compat/memory_info.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../util/fileproxy.h"
@@ -217,7 +216,8 @@ static void *wit_position_worker(void *arg) {
   }
 }
 
-void word_info_table_build_position_lengths(WordInfoTable *wit) {
+void word_info_table_build_position_lengths(WordInfoTable *wit,
+                                            int num_threads) {
   word_info_table_clear_position_lengths(wit);
   if (wit->kwg_hash == 0) {
     return;
@@ -255,7 +255,6 @@ void word_info_table_build_position_lengths(WordInfoTable *wit) {
     }
     build.lengths[insert_idx] = length;
   }
-  int num_threads = get_num_cores();
   if (num_threads > build.num_lengths) {
     num_threads = build.num_lengths;
   }
@@ -614,8 +613,10 @@ void word_info_table_load(WordInfoTable *wit, const char *name,
        length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
     has_position_lengths |= wit->position_lengths[length] != NULL;
   }
+  // Like the other tables, loading uses no threads: only a version-3 or -4
+  // file lacks the rows, and kwg2witifneeded upgrades it.
   if (!has_position_lengths) {
-    word_info_table_build_position_lengths(wit);
+    word_info_table_build_position_lengths(wit, 1);
   }
 }
 

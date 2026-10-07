@@ -163,7 +163,10 @@ static inline void word_info_table_clear_position_lengths(WordInfoTable *wit) {
 
 // Requires a complete validated WIT dictionary, as produced by the native
 // maker or loader. A zero source fingerprint leaves this optional cache absent.
-void word_info_table_build_position_lengths(WordInfoTable *wit);
+// Uses num_threads threads (at most one per word length; 1 if num_threads <
+// 1).
+void word_info_table_build_position_lengths(WordInfoTable *wit,
+                                            int num_threads);
 
 static inline void word_info_table_destroy(WordInfoTable *wit) {
   if (wit == NULL) {
