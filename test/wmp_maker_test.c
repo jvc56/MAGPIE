@@ -35,7 +35,8 @@ void test_make_wmp_from_kwg(void) {
   assert(wmp->board_dim == BOARD_DIM);
 
   // Verify it can look up words
-  MachineLetter *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  MachineLetter *buffer =
+      malloc_or_die(wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES);
 
   // Test basic word lookup
   BitRack aa = string_to_bit_rack(ld, "AA");
@@ -74,7 +75,8 @@ void test_make_wmp_from_kwg(void) {
   // Verify same lookup results for a few test cases
   BitRack test_rack = string_to_bit_rack(ld, "RETINAS");
   int bytes1 = wmp_write_words_to_buffer(wmp, &test_rack, 7, buffer);
-  MachineLetter *buffer2 = malloc_or_die(wmp_from_words->max_word_lookup_bytes);
+  MachineLetter *buffer2 = malloc_or_die(wmp_from_words->max_word_lookup_bytes +
+                                         WMP_WORD_BUFFER_SLACK_BYTES);
   int bytes2 =
       wmp_write_words_to_buffer(wmp_from_words, &test_rack, 7, buffer2);
   assert(bytes1 == bytes2);
@@ -117,7 +119,8 @@ void test_make_wmp_from_dawg_only_kwg(void) {
   assert(wmp->version == WMP_VERSION);
   assert(wmp->board_dim == BOARD_DIM);
 
-  MachineLetter *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  MachineLetter *buffer =
+      malloc_or_die(wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES);
 
   // Test basic word lookup - AA
   BitRack aa = string_to_bit_rack(ld, "AA");
@@ -210,7 +213,8 @@ void test_make_wmp_from_words(void) {
   assert(wmp->board_dim == BOARD_DIM);
   assert(wmp->max_word_lookup_bytes == 8 * 47); // EIQSTU??
 
-  MachineLetter *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  MachineLetter *buffer =
+      malloc_or_die(wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES);
 
   BitRack iq = string_to_bit_rack(ld, "IQ");
   int bytes_written = wmp_write_words_to_buffer(wmp, &iq, 2, buffer);

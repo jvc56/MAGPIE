@@ -394,7 +394,7 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   if (wmp != NULL && (entry->nonplaythrough_has_word_of_length_bitmask &
                       (1U << RACK_SIZE)) != 0) {
     BitRack full_bit_rack = bit_rack_create_from_rack(ld, &player_rack);
-    MachineLetter buf[WMP_RESULT_BUFFER_SIZE];
+    MachineLetter buf[WMP_RESULT_BUFFER_SIZE + WMP_WORD_BUFFER_SLACK_BYTES];
     const int bytes =
         wmp_write_words_to_buffer(wmp, &full_bit_rack, RACK_SIZE, buf);
     const int num_words = bytes / RACK_SIZE;

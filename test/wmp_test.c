@@ -96,7 +96,8 @@ void test_short_and_long_words(void) {
 
   WMP *wmp = wmp_create_or_die("testdata", "CSW21_3or15");
 
-  MachineLetter *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  MachineLetter *buffer =
+      malloc_or_die(wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES);
   BitRack inq = string_to_bit_rack(ld, "INQ");
   int bytes_written = wmp_write_words_to_buffer(wmp, &inq, 3, buffer);
   assert(bytes_written == 3);
@@ -323,9 +324,12 @@ static int reference_write_double_blanks(const WMPEntry *entry,
   return bytes_written;
 }
 
+// The words go at the end of the buffer with exactly the writers' slack
+// after them, so a write past the slack is out of bounds.
 static void assert_expansion_matches_reference(const WMP *wmp,
                                                const WMPEntry *entry,
                                                int length, uint8_t *buffer,
+                                               int buffer_size,
                                                uint8_t *expected) {
   const WMPForLength *wfl = &wmp->wfls[length];
   const BitRack bit_rack = wmp_entry_read_bit_rack(entry);
@@ -338,30 +342,35 @@ static void assert_expansion_matches_reference(const WMP *wmp,
                                           expected);
   // The loops leave the rack as they found it.
   assert(bit_rack_equals(&reference_rack, &bit_rack));
+  uint8_t *output =
+      buffer + (buffer_size - expected_bytes - WMP_WORD_BUFFER_SLACK_BYTES);
   const int bytes_written =
-      wmp_entry_write_words_to_buffer(entry, wmp, &bit_rack, length, buffer);
+      wmp_entry_write_words_to_buffer(entry, wmp, &bit_rack, length, output);
   assert(bytes_written == expected_bytes);
-  assert(memcmp(buffer, expected, (size_t)bytes_written) == 0);
+  assert(memcmp(output, expected, (size_t)bytes_written) == 0);
 }
 
 // Every single and double blank entry of every length expands to the same
-// bytes as the reference loops.
+// bytes as the reference loops, writing nothing past the slack.
 static void test_blank_expansion_matches_reference(void) {
   WMP *wmp = wmp_create_or_die("testdata", "CSW21");
-  uint8_t *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  const int buffer_size =
+      (int)wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES;
+  uint8_t *buffer = malloc_or_die(buffer_size);
   uint8_t *expected = malloc_or_die(wmp->max_word_lookup_bytes);
   for (int length = 2; length <= BOARD_DIM; length++) {
     const WMPForLength *wfl = &wmp->wfls[length];
     for (uint32_t entry_idx = 0; entry_idx < wfl->num_blank_entries;
          entry_idx++) {
-      assert_expansion_matches_reference(
-          wmp, &wfl->blank_map_entries[entry_idx], length, buffer, expected);
+      assert_expansion_matches_reference(wmp,
+                                         &wfl->blank_map_entries[entry_idx],
+                                         length, buffer, buffer_size, expected);
     }
     for (uint32_t entry_idx = 0; entry_idx < wfl->num_double_blank_entries;
          entry_idx++) {
       assert_expansion_matches_reference(
           wmp, &wfl->double_blank_map_entries[entry_idx], length, buffer,
-          expected);
+          buffer_size, expected);
     }
   }
   free(expected);

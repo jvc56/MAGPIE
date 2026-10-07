@@ -22,6 +22,12 @@ enum {
   WMP_EARLIEST_SUPPORTED_VERSION = 3,
   WMP_VERSION = 3,
   WMP_RESULT_BUFFER_SIZE = 7000,
+  // A blank expansion copies each inlined word list with one
+  // WMP_INLINE_VALUE_BYTES move, so the word writers can store fewer than
+  // this many bytes past the end of the words they return. Every buffer
+  // passed to them needs this much room beyond the longest result
+  // (max_word_lookup_bytes, expected to be at most WMP_RESULT_BUFFER_SIZE).
+  WMP_WORD_BUFFER_SLACK_BYTES = WMP_INLINE_VALUE_BYTES,
   WMP_INDEX_MIN_BUCKETS = 16,
   // At most this percent of the index's slots hold entries.
   WMP_INDEX_MAX_FILL_PERCENT = 75,

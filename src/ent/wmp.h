@@ -25,7 +25,8 @@
 // Use the following either to dynamically allocate buffers for intermediate
 // and final results, or to validate that statically allocated buffers are
 // large enough.
-// 4 bytes: maximum size in bytes of word lookup results
+// 4 bytes: maximum size in bytes of word lookup results (a buffer for them
+//          needs WMP_WORD_BUFFER_SLACK_BYTES more)
 // 4 bytes: maximum size in bytes of blank pair results
 // xxxxxx: repeated WordOfSameLengthMap binary data
 
@@ -689,7 +690,9 @@ wfl_get_present_word_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
 }
 
 // Called for the letters a blank entry says complete a word, so the
-// blankless rack is known to be present.
+// blankless rack is known to be present. An inlined word list is copied with
+// one WMP_INLINE_VALUE_BYTES move, which can write up to
+// WMP_WORD_BUFFER_SLACK_BYTES past the words.
 static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
                                                       const BitRack *bit_rack,
                                                       int word_length,
@@ -698,8 +701,12 @@ static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
   if (entry == NULL) {
     return 0;
   }
-  return wmp_entry_write_blankless_words_to_buffer(entry, wfl, word_length,
-                                                   buffer);
+  if (wmp_entry_is_inlined(entry)) {
+    memcpy(buffer, entry->bucket_or_inline, WMP_INLINE_VALUE_BYTES);
+    return wmp_entry_number_of_inlined_bytes(entry, word_length);
+  }
+  return wmp_entry_write_uninlined_blankless_words_to_buffer(
+      entry, wfl, word_length, buffer);
 }
 
 // Writes the words for each letter at or above min_ml that the blank
@@ -845,6 +852,9 @@ static inline int wmp_entry_write_double_blanks_to_buffer(
   return bytes_written;
 }
 
+// Writes the words of the entry's rack and returns the bytes they fill. The
+// buffer needs max_word_lookup_bytes plus WMP_WORD_BUFFER_SLACK_BYTES, as a
+// blank expansion can store past the words it returns.
 static inline int wmp_entry_write_words_to_buffer(const WMPEntry *entry,
                                                   const WMP *wmp,
                                                   const BitRack *bit_rack,
@@ -871,6 +881,8 @@ static inline int wmp_entry_write_words_to_buffer(const WMPEntry *entry,
   return result;
 }
 
+// Looks up the rack and writes its words like
+// wmp_entry_write_words_to_buffer, so the buffer needs the same slack.
 static inline int wmp_write_words_to_buffer(const WMP *wmp,
                                             const BitRack *bit_rack,
                                             int word_length, uint8_t *buffer) {
