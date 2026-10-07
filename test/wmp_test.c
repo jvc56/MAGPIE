@@ -1,6 +1,7 @@
 #include "wmp_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/def/board_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/wmp_defs.h"
 #include "../src/ent/bit_rack.h"
@@ -19,8 +20,10 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 long get_file_size(const char *filename) {
   ErrorStack *error_stack = error_stack_create();
@@ -125,6 +128,71 @@ void test_short_and_long_words(void) {
   config_destroy(config);
 }
 
+// The entry for bit_rack found the way the file lays the words out: through
+// the bucket starts, by the full BitRack mix.
+static const WMPEntry *get_entry_by_bucket_starts(const WMPForLength *wfl,
+                                                  const BitRack *bit_rack) {
+  const uint32_t bucket_idx =
+      bit_rack_get_bucket_index(bit_rack, wfl->num_word_buckets);
+  for (uint32_t entry_idx = wfl->word_bucket_starts[bucket_idx];
+       entry_idx < wfl->word_bucket_starts[bucket_idx + 1]; entry_idx++) {
+    const BitRack key =
+        wmp_entry_read_bit_rack(&wfl->word_map_entries[entry_idx]);
+    if (bit_rack_equals(&key, bit_rack)) {
+      return &wfl->word_map_entries[entry_idx];
+    }
+  }
+  return NULL;
+}
+
+static void assert_same_entry(const WMPEntry *expected, const WMPEntry *got) {
+  if (expected == NULL) {
+    assert(got == NULL);
+    return;
+  }
+  assert(got != NULL);
+  assert(memcmp(expected, got, sizeof(WMPEntry)) == 0);
+}
+
+// Every blankless entry is found through the filter and the index, and racks
+// one tile away from an entry get the same answer from the index as from the
+// bucket starts.
+void test_word_index_matches_bucket_starts(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const int ld_size = ld_get_size(config_get_ld(config));
+  WMP *wmp = wmp_create_or_die("testdata", "CSW21");
+  for (int length = 2; length <= BOARD_DIM; length++) {
+    const WMPForLength *wfl = &wmp->wfls[length];
+    for (uint32_t entry_idx = 0; entry_idx < wfl->num_word_entries;
+         entry_idx++) {
+      const WMPEntry *entry = &wfl->word_map_entries[entry_idx];
+      const BitRack key = wmp_entry_read_bit_rack(entry);
+      assert_same_entry(entry, wfl_get_word_entry(wfl, &key));
+      assert_same_entry(entry, wfl_get_present_word_entry(wfl, &key));
+      if (entry_idx % 16 != 0) {
+        continue;
+      }
+      for (int from_ml = 1; from_ml < ld_size; from_ml++) {
+        if (bit_rack_get_letter(&key, from_ml) == 0) {
+          continue;
+        }
+        for (int to_ml = 1; to_ml < ld_size; to_ml++) {
+          if (to_ml == from_ml) {
+            continue;
+          }
+          BitRack neighbor = key;
+          bit_rack_take_letter(&neighbor, from_ml);
+          bit_rack_add_letter(&neighbor, to_ml);
+          assert_same_entry(get_entry_by_bucket_starts(wfl, &neighbor),
+                            wfl_get_word_entry(wfl, &neighbor));
+        }
+      }
+    }
+  }
+  wmp_destroy(wmp);
+  config_destroy(config);
+}
+
 void check_all_wmp_result_sizes_fit_in_buffer(void) {
   Config *config = config_create_or_die("");
   ErrorStack *error_stack = error_stack_create();
@@ -152,5 +220,6 @@ void check_all_wmp_result_sizes_fit_in_buffer(void) {
 void test_wmp(void) {
   write_wmp_files();
   test_short_and_long_words();
+  test_word_index_matches_bucket_starts();
   check_all_wmp_result_sizes_fit_in_buffer();
 }
