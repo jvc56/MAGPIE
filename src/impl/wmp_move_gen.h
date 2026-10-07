@@ -24,6 +24,9 @@ enum {
   MAX_WMP_MOVE_GEN_ANCHORS =
       ((RACK_SIZE + 1) * (MAX_POSSIBLE_PLAYTHROUGH_BLOCKS + 1)),
   WMP_ANCHOR_MASK_WORDS = (MAX_WMP_MOVE_GEN_ANCHORS + 63) / 64,
+  // Subracks covered by one candidate mask. A RACK_SIZE of 8 has up to 70
+  // subracks of one size, so callers take them in chunks of this many.
+  WMP_MOVE_GEN_SUBRACKS_PER_MASK = 64,
 };
 
 typedef struct SubrackInfo {
@@ -776,7 +779,92 @@ wmp_move_gen_get_nonplaythrough_subrack(const WMPMoveGen *wmp_move_gen,
   return &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size].subrack;
 }
 
-// Called once per canonical subrack from the hottest loop in wordmap_gen.
+// Bit i of the result marks subrack first_idx + i of the current anchor's size
+// as a candidate, one that might record a play. A clear bit means the subrack
+// would record nothing:
+// - Its lookup would be a blankless miss that the filter rejects. Every
+//   playthrough subrack is looked up, and so is a lazy nonplaythrough subrack
+//   that is still unresolved. A subrack with a blank is always a candidate.
+// - Its nonplaythrough entry is already resolved to NULL.
+// - prune_by_leave is set and its leave plus score_bound is below cutoff. The
+//   caller sets it only when the subrack's own leave check would skip such a
+//   subrack whenever it is reached.
+// Bits of *filter_misses mark the subracks that are still unresolved, kept by
+// the leave check, and rejected by the filter. Looking one up would store
+// NULL, so the caller stores that with wmp_move_gen_resolve_filter_miss. A
+// rejected playthrough subrack keeps its old wmp_entry instead of NULL, which
+// nothing reads: a playthrough entry is written before every read.
+//
+// Every subrack gets the same straight-line work with no branch on what it
+// holds, so the filter loads overlap and no branch mispredicts.
+static inline __attribute__((always_inline)) uint64_t
+wmp_move_gen_get_candidate_subracks(const WMPMoveGen *wmp_move_gen,
+                                    int first_idx, int count, bool lazy,
+                                    bool prune_by_leave, Equity score_bound,
+                                    Equity cutoff, uint64_t *filter_misses) {
+  assert(count <= WMP_MOVE_GEN_SUBRACKS_PER_MASK);
+  const int offset =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play) + first_idx;
+  const bool is_playthrough =
+      wmp_move_gen->word_length > wmp_move_gen->tiles_to_play;
+  const bool may_be_unresolved = lazy && !is_playthrough;
+  const SubrackInfo *nonplaythrough_infos =
+      &wmp_move_gen->nonplaythrough_infos[offset];
+  const SubrackInfo *lookup_infos =
+      is_playthrough ? &wmp_move_gen->playthrough_infos[offset]
+                     : nonplaythrough_infos;
+  const WMPForLength *wfl = &wmp_move_gen->wmp->wfls[wmp_move_gen->word_length];
+  // With no prune every subrack passes, whatever its leave value holds: the
+  // sum below is 64 bits wide and cannot fall below INT64_MIN.
+  const int64_t leave_cutoff = prune_by_leave ? (int64_t)cutoff : INT64_MIN;
+  uint64_t candidates = 0;
+  uint64_t misses = 0;
+  for (int bit_idx = 0; bit_idx < count; bit_idx++) {
+    // Each test is a 0 or 1 combined with bitwise operators, so the filter
+    // load is not conditional and nothing branches.
+    const BitRack *subrack = &lookup_infos[bit_idx].subrack;
+    const uint64_t has_blank =
+        (uint64_t)(bit_rack_get_letter(subrack, BLANK_MACHINE_LETTER) != 0);
+    const uint64_t may_have_words =
+        has_blank | (uint64_t)wfl_blankless_rack_may_have_words(wfl, subrack);
+    // A playthrough anchor's lookup decides alone, so its nonplaythrough
+    // entries are not read; on the lazy path some of them are stale.
+    const WMPEntry *entry =
+        is_playthrough ? NULL : nonplaythrough_infos[bit_idx].wmp_entry;
+    const uint64_t unresolved =
+        (uint64_t)(may_be_unresolved && entry == WMP_ENTRY_UNRESOLVED);
+    const uint64_t looked_up = (uint64_t)is_playthrough | unresolved;
+    const uint64_t may_record =
+        looked_up != 0 ? may_have_words : (uint64_t)(entry != NULL);
+    const int64_t leave_bound =
+        (int64_t)nonplaythrough_infos[bit_idx].leave_value + score_bound;
+    const uint64_t leave_kept = (uint64_t)(leave_bound >= leave_cutoff);
+    candidates |= (may_record & leave_kept) << bit_idx;
+    misses |= (unresolved & (may_have_words ^ 1) & leave_kept) << bit_idx;
+  }
+  *filter_misses = misses;
+  return candidates;
+}
+
+// Stores the NULL that looking up this lazy nonplaythrough subrack would
+// store, given that the filter rejected it, in the subrack and in the rack's
+// cache.
+static inline void wmp_move_gen_resolve_filter_miss(WMPMoveGen *wmp_move_gen,
+                                                    int idx_for_size) {
+  const int subrack_idx =
+      subracks_get_combination_offset(wmp_move_gen->tiles_to_play) +
+      idx_for_size;
+  SubrackInfo *subrack_info = &wmp_move_gen->nonplaythrough_infos[subrack_idx];
+  assert(subrack_info->wmp_entry == WMP_ENTRY_UNRESOLVED);
+  assert(wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack,
+                            wmp_move_gen->word_length) == NULL);
+  subrack_info->wmp_entry = NULL;
+  if (wmp_move_gen->nonplaythrough_wmp_entry_cache != NULL) {
+    wmp_move_gen->nonplaythrough_wmp_entry_cache[subrack_idx] = NULL;
+  }
+}
+
+// Called once per candidate subrack from the hottest loop in wordmap_gen.
 // clang inlines it there while it has a single caller; a second caller
 // anywhere in that translation unit flips the cost model and turns the loop
 // into a call per subrack (measured: about -5% sim throughput). Pin it.

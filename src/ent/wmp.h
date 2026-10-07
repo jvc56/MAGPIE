@@ -687,6 +687,16 @@ static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
   return wfl_index_get_entry(wfl, hash, bit_rack);
 }
 
+// False only when the filter proves the blankless rack has no words of this
+// length, in which case wfl_get_word_entry returns NULL. It has no branch, so
+// a caller can test many racks back to back. It is safe to call on a rack
+// with a blank, where the answer means nothing; such a caller ignores the
+// answer rather than branching on the blank first.
+static inline bool wfl_blankless_rack_may_have_words(const WMPForLength *wfl,
+                                                     const BitRack *bit_rack) {
+  return wfl_filter_may_contain(wfl, wmp_index_hash(bit_rack));
+}
+
 // For a rack whose words are known to exist, the filter would only add a
 // load.
 static inline const WMPEntry *

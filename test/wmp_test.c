@@ -171,6 +171,9 @@ void test_word_index_matches_bucket_starts(void) {
       const BitRack key = wmp_entry_read_bit_rack(entry);
       assert_same_entry(entry, wfl_get_word_entry(wfl, &key));
       assert_same_entry(entry, wfl_get_present_word_entry(wfl, &key));
+      // Move generation drops a subrack the filter rejects without looking
+      // it up, so no stored rack may be rejected.
+      assert(wfl_blankless_rack_may_have_words(wfl, &key));
       if (entry_idx % 16 != 0) {
         continue;
       }
