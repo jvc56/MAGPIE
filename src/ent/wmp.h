@@ -112,6 +112,14 @@ typedef struct WMPForLength {
   uint32_t num_double_blank_entries;
   uint32_t *double_blank_bucket_starts;
   WMPEntry *double_blank_map_entries;
+
+  // EXPERIMENT (MAGPIE_WMP_TAGS): for each map, one byte per entry, parallel
+  // to its entries: high bits of the entry's hash. A lookup reads an entry
+  // only when its tag matches, so most absent keys in a nonempty bucket
+  // never touch the entries. NULL when not built.
+  uint8_t *word_tags;
+  uint8_t *blank_tags;
+  uint8_t *double_blank_tags;
 } WMPForLength;
 
 typedef struct WMP {
@@ -227,11 +235,41 @@ static inline void read_wfl_double_blanks(WMPForLength *wfl, FILE *stream) {
                                wfl->num_double_blank_entries, stream);
 }
 
+// The tag of a key: hash bits above any bucket index's.
+static inline uint8_t wmp_tag(uint64_t hash) { return (uint8_t)(hash >> 56); }
+
+// EXPERIMENT: the tags of entries[0..num_entries), or NULL for none.
+static inline uint8_t *wmp_build_tags(const WMPEntry *entries,
+                                      uint32_t num_entries) {
+  if (num_entries == 0) {
+    return NULL;
+  }
+  uint8_t *tags = malloc_or_die(num_entries);
+  for (uint32_t entry_idx = 0; entry_idx < num_entries; entry_idx++) {
+    BitRack key;
+    memcpy(&key, entries[entry_idx].bit_rack_bytes, sizeof(key));
+    tags[entry_idx] = wmp_tag(bit_rack_mix_to_64(&key));
+  }
+  return tags;
+}
+
 static inline void read_wmp_for_length(WMP *wmp, uint32_t len, FILE *stream) {
   WMPForLength *wfl = &wmp->wfls[len];
   read_wfl_blankless_words(wfl, len, stream);
   read_wfl_blanks(wfl, stream);
   read_wfl_double_blanks(wfl, stream);
+  wfl->word_tags = NULL;
+  wfl->blank_tags = NULL;
+  wfl->double_blank_tags = NULL;
+  const char *use_tags = getenv("MAGPIE_WMP_TAGS");
+  if (use_tags != NULL && use_tags[0] == '1') {
+    wfl->word_tags =
+        wmp_build_tags(wfl->word_map_entries, wfl->num_word_entries);
+    wfl->blank_tags =
+        wmp_build_tags(wfl->blank_map_entries, wfl->num_blank_entries);
+    wfl->double_blank_tags = wmp_build_tags(wfl->double_blank_map_entries,
+                                            wfl->num_double_blank_entries);
+  }
 }
 
 static inline void wmp_load_from_filename_with_stream(WMP *wmp,
@@ -307,6 +345,10 @@ static inline void wmp_destroy(WMP *wmp) {
 
     free(wfl->double_blank_bucket_starts);
     free(wfl->double_blank_map_entries);
+
+    free(wfl->word_tags);
+    free(wfl->blank_tags);
+    free(wfl->double_blank_tags);
   }
   free(wmp);
 }
@@ -421,20 +463,42 @@ static inline void wmp_entry_write_bit_rack(WMPEntry *entry,
 #endif
 }
 
-static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
-                                                 const BitRack *bit_rack) {
-  const uint32_t bucket_index =
-      bit_rack_get_bucket_index(bit_rack, wfl->num_word_buckets);
-  const uint32_t start = wfl->word_bucket_starts[bucket_index];
-  const uint32_t end = wfl->word_bucket_starts[bucket_index + 1];
+// The entry for bit_rack among the hashed entries (bucket_starts, entries
+// and, if built, tags), or NULL.
+static inline const WMPEntry *
+wmp_bucket_get_entry(const uint32_t *bucket_starts, uint32_t num_buckets,
+                     const WMPEntry *entries, const uint8_t *tags,
+                     const BitRack *bit_rack) {
+  const uint64_t hash = bit_rack_mix_to_64(bit_rack);
+  const uint32_t bucket_index = (uint32_t)(hash & (num_buckets - 1));
+  const uint32_t start = bucket_starts[bucket_index];
+  const uint32_t end = bucket_starts[bucket_index + 1];
+  if (tags != NULL) {
+    const uint8_t tag = wmp_tag(hash);
+    for (uint32_t i = start; i < end; i++) {
+      if (tags[i] != tag) {
+        continue;
+      }
+      const BitRack entry_bit_rack = wmp_entry_read_bit_rack(&entries[i]);
+      if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
+        return &entries[i];
+      }
+    }
+    return NULL;
+  }
   for (uint32_t i = start; i < end; i++) {
-    const WMPEntry *entry = &wfl->word_map_entries[i];
-    const BitRack entry_bit_rack = wmp_entry_read_bit_rack(entry);
+    const BitRack entry_bit_rack = wmp_entry_read_bit_rack(&entries[i]);
     if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
-      return entry;
+      return &entries[i];
     }
   }
   return NULL;
+}
+
+static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
+                                                 const BitRack *bit_rack) {
+  return wmp_bucket_get_entry(wfl->word_bucket_starts, wfl->num_word_buckets,
+                              wfl->word_map_entries, wfl->word_tags, bit_rack);
 }
 
 static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
@@ -473,18 +537,9 @@ static inline const WMPEntry *wfl_get_blank_entry(const WMPForLength *wfl,
   if (wfl->num_blank_buckets == 0) {
     return NULL;
   }
-  const uint32_t bucket_index =
-      bit_rack_get_bucket_index(bit_rack, wfl->num_blank_buckets);
-  const uint32_t start = wfl->blank_bucket_starts[bucket_index];
-  const uint32_t end = wfl->blank_bucket_starts[bucket_index + 1];
-  for (uint32_t i = start; i < end; i++) {
-    const WMPEntry *entry = &wfl->blank_map_entries[i];
-    const BitRack entry_bit_rack = wmp_entry_read_bit_rack(entry);
-    if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
-      return entry;
-    }
-  }
-  return NULL;
+  return wmp_bucket_get_entry(wfl->blank_bucket_starts, wfl->num_blank_buckets,
+                              wfl->blank_map_entries, wfl->blank_tags,
+                              bit_rack);
 }
 
 static inline const WMPEntry *
@@ -492,18 +547,10 @@ wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
   if (wfl->num_double_blank_buckets == 0) {
     return NULL;
   }
-  const uint32_t bucket_index =
-      bit_rack_get_bucket_index(bit_rack, wfl->num_double_blank_buckets);
-  const uint32_t start = wfl->double_blank_bucket_starts[bucket_index];
-  const uint32_t end = wfl->double_blank_bucket_starts[bucket_index + 1];
-  for (uint32_t i = start; i < end; i++) {
-    const WMPEntry *entry = &wfl->double_blank_map_entries[i];
-    const BitRack entry_bit_rack = wmp_entry_read_bit_rack(entry);
-    if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
-      return entry;
-    }
-  }
-  return NULL;
+  return wmp_bucket_get_entry(wfl->double_blank_bucket_starts,
+                              wfl->num_double_blank_buckets,
+                              wfl->double_blank_map_entries,
+                              wfl->double_blank_tags, bit_rack);
 }
 
 static inline const char *wmp_get_name(const WMP *wmp) { return wmp->name; }

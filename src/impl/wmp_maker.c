@@ -1026,7 +1026,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   // Now sort lengths by work (pair_counts)
   sort_lengths_by_work(sorted_lengths, pair_counts, num_active_lengths);
 
-  WMP *wmp = malloc_or_die(sizeof(WMP));
+  WMP *wmp = calloc_or_die(1, sizeof(WMP));
   wmp->name = NULL;
   wmp->version = WMP_VERSION;
   wmp->board_dim = BOARD_DIM;
