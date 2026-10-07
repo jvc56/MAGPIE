@@ -47,6 +47,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 #include <utime.h>
 
 static void test_version_comparison(void) {
@@ -384,6 +385,16 @@ static void test_client_state(void) {
     error_stack_reset(error_stack);
   }
   assert(chmod(path, S_IRUSR | S_IWUSR) == 0);
+
+  // So is a directory of that name, which read as a file 2^63 bytes long
+  // ended the process.
+  const char *directory = "contribute_test_settings_dir";
+  (void)rmdir(directory);
+  assert(mkdir(directory, S_IRWXU) == 0);
+  assert(!client_state_load(directory, error_stack));
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_reset(error_stack);
+  assert(rmdir(directory) == 0);
 
   // What the server sends as an identity is taken only in canonical form: it
   // becomes a header and a settings line, and a newline in it wrote a

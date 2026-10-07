@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 enum {
   DEFAULT_IDLE_WAIT_SECONDS = 5,
@@ -104,6 +105,19 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
         get_formatted_string("could not read contribution settings from '%s': "
                              "%s",
                              settings_path, strerror(errno)));
+    return NULL;
+  }
+  // A directory opens, and its size reads as 2^63: the read that followed
+  // ended the process.
+  struct stat stream_stat;
+  if (stream && (fstat(fileno(stream), &stream_stat) != 0 ||
+                 !S_ISREG(stream_stat.st_mode))) {
+    (void)fclose(stream);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
+        get_formatted_string("could not read contribution settings from '%s': "
+                             "it is not a file",
+                             settings_path));
     return NULL;
   }
   if (stream) {
