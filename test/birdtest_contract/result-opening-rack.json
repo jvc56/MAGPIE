@@ -1,5 +1,5 @@
 {
-  "claim_token": "41f83a3e-3ea6-48b4-be1d-51c4631f4169",
+  "claim_token": "1bbc26de-03ab-4479-bcee-d4b4eac7c569",
   "result": {
     "racks": [
       {
@@ -215,5 +215,6 @@
         "num_moves": 5
       }
     ]
-  }
+  },
+  "movegens": 10002
 }
