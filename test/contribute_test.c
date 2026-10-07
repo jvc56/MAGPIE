@@ -291,16 +291,99 @@ static void test_client_state(void) {
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
 
-  // So is a missing server.
+  // A file that states only an API key contributes under it to the default
+  // server, with every other setting its default.
   write_settings_file(path, "apikey bt_x\n");
+  state = client_state_load(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(state->settings_file_found);
+  assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
+  assert(!state->server_stated);
+  assert_strings_equal(state->api_key, "bt_x");
+  assert(state->worker_uuid == NULL);
+  assert(state->threads == 0);
+  assert(state->max_tasks == 0 && !state->max_tasks_stated);
+  assert(state->idle_wait_seconds == 5 && !state->idle_wait_stated);
+  client_state_destroy(state);
+
+  // So does one that states only the identity it was issued.
+  write_settings_file(path, "uuid 6f3d7198-178a-47c8-9ccc-6aa6995a5a9c\n");
+  state = client_state_load(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
+  assert(state->api_key == NULL);
+  assert_strings_equal(state->worker_uuid,
+                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
+  client_state_destroy(state);
+
+  // And an empty one, or one of comments.
+  write_settings_file(path, "# nothing set\n\n");
+  state = client_state_load(path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
+  client_state_destroy(state);
+
+  // A file that is not there at all is every setting at its default.
+  const char *missing = "contribute_test_does_not_exist.txt";
+  (void)remove(missing);
+  state = client_state_load(missing, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(state);
+  assert(!state->settings_file_found);
+  assert_strings_equal(state->settings_path, missing);
+  assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
+  assert(!state->server_stated);
+  assert(state->api_key == NULL);
+  assert(state->worker_uuid == NULL);
+  assert(state->threads == 0);
+  assert(state->max_tasks == 0 && !state->max_tasks_stated);
+  assert(state->idle_wait_seconds == 5 && !state->idle_wait_stated);
+  assert(state->commented_key_line == 0);
+
+  // The first identity the server issues creates it, holding a header and
+  // the uuid line and nothing defaulted -- not the server, which a later
+  // change of default should still reach.
+  assert(client_state_set_worker_uuid(state,
+                                      "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c"));
+  client_state_destroy(state);
+  char *created = get_string_from_file(missing, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(created, CONTRIBUTE_SETTINGS_HEADER
+                       "\nuuid 6f3d7198-178a-47c8-9ccc-6aa6995a5a9c\n");
+  assert(!strstr(created, "server"));
+  free(created);
+  // And a later run reads it back, on the default server still.
+  state = client_state_load(missing, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(state->settings_file_found);
+  assert_strings_equal(state->worker_uuid,
+                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
+  assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
+  assert(!state->server_stated);
+  client_state_destroy(state);
+  (void)remove(missing);
+
+  // A server line with no address is refused rather than taken for the
+  // default: deleting the line is how to ask for that.
+  write_settings_file(path, "server\napikey bt_x\n");
   assert(!client_state_load(path, error_stack));
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
 
-  // As is a file that is not there at all.
-  assert(!client_state_load("contribute_test_does_not_exist.txt", error_stack));
-  assert(!error_stack_is_empty(error_stack));
-  error_stack_reset(error_stack);
+  // A file that is there but cannot be read is an error, not the defaults:
+  // it may hold the API key the contributor means to run under. (Skipped
+  // where permissions do not stop a read, as for root.)
+  write_settings_file(path, "apikey bt_x\n");
+  assert(chmod(path, 0) == 0);
+  FILE *unreadable = fopen(path, "re");
+  if (unreadable) {
+    (void)fclose(unreadable);
+  } else {
+    assert(!client_state_load(path, error_stack));
+    assert(!error_stack_is_empty(error_stack));
+    error_stack_reset(error_stack);
+  }
+  assert(chmod(path, S_IRUSR | S_IWUSR) == 0);
 
   // What the server sends as an identity is taken only in canonical form: it
   // becomes a header and a settings line, and a newline in it wrote a
@@ -1645,6 +1728,68 @@ static void test_a_runs_state_starts_clean(void) {
   (void)remove(path);
 }
 
+// A run starts by saying which settings it uses and which of them are
+// defaults -- the sign of a run from the wrong folder, which with the file
+// optional is a new anonymous worker rather than an error -- and says only
+// whether there is an API key, never the key.
+static char *settings_printed_for(const char *path, const char *contents) {
+  if (contents) {
+    write_settings_file(path, contents);
+  } else {
+    (void)remove(path);
+  }
+  FILE *captured = tmpfile();
+  assert(captured);
+  io_set_stream_out(captured);
+  ErrorStack *error_stack = error_stack_create();
+  ThreadControl *thread_control = thread_control_create();
+  ContributeState *state =
+      contribute_state_create(path, thread_control, error_stack);
+  io_reset_stream_out();
+  assert(error_stack_is_empty(error_stack));
+  assert(state);
+  contribute_state_destroy(state);
+  thread_control_destroy(thread_control);
+  (void)remove(path);
+  rewind(captured);
+  char *printed =
+      get_string_from_file_handle(captured, "(captured)", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  return printed;
+}
+
+static void test_a_run_says_which_settings_are_defaults(void) {
+  const char *path = "contribute_test_printed_settings.txt";
+
+  char *printed = settings_printed_for(path, NULL);
+  assert(strstr(printed, "not found; every setting is its default"));
+  assert(
+      strstr(printed, "  server   " CONTRIBUTE_DEFAULT_SERVER " (default)\n"));
+  assert(strstr(printed, "  apikey   none (anonymous)\n"));
+  assert(strstr(printed, "  uuid     none yet"));
+  assert(strstr(printed, "(default)\n  maxtasks 0 (default: no limit)\n"));
+  assert(strstr(printed, "  idlewait 5 (default)\n"));
+  free(printed);
+
+  printed = settings_printed_for(path, "apikey bt_SECRETKEY123\n");
+  assert(!strstr(printed, "not found"));
+  assert(
+      strstr(printed, "  server   " CONTRIBUTE_DEFAULT_SERVER " (default)\n"));
+  assert(strstr(printed, "  apikey   set\n"));
+  assert(!strstr(printed, "SECRETKEY"));
+  free(printed);
+
+  printed = settings_printed_for(path, "server http://127.0.0.1:9\n"
+                                       "threads 2\nmaxtasks 3\nidlewait 4\n");
+  assert(strstr(printed, "  server   http://127.0.0.1:9\n"));
+  assert(strstr(printed, "  threads  2\n"));
+  assert(strstr(printed, "  maxtasks 3\n"));
+  assert(strstr(printed, "  idlewait 4\n"));
+  assert(!strstr(printed, "default"));
+  free(printed);
+}
+
 // contribute.txt's thread count is capped where a task can still get a move
 // generator on every thread it runs: at N threads a simulated game per thread
 // simulates on N more, and past move generation's pool magpie exits on the
@@ -2543,6 +2688,7 @@ void test_contribute(void) {
   test_a_rewritten_klv_is_read_again();
   test_an_abandoned_temporary_is_removed();
   test_a_runs_state_starts_clean();
+  test_a_run_says_which_settings_are_defaults();
   test_contribute_maps_rack_info_tables_unless_told_not_to();
   test_a_derived_build_is_held_by_one_process();
   test_a_runs_threads_are_capped();

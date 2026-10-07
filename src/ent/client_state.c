@@ -53,12 +53,21 @@ static int parse_setting_int(const char *value, const char *key,
   return result;
 }
 
+// Appends the uuid line, or, when there is no file, creates one holding the
+// header and that line alone. The create is exclusive, so a file that appears
+// in between is appended to rather than replaced.
 static bool append_uuid_line(const char *path, const char *uuid) {
-  FILE *stream = fopen(path, "ae");
+  FILE *stream = fopen(path, "wxe");
+  const char *format = CONTRIBUTE_SETTINGS_HEADER "\nuuid %s\n";
+  if (!stream && errno == EEXIST) {
+    stream = fopen(path, "ae");
+    // The leading newline ends a last line that had none.
+    format = "\nuuid %s\n";
+  }
   if (!stream) {
     return false;
   }
-  const bool written = fprintf(stream, "\nuuid %s\n", uuid) > 0;
+  const bool written = fprintf(stream, format, uuid) > 0;
   return fclose(stream) == 0 && written;
 }
 
@@ -84,18 +93,30 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   const char *settings_path =
       path ? path : CONTRIBUTE_SETTINGS_DEFAULT_FILENAME;
 
-  char *contents = get_string_from_file(settings_path, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_reset(error_stack);
+  // No file is every setting at its default. One that is there but cannot be
+  // read -- its permissions, a directory of that name -- is an error: the
+  // contributor meant something by it, perhaps an API key.
+  char *contents = NULL;
+  FILE *stream = fopen(settings_path, "re");
+  if (!stream && errno != ENOENT) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
-        get_formatted_string(
-            "could not read contribution settings from '%s'. Create it with at "
-            "least a 'server' line, for example:\n"
-            "  server https://birdtest.example\n"
-            "  apikey bt_...",
-            settings_path));
+        get_formatted_string("could not read contribution settings from '%s': "
+                             "%s",
+                             settings_path, strerror(errno)));
     return NULL;
+  }
+  if (stream) {
+    contents = get_string_from_file_handle(stream, settings_path, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_reset(error_stack);
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
+          get_formatted_string("could not read contribution settings from '%s'",
+                               settings_path));
+      free(contents);
+      return NULL;
+    }
   }
 
   ClientState *state = (ClientState *)malloc_or_die(sizeof(ClientState));
@@ -107,6 +128,10 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   state->idle_wait_seconds = DEFAULT_IDLE_WAIT_SECONDS;
   state->settings_path = string_duplicate(settings_path);
   state->commented_key_line = 0;
+  state->settings_file_found = stream != NULL;
+  state->server_stated = false;
+  state->max_tasks_stated = false;
+  state->idle_wait_stated = false;
 
   int line_number = 0;
   // The last uuid line's, which is the one that counts.
@@ -114,8 +139,8 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   char *cursor = contents;
   // A UTF-8 byte-order mark, which some editors write first: read as part of
   // the first word, it made `server` an unknown setting.
-  if ((unsigned char)cursor[0] == 0xEF && (unsigned char)cursor[1] == 0xBB &&
-      (unsigned char)cursor[2] == 0xBF) {
+  if (cursor && (unsigned char)cursor[0] == 0xEF &&
+      (unsigned char)cursor[1] == 0xBB && (unsigned char)cursor[2] == 0xBF) {
     cursor += 3;
   }
   while (cursor && *cursor) {
@@ -153,8 +178,19 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
                                    "each setting on a line of its own",
                                    settings_path, line_number));
         }
+        // A server line with no address is a setting left unfinished, not a
+        // request for the default: deleting the line is that.
+        if (value[0] == '\0') {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+              get_formatted_string("%s line %d: 'server' has no address; give "
+                                   "one, or delete the line to use %s",
+                                   settings_path, line_number,
+                                   CONTRIBUTE_DEFAULT_SERVER));
+        }
         free(state->server_url);
         state->server_url = string_duplicate(value);
+        state->server_stated = true;
       } else if (strings_equal(key, "apikey")) {
         // A key is `bt_` and letters, digits and underscores: a space was two
         // settings on one line, and anything else (a no-break space) a key
@@ -185,6 +221,7 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
       } else if (strings_equal(key, "maxtasks")) {
         state->max_tasks = parse_setting_int(value, key, settings_path,
                                              line_number, error_stack);
+        state->max_tasks_stated = true;
         // 0 is "no limit"; a negative count stopped the run after one task.
         if (state->max_tasks < 0) {
           error_stack_push(
@@ -196,6 +233,8 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
       } else if (strings_equal(key, "idlewait")) {
         state->idle_wait_seconds = parse_setting_int(value, key, settings_path,
                                                      line_number, error_stack);
+        // Zero or less is the default (below).
+        state->idle_wait_stated = state->idle_wait_seconds > 0;
       } else {
         // A typo'd 'apikey' must not silently downgrade someone to anonymous.
         // The word is shown only if it could be a setting's name: a pasted
@@ -235,12 +274,8 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   }
   free(contents);
 
-  if (!state->server_url || string_length(state->server_url) == 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
-        get_formatted_string("%s does not set 'server'", settings_path));
-    client_state_destroy(state);
-    return NULL;
+  if (!state->server_url) {
+    state->server_url = string_duplicate(CONTRIBUTE_DEFAULT_SERVER);
   }
 
   if (state->api_key && string_length(state->api_key) == 0) {

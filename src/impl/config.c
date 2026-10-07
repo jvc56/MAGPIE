@@ -27,6 +27,7 @@
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
+#include "../ent/client_state.h"
 #include "../ent/conversion_results.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/endgame_results.h"
@@ -1189,10 +1190,14 @@ static const char *contribute_help(const char **usages, const char **examples) {
   return "Contributes to birdtest: claims tasks, executes them with MAGPIE's "
          "own command API, and submits the results, repeating until the "
          "server has no more work or the settings file's maxtasks is "
-         "reached. Settings (server, apikey, threads, ...) come from the "
-         "given file, or contribute.txt in the working directory if no path "
-         "is given -- never from the command line, since an API key there "
-         "ends up in shell history and ps output. Rack info tables are "
+         "reached. Settings (server, apikey, uuid, threads, maxtasks, "
+         "idlewait) come from the given file, or contribute.txt in the "
+         "working directory if no path is given -- never from the command "
+         "line, since an API key there ends up in shell history and ps "
+         "output. The file and every setting in it are optional: with none, "
+         "MAGPIE contributes anonymously to " CONTRIBUTE_DEFAULT_SERVER
+         " on all but one core, and creates the file to save the identity "
+         "the server issues. Rack info tables are "
          "memory-mapped unless -ritmmap false is given here, so workers "
          "sharing a data directory share one copy.";
 }

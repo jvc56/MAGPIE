@@ -621,7 +621,15 @@ static void adopt_server_assigned_uuid(ContributeState *state,
         "the server sent a worker identity that is not a UUID; ignoring it\n");
     return;
   }
-  if (!client_state_set_worker_uuid(client_state, worker_uuid)) {
+  const bool file_was_found = client_state->settings_file_found;
+  if (client_state_set_worker_uuid(client_state, worker_uuid)) {
+    if (!file_was_found) {
+      thread_control_print_formatted(
+          thread_control, "created %s to save this worker's identity\n",
+          client_state->settings_path);
+      client_state->settings_file_found = true;
+    }
+  } else {
     thread_control_print_formatted(
         thread_control,
         "could not save this worker's identity to %s; add the line\n"
@@ -744,6 +752,55 @@ static int seconds_until_a_deferral_ends(const ContributeState *state) {
   return soonest == 0 ? 0 : (int)(soonest / 1000000000LL) + 1;
 }
 
+// The settings the run uses, each marked when it is the default: with the
+// file optional, running from the wrong folder starts a new anonymous worker
+// on the default server rather than stopping, and this is where that shows.
+// The API key itself is never printed, only whether there is one.
+static void print_settings(const ClientState *client_state, int threads,
+                           ThreadControl *thread_control) {
+  const char *const defaulted = " (default)";
+  if (client_state->settings_file_found) {
+    thread_control_print_formatted(thread_control,
+                                   "contribute settings (%s):\n",
+                                   client_state->settings_path);
+  } else {
+    thread_control_print_formatted(
+        thread_control,
+        "contribute settings (%s not found; every setting is its default):\n",
+        client_state->settings_path);
+  }
+  thread_control_print_formatted(thread_control, "  server   %s%s\n",
+                                 client_state->server_url,
+                                 client_state->server_stated ? "" : defaulted);
+  thread_control_print_formatted(thread_control, "  apikey   %s\n",
+                                 client_state->api_key ? "set"
+                                                       : "none (anonymous)");
+  thread_control_print_formatted(
+      thread_control, "  uuid     %s\n",
+      client_state->worker_uuid ? client_state->worker_uuid
+      : client_state->api_key   ? "none"
+                                : "none yet (the server issues one)");
+  const char *threads_note = "";
+  if (client_state->threads <= 0) {
+    threads_note = defaulted;
+  } else if (client_state->threads != threads) {
+    threads_note = " (capped)";
+  }
+  thread_control_print_formatted(thread_control, "  threads  %d%s\n", threads,
+                                 threads_note);
+  const char *max_tasks_note = "";
+  if (!client_state->max_tasks_stated) {
+    max_tasks_note = " (default: no limit)";
+  } else if (client_state->max_tasks == 0) {
+    max_tasks_note = " (no limit)";
+  }
+  thread_control_print_formatted(thread_control, "  maxtasks %d%s\n",
+                                 client_state->max_tasks, max_tasks_note);
+  thread_control_print_formatted(
+      thread_control, "  idlewait %d%s\n", client_state->idle_wait_seconds,
+      client_state->idle_wait_stated ? "" : defaulted);
+}
+
 static bool interrupted_check(void *thread_control) {
   return contribute_interrupted((ThreadControl *)thread_control);
 }
@@ -799,15 +856,7 @@ ContributeState *contribute_state_create(const char *settings_path,
   state->claimed_job_id = NULL;
   state->assignment = NULL;
 
-  const char *identity_description = "a new anonymous worker";
-  if (client_state->api_key) {
-    identity_description = "an authenticated worker";
-  } else if (client_state->worker_uuid) {
-    identity_description = client_state->worker_uuid;
-  }
-  thread_control_print_formatted(
-      thread_control, "contributing to %s as %s (%d threads)\n",
-      client_state->server_url, identity_description, state->threads);
+  print_settings(client_state, state->threads, thread_control);
   if (!client_state->api_key && client_state->commented_key_line) {
     thread_control_print_formatted(
         thread_control,
