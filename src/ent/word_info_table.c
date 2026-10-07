@@ -1,6 +1,8 @@
 #include "word_info_table.h"
 
+#include "../compat/cpthread.h"
 #include "../compat/endian_io.h"
+#include "../compat/memory_info.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../util/fileproxy.h"
@@ -9,6 +11,7 @@
 #include "data_filepaths.h"
 #include <errno.h>
 #include <limits.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -121,46 +124,92 @@ static int32_t wit_position_value(const WitTrie *trie,
   return -1;
 }
 
-static void wit_position_add_word(WordInfoTable *wit,
-                                  const MachineLetter *letters,
+// Records into position_lengths, for the length-`final_length` words below
+// the current node, every base word that ends at this node's depth: the
+// substring of `letters` ending at depth - 1 is the same for all of them, so
+// each base lookup runs once per node rather than once per word.
+static void wit_position_add_node(const WordInfoTable *wit,
+                                  uint32_t *const *position_lengths,
+                                  const MachineLetter *letters, int depth,
                                   int final_length) {
   const uint32_t length_bit = UINT32_C(1) << final_length;
   for (int base_length = WIT_POSITION_MIN_BASE_LENGTH;
-       base_length <= final_length &&
-       base_length <= WIT_POSITION_MAX_BASE_LENGTH;
+       base_length <= depth && base_length <= WIT_POSITION_MAX_BASE_LENGTH;
        base_length++) {
     const WitTrie *trie = &wit->tries[base_length];
     if (trie->num_values == 0) {
       continue;
     }
-    const size_t stride = (size_t)wit_stride_for_len(base_length);
-    for (int position = 0; position + base_length <= final_length; position++) {
-      const int32_t value =
-          wit_position_value(trie, letters + position, base_length);
-      if (value >= 0) {
-        wit->position_lengths[base_length][((size_t)value * stride) +
-                                           position] |= length_bit;
-      }
+    const int position = depth - base_length;
+    const int32_t value =
+        wit_position_value(trie, letters + position, base_length);
+    if (value >= 0) {
+      position_lengths[base_length][((size_t)value *
+                                     (size_t)wit_stride_for_len(base_length)) +
+                                    position] |= length_bit;
     }
   }
 }
 
-static void wit_position_visit_words(WordInfoTable *wit, const WitTrie *trie,
-                                     uint32_t first_node, int depth, int length,
+// Visits the nodes from first_node at depth `depth` of the length-`length`
+// trie, recording base words for each node with a word below it (see
+// wit_position_add_node). Returns whether any of them has a word below it.
+static bool wit_position_visit_words(const WordInfoTable *wit,
+                                     uint32_t *const *position_lengths,
+                                     const WitTrie *trie, uint32_t first_node,
+                                     int depth, int length,
                                      MachineLetter *letters) {
+  bool any_word = false;
   for (uint32_t node = first_node; node != 0; node++) {
     letters[depth - 1] = trie->node_tile[node];
+    bool has_word = false;
     if (depth == length) {
-      if (trie->node_value[node] >= 0) {
-        wit_position_add_word(wit, letters, length);
-      }
+      has_word = trie->node_value[node] >= 0;
     } else if (trie->node_child[node] != 0) {
-      wit_position_visit_words(wit, trie, trie->node_child[node], depth + 1,
-                               length, letters);
+      has_word = wit_position_visit_words(wit, position_lengths, trie,
+                                          trie->node_child[node], depth + 1,
+                                          length, letters);
+    }
+    if (has_word) {
+      wit_position_add_node(wit, position_lengths, letters, depth, length);
+      any_word = true;
     }
     if (trie->node_last[node]) {
       break;
     }
+  }
+  return any_word;
+}
+
+// The word lengths whose tries one build pass visits, heaviest first, shared
+// by the threads that take them in turn.
+typedef struct WitPositionBuild {
+  const WordInfoTable *wit;
+  int num_lengths;
+  int lengths[BOARD_DIM + 1];
+  atomic_int next_length_idx;
+} WitPositionBuild;
+
+// One thread's share: it ORs into its own position tables (the table's own
+// for the calling thread), so threads never write the same word.
+typedef struct WitPositionWorker {
+  WitPositionBuild *build;
+  uint32_t *position_lengths[BOARD_DIM + 1];
+} WitPositionWorker;
+
+static void *wit_position_worker(void *arg) {
+  WitPositionWorker *worker = arg;
+  WitPositionBuild *build = worker->build;
+  MachineLetter letters[BOARD_DIM];
+  for (;;) {
+    const int length_idx = atomic_fetch_add(&build->next_length_idx, 1);
+    if (length_idx >= build->num_lengths) {
+      return NULL;
+    }
+    const int length = build->lengths[length_idx];
+    const WitTrie *trie = &build->wit->tries[length];
+    (void)wit_position_visit_words(build->wit, worker->position_lengths, trie,
+                                   trie->root, 1, length, letters);
   }
 }
 
@@ -169,6 +218,7 @@ void word_info_table_build_position_lengths(WordInfoTable *wit) {
   if (wit->kwg_hash == 0) {
     return;
   }
+  size_t table_cells[BOARD_DIM + 1] = {0};
   for (int length = WIT_POSITION_MIN_BASE_LENGTH;
        length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
     const size_t rows = wit->tries[length].num_values;
@@ -178,16 +228,70 @@ void word_info_table_build_position_lengths(WordInfoTable *wit) {
       return;
     }
     if (rows != 0) {
+      table_cells[length] = rows * stride;
       wit->position_lengths[length] =
-          calloc_or_die(rows * stride, sizeof(uint32_t));
+          calloc_or_die(table_cells[length], sizeof(uint32_t));
     }
   }
-  MachineLetter letters[BOARD_DIM];
+  // Each word length's trie is one task; the biggest go first so the last
+  // ones to finish are short.
+  WitPositionBuild build = {.wit = wit, .num_lengths = 0};
+  atomic_init(&build.next_length_idx, 0);
   for (int length = WIT_POSITION_MIN_BASE_LENGTH; length <= BOARD_DIM;
        length++) {
-    const WitTrie *trie = &wit->tries[length];
-    wit_position_visit_words(wit, trie, trie->root, 1, length, letters);
+    if (wit->tries[length].root == 0) {
+      continue;
+    }
+    int insert_idx = build.num_lengths++;
+    while (insert_idx > 0 &&
+           wit->tries[build.lengths[insert_idx - 1]].num_nodes <
+               wit->tries[length].num_nodes) {
+      build.lengths[insert_idx] = build.lengths[insert_idx - 1];
+      insert_idx--;
+    }
+    build.lengths[insert_idx] = length;
   }
+  int num_threads = get_num_cores();
+  if (num_threads > build.num_lengths) {
+    num_threads = build.num_lengths;
+  }
+  if (num_threads < 1) {
+    num_threads = 1;
+  }
+  WitPositionWorker *workers =
+      calloc_or_die((size_t)num_threads, sizeof(WitPositionWorker));
+  cpthread_t *threads = calloc_or_die((size_t)num_threads, sizeof(cpthread_t));
+  for (int worker_idx = 0; worker_idx < num_threads; worker_idx++) {
+    workers[worker_idx].build = &build;
+    for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+         length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+      if (table_cells[length] == 0) {
+        continue;
+      }
+      workers[worker_idx].position_lengths[length] =
+          worker_idx == 0
+              ? wit->position_lengths[length]
+              : calloc_or_die(table_cells[length], sizeof(uint32_t));
+    }
+  }
+  for (int worker_idx = 1; worker_idx < num_threads; worker_idx++) {
+    cpthread_create(&threads[worker_idx], wit_position_worker,
+                    &workers[worker_idx]);
+  }
+  (void)wit_position_worker(&workers[0]);
+  for (int worker_idx = 1; worker_idx < num_threads; worker_idx++) {
+    cpthread_join(threads[worker_idx]);
+    for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+         length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+      uint32_t *own = workers[worker_idx].position_lengths[length];
+      for (size_t cell = 0; cell < table_cells[length]; cell++) {
+        wit->position_lengths[length][cell] |= own[cell];
+      }
+      free(own);
+    }
+  }
+  free(threads);
+  free(workers);
 }
 
 static bool wit_positional_alphabet_supported(const WordInfoTable *wit) {
