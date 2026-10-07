@@ -4,6 +4,7 @@
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
@@ -23,7 +24,9 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -579,6 +582,42 @@ void test_playmove(void) {
   config_destroy(config);
 }
 
+// With a known tile, the rest of the rack is a random draw from the other
+// unseen tiles, whichever end of the bag the player draws from: over many
+// seeds, the number of further copies of the known letter matches its
+// expectation.
+static void test_set_random_rack_fill_is_random(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Rack *known_rack = rack_create(ld_get_size(ld));
+  rack_set_to_string(ld, known_rack, "E");
+  const MachineLetter e = ld_hl_to_ml(ld, "E");
+  // CSW21 has 12 Es: after the known one, 11 among the other 99 tiles, 6 of
+  // which are drawn.
+  const double expected = 6.0 * 11.0 / 99.0;
+  const int trials = 20000;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    double total = 0.0;
+    for (int trial = 0; trial < trials; trial++) {
+      game_reset(game);
+      game_seed(game, (uint64_t)trial + 1);
+      set_random_rack(game, player_index, known_rack);
+      const Rack *rack = player_get_rack(game_get_player(game, player_index));
+      total += rack_get_letter(rack, e) - 1;
+      return_rack_to_bag(game, player_index);
+    }
+    // The standard error of the mean is about 0.0021; the bug this guards
+    // against moved it by 0.15 or more.
+    const double mean = total / trials;
+    assert(fabs(mean - expected) < 0.02);
+  }
+  rack_destroy(known_rack);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_set_random_rack(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
@@ -982,6 +1021,7 @@ void test_gameplay(void) {
   test_six_passes_game();
   test_standard_game();
   test_set_random_rack();
+  test_set_random_rack_fill_is_random();
   test_backups();
   test_leave_record();
   test_moves_are_similar();

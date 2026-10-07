@@ -150,15 +150,29 @@ bool bag_draw_letter(Bag *bag, MachineLetter letter, int player_draw_index) {
   if (get_is_blanked(letter)) {
     letter = BLANK_MACHINE_LETTER;
   }
+  // Take a uniformly random copy of the letter (with the bag's PRNG, so a
+  // seeded bag stays deterministic). The tiles drawn from either end after
+  // this one must still be in random order: taking the first copy found
+  // from the start would leave the start of the bag short of the letter and
+  // the end long in it.
+  int copies = 0;
+  for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
+    copies += bag->letters[i] == letter ? 1 : 0;
+  }
+  if (copies == 0) {
+    return false;
+  }
+  int skip =
+      copies > 1 ? (int)prng_get_random_number(bag->prng, (uint64_t)copies) : 0;
   int letter_index = -1;
   for (int i = bag->start_tile_index; i < bag->end_tile_index; i++) {
     if (bag->letters[i] == letter) {
-      letter_index = i;
-      break;
+      if (skip == 0) {
+        letter_index = i;
+        break;
+      }
+      skip--;
     }
-  }
-  if (letter_index < 0) {
-    return false;
   }
   if (player_draw_index == 0) {
     bag->end_tile_index--;
