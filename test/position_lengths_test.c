@@ -242,10 +242,32 @@ static void test_load_rebuild_and_cleanup(void) {
   assert(error_stack_is_empty(errors));
   assert_literal_cache(words, loaded);
   // Version3 ordinary rows remain loadable and still derive literal positions.
-  FILE *file = fopen_or_die(filename, "r+b");
-  const int written = fputc(3, file);
-  assert(written == 3);
+  // The file holds them, then its position-length rows: keep only the rows,
+  // under a version-3 header with no flags.
+  size_t position_bytes = 0;
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    position_bytes += (size_t)wit->tries[length].num_values *
+                      wit_stride_for_len(length) * sizeof(uint32_t);
+  }
+  FILE *file = fopen_or_die(filename, "rb");
+  fseek_or_die(file, 0, SEEK_END);
+  const long file_size = ftell(file);
+  assert(file_size > 0 && (size_t)file_size > position_bytes);
+  const size_t ordinary_size = (size_t)file_size - position_bytes;
+  uint8_t *bytes = malloc_or_die(ordinary_size);
+  fseek_or_die(file, 0, SEEK_SET);
+  const size_t read_size = fread(bytes, 1, ordinary_size, file);
+  assert(read_size == ordinary_size);
   fclose_or_die(file);
+  assert(bytes[2] == WIT_FLAG_POSITION_LENGTHS);
+  bytes[0] = 3;
+  bytes[2] = 0;
+  file = fopen_or_die(filename, "wb");
+  const size_t written = fwrite(bytes, 1, ordinary_size, file);
+  assert(written == ordinary_size);
+  fclose_or_die(file);
+  free(bytes);
   word_info_table_load(loaded, "position_lengths_v3", filename, errors);
   assert(error_stack_is_empty(errors));
   assert_literal_cache(words, loaded);

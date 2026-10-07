@@ -79,17 +79,19 @@ The file tests cover ordinary and positional roundtrips, version-3 fallback,
 zero rows, malformed/truncated files and preserving existing output on failure.
 These tests are also in the normal C test suite.
 
-## WIT version 4 file format
+## WIT version 5 file format
 
 All integers are little-endian. The 12-byte header is:
 
 | Field | Type |
 | --- | --- |
-| Version (4), board dimension, flags, reserved (0) | 4 × uint8 |
+| Version (5), board dimension, flags, reserved (0) | 4 × uint8 |
 | KWG fingerprint | uint64 |
 
 Flag bit 0 indicates complete positional data for base lengths 2 through 4.
-All other flag bits must be zero. The ordinary trie sections follow unchanged
+Flag bit 1 indicates the position-length rows, set exactly when the KWG
+fingerprint is nonzero. All other flag bits must be zero. Version 4 is the
+same without bit 1. The ordinary trie sections follow unchanged
 from version 3, one per length 1 through the board dimension. Each begins with
 node count, root and value count (three uint32 values), then tile bytes,
 sibling-last bytes, uint32 children, int32 terminal IDs and uint32 ordinary
@@ -110,8 +112,19 @@ the base are excluded. Their local offset index is `delta + e` on the left or
 `(e * (e - 1) + offset_index) * 26 + machine_letter - 1`.
 A row has `26 * (dimension - b) * (dimension - b + 1)` cells.
 
-The loader validates the version, flags, dimension, trie structure and exact
-payload size before exposing a table. The normal lexicon loader pairs the WIT
-with its KWG fingerprint. Unknown flags, malformed tries, truncated sections
-and trailing bytes are load errors; a valid legacy WIT or version-4 WIT without
-the optional section keeps ordinary filtering.
+If flag bit 1 is set, append, after any positional rows, the position-length
+rows for base lengths 2 through the board dimension, in that order and each in
+its trie's value-ID order; missing base lengths take no space. A row has
+`dimension - b + 1` uint32 cells, one per position `p` of the base within a
+longer word; bit `n` of cell `p` is set when some length-`n` word has the base
+at `p`, so only bits `b + p` through the dimension may be set. These are
+derived from the complete dictionary; storing them saves deriving them on
+every load, which a version-3 or version-4 file still does.
+
+The loader validates the version, flags, dimension, trie structure, position
+lengths and exact payload size before exposing a table. The normal lexicon
+loader pairs the WIT with its KWG fingerprint. Unknown flags, malformed tries,
+truncated sections and trailing bytes are load errors; a valid legacy WIT or
+version-4 WIT without the optional section keeps ordinary filtering. A
+version-5 table with a fingerprint but no position-length rows is a load error,
+so `kwg2witifneeded` rebuilds it.

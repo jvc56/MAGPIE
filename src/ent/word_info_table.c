@@ -24,6 +24,10 @@
 // v4: byte 2 is flags (bit 0: positional masks), byte 3 remains zero. The
 // ordinary sections are unchanged. If flagged, append every length-2..4
 // positional row in terminal-ID order, with sizes derived from those tries.
+// v5: flags bit 1 (position lengths) appends, after any positional rows,
+// each base length's position-length rows (word_info_table.h), lengths
+// 2..BOARD_DIM in terminal-ID order. Written whenever the table has a KWG
+// hash; without it a loader derives them.
 // All integers are little-endian; there is no second identity or key layout.
 static void wit_clear(WordInfoTable *wit) {
   for (int length = 0; length <= BOARD_DIM; length++) {
@@ -306,10 +310,20 @@ static bool wit_positional_alphabet_supported(const WordInfoTable *wit) {
   return true;
 }
 
+// The number of uint32 cells in base_length's position-length rows.
+static size_t wit_position_length_cells(const WordInfoTable *wit,
+                                        int base_length) {
+  return (size_t)wit->tries[base_length].num_values *
+         (size_t)wit_stride_for_len(base_length);
+}
+
 static bool wit_write_stream(const WordInfoTable *wit, bool positional,
-                             FILE *stream) {
-  const uint8_t header[4] = {WIT_VERSION, BOARD_DIM,
-                             positional ? WIT_FLAG_WORD_PLUS_FLOATER : 0, 0};
+                             bool position_lengths, FILE *stream) {
+  const uint8_t header[4] = {
+      WIT_VERSION, BOARD_DIM,
+      (uint8_t)((positional ? WIT_FLAG_WORD_PLUS_FLOATER : 0) |
+                (position_lengths ? WIT_FLAG_POSITION_LENGTHS : 0)),
+      0};
   const uint32_t fingerprint[2] = {(uint32_t)wit->kwg_hash,
                                    (uint32_t)(wit->kwg_hash >> 32)};
   if (fwrite(header, sizeof(header), 1, stream) != 1 ||
@@ -342,6 +356,13 @@ static bool wit_write_stream(const WordInfoTable *wit, bool positional,
       return false;
     }
   }
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       position_lengths && length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    if (!fwrite_le_uint32s(wit->position_lengths[length],
+                           wit_position_length_cells(wit, length), stream)) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -362,6 +383,15 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
   }
   valid = valid && (!positional || (wit->kwg_hash != 0 &&
                                     wit_positional_alphabet_supported(wit)));
+  // A table with a KWG hash always has its position lengths built
+  // (word_info_table_build_position_lengths), so they are always written.
+  const bool position_lengths = wit->kwg_hash != 0;
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       valid && position_lengths && length <= WIT_POSITION_MAX_BASE_LENGTH;
+       length++) {
+    valid = wit_position_length_cells(wit, length) == 0 ||
+            wit->position_lengths[length] != NULL;
+  }
   for (int length = WPF_MIN_BLOCK_LENGTH;
        valid && positional && length <= WPF_MAX_BLOCK_LENGTH; length++) {
     const uint32_t rows = wit->tries[length].num_values;
@@ -397,7 +427,7 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
     free(temporary_filename);
     return;
   }
-  bool written = wit_write_stream(wit, positional, stream);
+  bool written = wit_write_stream(wit, positional, position_lengths, stream);
   int error_number = written ? 0 : errno;
   if (fclose(stream) != 0) {
     if (written) {
@@ -479,8 +509,11 @@ static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
     *status = ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM;
     return false;
   }
-  if (header[3] != 0 || (header[2] & ~WIT_FLAG_WORD_PLUS_FLOATER) != 0 ||
-      (header[0] == 3 && header[2] != 0)) {
+  const uint8_t known_flags =
+      header[0] >= 5   ? WIT_FLAG_WORD_PLUS_FLOATER | WIT_FLAG_POSITION_LENGTHS
+      : header[0] == 4 ? WIT_FLAG_WORD_PLUS_FLOATER
+                       : 0;
+  if (header[3] != 0 || (header[2] & ~known_flags) != 0) {
     *message = "unsupported word info table flags";
     return false;
   }
@@ -515,6 +548,40 @@ static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
       return false;
     }
   }
+  // Version 5 writes position lengths exactly when there is a KWG hash.
+  const bool position_lengths = (header[2] & WIT_FLAG_POSITION_LENGTHS) != 0;
+  if (header[0] >= 5 && position_lengths != (wit->kwg_hash != 0)) {
+    *message = "word info table position lengths do not match its KWG hash";
+    return false;
+  }
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       position_lengths && length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    const size_t cells = wit_position_length_cells(wit, length);
+    if (cells == 0) {
+      continue;
+    }
+    if (cells > remaining / sizeof(uint32_t)) {
+      *message = "truncated word info table position lengths";
+      return false;
+    }
+    remaining -= cells * sizeof(uint32_t);
+    wit->position_lengths[length] = malloc_or_die(cells * sizeof(uint32_t));
+    if (!fread_le_uint32s(wit->position_lengths[length], cells, stream)) {
+      return false;
+    }
+    // A base at position p of a final-length word has length + p <= final
+    // length <= BOARD_DIM; any other bit means a corrupt table.
+    const size_t stride = (size_t)wit_stride_for_len(length);
+    for (size_t cell = 0; cell < cells; cell++) {
+      const int position = (int)(cell % stride);
+      const uint32_t allowed = (uint32_t)((UINT64_C(1) << (BOARD_DIM + 1)) -
+                                          (UINT64_C(1) << (length + position)));
+      if ((wit->position_lengths[length][cell] & ~allowed) != 0) {
+        *message = "invalid word info table position lengths";
+        return false;
+      }
+    }
+  }
   if (remaining != 0 || fgetc(stream) != EOF || ferror(stream)) {
     *message = "unexpected data after word info table";
     return false;
@@ -542,7 +609,14 @@ void word_info_table_load(WordInfoTable *wit, const char *name,
     return;
   }
   wit->name = string_duplicate(name);
-  word_info_table_build_position_lengths(wit);
+  bool has_position_lengths = false;
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    has_position_lengths |= wit->position_lengths[length] != NULL;
+  }
+  if (!has_position_lengths) {
+    word_info_table_build_position_lengths(wit);
+  }
 }
 
 WordInfoTable *word_info_table_create(const char *data_paths,
