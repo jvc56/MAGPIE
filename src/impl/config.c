@@ -1194,10 +1194,11 @@ static const char *contribute_help(const char **usages, const char **examples) {
          "idlewait) come from the given file, or contribute.txt in the "
          "working directory if no path is given -- never from the command "
          "line, since an API key there ends up in shell history and ps "
-         "output. The file and every setting in it are optional: with none, "
-         "MAGPIE contributes anonymously to " CONTRIBUTE_DEFAULT_SERVER
-         " on all but one core, and creates the file to save the identity "
-         "the server issues. Rack info tables are "
+         "output. Every setting is optional, and so is contribute.txt itself "
+         "(a file given by path must exist): with none, MAGPIE contributes "
+         "anonymously to " CONTRIBUTE_DEFAULT_SERVER " on all but one core, "
+         "and creates contribute.txt to save the identity the server "
+         "issues. Rack info tables are "
          "memory-mapped unless -ritmmap false is given here, so workers "
          "sharing a data directory share one copy.";
 }

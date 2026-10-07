@@ -94,11 +94,24 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   const char *settings_path =
       path ? path : CONTRIBUTE_SETTINGS_DEFAULT_FILENAME;
 
-  // No file is every setting at its default. One that is there but cannot be
-  // read -- its permissions, a directory of that name -- is an error: the
-  // contributor meant something by it, perhaps an API key.
+  // No contribute.txt in the working directory is every setting at its
+  // default. A file named on the command line that is not there is an error:
+  // a typo in its name would otherwise start a new anonymous worker on the
+  // default server, and a file the contributor named holds something they
+  // meant, perhaps an API key. So is one that is there but cannot be read
+  // (its permissions, a directory of that name), whichever it is.
   char *contents = NULL;
   FILE *stream = fopen(settings_path, "re");
+  if (!stream && errno == ENOENT && path) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
+        get_formatted_string(
+            "'%s' does not exist; create it, or run contribute with no path "
+            "to use " CONTRIBUTE_SETTINGS_DEFAULT_FILENAME
+            " in the working directory or, without one, the defaults",
+            settings_path));
+    return NULL;
+  }
   if (!stream && errno != ENOENT) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,

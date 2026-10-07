@@ -324,45 +324,26 @@ static void test_client_state(void) {
   assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
   client_state_destroy(state);
 
-  // A file that is not there at all is every setting at its default.
-  const char *missing = "contribute_test_does_not_exist.txt";
-  (void)remove(missing);
-  state = client_state_load(missing, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert(state);
-  assert(!state->settings_file_found);
-  assert_strings_equal(state->settings_path, missing);
-  assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
-  assert(!state->server_stated);
-  assert(state->api_key == NULL);
-  assert(state->worker_uuid == NULL);
-  assert(state->threads == 0);
-  assert(state->max_tasks == 0 && !state->max_tasks_stated);
-  assert(state->idle_wait_seconds == 5 && !state->idle_wait_stated);
-  assert(state->commented_key_line == 0);
-
-  // The first identity the server issues creates it, holding a header and
-  // the uuid line and nothing defaulted -- not the server, which a later
-  // change of default should still reach.
-  assert(client_state_set_worker_uuid(state,
-                                      "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c"));
-  client_state_destroy(state);
-  char *created = get_string_from_file(missing, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  assert_strings_equal(created, CONTRIBUTE_SETTINGS_HEADER
-                       "\nuuid 6f3d7198-178a-47c8-9ccc-6aa6995a5a9c\n");
-  assert(!strstr(created, "server"));
-  free(created);
-  // And a later run reads it back, on the default server still.
-  state = client_state_load(missing, error_stack);
+  // As does a named file that is there but empty.
+  write_settings_file(path, "");
+  state = client_state_load(path, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(state->settings_file_found);
-  assert_strings_equal(state->worker_uuid,
-                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
   assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
-  assert(!state->server_stated);
+  assert(state->api_key == NULL);
   client_state_destroy(state);
+
+  // But a named file that is not there is refused, naming it: a typo in the
+  // name would otherwise start a new anonymous worker on the default server.
+  const char *missing = "contribute_test_does_not_exist.txt";
   (void)remove(missing);
+  assert(!client_state_load(missing, error_stack));
+  char *refusal = error_stack_get_string_and_reset(error_stack);
+  assert(
+      strstr(refusal, "'contribute_test_does_not_exist.txt' does not exist"));
+  free(refusal);
+  // And nothing was created in its place.
+  assert(access(missing, F_OK) != 0);
 
   // A server line with no address is refused rather than taken for the
   // default: deleting the line is how to ask for that.
@@ -426,6 +407,56 @@ static void test_client_state(void) {
   client_state_destroy(state);
 
   (void)remove(path);
+  error_stack_destroy(error_stack);
+}
+
+// No contribute.txt in the working directory is every setting at its default,
+// and the first identity the server issues creates it. Skipped where the
+// working directory has a contribute.txt of its own, which this would read
+// and must not touch.
+static void test_the_default_settings_file_may_be_missing(void) {
+  const char *default_path = CONTRIBUTE_SETTINGS_DEFAULT_FILENAME;
+  if (access(default_path, F_OK) == 0) {
+    return;
+  }
+  ErrorStack *error_stack = error_stack_create();
+  ClientState *state = client_state_load(NULL, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(state);
+  assert(!state->settings_file_found);
+  assert_strings_equal(state->settings_path, default_path);
+  assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
+  assert(!state->server_stated);
+  assert(state->api_key == NULL);
+  assert(state->worker_uuid == NULL);
+  assert(state->threads == 0);
+  assert(state->max_tasks == 0 && !state->max_tasks_stated);
+  assert(state->idle_wait_seconds == 5 && !state->idle_wait_stated);
+  assert(state->commented_key_line == 0);
+
+  // The first identity the server issues creates it, holding a header and
+  // the uuid line and nothing defaulted -- not the server, which a later
+  // change of default should still reach.
+  assert(client_state_set_worker_uuid(state,
+                                      "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c"));
+  client_state_destroy(state);
+  char *created = get_string_from_file(default_path, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(created, CONTRIBUTE_SETTINGS_HEADER
+                       "\nuuid 6f3d7198-178a-47c8-9ccc-6aa6995a5a9c\n");
+  assert(!strstr(created, "server"));
+  free(created);
+
+  // And a later run reads it back, on the default server still.
+  state = client_state_load(NULL, error_stack);
+  (void)remove(default_path);
+  assert(error_stack_is_empty(error_stack));
+  assert(state->settings_file_found);
+  assert_strings_equal(state->worker_uuid,
+                       "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c");
+  assert_strings_equal(state->server_url, CONTRIBUTE_DEFAULT_SERVER);
+  assert(!state->server_stated);
+  client_state_destroy(state);
   error_stack_destroy(error_stack);
 }
 
@@ -1907,11 +1938,11 @@ static void test_a_runs_state_starts_clean(void) {
 // defaults -- the sign of a run from the wrong folder, which with the file
 // optional is a new anonymous worker rather than an error -- and says only
 // whether there is an API key, never the key.
+// With `path` NULL, the default file, which the caller has checked is not
+// there.
 static char *settings_printed_for(const char *path, const char *contents) {
   if (contents) {
     write_settings_file(path, contents);
-  } else {
-    (void)remove(path);
   }
   FILE *captured = tmpfile();
   assert(captured);
@@ -1925,7 +1956,9 @@ static char *settings_printed_for(const char *path, const char *contents) {
   assert(state);
   contribute_state_destroy(state);
   thread_control_destroy(thread_control);
-  (void)remove(path);
+  if (path) {
+    (void)remove(path);
+  }
   rewind(captured);
   char *printed =
       get_string_from_file_handle(captured, "(captured)", error_stack);
@@ -1937,17 +1970,21 @@ static char *settings_printed_for(const char *path, const char *contents) {
 static void test_a_run_says_which_settings_are_defaults(void) {
   const char *path = "contribute_test_printed_settings.txt";
 
-  char *printed = settings_printed_for(path, NULL);
-  assert(strstr(printed, "not found; every setting is its default"));
-  assert(
-      strstr(printed, "  server   " CONTRIBUTE_DEFAULT_SERVER " (default)\n"));
-  assert(strstr(printed, "  apikey   none (anonymous)\n"));
-  assert(strstr(printed, "  uuid     none yet"));
-  assert(strstr(printed, "(default)\n  maxtasks 0 (default: no limit)\n"));
-  assert(strstr(printed, "  idlewait 5 (default)\n"));
-  free(printed);
+  // Skipped where the working directory has a contribute.txt of its own.
+  if (access(CONTRIBUTE_SETTINGS_DEFAULT_FILENAME, F_OK) != 0) {
+    char *printed = settings_printed_for(NULL, NULL);
+    assert(strstr(printed, CONTRIBUTE_SETTINGS_DEFAULT_FILENAME
+                  " not found; every setting is its default"));
+    assert(strstr(printed,
+                  "  server   " CONTRIBUTE_DEFAULT_SERVER " (default)\n"));
+    assert(strstr(printed, "  apikey   none (anonymous)\n"));
+    assert(strstr(printed, "  uuid     none yet"));
+    assert(strstr(printed, "(default)\n  maxtasks 0 (default: no limit)\n"));
+    assert(strstr(printed, "  idlewait 5 (default)\n"));
+    free(printed);
+  }
 
-  printed = settings_printed_for(path, "apikey bt_SECRETKEY123\n");
+  char *printed = settings_printed_for(path, "apikey bt_SECRETKEY123\n");
   assert(!strstr(printed, "not found"));
   assert(
       strstr(printed, "  server   " CONTRIBUTE_DEFAULT_SERVER " (default)\n"));
@@ -2851,6 +2888,7 @@ void test_contribute(void) {
   test_json_wrapper();
   test_json_serialization();
   test_client_state();
+  test_the_default_settings_file_may_be_missing();
   test_sha256();
   test_digest_cache_key_notices_a_same_size_replacement();
   test_contract_fixtures_carry_every_key_contribute_reads();

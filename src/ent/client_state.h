@@ -9,13 +9,15 @@
 // optional path to this file, defaulting to contribute.txt in the working
 // directory.
 //
-// The file is optional, and so is every setting in it: a missing file is
-// every setting at its default (birdtest.org, anonymous, cores - 1 threads, no
-// task limit), and a file states only what it changes. What a file does state
-// is held to its rules -- an unknown or miscased setting, or a malformed
-// value, is refused, never passed over for the default. Nothing defaulted is
-// ever written into the file, so a later change of default reaches every
-// contributor whose file does not override it.
+// The default file is optional, and so is every setting in any file: no
+// contribute.txt in the working directory is every setting at its default
+// (birdtest.org, anonymous, cores - 1 threads, no task limit), and a file
+// states only what it changes. A file named on the command line must exist:
+// a typo in its name would otherwise quietly start a new anonymous worker. What
+// a file does state is held to its rules -- an unknown or miscased setting, or
+// a malformed value, is refused, never passed over for the default. Nothing
+// defaulted is ever written into the file, so a later change of default reaches
+// every contributor whose file does not override it.
 
 #include "../util/io_util.h"
 #include <stdbool.h>
@@ -58,10 +60,11 @@ typedef struct ClientState {
 } ClientState;
 
 // Reads the settings file at `path`, or CONTRIBUTE_SETTINGS_DEFAULT_FILENAME
-// when `path` is NULL. A file that is not there is every setting at its
-// default; one that is there but cannot be read, or that holds an unknown
-// setting or a malformed value, is an error (NULL, and a message on
-// error_stack that never quotes a value that could be an API key).
+// when `path` is NULL. With `path` NULL, a file that is not there is every
+// setting at its default; a `path` that is not there is an error. So is a file
+// that cannot be read, or that holds an unknown setting or a malformed value
+// (NULL, and a message on error_stack that never quotes a value that could be
+// an API key).
 ClientState *client_state_load(const char *path, ErrorStack *error_stack);
 void client_state_destroy(ClientState *state);
 
