@@ -349,7 +349,7 @@ static Equity pat_eval_test_fresh_run_penalty(const char *move_string,
   Config *config = config_create_or_die(
       "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "new");
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
   const LetterDistribution *ld = game_get_ld(game);
   const Player *player = game_get_player(game, 0);
   rack_set_to_string(ld, player_get_rack(player), "ACEHMRS");
