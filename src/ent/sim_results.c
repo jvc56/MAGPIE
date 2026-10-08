@@ -538,6 +538,18 @@ const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play) {
   return simmed_play->utility_stat;
 }
 
+double simmed_play_get_exact_equity_mean(const SimmedPlay *simmed_play) {
+  return exact_mean_get_equity(&simmed_play->exact_equity);
+}
+
+double simmed_play_get_exact_win_pct_mean(const SimmedPlay *simmed_play) {
+  return exact_mean_get_unit(&simmed_play->exact_win_pct);
+}
+
+double simmed_play_get_exact_utility_mean(const SimmedPlay *simmed_play) {
+  return exact_mean_get_unit(&simmed_play->exact_utility);
+}
+
 bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play) {
   return simmed_play->utility_w_spread > 0.0;
 }

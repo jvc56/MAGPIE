@@ -35,6 +35,11 @@ uint64_t simmed_play_get_ply_info_count(const SimmedPlay *simmed_play,
 const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play);
+// The exactly order-independent means compare_simmed_plays ranks by. They are
+// bit-reproducible for a given sample multiset, unlike the Stat means above.
+double simmed_play_get_exact_equity_mean(const SimmedPlay *simmed_play);
+double simmed_play_get_exact_win_pct_mean(const SimmedPlay *simmed_play);
+double simmed_play_get_exact_utility_mean(const SimmedPlay *simmed_play);
 bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play);
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);

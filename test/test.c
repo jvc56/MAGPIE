@@ -59,6 +59,7 @@
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
+#include "sim_det_sweep_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
@@ -176,6 +177,7 @@ static TestEntry on_demand_test_table[] = {
     {"playchooserfixed", test_play_chooser_fixed_short_budget},
     {"analyze_sim", test_analyze_sim},
     {"simdetigp", test_autoplay_sim_determinism_igp},
+    {"simdetsweep", test_sim_determinism_sweep},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},
