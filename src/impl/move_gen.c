@@ -3009,7 +3009,6 @@ static inline void shadow_start_small(MoveGen *gen) {
   }
 
   const uint64_t original_rack_cross_set = gen->rack_cross_set;
-  rack_copy(&gen->full_player_rack, &gen->player_rack);
 
   const MachineLetter current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
@@ -3554,6 +3553,8 @@ void gen_shadow(MoveGen *gen) {
 // Simplified gen_shadow for BEST_SMALL.
 // Skips leave_map setup and uses small shadow functions.
 void gen_shadow_small(MoveGen *gen) {
+  // Every anchor restores this same rack; snapshot it once per generation.
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
   anchor_heap_reset(&gen->anchor_heap);
 
   for (int dir = 0; dir < 2; dir++) {
