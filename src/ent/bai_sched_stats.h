@@ -43,6 +43,10 @@ typedef struct BAISchedSimStats {
   // Thread-ns from each worker leaving the sampling loop to the last worker
   // leaving it.
   int64_t tail_ns;
+  // Thread-ns from bai() starting to each worker's first claim, and from the
+  // last worker leaving the sampling loop to bai() returning.
+  int64_t startup_ns;
+  int64_t end_ns;
   // Thread-ns spent waiting to acquire the BAI mutex.
   int64_t lock_wait_ns;
   // Time spent folding rounds and scheduling rounds (held under the mutex).

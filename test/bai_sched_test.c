@@ -73,11 +73,12 @@ static double baisched_pct(const int64_t part, const double whole) {
 }
 
 static void baisched_print_header(void) {
-  printf("%4s %7s %5s %9s %8s %9s | %6s %6s %6s %6s %6s %6s %6s | %6s %6s "
-         "%6s %6s | %7s %7s %7s %5s\n",
+  printf("%4s %7s %5s %9s %8s %9s | %6s %6s %6s %6s %6s %6s %6s %6s %6s | "
+         "%6s %6s %6s %6s | %7s %7s %7s %5s\n",
          "thr", "iters", "sims", "samples", "wall_s", "samp/s", "busy%",
-         "idle%", "barr%", "tail%", "lock%", "fold%", "other%", "q99md",
-         "q999md", "q999mx", "qmaxmx", "ovsh/sm", "staleav", "stalemx", "R");
+         "idle%", "barr%", "start%", "tail%", "end%", "lock%", "fold%",
+         "other%", "q99md", "q999md", "q999mx", "qmaxmx", "ovsh/sm", "staleav",
+         "stalemx", "R");
 }
 
 static void baisched_print_row(const int threads, const int iters,
@@ -94,7 +95,9 @@ static void baisched_print_row(const int threads, const int iters,
   int64_t busy_ns = 0;
   int64_t idle_ns = 0;
   int64_t barrier_ns = 0;
+  int64_t startup_ns = 0;
   int64_t tail_ns = 0;
+  int64_t end_ns = 0;
   int64_t lock_ns = 0;
   int64_t fold_ns = 0;
   uint64_t overshoot = 0;
@@ -114,7 +117,9 @@ static void baisched_print_row(const int threads, const int iters,
     idle_ns += sim_stats.idle_ns;
     barrier_ns +=
         sim_stats.initial_barrier_ns + sim_stats.avoid_prune_barrier_ns;
+    startup_ns += sim_stats.startup_ns;
     tail_ns += sim_stats.tail_ns;
+    end_ns += sim_stats.end_ns;
     lock_ns += sim_stats.lock_wait_ns;
     fold_ns += sim_stats.fold_ns + sim_stats.schedule_ns;
     overshoot += sim_stats.overshoot_samples;
@@ -153,14 +158,15 @@ static void baisched_print_row(const int threads, const int iters,
   free(q99);
   free(q999);
   free(qmax);
-  const int64_t accounted =
-      busy_ns + idle_ns + barrier_ns + tail_ns + lock_ns + fold_ns;
-  printf(" %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f | %6.2f %6.2f %6.2f "
-         "%6.1f | %7.1f %7.0f %7llu %5d\n",
+  const int64_t accounted = busy_ns + idle_ns + barrier_ns + startup_ns +
+                            tail_ns + end_ns + lock_ns + fold_ns;
+  printf(" %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f | %6.2f %6.2f "
+         "%6.2f %6.1f | %7.1f %7.0f %7llu %5d\n",
          baisched_pct(busy_ns, capacity_ns), baisched_pct(idle_ns, capacity_ns),
          baisched_pct(barrier_ns, capacity_ns),
-         baisched_pct(tail_ns, capacity_ns), baisched_pct(lock_ns, capacity_ns),
-         baisched_pct(fold_ns, capacity_ns),
+         baisched_pct(startup_ns, capacity_ns),
+         baisched_pct(tail_ns, capacity_ns), baisched_pct(end_ns, capacity_ns),
+         baisched_pct(lock_ns, capacity_ns), baisched_pct(fold_ns, capacity_ns),
          100.0 - baisched_pct(accounted, capacity_ns), q99_median, q999_median,
          q999_max, qmax_max, (double)overshoot / (double)num_sims,
          stale_count > 0 ? (double)stale_sum / (double)stale_count : 0.0,

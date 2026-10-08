@@ -195,6 +195,11 @@ typedef struct BAISyncData {
   // before the stop.
   bool stopped;
   size_t record_size;
+  // Slots scheduled but not yet claimed, and the number of workers. Together
+  // they size claims near the end of a sim (see
+  // bai_schedule_claim_while_locked); neither affects what is sampled.
+  uint64_t num_unclaimed;
+  int num_threads;
   // Signaled whenever a fold may have made new work claimable, when the sim
   // stops, and when a worker abandons the rounds. A worker with nothing to
   // claim waits on it instead of spinning on the mutex.
@@ -204,6 +209,7 @@ typedef struct BAISyncData {
   BAISchedHistogram sched_histogram;
   uint64_t sched_completions;
   bool sched_stop_folded;
+  int64_t sched_start_ns;
   int64_t sched_last_exit_ns;
   int64_t sched_exit_ns_sum;
   int sched_num_exits;
@@ -221,6 +227,7 @@ typedef struct BAIWorkerSchedStats {
   uint64_t idle_episodes;
   int64_t lock_wait_ns;
   int64_t avoid_prune_barrier_ns;
+  int64_t first_claim_ns;
   BAISchedHistogram histogram;
 } BAIWorkerSchedStats;
 
@@ -245,6 +252,9 @@ static inline void bai_sched_idle_begin(BAIWorkerSchedStats *worker_stats) {
 }
 
 static inline void bai_sched_idle_end(BAIWorkerSchedStats *worker_stats) {
+  if (worker_stats->first_claim_ns == 0) {
+    worker_stats->first_claim_ns = ctimer_monotonic_ns();
+  }
   if (worker_stats->idle_start_ns != 0) {
     worker_stats->idle_ns +=
         ctimer_monotonic_ns() - worker_stats->idle_start_ns;
@@ -331,6 +341,8 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->scheduling_finished = false;
   bai_sync_data->stopped = false;
   bai_sync_data->record_size = 0;
+  bai_sync_data->num_unclaimed = 0;
+  bai_sync_data->num_threads = 1;
 #ifdef BAI_SCHED_STATS
   memset(&bai_sync_data->sched_stats, 0, sizeof(bai_sync_data->sched_stats));
   bai_sched_histogram_reset(&bai_sync_data->sched_histogram);
@@ -620,6 +632,7 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
     bai_sync_data->arm_data[arm_index].num_scheduled++;
   }
   bai_sync_data->num_total_samples_requested += (uint64_t)num_samples;
+  bai_sync_data->num_unclaimed += (uint64_t)num_samples;
   bai_sync_data->next_round_to_schedule++;
   if (bai_sync_data->num_total_samples_requested >= budget) {
     // This round spends the last of the budget. The sample-limit status is
@@ -645,6 +658,12 @@ typedef struct BAIClaim {
 // sim has stopped. Threads pull greedily across round boundaries, so a slow
 // sample in one round does not keep the others from working on the rounds
 // behind it.
+//
+// Once the last round is scheduled, a claim takes at most half of an even
+// share of what is left, so that the sim does not end with one worker still
+// running a whole batch while the others have nothing to do. Which worker
+// runs which slot never changes what a slot samples, so the claim size can
+// depend on the thread count without affecting the results.
 static inline bool bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
                                                    BAIClaim *claim) {
   if (bai_sync_data->stopped) {
@@ -656,14 +675,23 @@ static inline bool bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
         &bai_sync_data
              ->rounds[bai_sync_data->next_round_to_claim % BAI_SCHEDULE_ROUNDS];
     if (round->num_claimed < round->num_samples) {
+      int max_slots = round->claim_batch;
+      if (bai_sync_data->scheduling_finished) {
+        const uint64_t share = bai_sync_data->num_unclaimed /
+                               (2 * (uint64_t)bai_sync_data->num_threads);
+        if (share < (uint64_t)max_slots) {
+          max_slots = share > 0 ? (int)share : 1;
+        }
+      }
       int num_slots = round->num_samples - round->num_claimed;
-      if (num_slots > round->claim_batch) {
-        num_slots = round->claim_batch;
+      if (num_slots > max_slots) {
+        num_slots = max_slots;
       }
       claim->round_number = bai_sync_data->next_round_to_claim;
       claim->first_slot = round->num_claimed;
       claim->num_slots = num_slots;
       round->num_claimed += num_slots;
+      bai_sync_data->num_unclaimed -= (uint64_t)num_slots;
       // Move past a fully claimed round now rather than on the next claim.
       // Once its samples complete it folds and its ring slot takes a new
       // round; a cursor still pointing at it would hand out the new round's
@@ -1052,6 +1080,9 @@ static inline void bai_sched_worker_merge(BAISyncData *sync_data,
   sim_stats->idle_events += stats->idle_episodes;
   sim_stats->lock_wait_ns += stats->lock_wait_ns;
   sim_stats->avoid_prune_barrier_ns += stats->avoid_prune_barrier_ns;
+  if (stats->first_claim_ns != 0) {
+    sim_stats->startup_ns += stats->first_claim_ns - sync_data->sched_start_ns;
+  }
   bai_sched_histogram_merge(&sync_data->sched_histogram, &stats->histogram);
   sync_data->sched_exit_ns_sum += exit_ns;
   sync_data->sched_num_exits++;
@@ -1081,7 +1112,10 @@ static inline void bai_sched_record(BAISyncData *sync_data,
       sync_data->sched_completions > sim_stats->folded_samples
           ? sync_data->sched_completions - sim_stats->folded_samples
           : 0;
-  sim_stats->wall_ns = bai_sched_now() - start_ns;
+  const int64_t end_ns = bai_sched_now();
+  sim_stats->wall_ns = end_ns - start_ns;
+  sim_stats->end_ns = (end_ns - sync_data->sched_last_exit_ns) *
+                      (int64_t)sync_data->sched_num_exits;
   sim_stats->tail_ns =
       sync_data->sched_last_exit_ns * (int64_t)sync_data->sched_num_exits -
       sync_data->sched_exit_ns_sum;
@@ -1135,6 +1169,10 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control,
                                                 (int)rvs_get_num_rvs(rvs), rng);
   sync_data->record_size = rvs_get_sample_record_size(rvs);
+  sync_data->num_threads = bai_options->num_threads;
+#ifdef BAI_SCHED_STATS
+  sync_data->sched_start_ns = sched_start_ns;
+#endif
 
   if (bai_options->arm_avoid_prune && bai_options->num_arm_avoid_prune > 0) {
     sync_data->avoid_prune_arms = bai_options->arm_avoid_prune;
