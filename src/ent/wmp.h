@@ -4,6 +4,7 @@
 #include "../compat/endian_conv.h"
 #include "../compat/malloc.h"
 #include "../def/board_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/wmp_defs.h"
 #include "../ent/bit_rack.h"
 #include "../util/fileproxy.h"
@@ -529,6 +530,8 @@ static inline int wmp_bytes_through_last_nonzero(uint64_t bits) {
 // words need not be zero.
 static inline int wmp_entry_number_of_inlined_bytes(const WMPEntry *entry,
                                                     int word_length) {
+  assert(word_length >= MINIMUM_WORD_LENGTH &&
+         word_length < WMP_INLINE_SLOT_TABLE_SIZE);
 #if IS_LITTLE_ENDIAN
   const WMPInlineSlotEnds *slot_ends = &wmp_inline_slot_ends[word_length];
   uint64_t low;
@@ -556,6 +559,8 @@ static inline int wmp_entry_number_of_inlined_bytes(const WMPEntry *entry,
 
 static inline int wmp_entry_number_of_inlined_words(const WMPEntry *entry,
                                                     int word_length) {
+  assert(word_length >= MINIMUM_WORD_LENGTH &&
+         word_length < WMP_INLINE_SLOT_TABLE_SIZE);
   return (wmp_entry_number_of_inlined_bytes(entry, word_length) *
           wmp_inline_slot_ends[word_length].inverse_length) >>
          WMP_INLINE_INVERSE_LENGTH_SHIFT;
