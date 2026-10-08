@@ -275,7 +275,12 @@ static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
   return gen->cutoff_equity_or_score;
 }
 
+// The cutoff never falls between resets: the WMP subrack mask in wordmap_gen
+// drops a subrack whose leave bound is below the cutoff when it builds the
+// mask, and relies on the cutoff still being at least that high when the walk
+// reaches the subrack.
 static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
+  const Equity previous_cutoff = gen->cutoff_equity_or_score;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
@@ -291,18 +296,22 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
     gen->cutoff_equity_or_score =
         gen->best_move_equity_or_score - gen->eq_margin_movegen;
-    return;
+    break;
   case MOVE_RECORD_BEST:;
     const Move *move = gen_get_readonly_best_move(gen);
     gen->cutoff_equity_or_score = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
                                       : move_get_score(move);
-    return;
+    break;
   case MOVE_RECORD_BEST_SMALL:
     // No Move object; best_move_equity_or_score is already the best score.
     gen->cutoff_equity_or_score = gen->best_move_equity_or_score;
-    return;
+    break;
   }
+  assert(gen->cutoff_equity_or_score >= previous_cutoff);
+  // previous_cutoff is read only by the assert above (compiled out in
+  // release).
+  (void)previous_cutoff;
 }
 
 static inline void
@@ -993,30 +1002,45 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
   return true;
 }
 
+// The anchor's score bound plus this subrack's leave bounds the equity of
+// every play the subrack can make, so under equity sort a subrack whose bound
+// cannot reach the cutoff is skipped. Under score sort the cutoff is a score,
+// which the anchor-level check already bounded; adding a leave there would
+// skip subracks that still hold plays above the cutoff.
+static inline __attribute__((always_inline)) bool
+wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
+                                 int subrack_idx) {
+  if (!gen->wmp_prune_subracks_by_leave) {
+    return false;
+  }
+  const Equity leave_value =
+      wmp_move_gen_get_leave_value(&gen->wmp_move_gen, subrack_idx);
+  return better_play_has_been_found(gen, leave_value +
+                                             anchor->highest_possible_score);
+}
+
 // Probes the WMP for one canonical subrack of the current anchor and records
 // every play its words allow. Returns true once the recording threshold has
 // been exceeded, so the caller stops scanning subracks.
 //
-// This has two callers, and with two callers clang keeps it out of line,
-// turning the hottest loop in wordmap_gen into a call per subrack (measured
-// at about -6% sim throughput with WIT off). Force the inline so that loop
-// fuses exactly as it did before the prune; the second copy lands in the
-// out-of-line masked scan below, away from generate_moves.
+// Its one call site is the subrack walk in wordmap_gen, which inlines into
+// generate_moves. Keep it the only one: a second inlined copy there costs
+// several percent of sim throughput, and with two call sites and no attribute
+// clang keeps it out of line, so the walk makes a call per subrack (about -6%
+// with WIT off).
 static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
                            bool lazy) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
-  // The anchor's score bound plus this subrack's leave bounds the equity of
-  // every play the subrack can make, so under equity sort a subrack whose
-  // bound cannot reach the cutoff is skipped. Under score sort the cutoff is
-  // a score, which the anchor-level check already bounded; adding a leave
-  // there would skip subracks that still hold plays above the cutoff.
+  // record_wmp_play prices every play below with wgen->leave_value. Only
+  // equity sort with tiles in the bag reads the subrack's leave, and that is
+  // when the leave prune is on; an empty bag sets it to 0 below, and score
+  // sort ignores it.
   if (gen->wmp_prune_subracks_by_leave) {
-    const Equity leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
-    if (better_play_has_been_found(gen, leave_value +
-                                            anchor->highest_possible_score)) {
-      return false;
-    }
+    wgen->leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
+  }
+  if (wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx)) {
+    return false;
   }
   if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy)) {
     return false;
@@ -1049,29 +1073,63 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
   return false;
 }
 
-// Scans the subracks of an anchor whose WIT forbidden set is nonzero, skipping
-// each canonical subrack that holds a forbidden letter before it is probed.
-// Kept out of line on purpose: a second inlined copy of the subrack loop in
-// wordmap_gen (and through it in generate_moves) grows the hot function
-// enough to cost several percent of sim throughput with WIT off, where this
-// scan never runs. One call per anchor here is negligible.
-static __attribute__((noinline)) void
-wordmap_gen_forbidden_subracks(MoveGen *gen, const Anchor *anchor,
-                               uint64_t forbidden_subrack_low,
-                               uint64_t forbidden_subrack_high) {
-  const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  const int num_subrack_combinations =
-      wmp_move_gen_get_num_subrack_combinations(wgen);
-  for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
-       subrack_idx++) {
+// The candidate mask for subracks first_idx onward, from
+// wmp_move_gen_get_candidate_subracks with the leave prune as it stands now.
+//
+// better_play_has_been_found(gen, bound) is exactly bound < cutoff when it
+// holds for EQUITY_MIN_VALUE, and otherwise false for every bound a leave plus
+// a score can reach, so nothing is dropped. Dropping a subrack whose bound is
+// already below the cutoff is safe because the cutoff never falls while plays
+// are recorded: gen_update_cutoff_equity_or_score takes it from the best move,
+// which is only replaced by a move that compare_moves ranks higher and so has
+// at least its equity (MOVE_RECORD_BEST), or from best_move_equity_or_score,
+// which only grows (MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST). That function
+// asserts it. MOVE_RECORD_BEST_SMALL is score-sort only, so the prune is never
+// on there. The check also stays active once it is, since a real move's equity
+// never reaches EQUITY_MAX_VALUE. So wordmap_gen_leave_prunes_subrack would
+// skip the subrack when the walk reaches it.
+static inline __attribute__((always_inline)) uint64_t
+wordmap_gen_candidate_subracks(const MoveGen *gen, const Anchor *anchor,
+                               int first_idx, int count, bool lazy,
+                               uint64_t *filter_misses) {
+  const bool prune_by_leave = gen->wmp_prune_subracks_by_leave &&
+                              better_play_has_been_found(gen, EQUITY_MIN_VALUE);
+  return wmp_move_gen_get_candidate_subracks(
+      &gen->wmp_move_gen, first_idx, count, lazy, prune_by_leave,
+      anchor->highest_possible_score, gen_get_cutoff_equity_or_score(gen),
+      filter_misses);
+}
+
+// Bit i of the result is set unless subrack first_idx + i holds a WIT
+// forbidden letter. Out of line: with WIT off the forbidden set is always
+// empty and this never runs.
+static __attribute__((noinline)) uint64_t wordmap_gen_allowed_subracks(
+    const WMPMoveGen *wgen, int first_idx, int count,
+    uint64_t forbidden_subrack_low, uint64_t forbidden_subrack_high) {
+  uint64_t allowed = 0;
+  for (int bit_idx = 0; bit_idx < count; bit_idx++) {
     const BitRack *subrack =
-        wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx);
-    if (bit_rack_intersects_mask(subrack, forbidden_subrack_low,
-                                 forbidden_subrack_high)) {
-      continue;
-    }
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, true)) {
-      return;
+        wmp_move_gen_get_nonplaythrough_subrack(wgen, first_idx + bit_idx);
+    allowed |= (uint64_t)(!bit_rack_intersects_mask(
+                   subrack, forbidden_subrack_low, forbidden_subrack_high))
+               << bit_idx;
+  }
+  return allowed;
+}
+
+// Resolves the filter misses in `misses`, bits counted from subrack
+// first_idx, as wordmap_gen_record_subrack would on reaching each one: unless
+// the leave check skips it, its lookup returns NULL and that is stored. Out
+// of line to keep the walk in generate_moves small; it has work only while a
+// lazily resolved rack still has unresolved subracks of the anchor's size.
+static __attribute__((noinline)) void
+wordmap_gen_resolve_filter_misses(MoveGen *gen, const Anchor *anchor,
+                                  int first_idx, uint64_t misses) {
+  while (misses != 0) {
+    const int subrack_idx = first_idx + wmp_move_gen_get_lowest_set_bit(misses);
+    misses &= misses - 1;
+    if (!wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx)) {
+      wmp_move_gen_resolve_filter_miss(&gen->wmp_move_gen, subrack_idx);
     }
   }
 }
@@ -1179,22 +1237,51 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   }
 
   // Neither whole-anchor rejection above needs combined subracks. Build
-  // them sequentially once for either surviving subrack scan below.
+  // them sequentially once for the subrack walk below.
   wmp_move_gen_build_playthrough_subracks(wgen);
 
-  // The forbidden set is the same for every subrack, so decide once per
-  // anchor. The masked scan lives out of line; this loop stays the one the
-  // generator ran before the prune existed, with no per-subrack test.
-  if (bit_rack_mask_has_letters(forbidden_subrack_low,
-                                forbidden_subrack_high)) {
-    wordmap_gen_forbidden_subracks(gen, anchor, forbidden_subrack_low,
-                                   forbidden_subrack_high);
-    return;
-  }
-  for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
-       subrack_idx++) {
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, lazy)) {
-      return;
+  // Visit only the candidate subracks, in index order; every other subrack
+  // would record nothing. A full scan would also have resolved each lazy
+  // filter miss to NULL when it reached it, under the cutoff left by the
+  // candidates below it. So each miss is resolved at that point: just before
+  // the next higher candidate is recorded, or after the last one. Misses past
+  // a threshold return stay unresolved, as they would have.
+  //
+  // The forbidden set is the same for every subrack, so the walk tests it
+  // once per chunk and pays nothing for it when it is empty, as it always is
+  // with WIT off.
+  const bool has_forbidden =
+      bit_rack_mask_has_letters(forbidden_subrack_low, forbidden_subrack_high);
+  for (int first_idx = 0; first_idx < num_subrack_combinations;
+       first_idx += WMP_MOVE_GEN_SUBRACKS_PER_MASK) {
+    const int remaining = num_subrack_combinations - first_idx;
+    const int count = remaining < WMP_MOVE_GEN_SUBRACKS_PER_MASK
+                          ? remaining
+                          : WMP_MOVE_GEN_SUBRACKS_PER_MASK;
+    uint64_t filter_misses = 0;
+    uint64_t candidates = wordmap_gen_candidate_subracks(
+        gen, anchor, first_idx, count, lazy, &filter_misses);
+    if (has_forbidden) {
+      const uint64_t allowed = wordmap_gen_allowed_subracks(
+          wgen, first_idx, count, forbidden_subrack_low,
+          forbidden_subrack_high);
+      candidates &= allowed;
+      filter_misses &= allowed;
+    }
+    while (candidates != 0) {
+      const int bit_idx = wmp_move_gen_get_lowest_set_bit(candidates);
+      candidates &= candidates - 1;
+      const uint64_t misses_below = filter_misses & ((1ULL << bit_idx) - 1);
+      if (misses_below != 0) {
+        wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, misses_below);
+        filter_misses ^= misses_below;
+      }
+      if (wordmap_gen_record_subrack(gen, anchor, first_idx + bit_idx, lazy)) {
+        return;
+      }
+    }
+    if (filter_misses != 0) {
+      wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, filter_misses);
     }
   }
 }
