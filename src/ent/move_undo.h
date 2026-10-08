@@ -256,57 +256,29 @@ static inline void board_set_right_extension_set_with_blank_tracked(
 // Tracked version of board_update_anchors - must match original exactly
 static inline void board_update_anchors_tracked(Board *board, int row, int col,
                                                 MoveUndo *undo) {
-  // Each tracked anchor setter saves both cross indices before modifying them.
-  board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION, false,
-                           undo);
-  board_set_anchor_tracked(board, row, col, BOARD_VERTICAL_DIRECTION, false,
-                           undo);
-  if (board_get_is_brick(board, row, col)) {
-    return;
-  }
-  bool tile_above = false;
-  bool tile_below = false;
-  bool tile_left = false;
-  bool tile_right = false;
-  bool tile_here = false;
-
-  if (row > 0) {
-    tile_above = !board_is_empty(board, row - 1, col);
-  }
-  if (col > 0) {
-    tile_left = !board_is_empty(board, row, col - 1);
-  }
-  if (row < BOARD_DIM - 1) {
-    tile_below = !board_is_empty(board, row + 1, col);
-  }
-  if (col < BOARD_DIM - 1) {
-    tile_right = !board_is_empty(board, row, col + 1);
-  }
-
-  tile_here = !board_is_empty(board, row, col);
-
-  if (tile_here) {
-    // When there's a tile here, set anchors based on adjacent empty squares
-    if (!tile_right) {
-      board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION,
-                               true, undo);
-    }
-    if (!tile_below) {
-      board_set_anchor_tracked(board, row, col, BOARD_VERTICAL_DIRECTION, true,
-                               undo);
-    }
-  } else {
-    // Empty square: set anchors only if adjacent tiles exist in specific
-    // pattern
-    if (!tile_left && !tile_right && (tile_above || tile_below)) {
-      board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION,
-                               true, undo);
-    }
-    if (!tile_above && !tile_below && (tile_left || tile_right)) {
-      board_set_anchor_tracked(board, row, col, BOARD_VERTICAL_DIRECTION, true,
-                               undo);
+  bool horizontal_anchor = false;
+  bool vertical_anchor = false;
+  if (!board_get_is_brick(board, row, col)) {
+    const bool tile_above = row > 0 && !board_is_empty(board, row - 1, col);
+    const bool tile_below =
+        row < BOARD_DIM - 1 && !board_is_empty(board, row + 1, col);
+    const bool tile_left = col > 0 && !board_is_empty(board, row, col - 1);
+    const bool tile_right =
+        col < BOARD_DIM - 1 && !board_is_empty(board, row, col + 1);
+    if (!board_is_empty(board, row, col)) {
+      horizontal_anchor = !tile_right;
+      vertical_anchor = !tile_below;
+    } else {
+      horizontal_anchor =
+          !tile_left && !tile_right && (tile_above || tile_below);
+      vertical_anchor = !tile_above && !tile_below && (tile_left || tile_right);
     }
   }
+  // Save the original state and write each final anchor value once.
+  board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION,
+                           horizontal_anchor, undo);
+  board_set_anchor_tracked(board, row, col, BOARD_VERTICAL_DIRECTION,
+                           vertical_anchor, undo);
 }
 
 #endif
