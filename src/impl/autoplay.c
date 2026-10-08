@@ -1181,6 +1181,28 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     show_divergent_results = false;
   }
 
+  // The divergent / non-divergent split is the variance reduction a game pair
+  // buys: a non-divergent pair is two identical games whose results cancel
+  // exactly. That only holds if games_are_divergent means "the two strategies
+  // chose differently" and never "the threads interleaved differently". Under
+  // intra-game parallelism a single sim gets every worker thread and is not
+  // yet reproducible, so the split is not attributable to strategy. Warn
+  // rather than silently reporting a paired comparison with no pairing left
+  // in it.
+  if (show_divergent_results &&
+      args->multi_threading_mode ==
+          MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM &&
+      (args->p1_sim_args.bai_options.num_threads > 1 ||
+       args->p2_sim_args.bai_options.num_threads > 1)) {
+    thread_control_print(
+        thread_control,
+        "warning: game pairs with -mtmode igp and more than one thread run a "
+        "multithreaded sim per move, which is not reproducible, so games are "
+        "reported as divergent for thread timing reasons rather than because "
+        "the two strategies chose differently. Use -mtmode pgp, or -threads "
+        "1, for an attributable paired comparison.\n");
+  }
+
   const int autoplay_num_threads = args->num_threads;
 
   AutoplayResults **autoplay_results_list =
