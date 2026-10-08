@@ -60,6 +60,8 @@
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_det_sweep_test.h"
+#include "sim_quality_test.h"
+#include "sim_regret_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
@@ -213,6 +215,8 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"baisched", test_bai_sched},
+    {"simquality", test_sim_quality},
+    {"simregret", test_sim_regret},
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
