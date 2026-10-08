@@ -455,13 +455,27 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   MoveList *move_list = simmer_worker->move_list;
   const int plies = sim_results_get_num_plies(sim_results);
 
+  const int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
+  // Canonicalize the bag before seeding it. game_seed alphabetizes and
+  // reshuffles whatever the bag currently holds, so the shuffle -- and
+  // therefore the opponent rack drawn below -- depends on the bag's contents,
+  // not just the seed. A worker's game copy starts each sim holding the real
+  // opponent rack, while every sample after the first starts with those tiles
+  // already back in the bag (returned by the previous sample's cleanup). The
+  // first sample on each worker therefore drew a different opponent rack than
+  // any later sample with the same seed, and which samples ran first depended
+  // on how the worker threads interleaved. Returning the rack here makes
+  // every sample seed an identical bag, so a sample's value is a pure
+  // function of its seed again. set_random_rack's own return_rack_to_bag
+  // below is then a no-op.
+  return_rack_to_bag(game, player_off_turn_index);
+
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
   const uint64_t seed = simmed_play_get_seed(simmed_play);
   prng_seed(simmer_worker->prng, seed);
   game_seed(game, seed);
 
-  int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
   bool set_player_off_turn_rack_with_known_opp_rack = false;
   if (simmer->use_alias_method) {
     Rack inferred_rack;
