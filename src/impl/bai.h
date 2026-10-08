@@ -268,23 +268,23 @@ typedef struct BAIWorkerSchedStats {
 
 static inline int64_t bai_sched_now(void) { return 0; }
 
-static inline void bai_sched_worker_init(BAIWorkerSchedStats
+static inline void bai_sched_worker_init(const BAIWorkerSchedStats
                                          __attribute__((unused)) *
                                          worker_stats) {}
 
-static inline void bai_sched_sample_done(BAIWorkerSchedStats
+static inline void bai_sched_sample_done(const BAIWorkerSchedStats
                                              __attribute__((unused)) *
                                              worker_stats,
                                          const int64_t
                                          __attribute__((unused)) start_ns) {}
 
-static inline void bai_sched_idle_begin(BAIWorkerSchedStats
+static inline void bai_sched_idle_begin(const BAIWorkerSchedStats
                                         __attribute__((unused)) *
                                         worker_stats) {}
 
-static inline void
-bai_sched_idle_end(BAIWorkerSchedStats __attribute__((unused)) * worker_stats) {
-}
+static inline void bai_sched_idle_end(const BAIWorkerSchedStats
+                                      __attribute__((unused)) *
+                                      worker_stats) {}
 #endif
 
 // Locks the BAI mutex, charging the wait to the worker when instrumented.
