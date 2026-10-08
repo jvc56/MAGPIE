@@ -104,7 +104,7 @@ jobs:
           - shard: rest
             tests: "hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep pat patfile patlexicon patutility patfeatures pateval"
           - shard: ap_rit
-            tests: "ap_rit"
+            tests: "ap_rit patwmp"
     steps:
       - uses: actions/checkout@v3
 

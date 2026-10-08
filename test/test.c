@@ -151,6 +151,7 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"pat", test_pat},
+    {"patwmp", test_pat_wmp_parity},
     {"patfile", test_pat_file},
     {"patlexicon", test_pat_lexicon},
     {"patutility", test_pat_utility},

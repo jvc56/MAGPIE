@@ -43,6 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void current_pat_header(char *buf, size_t buf_size) {
   (void)snprintf(buf, buf_size, "%s%d", PAT_MAGIC_PREFIX, PAT_VERSION);
@@ -2290,6 +2291,221 @@ static void test_pat_movegen_integration(void) {
   config_destroy(config);
 }
 
+enum {
+  // Seeded self-play positions per run of pat_wmp_table_parity_run, and
+  // how many must survive to the checks (a game can end early).
+  PAT_WMP_PARITY_ATTEMPTS = 24,
+  PAT_WMP_PARITY_MIN_POSITIONS = 18,
+  // The capacity of the full list it checks, and the within-margin
+  // recording's margin in points.
+  PAT_WMP_PARITY_TOP = 15,
+  PAT_WMP_PARITY_MARGIN = 12,
+  PAT_WMP_PARITY_ORACLE_CAPACITY = 100000,
+};
+// Far stronger than any file uses, to stress every bound it enters.
+#define PAT_WMP_PARITY_UTILITY 2000.0
+
+// The WMP record phase prunes a subrack when the anchor's score bound plus
+// the subrack's leave plus the anchor's PAT bound cannot reach the cutoff
+// (see wordmap_gen_leave_prunes_subrack): in the subrack walk's candidate
+// mask, and again when it resolves a lazy filter miss. The PAT bound carries
+// the utility correction's largest value, which is positive, so leaving it
+// out of any of those skips subracks that hold plays above the cutoff. This
+// checks WMP recording with the speed tables in `tables` (RIT: lazily
+// resolved subracks and their filter misses; WIT: the forbidden-subrack mask)
+// against exhaustive recording without WMP, on positions from seeded
+// self-play, with a strong utility correction: the best move, a full
+// PAT_WMP_PARITY_TOP-move list (whose skip reads the utility bound), and the
+// within-margin list, which must hold exactly the exhaustive list's moves
+// within the margin. With defense_weights every channel is weighted too;
+// without them the defense term is zero, so the PAT bound is the utility
+// correction's alone and positive, the case where dropping it from a prune
+// changes the moves found. Returns the positions checked.
+static int pat_wmp_table_parity_run(const char *lexicon, const char *tables,
+                                    bool defense_weights) {
+  char *base_cmd = get_formatted_string(
+      "set -lex %s -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-winpct winpct_english",
+      lexicon);
+  char *wmp_cmd = get_formatted_string("set -wmp true %s", tables);
+  Config *config_wmp = config_create_or_die(base_cmd);
+  load_and_exec_config_or_die(config_wmp, wmp_cmd);
+  Config *config_oracle = config_create_or_die(base_cmd);
+  load_and_exec_config_or_die(config_oracle, "set -wmp false");
+  free(wmp_cmd);
+  free(base_cmd);
+  Config *configs[2] = {config_wmp, config_oracle};
+  PATWeights *pats[2];
+  for (int config_idx = 0; config_idx < 2; config_idx++) {
+    PATWeights *pat = pat_create_zeroed("wmp_table_parity");
+    for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
+         feature_index++) {
+      pat_set_weight(pat, feature_index,
+                     defense_weights ? -40 - 3 * (feature_index % 7) : 0);
+    }
+    pat_set_combine_gamma(pat, 0.5);
+    pat_set_lexicon_floaters(pat, true);
+    pat_set_signed_through(pat, true);
+    pat_set_utility_adjust(pat, PAT_WMP_PARITY_UTILITY,
+                           config_get_win_pcts(configs[config_idx]));
+    PlayersData *players_data = config_get_players_data(configs[config_idx]);
+    players_data_set_data(players_data, PLAYERS_DATA_TYPE_PAT, 0, pat);
+    players_data_set_data(players_data, PLAYERS_DATA_TYPE_PAT, 1, pat);
+    players_data_set_is_shared(players_data, PLAYERS_DATA_TYPE_PAT, true);
+    pats[config_idx] = pat;
+    load_and_exec_config_or_die(
+        configs[config_idx],
+        "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0");
+    const Game *game = config_get_game(configs[config_idx]);
+    pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
+                          game_get_ld(game));
+    for (int player_index = 0; player_index < 2; player_index++) {
+      player_update(players_data, game_get_player(game, player_index));
+    }
+  }
+  Game *game_wmp = config_get_game(config_wmp);
+  Game *game_oracle = config_get_game(config_oracle);
+
+  MoveList *best_list = move_list_create(1);
+  MoveList *oracle_list = move_list_create(PAT_WMP_PARITY_ORACLE_CAPACITY);
+  MoveList *top_list = move_list_create(PAT_WMP_PARITY_TOP);
+  MoveList *within_list = move_list_create(PAT_WMP_PARITY_ORACLE_CAPACITY);
+  int positions_checked = 0;
+  for (int attempt = 0; attempt < PAT_WMP_PARITY_ATTEMPTS; attempt++) {
+    // The setup plays run without the heavy weights, under which passing
+    // beats every opening play; they are restored for the checks.
+    game_reset(game_wmp);
+    game_seed(game_wmp, 5000000ULL + (uint64_t)attempt);
+    draw_starting_racks(game_wmp);
+    player_set_pat(game_get_player(game_wmp, 0), NULL);
+    player_set_pat(game_get_player(game_wmp, 1), NULL);
+    const int plies = attempt % 14;
+    for (int ply = 0; ply < plies; ply++) {
+      play_move(get_top_equity_move(game_wmp, best_list), game_wmp, NULL);
+      if (game_get_game_end_reason(game_wmp) != GAME_END_REASON_NONE) {
+        break;
+      }
+    }
+    player_set_pat(game_get_player(game_wmp, 0), pats[0]);
+    player_set_pat(game_get_player(game_wmp, 1), pats[0]);
+    if (game_get_game_end_reason(game_wmp) != GAME_END_REASON_NONE ||
+        bag_get_letters(game_get_bag(game_wmp)) == 0) {
+      continue;
+    }
+    char *cgp = game_get_cgp(game_wmp, true);
+    char *cgp_cmd = get_formatted_string("cgp %s", cgp);
+    load_and_exec_config_or_die(config_oracle, cgp_cmd);
+    free(cgp_cmd);
+    free(cgp);
+
+    MoveGenArgs args = {
+        .game = game_oracle,
+        .move_list = oracle_list,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&args);
+    move_list_sort_moves(oracle_list);
+    const int num_oracle = move_list_get_count(oracle_list);
+    assert(num_oracle > 0 && num_oracle < PAT_WMP_PARITY_ORACLE_CAPACITY);
+    const Move *oracle_top = move_list_get_move(oracle_list, 0);
+
+    // The best move.
+    const Move *best = get_top_equity_move(game_wmp, best_list);
+    assert(move_get_equity(best) == move_get_equity(oracle_top));
+    assert(compare_moves_without_equity(best, oracle_top, true) == -1);
+
+    // A full list keeps the exhaustive list's top equities.
+    args.game = game_wmp;
+    args.move_list = top_list;
+    generate_moves(&args);
+    move_list_sort_moves(top_list);
+    const int num_top = move_list_get_count(top_list);
+    assert(num_top ==
+           (num_oracle < PAT_WMP_PARITY_TOP ? num_oracle : PAT_WMP_PARITY_TOP));
+    for (int move_idx = 0; move_idx < num_top; move_idx++) {
+      assert(move_get_equity(move_list_get_move(top_list, move_idx)) ==
+             move_get_equity(move_list_get_move(oracle_list, move_idx)));
+    }
+
+    // The within-margin list holds exactly the moves within the margin.
+    args.move_list = within_list;
+    args.move_record_type = MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST;
+    args.eq_margin_movegen = int_to_equity(PAT_WMP_PARITY_MARGIN);
+    generate_moves(&args);
+    move_list_sort_moves(within_list);
+    const Equity margin_cutoff =
+        move_get_equity(oracle_top) - int_to_equity(PAT_WMP_PARITY_MARGIN);
+    int num_expected = 0;
+    while (num_expected < num_oracle &&
+           move_get_equity(move_list_get_move(oracle_list, num_expected)) >=
+               margin_cutoff) {
+      num_expected++;
+    }
+    assert(move_list_get_count(within_list) == num_expected);
+    for (int move_idx = 0; move_idx < num_expected; move_idx++) {
+      assert(move_get_equity(move_list_get_move(within_list, move_idx)) ==
+             move_get_equity(move_list_get_move(oracle_list, move_idx)));
+    }
+    positions_checked++;
+  }
+  move_list_destroy(best_list);
+  move_list_destroy(oracle_list);
+  move_list_destroy(top_list);
+  move_list_destroy(within_list);
+  config_destroy(config_wmp);
+  config_destroy(config_oracle);
+  return positions_checked;
+}
+
+// pat_wmp_table_parity_run for every combination of the speed tables the
+// lexicon has in the data directory. CI builds a RIT only for TWL98, in the
+// ap_rit shard, which runs this as patwmp.
+static void pat_wmp_table_parity_lexicon(const char *lexicon) {
+  char *wmp_path = get_formatted_string("./data/lexica/%s.wmp", lexicon);
+  char *rit_path = get_formatted_string("./data/lexica/%s.rit", lexicon);
+  char *wit_path = get_formatted_string("./data/lexica/%s.wit", lexicon);
+  const bool have_wmp = access(wmp_path, R_OK) == 0;
+  const bool have_rit = access(rit_path, R_OK) == 0;
+  const bool have_wit = access(wit_path, R_OK) == 0;
+  free(wmp_path);
+  free(rit_path);
+  free(wit_path);
+  if (!have_wmp) {
+    printf("PAT WMP parity %s: no WMP, skipped\n", lexicon);
+    return;
+  }
+  for (int uses_rit = 0; uses_rit <= 1; uses_rit++) {
+    for (int uses_wit = 0; uses_wit <= 1; uses_wit++) {
+      if ((uses_rit && !have_rit) || (uses_wit && !have_wit)) {
+        continue;
+      }
+      char *tables = get_formatted_string(
+          "-rit %s %s -wit %s", uses_rit ? "true" : "false",
+          uses_rit ? "-ritmmap true" : "", uses_wit ? "true" : "false");
+      for (int defense_weights = 0; defense_weights <= 1; defense_weights++) {
+        const int positions =
+            pat_wmp_table_parity_run(lexicon, tables, defense_weights);
+        printf("PAT WMP parity %s (RIT %s, WIT %s, %s): %d positions\n",
+               lexicon, uses_rit ? "on" : "off", uses_wit ? "on" : "off",
+               defense_weights ? "every channel weighted" : "utility only",
+               positions);
+        assert(positions >= PAT_WMP_PARITY_MIN_POSITIONS);
+      }
+      free(tables);
+    }
+  }
+}
+
+void test_pat_wmp_parity(void) {
+  pat_wmp_table_parity_lexicon("CSW24");
+  pat_wmp_table_parity_lexicon("TWL98");
+}
+
 void test_pat(void) {
   char *data_dir = create_temp_pat_data_dir();
   test_pat_feature_names();
@@ -2320,6 +2536,7 @@ void test_pat(void) {
   test_pat_opening_and_hook_flex();
   test_pat_movegen_integration();
   test_pat_path_parity();
+  test_pat_wmp_parity();
   test_pat_usage_options();
   test_pat_candidates_option();
   free(data_dir);
