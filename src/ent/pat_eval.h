@@ -2,6 +2,7 @@
 #define PAT_EVAL_H
 
 #include "../def/board_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/pat_defs.h"
 #include "board.h"
@@ -121,6 +122,10 @@ typedef struct PATEvalContext {
   // get this position (folded into every movegen bound).
   Equity utility_non_placement;
   Equity utility_bound;
+  // utility_prefix_max[d][s] is the largest correction any placement that
+  // draws d tiles and scores at most s points can get this position (see
+  // pat_eval_utility_bound_for_play).
+  Equity utility_prefix_max[RACK_SIZE + 1][PAT_UTILITY_PREFIX_MAX_SCORE + 1];
   // Bitmask of PAT_CLASS_MASK_* classes this context actually applies
   // (weighted in the file and not excluded by the runtime mask); see
   // pat_eval_context_get_active_classes, the safe way to read this from outside
@@ -223,6 +228,26 @@ pat_eval_utility_bound(const PATEvalContext *pat_eval_ctx) {
   }
   return pat_eval_ctx->utility_bound;
 }
+// The largest utility correction a placement drawing tiles_played tiles and
+// scoring at most max_score can get this position: never above
+// pat_eval_utility_bound, and 0 when the context is NULL, disabled, or
+// carries no correction.
+static inline Equity
+pat_eval_utility_bound_for_play(const PATEvalContext *pat_eval_ctx,
+                                int tiles_played, Equity max_score) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights || !pat_eval_ctx->utility_row) {
+    return 0;
+  }
+  if (max_score > PAT_UTILITY_PREFIX_MAX_SCORE * EQUITY_RESOLUTION) {
+    return pat_eval_ctx->utility_bound;
+  }
+  // A placement scores whole points, so the ceiling of max_score bounds it.
+  const int max_points =
+      max_score > 0
+          ? (int)((max_score + EQUITY_RESOLUTION - 1) / EQUITY_RESOLUTION)
+          : 0;
+  return pat_eval_ctx->utility_prefix_max[tiles_played][max_points];
+}
 // Bitmask of PAT_CLASS_MASK_* classes this context actually applies, or 0
 // when the context is NULL or disabled. See placement_adjustment, which
 // uses PAT_CLASS_MASK_WORD_MULT/PAT_CLASS_MASK_LETTER_MULT against this to
@@ -244,6 +269,17 @@ static inline Equity pat_eval_scaled(const PATEvalContext *pat_eval_ctx,
     return term;
   }
   return (Equity)lround((double)term * pat_eval_ctx->term_scale);
+}
+
+// The same bound as pat_eval_lane_penalty_bound without the utility
+// correction's, for callers that bound the correction per play.
+static inline Equity
+pat_eval_lane_defense_bound(const PATEvalContext *pat_eval_ctx, int dir,
+                            int lane) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights) {
+    return 0;
+  }
+  return pat_eval_ctx->lane_penalty_bound[dir][lane];
 }
 
 // The upper bound on the defense term of every tile placement in lane

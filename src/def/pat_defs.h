@@ -162,6 +162,10 @@ enum {
 #define PAT_UTILITY_ADJUST_ROW_PREFIX "utility_adjust,"
 // Margins beyond this are read at it; kappa is flat there.
 #define PAT_UTILITY_MARGIN_LIMIT 600
+// Placements scoring up to this many points get a bound on the utility
+// correction from their tile count and score bound alone (see
+// pat_eval_utility_bound_for_play); higher scores take the position's bound.
+#define PAT_UTILITY_PREFIX_MAX_SCORE 200
 // Finite-difference half-width, in points, for kappa: wide enough to smooth
 // the table's integer margin buckets.
 #define PAT_UTILITY_KAPPA_STEP 15

@@ -186,6 +186,28 @@ void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
     }
   }
   pat_eval_ctx->utility_bound = bound;
+  // Each draw count's row read from the current margin up, a point of score
+  // at a time, clamped at the table's edges as pat_utility_index clamps:
+  // utility_prefix_max[d][s] is the running maximum.
+  for (int drawn = 0; drawn <= RACK_SIZE; drawn++) {
+    const int bag_after = bag > drawn ? bag - drawn : 0;
+    const Equity *row =
+        weights->utility_table +
+        pat_utility_index(weights, bag_after, -PAT_UTILITY_MARGIN_LIMIT);
+    Equity running = EQUITY_MIN_VALUE;
+    for (int score = 0; score <= PAT_UTILITY_PREFIX_MAX_SCORE; score++) {
+      int offset = margin + score + PAT_UTILITY_MARGIN_LIMIT;
+      if (offset < 0) {
+        offset = 0;
+      } else if (offset >= PAT_UTILITY_WIDTH) {
+        offset = PAT_UTILITY_WIDTH - 1;
+      }
+      if (row[offset] > running) {
+        running = row[offset];
+      }
+      pat_eval_ctx->utility_prefix_max[drawn][score] = running;
+    }
+  }
 }
 
 // The utility correction for move (see PAT_UTILITY_ADJUST_ROW_PREFIX), 0
