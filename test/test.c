@@ -6,6 +6,7 @@
 #include "analyze_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "bai_sched_test.h"
 #include "bai_test.h"
 #include "bai_utility_test.h"
 #include "benchmark_endgame_test.h"
@@ -209,6 +210,7 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
+    {"baisched", test_bai_sched},
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver

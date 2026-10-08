@@ -15,10 +15,12 @@
  */
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
 #include "../def/bai_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bai_result.h"
+#include "../ent/bai_sched_stats.h"
 #include "../ent/checkpoint.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
@@ -30,6 +32,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #define MINIMUM_VARIANCE 1e-10
 
@@ -117,6 +120,9 @@ typedef struct BAIRound {
   int num_claimed;
   int num_completed;
   BAIPendingArmDatum *pending;
+#ifdef BAI_SCHED_STATS
+  uint64_t committed_at_schedule;
+#endif
 } BAIRound;
 
 typedef struct BAIArmDatum {
@@ -160,7 +166,100 @@ typedef struct BAISyncData {
   // in flight. The schedule is meant to make this impossible; a nonzero count
   // means the lag is too short for the cost skew between samples.
   uint64_t idle_events;
+#ifdef BAI_SCHED_STATS
+  BAISchedSimStats sched_stats;
+  BAISchedHistogram sched_histogram;
+  uint64_t sched_bai_completions;
+  bool sched_stop_folded;
+  int64_t sched_last_exit_ns;
+  int64_t sched_exit_ns_sum;
+  int sched_num_exits;
+#endif
 } BAISyncData;
+
+// Scheduling instrumentation. With BAI_SCHED_STATS undefined every hook below
+// is an empty inline function and the per-thread struct is a single unused
+// byte, so the production build compiles all of it away.
+#ifdef BAI_SCHED_STATS
+typedef struct BAIWorkerSchedStats {
+  int64_t busy_ns;
+  int64_t idle_ns;
+  int64_t idle_start_ns;
+  uint64_t idle_episodes;
+  int64_t lock_wait_ns;
+  int64_t initial_barrier_ns;
+  int64_t avoid_prune_barrier_ns;
+  BAISchedHistogram histogram;
+} BAIWorkerSchedStats;
+
+static inline int64_t bai_sched_now(void) { return ctimer_monotonic_ns(); }
+
+static inline void bai_sched_worker_init(BAIWorkerSchedStats *worker_stats) {
+  memset(worker_stats, 0, sizeof(*worker_stats));
+}
+
+static inline void bai_sched_sample_done(BAIWorkerSchedStats *worker_stats,
+                                         const int64_t start_ns) {
+  const int64_t cost_ns = ctimer_monotonic_ns() - start_ns;
+  worker_stats->busy_ns += cost_ns;
+  bai_sched_histogram_add(&worker_stats->histogram, cost_ns);
+}
+
+static inline void bai_sched_idle_begin(BAIWorkerSchedStats *worker_stats) {
+  if (worker_stats->idle_start_ns == 0) {
+    worker_stats->idle_start_ns = ctimer_monotonic_ns();
+    worker_stats->idle_episodes++;
+  }
+}
+
+static inline void bai_sched_idle_end(BAIWorkerSchedStats *worker_stats) {
+  if (worker_stats->idle_start_ns != 0) {
+    worker_stats->idle_ns +=
+        ctimer_monotonic_ns() - worker_stats->idle_start_ns;
+    worker_stats->idle_start_ns = 0;
+  }
+}
+#else
+typedef struct BAIWorkerSchedStats {
+  char unused;
+} BAIWorkerSchedStats;
+
+static inline int64_t bai_sched_now(void) { return 0; }
+
+static inline void bai_sched_worker_init(BAIWorkerSchedStats
+                                         __attribute__((unused)) *
+                                         worker_stats) {}
+
+static inline void bai_sched_sample_done(BAIWorkerSchedStats
+                                             __attribute__((unused)) *
+                                             worker_stats,
+                                         const int64_t
+                                         __attribute__((unused)) start_ns) {}
+
+static inline void bai_sched_idle_begin(BAIWorkerSchedStats
+                                        __attribute__((unused)) *
+                                        worker_stats) {}
+
+static inline void
+bai_sched_idle_end(BAIWorkerSchedStats __attribute__((unused)) * worker_stats) {
+}
+#endif
+
+// Locks the BAI mutex, charging the wait to the worker when instrumented.
+static inline void bai_sync_lock(BAISyncData *bai_sync_data,
+                                 BAIWorkerSchedStats *worker_stats) {
+#ifdef BAI_SCHED_STATS
+  const int64_t start_ns = ctimer_monotonic_ns();
+  cpthread_mutex_lock(&bai_sync_data->mutex);
+  // A worker that is already idle is charged to idle time, not lock time.
+  if (worker_stats->idle_start_ns == 0) {
+    worker_stats->lock_wait_ns += ctimer_monotonic_ns() - start_ns;
+  }
+#else
+  (void)worker_stats;
+  cpthread_mutex_lock(&bai_sync_data->mutex);
+#endif
+}
 
 static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
                                                 ThreadControl *thread_control,
@@ -204,6 +303,15 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   // worker that starts after an initial-phase stop exits immediately.
   bai_sync_data->scheduling_finished = true;
   bai_sync_data->idle_events = 0;
+#ifdef BAI_SCHED_STATS
+  memset(&bai_sync_data->sched_stats, 0, sizeof(bai_sync_data->sched_stats));
+  bai_sched_histogram_reset(&bai_sync_data->sched_histogram);
+  bai_sync_data->sched_bai_completions = 0;
+  bai_sync_data->sched_stop_folded = false;
+  bai_sync_data->sched_last_exit_ns = 0;
+  bai_sync_data->sched_exit_ns_sum = 0;
+  bai_sync_data->sched_num_exits = 0;
+#endif
   return bai_sync_data;
 }
 
@@ -351,8 +459,9 @@ bai_sync_data_get_next_initial_sample_index_while_locked(BAISampleArgs *args) {
 }
 
 static inline int
-bai_sync_data_get_next_initial_sample_index(BAISampleArgs *args) {
-  cpthread_mutex_lock(&args->bai_sync_data->mutex);
+bai_sync_data_get_next_initial_sample_index(BAISampleArgs *args,
+                                            BAIWorkerSchedStats *worker_stats) {
+  bai_sync_lock(args->bai_sync_data, worker_stats);
   const int arm_index =
       bai_sync_data_get_next_initial_sample_index_while_locked(args);
   cpthread_mutex_unlock(&args->bai_sync_data->mutex);
@@ -479,6 +588,9 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
 // committed statistics and charges them to the sample budget.
 static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
+#ifdef BAI_SCHED_STATS
+  const int64_t sched_start_ns = bai_sched_now();
+#endif
   if (bai_sync_data->scheduling_finished) {
     return;
   }
@@ -572,6 +684,10 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   }
   bai_sync_data->num_total_samples_requested += (uint64_t)num_samples;
   bai_sync_data->next_round_to_schedule++;
+#ifdef BAI_SCHED_STATS
+  round->committed_at_schedule = bai_sync_data->num_total_samples_completed;
+  bai_sync_data->sched_stats.schedule_ns += bai_sched_now() - sched_start_ns;
+#endif
 }
 
 // Assumes the caller has locked the bai sync data mutex. Hands out the next
@@ -591,6 +707,18 @@ static inline int bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
       const int arm_index = round->arm_indices[round->num_claimed];
       *seed = round->seeds[round->num_claimed];
       round->num_claimed++;
+#ifdef BAI_SCHED_STATS
+      const uint64_t completed = bai_sync_data->sched_stats.initial_samples +
+                                 bai_sync_data->sched_bai_completions;
+      const uint64_t stale = completed > round->committed_at_schedule
+                                 ? completed - round->committed_at_schedule
+                                 : 0;
+      bai_sync_data->sched_stats.stale_sum += stale;
+      bai_sync_data->sched_stats.stale_count++;
+      if (stale > bai_sync_data->sched_stats.stale_max) {
+        bai_sync_data->sched_stats.stale_max = stale;
+      }
+#endif
       return arm_index;
     }
     bai_sync_data->next_round_to_claim++;
@@ -601,8 +729,8 @@ static inline int bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
 // Assumes the caller has locked the bai sync data mutex. Folds one finished
 // round into the committed statistics and re-derives everything the next
 // schedule reads from them.
-static inline void bai_commit_round_while_locked(BAISampleArgs *args,
-                                                 BAIRound *round) {
+static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
+                                                      BAIRound *round) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
   for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
     const BAIPendingArmDatum *pending = &round->pending[arm_index];
@@ -636,6 +764,27 @@ static inline void bai_commit_round_while_locked(BAISampleArgs *args,
                                       bai_sync_data->astar_index, true);
 }
 
+static inline void bai_commit_round_while_locked(BAISampleArgs *args,
+                                                 BAIRound *round) {
+#ifdef BAI_SCHED_STATS
+  BAISyncData *bai_sync_data = args->bai_sync_data;
+  const int64_t fold_start_ns = bai_sched_now();
+  const bool stopped_before =
+      bai_result_get_status(bai_sync_data->bai_result) !=
+      BAI_RESULT_STATUS_NONE;
+  bai_commit_round_while_locked_impl(args, round);
+  bai_sync_data->sched_stats.fold_ns += bai_sched_now() - fold_start_ns;
+  bai_sync_data->sched_stats.folded_samples += (uint64_t)round->num_samples;
+  bai_sync_data->sched_stats.num_rounds_folded++;
+  if (!stopped_before && bai_result_get_status(bai_sync_data->bai_result) !=
+                             BAI_RESULT_STATUS_NONE) {
+    bai_sync_data->sched_stop_folded = true;
+  }
+#else
+  bai_commit_round_while_locked_impl(args, round);
+#endif
+}
+
 // Assumes the caller has locked the bai sync data mutex. Records one finished
 // sample against its round, then folds every round that is complete, oldest
 // first, scheduling a replacement for each one folded.
@@ -651,6 +800,12 @@ static inline void bai_schedule_complete_while_locked(
   bai_accumulate_checked(&pending->samples_squared_sum,
                          bai_quantize_sample(sample_value * sample_value));
   round->num_completed++;
+#ifdef BAI_SCHED_STATS
+  bai_sync_data->sched_bai_completions++;
+  if (bai_sync_data->sched_stop_folded) {
+    bai_sync_data->sched_stats.overshoot_samples++;
+  }
+#endif
   // Fold in round order. A round whose samples are all in but which is not
   // the oldest unfolded one waits, because folding out of order would make
   // the committed statistics depend on completion order again. No thread
@@ -704,8 +859,9 @@ static inline void bai_sync_data_start_schedule(BAISampleArgs *args) {
 
 static inline void bai_sync_data_add_sample(BAISampleArgs *args,
                                             const int arm_index,
-                                            const double sample_value) {
-  cpthread_mutex_lock(&args->bai_sync_data->mutex);
+                                            const double sample_value,
+                                            BAIWorkerSchedStats *worker_stats) {
+  bai_sync_lock(args->bai_sync_data, worker_stats);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
   cpthread_mutex_unlock(&args->bai_sync_data->mutex);
 }
@@ -759,6 +915,10 @@ static inline void bai_finish_initial_phase(void *uncasted_bai_worker_args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)uncasted_bai_worker_args;
   BAISyncData *bai_sync_data = bai_worker_args->sync_data;
   bai_sync_data->initial_phase = false;
+#ifdef BAI_SCHED_STATS
+  bai_sync_data->sched_stats.initial_samples =
+      bai_sync_data->num_total_samples_completed;
+#endif
   if (bai_should_stop(bai_sync_data->bai_result,
                       bai_worker_args->sync_data->thread_control)) {
     return;
@@ -857,7 +1017,8 @@ bai_worker_rvs_thread_index(const BAIWorkerArgs *bai_worker_args) {
 // The initial phase allocates a fixed number of samples to every arm, so its
 // samples merge straight into the committed statistics.
 static inline void
-bai_worker_initial_sample_loop(BAIWorkerArgs *bai_worker_args) {
+bai_worker_initial_sample_loop(BAIWorkerArgs *bai_worker_args,
+                               BAIWorkerSchedStats *worker_stats) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
   ThreadControl *thread_control = sync_data->thread_control;
   RandomVariables *rvs = bai_worker_args->rvs;
@@ -868,12 +1029,14 @@ bai_worker_initial_sample_loop(BAIWorkerArgs *bai_worker_args) {
 
   while (!bai_should_stop(sync_data->bai_result, thread_control)) {
     const int arm_index =
-        bai_sync_data_get_next_initial_sample_index(&sample_args);
+        bai_sync_data_get_next_initial_sample_index(&sample_args, worker_stats);
     if (arm_index < 0) {
       break;
     }
+    const int64_t sample_start_ns = bai_sched_now();
     const double sample = rvs_sample(rvs, arm_index, rvs_thread_index, NULL);
-    bai_sync_data_add_sample(&sample_args, arm_index, sample);
+    bai_sched_sample_done(worker_stats, sample_start_ns);
+    bai_sync_data_add_sample(&sample_args, arm_index, sample, worker_stats);
   }
 }
 
@@ -890,7 +1053,8 @@ static inline bool bai_should_abandon_rounds(BAIResult *bai_result,
          status == BAI_RESULT_STATUS_TIMEOUT;
 }
 
-static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args) {
+static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
+                                         BAIWorkerSchedStats *worker_stats) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
   ThreadControl *thread_control = sync_data->thread_control;
   RandomVariables *rvs = bai_worker_args->rvs;
@@ -902,7 +1066,7 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args) {
   while (!bai_should_abandon_rounds(sync_data->bai_result, thread_control)) {
     uint64_t round_number = 0;
     uint64_t reserved_seed = RVS_SEED_UNRESERVED;
-    cpthread_mutex_lock(&sync_data->mutex);
+    bai_sync_lock(sync_data, worker_stats);
     const int arm_index = bai_schedule_claim_while_locked(
         sync_data, &round_number, &reserved_seed);
     bool finished = false;
@@ -920,26 +1084,107 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args) {
       if (finished) {
         break;
       }
+      bai_sched_idle_begin(worker_stats);
       continue;
     }
+    bai_sched_idle_end(worker_stats);
+    const int64_t sample_start_ns = bai_sched_now();
     const double sample = rvs_sample_with_seed(
         rvs, (uint64_t)arm_index, reserved_seed, rvs_thread_index, NULL);
-    cpthread_mutex_lock(&sync_data->mutex);
+    bai_sched_sample_done(worker_stats, sample_start_ns);
+    bai_sync_lock(sync_data, worker_stats);
     bai_schedule_complete_while_locked(&sample_args, round_number, arm_index,
                                        sample);
     cpthread_mutex_unlock(&sync_data->mutex);
   }
+  bai_sched_idle_end(worker_stats);
 }
+
+#ifdef BAI_SCHED_STATS
+// Merges one worker's measurements into the sim's, under the mutex.
+static inline void bai_sched_worker_merge(BAISyncData *sync_data,
+                                          const BAIWorkerSchedStats *stats,
+                                          const int64_t exit_ns) {
+  cpthread_mutex_lock(&sync_data->mutex);
+  BAISchedSimStats *sim_stats = &sync_data->sched_stats;
+  sim_stats->busy_ns += stats->busy_ns;
+  sim_stats->idle_ns += stats->idle_ns;
+  sim_stats->idle_events += stats->idle_episodes;
+  sim_stats->lock_wait_ns += stats->lock_wait_ns;
+  sim_stats->initial_barrier_ns += stats->initial_barrier_ns;
+  sim_stats->avoid_prune_barrier_ns += stats->avoid_prune_barrier_ns;
+  bai_sched_histogram_merge(&sync_data->sched_histogram, &stats->histogram);
+  sync_data->sched_exit_ns_sum += exit_ns;
+  sync_data->sched_num_exits++;
+  if (exit_ns > sync_data->sched_last_exit_ns) {
+    sync_data->sched_last_exit_ns = exit_ns;
+  }
+  cpthread_mutex_unlock(&sync_data->mutex);
+}
+
+// Derives the per-sim summary once every worker has merged, and hands it to
+// the process-wide collector.
+static inline void bai_sched_record(BAISyncData *sync_data,
+                                    const BAIOptions *bai_options,
+                                    const int64_t start_ns) {
+  BAISchedSimStats *sim_stats = &sync_data->sched_stats;
+  const BAISchedHistogram *histogram = &sync_data->sched_histogram;
+  sim_stats->num_threads = bai_options->num_threads;
+  sim_stats->num_arms = sync_data->num_arms;
+  sim_stats->round_size = sync_data->round_size;
+  sim_stats->lag_rounds = BAI_SCHEDULE_LAG;
+  sim_stats->sample_limit = bai_options->sample_limit;
+  sim_stats->bai_samples = sync_data->sched_bai_completions;
+  sim_stats->abandoned_samples =
+      sync_data->sched_bai_completions > sim_stats->folded_samples
+          ? sync_data->sched_bai_completions - sim_stats->folded_samples
+          : 0;
+  sim_stats->wall_ns = bai_sched_now() - start_ns;
+  sim_stats->tail_ns =
+      sync_data->sched_last_exit_ns * (int64_t)sync_data->sched_num_exits -
+      sync_data->sched_exit_ns_sum;
+  sim_stats->sample_mean_ns =
+      histogram->num_samples > 0
+          ? histogram->total_ns / (int64_t)histogram->num_samples
+          : 0;
+  sim_stats->sample_p50_ns = bai_sched_histogram_quantile(histogram, 0.5);
+  sim_stats->sample_p99_ns = bai_sched_histogram_quantile(histogram, 0.99);
+  sim_stats->sample_p999_ns = bai_sched_histogram_quantile(histogram, 0.999);
+  sim_stats->sample_max_ns = histogram->max_ns;
+  bai_sched_stats_record(sim_stats);
+}
+#endif
 
 static inline void *bai_worker(void *args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)args;
-  bai_worker_initial_sample_loop(bai_worker_args);
+  BAIWorkerSchedStats worker_stats;
+  bai_sched_worker_init(&worker_stats);
+  bai_worker_initial_sample_loop(bai_worker_args, &worker_stats);
+#ifdef BAI_SCHED_STATS
+  const int64_t initial_barrier_start_ns = bai_sched_now();
+#endif
   checkpoint_wait(bai_worker_args->checkpoint, bai_worker_args);
-  bai_worker_round_loop(bai_worker_args);
+#ifdef BAI_SCHED_STATS
+  worker_stats.initial_barrier_ns += bai_sched_now() - initial_barrier_start_ns;
+#endif
+  bai_worker_round_loop(bai_worker_args, &worker_stats);
+#ifdef BAI_SCHED_STATS
+  const int64_t exit_ns = bai_sched_now();
+#endif
   if (bai_worker_args->sync_data->avoid_prune_arms) {
+#ifdef BAI_SCHED_STATS
+    const int64_t avoid_prune_barrier_start_ns = bai_sched_now();
+#endif
     checkpoint_wait(bai_worker_args->avoid_prune_checkpoint, bai_worker_args);
+#ifdef BAI_SCHED_STATS
+    worker_stats.avoid_prune_barrier_ns +=
+        bai_sched_now() - avoid_prune_barrier_start_ns;
+#endif
     sim_unpruned_to_winner(bai_worker_args);
   }
+#ifdef BAI_SCHED_STATS
+  bai_sched_worker_merge(bai_worker_args->sync_data, &worker_stats, exit_ns);
+#endif
   return NULL;
 }
 
@@ -948,6 +1193,9 @@ static inline void *bai_worker(void *args) {
 static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                        RandomVariables *rng, ThreadControl *thread_control,
                        BAILogger *bai_logger, BAIResult *bai_result) {
+#ifdef BAI_SCHED_STATS
+  const int64_t sched_start_ns = bai_sched_now();
+#endif
   bai_result_reset(bai_result, bai_options->time_limit_seconds);
 
   Checkpoint *checkpoint =
@@ -991,6 +1239,9 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   }
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
   bai_result_stop_timer(bai_result);
+#ifdef BAI_SCHED_STATS
+  bai_sched_record(sync_data, bai_options, sched_start_ns);
+#endif
   free(bai_worker_args_array);
   free(worker_ids);
   bai_sync_data_destroy(sync_data);
