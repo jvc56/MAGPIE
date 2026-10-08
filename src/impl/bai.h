@@ -76,22 +76,31 @@ enum {
   // from whatever has merged at the instant a thread asks for work, so the
   // allocation is the same whichever way the worker threads interleave.
   //
-  // BAI_SCHEDULE_LAG rounds are kept scheduled ahead of the one being folded
-  // so a thread always has something to claim and never waits on a specific
-  // sample. The ring needs one more slot than the lag: the slot freed by the
-  // round that just folded is the one the newly scheduled round takes.
-  BAI_SCHEDULE_LAG = 2,
+  // Every constant here is fixed: none depends on -threads, which would make
+  // a sim's result depend on how many threads ran it, and none depends on the
+  // sample budget, so an N-sample sim's schedule is a prefix of a 2N-sample
+  // one up to the point where a stop condition fires.
+  //
+  // BAI_SCHEDULE_ROUND_SIZE is the fold granularity. A fold and a schedule
+  // each cost O(num_arms) under the mutex.
+  BAI_SCHEDULE_ROUND_SIZE = 32,
+  // BAI_SCHEDULE_DEPTH_SAMPLES is how many samples stay scheduled ahead of
+  // the round being folded, so that a slow sample holding up the oldest round
+  // cannot starve the other threads: they keep claiming from the rounds
+  // behind it. It must cover (threads - 1) times the ratio of a straggler's
+  // cost to the mean sample cost. The cost is staleness: a round is scheduled
+  // from statistics up to this many samples old. Scheduling counts the
+  // samples already handed out to each arm, so stale rounds still rotate
+  // between arms rather than piling onto one pair.
+  BAI_SCHEDULE_DEPTH_SAMPLES = 1024,
+  BAI_SCHEDULE_LAG = BAI_SCHEDULE_DEPTH_SAMPLES / BAI_SCHEDULE_ROUND_SIZE,
+  // The ring needs one more round than the lag: the slot freed by the round
+  // that just folded is the one the newly scheduled round takes.
   BAI_SCHEDULE_ROUNDS = BAI_SCHEDULE_LAG + 1,
-  // Round size bounds, and how many rounds a sim's BAI-phase budget is cut
-  // into. The size is derived from the sample budget and deliberately NOT
-  // from the thread count: deriving it from -threads would make a sim's
-  // result depend on how many threads happened to run it, which is the whole
-  // property this scheduling exists to provide. More rounds means finer
-  // adaptation; fewer means less scheduling overhead.
-  BAI_SCHEDULE_MIN_ROUND_SIZE = 8,
-  BAI_SCHEDULE_MAX_ROUND_SIZE = 256,
-  BAI_SCHEDULE_ROUNDS_PER_BUDGET = 32,
 };
+
+static_assert(BAI_SCHEDULE_DEPTH_SAMPLES % BAI_SCHEDULE_ROUND_SIZE == 0,
+              "BAI schedule depth must be a whole number of rounds");
 
 // Internal BAI structs
 
@@ -127,6 +136,12 @@ typedef struct BAIRound {
 
 typedef struct BAIArmDatum {
   uint64_t num_samples;
+  // Samples handed out to this arm so far: the committed num_samples plus
+  // those scheduled in rounds not yet folded. Scheduling weighs arms by this
+  // count, as if every outstanding sample will return the current mean, so a
+  // round scheduled from stale statistics still accounts for the rounds
+  // scheduled after them.
+  uint64_t num_scheduled;
   int64_t samples_sum;
   int64_t samples_squared_sum;
   double mean;
@@ -140,7 +155,6 @@ typedef struct BAISyncData {
   uint64_t num_total_samples_completed;
   uint64_t num_total_samples_requested;
   int astar_index;
-  int challenger_index;
   bool initial_phase;
   BAIArmDatum *arm_data;
   RandomVariables *rng;
@@ -276,7 +290,6 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->num_total_samples_completed = 0;
   bai_sync_data->num_total_samples_requested = 0;
   bai_sync_data->astar_index = -1;
-  bai_sync_data->challenger_index = -1;
   bai_sync_data->avoid_prune_best_arm_idx = -1;
   bai_sync_data->initial_phase = true;
   bai_sync_data->arm_data =
@@ -418,22 +431,33 @@ static inline double bai_d(const double mu, const double sigma2,
   return 0.5 * (diff * diff) / sigma2;
 }
 
+// The GLR statistic for "astar beats challenger", with the two arms weighted
+// by the given sample counts.
+static inline double
+bai_arm_z_with_counts(const BAIArmDatum *astar_arm_data,
+                      const double astar_num_samples,
+                      const BAIArmDatum *challenger_arm_data,
+                      const double challenger_num_samples) {
+  const double alt_lambda =
+      bai_alt_lambda(astar_arm_data->mean, astar_arm_data->var,
+                     astar_num_samples, challenger_arm_data->mean,
+                     challenger_arm_data->var, challenger_num_samples);
+  const double d_astar =
+      bai_d(astar_arm_data->mean, astar_arm_data->var, alt_lambda);
+  const double d_a =
+      bai_d(challenger_arm_data->mean, challenger_arm_data->var, alt_lambda);
+  return astar_num_samples * d_astar + challenger_num_samples * d_a;
+}
+
 static inline double bai_get_arm_z(BAISyncData *bai_sync_data,
                                    const int astar_index,
                                    const int challenger_index) {
   const BAIArmDatum *astar_arm_data = &bai_sync_data->arm_data[astar_index];
   const BAIArmDatum *challenger_arm_data =
       &bai_sync_data->arm_data[challenger_index];
-  const double alt_lambda = bai_alt_lambda(
-      astar_arm_data->mean, astar_arm_data->var,
-      (double)astar_arm_data->num_samples, challenger_arm_data->mean,
-      challenger_arm_data->var, (double)challenger_arm_data->num_samples);
-  const double d_astar =
-      bai_d(astar_arm_data->mean, astar_arm_data->var, alt_lambda);
-  const double d_a =
-      bai_d(challenger_arm_data->mean, challenger_arm_data->var, alt_lambda);
-  return (double)astar_arm_data->num_samples * d_astar +
-         (double)challenger_arm_data->num_samples * d_a;
+  return bai_arm_z_with_counts(
+      astar_arm_data, (double)astar_arm_data->num_samples, challenger_arm_data,
+      (double)challenger_arm_data->num_samples);
 }
 
 static inline int
@@ -475,12 +499,15 @@ bai_sync_data_get_next_initial_sample_index(BAISampleArgs *args,
 }
 
 // Assumes the caller has locked bai_sync_data or is the only thread running
-static inline void bai_update_threshold_and_challenger(
-    BAISyncData *bai_sync_data, RandomVariables *rvs, bai_threshold_t threshold,
-    bai_sampling_rule_t sampling_rule, const double delta, const int arm_index,
-    const bool update_all) {
-  if (threshold == BAI_THRESHOLD_NONE &&
-      sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
+// Checks the stopping threshold against the committed statistics. The
+// challenger is not chosen here: scheduling picks it when it lays out a round,
+// from the counts handed out by then (see bai_schedule_challenger).
+static inline void bai_update_threshold(BAISyncData *bai_sync_data,
+                                        RandomVariables *rvs,
+                                        bai_threshold_t threshold,
+                                        const double delta, const int arm_index,
+                                        const bool update_all) {
+  if (threshold == BAI_THRESHOLD_NONE) {
     return;
   }
 
@@ -498,14 +525,6 @@ static inline void bai_update_threshold_and_challenger(
     break;
   }
 
-  double challenger_value;
-  switch (sampling_rule) {
-  case BAI_SAMPLING_RULE_ROUND_ROBIN:
-    break;
-  case BAI_SAMPLING_RULE_TOP_TWO_IDS:
-    bai_sync_data->challenger_index = -1;
-    break;
-  }
   for (int i = 0; i < bai_sync_data->num_arms; i++) {
     if (i == bai_sync_data->astar_index ||
         rvs_are_similar(rvs, bai_sync_data->astar_index, i)) {
@@ -524,19 +543,6 @@ static inline void bai_update_threshold_and_challenger(
     case BAI_THRESHOLD_GK16:
       if (arm_Z > bai_threshold) {
         num_arms_at_threshold++;
-      }
-      break;
-    }
-    switch (sampling_rule) {
-    case BAI_SAMPLING_RULE_ROUND_ROBIN:
-      break;
-    case BAI_SAMPLING_RULE_TOP_TWO_IDS:;
-      double arm_challenger_value =
-          arm_Z + log((double)bai_sync_data->arm_data[i].num_samples);
-      if (bai_sync_data->challenger_index < 0 ||
-          arm_challenger_value < challenger_value) {
-        bai_sync_data->challenger_index = i;
-        challenger_value = arm_challenger_value;
       }
       break;
     }
@@ -583,10 +589,40 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
                             old_astar_index != bai_sync_data->astar_index ||
                             bai_sync_data->astar_index == arm_index;
 
-    bai_update_threshold_and_challenger(bai_sync_data, args->rvs,
-                                        args->threshold, args->sampling_rule,
-                                        args->delta, arm_index, update_all);
+    bai_update_threshold(bai_sync_data, args->rvs, args->threshold, args->delta,
+                         arm_index, update_all);
   }
+}
+
+// Assumes the caller has locked the bai sync data mutex, or is the only
+// thread running. The top-two challenger: the arm minimizing Z + log(N)
+// against astar, as in the sequential rule, but with every arm weighted by the
+// samples handed out to it (num_scheduled) rather than only those committed.
+// Returns astar when every other arm is similar to it.
+static inline int bai_schedule_challenger(const BAISyncData *bai_sync_data,
+                                          RandomVariables *rvs,
+                                          const int astar_index) {
+  const BAIArmDatum *astar_arm_datum = &bai_sync_data->arm_data[astar_index];
+  const double astar_num_scheduled = (double)astar_arm_datum->num_scheduled;
+  int challenger_index = -1;
+  double challenger_value = 0.0;
+  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+    if (arm_index == astar_index ||
+        rvs_are_similar(rvs, astar_index, arm_index)) {
+      continue;
+    }
+    const BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
+    const double num_scheduled = (double)arm_datum->num_scheduled;
+    const double value =
+        bai_arm_z_with_counts(astar_arm_datum, astar_num_scheduled, arm_datum,
+                              num_scheduled) +
+        log(num_scheduled);
+    if (challenger_index < 0 || value < challenger_value) {
+      challenger_index = arm_index;
+      challenger_value = value;
+    }
+  }
+  return challenger_index < 0 ? astar_index : challenger_index;
 }
 
 // Assumes the caller has locked the bai sync data mutex, or is the only
@@ -636,17 +672,15 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
     break;
   case BAI_SAMPLING_RULE_TOP_TWO_IDS:;
     const int astar_arm_index = bai_sync_data->astar_index;
-    int challenger_arm_index = bai_sync_data->challenger_index;
-    if (challenger_arm_index < 0) {
-      challenger_arm_index = astar_arm_index;
-    }
+    const int challenger_arm_index =
+        bai_schedule_challenger(bai_sync_data, args->rvs, astar_arm_index);
     const BAIArmDatum *astar_arm_datum =
         &bai_sync_data->arm_data[astar_arm_index];
     const BAIArmDatum *challenger_arm_datum =
         &bai_sync_data->arm_data[challenger_arm_index];
-    const double astar_num_samples = (double)astar_arm_datum->num_samples;
+    const double astar_num_samples = (double)astar_arm_datum->num_scheduled;
     const double challenger_num_samples =
-        (double)challenger_arm_datum->num_samples;
+        (double)challenger_arm_datum->num_scheduled;
     const double theta_bar =
         (astar_num_samples * astar_arm_datum->mean +
          challenger_num_samples * challenger_arm_datum->mean) /
@@ -687,8 +721,9 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
     break;
   }
   for (int slot = 0; slot < num_samples; slot++) {
-    round->seeds[slot] =
-        rvs_next_seed(args->rvs, (uint64_t)round->arm_indices[slot]);
+    const int arm_index = round->arm_indices[slot];
+    round->seeds[slot] = rvs_next_seed(args->rvs, (uint64_t)arm_index);
+    bai_sync_data->arm_data[arm_index].num_scheduled++;
   }
   bai_sync_data->num_total_samples_requested += (uint64_t)num_samples;
   bai_sync_data->next_round_to_schedule++;
@@ -772,9 +807,8 @@ static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
                           BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
     return;
   }
-  bai_update_threshold_and_challenger(bai_sync_data, args->rvs, args->threshold,
-                                      args->sampling_rule, args->delta,
-                                      bai_sync_data->astar_index, true);
+  bai_update_threshold(bai_sync_data, args->rvs, args->threshold, args->delta,
+                       bai_sync_data->astar_index, true);
 }
 
 static inline void bai_commit_round_while_locked(BAISampleArgs *args,
@@ -850,14 +884,12 @@ static inline void bai_sync_data_start_schedule(BAISampleArgs *args) {
   if (requested >= args->sample_limit) {
     return;
   }
-  const uint64_t budget = args->sample_limit - requested;
-  uint64_t round_size = budget / BAI_SCHEDULE_ROUNDS_PER_BUDGET;
-  if (round_size < BAI_SCHEDULE_MIN_ROUND_SIZE) {
-    round_size = BAI_SCHEDULE_MIN_ROUND_SIZE;
-  } else if (round_size > BAI_SCHEDULE_MAX_ROUND_SIZE) {
-    round_size = BAI_SCHEDULE_MAX_ROUND_SIZE;
-  }
+  const size_t round_size = BAI_SCHEDULE_ROUND_SIZE;
   bai_sync_data->round_size = (int)round_size;
+  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+    bai_sync_data->arm_data[arm_index].num_scheduled =
+        bai_sync_data->arm_data[arm_index].num_samples;
+  }
   for (int i = 0; i < BAI_SCHEDULE_ROUNDS; i++) {
     bai_sync_data->rounds[i].arm_indices =
         malloc_or_die(sizeof(int) * round_size);
@@ -956,11 +988,10 @@ static inline void bai_finish_initial_phase(void *uncasted_bai_worker_args) {
                           BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
     return;
   }
-  bai_update_threshold_and_challenger(
-      bai_sync_data, bai_worker_args->rvs,
-      bai_worker_args->bai_options->threshold,
-      bai_worker_args->bai_options->sampling_rule,
-      bai_worker_args->bai_options->delta, bai_sync_data->astar_index, true);
+  bai_update_threshold(bai_sync_data, bai_worker_args->rvs,
+                       bai_worker_args->bai_options->threshold,
+                       bai_worker_args->bai_options->delta,
+                       bai_sync_data->astar_index, true);
   // Fill the round pipeline from the statistics the initial phase produced.
   // Runs here, single-threaded at the checkpoint, so the first schedules are
   // computed before any BAI-phase worker can claim.
