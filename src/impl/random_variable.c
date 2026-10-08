@@ -124,6 +124,7 @@ typedef struct RVUniformPredetermined {
 
 double rv_uniform_predetermined_sample(
     RandomVariables *rvs, const uint64_t __attribute__((unused)) k,
+    const uint64_t __attribute__((unused)) reserved_seed,
     const int __attribute__((unused)) thread_index,
     const uint64_t __attribute__((unused)) sample_count,
     BAILogger __attribute__((unused)) * bai_logger) {
