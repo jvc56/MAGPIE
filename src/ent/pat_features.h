@@ -61,6 +61,14 @@ int pat_find_premium_squares(const Square *lanes, uint8_t *premium_rows,
                              uint8_t *premium_cols, uint8_t *premium_classes);
 int pat_find_dd(const Square *lanes, uint8_t *dd_dirs, uint8_t *dd_lanes,
                 uint8_t *dd_los, uint8_t *dd_his, uint8_t *dd_tiers);
+// The first hook and floater-value features of a premium class's channels.
+void pat_class_channel_bases(int premium_class, int *hook_base,
+                             int *float_score_base);
+// Lists in feature_indexes the features a scan of a unit in unit_group (see
+// PAT_NUM_UNIT_GROUPS) can write, and returns how many. Every other feature
+// of the unit's row stays zero, so a dot product over the group's features
+// alone equals the full one.
+int pat_unit_group_features(int unit_group, uint8_t *feature_indexes);
 // Scans one premium square's walk along dir, or one window, adding its
 // features to features; see the definitions for the parameters.
 void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,

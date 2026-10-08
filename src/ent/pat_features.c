@@ -447,6 +447,70 @@ static PATCrossInfo pat_effective_cross_info(
 // score_channels says whether to compute the hook-score channels;
 // evaluation skips them when their weights are all zero (see
 // PATEvalContext.score_channels).
+void pat_class_channel_bases(int premium_class, int *hook_base,
+                             int *float_score_base) {
+  *hook_base = PAT_FEATURE_HOOK_START;
+  *float_score_base = PAT_FEATURE_FLOAT_SCORE_START;
+  if (premium_class == PAT_PREMIUM_DWS) {
+    *hook_base = PAT_FEATURE_DWS_HOOK_START;
+    *float_score_base = PAT_FEATURE_DWS_FLOAT_SCORE_START;
+  } else if (premium_class == PAT_PREMIUM_TLS) {
+    *hook_base = PAT_FEATURE_TLS_HOOK_START;
+    *float_score_base = PAT_FEATURE_TLS_FLOAT_SCORE_START;
+  } else if (premium_class == PAT_PREMIUM_DLS) {
+    *hook_base = PAT_FEATURE_DLS_HOOK_START;
+    *float_score_base = PAT_FEATURE_DLS_FLOAT_SCORE_START;
+  } else if (premium_class == PAT_PREMIUM_QWS) {
+    *hook_base = PAT_FEATURE_QWS_HOOK_START;
+    *float_score_base = PAT_FEATURE_QWS_FLOAT_SCORE_START;
+  } else if (premium_class == PAT_PREMIUM_QLS) {
+    *hook_base = PAT_FEATURE_QLS_HOOK_START;
+    *float_score_base = PAT_FEATURE_QLS_FLOAT_SCORE_START;
+  }
+}
+
+static int pat_append_bins(uint8_t *feature_indexes, int count, int start,
+                           int num_bins) {
+  for (int bin_idx = 0; bin_idx < num_bins; bin_idx++) {
+    feature_indexes[count++] = (uint8_t)(start + bin_idx);
+  }
+  return count;
+}
+
+int pat_unit_group_features(int unit_group, uint8_t *feature_indexes) {
+  if (unit_group >= PAT_NUM_PREMIUM_CLASSES) {
+    // A window writes its tier's features (see pat_scan_dd_unit).
+    const int tier_base =
+        PAT_FEATURE_WINDOW_START +
+        (unit_group - PAT_NUM_PREMIUM_CLASSES) * PAT_WINDOW_FEATURES_PER_TIER;
+    return pat_append_bins(feature_indexes, 0, tier_base,
+                           PAT_WINDOW_FEATURES_PER_TIER);
+  }
+  int hook_base = 0;
+  int float_score_base = 0;
+  pat_class_channel_bases(unit_group, &hook_base, &float_score_base);
+  int count =
+      pat_append_bins(feature_indexes, 0, hook_base, PAT_HOOK_BIN_COUNT);
+  count = pat_append_bins(feature_indexes, count, float_score_base,
+                          PAT_FLOATER_BIN_COUNT);
+  if (unit_group == PAT_PREMIUM_TWS) {
+    count =
+        pat_append_bins(feature_indexes, count, PAT_FEATURE_FLOAT_FLEX_START,
+                        PAT_FLOATER_BIN_COUNT);
+    count = pat_append_bins(feature_indexes, count,
+                            PAT_FEATURE_FLOAT_THROUGH_SCORE_START,
+                            PAT_FLOATER_BIN_COUNT);
+    count = pat_append_bins(feature_indexes, count,
+                            PAT_FEATURE_FLOAT_THROUGH_COUNT_START,
+                            PAT_FLOATER_BIN_COUNT);
+    count = pat_append_bins(feature_indexes, count,
+                            PAT_FEATURE_HOOK_SCORE_START, PAT_HOOK_BIN_COUNT);
+    feature_indexes[count++] = PAT_FEATURE_TT_FLOATER;
+    feature_indexes[count++] = PAT_FEATURE_TT_HOOK_ONLY;
+  }
+  return count;
+}
+
 void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                    const uint8_t *unseen_counts, const PATWeights *pat,
                    int premium_row, int premium_col, int premium_class, int dir,
@@ -463,25 +527,11 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   // Each premium class writes its own hook and floater-value channels. The
   // richer channels (floater flexibility, the lexicon through-table, and
   // the triple-triple pair) stay exclusive to triple word squares, which
-  // are the ones worth the feature budget.
-  int hook_base = PAT_FEATURE_HOOK_START;
-  int float_score_base = PAT_FEATURE_FLOAT_SCORE_START;
-  if (premium_class == PAT_PREMIUM_DWS) {
-    hook_base = PAT_FEATURE_DWS_HOOK_START;
-    float_score_base = PAT_FEATURE_DWS_FLOAT_SCORE_START;
-  } else if (premium_class == PAT_PREMIUM_TLS) {
-    hook_base = PAT_FEATURE_TLS_HOOK_START;
-    float_score_base = PAT_FEATURE_TLS_FLOAT_SCORE_START;
-  } else if (premium_class == PAT_PREMIUM_DLS) {
-    hook_base = PAT_FEATURE_DLS_HOOK_START;
-    float_score_base = PAT_FEATURE_DLS_FLOAT_SCORE_START;
-  } else if (premium_class == PAT_PREMIUM_QWS) {
-    hook_base = PAT_FEATURE_QWS_HOOK_START;
-    float_score_base = PAT_FEATURE_QWS_FLOAT_SCORE_START;
-  } else if (premium_class == PAT_PREMIUM_QLS) {
-    hook_base = PAT_FEATURE_QLS_HOOK_START;
-    float_score_base = PAT_FEATURE_QLS_FLOAT_SCORE_START;
-  }
+  // are the ones worth the feature budget. pat_unit_group_features lists
+  // the same split.
+  int hook_base = 0;
+  int float_score_base = 0;
+  pat_class_channel_bases(premium_class, &hook_base, &float_score_base);
   const bool full_channels = (premium_class == PAT_PREMIUM_TWS);
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_row : premium_col;

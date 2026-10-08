@@ -22,18 +22,36 @@
 #include <stdlib.h>
 #include <string.h>
 
-// The same product over only the weighted features; the other terms are
-// zero. Every path that has a context uses this one.
-static Equity pat_dot_ctx(const PATEvalContext *pat_eval_ctx,
-                          const int32_t *features) {
-  const Equity *weights = pat_eval_ctx->weights->weights;
-  int64_t acc = 0;
-  for (int nonzero_idx = 0; nonzero_idx < pat_eval_ctx->num_nonzero_features;
-       nonzero_idx++) {
-    const int feature_index = pat_eval_ctx->nonzero_feature_index[nonzero_idx];
-    acc += (int64_t)weights[feature_index] * features[feature_index];
+static_assert(PAT_NUM_FEATURES <= UINT8_MAX + 1,
+              "group feature indexes are bytes");
+
+// The unit group of a context unit (see PAT_NUM_UNIT_GROUPS).
+static int pat_unit_group(const PATEvalContext *pat_eval_ctx, int unit_index) {
+  const int num_premium_units = pat_eval_ctx->num_premium * 2;
+  if (unit_index < num_premium_units) {
+    return pat_eval_ctx->premium_classes[unit_index / 2];
   }
-  return pat_clamp_dot(acc);
+  return PAT_NUM_PREMIUM_CLASSES +
+         pat_eval_ctx->dd_tiers[unit_index - num_premium_units];
+}
+
+// The weights' product with a unit's feature row, over only the weighted
+// features the unit's group can write; the row's other terms are zero.
+// Every path that has a context uses this one.
+static Equity pat_dot_unit(const PATEvalContext *pat_eval_ctx, int unit_index,
+                           const int32_t *features) {
+  const int unit_group = pat_unit_group(pat_eval_ctx, unit_index);
+  const uint8_t *feature_index = pat_eval_ctx->group_feature_index[unit_group];
+  const Equity *feature_weight = pat_eval_ctx->group_feature_weight[unit_group];
+  const int num_features = pat_eval_ctx->group_num_features[unit_group];
+  int64_t acc = 0;
+  for (int group_idx = 0; group_idx < num_features; group_idx++) {
+    acc +=
+        (int64_t)feature_weight[group_idx] * features[feature_index[group_idx]];
+  }
+  const Equity penalty = pat_clamp_dot(acc);
+  assert(penalty == pat_dot(pat_eval_ctx->weights, features));
+  return penalty;
 }
 
 // The per-row and per-column unit masks are 64-bit.
@@ -410,23 +428,32 @@ static void pat_eval_context_load_units(
     pat_eval_ctx->term_scale =
         weights->stage_scale[pat_stage_for_bag(bag_count)];
   }
-  pat_eval_ctx->num_nonzero_features = 0;
   pat_eval_ctx->score_channels = !drop_unweighted_units;
-  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-       feature_index++) {
-    if (weights->weights[feature_index] != 0) {
-      pat_eval_ctx
-          ->nonzero_feature_index[pat_eval_ctx->num_nonzero_features++] =
-          feature_index;
-      if (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
-          feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT) {
-        pat_eval_ctx->score_channels = true;
-      }
+  for (int bin_idx = 0; bin_idx < PAT_HOOK_BIN_COUNT; bin_idx++) {
+    if (weights->weights[PAT_FEATURE_HOOK_SCORE_START + bin_idx] != 0) {
+      pat_eval_ctx->score_channels = true;
     }
   }
+  for (int unit_group = 0; unit_group < PAT_NUM_UNIT_GROUPS; unit_group++) {
+    uint8_t group_features[PAT_NUM_FEATURES];
+    const int num_group_features =
+        pat_unit_group_features(unit_group, group_features);
+    int num_weighted = 0;
+    for (int group_idx = 0; group_idx < num_group_features; group_idx++) {
+      const int feature_index = group_features[group_idx];
+      if (weights->weights[feature_index] != 0) {
+        pat_eval_ctx->group_feature_index[unit_group][num_weighted] =
+            (uint8_t)feature_index;
+        pat_eval_ctx->group_feature_weight[unit_group][num_weighted] =
+            weights->weights[feature_index];
+        num_weighted++;
+      }
+    }
+    pat_eval_ctx->group_num_features[unit_group] = (uint8_t)num_weighted;
+  }
   for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
-    int32_t *unit_features = pat_eval_ctx->unit_features[unit_index];
-    memset(unit_features, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
+    int32_t unit_features[PAT_NUM_FEATURES];
+    memset(unit_features, 0, sizeof(unit_features));
     int dir = 0;
     int lane = 0;
     int extent_lo = 0;
@@ -436,7 +463,7 @@ static void pat_eval_context_load_units(
                           &lane, &extent_lo, &extent_hi,
                           &pat_eval_ctx->unit_hook_letters[unit_index]);
     pat_eval_ctx->unit_penalty[unit_index] =
-        pat_dot_ctx(pat_eval_ctx, unit_features);
+        pat_dot_unit(pat_eval_ctx, unit_index, unit_features);
     // A move affects this unit only when it has a tile on or directly
     // beside the lane (perpendicular halo of one) within the span of
     // squares the baseline walk visited: squares beyond the walk's break
@@ -811,7 +838,7 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
                               overlay_features, &scan_dir, &scan_lane, NULL,
                               NULL,
                               discount > 0.0 ? &fresh_hook_letters : NULL);
-        penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
+        penalty = pat_dot_unit(pat_eval_ctx, unit_index, overlay_features);
         // The move's own placement can create or destroy this unit's hook
         // letters (a newly hooked square, or covering one that existed at
         // baseline), so eligibility is re-checked against the fresh,

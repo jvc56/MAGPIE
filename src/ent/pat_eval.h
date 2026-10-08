@@ -66,7 +66,6 @@ typedef struct PATEvalContext {
   // either. The player's whole rack is excluded, not the leave the move
   // would keep, since the context is built once for the position.
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
-  int32_t unit_features[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
   Equity unit_penalty[PAT_MAX_SCAN_UNITS];
@@ -77,10 +76,12 @@ typedef struct PATEvalContext {
   // order the move does not reach.
   int64_t total_unit_penalty;
   uint16_t units_by_penalty[PAT_MAX_SCAN_UNITS];
-  // The features carrying a nonzero weight, so a unit's dot product visits
-  // only those; every other term is exactly zero.
-  int nonzero_feature_index[PAT_NUM_FEATURES];
-  int num_nonzero_features;
+  // For each unit group (see PAT_NUM_UNIT_GROUPS), the features its scans
+  // can write that carry a nonzero weight, and those weights, so a unit's
+  // dot product visits only those; every other term is exactly zero.
+  uint8_t group_feature_index[PAT_NUM_UNIT_GROUPS][PAT_NUM_FEATURES];
+  Equity group_feature_weight[PAT_NUM_UNIT_GROUPS][PAT_NUM_FEATURES];
+  uint8_t group_num_features[PAT_NUM_UNIT_GROUPS];
   // Whether scans compute the hook-score channels: always for training
   // rows; at runtime only when a hook-score weight is nonzero.
   bool score_channels;
