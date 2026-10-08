@@ -11,6 +11,7 @@
 #include "../ent/thread_control.h"
 #include "bai_logger.h"
 #include "inference.h"
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct RandomVariables RandomVariables;
@@ -44,7 +45,13 @@ double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
                   BAILogger *bai_logger);
 double rvs_sample_with_seed(RandomVariables *rvs, uint64_t k,
                             uint64_t reserved_seed, int thread_index,
-                            BAILogger *bai_logger);
+                            BAILogger *bai_logger, void *record);
+// Bytes in the record a sample can write instead of applying its effect on
+// the random variable's results, or 0 when samples have no such effect.
+size_t rvs_get_sample_record_size(const RandomVariables *rvs);
+// Applies a record written by rvs_sample_with_seed for arm k.
+void rvs_apply_sample_record(const RandomVariables *rvs, uint64_t k,
+                             const void *record);
 uint64_t rvs_next_seed(RandomVariables *rvs, uint64_t k);
 bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);

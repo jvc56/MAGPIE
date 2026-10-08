@@ -12,6 +12,7 @@
 #include "stats.h"
 #include "win_pct.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef enum {
   PLY_INFO_COUNT_PASS,
@@ -22,6 +23,27 @@ typedef enum {
 } ply_info_count_t;
 
 typedef struct SimmedPlay SimmedPlay;
+
+typedef struct SimmedPlayPlyRecord {
+  Equity score;
+  uint8_t count_type;
+  bool is_bingo;
+} SimmedPlayPlyRecord;
+
+// One sample's contributions to a SimmedPlay, captured instead of applied so
+// that they can be applied later, in a fixed order, or dropped. The BAI round
+// scheduler applies each round's records when it folds the round, so the
+// results hold exactly the folded samples. (The heat map is display-only and
+// is still updated as the sample runs.)
+typedef struct SimmedPlaySampleRecord {
+  Equity equity_sample;
+  Equity leftover;
+  double win_pct;
+  double utility;
+  bool has_utility;
+  int num_plies;
+  SimmedPlayPlyRecord plies[MAX_PLIES];
+} SimmedPlaySampleRecord;
 
 const Move *simmed_play_get_move(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_score_stat(const SimmedPlay *simmed_play,
@@ -43,17 +65,27 @@ double simmed_play_get_exact_utility_mean(const SimmedPlay *simmed_play);
 bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play);
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
+// Each simmed_play_add_* function applies its contribution to simmed_play,
+// or, when record is non-NULL, writes it to record instead, to be applied by
+// simmed_play_apply_sample_record. A record must be cleared with
+// simmed_play_sample_record_clear before a sample starts filling it.
+void simmed_play_sample_record_clear(SimmedPlaySampleRecord *record);
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
-                                   const Move *move);
+                                   const Move *move,
+                                   SimmedPlaySampleRecord *record);
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
-                                 Equity spread, Equity leftover);
+                                 Equity spread, Equity leftover,
+                                 SimmedPlaySampleRecord *record);
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
                                     int bag_tiles, int on_turn_rack_tiles,
-                                    int off_turn_rack_tiles,
-                                    bool plies_are_odd);
-void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility);
+                                    int off_turn_rack_tiles, bool plies_are_odd,
+                                    SimmedPlaySampleRecord *record);
+void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility,
+                                  SimmedPlaySampleRecord *record);
+void simmed_play_apply_sample_record(SimmedPlay *simmed_play,
+                                     const SimmedPlaySampleRecord *record);
 
 typedef struct SimResults SimResults;
 

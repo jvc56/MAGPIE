@@ -650,21 +650,69 @@ void sim_results_set_num_infer_leaves(SimResults *sim_results,
   sim_results->num_infer_leaves = num_infer_leaves;
 }
 
+void simmed_play_sample_record_clear(SimmedPlaySampleRecord *record) {
+  record->equity_sample = 0;
+  record->leftover = 0;
+  record->win_pct = 0.0;
+  record->utility = 0.0;
+  record->has_utility = false;
+  record->num_plies = 0;
+}
+
+// Assumes the caller holds simmed_play->mutex.
+static void simmed_play_apply_ply_while_locked(SimmedPlay *simmed_play,
+                                               const int ply_index,
+                                               const SimmedPlayPlyRecord *ply) {
+  stat_push(simmed_play->ply_infos[ply_index].score_stat,
+            equity_to_double(ply->score), 1);
+  stat_push(simmed_play->ply_infos[ply_index].bingo_stat,
+            (double)(ply->is_bingo), 1);
+  simmed_play->ply_infos[ply_index].ply_info_counts[ply->count_type]++;
+  simmed_play->ply_infos[ply_index].ply_info_counts[PLY_INFO_COUNT_BINGO] +=
+      (uint64_t)ply->is_bingo;
+}
+
+// Assumes the caller holds simmed_play->mutex.
+static void simmed_play_apply_equity_while_locked(SimmedPlay *simmed_play,
+                                                  const Equity equity_sample,
+                                                  const Equity leftover) {
+  stat_push(simmed_play->equity_stat, equity_to_double(equity_sample), 1);
+  stat_push(simmed_play->leftover_stat, equity_to_double(leftover), 1);
+  exact_mean_push_scaled(&simmed_play->exact_equity, (int64_t)equity_sample);
+}
+
+// Assumes the caller holds simmed_play->mutex.
+static void simmed_play_apply_win_pct_while_locked(SimmedPlay *simmed_play,
+                                                   const double wpct) {
+  stat_push(simmed_play->win_pct_stat, wpct, 1);
+  exact_mean_push_scaled(&simmed_play->exact_win_pct,
+                         exact_mean_scale_unit_value(wpct));
+}
+
+// Assumes the caller holds simmed_play->mutex.
+static void simmed_play_apply_utility_while_locked(SimmedPlay *simmed_play,
+                                                   const double utility) {
+  stat_push(simmed_play->utility_stat, utility, 1);
+  exact_mean_push_scaled(&simmed_play->exact_utility,
+                         exact_mean_scale_unit_value(utility));
+}
+
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
-                                   const Move *move) {
-  const double move_score = equity_to_double(move_get_score(move));
-  bool is_bingo = false;
-  ply_info_count_t count_type;
+                                   const Move *move,
+                                   SimmedPlaySampleRecord *record) {
+  SimmedPlayPlyRecord ply;
+  ply.score = move_get_score(move);
+  ply.is_bingo = false;
   switch (move_get_type(move)) {
   case GAME_EVENT_PASS:
-    count_type = PLY_INFO_COUNT_PASS;
+    ply.count_type = PLY_INFO_COUNT_PASS;
     break;
   case GAME_EVENT_EXCHANGE:
-    count_type = PLY_INFO_COUNT_EXCHANGE;
+    ply.count_type = PLY_INFO_COUNT_EXCHANGE;
     break;
   case GAME_EVENT_TILE_PLACEMENT_MOVE:
-    count_type = PLY_INFO_COUNT_TILE_PLACEMENT;
-    is_bingo = move_get_tiles_played(move) == RACK_SIZE;
+    ply.count_type = PLY_INFO_COUNT_TILE_PLACEMENT;
+    ply.is_bingo = move_get_tiles_played(move) == RACK_SIZE;
     break;
   default:
     log_fatal(
@@ -673,26 +721,35 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
     return;
   }
   HeatMap *heat_map = simmed_play_get_heat_map(simmed_play, ply_index);
+  if (record) {
+    record->plies[ply_index] = ply;
+    record->num_plies = ply_index + 1;
+    if (heat_map) {
+      cpthread_mutex_lock(&simmed_play->mutex);
+      heat_map_add_move(heat_map, move);
+      cpthread_mutex_unlock(&simmed_play->mutex);
+    }
+    return;
+  }
   cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->ply_infos[ply_index].score_stat, move_score, 1);
-  stat_push(simmed_play->ply_infos[ply_index].bingo_stat, (double)(is_bingo),
-            1);
+  simmed_play_apply_ply_while_locked(simmed_play, ply_index, &ply);
   if (heat_map) {
     heat_map_add_move(heat_map, move);
   }
-  simmed_play->ply_infos[ply_index].ply_info_counts[count_type]++;
-  simmed_play->ply_infos[ply_index].ply_info_counts[PLY_INFO_COUNT_BINGO] +=
-      (uint64_t)is_bingo;
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
-                                 Equity spread, Equity leftover) {
-  cpthread_mutex_lock(&simmed_play->mutex);
+                                 Equity spread, Equity leftover,
+                                 SimmedPlaySampleRecord *record) {
   const Equity equity_sample = spread - initial_spread + leftover;
-  stat_push(simmed_play->equity_stat, equity_to_double(equity_sample), 1);
-  stat_push(simmed_play->leftover_stat, equity_to_double(leftover), 1);
-  exact_mean_push_scaled(&simmed_play->exact_equity, (int64_t)equity_sample);
+  if (record) {
+    record->equity_sample = equity_sample;
+    record->leftover = leftover;
+    return;
+  }
+  cpthread_mutex_lock(&simmed_play->mutex);
+  simmed_play_apply_equity_while_locked(simmed_play, equity_sample, leftover);
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
@@ -700,11 +757,15 @@ int round_to_nearest_int(double a) {
   return (int)(a + 0.5 - (a < 0)); // truncated to 55
 }
 
-void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility) {
+void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility,
+                                  SimmedPlaySampleRecord *record) {
+  if (record) {
+    record->utility = utility;
+    record->has_utility = true;
+    return;
+  }
   cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->utility_stat, utility, 1);
-  exact_mean_push_scaled(&simmed_play->exact_utility,
-                         exact_mean_scale_unit_value(utility));
+  simmed_play_apply_utility_while_locked(simmed_play, utility);
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
@@ -712,8 +773,8 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
                                     int bag_tiles, int on_turn_rack_tiles,
-                                    int off_turn_rack_tiles,
-                                    bool plies_are_odd) {
+                                    int off_turn_rack_tiles, bool plies_are_odd,
+                                    SimmedPlaySampleRecord *record) {
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
     // the game ended; use the actual result.
@@ -741,12 +802,30 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
       wpct = 1.0 - wpct;
     }
   }
+  if (record) {
+    record->win_pct = wpct;
+    return wpct;
+  }
   cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->win_pct_stat, wpct, 1);
-  exact_mean_push_scaled(&simmed_play->exact_win_pct,
-                         exact_mean_scale_unit_value(wpct));
+  simmed_play_apply_win_pct_while_locked(simmed_play, wpct);
   cpthread_mutex_unlock(&simmed_play->mutex);
   return wpct;
+}
+
+void simmed_play_apply_sample_record(SimmedPlay *simmed_play,
+                                     const SimmedPlaySampleRecord *record) {
+  cpthread_mutex_lock(&simmed_play->mutex);
+  for (int ply_index = 0; ply_index < record->num_plies; ply_index++) {
+    simmed_play_apply_ply_while_locked(simmed_play, ply_index,
+                                       &record->plies[ply_index]);
+  }
+  simmed_play_apply_equity_while_locked(simmed_play, record->equity_sample,
+                                        record->leftover);
+  simmed_play_apply_win_pct_while_locked(simmed_play, record->win_pct);
+  if (record->has_utility) {
+    simmed_play_apply_utility_while_locked(simmed_play, record->utility);
+  }
+  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
