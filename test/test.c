@@ -174,6 +174,7 @@ static TestEntry on_demand_test_table[] = {
     {"peginterrupt", test_peg_interrupted_candidate_outcomes},
     {"playchooserfixed", test_play_chooser_fixed_short_budget},
     {"analyze_sim", test_analyze_sim},
+    {"simdetigp", test_autoplay_sim_determinism_igp},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},

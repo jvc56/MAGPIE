@@ -668,3 +668,46 @@ void test_autoplay(void) {
   test_autoplay_default();
   test_autoplay_wmp_correctness();
 }
+
+// Regression test for multithreaded sim determinism under intra-game
+// parallelism (-mtmode igp), where a single sim gets every worker thread.
+//
+// With identical p1/p2 configurations every game pair must be non-divergent.
+// game_get_player_draw_index is seat-based (player_index ^
+// starting_player_index) and the pair swaps only the starting player index
+// while keeping the same bag seed, so at every turn the two games present the
+// same board, rack and bag to whoever is on turn. Two identical strategies can
+// therefore only disagree if the sim itself is nondeterministic, which makes
+// the divergent count an exact, binary determinism check with no statistical
+// interpretation needed.
+//
+// Must be run under igp specifically. Under pgp every sim gets exactly one
+// worker thread, so there is no thread timing inside a sim and the property
+// holds trivially; passing under pgp proves nothing.
+//
+// Requires -tlim 0. A clocked sim is nondeterministic by construction and can
+// never be made pair-exact, so this test must not be run with a time limit or
+// with the -pc1/-pc2 play choosers, whose budgets are clocks.
+void test_autoplay_sim_determinism_igp(void) {
+  const int num_pairs = 2;
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -pl1 1 -pl2 1 -np1 4 -np2 4 -iterations 40 "
+      "-minplayiterations 5 -tlim 0 -threads 6 -mtmode igp");
+  char *autoplay_cmd =
+      get_formatted_string("autoplay games %d -gp true -seed 7", num_pairs);
+  load_and_exec_config_or_die(config, autoplay_cmd);
+  free(autoplay_cmd);
+
+  char *res = autoplay_results_to_string(config_get_autoplay_results(config),
+                                         false, true);
+  char *expected_total =
+      get_formatted_string("autoplay games %d", num_pairs * 2);
+  assert_autoplay_output(res, 2,
+                         (const char *[]){expected_total, "autoplay games 0"});
+  free(expected_total);
+  free(res);
+  config_destroy(config);
+
+  printf("IGP sim determinism: PASSED (%d game pairs, 0 divergent)\n",
+         num_pairs);
+}
