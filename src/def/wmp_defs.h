@@ -12,6 +12,33 @@ enum {
   WMP_EARLIEST_SUPPORTED_VERSION = 3,
   WMP_VERSION = 3,
   WMP_RESULT_BUFFER_SIZE = 7000,
+  WMP_INDEX_MIN_BUCKETS = 16,
+  // At most this percent of the index's slots hold entries.
+  WMP_INDEX_MAX_FILL_PERCENT = 75,
+  // Miss filter: bits per entry, and the width of a bit index into one
+  // 64-bit filter word.
+  WMP_FILTER_BITS_PER_ENTRY = 16,
+  WMP_FILTER_BIT_INDEX_BITS = 6,
+  WMP_FILTER_MIN_WORDS = 2,
 };
+
+// The blankless lookup index stores the entries in buckets of
+// WMP_INDEX_BUCKET_SLOTS 32-byte entries, one cache line: 128 bytes on Apple
+// silicon, 64 bytes elsewhere.
+#if defined(__APPLE__) && defined(__aarch64__)
+enum {
+  WMP_INDEX_BUCKET_SLOTS = 4,
+  WMP_INDEX_BUCKET_ALIGNMENT = 128,
+};
+#else
+enum {
+  WMP_INDEX_BUCKET_SLOTS = 2,
+  WMP_INDEX_BUCKET_ALIGNMENT = 64,
+};
+#endif
+
+// Odd multipliers for wmp_index_hash.
+#define WMP_INDEX_HASH_LOW_MULTIPLIER 0x9E3779B97F4A7C15ULL
+#define WMP_INDEX_HASH_HIGH_MULTIPLIER 0xC2B2AE3D27D4EB4FULL
 
 #endif

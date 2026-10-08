@@ -1186,6 +1186,10 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   // Calculate max_word_lookup_bytes
   wmp->max_word_lookup_bytes = calculate_max_word_lookup_bytes(wmp);
 
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    wfl_build_word_index(&wmp->wfls[len]);
+  }
+
   return wmp;
 }
 
