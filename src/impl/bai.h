@@ -458,14 +458,19 @@ bai_arm_z_with_counts(const BAIArmDatum *astar_arm_data,
 }
 
 // Assumes the caller has locked the bai sync data mutex. Checks the stopping
-// threshold against the committed statistics. The challenger is not chosen
-// here: scheduling picks it when it lays out a round, from the counts handed
-// out by then (see bai_schedule_challenger).
+// threshold against the committed statistics: every arm other than astar must
+// either be similar to it or have a Z statistic above the GK16 threshold.
+// With no threshold, only the first condition can hold, so under the top-two
+// rule a sim whose plays are all similar to astar still stops; under
+// round-robin it never does. The challenger is not chosen here: scheduling
+// picks it when it lays out a round (see bai_schedule_challenger).
 static inline void bai_update_threshold(BAISyncData *bai_sync_data,
                                         RandomVariables *rvs,
                                         const bai_threshold_t threshold,
+                                        const bai_sampling_rule_t sampling_rule,
                                         const double delta) {
-  if (threshold == BAI_THRESHOLD_NONE) {
+  if (threshold == BAI_THRESHOLD_NONE &&
+      sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
     return;
   }
   const double bai_threshold = log(
@@ -476,6 +481,9 @@ static inline void bai_update_threshold(BAISyncData *bai_sync_data,
     if (arm_index == astar_index ||
         rvs_are_similar(rvs, astar_index, arm_index)) {
       continue;
+    }
+    if (threshold == BAI_THRESHOLD_NONE) {
+      return;
     }
     const BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
     const double arm_z = bai_arm_z_with_counts(
@@ -774,7 +782,8 @@ static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
                           BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
     return;
   }
-  bai_update_threshold(bai_sync_data, args->rvs, args->threshold, args->delta);
+  bai_update_threshold(bai_sync_data, args->rvs, args->threshold,
+                       args->sampling_rule, args->delta);
 }
 
 static inline void bai_commit_round_while_locked(BAISampleArgs *args,
