@@ -162,10 +162,15 @@ typedef struct BAISyncData {
   uint64_t next_round_to_fold;
   uint64_t next_round_to_schedule;
   bool scheduling_finished;
-  // Counts the times a thread found nothing to claim while rounds were still
-  // in flight. The schedule is meant to make this impossible; a nonzero count
-  // means the lag is too short for the cost skew between samples.
-  uint64_t idle_events;
+  // True once no further round will ever be scheduled: either scheduling has
+  // finished, or the round just scheduled reached the sample limit. A worker
+  // that finds nothing to claim exits once this is set, rather than waiting
+  // for folds that can only drain rounds already handed out.
+  bool claims_exhausted;
+  // Signaled whenever a fold may have made new work claimable, when claims
+  // become exhausted, and when a worker abandons the rounds. A worker with
+  // nothing to claim waits on it instead of spinning on the mutex.
+  cpthread_cond_t work_available;
 #ifdef BAI_SCHED_STATS
   BAISchedSimStats sched_stats;
   BAISchedHistogram sched_histogram;
@@ -282,6 +287,7 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   }
   bai_sync_data->rng = rng;
   cpthread_mutex_init(&bai_sync_data->mutex);
+  cpthread_cond_init(&bai_sync_data->work_available);
   bai_sync_data->thread_control = thread_control;
   bai_sync_data->bai_result = bai_result;
   bai_sync_data->avoid_prune_arms = NULL;
@@ -302,7 +308,7 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   // Nothing is scheduled until the initial phase hands over, so a BAI-phase
   // worker that starts after an initial-phase stop exits immediately.
   bai_sync_data->scheduling_finished = true;
-  bai_sync_data->idle_events = 0;
+  bai_sync_data->claims_exhausted = true;
 #ifdef BAI_SCHED_STATS
   memset(&bai_sync_data->sched_stats, 0, sizeof(bai_sync_data->sched_stats));
   bai_sched_histogram_reset(&bai_sync_data->sched_histogram);
@@ -597,6 +603,7 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   if (bai_result_get_status(bai_sync_data->bai_result) !=
       BAI_RESULT_STATUS_NONE) {
     bai_sync_data->scheduling_finished = true;
+    bai_sync_data->claims_exhausted = true;
     return;
   }
   const uint64_t requested = bai_sync_data->num_total_samples_requested;
@@ -604,6 +611,7 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
     bai_result_set_status(bai_sync_data->bai_result,
                           BAI_RESULT_STATUS_SAMPLE_LIMIT);
     bai_sync_data->scheduling_finished = true;
+    bai_sync_data->claims_exhausted = true;
     return;
   }
   const uint64_t available = args->sample_limit - requested;
@@ -684,6 +692,11 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   }
   bai_sync_data->num_total_samples_requested += (uint64_t)num_samples;
   bai_sync_data->next_round_to_schedule++;
+  if (bai_sync_data->num_total_samples_requested >= args->sample_limit) {
+    // This round spends the last of the budget. The fold that follows still
+    // records the sample-limit status, but no worker needs to wait for it.
+    bai_sync_data->claims_exhausted = true;
+  }
 #ifdef BAI_SCHED_STATS
   round->committed_at_schedule = bai_sync_data->num_total_samples_completed;
   bai_sync_data->sched_stats.schedule_ns += bai_sched_now() - sched_start_ns;
@@ -800,6 +813,7 @@ static inline void bai_schedule_complete_while_locked(
   bai_accumulate_checked(&pending->samples_squared_sum,
                          bai_quantize_sample(sample_value * sample_value));
   round->num_completed++;
+  bool folded = false;
 #ifdef BAI_SCHED_STATS
   bai_sync_data->sched_bai_completions++;
   if (bai_sync_data->sched_stop_folded) {
@@ -821,6 +835,10 @@ static inline void bai_schedule_complete_while_locked(
     bai_commit_round_while_locked(args, oldest);
     bai_sync_data->next_round_to_fold++;
     bai_schedule_round_while_locked(args);
+    folded = true;
+  }
+  if (folded) {
+    cpthread_cond_broadcast(&bai_sync_data->work_available);
   }
 }
 
@@ -852,6 +870,7 @@ static inline void bai_sync_data_start_schedule(BAISampleArgs *args) {
   bai_sync_data->next_round_to_fold = 0;
   bai_sync_data->next_round_to_schedule = 0;
   bai_sync_data->scheduling_finished = false;
+  bai_sync_data->claims_exhausted = false;
   for (int i = 0; i < BAI_SCHEDULE_ROUNDS; i++) {
     bai_schedule_round_while_locked(args);
   }
@@ -1069,24 +1088,20 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
     bai_sync_lock(sync_data, worker_stats);
     const int arm_index = bai_schedule_claim_while_locked(
         sync_data, &round_number, &reserved_seed);
-    bool finished = false;
     if (arm_index < 0) {
-      finished = sync_data->scheduling_finished;
-      if (!finished) {
-        // Every scheduled slot is taken but a round is still in flight, so
-        // nothing can be scheduled yet. The lag exists to make this
-        // unreachable; count it rather than hide it.
-        sync_data->idle_events++;
-      }
-    }
-    cpthread_mutex_unlock(&sync_data->mutex);
-    if (arm_index < 0) {
-      if (finished) {
+      if (sync_data->claims_exhausted) {
+        cpthread_mutex_unlock(&sync_data->mutex);
         break;
       }
+      // Every scheduled slot is taken but a round is still in flight, so
+      // nothing can be scheduled until it folds. Sleep until a fold (or an
+      // abandoning worker) signals, rather than spinning on the mutex.
       bai_sched_idle_begin(worker_stats);
+      cpthread_cond_wait(&sync_data->work_available, &sync_data->mutex);
+      cpthread_mutex_unlock(&sync_data->mutex);
       continue;
     }
+    cpthread_mutex_unlock(&sync_data->mutex);
     bai_sched_idle_end(worker_stats);
     const int64_t sample_start_ns = bai_sched_now();
     const double sample = rvs_sample_with_seed(
@@ -1098,6 +1113,11 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
     cpthread_mutex_unlock(&sync_data->mutex);
   }
   bai_sched_idle_end(worker_stats);
+  // Wake any worker waiting for work so it can see the same exit condition:
+  // claims exhausted, or the clock or a user interrupt abandoning the rounds.
+  cpthread_mutex_lock(&sync_data->mutex);
+  cpthread_cond_broadcast(&sync_data->work_available);
+  cpthread_mutex_unlock(&sync_data->mutex);
 }
 
 #ifdef BAI_SCHED_STATS
