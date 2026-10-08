@@ -1184,23 +1184,32 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   // The divergent / non-divergent split is the variance reduction a game pair
   // buys: a non-divergent pair is two identical games whose results cancel
   // exactly. That only holds if games_are_divergent means "the two strategies
-  // chose differently" and never "the threads interleaved differently". Under
-  // intra-game parallelism a single sim gets every worker thread and is not
-  // yet reproducible, so the split is not attributable to strategy. Warn
-  // rather than silently reporting a paired comparison with no pairing left
-  // in it.
-  if (show_divergent_results &&
+  // chose differently" and never "the threads interleaved differently".
+  //
+  // A multithreaded sim under intra-game parallelism is reproducible when it
+  // stops on a sample budget, but time-budgeted search is nondeterministic by
+  // construction: a clock cannot be reproduced, so neither can the pair. Warn
+  // for exactly that case -- a nonzero sim time limit, or a play chooser,
+  // whose budget is a millisecond clock by definition.
+  const bool igp_with_multithreaded_sims =
       args->multi_threading_mode ==
           MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM &&
       (args->p1_sim_args.bai_options.num_threads > 1 ||
-       args->p2_sim_args.bai_options.num_threads > 1)) {
+       args->p2_sim_args.bai_options.num_threads > 1);
+  const bool search_is_clocked =
+      args->p1_sim_args.bai_options.time_limit_seconds > 0 ||
+      args->p2_sim_args.bai_options.time_limit_seconds > 0 ||
+      args->use_play_chooser[0] || args->use_play_chooser[1];
+  if (show_divergent_results && igp_with_multithreaded_sims &&
+      search_is_clocked) {
     thread_control_print(
         thread_control,
-        "warning: game pairs with -mtmode igp and more than one thread run a "
-        "multithreaded sim per move, which is not reproducible, so games are "
-        "reported as divergent for thread timing reasons rather than because "
-        "the two strategies chose differently. Use -mtmode pgp, or -threads "
-        "1, for an attributable paired comparison.\n");
+        "warning: game pairs with -mtmode igp and a time-budgeted search run "
+        "a multithreaded sim per move whose stopping point a clock decides, "
+        "so games are reported as divergent for thread timing reasons rather "
+        "than because the two strategies chose differently. Stop on a sample "
+        "budget instead (-tlim 0 with -iterations, and no -pc1/-pc2), or use "
+        "-mtmode pgp, for an attributable paired comparison.\n");
   }
 
   const int autoplay_num_threads = args->num_threads;
