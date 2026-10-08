@@ -15,6 +15,7 @@
 #include "pat.h"
 #include "pat_lexicon.h"
 #include "rack.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -74,6 +75,19 @@ void pat_compute_unseen_counts(const Square *lanes,
                       ? unseen_counts[machine_letter] - held
                       : 0);
   }
+}
+
+// A whole-point equity as an int. Letter and cross scores always are whole
+// points, so this skips equity_to_int's checks for the special values on
+// the scan's hot paths.
+static inline int pat_equity_points(Equity points) {
+  assert(equity_is_integer(points));
+  return points / EQUITY_RESOLUTION;
+}
+
+static inline int pat_letter_points(const LetterDistribution *ld,
+                                    MachineLetter ml) {
+  return pat_equity_points(ld_get_score(ld, ml));
 }
 
 static inline bool pat_move_covers(const PATMoveOverlay *overlay, int row,
@@ -139,7 +153,7 @@ static uint64_t pat_fresh_cross_set(const KWG *kwg,
         }
       }
       if (!get_is_blanked(letter)) {
-        cross_score += equity_to_int(ld_get_score(ld, letter));
+        cross_score += pat_letter_points(ld, letter);
       }
       const MachineLetter unblanked = get_unblanked_machine_letter(letter);
       if (side < 0) {
@@ -297,14 +311,17 @@ static inline int pat_letter_score_exposure(int cross_score, int tile_score,
 // adjacent to the square, the real post-move cross set would require a KWG
 // traversal, so it is approximated with the per-letter hook_flex table; a
 // pre-move dead square is left dead even though a fresh adjacent tile
-// technically changes its perpendicular pattern. ld and
-// premium_word_multiplier feed
-// score_exposure only; a caller that never reads it may pass NULL and any
-// multiplier.
-static PATCrossInfo pat_effective_cross_info(
-    const Square *lane, int idx, int dir, const PATMoveOverlay *overlay,
-    int row, int col, const uint8_t *unseen_counts,
-    const LetterDistribution *ld, int premium_word_multiplier) {
+// technically changes its perpendicular pattern. score_exposure is computed
+// only when want_score_exposure is set, which needs ld; otherwise it is 0
+// and premium_word_multiplier is a don't-care. A NULL ld also leaves created
+// hooks to the approximation.
+static PATCrossInfo
+pat_effective_cross_info(const Square *lane, int idx, int dir,
+                         const PATMoveOverlay *overlay, int row, int col,
+                         const uint8_t *unseen_counts,
+                         const LetterDistribution *ld, bool want_score_exposure,
+                         int premium_word_multiplier) {
+  assert(!want_score_exposure || ld != NULL);
   const uint64_t base_cross_set = square_get_cross_set(&lane[idx]);
   PATCrossInfo info;
   // Exact created hooks: if a fresh tile sits perpendicular-adjacent,
@@ -334,7 +351,7 @@ static PATCrossInfo pat_effective_cross_info(
       info.flex = info.hooky ? pat_set_flex(unseen_counts, cross_set) : 0;
       info.letter_set = info.hooky ? cross_set : 0;
       info.score_exposure = 0;
-      if (info.hooky) {
+      if (info.hooky && want_score_exposure) {
         const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
         const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
         const int word_multiplier = bonus_square_get_word_multiplier(bonus);
@@ -349,7 +366,7 @@ static PATCrossInfo pat_effective_cross_info(
           exposure +=
               (int64_t)unseen_counts[machine_letter] *
               pat_letter_score_exposure(
-                  cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
+                  cross_score, pat_letter_points(ld, machine_letter),
                   letter_multiplier, word_multiplier, premium_word_multiplier);
         }
         info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
@@ -366,8 +383,9 @@ static PATCrossInfo pat_effective_cross_info(
   const BonusSquare bonus = square_get_bonus_square(&lane[idx]);
   const int letter_multiplier = bonus_square_get_letter_multiplier(bonus);
   const int word_multiplier = bonus_square_get_word_multiplier(bonus);
-  if (info.hooky && ld != NULL) {
-    const int cross_score = equity_to_int(square_get_cross_score(&lane[idx]));
+  if (info.hooky && want_score_exposure) {
+    const int cross_score =
+        pat_equity_points(square_get_cross_score(&lane[idx]));
     int64_t exposure = 0;
     uint64_t remaining = base_cross_set & ~(uint64_t)1;
     while (remaining) {
@@ -379,7 +397,7 @@ static PATCrossInfo pat_effective_cross_info(
       exposure +=
           (int64_t)unseen_counts[machine_letter] *
           pat_letter_score_exposure(
-              cross_score, equity_to_int(ld_get_score(ld, machine_letter)),
+              cross_score, pat_letter_points(ld, machine_letter),
               letter_multiplier, word_multiplier, premium_word_multiplier);
     }
     info.score_exposure = (int)(exposure / PAT_HOOK_SCORE_SCALE);
@@ -407,8 +425,8 @@ static PATCrossInfo pat_effective_cross_info(
           overlay->hook_flex[get_unblanked_machine_letter(fresh_letter)];
       if (fresh_flex < 0 || flex < fresh_flex) {
         fresh_flex = flex;
-        fresh_score = (ld != NULL && !get_is_blanked(fresh_letter))
-                          ? equity_to_int(ld_get_score(ld, fresh_letter))
+        fresh_score = (want_score_exposure && !get_is_blanked(fresh_letter))
+                          ? pat_letter_points(ld, fresh_letter)
                           : 0;
       }
     }
@@ -419,7 +437,7 @@ static PATCrossInfo pat_effective_cross_info(
     // score yet: the hooked word is approximated by the fresh tile facing
     // this square and the admissible letters by a typical two-point tile,
     // weighted by the same two-letter-word count the flexibility uses.
-    if (ld != NULL) {
+    if (want_score_exposure) {
       const int fresh_exposure =
           fresh_flex *
           pat_letter_score_exposure(fresh_score, 2, letter_multiplier,
@@ -434,19 +452,6 @@ static PATCrossInfo pat_effective_cross_info(
   return info;
 }
 
-// Scans one (premium square, dir) unit: walks outward from the empty premium
-// square along its lane on both sides, accumulating hook, floater, and
-// triple-triple features binned by the number of tiles a word reaching the
-// square must play. A triple-triple span is counted from both of its
-// endpoints; training and evaluation count it the same way, so the weight
-// absorbs the double count.
-// extent_lo/extent_hi (optional) receive the lowest and highest lane index
-// the walk visited, including the square it broke on: a move can only change
-// this unit's features by placing a tile on one of those squares or directly
-// beside them.
-// score_channels says whether to compute the hook-score channels;
-// evaluation skips them when their weights are all zero (see
-// PATEvalContext.score_channels).
 void pat_class_channel_bases(int premium_class, int *hook_base,
                              int *float_score_base) {
   *hook_base = PAT_FEATURE_HOOK_START;
@@ -511,6 +516,19 @@ int pat_unit_group_features(int unit_group, uint8_t *feature_indexes) {
   return count;
 }
 
+// Scans one (premium square, dir) unit: walks outward from the empty premium
+// square along its lane on both sides, accumulating hook, floater, and
+// triple-triple features binned by the number of tiles a word reaching the
+// square must play. A triple-triple span is counted from both of its
+// endpoints; training and evaluation count it the same way, so the weight
+// absorbs the double count.
+// extent_lo/extent_hi (optional) receive the lowest and highest lane index
+// the walk visited, including the square it broke on: a move can only change
+// this unit's features by placing a tile on one of those squares or directly
+// beside them.
+// score_channels says whether to compute the hook-score channels;
+// evaluation skips them when their weights are all zero (see
+// PATEvalContext.score_channels).
 void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
                    const uint8_t *unseen_counts, const PATWeights *pat,
                    int premium_row, int premium_col, int premium_class, int dir,
@@ -533,6 +551,9 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
   int float_score_base = 0;
   pat_class_channel_bases(premium_class, &hook_base, &float_score_base);
   const bool full_channels = (premium_class == PAT_PREMIUM_TWS);
+  // Only the hook-score channels read a square's score exposure, and only
+  // triple word squares have them.
+  const bool want_score_exposure = full_channels && hook_score_ld != NULL;
   const int lane_index =
       (dir == BOARD_HORIZONTAL_DIRECTION) ? premium_row : premium_col;
   const int premium_idx =
@@ -560,7 +581,7 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       lane, premium_idx, dir, overlay,
       pat_unit_row(dir, lane_index, premium_idx),
       pat_unit_col(dir, lane_index, premium_idx), unseen_counts, hook_score_ld,
-      premium_word_multiplier);
+      want_score_exposure, premium_word_multiplier);
   if (premium_info.dead) {
     // No word along this lane can cover the TWS square at all.
     return;
@@ -628,7 +649,7 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
           }
           int tile_score = 0;
           if (!get_is_blanked(run_letter)) {
-            tile_score = equity_to_int(ld_get_score(ld, run_letter));
+            tile_score = pat_letter_points(ld, run_letter);
           }
           features[float_score_base + distance_bin - 1] += tile_score;
           // What a word through this floater would actually lay down on
@@ -745,7 +766,7 @@ void pat_scan_unit(const Square *lanes, const LetterDistribution *ld,
       }
       const PATCrossInfo info = pat_effective_cross_info(
           lane, idx, dir, overlay, square_row, square_col, unseen_counts,
-          hook_score_ld, premium_word_multiplier);
+          hook_score_ld, want_score_exposure, premium_word_multiplier);
       if (info.dead) {
         break;
       }
@@ -828,11 +849,11 @@ void pat_scan_dd_unit(const Square *lanes, const uint8_t *unseen_counts,
       has_floater = true;
       continue;
     }
-    // Never reads score_exposure, so ld and the premium multiplier are
-    // don't-cares here.
+    // Never reads score_exposure, so the premium multiplier is a
+    // don't-care here; a NULL ld keeps created hooks approximate.
     const PATCrossInfo info =
         pat_effective_cross_info(lane, idx, dir, overlay, square_row,
-                                 square_col, unseen_counts, NULL, 2);
+                                 square_col, unseen_counts, NULL, false, 2);
     if (info.dead) {
       return;
     }
