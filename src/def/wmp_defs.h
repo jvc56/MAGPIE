@@ -1,17 +1,33 @@
 #ifndef WMP_DEFS_H
 #define WMP_DEFS_H
 
+#include "board_defs.h"
 #include <stdint.h>
 
 enum {
   WMP_INLINE_VALUE_BYTES = 16,
   WMP_NONINLINE_PADDING_BYTES =
       WMP_INLINE_VALUE_BYTES - 2 * sizeof(uint32_t) - 1,
+  // The inline slot table covers every word length an entry can be read at
+  // and every length a word slot can have.
+  WMP_INLINE_SLOT_TABLE_SIZE =
+      (BOARD_DIM > WMP_INLINE_VALUE_BYTES ? BOARD_DIM
+                                          : WMP_INLINE_VALUE_BYTES) +
+      1,
+  // An inlined byte count times the table's inverse length, shifted right by
+  // this, is the word count.
+  WMP_INLINE_INVERSE_LENGTH_SHIFT = 8,
   WMP_BITRACK_BYTES = 16,
   WMP_BUCKET_ITEMS_CAPACITY = 1,
   WMP_EARLIEST_SUPPORTED_VERSION = 3,
   WMP_VERSION = 3,
   WMP_RESULT_BUFFER_SIZE = 7000,
+  // A blank expansion copies each inlined word list with one
+  // WMP_INLINE_VALUE_BYTES move, so the word writers can store fewer than
+  // this many bytes past the end of the words they return. Every buffer
+  // passed to them needs this much room beyond the longest result
+  // (max_word_lookup_bytes, expected to be at most WMP_RESULT_BUFFER_SIZE).
+  WMP_WORD_BUFFER_SLACK_BYTES = WMP_INLINE_VALUE_BYTES,
   WMP_INDEX_MIN_BUCKETS = 16,
   // At most this percent of the index's slots hold entries.
   WMP_INDEX_MAX_FILL_PERCENT = 75,

@@ -67,7 +67,8 @@ typedef struct WMPMoveGen {
   int playthrough_blocks;
   int playthrough_blocks_copy;
 
-  MachineLetter buffer[WMP_RESULT_BUFFER_SIZE];
+  // Room for the longest result and the writers' slack.
+  MachineLetter buffer[WMP_RESULT_BUFFER_SIZE + WMP_WORD_BUFFER_SLACK_BYTES];
   // Points at the current subrack's contiguous word list: directly into the
   // WMP's storage for blankless subracks (zero copy), or at `buffer` when
   // blank designation required assembling the words.
