@@ -37,8 +37,15 @@ typedef struct RandomVariablesArgs {
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args);
 void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args);
 void rvs_destroy(RandomVariables *rvs);
+// Sentinel meaning "no seed was reserved for this sample; draw one".
+#define RVS_SEED_UNRESERVED UINT64_MAX
+
 double rvs_sample(RandomVariables *rvs, uint64_t k, int thread_index,
                   BAILogger *bai_logger);
+double rvs_sample_with_seed(RandomVariables *rvs, uint64_t k,
+                            uint64_t reserved_seed, int thread_index,
+                            BAILogger *bai_logger);
+uint64_t rvs_next_seed(RandomVariables *rvs, uint64_t k);
 bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);

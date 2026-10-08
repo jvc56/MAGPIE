@@ -31,10 +31,15 @@
 #define SIMILARITY_EPSILON 1e-6
 
 typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
-                                    const int, const uint64_t, BAILogger *);
+                                    const uint64_t, const int, const uint64_t,
+                                    BAILogger *);
 typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 typedef int (*rvs_get_best_arm_index_func_t)(const RandomVariables *);
+// Reserves the next seed for arm k, advancing that arm's seed stream. Lets a
+// caller that schedules samples ahead of time bind each scheduled sample to a
+// seed, instead of letting whichever thread runs first take the next one.
+typedef uint64_t (*rvs_next_seed_func_t)(RandomVariables *, const uint64_t);
 
 struct RandomVariables {
   uint64_t num_rvs;
@@ -43,6 +48,7 @@ struct RandomVariables {
   rvs_similar_func_t similar_func;
   rvs_destroy_data_func_t destroy_data_func;
   rvs_get_best_arm_index_func_t get_best_arm_index_func;
+  rvs_next_seed_func_t next_seed_func;
   void *data;
 };
 
@@ -66,6 +72,7 @@ typedef struct RVUniform {
 
 double rv_uniform_sample(RandomVariables *rvs,
                          const uint64_t __attribute__((unused)) k,
+                         const uint64_t __attribute__((unused)) reserved_seed,
                          const int __attribute__((unused)) thread_index,
                          const uint64_t __attribute__((unused)) sample_count,
                          BAILogger __attribute__((unused)) * bai_logger) {
@@ -201,6 +208,7 @@ static void rv_normal_seed_arm_prngs(RVNormal *rv_normal, const uint64_t seed) {
 }
 
 double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
+                        const uint64_t __attribute__((unused)) reserved_seed,
                         const int __attribute__((unused)) thread_index,
                         const uint64_t __attribute__((unused)) sample_count,
                         BAILogger __attribute__((unused)) * bai_logger) {
@@ -291,6 +299,8 @@ typedef struct RVNormalPredetermined {
 } RVNormalPredetermined;
 
 double rv_normal_predetermined_sample(RandomVariables *rvs, const uint64_t k,
+                                      const uint64_t
+                                      __attribute__((unused)) reserved_seed,
                                       const int
                                       __attribute__((unused)) thread_index,
                                       const uint64_t
@@ -432,7 +442,8 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
-                     const int thread_index, const uint64_t sample_count,
+                     const uint64_t reserved_seed, const int thread_index,
+                     const uint64_t sample_count,
                      BAILogger __attribute__((unused)) * bai_logger) {
   Simmer *simmer = (Simmer *)rvs->data;
   SimResults *sim_results = simmer->sim_results;
@@ -471,8 +482,11 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   return_rack_to_bag(game, player_off_turn_index);
 
   // This will shuffle the bag, so there is no need
-  // to call bag_shuffle explicitly.
-  const uint64_t seed = simmed_play_get_seed(simmed_play);
+  // to call bag_shuffle explicitly. A caller that scheduled this sample ahead
+  // of time already reserved its seed; only draw one here when it did not.
+  const uint64_t seed = (reserved_seed != RVS_SEED_UNRESERVED)
+                            ? reserved_seed
+                            : simmed_play_get_seed(simmed_play);
   prng_seed(simmer_worker->prng, seed);
   game_seed(game, seed);
 
@@ -603,6 +617,15 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   return utility;
 }
 
+// Reserves arm k's next rollout seed. All plays' PRNGs are seeded from the
+// same sim seed, so arm k's n-th reserved seed is the same value for every
+// arm: common random numbers across arms, for free.
+static uint64_t rv_sim_next_seed(RandomVariables *rvs, const uint64_t k) {
+  const Simmer *simmer = (const Simmer *)rvs->data;
+  return simmed_play_get_seed(
+      sim_results_get_simmed_play(simmer->sim_results, (int)k));
+}
+
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
   const Simmer *simmer = (const Simmer *)rvs->data;
   return sim_results_get_best_move_index(simmer->sim_results);
@@ -643,6 +666,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   rvs->similar_func = rv_sim_are_similar;
   rvs->destroy_data_func = rv_sim_destroy;
   rvs->get_best_arm_index_func = rv_sim_get_best_arm_index;
+  rvs->next_seed_func = rv_sim_next_seed;
 
   rvs->num_rvs = move_list_get_count(sim_args->move_list);
 
@@ -758,6 +782,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   RandomVariables *rvs = malloc_or_die(sizeof(RandomVariables));
+  rvs->next_seed_func = NULL;
   // The num_rvs field will be overwritten in the rv_sim_create function
   // since it is cumbersome and unnecessary for the caller to set
   // rvs_args->num_rvs for simmed plays.
@@ -821,9 +846,25 @@ void rvs_destroy(RandomVariables *rvs) {
 
 double rvs_sample(RandomVariables *rvs, const uint64_t k,
                   const int thread_index, BAILogger *bai_logger) {
-  uint64_t prev_total_samples = atomic_fetch_add(&rvs->total_samples, 1);
-  return rvs->sample_func(rvs, k, thread_index, prev_total_samples + 1,
-                          bai_logger);
+  return rvs_sample_with_seed(rvs, k, RVS_SEED_UNRESERVED, thread_index,
+                              bai_logger);
+}
+
+// Samples arm k using a seed reserved earlier by rvs_next_seed. Random
+// variables that do not draw from a seed ignore it.
+double rvs_sample_with_seed(RandomVariables *rvs, const uint64_t k,
+                            const uint64_t reserved_seed,
+                            const int thread_index, BAILogger *bai_logger) {
+  const uint64_t prev_total_samples = atomic_fetch_add(&rvs->total_samples, 1);
+  return rvs->sample_func(rvs, k, reserved_seed, thread_index,
+                          prev_total_samples + 1, bai_logger);
+}
+
+uint64_t rvs_next_seed(RandomVariables *rvs, const uint64_t k) {
+  if (rvs->next_seed_func == NULL) {
+    return RVS_SEED_UNRESERVED;
+  }
+  return rvs->next_seed_func(rvs, k);
 }
 
 bool rvs_are_similar(RandomVariables *rvs, const int i, const int j) {
