@@ -688,11 +688,23 @@ void test_autoplay(void) {
 // Requires -tlim 0. A clocked sim is nondeterministic by construction and can
 // never be made pair-exact, so this test must not be run with a time limit or
 // with the -pc1/-pc2 play choosers, whose budgets are clocks.
+//
+// SIMDETIGP_PAIRS and SIMDETIGP_ITERS (defaults 2 and 40) scale the check up.
+// A budget well past the BAI schedule depth exercises top-two rounds; at the
+// default every sample is round-robin.
 void test_autoplay_sim_determinism_igp(void) {
-  const int num_pairs = 2;
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -pl1 1 -pl2 1 -np1 4 -np2 4 -iterations 40 "
-      "-minplayiterations 5 -tlim 0 -threads 6 -mtmode igp");
+  const char *pairs_env = getenv("SIMDETIGP_PAIRS");
+  const int num_pairs =
+      pairs_env != NULL ? (int)strtol(pairs_env, NULL, 10) : 2;
+  const char *iters_env = getenv("SIMDETIGP_ITERS");
+  const int num_iters =
+      iters_env != NULL ? (int)strtol(iters_env, NULL, 10) : 40;
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -pl1 1 -pl2 1 -np1 4 -np2 4 -iterations %d "
+      "-minplayiterations 5 -tlim 0 -threads 6 -mtmode igp",
+      num_iters);
+  Config *config = config_create_or_die(settings);
+  free(settings);
   char *autoplay_cmd =
       get_formatted_string("autoplay games %d -gp true -seed 7", num_pairs);
   load_and_exec_config_or_die(config, autoplay_cmd);
