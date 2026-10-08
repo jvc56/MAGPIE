@@ -1,9 +1,14 @@
 #include "pat_test_util.h"
 
+#include "../src/def/equity_defs.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/move.h"
 #include "../src/ent/pat.h"
+#include "../src/ent/pat_eval.h"
 #include "../src/ent/pat_lexicon.h"
 #include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include <assert.h>
@@ -36,4 +41,24 @@ PATWeights *pat_test_create_prepared(const char *name, const Game *game) {
   pat_prepare_hook_flex(pat, player_get_kwg(game_get_player(game, 0)),
                         game_get_ld(game));
   return pat;
+}
+
+void pat_test_assert_capped_penalty(const PATEvalContext *pat_eval_ctx,
+                                    const Move *move, const Rack *leave,
+                                    Equity exact) {
+  const Equity floors[] = {EQUITY_MIN_VALUE, exact - 1000, exact - 1, exact,
+                           exact + 1,        exact + 1000, 0,         1,
+                           EQUITY_MAX_VALUE};
+  const int num_floors = (int)(sizeof(floors) / sizeof(floors[0]));
+  for (int floor_idx = 0; floor_idx < num_floors; floor_idx++) {
+    const Equity floor = floors[floor_idx];
+    const Equity capped =
+        pat_eval_move_penalty_capped(pat_eval_ctx, move, leave, floor);
+    if (exact >= floor) {
+      assert(capped == exact);
+    } else {
+      assert(capped >= exact);
+      assert(capped < floor);
+    }
+  }
 }

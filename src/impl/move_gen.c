@@ -215,11 +215,11 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
 }
 
 // Best-move recording computes the PAT term lazily: a candidate whose
-// equity without it, plus pat_eval_move_penalty_bound, is already strictly
+// equity without it, plus an upper bound on the term, is already strictly
 // below the best move's full equity cannot become the best move, so the
-// per-move lane rescans run only for genuine contenders. The stored equity
-// of a skipped candidate is an overestimate used only in a comparison it
-// strictly loses.
+// per-move lane rescans run only while the candidate can still contend
+// (see gen_pat_contender_equity). The stored equity of a skipped candidate
+// is an overestimate used only in a comparison it strictly loses.
 static inline bool gen_pat_is_active(const MoveGen *gen) {
   return gen->pat_eval_ctx.weights != NULL;
 }
@@ -238,6 +238,30 @@ static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
 
 static inline const Move *gen_get_readonly_best_move(const MoveGen *gen) {
   return &gen->best_move_and_current_move[gen->best_move_index];
+}
+
+// The equity a best-move candidate is recorded with when PAT is active: its
+// equity without the term plus the term, which is exact unless the
+// candidate cannot reach the best move's equity. Then it is an overestimate
+// that still strictly loses the compare (see pat_eval_move_penalty_capped).
+static inline Equity gen_pat_contender_equity(const MoveGen *gen,
+                                              const Move *move,
+                                              const Rack *leave,
+                                              Equity equity_without_pat) {
+  const Equity best_equity = move_get_equity(gen_get_readonly_best_move(gen));
+  Equity floor = EQUITY_MIN_VALUE;
+  if (best_equity != EQUITY_INITIAL_VALUE) {
+    // The smallest term with which the candidate still reaches the best.
+    int64_t needed = (int64_t)best_equity - equity_without_pat;
+    if (needed < EQUITY_MIN_VALUE) {
+      needed = EQUITY_MIN_VALUE;
+    } else if (needed > EQUITY_MAX_VALUE) {
+      needed = EQUITY_MAX_VALUE;
+    }
+    floor = (Equity)needed;
+  }
+  return equity_without_pat +
+         pat_eval_move_penalty_capped(&gen->pat_eval_ctx, move, leave, floor);
 }
 
 static inline Move *gen_get_best_move(MoveGen *gen) {
@@ -397,21 +421,8 @@ static inline void update_best_move_or_insert_into_movelist(
         !gen->stop_on_threshold) {
       const Equity equity_without_pat =
           gen_get_static_equity_without_pat(gen, current_move);
-      const Equity best_equity =
-          move_get_equity(gen_get_readonly_best_move(gen));
-      const Equity penalty_bound = pat_eval_move_penalty_bound(
-          &gen->pat_eval_ctx, current_move, &gen->player_rack);
-      if (best_equity != EQUITY_INITIAL_VALUE &&
-          equity_without_pat + penalty_bound < best_equity) {
-        // Cannot become the best move even with its best possible defense
-        // term; the stored overestimate still strictly loses the compare.
-        move_equity_or_score = equity_without_pat + penalty_bound;
-      } else {
-        move_equity_or_score =
-            equity_without_pat + pat_eval_move_penalty(&gen->pat_eval_ctx,
-                                                       current_move,
-                                                       &gen->player_rack);
-      }
+      move_equity_or_score = gen_pat_contender_equity(
+          gen, current_move, &gen->player_rack, equity_without_pat);
     } else {
       move_equity_or_score =
           get_move_equity_for_sort_type(gen, current_move, score);
@@ -864,18 +875,8 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                     pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
                     NULL, gen->board_number_of_tiles_played,
                     gen->number_of_tiles_in_bag, leave_value);
-      const Equity best_equity =
-          move_get_equity(gen_get_readonly_best_move(gen));
-      const Equity penalty_bound = pat_eval_move_penalty_bound(
-          &gen->pat_eval_ctx, current_move, &gen->leave);
-      if (best_equity != EQUITY_INITIAL_VALUE &&
-          equity_without_pat + penalty_bound < best_equity) {
-        move_equity_or_score = equity_without_pat + penalty_bound;
-      } else {
-        move_equity_or_score = equity_without_pat +
-                               pat_eval_move_penalty(&gen->pat_eval_ctx,
-                                                     current_move, &gen->leave);
-      }
+      move_equity_or_score = gen_pat_contender_equity(
+          gen, current_move, &gen->leave, equity_without_pat);
     } else {
       move_equity_or_score = has_precomputed_equity
                                  ? precomputed_equity

@@ -1696,6 +1696,7 @@ static void pat_path_parity_run(double utility_adjust) {
             pat_eval_move_penalty(parity_ctx, move, &leave);
         assert(with_utility <=
                pat_eval_move_penalty_bound(parity_ctx, move, &leave));
+        pat_test_assert_capped_penalty(parity_ctx, move, &leave, with_utility);
         assert(with_utility - without_utility[i] <= utility_bound);
         if (with_utility != without_utility[i]) {
           utility_nonzero++;

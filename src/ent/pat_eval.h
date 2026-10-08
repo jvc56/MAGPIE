@@ -184,6 +184,15 @@ void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
 // PATWeights.own_asset_discount); NULL forgoes the credit.
 Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
                              const Move *move, const Rack *leave);
+// pat_eval_move_penalty(move, leave) when that is at least floor. Otherwise
+// a value below floor that is still no less than the exact term: the lane
+// rescans stop once an upper bound on the term falls below floor, and that
+// bound is returned. So in a comparison against floor the result decides
+// exactly as the exact term would; nothing else about it is exact.
+// EQUITY_MIN_VALUE always returns the exact term.
+Equity pat_eval_move_penalty_capped(const PATEvalContext *pat_eval_ctx,
+                                    const Move *move, const Rack *leave,
+                                    Equity floor);
 // Returns an upper bound on pat_eval_move_penalty for the move without any
 // lane rescans: the baseline penalty minus the baseline contributions of
 // the units the move can affect or its leave could exploit (each of which
