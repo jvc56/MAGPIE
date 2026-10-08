@@ -1,6 +1,7 @@
 #include "sim_results.h"
 
 #include "../compat/cpthread.h"
+#include "../def/bai_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
@@ -29,16 +30,6 @@ typedef struct PlyInfo {
   uint64_t ply_info_counts[NUM_PLY_INFO_COUNT_TYPES];
 } PlyInfo;
 
-enum {
-  // win% and blended utility are both in [0, 1] and are accumulated as
-  // integers scaled by this shift. 10^9 samples * 2^30 is about 1.07e18,
-  // well inside int64.
-  SIMMED_PLAY_FIXED_POINT_SHIFT = 30,
-};
-
-#define SIMMED_PLAY_FIXED_POINT_SCALE                                          \
-  ((int64_t)1 << SIMMED_PLAY_FIXED_POINT_SHIFT)
-
 // An exactly order-independent mean. compare_simmed_plays ranks plays by mean
 // win%, mean equity and mean blended utility, and those rankings decide which
 // move the sim returns. Reading them from the Stat objects below made the
@@ -52,6 +43,11 @@ enum {
 // Integer addition is exactly commutative and associative, so these sums are
 // a pure function of the sample multiset. The Stat objects are still
 // maintained for display (variance, standard error, and the printed mean).
+//
+// win% and blended utility are both in [0, 1] and are scaled by
+// BAI_FIXED_POINT_SCALE, the same scale BAI uses, so the means move selection
+// ranks by are bit-identical to BAI's arm means. 10^9 samples * 2^30 is about
+// 1.07e18, well inside int64.
 typedef struct ExactMean {
   int64_t scaled_sum;
   uint64_t num_samples;
@@ -70,7 +66,7 @@ static inline void exact_mean_push_scaled(ExactMean *exact_mean,
 
 // Scales a value in [0, 1] into the fixed-point domain.
 static inline int64_t exact_mean_scale_unit_value(const double value) {
-  return llround(value * (double)SIMMED_PLAY_FIXED_POINT_SCALE);
+  return llround(value * (double)BAI_FIXED_POINT_SCALE);
 }
 
 // The division runs on an exact integer numerator in a fixed operation order,
@@ -85,8 +81,7 @@ static inline double exact_mean_get(const ExactMean *exact_mean,
 }
 
 static inline double exact_mean_get_unit(const ExactMean *exact_mean) {
-  return exact_mean_get(exact_mean,
-                        1.0 / (double)SIMMED_PLAY_FIXED_POINT_SCALE);
+  return exact_mean_get(exact_mean, 1.0 / (double)BAI_FIXED_POINT_SCALE);
 }
 
 // Equity is accumulated as raw millipoints; the mean is reported in points.

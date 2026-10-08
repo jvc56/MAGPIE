@@ -37,22 +37,15 @@
 #define MINIMUM_VARIANCE 1e-10
 
 enum {
-  // Sample values are accumulated as integers scaled by
-  // 2^BAI_SAMPLE_FIXED_POINT_SHIFT so that the sums do not depend on the order
-  // samples complete in, which is what lets a multithreaded sim reproduce a
-  // single-threaded one exactly. Integer addition is exactly commutative and
-  // associative; double addition is not, so an identical multiset of samples
-  // summed in a different order gives last-bit-different means, which can tip
-  // the comparison between two near-tied arms.
-  BAI_SAMPLE_FIXED_POINT_SHIFT = 30,
+  // Sample values are accumulated in the fixed-point domain described with
+  // BAI_FIXED_POINT_SHIFT (bai_defs.h), which is what lets a multithreaded sim
+  // reproduce a single-threaded one exactly.
+  //
   // A single sample is rejected beyond this magnitude, well outside the range
   // of any random variable this is used with, so that the llround below cannot
   // be handed a value outside the range of int64_t.
   BAI_SAMPLE_MAX_MAGNITUDE = 1 << 20,
 };
-
-#define BAI_SAMPLE_FIXED_POINT_SCALE                                           \
-  ((int64_t)1 << BAI_SAMPLE_FIXED_POINT_SHIFT)
 
 // samples_squared_sum accumulates the quantized value of (value * value), NOT
 // the square of the quantized value. Squaring after quantizing would
@@ -67,7 +60,7 @@ enum {
 // with are unbounded, so nothing here can bound an arbitrary RV's range in
 // advance. bai_accumulate_checked therefore fails loudly rather than silently
 // wrapping.
-static_assert(BAI_SAMPLE_FIXED_POINT_SHIFT < 62,
+static_assert(BAI_FIXED_POINT_SHIFT < 62,
               "BAI fixed-point scale must leave headroom in int64");
 
 enum {
@@ -380,12 +373,12 @@ static inline int64_t bai_quantize_sample(const double value) {
         value <= (double)BAI_SAMPLE_MAX_MAGNITUDE)) {
     log_fatal("BAI sample value out of range: %f", value);
   }
-  return llround(value * (double)BAI_SAMPLE_FIXED_POINT_SCALE);
+  return llround(value * (double)BAI_FIXED_POINT_SCALE);
 }
 
 // Adds to a fixed-point accumulator, failing loudly rather than silently
 // wrapping. See the overflow bound documented with
-// BAI_SAMPLE_FIXED_POINT_SHIFT.
+// BAI_FIXED_POINT_SHIFT.
 static inline void bai_accumulate_checked(int64_t *accumulator,
                                           const int64_t addend) {
   if ((addend > 0 && *accumulator > INT64_MAX - addend) ||
@@ -401,7 +394,7 @@ static inline void bai_accumulate_checked(int64_t *accumulator,
 // the order they were added in.
 static inline void
 bai_arm_datum_recompute_mean_and_var(BAIArmDatum *arm_datum) {
-  const double inverse_scale = 1.0 / (double)BAI_SAMPLE_FIXED_POINT_SCALE;
+  const double inverse_scale = 1.0 / (double)BAI_FIXED_POINT_SCALE;
   const double num_samples = (double)arm_datum->num_samples;
   arm_datum->mean =
       (double)arm_datum->samples_sum * inverse_scale / num_samples;
