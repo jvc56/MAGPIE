@@ -1008,7 +1008,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
 // which the anchor-level check already bounded; adding a leave there would
 // skip subracks that still hold plays above the cutoff.
 static inline __attribute__((always_inline)) bool
-wordmap_gen_leave_prunes_subrack(MoveGen *gen, const Anchor *anchor,
+wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
                                  int subrack_idx) {
   if (!gen->wmp_prune_subracks_by_leave) {
     return false;
@@ -1032,6 +1032,13 @@ static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
                            bool lazy) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
+  // record_wmp_play prices every play below with wgen->leave_value. Only
+  // equity sort with tiles in the bag reads the subrack's leave, and that is
+  // when the leave prune is on; an empty bag sets it to 0 below, and score
+  // sort ignores it.
+  if (gen->wmp_prune_subracks_by_leave) {
+    wgen->leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
+  }
   if (wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx)) {
     return false;
   }
