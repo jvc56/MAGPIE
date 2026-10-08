@@ -71,6 +71,41 @@ void test_alias_method_dist(const Config *config, AliasMethod *am,
   prng_destroy(prng);
 }
 
+// The same items added in opposite orders draw the same racks from
+// identically seeded PRNGs.
+static void test_alias_method_order_independent(const Config *config) {
+  const LetterDistribution *ld = config_get_ld(config);
+  const char *rack_strs[] = {"AE", "S", "?Q", "ER", "S", "DEIR", "Z"};
+  const int counts[] = {3, 5, 1, 2, 4, 7, 2};
+  const int num_items = (int)(sizeof(counts) / sizeof(counts[0]));
+  AliasMethod *forward = alias_method_create();
+  AliasMethod *backward = alias_method_create();
+  Rack rack;
+  Rack backward_rack;
+  rack_set_dist_size_and_reset(&rack, ld_get_size(ld));
+  rack_set_dist_size_and_reset(&backward_rack, ld_get_size(ld));
+  for (int item_idx = 0; item_idx < num_items; item_idx++) {
+    rack_set_to_string(ld, &rack, rack_strs[item_idx]);
+    alias_method_add_rack(forward, &rack, counts[item_idx]);
+    const int reverse_idx = num_items - 1 - item_idx;
+    rack_set_to_string(ld, &rack, rack_strs[reverse_idx]);
+    alias_method_add_rack(backward, &rack, counts[reverse_idx]);
+  }
+  assert(alias_method_generate_tables(forward));
+  assert(alias_method_generate_tables(backward));
+  XoshiroPRNG *forward_prng = prng_create(7);
+  XoshiroPRNG *backward_prng = prng_create(7);
+  for (int sample_idx = 0; sample_idx < 1000; sample_idx++) {
+    assert(alias_method_sample(forward, forward_prng, &rack));
+    assert(alias_method_sample(backward, backward_prng, &backward_rack));
+    assert(racks_are_equal(&rack, &backward_rack));
+  }
+  prng_destroy(forward_prng);
+  prng_destroy(backward_prng);
+  alias_method_destroy(forward);
+  alias_method_destroy(backward);
+}
+
 void test_alias_method(void) {
   Config *config =
       config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
@@ -144,5 +179,6 @@ void test_alias_method(void) {
                          });
   alias_method_destroy(am);
   prng_destroy(prng);
+  test_alias_method_order_independent(config);
   config_destroy(config);
 }

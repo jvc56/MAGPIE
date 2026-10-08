@@ -9,6 +9,7 @@
 #include "xoshiro.h"
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define INITIAL_AM_ENTRIES_SIZE 1024
 
@@ -71,12 +72,29 @@ static inline void alias_method_add_rack(AliasMethod *am, const Rack *rack,
   cpthread_mutex_unlock(&am->mutex);
 }
 
+static inline int alias_method_compare_items(const void *a, const void *b) {
+  const AliasMethodItem *item_a = (const AliasMethodItem *)a;
+  const AliasMethodItem *item_b = (const AliasMethodItem *)b;
+  const int rack_order =
+      memcmp(&item_a->rack, &item_b->rack, sizeof(item_a->rack));
+  if (rack_order != 0) {
+    return rack_order;
+  }
+  return (item_a->count > item_b->count) - (item_a->count < item_b->count);
+}
+
 // Returns true if there are a nonzero number of items and counts to generate
 // tables for and returns false otherwise.
 static inline bool alias_method_generate_tables(AliasMethod *am) {
   if (am->num_items == 0 || am->total_item_count == 0) {
     return false;
   }
+
+  // Sort the items (by rack, then count) so the tables, and the racks a
+  // seeded sample draws, do not depend on the order the items were added in:
+  // inference threads add them in whatever order they finish.
+  qsort(am->items, am->num_items, sizeof(AliasMethodItem),
+        alias_method_compare_items);
 
   uint32_t num_overfull_items = 0;
   uint32_t num_underfull_items = 0;
