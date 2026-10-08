@@ -753,6 +753,13 @@ static inline int bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
       const int arm_index = round->arm_indices[round->num_claimed];
       *seed = round->seeds[round->num_claimed];
       round->num_claimed++;
+      // Move past a fully claimed round now rather than on the next claim.
+      // Once its samples complete it folds and its ring slot takes a new
+      // round; a cursor still pointing at it would hand out the new round's
+      // slots under the old round's number, ahead of the rounds before it.
+      if (round->num_claimed == round->num_samples) {
+        bai_sync_data->next_round_to_claim++;
+      }
 #ifdef BAI_SCHED_STATS
       const uint64_t completed = bai_sync_data->sched_stats.initial_samples +
                                  bai_sync_data->sched_bai_completions;
