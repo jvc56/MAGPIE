@@ -24,6 +24,9 @@ typedef struct BAISchedSimStats {
   uint64_t folded_samples;
   uint64_t abandoned_samples;
   uint64_t num_rounds_folded;
+  // Speculative samples started, and those a round went on to use.
+  uint64_t speculations;
+  uint64_t speculation_hits;
   // Samples completed after the fold that set a stop status.
   uint64_t overshoot_samples;
   // For each BAI-phase claim: samples completed so far minus samples

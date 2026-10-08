@@ -65,6 +65,9 @@ double simmed_play_get_exact_utility_mean(const SimmedPlay *simmed_play);
 bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play);
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
+// The seed simmed_play_get_seed would return after `ahead` more calls,
+// without advancing the stream.
+uint64_t simmed_play_peek_seed(SimmedPlay *simmed_play, uint64_t ahead);
 // Each simmed_play_add_* function applies its contribution to simmed_play,
 // or, when record is non-NULL, writes it to record instead, to be applied by
 // simmed_play_apply_sample_record. A record must be cleared with

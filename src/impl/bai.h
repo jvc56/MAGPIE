@@ -85,31 +85,47 @@ enum {
   // BAI_SCHEDULE_ROUND_SIZE is the fold granularity. A fold and a schedule
   // each cost O(num_arms + round size) under the mutex.
   BAI_SCHEDULE_ROUND_SIZE = 32,
-  // BAI_SCHEDULE_DEPTH_SAMPLES is how many samples stay scheduled ahead of
-  // the round being folded, so that a slow sample holding up the oldest round
-  // cannot starve the other threads: they keep claiming from the rounds
-  // behind it. It must cover (threads - 1) times the ratio of a straggler's
-  // cost to the mean sample cost. The cost is staleness: a round is scheduled
-  // from statistics up to this many samples old. Scheduling counts the
-  // samples already handed out to each arm, so stale rounds still rotate
-  // between arms rather than piling onto one pair.
-  BAI_SCHEDULE_DEPTH_SAMPLES = 1024,
-  BAI_SCHEDULE_LAG = BAI_SCHEDULE_DEPTH_SAMPLES / BAI_SCHEDULE_ROUND_SIZE,
-  // The ring needs one more round than the lag: the slot freed by the round
-  // that just folded is the one the newly scheduled round takes.
-  BAI_SCHEDULE_ROUNDS = BAI_SCHEDULE_LAG + 1,
+  // Round j is scheduled when round j - lag - 1 folds, from the statistics
+  // committed by then. Initial-phase rounds need no statistics, so they run
+  // far ahead: a slow sample holding up the oldest round cannot starve the
+  // other threads, which keep claiming from the rounds behind it.
+  BAI_SCHEDULE_ROUND_ROBIN_LAG = 32,
+  // Adaptive rounds read statistics, and every round of lag makes them
+  // staler. Measured as move-choice regret against a high-budget reference,
+  // two rounds (64 samples) choose as well as scheduling every sample from
+  // fully current statistics, while 128 samples of lag already choose
+  // measurably worse and 1024 much worse at 500-1000 sample budgets. When
+  // this little lag leaves a worker nothing to claim, it speculates instead
+  // of waiting (see BAISpeculation).
+  BAI_SCHEDULE_ADAPTIVE_LAG = 2,
+  // The ring needs one more round than the longest lag: the slot freed by
+  // the round that just folded is the one the newly scheduled round takes.
+  BAI_SCHEDULE_ROUNDS = BAI_SCHEDULE_ROUND_ROBIN_LAG + 1,
   // A worker claims up to this many consecutive slots of a round-robin round
   // at once. Every arm draws its seeds from an identically seeded stream, so
   // consecutive slots of one iteration replay the same opponent rack, and
   // running them on one thread keeps that thread's RIT cache hot. Adaptive
   // rounds are claimed one slot at a time.
   BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH = 8,
+  // Speculative samples held per worker thread, and how many rounds past the
+  // last one laid out speculation looks. A straggler under OS preemption can
+  // run 10x the mean sample, during which each other worker wants about that
+  // many samples of other work.
+  BAI_SPECULATIONS_PER_THREAD = 16,
+  BAI_SPECULATION_ROUNDS = 8,
+  BAI_SPECULATION_SLOTS = BAI_SPECULATION_ROUNDS * BAI_SCHEDULE_ROUND_SIZE,
 };
 
-static_assert(BAI_SCHEDULE_DEPTH_SAMPLES % BAI_SCHEDULE_ROUND_SIZE == 0,
-              "BAI schedule depth must be a whole number of rounds");
+static_assert(BAI_SCHEDULE_ADAPTIVE_LAG < BAI_SCHEDULE_ROUND_ROBIN_LAG,
+              "adaptive rounds never run further ahead than round-robin ones");
 static_assert(BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH <= BAI_SCHEDULE_ROUND_SIZE,
               "a claim never spans rounds");
+
+typedef enum {
+  BAI_SPECULATION_EMPTY,
+  BAI_SPECULATION_RUNNING,
+  BAI_SPECULATION_DONE,
+} bai_speculation_state_t;
 
 // Internal BAI structs
 
@@ -131,7 +147,12 @@ typedef struct BAIRound {
   // folded leaves no trace.
   double *values;
   unsigned char *records;
+  // Nonzero for a slot already handed out: claimed by a worker, or matched
+  // when the round was laid out to a speculative sample (see BAISpeculation).
+  // Claims skip such slots.
+  unsigned char *slot_taken;
   int num_samples;
+  // Claims scan forward from here; every slot before it is taken.
   int num_claimed;
   int num_completed;
   // The most slots one claim takes from this round.
@@ -154,6 +175,33 @@ typedef struct BAIArmDatum {
   double mean;
   double var;
 } BAIArmDatum;
+
+// A sample run ahead of the schedule by a worker that had nothing to claim.
+// A sample is a pure function of its arm and its seed, and an arm's seeds come
+// from its own stream in order, so the n-th sample of an arm (its ordinal) is
+// the same whenever and on whichever thread it runs. A worker that would
+// otherwise wait therefore samples the slots the next round will most likely
+// hold, at the seeds they will reserve, and keeps the results here. When a
+// round is laid out, a slot whose (arm, ordinal) is already done is filled in
+// from here and never claimed; one still running is adopted, and the
+// speculating worker completes it when it finishes. Results that no round
+// ever schedules are dropped. Which samples get speculated depends on thread
+// timing, but a slot's value never does, so the results do not either.
+typedef struct BAISpeculation {
+  bai_speculation_state_t state;
+  int arm_index;
+  uint64_t ordinal;
+  uint64_t seed;
+  double value;
+  unsigned char *record;
+  // Set when a round laid out the slot this sample turned out to be while it
+  // was still running.
+  bool adopted;
+  uint64_t round_number;
+  int slot;
+  // Whether it is one of the currently expected slots (see BAISyncData).
+  bool expected;
+} BAISpeculation;
 
 typedef struct BAISyncData {
   int num_arms;
@@ -195,6 +243,30 @@ typedef struct BAISyncData {
   // before the stop.
   bool stopped;
   size_t record_size;
+  // The round that holds the last initial-phase sample, once it has been
+  // laid out; UINT64_MAX before that.
+  uint64_t initial_last_round;
+  // The speculation cache, or NULL when the random variables cannot peek at
+  // future seeds (and so a sample is not a function of its slot).
+  BAISpeculation *speculations;
+  int num_speculations;
+  // The slots the next rounds are expected to hold, which only change when a
+  // round is laid out or folded: schedule_epoch counts those events, and the
+  // expectation is recomputed when it moves. covered marks the expected slots
+  // a speculation already holds; claims take uncovered ones in order from
+  // speculation_cursor.
+  uint64_t schedule_epoch;
+  uint64_t speculation_epoch;
+  bool speculation_valid;
+  int speculation_cursor;
+  int speculation_arms[BAI_SPECULATION_SLOTS];
+  uint64_t speculation_ordinals[BAI_SPECULATION_SLOTS];
+  bool speculation_covered[BAI_SPECULATION_SLOTS];
+  // Scratch for the refresh: per arm, the first expected slot of that arm
+  // and a running count; per slot, the next expected slot of the same arm.
+  int *speculation_first_slot;
+  uint64_t *speculation_arm_count;
+  int speculation_next_slot[BAI_SPECULATION_SLOTS];
   // Slots scheduled but not yet claimed, and the number of workers. Together
   // they size claims near the end of a sim (see
   // bai_schedule_claim_while_locked); neither affects what is sampled.
@@ -330,6 +402,7 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
     bai_sync_data->rounds[i].seeds = NULL;
     bai_sync_data->rounds[i].values = NULL;
     bai_sync_data->rounds[i].records = NULL;
+    bai_sync_data->rounds[i].slot_taken = NULL;
     bai_sync_data->rounds[i].num_samples = 0;
     bai_sync_data->rounds[i].num_claimed = 0;
     bai_sync_data->rounds[i].num_completed = 0;
@@ -343,6 +416,15 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->record_size = 0;
   bai_sync_data->num_unclaimed = 0;
   bai_sync_data->num_threads = 1;
+  bai_sync_data->initial_last_round = UINT64_MAX;
+  bai_sync_data->speculations = NULL;
+  bai_sync_data->num_speculations = 0;
+  bai_sync_data->schedule_epoch = 0;
+  bai_sync_data->speculation_epoch = UINT64_MAX;
+  bai_sync_data->speculation_valid = false;
+  bai_sync_data->speculation_cursor = 0;
+  bai_sync_data->speculation_first_slot = NULL;
+  bai_sync_data->speculation_arm_count = NULL;
 #ifdef BAI_SCHED_STATS
   memset(&bai_sync_data->sched_stats, 0, sizeof(bai_sync_data->sched_stats));
   bai_sched_histogram_reset(&bai_sync_data->sched_histogram);
@@ -361,7 +443,15 @@ static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
     free(bai_sync_data->rounds[i].seeds);
     free(bai_sync_data->rounds[i].values);
     free(bai_sync_data->rounds[i].records);
+    free(bai_sync_data->rounds[i].slot_taken);
   }
+  for (int spec_idx = 0; spec_idx < bai_sync_data->num_speculations;
+       spec_idx++) {
+    free(bai_sync_data->speculations[spec_idx].record);
+  }
+  free(bai_sync_data->speculations);
+  free(bai_sync_data->speculation_first_slot);
+  free(bai_sync_data->speculation_arm_count);
   free(bai_sync_data->arm_data);
   free(bai_sync_data);
 }
@@ -528,12 +618,13 @@ static inline int bai_schedule_challenger(const BAISyncData *bai_sync_data,
 }
 
 // Assumes the caller has locked the bai sync data mutex, or is the only
-// thread running. Lays out a top-two round: the samples are split between
-// astar and the challenger by rounding the top-two IDS proportion.
-static inline void bai_schedule_top_two_round(BAISampleArgs *args,
-                                              BAIRound *round) {
+// thread running. Lays out num_samples slots of a top-two round: the samples
+// are split between astar and the challenger by rounding the top-two IDS
+// proportion.
+static inline void bai_schedule_top_two_arms(const BAISampleArgs *args,
+                                             const int num_samples,
+                                             int *arm_indices) {
   const BAISyncData *bai_sync_data = args->bai_sync_data;
-  const int num_samples = round->num_samples;
   const int astar_arm_index = bai_sync_data->astar_index;
   const int challenger_arm_index =
       bai_schedule_challenger(bai_sync_data, args->rvs, astar_arm_index);
@@ -578,9 +669,73 @@ static inline void bai_schedule_top_two_round(BAISampleArgs *args,
     astar_count = num_samples;
   }
   for (int slot = 0; slot < num_samples; slot++) {
-    round->arm_indices[slot] =
+    arm_indices[slot] =
         (slot < astar_count) ? astar_arm_index : challenger_arm_index;
   }
+}
+
+// Assumes the caller has locked the bai sync data mutex. Whether the next
+// round to be laid out will be round-robin: every initial-phase round, every
+// round under the round-robin rule, and the adaptive-lag rounds laid out
+// before the initial phase has folded.
+static inline bool bai_next_round_is_round_robin(const BAISampleArgs *args) {
+  const BAISyncData *bai_sync_data = args->bai_sync_data;
+  if (args->sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN ||
+      bai_sync_data->num_total_samples_requested <
+          bai_sync_data->initial_limit) {
+    return true;
+  }
+  if (!bai_sync_data->initial_phase) {
+    return false;
+  }
+  // The next round will be laid out when the round BAI_SCHEDULE_ADAPTIVE_LAG
+  // + 1 before it folds; it is adaptive if the initial phase has folded by
+  // then.
+  const uint64_t round_number = bai_sync_data->next_round_to_schedule;
+  return round_number < BAI_SCHEDULE_ADAPTIVE_LAG + 1 ||
+         round_number - BAI_SCHEDULE_ADAPTIVE_LAG - 1 <
+             bai_sync_data->initial_last_round;
+}
+
+// Assumes the caller has locked the bai sync data mutex. Hands a speculative
+// sample matching (arm_index, ordinal), if there is one, to slot of the round
+// being laid out: a finished one fills the slot in, a running one adopts it.
+// Either way no worker will claim the slot. Returns true if one matched.
+static inline bool bai_speculation_match_while_locked(
+    BAISyncData *bai_sync_data, BAIRound *round, const uint64_t round_number,
+    const int slot, const int arm_index, const uint64_t ordinal) {
+  for (int spec_idx = 0; spec_idx < bai_sync_data->num_speculations;
+       spec_idx++) {
+    BAISpeculation *speculation = &bai_sync_data->speculations[spec_idx];
+    if (speculation->state == BAI_SPECULATION_EMPTY ||
+        speculation->arm_index != arm_index ||
+        speculation->ordinal != ordinal) {
+      continue;
+    }
+    if (speculation->seed != round->seeds[slot]) {
+      log_fatal("speculative sample of arm %d ordinal %llu has a stale seed",
+                arm_index, (unsigned long long)ordinal);
+    }
+    round->slot_taken[slot] = 1;
+    if (speculation->state == BAI_SPECULATION_DONE) {
+      round->values[slot] = speculation->value;
+      if (round->records != NULL) {
+        memcpy(round->records + (size_t)slot * bai_sync_data->record_size,
+               speculation->record, bai_sync_data->record_size);
+      }
+      round->num_completed++;
+      speculation->state = BAI_SPECULATION_EMPTY;
+#ifdef BAI_SCHED_STATS
+      bai_sync_data->sched_stats.speculation_hits++;
+#endif
+    } else {
+      speculation->adopted = true;
+      speculation->round_number = round_number;
+      speculation->slot = slot;
+    }
+    return true;
+  }
+  return false;
 }
 
 // Assumes the caller has locked the bai sync data mutex, or is the only
@@ -631,17 +786,32 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
     }
     round->claim_batch = BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH;
   } else {
-    bai_schedule_top_two_round(args, round);
+    bai_schedule_top_two_arms(args, num_samples, round->arm_indices);
     round->claim_batch = 1;
   }
+  const uint64_t round_number = bai_sync_data->next_round_to_schedule;
+  int num_matched = 0;
   for (int slot = 0; slot < num_samples; slot++) {
     const int arm_index = round->arm_indices[slot];
+    BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
     round->seeds[slot] = rvs_next_seed(args->rvs, (uint64_t)arm_index);
-    bai_sync_data->arm_data[arm_index].num_scheduled++;
+    round->slot_taken[slot] = 0;
+    if (bai_speculation_match_while_locked(bai_sync_data, round, round_number,
+                                           slot, arm_index,
+                                           arm_datum->num_scheduled)) {
+      num_matched++;
+    }
+    arm_datum->num_scheduled++;
   }
   bai_sync_data->num_total_samples_requested += (uint64_t)num_samples;
-  bai_sync_data->num_unclaimed += (uint64_t)num_samples;
+  bai_sync_data->num_unclaimed += (uint64_t)(num_samples - num_matched);
   bai_sync_data->next_round_to_schedule++;
+  bai_sync_data->schedule_epoch++;
+  if (requested < bai_sync_data->initial_limit &&
+      bai_sync_data->num_total_samples_requested >=
+          bai_sync_data->initial_limit) {
+    bai_sync_data->initial_last_round = round_number;
+  }
   if (bai_sync_data->num_total_samples_requested >= budget) {
     // This round spends the last of the budget. The sample-limit status is
     // recorded when it folds, but no worker needs to wait for that.
@@ -651,6 +821,26 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   round->committed_at_schedule = bai_sync_data->num_total_samples_completed;
   bai_sync_data->sched_stats.schedule_ns += bai_sched_now() - sched_start_ns;
 #endif
+}
+
+// Assumes the caller has locked the bai sync data mutex, or is the only
+// thread running. Lays out every round the folds so far allow: round j once
+// round j - lag - 1 has folded, with the round-robin lag for initial-phase
+// rounds and the adaptive lag for the rest. Since folds are in order, each
+// round is laid out from the statistics of one fixed fold.
+static inline void bai_schedule_rounds_while_locked(BAISampleArgs *args) {
+  const BAISyncData *bai_sync_data = args->bai_sync_data;
+  while (!bai_sync_data->scheduling_finished) {
+    const uint64_t lag = bai_sync_data->num_total_samples_requested <
+                                 bai_sync_data->initial_limit
+                             ? BAI_SCHEDULE_ROUND_ROBIN_LAG
+                             : BAI_SCHEDULE_ADAPTIVE_LAG;
+    if (bai_sync_data->next_round_to_schedule >
+        bai_sync_data->next_round_to_fold + lag) {
+      return;
+    }
+    bai_schedule_round_while_locked(args);
+  }
 }
 
 // A run of consecutive slots of one round, handed to one worker.
@@ -682,6 +872,10 @@ static inline bool bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
     BAIRound *round =
         &bai_sync_data
              ->rounds[bai_sync_data->next_round_to_claim % BAI_SCHEDULE_ROUNDS];
+    while (round->num_claimed < round->num_samples &&
+           round->slot_taken[round->num_claimed]) {
+      round->num_claimed++;
+    }
     if (round->num_claimed < round->num_samples) {
       int max_slots = round->claim_batch;
       if (bai_sync_data->scheduling_finished) {
@@ -691,15 +885,22 @@ static inline bool bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
           max_slots = share > 0 ? (int)share : 1;
         }
       }
-      int num_slots = round->num_samples - round->num_claimed;
-      if (num_slots > max_slots) {
-        num_slots = max_slots;
+      int num_slots = 0;
+      while (num_slots < max_slots &&
+             round->num_claimed + num_slots < round->num_samples &&
+             !round->slot_taken[round->num_claimed + num_slots]) {
+        round->slot_taken[round->num_claimed + num_slots] = 1;
+        num_slots++;
       }
       claim->round_number = bai_sync_data->next_round_to_claim;
       claim->first_slot = round->num_claimed;
       claim->num_slots = num_slots;
       round->num_claimed += num_slots;
       bai_sync_data->num_unclaimed -= (uint64_t)num_slots;
+      while (round->num_claimed < round->num_samples &&
+             round->slot_taken[round->num_claimed]) {
+        round->num_claimed++;
+      }
       // Move past a fully claimed round now rather than on the next claim.
       // Once its samples complete it folds and its ring slot takes a new
       // round; a cursor still pointing at it would hand out the new round's
@@ -752,6 +953,7 @@ static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
         &bai_sync_data->arm_data[round->arm_indices[slot]]);
   }
   bai_sync_data->num_total_samples_completed += (uint64_t)round->num_samples;
+  bai_sync_data->schedule_epoch++;
 
   bai_sync_data->astar_index = 0;
   double astar_mean = bai_sync_data->arm_data[0].mean;
@@ -853,7 +1055,7 @@ bai_schedule_complete_while_locked(BAISampleArgs *args,
       bai_sync_data->scheduling_finished = true;
       break;
     }
-    bai_schedule_round_while_locked(args);
+    bai_schedule_rounds_while_locked(args);
   }
   if (!bai_sync_data->stopped && bai_sync_data->scheduling_finished &&
       bai_sync_data->next_round_to_fold ==
@@ -886,14 +1088,232 @@ static inline void bai_sync_data_start_schedule(BAISampleArgs *args,
         malloc_or_die(sizeof(uint64_t) * round_size);
     bai_sync_data->rounds[i].values =
         malloc_or_die(sizeof(double) * round_size);
+    bai_sync_data->rounds[i].slot_taken = malloc_or_die(round_size);
     if (bai_sync_data->record_size > 0) {
       bai_sync_data->rounds[i].records =
           malloc_or_die(bai_sync_data->record_size * round_size);
     }
   }
-  for (int i = 0; i < BAI_SCHEDULE_ROUNDS; i++) {
-    bai_schedule_round_while_locked(args);
+  // Speculation needs a sample to be a function of its slot, which holds
+  // only for random variables that draw from seeds a slot can reserve.
+  if (bai_sync_data->num_arms > 0 &&
+      rvs_peek_seed(args->rvs, 0, 0) != RVS_SEED_UNRESERVED) {
+    bai_sync_data->num_speculations =
+        BAI_SPECULATIONS_PER_THREAD * bai_sync_data->num_threads;
+    bai_sync_data->speculations = malloc_or_die(
+        sizeof(BAISpeculation) * (size_t)bai_sync_data->num_speculations);
+    bai_sync_data->speculation_first_slot =
+        malloc_or_die(sizeof(int) * (size_t)bai_sync_data->num_arms);
+    bai_sync_data->speculation_arm_count =
+        malloc_or_die(sizeof(uint64_t) * (size_t)bai_sync_data->num_arms);
+    for (int spec_idx = 0; spec_idx < bai_sync_data->num_speculations;
+         spec_idx++) {
+      BAISpeculation *speculation = &bai_sync_data->speculations[spec_idx];
+      speculation->state = BAI_SPECULATION_EMPTY;
+      speculation->record = bai_sync_data->record_size > 0
+                                ? malloc_or_die(bai_sync_data->record_size)
+                                : NULL;
+    }
   }
+  bai_schedule_rounds_while_locked(args);
+}
+
+// Assumes the caller has locked the bai sync data mutex. Lays out the slots
+// the next BAI_SPECULATION_ROUNDS rounds are expected to hold: exactly, when
+// they will be round-robin, or as the top-two rule would lay them out from
+// the statistics committed so far, round after round. Returns false when
+// there is nothing sound to predict from yet.
+static inline bool bai_speculation_expected_arms(BAISampleArgs *args,
+                                                 int *arm_indices) {
+  BAISyncData *bai_sync_data = args->bai_sync_data;
+  if (bai_next_round_is_round_robin(args)) {
+    const uint64_t requested = bai_sync_data->num_total_samples_requested;
+    for (int slot = 0; slot < BAI_SPECULATION_SLOTS; slot++) {
+      arm_indices[slot] = (int)((requested + (uint64_t)slot) %
+                                (uint64_t)bai_sync_data->num_arms);
+    }
+    return true;
+  }
+  // The top-two rule reads every arm's mean, so every arm needs a committed
+  // sample. The initial phase is iteration-major, so once num_arms samples
+  // have folded each arm has one.
+  if (bai_sync_data->astar_index < 0 ||
+      bai_sync_data->num_total_samples_completed <
+          (uint64_t)bai_sync_data->num_arms) {
+    return false;
+  }
+  // Each predicted round counts the ones predicted before it, as scheduling
+  // will; the counts are put back afterwards.
+  for (int round_idx = 0; round_idx < BAI_SPECULATION_ROUNDS; round_idx++) {
+    int *round_arms = arm_indices + round_idx * BAI_SCHEDULE_ROUND_SIZE;
+    bai_schedule_top_two_arms(args, BAI_SCHEDULE_ROUND_SIZE, round_arms);
+    for (int slot = 0; slot < BAI_SCHEDULE_ROUND_SIZE; slot++) {
+      bai_sync_data->arm_data[round_arms[slot]].num_scheduled++;
+    }
+  }
+  for (int slot = 0; slot < BAI_SPECULATION_SLOTS; slot++) {
+    bai_sync_data->arm_data[arm_indices[slot]].num_scheduled--;
+  }
+  return true;
+}
+
+// Assumes the caller has locked the bai sync data mutex. Recomputes the
+// expected slots and which of them speculations already hold.
+static inline void bai_speculation_refresh_while_locked(BAISampleArgs *args) {
+  BAISyncData *bai_sync_data = args->bai_sync_data;
+  bai_sync_data->speculation_epoch = bai_sync_data->schedule_epoch;
+  bai_sync_data->speculation_cursor = 0;
+  bai_sync_data->speculation_valid =
+      bai_speculation_expected_arms(args, bai_sync_data->speculation_arms);
+  // Slots past the budget will never be laid out, so they count as covered
+  // and are never speculated on.
+  const uint64_t budget = args->sample_limit > bai_sync_data->initial_limit
+                              ? args->sample_limit
+                              : bai_sync_data->initial_limit;
+  const uint64_t remaining =
+      budget - bai_sync_data->num_total_samples_requested;
+  for (int slot = 0; slot < BAI_SPECULATION_SLOTS; slot++) {
+    bai_sync_data->speculation_covered[slot] = (uint64_t)slot >= remaining;
+  }
+  for (int spec_idx = 0; spec_idx < bai_sync_data->num_speculations;
+       spec_idx++) {
+    bai_sync_data->speculations[spec_idx].expected = false;
+  }
+  if (!bai_sync_data->speculation_valid) {
+    return;
+  }
+  int *first_slot = bai_sync_data->speculation_first_slot;
+  uint64_t *arm_count = bai_sync_data->speculation_arm_count;
+  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+    first_slot[arm_index] = -1;
+    arm_count[arm_index] = 0;
+  }
+  for (int slot = 0; slot < BAI_SPECULATION_SLOTS; slot++) {
+    const int arm_index = bai_sync_data->speculation_arms[slot];
+    bai_sync_data->speculation_ordinals[slot] =
+        bai_sync_data->arm_data[arm_index].num_scheduled +
+        arm_count[arm_index]++;
+  }
+  for (int slot = BAI_SPECULATION_SLOTS - 1; slot >= 0; slot--) {
+    const int arm_index = bai_sync_data->speculation_arms[slot];
+    bai_sync_data->speculation_next_slot[slot] = first_slot[arm_index];
+    first_slot[arm_index] = slot;
+  }
+  // An entry for arm a at ordinal num_scheduled + k is the expected slot
+  // holding a's k-th predicted sample, if there are that many.
+  for (int spec_idx = 0; spec_idx < bai_sync_data->num_speculations;
+       spec_idx++) {
+    BAISpeculation *speculation = &bai_sync_data->speculations[spec_idx];
+    if (speculation->state == BAI_SPECULATION_EMPTY) {
+      continue;
+    }
+    const uint64_t num_scheduled =
+        bai_sync_data->arm_data[speculation->arm_index].num_scheduled;
+    if (speculation->ordinal < num_scheduled) {
+      continue;
+    }
+    int slot = first_slot[speculation->arm_index];
+    for (uint64_t ahead = speculation->ordinal - num_scheduled;
+         ahead > 0 && slot >= 0; ahead--) {
+      slot = bai_sync_data->speculation_next_slot[slot];
+    }
+    if (slot >= 0) {
+      speculation->expected = true;
+      bai_sync_data->speculation_covered[slot] = true;
+    }
+  }
+}
+
+// Assumes the caller has locked the bai sync data mutex. Reserves a cache
+// entry for the first expected slot nobody has speculated on yet and returns
+// its index, or -1 if there is none or no entry to put it in. A finished
+// entry that is no longer expected is recycled.
+static inline int bai_speculation_claim_while_locked(BAISampleArgs *args) {
+  BAISyncData *bai_sync_data = args->bai_sync_data;
+  if (bai_sync_data->speculations == NULL || bai_sync_data->stopped ||
+      bai_sync_data->scheduling_finished) {
+    return -1;
+  }
+  if (bai_sync_data->speculation_epoch != bai_sync_data->schedule_epoch) {
+    bai_speculation_refresh_while_locked(args);
+  }
+  if (!bai_sync_data->speculation_valid) {
+    return -1;
+  }
+  int slot = bai_sync_data->speculation_cursor;
+  while (slot < BAI_SPECULATION_SLOTS &&
+         bai_sync_data->speculation_covered[slot]) {
+    slot++;
+  }
+  bai_sync_data->speculation_cursor = slot;
+  if (slot == BAI_SPECULATION_SLOTS) {
+    return -1;
+  }
+  int entry_idx = -1;
+  for (int spec_idx = 0; spec_idx < bai_sync_data->num_speculations;
+       spec_idx++) {
+    const BAISpeculation *speculation = &bai_sync_data->speculations[spec_idx];
+    if (speculation->state == BAI_SPECULATION_EMPTY) {
+      entry_idx = spec_idx;
+      break;
+    }
+    if (speculation->state == BAI_SPECULATION_DONE && !speculation->expected &&
+        entry_idx < 0) {
+      entry_idx = spec_idx;
+    }
+  }
+  if (entry_idx < 0) {
+    return -1;
+  }
+  const int arm_index = bai_sync_data->speculation_arms[slot];
+  const uint64_t ordinal = bai_sync_data->speculation_ordinals[slot];
+  BAISpeculation *speculation = &bai_sync_data->speculations[entry_idx];
+  speculation->state = BAI_SPECULATION_RUNNING;
+  speculation->arm_index = arm_index;
+  speculation->ordinal = ordinal;
+  speculation->seed =
+      rvs_peek_seed(args->rvs, (uint64_t)arm_index,
+                    ordinal - bai_sync_data->arm_data[arm_index].num_scheduled);
+  speculation->adopted = false;
+  speculation->expected = true;
+  bai_sync_data->speculation_covered[slot] = true;
+  bai_sync_data->speculation_cursor = slot + 1;
+#ifdef BAI_SCHED_STATS
+  bai_sync_data->sched_stats.speculations++;
+#endif
+  return entry_idx;
+}
+
+// Assumes the caller has locked the bai sync data mutex. Stores a finished
+// speculative sample, or, if a round adopted it meanwhile, completes that
+// round's slot with it. Discards it if the sim has stopped.
+static inline void bai_speculation_finish_while_locked(BAISampleArgs *args,
+                                                       const int spec_idx,
+                                                       const double value) {
+  BAISyncData *bai_sync_data = args->bai_sync_data;
+  BAISpeculation *speculation = &bai_sync_data->speculations[spec_idx];
+  if (bai_sync_data->stopped) {
+    speculation->state = BAI_SPECULATION_EMPTY;
+    return;
+  }
+  if (!speculation->adopted) {
+    speculation->value = value;
+    speculation->state = BAI_SPECULATION_DONE;
+    return;
+  }
+  BAIRound *round =
+      &bai_sync_data->rounds[speculation->round_number % BAI_SCHEDULE_ROUNDS];
+  if (round->records != NULL) {
+    memcpy(round->records +
+               (size_t)speculation->slot * bai_sync_data->record_size,
+           speculation->record, bai_sync_data->record_size);
+  }
+  speculation->state = BAI_SPECULATION_EMPTY;
+#ifdef BAI_SCHED_STATS
+  bai_sync_data->sched_stats.speculation_hits++;
+#endif
+  bai_schedule_complete_while_locked(args, speculation->round_number,
+                                     speculation->slot, value);
 }
 
 typedef struct BAIWorkerArgs {
@@ -1030,7 +1450,26 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
         break;
       }
       // Every scheduled slot is taken but a round is still in flight, so
-      // nothing can be scheduled until it folds. Sleep until a fold (or an
+      // nothing can be scheduled until it folds. Run a sample the next round
+      // is likely to hold instead of waiting.
+      const int spec_idx = bai_speculation_claim_while_locked(&sample_args);
+      if (spec_idx >= 0) {
+        BAISpeculation *speculation = &sync_data->speculations[spec_idx];
+        const int arm_index = speculation->arm_index;
+        const uint64_t seed = speculation->seed;
+        unsigned char *record = speculation->record;
+        cpthread_mutex_unlock(&sync_data->mutex);
+        bai_sched_idle_end(worker_stats);
+        const int64_t sample_start_ns = bai_sched_now();
+        const double sample = rvs_sample_with_seed(
+            rvs, (uint64_t)arm_index, seed, rvs_thread_index, NULL, record);
+        bai_sched_sample_done(worker_stats, sample_start_ns);
+        bai_sync_lock(sync_data, worker_stats);
+        bai_speculation_finish_while_locked(&sample_args, spec_idx, sample);
+        cpthread_mutex_unlock(&sync_data->mutex);
+        continue;
+      }
+      // Nothing worth speculating on either. Sleep until a fold (or an
       // abandoning worker) signals, rather than spinning on the mutex.
       bai_sched_idle_begin(worker_stats);
       cpthread_cond_wait(&sync_data->work_available, &sync_data->mutex);
@@ -1111,7 +1550,7 @@ static inline void bai_sched_record(BAISyncData *sync_data,
   sim_stats->num_threads = bai_options->num_threads;
   sim_stats->num_arms = sync_data->num_arms;
   sim_stats->round_size = BAI_SCHEDULE_ROUND_SIZE;
-  sim_stats->lag_rounds = BAI_SCHEDULE_LAG;
+  sim_stats->lag_rounds = BAI_SCHEDULE_ADAPTIVE_LAG;
   sim_stats->sample_limit = bai_options->sample_limit;
   sim_stats->bai_samples =
       sync_data->sched_completions > sim_stats->initial_samples

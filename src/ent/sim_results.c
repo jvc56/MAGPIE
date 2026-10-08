@@ -562,6 +562,19 @@ uint64_t simmed_play_get_seed(SimmedPlay *simmed_play) {
   return seed;
 }
 
+uint64_t simmed_play_peek_seed(SimmedPlay *simmed_play, const uint64_t ahead) {
+  XoshiroPRNG *peek_prng = prng_create(0);
+  cpthread_mutex_lock(&simmed_play->mutex);
+  prng_copy(peek_prng, simmed_play->prng);
+  cpthread_mutex_unlock(&simmed_play->mutex);
+  for (uint64_t step = 0; step < ahead; step++) {
+    prng_next(peek_prng);
+  }
+  const uint64_t seed = prng_next(peek_prng);
+  prng_destroy(peek_prng);
+  return seed;
+}
+
 int sim_results_get_number_of_plays(const SimResults *sim_results) {
   return sim_results->num_simmed_plays;
 }

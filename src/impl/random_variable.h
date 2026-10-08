@@ -53,6 +53,11 @@ size_t rvs_get_sample_record_size(const RandomVariables *rvs);
 void rvs_apply_sample_record(const RandomVariables *rvs, uint64_t k,
                              const void *record);
 uint64_t rvs_next_seed(RandomVariables *rvs, uint64_t k);
+// The seed rvs_next_seed would return for arm k after `ahead` more calls,
+// without advancing it, or RVS_SEED_UNRESERVED when this kind of random
+// variable does not draw from seeds. A sample drawn with a peeked seed is the
+// sample the slot reserving that seed would produce.
+uint64_t rvs_peek_seed(RandomVariables *rvs, uint64_t k, uint64_t ahead);
 bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);

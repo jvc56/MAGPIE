@@ -74,11 +74,11 @@ static double baisched_pct(const int64_t part, const double whole) {
 
 static void baisched_print_header(void) {
   printf("%4s %7s %5s %9s %8s %9s | %6s %6s %6s %6s %6s %6s %6s %6s %6s | "
-         "%6s %6s %6s %6s | %7s %7s %7s %5s\n",
+         "%6s %6s %6s %6s | %7s %7s %6s %7s %7s %5s\n",
          "thr", "iters", "sims", "samples", "wall_s", "samp/s", "busy%",
          "idle%", "barr%", "start%", "tail%", "end%", "lock%", "fold%",
-         "other%", "q99md", "q999md", "q999mx", "qmaxmx", "ovsh/sm", "staleav",
-         "stalemx", "R");
+         "other%", "q99md", "q999md", "q999mx", "qmaxmx", "ovsh/sm", "spec/sm",
+         "hit%", "staleav", "stalemx", "R");
 }
 
 static void baisched_print_row(const int threads, const int iters,
@@ -101,6 +101,8 @@ static void baisched_print_row(const int threads, const int iters,
   int64_t lock_ns = 0;
   int64_t fold_ns = 0;
   uint64_t overshoot = 0;
+  uint64_t speculations = 0;
+  uint64_t speculation_hits = 0;
   uint64_t stale_sum = 0;
   uint64_t stale_count = 0;
   uint64_t stale_max = 0;
@@ -123,6 +125,8 @@ static void baisched_print_row(const int threads, const int iters,
     lock_ns += sim_stats.lock_wait_ns;
     fold_ns += sim_stats.fold_ns + sim_stats.schedule_ns;
     overshoot += sim_stats.overshoot_samples;
+    speculations += sim_stats.speculations;
+    speculation_hits += sim_stats.speculation_hits;
     stale_sum += sim_stats.stale_sum;
     stale_count += sim_stats.stale_count;
     if (sim_stats.stale_max > stale_max) {
@@ -161,7 +165,7 @@ static void baisched_print_row(const int threads, const int iters,
   const int64_t accounted = busy_ns + idle_ns + barrier_ns + startup_ns +
                             tail_ns + end_ns + lock_ns + fold_ns;
   printf(" %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f %6.2f | %6.2f %6.2f "
-         "%6.2f %6.1f | %7.1f %7.0f %7llu %5d\n",
+         "%6.2f %6.1f | %7.1f %7.1f %6.1f %7.0f %7llu %5d\n",
          baisched_pct(busy_ns, capacity_ns), baisched_pct(idle_ns, capacity_ns),
          baisched_pct(barrier_ns, capacity_ns),
          baisched_pct(startup_ns, capacity_ns),
@@ -169,6 +173,10 @@ static void baisched_print_row(const int threads, const int iters,
          baisched_pct(lock_ns, capacity_ns), baisched_pct(fold_ns, capacity_ns),
          100.0 - baisched_pct(accounted, capacity_ns), q99_median, q999_median,
          q999_max, qmax_max, (double)overshoot / (double)num_sims,
+         (double)speculations / (double)num_sims,
+         speculations > 0
+             ? 100.0 * (double)speculation_hits / (double)speculations
+             : 0.0,
          stale_count > 0 ? (double)stale_sum / (double)stale_count : 0.0,
          (unsigned long long)stale_max, round_size);
 }

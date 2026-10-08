@@ -40,6 +40,10 @@ typedef int (*rvs_get_best_arm_index_func_t)(const RandomVariables *);
 // caller that schedules samples ahead of time bind each scheduled sample to a
 // seed, instead of letting whichever thread runs first take the next one.
 typedef uint64_t (*rvs_next_seed_func_t)(RandomVariables *, const uint64_t);
+// The seed rvs_next_seed_func_t would return after `ahead` more calls, without
+// advancing the stream.
+typedef uint64_t (*rvs_peek_seed_func_t)(RandomVariables *, const uint64_t,
+                                         const uint64_t);
 // Like rvs_sample_func_t, but writes the sample's effect on the random
 // variable's results to a record instead of applying it.
 typedef double (*rvs_sample_into_record_func_t)(RandomVariables *,
@@ -58,6 +62,7 @@ struct RandomVariables {
   rvs_destroy_data_func_t destroy_data_func;
   rvs_get_best_arm_index_func_t get_best_arm_index_func;
   rvs_next_seed_func_t next_seed_func;
+  rvs_peek_seed_func_t peek_seed_func;
   // NULL and 0 for random variables whose samples have no deferrable effect.
   rvs_sample_into_record_func_t sample_into_record_func;
   rvs_apply_record_func_t apply_record_func;
@@ -677,6 +682,13 @@ static uint64_t rv_sim_next_seed(RandomVariables *rvs, const uint64_t k) {
       sim_results_get_simmed_play(simmer->sim_results, (int)k));
 }
 
+static uint64_t rv_sim_peek_seed(RandomVariables *rvs, const uint64_t k,
+                                 const uint64_t ahead) {
+  const Simmer *simmer = (const Simmer *)rvs->data;
+  return simmed_play_peek_seed(
+      sim_results_get_simmed_play(simmer->sim_results, (int)k), ahead);
+}
+
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
   const Simmer *simmer = (const Simmer *)rvs->data;
   return sim_results_get_best_move_index(simmer->sim_results);
@@ -718,6 +730,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   rvs->destroy_data_func = rv_sim_destroy;
   rvs->get_best_arm_index_func = rv_sim_get_best_arm_index;
   rvs->next_seed_func = rv_sim_next_seed;
+  rvs->peek_seed_func = rv_sim_peek_seed;
   rvs->sample_into_record_func = rv_sim_sample_into_record;
   rvs->apply_record_func = rv_sim_apply_record;
   rvs->sample_record_size = sizeof(SimmedPlaySampleRecord);
@@ -837,6 +850,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   RandomVariables *rvs = malloc_or_die(sizeof(RandomVariables));
   rvs->next_seed_func = NULL;
+  rvs->peek_seed_func = NULL;
   rvs->sample_into_record_func = NULL;
   rvs->apply_record_func = NULL;
   rvs->sample_record_size = 0;
@@ -923,6 +937,14 @@ double rvs_sample_with_seed(RandomVariables *rvs, const uint64_t k,
   }
   return rvs->sample_func(rvs, k, reserved_seed, thread_index,
                           prev_total_samples + 1, bai_logger);
+}
+
+uint64_t rvs_peek_seed(RandomVariables *rvs, const uint64_t k,
+                       const uint64_t ahead) {
+  if (rvs->peek_seed_func == NULL) {
+    return RVS_SEED_UNRESERVED;
+  }
+  return rvs->peek_seed_func(rvs, k, ahead);
 }
 
 size_t rvs_get_sample_record_size(const RandomVariables *rvs) {
