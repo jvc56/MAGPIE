@@ -71,10 +71,18 @@ static_assert(BAI_SAMPLE_FIXED_POINT_SHIFT < 62,
               "BAI fixed-point scale must leave headroom in int64");
 
 enum {
-  // BAI-phase samples are scheduled in rounds. A round's schedule is computed
-  // from the arm statistics committed when an earlier round finished, never
-  // from whatever has merged at the instant a thread asks for work, so the
+  // Every sample is scheduled in rounds. A round's schedule is computed from
+  // the arm statistics committed when an earlier round folded, never from
+  // whatever has merged at the instant a thread asks for work, so the
   // allocation is the same whichever way the worker threads interleave.
+  //
+  // The first rounds lay the initial phase out round-robin: every arm gets
+  // sample_minimum samples, iteration-major, so a run of consecutive slots is
+  // the same iteration across consecutive arms. Those rounds need no
+  // statistics, so they go out as soon as the sim starts and there is no
+  // barrier between the phases: rounds scheduled before the initial phase has
+  // fully folded are round-robin too, and the first adaptive round is the
+  // first one scheduled after it has.
   //
   // Every constant here is fixed: none depends on -threads, which would make
   // a sim's result depend on how many threads ran it, and none depends on the
@@ -82,7 +90,7 @@ enum {
   // one up to the point where a stop condition fires.
   //
   // BAI_SCHEDULE_ROUND_SIZE is the fold granularity. A fold and a schedule
-  // each cost O(num_arms) under the mutex.
+  // each cost O(num_arms + round size) under the mutex.
   BAI_SCHEDULE_ROUND_SIZE = 32,
   // BAI_SCHEDULE_DEPTH_SAMPLES is how many samples stay scheduled ahead of
   // the round being folded, so that a slow sample holding up the oldest round
@@ -97,10 +105,18 @@ enum {
   // The ring needs one more round than the lag: the slot freed by the round
   // that just folded is the one the newly scheduled round takes.
   BAI_SCHEDULE_ROUNDS = BAI_SCHEDULE_LAG + 1,
+  // A worker claims up to this many consecutive slots of a round-robin round
+  // at once. Every arm draws its seeds from an identically seeded stream, so
+  // consecutive slots of one iteration replay the same opponent rack, and
+  // running them on one thread keeps that thread's RIT cache hot. Adaptive
+  // rounds are claimed one slot at a time.
+  BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH = 8,
 };
 
 static_assert(BAI_SCHEDULE_DEPTH_SAMPLES % BAI_SCHEDULE_ROUND_SIZE == 0,
               "BAI schedule depth must be a whole number of rounds");
+static_assert(BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH <= BAI_SCHEDULE_ROUND_SIZE,
+              "a claim never spans rounds");
 
 // Internal BAI structs
 
@@ -114,9 +130,6 @@ typedef struct BAIRound {
   // once and the arms share one seed stream, so a seed taken at claim time
   // would land in whichever round happened to get there first.
   uint64_t *seeds;
-  int num_samples;
-  int num_claimed;
-  int num_completed;
   // Each slot's sample value and, for random variables with deferrable
   // effects, its record (record_size bytes per slot). They are held here
   // until the round is complete and then folded in slot order, so both the
@@ -125,6 +138,11 @@ typedef struct BAIRound {
   // folded leaves no trace.
   double *values;
   unsigned char *records;
+  int num_samples;
+  int num_claimed;
+  int num_completed;
+  // The most slots one claim takes from this round.
+  int claim_batch;
 #ifdef BAI_SCHED_STATS
   uint64_t committed_at_schedule;
 #endif
@@ -142,15 +160,17 @@ typedef struct BAIArmDatum {
   int64_t samples_squared_sum;
   double mean;
   double var;
-  double *Zs;
 } BAIArmDatum;
 
 typedef struct BAISyncData {
   int num_arms;
-  int num_arms_reached_threshold;
   uint64_t num_total_samples_completed;
   uint64_t num_total_samples_requested;
+  // num_arms * sample_minimum: the round-robin samples every arm gets before
+  // any statistics are read.
+  uint64_t initial_limit;
   int astar_index;
+  // True until the round holding the last initial-phase sample has folded.
   bool initial_phase;
   BAIArmDatum *arm_data;
   RandomVariables *rng;
@@ -163,11 +183,10 @@ typedef struct BAISyncData {
   int avoid_prune_count;    // remaining arms still needing top-up
   int avoid_prune_next_idx; // round-robin cursor
   int avoid_prune_best_arm_idx;
-  // BAI-phase round schedule. Rounds [next_round_to_fold,
-  // next_round_to_schedule) are live; rounds are claimed in order from
-  // next_round_to_claim and folded in order from next_round_to_fold.
+  // The round schedule. Rounds [next_round_to_fold, next_round_to_schedule)
+  // are live; rounds are claimed in order from next_round_to_claim and folded
+  // in order from next_round_to_fold.
   BAIRound rounds[BAI_SCHEDULE_ROUNDS];
-  int round_size;
   uint64_t next_round_to_claim;
   uint64_t next_round_to_fold;
   uint64_t next_round_to_schedule;
@@ -176,20 +195,21 @@ typedef struct BAISyncData {
   // nothing to claim exits once this is set, rather than waiting for folds
   // that can only drain rounds already handed out.
   bool scheduling_finished;
-  // True once the results are final: a fold raised a stop condition, or a
-  // worker abandoned the rounds on a timeout or user interrupt. Nothing more
-  // is claimed or folded, and samples still in flight are discarded, so the
-  // results hold exactly the rounds folded before the stop.
+  // True once the results are final: a fold raised a stop condition, the
+  // budget is spent and folded, or a worker abandoned the rounds on a timeout
+  // or user interrupt. Nothing more is claimed or folded, and samples still
+  // in flight are discarded, so the results hold exactly the rounds folded
+  // before the stop.
   bool stopped;
   size_t record_size;
-  // Signaled whenever a fold may have made new work claimable, when claims
-  // become exhausted, and when a worker abandons the rounds. A worker with
-  // nothing to claim waits on it instead of spinning on the mutex.
+  // Signaled whenever a fold may have made new work claimable, when the sim
+  // stops, and when a worker abandons the rounds. A worker with nothing to
+  // claim waits on it instead of spinning on the mutex.
   cpthread_cond_t work_available;
 #ifdef BAI_SCHED_STATS
   BAISchedSimStats sched_stats;
   BAISchedHistogram sched_histogram;
-  uint64_t sched_bai_completions;
+  uint64_t sched_completions;
   bool sched_stop_folded;
   int64_t sched_last_exit_ns;
   int64_t sched_exit_ns_sum;
@@ -207,7 +227,6 @@ typedef struct BAIWorkerSchedStats {
   int64_t idle_start_ns;
   uint64_t idle_episodes;
   int64_t lock_wait_ns;
-  int64_t initial_barrier_ns;
   int64_t avoid_prune_barrier_ns;
   BAISchedHistogram histogram;
 } BAIWorkerSchedStats;
@@ -287,18 +306,14 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
                                                 RandomVariables *rng) {
   BAISyncData *bai_sync_data = malloc_or_die(sizeof(BAISyncData));
   bai_sync_data->num_arms = num_initial_arms;
-  bai_sync_data->num_arms_reached_threshold = 0;
   bai_sync_data->num_total_samples_completed = 0;
   bai_sync_data->num_total_samples_requested = 0;
+  bai_sync_data->initial_limit = 0;
   bai_sync_data->astar_index = -1;
   bai_sync_data->avoid_prune_best_arm_idx = -1;
   bai_sync_data->initial_phase = true;
   bai_sync_data->arm_data =
       calloc_or_die(num_initial_arms, sizeof(BAIArmDatum));
-  for (int i = 0; i < num_initial_arms; i++) {
-    bai_sync_data->arm_data[i].Zs =
-        malloc_or_die(num_initial_arms * sizeof(double));
-  }
   bai_sync_data->rng = rng;
   cpthread_mutex_init(&bai_sync_data->mutex);
   cpthread_cond_init(&bai_sync_data->work_available);
@@ -315,20 +330,18 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
     bai_sync_data->rounds[i].num_samples = 0;
     bai_sync_data->rounds[i].num_claimed = 0;
     bai_sync_data->rounds[i].num_completed = 0;
+    bai_sync_data->rounds[i].claim_batch = 1;
   }
-  bai_sync_data->round_size = 0;
   bai_sync_data->next_round_to_claim = 0;
   bai_sync_data->next_round_to_fold = 0;
   bai_sync_data->next_round_to_schedule = 0;
-  // Nothing is scheduled until the initial phase hands over, so a BAI-phase
-  // worker that starts after an initial-phase stop exits immediately.
-  bai_sync_data->scheduling_finished = true;
+  bai_sync_data->scheduling_finished = false;
   bai_sync_data->stopped = false;
   bai_sync_data->record_size = 0;
 #ifdef BAI_SCHED_STATS
   memset(&bai_sync_data->sched_stats, 0, sizeof(bai_sync_data->sched_stats));
   bai_sched_histogram_reset(&bai_sync_data->sched_histogram);
-  bai_sync_data->sched_bai_completions = 0;
+  bai_sync_data->sched_completions = 0;
   bai_sync_data->sched_stop_folded = false;
   bai_sync_data->sched_last_exit_ns = 0;
   bai_sync_data->sched_exit_ns_sum = 0;
@@ -338,9 +351,6 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
 }
 
 static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
-  for (int i = 0; i < bai_sync_data->num_arms; i++) {
-    free(bai_sync_data->arm_data[i].Zs);
-  }
   for (int i = 0; i < BAI_SCHEDULE_ROUNDS; i++) {
     free(bai_sync_data->rounds[i].arm_indices);
     free(bai_sync_data->rounds[i].seeds);
@@ -356,20 +366,9 @@ typedef struct BAISampleArgs {
   RandomVariables *rvs;
   double delta;
   uint64_t sample_limit;
-  uint64_t sample_minimum;
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
   double cutoff;
-  // Per-thread batch state for the initial phase. When batch_remaining == 0
-  // the worker atomically reserves num_arms consecutive sample indices from
-  // the global counter, forming a batch of (iter N, arms 0..num_arms-1)
-  // processed contiguously on this thread. Each arm in iter N draws its
-  // pre-candidate opp rack from the same iter-local PRNG state, so racks
-  // repeat across arms within a batch and the RIT cache hits. This matters
-  // in the all-initial-phase regime (short MCTS-style sims with no BAI
-  // pruning); it's neutral in normal BAI-phase-dominated sims.
-  uint64_t initial_batch_next_total_index;
-  int initial_batch_remaining;
 } BAISampleArgs;
 
 // Quantizes a sample value into the fixed-point integer domain the arm
@@ -453,149 +452,35 @@ bai_arm_z_with_counts(const BAIArmDatum *astar_arm_data,
   return astar_num_samples * d_astar + challenger_num_samples * d_a;
 }
 
-static inline double bai_get_arm_z(BAISyncData *bai_sync_data,
-                                   const int astar_index,
-                                   const int challenger_index) {
-  const BAIArmDatum *astar_arm_data = &bai_sync_data->arm_data[astar_index];
-  const BAIArmDatum *challenger_arm_data =
-      &bai_sync_data->arm_data[challenger_index];
-  return bai_arm_z_with_counts(
-      astar_arm_data, (double)astar_arm_data->num_samples, challenger_arm_data,
-      (double)challenger_arm_data->num_samples);
-}
-
-static inline int
-bai_sync_data_sample_limit_reached(const BAISyncData *bai_sync_data,
-                                   uint64_t sample_limit) {
-  return bai_sync_data->num_total_samples_requested >= sample_limit;
-}
-
-static inline int
-bai_sync_data_get_next_initial_sample_index_while_locked(BAISampleArgs *args) {
-  const int num_arms = args->bai_sync_data->num_arms;
-  const uint64_t initial_limit = (uint64_t)num_arms * args->sample_minimum;
-  if (args->initial_batch_remaining == 0) {
-    if (args->bai_sync_data->num_total_samples_requested >= initial_limit) {
-      return -1;
-    }
-    args->initial_batch_next_total_index =
-        args->bai_sync_data->num_total_samples_requested;
-    args->bai_sync_data->num_total_samples_requested += (uint64_t)num_arms;
-    args->initial_batch_remaining = num_arms;
-  }
-  const uint64_t total_index = args->initial_batch_next_total_index++;
-  args->initial_batch_remaining--;
-  if (total_index >= initial_limit) {
-    args->initial_batch_remaining = 0;
-    return -1;
-  }
-  return (int)(total_index % (uint64_t)num_arms);
-}
-
-static inline int
-bai_sync_data_get_next_initial_sample_index(BAISampleArgs *args,
-                                            BAIWorkerSchedStats *worker_stats) {
-  bai_sync_lock(args->bai_sync_data, worker_stats);
-  const int arm_index =
-      bai_sync_data_get_next_initial_sample_index_while_locked(args);
-  cpthread_mutex_unlock(&args->bai_sync_data->mutex);
-  return arm_index;
-}
-
-// Assumes the caller has locked bai_sync_data or is the only thread running
-// Checks the stopping threshold against the committed statistics. The
-// challenger is not chosen here: scheduling picks it when it lays out a round,
-// from the counts handed out by then (see bai_schedule_challenger).
+// Assumes the caller has locked the bai sync data mutex. Checks the stopping
+// threshold against the committed statistics. The challenger is not chosen
+// here: scheduling picks it when it lays out a round, from the counts handed
+// out by then (see bai_schedule_challenger).
 static inline void bai_update_threshold(BAISyncData *bai_sync_data,
                                         RandomVariables *rvs,
-                                        bai_threshold_t threshold,
-                                        const double delta, const int arm_index,
-                                        const bool update_all) {
+                                        const bai_threshold_t threshold,
+                                        const double delta) {
   if (threshold == BAI_THRESHOLD_NONE) {
     return;
   }
-
-  BAIArmDatum *astar_arm_datum =
-      &bai_sync_data->arm_data[bai_sync_data->astar_index];
-  int num_arms_at_threshold = 0;
-
-  double bai_threshold;
-  switch (threshold) {
-  case BAI_THRESHOLD_NONE:
-    break;
-  case BAI_THRESHOLD_GK16:
-    bai_threshold = log(
-        (log((double)bai_sync_data->num_total_samples_completed) + 1) / delta);
-    break;
-  }
-
-  for (int i = 0; i < bai_sync_data->num_arms; i++) {
-    if (i == bai_sync_data->astar_index ||
-        rvs_are_similar(rvs, bai_sync_data->astar_index, i)) {
-      num_arms_at_threshold++;
-      astar_arm_datum->Zs[i] = INFINITY;
+  const double bai_threshold = log(
+      (log((double)bai_sync_data->num_total_samples_completed) + 1) / delta);
+  const int astar_index = bai_sync_data->astar_index;
+  const BAIArmDatum *astar_arm_datum = &bai_sync_data->arm_data[astar_index];
+  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+    if (arm_index == astar_index ||
+        rvs_are_similar(rvs, astar_index, arm_index)) {
       continue;
     }
-    if (update_all || i == arm_index) {
-      astar_arm_datum->Zs[i] =
-          bai_get_arm_z(bai_sync_data, bai_sync_data->astar_index, i);
-    }
-    double arm_Z = astar_arm_datum->Zs[i];
-    switch (threshold) {
-    case BAI_THRESHOLD_NONE:
-      break;
-    case BAI_THRESHOLD_GK16:
-      if (arm_Z > bai_threshold) {
-        num_arms_at_threshold++;
-      }
-      break;
+    const BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
+    const double arm_z = bai_arm_z_with_counts(
+        astar_arm_datum, (double)astar_arm_datum->num_samples, arm_datum,
+        (double)arm_datum->num_samples);
+    if (!(arm_z > bai_threshold)) {
+      return;
     }
   }
-  if (!bai_sync_data->initial_phase &&
-      num_arms_at_threshold == bai_sync_data->num_arms) {
-    bai_result_set_status(bai_sync_data->bai_result,
-                          BAI_RESULT_STATUS_THRESHOLD);
-  }
-}
-
-// Assumes the caller has locked the bai sync data mutex
-static inline void
-bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
-                                      const double sample_value) {
-  BAISyncData *bai_sync_data = args->bai_sync_data;
-  BAIArmDatum *arm_data = bai_sync_data->arm_data;
-  bai_sync_data->num_total_samples_completed++;
-  BAIArmDatum *sample_arm_datum = &arm_data[arm_index];
-  sample_arm_datum->num_samples++;
-  bai_accumulate_checked(&sample_arm_datum->samples_sum,
-                         bai_quantize_sample(sample_value));
-  bai_accumulate_checked(&sample_arm_datum->samples_squared_sum,
-                         bai_quantize_sample(sample_value * sample_value));
-  bai_arm_datum_recompute_mean_and_var(sample_arm_datum);
-
-  const int old_astar_index = bai_sync_data->astar_index;
-  bai_sync_data->astar_index = 0;
-  double astar_mean = arm_data[0].mean;
-  for (int i = 1; i < bai_sync_data->num_arms; i++) {
-    const BAIArmDatum *arm_datum = &arm_data[i];
-    if (arm_datum->mean > astar_mean) {
-      bai_sync_data->astar_index = i;
-      astar_mean = arm_datum->mean;
-    }
-  }
-
-  if (!bai_sync_data->initial_phase &&
-      is_win_pct_within_cutoff(astar_mean, args->cutoff)) {
-    bai_result_set_status(bai_sync_data->bai_result,
-                          BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
-  } else {
-    const bool update_all = old_astar_index == -1 ||
-                            old_astar_index != bai_sync_data->astar_index ||
-                            bai_sync_data->astar_index == arm_index;
-
-    bai_update_threshold(bai_sync_data, args->rvs, args->threshold, args->delta,
-                         arm_index, update_all);
-  }
+  bai_result_set_status(bai_sync_data->bai_result, BAI_RESULT_STATUS_THRESHOLD);
 }
 
 // Assumes the caller has locked the bai sync data mutex, or is the only
@@ -630,8 +515,68 @@ static inline int bai_schedule_challenger(const BAISyncData *bai_sync_data,
 }
 
 // Assumes the caller has locked the bai sync data mutex, or is the only
-// thread running. Lays out one round's worth of arm indices from the
-// committed statistics and charges them to the sample budget.
+// thread running. Lays out a top-two round: the samples are split between
+// astar and the challenger by rounding the top-two IDS proportion.
+static inline void bai_schedule_top_two_round(BAISampleArgs *args,
+                                              BAIRound *round) {
+  const BAISyncData *bai_sync_data = args->bai_sync_data;
+  const int num_samples = round->num_samples;
+  const int astar_arm_index = bai_sync_data->astar_index;
+  const int challenger_arm_index =
+      bai_schedule_challenger(bai_sync_data, args->rvs, astar_arm_index);
+  const BAIArmDatum *astar_arm_datum =
+      &bai_sync_data->arm_data[astar_arm_index];
+  const BAIArmDatum *challenger_arm_datum =
+      &bai_sync_data->arm_data[challenger_arm_index];
+  const double astar_num_samples = (double)astar_arm_datum->num_scheduled;
+  const double challenger_num_samples =
+      (double)challenger_arm_datum->num_scheduled;
+  const double theta_bar =
+      (astar_num_samples * astar_arm_datum->mean +
+       challenger_num_samples * challenger_arm_datum->mean) /
+      (astar_num_samples + challenger_num_samples);
+  const double numerator =
+      astar_num_samples *
+      bai_d(astar_arm_datum->mean, astar_arm_datum->var, theta_bar);
+  const double denominator =
+      numerator + challenger_num_samples * bai_d(challenger_arm_datum->mean,
+                                                 challenger_arm_datum->var,
+                                                 theta_bar);
+  // This replaces a per-sample coin flip against numerator/denominator with
+  // the stratified version of the same rule: allocate the round between the
+  // two arms by rounding that proportion. It matches the coin's mean exactly
+  // with zero variance, so it is statistically no worse, and it removes the
+  // shared rng stream from scheduling entirely. Equal means make both terms
+  // zero; the coin fell through to the challenger there, so a degenerate
+  // proportion allocates the round to the challenger too.
+  double astar_share = 0.0;
+  if (denominator > 0.0) {
+    astar_share = numerator / denominator;
+    if (!(astar_share > 0.0)) {
+      astar_share = 0.0;
+    } else if (astar_share > 1.0) {
+      astar_share = 1.0;
+    }
+  }
+  int astar_count = (int)llround(astar_share * (double)num_samples);
+  if (astar_count < 0) {
+    astar_count = 0;
+  } else if (astar_count > num_samples) {
+    astar_count = num_samples;
+  }
+  for (int slot = 0; slot < num_samples; slot++) {
+    round->arm_indices[slot] =
+        (slot < astar_count) ? astar_arm_index : challenger_arm_index;
+  }
+}
+
+// Assumes the caller has locked the bai sync data mutex, or is the only
+// thread running. Lays out the next round and charges it to the budget. The
+// budget is the sample limit, but never less than the initial phase, which
+// always runs to completion. Rounds scheduled before the initial phase has
+// folded, and every round under the round-robin rule, cycle through the arms
+// in global sample order; the rest follow the top-two rule from the
+// committed statistics.
 static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
 #ifdef BAI_SCHED_STATS
@@ -640,15 +585,24 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   if (bai_sync_data->scheduling_finished) {
     return;
   }
+  const uint64_t budget = args->sample_limit > bai_sync_data->initial_limit
+                              ? args->sample_limit
+                              : bai_sync_data->initial_limit;
   const uint64_t requested = bai_sync_data->num_total_samples_requested;
-  if (requested >= args->sample_limit) {
+  if (requested >= budget) {
     bai_sync_data->scheduling_finished = true;
     return;
   }
-  const uint64_t available = args->sample_limit - requested;
-  int num_samples = bai_sync_data->round_size;
-  if ((uint64_t)num_samples > available) {
-    num_samples = (int)available;
+  // A round never straddles the end of the initial phase, so the fold that
+  // completes it runs before any later sample is handed out.
+  uint64_t round_end = budget;
+  if (requested < bai_sync_data->initial_limit &&
+      bai_sync_data->initial_limit < round_end) {
+    round_end = bai_sync_data->initial_limit;
+  }
+  int num_samples = BAI_SCHEDULE_ROUND_SIZE;
+  if ((uint64_t)num_samples > round_end - requested) {
+    num_samples = (int)(round_end - requested);
   }
   BAIRound *round =
       &bai_sync_data->rounds[bai_sync_data->next_round_to_schedule %
@@ -656,62 +610,16 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   round->num_samples = num_samples;
   round->num_claimed = 0;
   round->num_completed = 0;
-  switch (args->sampling_rule) {
-  case BAI_SAMPLING_RULE_ROUND_ROBIN:
+  if (bai_sync_data->initial_phase ||
+      args->sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN) {
     for (int slot = 0; slot < num_samples; slot++) {
       round->arm_indices[slot] = (int)((requested + (uint64_t)slot) %
                                        (uint64_t)bai_sync_data->num_arms);
     }
-    break;
-  case BAI_SAMPLING_RULE_TOP_TWO_IDS:;
-    const int astar_arm_index = bai_sync_data->astar_index;
-    const int challenger_arm_index =
-        bai_schedule_challenger(bai_sync_data, args->rvs, astar_arm_index);
-    const BAIArmDatum *astar_arm_datum =
-        &bai_sync_data->arm_data[astar_arm_index];
-    const BAIArmDatum *challenger_arm_datum =
-        &bai_sync_data->arm_data[challenger_arm_index];
-    const double astar_num_samples = (double)astar_arm_datum->num_scheduled;
-    const double challenger_num_samples =
-        (double)challenger_arm_datum->num_scheduled;
-    const double theta_bar =
-        (astar_num_samples * astar_arm_datum->mean +
-         challenger_num_samples * challenger_arm_datum->mean) /
-        (astar_num_samples + challenger_num_samples);
-    const double numerator =
-        astar_num_samples *
-        bai_d(astar_arm_datum->mean, astar_arm_datum->var, theta_bar);
-    const double denominator =
-        numerator + challenger_num_samples * bai_d(challenger_arm_datum->mean,
-                                                   challenger_arm_datum->var,
-                                                   theta_bar);
-    // This replaces a per-sample coin flip against numerator/denominator with
-    // the stratified version of the same rule: allocate the round between the
-    // two arms by rounding that proportion. It matches the coin's mean exactly
-    // with zero variance, so it is statistically no worse, and it removes the
-    // shared rng stream from the BAI phase entirely. Equal means make both
-    // terms zero; the coin fell through to the challenger there, so a
-    // degenerate proportion allocates the round to the challenger too.
-    double astar_share = 0.0;
-    if (denominator > 0.0) {
-      astar_share = numerator / denominator;
-      if (!(astar_share > 0.0)) {
-        astar_share = 0.0;
-      } else if (astar_share > 1.0) {
-        astar_share = 1.0;
-      }
-    }
-    int astar_count = (int)llround(astar_share * (double)num_samples);
-    if (astar_count < 0) {
-      astar_count = 0;
-    } else if (astar_count > num_samples) {
-      astar_count = num_samples;
-    }
-    for (int slot = 0; slot < num_samples; slot++) {
-      round->arm_indices[slot] =
-          (slot < astar_count) ? astar_arm_index : challenger_arm_index;
-    }
-    break;
+    round->claim_batch = BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH;
+  } else {
+    bai_schedule_top_two_round(args, round);
+    round->claim_batch = 1;
   }
   for (int slot = 0; slot < num_samples; slot++) {
     const int arm_index = round->arm_indices[slot];
@@ -720,7 +628,7 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
   }
   bai_sync_data->num_total_samples_requested += (uint64_t)num_samples;
   bai_sync_data->next_round_to_schedule++;
-  if (bai_sync_data->num_total_samples_requested >= args->sample_limit) {
+  if (bai_sync_data->num_total_samples_requested >= budget) {
     // This round spends the last of the budget. The sample-limit status is
     // recorded when it folds, but no worker needs to wait for that.
     bai_sync_data->scheduling_finished = true;
@@ -731,16 +639,23 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
 #endif
 }
 
+// A run of consecutive slots of one round, handed to one worker.
+typedef struct BAIClaim {
+  uint64_t round_number;
+  int first_slot;
+  int num_slots;
+} BAIClaim;
+
 // Assumes the caller has locked the bai sync data mutex. Hands out the next
-// unclaimed slot of the oldest round that still has one, or -1 when every
-// scheduled slot is taken or the sim has stopped. Threads pull greedily
-// across round boundaries, so a slow sample in one round does not keep the
-// others from working on the rounds behind it.
-static inline int bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
-                                                  uint64_t *round_number,
-                                                  int *slot, uint64_t *seed) {
+// unclaimed slots of the oldest round that still has some, up to the round's
+// claim batch, and returns false when every scheduled slot is taken or the
+// sim has stopped. Threads pull greedily across round boundaries, so a slow
+// sample in one round does not keep the others from working on the rounds
+// behind it.
+static inline bool bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
+                                                   BAIClaim *claim) {
   if (bai_sync_data->stopped) {
-    return -1;
+    return false;
   }
   while (bai_sync_data->next_round_to_claim <
          bai_sync_data->next_round_to_schedule) {
@@ -748,11 +663,14 @@ static inline int bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
         &bai_sync_data
              ->rounds[bai_sync_data->next_round_to_claim % BAI_SCHEDULE_ROUNDS];
     if (round->num_claimed < round->num_samples) {
-      *round_number = bai_sync_data->next_round_to_claim;
-      *slot = round->num_claimed;
-      const int arm_index = round->arm_indices[round->num_claimed];
-      *seed = round->seeds[round->num_claimed];
-      round->num_claimed++;
+      int num_slots = round->num_samples - round->num_claimed;
+      if (num_slots > round->claim_batch) {
+        num_slots = round->claim_batch;
+      }
+      claim->round_number = bai_sync_data->next_round_to_claim;
+      claim->first_slot = round->num_claimed;
+      claim->num_slots = num_slots;
+      round->num_claimed += num_slots;
       // Move past a fully claimed round now rather than on the next claim.
       // Once its samples complete it folds and its ring slot takes a new
       // round; a cursor still pointing at it would hand out the new round's
@@ -761,27 +679,27 @@ static inline int bai_schedule_claim_while_locked(BAISyncData *bai_sync_data,
         bai_sync_data->next_round_to_claim++;
       }
 #ifdef BAI_SCHED_STATS
-      const uint64_t completed = bai_sync_data->sched_stats.initial_samples +
-                                 bai_sync_data->sched_bai_completions;
+      const uint64_t completed = bai_sync_data->sched_completions;
       const uint64_t stale = completed > round->committed_at_schedule
                                  ? completed - round->committed_at_schedule
                                  : 0;
-      bai_sync_data->sched_stats.stale_sum += stale;
-      bai_sync_data->sched_stats.stale_count++;
+      bai_sync_data->sched_stats.stale_sum += stale * (uint64_t)num_slots;
+      bai_sync_data->sched_stats.stale_count += (uint64_t)num_slots;
       if (stale > bai_sync_data->sched_stats.stale_max) {
         bai_sync_data->sched_stats.stale_max = stale;
       }
 #endif
-      return arm_index;
+      return true;
     }
     bai_sync_data->next_round_to_claim++;
   }
-  return -1;
+  return false;
 }
 
 // Assumes the caller has locked the bai sync data mutex. Folds one finished
-// round into the committed statistics and re-derives everything the next
-// schedule reads from them.
+// round into the committed statistics and the random variables' results, in
+// slot order, then re-derives everything the next schedule reads and checks
+// the stop conditions. None are checked during the initial phase.
 static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
                                                       BAIRound *round) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
@@ -814,13 +732,28 @@ static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
       astar_mean = bai_sync_data->arm_data[arm_index].mean;
     }
   }
+
+  if (bai_sync_data->initial_phase) {
+    if (bai_sync_data->num_total_samples_completed <
+        bai_sync_data->initial_limit) {
+      return;
+    }
+    bai_sync_data->initial_phase = false;
+#ifdef BAI_SCHED_STATS
+    bai_sync_data->sched_stats.initial_samples = bai_sync_data->initial_limit;
+#endif
+  }
+  // When the initial phase alone spends the budget, the sim simply ends on
+  // the sample limit.
+  if (args->sample_limit <= bai_sync_data->initial_limit) {
+    return;
+  }
   if (is_win_pct_within_cutoff(astar_mean, args->cutoff)) {
     bai_result_set_status(bai_sync_data->bai_result,
                           BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
     return;
   }
-  bai_update_threshold(bai_sync_data, args->rvs, args->threshold, args->delta,
-                       bai_sync_data->astar_index, true);
+  bai_update_threshold(bai_sync_data, args->rvs, args->threshold, args->delta);
 }
 
 static inline void bai_commit_round_while_locked(BAISampleArgs *args,
@@ -855,7 +788,7 @@ bai_schedule_complete_while_locked(BAISampleArgs *args,
                                    const double sample_value) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
 #ifdef BAI_SCHED_STATS
-  bai_sync_data->sched_bai_completions++;
+  bai_sync_data->sched_completions++;
   if (bai_sync_data->stopped) {
     bai_sync_data->sched_stats.overshoot_samples++;
   }
@@ -905,20 +838,17 @@ bai_schedule_complete_while_locked(BAISampleArgs *args,
   }
 }
 
-// Sizes the rounds and fills the pipeline. Runs once, single-threaded, at the
-// checkpoint between the initial and BAI phases.
-static inline void bai_sync_data_start_schedule(BAISampleArgs *args) {
+// Allocates the rounds and fills the pipeline with the first rounds of the
+// initial phase. Runs once, single-threaded, before any worker starts.
+static inline void bai_sync_data_start_schedule(BAISampleArgs *args,
+                                                const uint64_t sample_minimum) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
-  const uint64_t requested = bai_sync_data->num_total_samples_requested;
-  if (requested >= args->sample_limit) {
-    return;
-  }
+  // Every arm needs at least one committed sample before the top-two rule
+  // can read its mean.
+  const uint64_t samples_per_arm = sample_minimum > 0 ? sample_minimum : 1;
+  bai_sync_data->initial_limit =
+      (uint64_t)bai_sync_data->num_arms * samples_per_arm;
   const size_t round_size = BAI_SCHEDULE_ROUND_SIZE;
-  bai_sync_data->round_size = (int)round_size;
-  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
-    bai_sync_data->arm_data[arm_index].num_scheduled =
-        bai_sync_data->arm_data[arm_index].num_samples;
-  }
   for (int i = 0; i < BAI_SCHEDULE_ROUNDS; i++) {
     bai_sync_data->rounds[i].arm_indices =
         malloc_or_die(sizeof(int) * round_size);
@@ -931,22 +861,9 @@ static inline void bai_sync_data_start_schedule(BAISampleArgs *args) {
           malloc_or_die(bai_sync_data->record_size * round_size);
     }
   }
-  bai_sync_data->next_round_to_claim = 0;
-  bai_sync_data->next_round_to_fold = 0;
-  bai_sync_data->next_round_to_schedule = 0;
-  bai_sync_data->scheduling_finished = false;
   for (int i = 0; i < BAI_SCHEDULE_ROUNDS; i++) {
     bai_schedule_round_while_locked(args);
   }
-}
-
-static inline void bai_sync_data_add_sample(BAISampleArgs *args,
-                                            const int arm_index,
-                                            const double sample_value,
-                                            BAIWorkerSchedStats *worker_stats) {
-  bai_sync_lock(args->bai_sync_data, worker_stats);
-  bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
-  cpthread_mutex_unlock(&args->bai_sync_data->mutex);
 }
 
 typedef struct BAIWorkerArgs {
@@ -954,13 +871,11 @@ typedef struct BAIWorkerArgs {
   RandomVariables *rvs;
   const BAIOptions *bai_options;
   BAILogger *bai_logger;
-  Checkpoint *checkpoint;
   Checkpoint *avoid_prune_checkpoint;
   int thread_index;
 } BAIWorkerArgs;
 
-// Builds the per-sample argument block from the options. Used by the worker
-// loops and by the handover between phases, which both need the same view.
+// Builds the per-sample argument block from the options.
 static inline BAISampleArgs
 bai_sample_args_create(BAISyncData *sync_data, RandomVariables *rvs,
                        const BAIOptions *bai_options) {
@@ -969,22 +884,11 @@ bai_sample_args_create(BAISyncData *sync_data, RandomVariables *rvs,
       .rvs = rvs,
       .delta = bai_options->delta,
       .sample_limit = bai_options->sample_limit,
-      .sample_minimum = bai_options->sample_minimum,
       .sampling_rule = bai_options->sampling_rule,
       .threshold = bai_options->threshold,
       .cutoff = bai_options->cutoff,
-      .initial_batch_next_total_index = 0,
-      .initial_batch_remaining = 0,
   };
   return sample_args;
-}
-
-static inline bool bai_should_stop(BAIResult *bai_result,
-                                   ThreadControl *thread_control) {
-  return bai_result_set_and_get_status(
-             bai_result, thread_control_get_status(thread_control) ==
-                             THREAD_CONTROL_STATUS_USER_INTERRUPT) !=
-         BAI_RESULT_STATUS_NONE;
 }
 
 static inline void bai_avoid_prune_prebroadcast(void *data) {
@@ -992,44 +896,6 @@ static inline void bai_avoid_prune_prebroadcast(void *data) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
   sync_data->avoid_prune_best_arm_idx =
       rvs_get_best_arm_index(bai_worker_args->rvs);
-}
-
-static inline void bai_finish_initial_phase(void *uncasted_bai_worker_args) {
-  BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)uncasted_bai_worker_args;
-  BAISyncData *bai_sync_data = bai_worker_args->sync_data;
-  bai_sync_data->initial_phase = false;
-#ifdef BAI_SCHED_STATS
-  bai_sync_data->sched_stats.initial_samples =
-      bai_sync_data->num_total_samples_completed;
-#endif
-  if (bai_should_stop(bai_sync_data->bai_result,
-                      bai_worker_args->sync_data->thread_control)) {
-    return;
-  }
-  assert(bai_sync_data->astar_index != -1);
-  if (bai_sync_data_sample_limit_reached(
-          bai_sync_data, bai_worker_args->bai_options->sample_limit)) {
-    bai_result_set_status(bai_sync_data->bai_result,
-                          BAI_RESULT_STATUS_SAMPLE_LIMIT);
-    return;
-  }
-  if (is_win_pct_within_cutoff(
-          bai_sync_data->arm_data[bai_sync_data->astar_index].mean,
-          bai_worker_args->bai_options->cutoff)) {
-    bai_result_set_status(bai_sync_data->bai_result,
-                          BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
-    return;
-  }
-  bai_update_threshold(bai_sync_data, bai_worker_args->rvs,
-                       bai_worker_args->bai_options->threshold,
-                       bai_worker_args->bai_options->delta,
-                       bai_sync_data->astar_index, true);
-  // Fill the round pipeline from the statistics the initial phase produced.
-  // Runs here, single-threaded at the checkpoint, so the first schedules are
-  // computed before any BAI-phase worker can claim.
-  BAISampleArgs sample_args = bai_sample_args_create(
-      bai_sync_data, bai_worker_args->rvs, bai_worker_args->bai_options);
-  bai_sync_data_start_schedule(&sample_args);
 }
 
 // Selects the next arm to sample from the avoid-prune list. Modifies the
@@ -1096,32 +962,6 @@ bai_worker_rvs_thread_index(const BAIWorkerArgs *bai_worker_args) {
   return bai_options->parent_worker_thread_index + bai_thread_index;
 }
 
-// The initial phase allocates a fixed number of samples to every arm, so its
-// samples merge straight into the committed statistics.
-static inline void
-bai_worker_initial_sample_loop(BAIWorkerArgs *bai_worker_args,
-                               BAIWorkerSchedStats *worker_stats) {
-  BAISyncData *sync_data = bai_worker_args->sync_data;
-  ThreadControl *thread_control = sync_data->thread_control;
-  RandomVariables *rvs = bai_worker_args->rvs;
-  const int rvs_thread_index = bai_worker_rvs_thread_index(bai_worker_args);
-
-  BAISampleArgs sample_args =
-      bai_sample_args_create(sync_data, rvs, bai_worker_args->bai_options);
-
-  while (!bai_should_stop(sync_data->bai_result, thread_control)) {
-    const int arm_index =
-        bai_sync_data_get_next_initial_sample_index(&sample_args, worker_stats);
-    if (arm_index < 0) {
-      break;
-    }
-    const int64_t sample_start_ns = bai_sched_now();
-    const double sample = rvs_sample(rvs, arm_index, rvs_thread_index, NULL);
-    bai_sched_sample_done(worker_stats, sample_start_ns);
-    bai_sync_data_add_sample(&sample_args, arm_index, sample, worker_stats);
-  }
-}
-
 // A clock or a user interrupt abandons the rounds from outside the fold
 // order, so where it cuts a sim short is not reproducible; a stop condition
 // raised by a fold is handled by the fold itself (see
@@ -1145,19 +985,16 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
   BAISampleArgs sample_args =
       bai_sample_args_create(sync_data, rvs, bai_worker_args->bai_options);
 
+  double sample_values[BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH];
   bool abandoned = false;
   while (true) {
     if (bai_should_abandon_rounds(sync_data->bai_result, thread_control)) {
       abandoned = true;
       break;
     }
-    uint64_t round_number = 0;
-    int slot = 0;
-    uint64_t reserved_seed = RVS_SEED_UNRESERVED;
+    BAIClaim claim;
     bai_sync_lock(sync_data, worker_stats);
-    const int arm_index = bai_schedule_claim_while_locked(
-        sync_data, &round_number, &slot, &reserved_seed);
-    if (arm_index < 0) {
+    if (!bai_schedule_claim_while_locked(sync_data, &claim)) {
       if (sync_data->scheduling_finished) {
         cpthread_mutex_unlock(&sync_data->mutex);
         break;
@@ -1170,22 +1007,31 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
       cpthread_mutex_unlock(&sync_data->mutex);
       continue;
     }
+    // The claimed slots were laid out before they were handed out, under the
+    // mutex, and nothing rewrites them until the round folds, which needs
+    // these very samples; they are safe to read without the lock.
     const BAIRound *round =
-        &sync_data->rounds[round_number % BAI_SCHEDULE_ROUNDS];
-    unsigned char *record =
-        round->records != NULL
-            ? round->records + (size_t)slot * sync_data->record_size
-            : NULL;
+        &sync_data->rounds[claim.round_number % BAI_SCHEDULE_ROUNDS];
     cpthread_mutex_unlock(&sync_data->mutex);
     bai_sched_idle_end(worker_stats);
-    const int64_t sample_start_ns = bai_sched_now();
-    const double sample =
-        rvs_sample_with_seed(rvs, (uint64_t)arm_index, reserved_seed,
-                             rvs_thread_index, NULL, record);
-    bai_sched_sample_done(worker_stats, sample_start_ns);
+    for (int claim_idx = 0; claim_idx < claim.num_slots; claim_idx++) {
+      const int slot = claim.first_slot + claim_idx;
+      unsigned char *record =
+          round->records != NULL
+              ? round->records + (size_t)slot * sync_data->record_size
+              : NULL;
+      const int64_t sample_start_ns = bai_sched_now();
+      sample_values[claim_idx] = rvs_sample_with_seed(
+          rvs, (uint64_t)round->arm_indices[slot], round->seeds[slot],
+          rvs_thread_index, NULL, record);
+      bai_sched_sample_done(worker_stats, sample_start_ns);
+    }
     bai_sync_lock(sync_data, worker_stats);
-    bai_schedule_complete_while_locked(&sample_args, round_number, slot,
-                                       sample);
+    for (int claim_idx = 0; claim_idx < claim.num_slots; claim_idx++) {
+      bai_schedule_complete_while_locked(&sample_args, claim.round_number,
+                                         claim.first_slot + claim_idx,
+                                         sample_values[claim_idx]);
+    }
     cpthread_mutex_unlock(&sync_data->mutex);
   }
   bai_sched_idle_end(worker_stats);
@@ -1212,7 +1058,6 @@ static inline void bai_sched_worker_merge(BAISyncData *sync_data,
   sim_stats->idle_ns += stats->idle_ns;
   sim_stats->idle_events += stats->idle_episodes;
   sim_stats->lock_wait_ns += stats->lock_wait_ns;
-  sim_stats->initial_barrier_ns += stats->initial_barrier_ns;
   sim_stats->avoid_prune_barrier_ns += stats->avoid_prune_barrier_ns;
   bai_sched_histogram_merge(&sync_data->sched_histogram, &stats->histogram);
   sync_data->sched_exit_ns_sum += exit_ns;
@@ -1232,13 +1077,16 @@ static inline void bai_sched_record(BAISyncData *sync_data,
   const BAISchedHistogram *histogram = &sync_data->sched_histogram;
   sim_stats->num_threads = bai_options->num_threads;
   sim_stats->num_arms = sync_data->num_arms;
-  sim_stats->round_size = sync_data->round_size;
+  sim_stats->round_size = BAI_SCHEDULE_ROUND_SIZE;
   sim_stats->lag_rounds = BAI_SCHEDULE_LAG;
   sim_stats->sample_limit = bai_options->sample_limit;
-  sim_stats->bai_samples = sync_data->sched_bai_completions;
+  sim_stats->bai_samples =
+      sync_data->sched_completions > sim_stats->initial_samples
+          ? sync_data->sched_completions - sim_stats->initial_samples
+          : 0;
   sim_stats->abandoned_samples =
-      sync_data->sched_bai_completions > sim_stats->folded_samples
-          ? sync_data->sched_bai_completions - sim_stats->folded_samples
+      sync_data->sched_completions > sim_stats->folded_samples
+          ? sync_data->sched_completions - sim_stats->folded_samples
           : 0;
   sim_stats->wall_ns = bai_sched_now() - start_ns;
   sim_stats->tail_ns =
@@ -1260,14 +1108,6 @@ static inline void *bai_worker(void *args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)args;
   BAIWorkerSchedStats worker_stats;
   bai_sched_worker_init(&worker_stats);
-  bai_worker_initial_sample_loop(bai_worker_args, &worker_stats);
-#ifdef BAI_SCHED_STATS
-  const int64_t initial_barrier_start_ns = bai_sched_now();
-#endif
-  checkpoint_wait(bai_worker_args->checkpoint, bai_worker_args);
-#ifdef BAI_SCHED_STATS
-  worker_stats.initial_barrier_ns += bai_sched_now() - initial_barrier_start_ns;
-#endif
   bai_worker_round_loop(bai_worker_args, &worker_stats);
 #ifdef BAI_SCHED_STATS
   const int64_t exit_ns = bai_sched_now();
@@ -1299,9 +1139,6 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
 #endif
   bai_result_reset(bai_result, bai_options->time_limit_seconds);
 
-  Checkpoint *checkpoint =
-      checkpoint_create(bai_options->num_threads, bai_finish_initial_phase);
-
   BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control,
                                                 (int)rvs_get_num_rvs(rvs), rng);
   sync_data->record_size = rvs_get_sample_record_size(rvs);
@@ -1312,6 +1149,12 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     sync_data->avoid_prune_next_idx = 0;
   }
 
+  // The first rounds need no statistics, so the pipeline is filled before
+  // any worker starts.
+  BAISampleArgs sample_args =
+      bai_sample_args_create(sync_data, rvs, bai_options);
+  bai_sync_data_start_schedule(&sample_args, bai_options->sample_minimum);
+
   Checkpoint *avoid_prune_checkpoint =
       checkpoint_create(bai_options->num_threads, bai_avoid_prune_prebroadcast);
 
@@ -1320,7 +1163,6 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       .rvs = rvs,
       .bai_options = bai_options,
       .bai_logger = bai_logger,
-      .checkpoint = checkpoint,
       .avoid_prune_checkpoint = avoid_prune_checkpoint,
   };
 
@@ -1340,6 +1182,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     cpthread_join(worker_ids[thread_index]);
   }
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
+  bai_result_set_num_samples(bai_result,
+                             sync_data->num_total_samples_completed);
   bai_result_stop_timer(bai_result);
 #ifdef BAI_SCHED_STATS
   bai_sched_record(sync_data, bai_options, sched_start_ns);
@@ -1348,7 +1192,6 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   free(worker_ids);
   bai_sync_data_destroy(sync_data);
   checkpoint_destroy(avoid_prune_checkpoint);
-  checkpoint_destroy(checkpoint);
 }
 
 #endif

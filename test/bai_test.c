@@ -128,6 +128,7 @@ void test_bai_sample_limit(int num_threads) {
       expected_num_samples = num_rvs * bai_options.sample_minimum;
     }
     assert(rvs_get_total_samples(rvs) == expected_num_samples);
+    assert(bai_result_get_num_samples(bai_result) == expected_num_samples);
   }
   thread_control_destroy(thread_control);
   // The timer should stop once the BAI has finished.
@@ -175,8 +176,16 @@ void test_bai_win_pct_cutoff_helper(int num_threads,
     assert(bai_result_get_status(bai_result) ==
            BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
     assert(bai_result_get_best_arm(bai_result) == 1);
-    uint64_t expected_num_samples = num_rvs * bai_options.sample_minimum;
-    assert(rvs_get_total_samples(rvs) == expected_num_samples);
+    // The cutoff stops the sim as soon as the initial phase has folded, so
+    // the results hold exactly the initial phase. With several threads,
+    // later rounds may already be in flight when that fold runs; they are
+    // computed but discarded, so only the committed count is exact.
+    const uint64_t expected_num_samples = num_rvs * bai_options.sample_minimum;
+    assert(bai_result_get_num_samples(bai_result) == expected_num_samples);
+    assert(rvs_get_total_samples(rvs) >= expected_num_samples);
+    if (num_threads == 1) {
+      assert(rvs_get_total_samples(rvs) == expected_num_samples);
+    }
   }
   thread_control_destroy(thread_control);
   // The timer should stop once the BAI has finished.
