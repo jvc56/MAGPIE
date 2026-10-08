@@ -27,16 +27,52 @@
 #include "random_variable.h"
 #include <assert.h>
 #include <limits.h>
+#include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #define MINIMUM_VARIANCE 1e-10
+
+enum {
+  // Sample values are accumulated as integers scaled by
+  // 2^BAI_SAMPLE_FIXED_POINT_SHIFT so that the sums do not depend on the order
+  // samples complete in, which is what lets a multithreaded sim reproduce a
+  // single-threaded one exactly. Integer addition is exactly commutative and
+  // associative; double addition is not, so an identical multiset of samples
+  // summed in a different order gives last-bit-different means, which can tip
+  // the comparison between two near-tied arms.
+  BAI_SAMPLE_FIXED_POINT_SHIFT = 30,
+  // A single sample is rejected beyond this magnitude, well outside the range
+  // of any random variable this is used with, so that the llround below cannot
+  // be handed a value outside the range of int64_t.
+  BAI_SAMPLE_MAX_MAGNITUDE = 1 << 20,
+};
+
+#define BAI_SAMPLE_FIXED_POINT_SCALE                                           \
+  ((int64_t)1 << BAI_SAMPLE_FIXED_POINT_SHIFT)
+
+// samples_squared_sum accumulates the quantized value of (value * value), NOT
+// the square of the quantized value. Squaring after quantizing would
+// accumulate 2^60-scale terms and overflow int64 after only eight samples,
+// whereas quantizing the square gives it exactly the same bound as the value
+// sum.
+//
+// For sim utilities, which sim_utility_blend bounds to [0, 1], a quantized
+// sample and a quantized square are each at most 2^30, so both accumulators
+// stay exact past 8e9 samples (int64 holds about 9.22e18). bai() is generic
+// over RandomVariables, though, and the normal RVs the unit tests drive it
+// with are unbounded, so nothing here can bound an arbitrary RV's range in
+// advance. bai_accumulate_checked therefore fails loudly rather than silently
+// wrapping.
+static_assert(BAI_SAMPLE_FIXED_POINT_SHIFT < 62,
+              "BAI fixed-point scale must leave headroom in int64");
 
 // Internal BAI structs
 
 typedef struct BAIArmDatum {
   uint64_t num_samples;
-  double samples_sum;
-  double samples_squared_sum;
+  int64_t samples_sum;
+  int64_t samples_squared_sum;
   double mean;
   double var;
   double *Zs;
@@ -120,6 +156,48 @@ typedef struct BAISampleArgs {
   uint64_t initial_batch_next_total_index;
   int initial_batch_remaining;
 } BAISampleArgs;
+
+// Quantizes a sample value into the fixed-point integer domain the arm
+// accumulators use. Does not clamp to [0, 1]: sim samples are utilities in
+// that range, but bai() is generic over RandomVariables and the normal RVs
+// the unit tests drive it with are unbounded.
+static inline int64_t bai_quantize_sample(const double value) {
+  if (!(value >= -(double)BAI_SAMPLE_MAX_MAGNITUDE &&
+        value <= (double)BAI_SAMPLE_MAX_MAGNITUDE)) {
+    log_fatal("BAI sample value out of range: %f", value);
+  }
+  return llround(value * (double)BAI_SAMPLE_FIXED_POINT_SCALE);
+}
+
+// Adds to a fixed-point accumulator, failing loudly rather than silently
+// wrapping. See the overflow bound documented with
+// BAI_SAMPLE_FIXED_POINT_SHIFT.
+static inline void bai_accumulate_checked(int64_t *accumulator,
+                                          const int64_t addend) {
+  if ((addend > 0 && *accumulator > INT64_MAX - addend) ||
+      (addend < 0 && *accumulator < INT64_MIN - addend)) {
+    log_fatal("BAI sample accumulator overflowed");
+  }
+  *accumulator += addend;
+}
+
+// Derives mean and variance from the exact integer accumulators. The
+// floating-point work here runs on exact integer inputs in a fixed operation
+// order, so it is bit-reproducible for a given set of samples regardless of
+// the order they were added in.
+static inline void
+bai_arm_datum_recompute_mean_and_var(BAIArmDatum *arm_datum) {
+  const double inverse_scale = 1.0 / (double)BAI_SAMPLE_FIXED_POINT_SCALE;
+  const double num_samples = (double)arm_datum->num_samples;
+  arm_datum->mean =
+      (double)arm_datum->samples_sum * inverse_scale / num_samples;
+  arm_datum->var =
+      (double)arm_datum->samples_squared_sum * inverse_scale / num_samples -
+      arm_datum->mean * arm_datum->mean;
+  if (arm_datum->var < MINIMUM_VARIANCE) {
+    arm_datum->var = MINIMUM_VARIANCE;
+  }
+}
 
 static inline double bai_alt_lambda(const double mu1, const double sigma21,
                                     const double w1, const double mua,
@@ -330,16 +408,11 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
   bai_sync_data->num_total_samples_completed++;
   BAIArmDatum *sample_arm_datum = &arm_data[arm_index];
   sample_arm_datum->num_samples++;
-  sample_arm_datum->samples_sum += sample_value;
-  sample_arm_datum->samples_squared_sum += sample_value * sample_value;
-  sample_arm_datum->mean =
-      sample_arm_datum->samples_sum / sample_arm_datum->num_samples;
-  sample_arm_datum->var =
-      sample_arm_datum->samples_squared_sum / sample_arm_datum->num_samples -
-      sample_arm_datum->mean * sample_arm_datum->mean;
-  if (sample_arm_datum->var < MINIMUM_VARIANCE) {
-    sample_arm_datum->var = MINIMUM_VARIANCE;
-  }
+  bai_accumulate_checked(&sample_arm_datum->samples_sum,
+                         bai_quantize_sample(sample_value));
+  bai_accumulate_checked(&sample_arm_datum->samples_squared_sum,
+                         bai_quantize_sample(sample_value * sample_value));
+  bai_arm_datum_recompute_mean_and_var(sample_arm_datum);
 
   const int old_astar_index = bai_sync_data->astar_index;
   bai_sync_data->astar_index = 0;
