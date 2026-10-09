@@ -1498,6 +1498,49 @@ static inline bool bai_should_abandon_rounds(BAIResult *bai_result,
          status == BAI_RESULT_STATUS_TIMEOUT;
 }
 
+// Samples the claimed slots in order into sample_values, without the mutex.
+// A round-robin claim holds up to a batch of slots, so the clock is checked
+// before each one after the first: a timeout or interrupt stops this worker
+// within one sample rather than a whole batch, and the slots it leaves
+// unsampled are abandoned with the rest of the sim. Returns how many slots it
+// sampled and sets *abandoned when it stopped early. worker_stats is written
+// only in BAI_SCHED_STATS builds.
+// cppcheck-suppress constParameterPointer
+static inline int bai_worker_sample_claim(BAIWorkerSchedStats *worker_stats,
+                                          const BAIWorkerArgs *bai_worker_args,
+                                          const BAIClaim *claim,
+                                          double *sample_values,
+                                          bool *abandoned) {
+  BAISyncData *sync_data = bai_worker_args->sync_data;
+  const int rvs_thread_index = bai_worker_rvs_thread_index(bai_worker_args);
+  // The claimed slots were laid out before they were handed out, under the
+  // mutex, and nothing rewrites them until the round folds, which needs
+  // these very samples; they are safe to read without the lock.
+  const BAIRound *round =
+      &sync_data->rounds[claim->round_number % BAI_SCHEDULE_ROUNDS];
+  int num_sampled = 0;
+  while (num_sampled < claim->num_slots) {
+    if (num_sampled > 0 &&
+        bai_should_abandon_rounds(sync_data->bai_result,
+                                  sync_data->thread_control)) {
+      *abandoned = true;
+      break;
+    }
+    const int slot = claim->first_slot + num_sampled;
+    unsigned char *record =
+        round->records != NULL
+            ? round->records + (size_t)slot * sync_data->record_size
+            : NULL;
+    const int64_t sample_start_ns = bai_sched_now();
+    sample_values[num_sampled] = rvs_sample_with_seed(
+        bai_worker_args->rvs, (uint64_t)round->arm_indices[slot],
+        round->seeds[slot], rvs_thread_index, NULL, record);
+    bai_sched_sample_done(worker_stats, sample_start_ns);
+    num_sampled++;
+  }
+  return num_sampled;
+}
+
 static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
                                          BAIWorkerSchedStats *worker_stats) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
@@ -1549,32 +1592,20 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
       cpthread_mutex_unlock(&sync_data->mutex);
       continue;
     }
-    // The claimed slots were laid out before they were handed out, under the
-    // mutex, and nothing rewrites them until the round folds, which needs
-    // these very samples; they are safe to read without the lock.
-    const BAIRound *round =
-        &sync_data->rounds[claim.round_number % BAI_SCHEDULE_ROUNDS];
     cpthread_mutex_unlock(&sync_data->mutex);
     bai_sched_idle_end(worker_stats);
-    for (int claim_idx = 0; claim_idx < claim.num_slots; claim_idx++) {
-      const int slot = claim.first_slot + claim_idx;
-      unsigned char *record =
-          round->records != NULL
-              ? round->records + (size_t)slot * sync_data->record_size
-              : NULL;
-      const int64_t sample_start_ns = bai_sched_now();
-      sample_values[claim_idx] = rvs_sample_with_seed(
-          rvs, (uint64_t)round->arm_indices[slot], round->seeds[slot],
-          rvs_thread_index, NULL, record);
-      bai_sched_sample_done(worker_stats, sample_start_ns);
-    }
+    const int num_sampled = bai_worker_sample_claim(
+        worker_stats, bai_worker_args, &claim, sample_values, &abandoned);
     bai_sync_lock(sync_data, worker_stats);
-    for (int claim_idx = 0; claim_idx < claim.num_slots; claim_idx++) {
+    for (int claim_idx = 0; claim_idx < num_sampled; claim_idx++) {
       bai_schedule_complete_while_locked(&sample_args, claim.round_number,
                                          claim.first_slot + claim_idx,
                                          sample_values[claim_idx]);
     }
     cpthread_mutex_unlock(&sync_data->mutex);
+    if (abandoned) {
+      break;
+    }
   }
   bai_sched_idle_end(worker_stats);
   cpthread_mutex_lock(&sync_data->mutex);

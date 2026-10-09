@@ -15,10 +15,12 @@
 #include "../src/util/string_util.h"
 #include <assert.h>
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum { NUM_UNIQUE_MEANS = 10000 };
 
@@ -254,6 +256,77 @@ void test_bai_time_limit(int num_threads) {
 
   assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_TIMEOUT);
 
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+  rvs_destroy(rvs);
+}
+
+// A round-robin claim holds a batch of slots. Once the clock has run out, a
+// worker stops after the slot it is on instead of running the rest of the
+// batch past the deadline. Drives the scheduler single-threaded, so it does
+// not depend on timing.
+void test_bai_claim_stops_within_one_sample(void) {
+  const double means_and_vars[] = {0.1, 1, 0.5, 1, 0.2, 1};
+  const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.01,
+      .sample_minimum = 50,
+      .sample_limit = 1000,
+      .num_threads = 1,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  bai_result_reset(bai_result, 0);
+  BAISyncData *sync_data =
+      bai_sync_data_create(bai_result, thread_control, num_rvs);
+  sync_data->record_size = rvs_get_sample_record_size(rvs);
+  BAISampleArgs sample_args =
+      bai_sample_args_create(sync_data, rvs, &bai_options);
+  bai_sync_data_start_schedule(&sample_args, bai_options.sample_minimum);
+  const BAIWorkerArgs worker_args = {
+      .sync_data = sync_data,
+      .rvs = rvs,
+      .bai_options = &bai_options,
+      .thread_index = 0,
+  };
+  BAIWorkerSchedStats worker_stats;
+  memset(&worker_stats, 0, sizeof(worker_stats));
+  double sample_values[BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH];
+
+  // With no time limit the whole claim is sampled.
+  BAIClaim claim;
+  bool claimed = bai_schedule_claim_while_locked(sync_data, &claim);
+  assert(claimed);
+  assert(claim.num_slots == BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH);
+  bool abandoned = false;
+  int num_sampled = bai_worker_sample_claim(&worker_stats, &worker_args, &claim,
+                                            sample_values, &abandoned);
+  assert(num_sampled == claim.num_slots);
+  assert(!abandoned);
+
+  // Once the clock has run out, only the slot already started is sampled.
+  bai_result_reset(bai_result, 1e-9);
+  ctime_nap(0.01);
+  claimed = bai_schedule_claim_while_locked(sync_data, &claim);
+  assert(claimed);
+  assert(claim.num_slots == BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH);
+  (void)claimed;
+  num_sampled = bai_worker_sample_claim(&worker_stats, &worker_args, &claim,
+                                        sample_values, &abandoned);
+  assert(num_sampled == 1);
+  assert(abandoned);
+  (void)num_sampled;
+
+  bai_sync_data_destroy(sync_data);
   bai_result_destroy(bai_result);
   thread_control_destroy(thread_control);
   rvs_destroy(rvs);
@@ -546,6 +619,7 @@ void test_bai(void) {
     test_bai_from_seed(bai_seed);
   } else {
     test_bai_abandon_folds_finished_samples();
+    test_bai_claim_stops_within_one_sample();
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {
