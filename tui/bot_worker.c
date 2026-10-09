@@ -1347,6 +1347,14 @@ void tui_bot_worker_start(TuiGameState *state) {
   if (state == NULL || state->bot_started) {
     return;
   }
+  // Without a win% table the computer can't simulate; it still plays,
+  // choosing by equity alone. Say so rather than play weaker silently.
+  const char *missing = tui_game_state_win_pct_missing(state);
+  if (missing != NULL) {
+    pthread_mutex_lock(&state->mutex);
+    tui_game_state_notice(state, missing);
+    pthread_mutex_unlock(&state->mutex);
+  }
   if (pthread_create(&state->bot_thread, NULL, bot_thread_main, state) == 0) {
     state->bot_started = true;
   }
@@ -1800,12 +1808,21 @@ const char *tui_analysis_unavailable_reason(const TuiGameState *state,
       entry->bag_before <= 0) {
     return "the bag is empty - use Solve";
   }
+  if (action == TUI_ANALYSIS_SIM) {
+    const char *missing = tui_game_state_win_pct_missing(state);
+    if (missing != NULL) {
+      return missing;
+    }
+  }
   if (action == TUI_ANALYSIS_RESUME) {
     if (!entry->analysis_snapshot.valid || entry->analysis_snapshot.is_static) {
       return "nothing saved to resume - use Simulate";
     }
     if (entry->analysis_snapshot.is_sim && entry->sim_results_saved == NULL) {
       return "no saved sim for this turn";
+    }
+    if (entry->analysis_snapshot.is_sim) {
+      return tui_game_state_win_pct_missing(state);
     }
   }
   return NULL;
