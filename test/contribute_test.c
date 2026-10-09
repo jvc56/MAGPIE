@@ -1267,6 +1267,18 @@ static char *simming_csw21_player(bool infer) {
   "\"peg_scenario_stride\": 1, \"peg_opp_model\": \"rational\", "              \
   "\"peg_nested\": false}"
 
+// A static CSW21 player whose endgame and pre-endgame solves run long: its
+// endgames 20 plies deep, its pre-endgames over the full default schedule.
+#define SLOW_SOLVING_CSW21_PLAYER                                              \
+  "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "                           \
+  "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "               \
+  "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "          \
+  "\"num_plays_recorded\": 5, \"movegen_margin\": 5.0, "                       \
+  "\"use_wordmap\": false, \"use_rit\": false, \"use_wit\": false, "           \
+  "\"endgame_plies\": 20, \"peg_max_bag\": 2, "                                \
+  "\"peg_stage_top_k\": [32, 16, 8, 4, 2], \"peg_scenario_stride\": 1, "       \
+  "\"peg_opp_model\": \"rational\", \"peg_nested\": false}"
+
 // The games or game_pairs request for `num_games` games between two players,
 // capturing every turn's position.
 static char *games_request(const char *job_type, int num_games,
@@ -1698,6 +1710,30 @@ static void test_a_task_is_stopped_at_its_time_limit(void) {
   const double elapsed = ctimer_elapsed_seconds(&timer);
   assert(contribute_deadline_finish(deadline));
   assert(elapsed >= 1.0 && elapsed < 120.0);
+  assert(thread_control_get_status(run_control) ==
+         THREAD_CONTROL_STATUS_STARTED);
+  free(result);
+  error_stack_reset(error_stack);
+  json_destroy(request);
+
+  // Players whose solves run far past the limit: the stop reaches the solve
+  // running when it comes, which hands back no move, and the game plays out
+  // on static plays -- not a fatal "failed to solve" -- so the task is back
+  // within moments of its limit.
+  text = games_request("games", 1000000, NULL, SLOW_SOLVING_CSW21_PLAYER,
+                       SLOW_SOLVING_CSW21_PLAYER);
+  request = json_parse(text, error_stack);
+  free(text);
+  assert(error_stack_is_empty(error_stack));
+  ctimer_start(&timer);
+  deadline = contribute_deadline_start(run_control, 1.5);
+  assert(config_contribute_execute(task_config, "games", request, 2, NULL,
+                                   &result, &movegens, error_stack));
+  const double solving_elapsed = ctimer_elapsed_seconds(&timer);
+  assert(contribute_deadline_finish(deadline));
+  printf("a solving task stopped at its 1.5 s limit returned after %.2f s\n",
+         solving_elapsed);
+  assert(solving_elapsed >= 1.5 && solving_elapsed < 10.0);
   assert(thread_control_get_status(run_control) ==
          THREAD_CONTROL_STATUS_STARTED);
   free(result);

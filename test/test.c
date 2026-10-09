@@ -5,6 +5,7 @@
 #include "alias_method_test.h"
 #include "alphabet_test.h"
 #include "analyze_test.h"
+#include "autoplay_solvers_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
 #include "bai_sched_test.h"
@@ -142,6 +143,7 @@ static TestEntry test_table[] = {
     {"gcg", test_gcg},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},
+    {"apsolvers", test_autoplay_solvers},
     {"contribute", test_contribute},
     {"words", test_words},
     {"wordprune", test_word_prune},

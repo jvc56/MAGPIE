@@ -31,6 +31,24 @@ enum {
   AUTOPLAY_SOLVER_EQUITY_LIST_CAP = 16384,
 };
 
+// Whether the run the solve belongs to was asked to stop: by the user, or by
+// a contribute task's time limit.
+static bool autoplay_solver_stopped(ThreadControl *run_thread_control) {
+  return run_thread_control != NULL &&
+         thread_control_get_status(run_thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
+// The solve's own thread control, which the solver sets and reads as it
+// likes, linked to the run's so a stop of the run stops the solve.
+static ThreadControl *
+autoplay_solver_thread_control_create(ThreadControl *run_thread_control) {
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_parent(thread_control, run_thread_control);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  return thread_control;
+}
+
 struct AutoplaySolverCtx {
   EndgameCtx *endgame_ctx;
   EndgameResults *endgame_results;
@@ -165,10 +183,10 @@ static double autoplay_solver_current_spread(const Game *game) {
 
 static const Move *autoplay_solver_solve_endgame(
     AutoplaySolverCtx *ctx, const AutoplaySolverSettings *settings, Game *game,
-    TranspositionTable *shared_tt, int num_threads, uint64_t seed, bool record,
-    ErrorStack *error_stack) {
-  ThreadControl *thread_control = thread_control_create();
-  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+    TranspositionTable *shared_tt, int num_threads, uint64_t seed,
+    ThreadControl *run_thread_control, bool record, ErrorStack *error_stack) {
+  ThreadControl *thread_control =
+      autoplay_solver_thread_control_create(run_thread_control);
   EndgameArgs endgame_args;
   endgame_args_fill(
       thread_control, game, /*tt_fraction_of_mem=*/0.0, settings->endgame_plies,
@@ -189,7 +207,8 @@ static const Move *autoplay_solver_solve_endgame(
   endgame_solve(&ctx->endgame_ctx, &endgame_args, ctx->endgame_results,
                 error_stack);
   thread_control_destroy(thread_control);
-  if (!error_stack_is_empty(error_stack)) {
+  if (!error_stack_is_empty(error_stack) ||
+      autoplay_solver_stopped(run_thread_control)) {
     return NULL;
   }
   const PVLine *pv_line =
@@ -285,13 +304,12 @@ static void autoplay_solver_record_peg(AutoplaySolverCtx *ctx, Game *game,
   };
 }
 
-static const Move *
-autoplay_solver_solve_peg(AutoplaySolverCtx *ctx,
-                          const AutoplaySolverSettings *settings, Game *game,
-                          TranspositionTable *shared_tt, int num_threads,
-                          bool record, ErrorStack *error_stack) {
-  ThreadControl *thread_control = thread_control_create();
-  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+static const Move *autoplay_solver_solve_peg(
+    AutoplaySolverCtx *ctx, const AutoplaySolverSettings *settings, Game *game,
+    TranspositionTable *shared_tt, int num_threads,
+    ThreadControl *run_thread_control, bool record, ErrorStack *error_stack) {
+  ThreadControl *thread_control =
+      autoplay_solver_thread_control_create(run_thread_control);
   PegArgs peg_args;
   peg_args_fill(
       game, thread_control, num_threads > 0 ? num_threads : 1,
@@ -317,6 +335,11 @@ autoplay_solver_solve_peg(AutoplaySolverCtx *ctx,
   peg_solve(&peg_args, &result, error_stack);
   thread_control_destroy(thread_control);
   if (error_stack_is_empty(error_stack) &&
+      autoplay_solver_stopped(run_thread_control)) {
+    peg_result_destroy(&result);
+    return NULL;
+  }
+  if (error_stack_is_empty(error_stack) &&
       (result.n_top_cands == 0 || result.best_win < 0.0)) {
     error_stack_push(error_stack, ERROR_STATUS_AUTOPLAY_SOLVER_NO_MOVE,
                      string_duplicate("the pre-endgame solve chose no move"));
@@ -336,15 +359,20 @@ autoplay_solver_solve_peg(AutoplaySolverCtx *ctx,
 const Move *autoplay_solver_solve(AutoplaySolverCtx *ctx,
                                   const AutoplaySolverSettings *settings,
                                   Game *game, TranspositionTable *shared_tt,
-                                  int num_threads, uint64_t seed, bool record,
-                                  ErrorStack *error_stack) {
+                                  int num_threads, uint64_t seed,
+                                  ThreadControl *run_thread_control,
+                                  bool record, ErrorStack *error_stack) {
   ctx->analysis = (SolverAnalysis){0};
+  if (autoplay_solver_stopped(run_thread_control)) {
+    return NULL;
+  }
   if (bag_get_letters(game_get_bag(game)) == 0) {
-    return autoplay_solver_solve_endgame(
-        ctx, settings, game, shared_tt, num_threads, seed, record, error_stack);
+    return autoplay_solver_solve_endgame(ctx, settings, game, shared_tt,
+                                         num_threads, seed, run_thread_control,
+                                         record, error_stack);
   }
   return autoplay_solver_solve_peg(ctx, settings, game, shared_tt, num_threads,
-                                   record, error_stack);
+                                   run_thread_control, record, error_stack);
 }
 
 const SolverAnalysis *

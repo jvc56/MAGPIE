@@ -1078,7 +1078,18 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
         autoplay_worker->args.solver_num_threads,
         autoplay_solver_seed(game_runner->seed, game_runner->turn_number,
                              player_on_turn_index),
+        autoplay_worker->shared_data->thread_control,
         autoplay_worker->captures_positions, error_stack);
+    if (!solved && error_stack_is_empty(error_stack)) {
+      // The run was stopped -- by the user, or a contribute task's time limit
+      // -- before or during the solve, which chose nothing. The run is being
+      // abandoned (a task's results are discarded), so the game plays out on
+      // static plays, as a stopped simulation's turn does: every later solve
+      // and simulation returns at once.
+      return get_top_move_for_player_on_turn(
+          game_runner->game, autoplay_worker->move_lists[player_on_turn_index],
+          autoplay_worker->captures_positions);
+    }
     if (!error_stack_is_empty(error_stack)) {
       error_stack_print_and_reset(error_stack);
       log_fatal("autoplay worker %d failed to solve for player %d on turn %d "

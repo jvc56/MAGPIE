@@ -5,6 +5,7 @@
 #include "../ent/autoplay_solver_settings.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
+#include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
@@ -28,22 +29,30 @@ bool autoplay_solver_applies(const AutoplaySolverSettings *settings,
 // to play, owned by `ctx` and valid until its next solve. Only call when
 // autoplay_solver_applies says so.
 //
-// Every solve runs with `num_threads` threads, no time limit, and the endgame
-// depth / PEG schedule `settings` states. `shared_tt` is the run's endgame
-// transposition table, shared by every worker's endgame and PEG leaf solves.
-// `seed` seeds the solve; a nonzero seed derived from the task makes runs as
-// consistent as multithreading allows, never reproducible.
+// Every solve runs with `num_threads` threads, no time limit,
+// and the endgame depth / PEG schedule `settings` states. `shared_tt` is the
+// run's endgame transposition table, shared by every worker's endgame and PEG
+// leaf solves. `seed` seeds the solve; a nonzero seed derived from the task
+// makes runs as consistent as multithreading allows, never reproducible.
+//
+// `run_thread_control` is the run's (NULL for none): a stop requested on it --
+// the user's, or a contribute task's time limit -- stops the solve, which then
+// returns NULL without an error, as it does when the run was stopped before
+// the solve began. The caller is abandoning the run, and plays on without the
+// solver.
 //
 // With `record` set, the solve's ranking is kept for the positions recorder
 // (autoplay_solver_get_analysis), each play with its static equity.
 //
-// Pushes an error, and returns NULL, if the solve produced no move: with no
-// time limit that is a bug, and the run should fail rather than fall back.
+// Pushes an error, and returns NULL, if a solve that was not stopped produced
+// no move: with no time limit that is a bug, and the run should fail rather
+// than fall back.
 const Move *autoplay_solver_solve(AutoplaySolverCtx *ctx,
                                   const AutoplaySolverSettings *settings,
                                   Game *game, TranspositionTable *shared_tt,
-                                  int num_threads, uint64_t seed, bool record,
-                                  ErrorStack *error_stack);
+                                  int num_threads, uint64_t seed,
+                                  ThreadControl *run_thread_control,
+                                  bool record, ErrorStack *error_stack);
 
 // The ranking behind the last solve, for the positions recorder. Valid until
 // the next solve, and only after one made with `record` set.
