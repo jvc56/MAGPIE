@@ -6,7 +6,10 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "move.h"
+#include <assert.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -50,19 +53,49 @@ static inline uint64_t heat_map_get_count(const HeatMap *hm, int row, int col,
   return hm->counts[heat_map_get_index(row, col, type)];
 }
 
-static inline void heat_map_add_move(HeatMap *hm, const Move *move) {
+// The heat map's view of a move: the squares it puts new tiles on. It is
+// small enough to keep in a sample record and add to the heat map later.
+typedef struct HeatMapPlacement {
+  // Bit i is set when the i-th square of the play gets a new tile; zero for a
+  // move that places no tiles.
+  uint32_t new_tile_mask;
+  uint8_t row_start;
+  uint8_t col_start;
+  uint8_t dir;
+  uint8_t length;
+} HeatMapPlacement;
+
+static_assert(BOARD_DIM <= 32, "HeatMapPlacement masks a play in 32 bits");
+
+static inline HeatMapPlacement heat_map_placement_from_move(const Move *move) {
+  HeatMapPlacement placement = {0};
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return placement;
+  }
+  placement.row_start = (uint8_t)move_get_row_start(move);
+  placement.col_start = (uint8_t)move_get_col_start(move);
+  placement.dir = (uint8_t)move_get_dir(move);
+  placement.length = (uint8_t)move_get_tiles_length(move);
+  for (int i = 0; i < placement.length; i++) {
+    if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
+      placement.new_tile_mask |= (uint32_t)1 << i;
+    }
+  }
+  return placement;
+}
+
+static inline void heat_map_add_placement(HeatMap *hm,
+                                          const HeatMapPlacement *placement,
+                                          const bool is_bingo) {
+  if (placement->new_tile_mask == 0) {
     return;
   }
-  const bool is_bingo = move_get_tiles_played(move) == RACK_SIZE;
-  const int row_inc = move_get_dir(move) == BOARD_VERTICAL_DIRECTION;
-  const int col_inc = move_get_dir(move) == BOARD_HORIZONTAL_DIRECTION;
+  const int row_inc = placement->dir == BOARD_VERTICAL_DIRECTION;
+  const int col_inc = placement->dir == BOARD_HORIZONTAL_DIRECTION;
   size_t current_offset = heat_map_get_index(
-      move_get_row_start(move), move_get_col_start(move), (heat_map_t)0);
-  const int move_len = move_get_tiles_length(move);
-  for (int i = 0; i < move_len; i++) {
-    const MachineLetter letter = move_get_tile(move, i);
-    if (letter != PLAYED_THROUGH_MARKER) {
+      placement->row_start, placement->col_start, (heat_map_t)0);
+  for (int i = 0; i < placement->length; i++) {
+    if (placement->new_tile_mask & ((uint32_t)1 << i)) {
       const size_t current_all_index = current_offset + HEAT_MAP_TYPE_ALL;
       hm->counts[current_all_index]++;
       if (hm->counts[current_all_index] >
@@ -82,6 +115,12 @@ static inline void heat_map_add_move(HeatMap *hm, const Move *move) {
     }
     current_offset += heat_map_get_index(row_inc, col_inc, (heat_map_t)0);
   }
+}
+
+static inline void heat_map_add_move(HeatMap *hm, const Move *move) {
+  const HeatMapPlacement placement = heat_map_placement_from_move(move);
+  heat_map_add_placement(hm, &placement,
+                         move_get_tiles_played(move) == RACK_SIZE);
 }
 
 static inline uint64_t heat_map_get_total_count(const HeatMap *hm) {

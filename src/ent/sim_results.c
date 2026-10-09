@@ -724,13 +724,11 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
   }
   HeatMap *heat_map = simmed_play_get_heat_map(simmed_play, ply_index);
   if (record) {
+    if (heat_map) {
+      ply.placement = heat_map_placement_from_move(move);
+    }
     record->plies[ply_index] = ply;
     record->num_plies = ply_index + 1;
-    if (heat_map) {
-      cpthread_mutex_lock(&simmed_play->mutex);
-      heat_map_add_move(heat_map, move);
-      cpthread_mutex_unlock(&simmed_play->mutex);
-    }
     return;
   }
   cpthread_mutex_lock(&simmed_play->mutex);
@@ -818,8 +816,12 @@ void simmed_play_apply_sample_record(SimmedPlay *simmed_play,
                                      const SimmedPlaySampleRecord *record) {
   cpthread_mutex_lock(&simmed_play->mutex);
   for (int ply_index = 0; ply_index < record->num_plies; ply_index++) {
-    simmed_play_apply_ply_while_locked(simmed_play, ply_index,
-                                       &record->plies[ply_index]);
+    const SimmedPlayPlyRecord *ply = &record->plies[ply_index];
+    simmed_play_apply_ply_while_locked(simmed_play, ply_index, ply);
+    HeatMap *heat_map = simmed_play_get_heat_map(simmed_play, ply_index);
+    if (heat_map) {
+      heat_map_add_placement(heat_map, &ply->placement, ply->is_bingo);
+    }
   }
   simmed_play_apply_equity_while_locked(simmed_play, record->equity_sample,
                                         record->leftover);

@@ -28,13 +28,14 @@ typedef struct SimmedPlayPlyRecord {
   Equity score;
   uint8_t count_type;
   bool is_bingo;
+  // Filled in only when the play keeps a heat map for this ply.
+  HeatMapPlacement placement;
 } SimmedPlayPlyRecord;
 
-// One sample's contributions to a SimmedPlay, captured instead of applied so
-// that they can be applied later, in a fixed order, or dropped. The BAI round
-// scheduler applies each round's records when it folds the round, so the
-// results hold exactly the folded samples. (The heat map is display-only and
-// is still updated as the sample runs.)
+// One sample's contributions to a SimmedPlay, heat map included, captured
+// instead of applied so that they can be applied later, in a fixed order, or
+// dropped. The BAI round scheduler applies each round's records when it folds
+// the round, so the results hold exactly the folded samples.
 typedef struct SimmedPlaySampleRecord {
   Equity equity_sample;
   Equity leftover;
