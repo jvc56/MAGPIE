@@ -3,6 +3,7 @@
   "job_id": "dc81790b-2289-4f0f-9640-3e1457dd56ad",
   "task_request": {
     "job_type": "game_pairs",
+    "threading_mode": "igp",
     "variant": "classic",
     "letter_distribution": "english",
     "board_layout": "standard15",

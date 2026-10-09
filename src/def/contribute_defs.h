@@ -30,9 +30,10 @@ enum { CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS = 600 };
 // The most threads a task runs on. Move generation keeps a pool of MAX_THREADS
 // per-thread generators, each held until its thread exits. A task at N threads
 // runs N autoplay workers, each with one simulation or inference thread at a
-// time (contribute plays one game per thread), plus the contribute thread,
-// which keeps its generator across tasks, and possibly the thread that called
-// contribute: 2N+2 at most. Past the pool, magpie exits on the task.
+// time (pgp: a game per thread), or one autoplay worker simulating on N (igp),
+// plus the contribute thread, which keeps its generator across tasks, and
+// possibly the thread that called contribute: 2N+2 at most. Past the pool,
+// magpie exits on the task.
 enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 
 // Task request fields, read in config.c's config_contribute_* functions.
@@ -76,6 +77,10 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 // same thing on every MAGPIE release.
 #define CONTRIBUTE_KEY_BINGO_BONUS "bingo_bonus"
 #define CONTRIBUTE_KEY_SIM_CUTOFF "sim_cutoff"
+// How a games or game_pairs task shares its threads when a player simulates:
+// one game at a time with every thread on its simulations (igp, the default
+// when absent), or a game per thread (pgp). See multi_threading_mode_t.
+#define CONTRIBUTE_KEY_THREADING_MODE "threading_mode"
 
 // Remaining per-player options (-l1/-l2, -w1/-w2, -rit1/-rit2, -wit1/-wit2,
 // -mi1/-mi2, -th1/-th2, -sa1/-sa2, -im1/-im2, -uwin1/-uwin2,

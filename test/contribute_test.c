@@ -676,11 +676,12 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   const JsonValue *games =
       load_task_request_fixture(BIRDTEST_GAMES_FIXTURE, &request);
   const char *const request_keys[] = {
-      CONTRIBUTE_KEY_VARIANT,      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
-      CONTRIBUTE_KEY_BOARD_LAYOUT, CONTRIBUTE_KEY_SEED,
-      CONTRIBUTE_KEY_NUM_GAMES,    CONTRIBUTE_KEY_CAPTURE_POSITIONS,
-      CONTRIBUTE_KEY_PLAYER1,      CONTRIBUTE_KEY_PLAYER2,
-      CONTRIBUTE_KEY_BINGO_BONUS,  CONTRIBUTE_KEY_SIM_CUTOFF,
+      CONTRIBUTE_KEY_VARIANT,        CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
+      CONTRIBUTE_KEY_BOARD_LAYOUT,   CONTRIBUTE_KEY_SEED,
+      CONTRIBUTE_KEY_NUM_GAMES,      CONTRIBUTE_KEY_CAPTURE_POSITIONS,
+      CONTRIBUTE_KEY_PLAYER1,        CONTRIBUTE_KEY_PLAYER2,
+      CONTRIBUTE_KEY_BINGO_BONUS,    CONTRIBUTE_KEY_SIM_CUTOFF,
+      CONTRIBUTE_KEY_THREADING_MODE,
   };
   assert_fixture_has_keys(request, request_keys,
                           sizeof(request_keys) / sizeof(request_keys[0]),
@@ -1207,6 +1208,115 @@ static void test_a_task_counts_its_move_generations(void) {
   assert(!none && movegens == 0);
   json_destroy(request);
   config_destroy(config);
+  error_stack_destroy(error_stack);
+}
+
+// The games or game_pairs request for `num_games` games between two players,
+// capturing every turn's position.
+static char *games_request(const char *job_type, int num_games,
+                           const char *threading_mode, const char *player1,
+                           const char *player2) {
+  char *mode =
+      threading_mode
+          ? get_formatted_string("\"threading_mode\": \"%s\", ", threading_mode)
+          : string_duplicate("");
+  char *request = get_formatted_string(
+      "{\"job_type\": \"%s\", \"variant\": \"classic\", %s"
+      "\"letter_distribution\": \"english\", "
+      "\"board_layout\": \"standard15\", \"seed\": \"23\", "
+      "\"num_games\": %d, \"capture_positions\": true, "
+      "\"capture_first_divergence\": false, \"bingo_bonus\": 50, "
+      "\"sim_cutoff\": 0.005, \"player1\": %s, \"player2\": %s}",
+      job_type, mode, num_games, player1, player2);
+  free(mode);
+  return request;
+}
+
+// A games or game_pairs task shares its threads as its request says: igp,
+// one game at a time with every thread on its simulations, unless it says
+// pgp. A request that states neither is igp; one that states something else
+// is refused. The other job types keep the reset's pgp, which none reads.
+static void test_a_games_task_takes_its_threading_mode(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -mtmode pgp");
+  ErrorStack *error_stack = error_stack_create();
+  struct {
+    const char *request;
+    bool accepted;
+    multi_threading_mode_t mode;
+  } cases[] = {
+      {"{}", true, MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM},
+      {"{\"threading_mode\": null}", true,
+       MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM},
+      {"{\"threading_mode\": \"igp\"}", true,
+       MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM},
+      {"{\"threading_mode\": \"pgp\"}", true,
+       MULTI_THREADING_MODE_PER_GAME_PARALLELISM},
+      {"{\"threading_mode\": \"IGP\"}", false,
+       MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM},
+      {"{\"threading_mode\": \"both\"}", false,
+       MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM},
+      {"{\"threading_mode\": 1}", false,
+       MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    const JsonValue *request = json_parse(cases[i].request, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    config_contribute_apply_threading_mode(config, request, error_stack);
+    if (error_stack_is_empty(error_stack) != cases[i].accepted) {
+      log_fatal("threading mode case %d: expected %s: %s", (int)i,
+                cases[i].accepted ? "accepted" : "refused", cases[i].request);
+    }
+    if (cases[i].accepted) {
+      assert(config_get_multi_threading_mode(config) == cases[i].mode);
+    }
+    error_stack_reset(error_stack);
+    json_destroy(request);
+  }
+  config_destroy(config);
+
+  // Through the executor: a games task with no mode runs igp even after a
+  // pgp one, and an opening-rack task after it runs with the reset's pgp.
+  Config *parent = config_create_default_test();
+  Config *task_config = config_create_for_contribute(parent, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const char *modes[] = {"pgp", NULL};
+  const multi_threading_mode_t expected[] = {
+      MULTI_THREADING_MODE_PER_GAME_PARALLELISM,
+      MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM};
+  for (int m = 0; m < 2; m++) {
+    char *text = games_request("games", 1, modes[m], STATIC_CSW21_PLAYER,
+                               STATIC_CSW21_PLAYER);
+    const JsonValue *request = json_parse(text, error_stack);
+    free(text);
+    assert(error_stack_is_empty(error_stack));
+    char *result = NULL;
+    uint64_t movegens = 0;
+    assert(config_contribute_execute(task_config, "games", request, 2, NULL,
+                                     &result, &movegens, error_stack));
+    assert(error_stack_is_empty(error_stack) && result);
+    assert(config_get_multi_threading_mode(task_config) == expected[m]);
+    free(result);
+    json_destroy(request);
+  }
+  const JsonValue *rack_request = json_parse(
+      "{\"job_type\": \"opening_rack\", \"variant\": \"classic\", "
+      "\"letter_distribution\": \"english\", "
+      "\"board_layout\": \"standard15\", \"seed\": \"7\", "
+      "\"bingo_bonus\": 50, \"sim_cutoff\": 0.005, \"racks\": [\"QI\"], "
+      "\"player\": " STATIC_CSW21_PLAYER "}",
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *result = NULL;
+  uint64_t movegens = 0;
+  assert(config_contribute_execute(task_config, "opening_rack", rack_request, 2,
+                                   NULL, &result, &movegens, error_stack));
+  assert(error_stack_is_empty(error_stack) && result);
+  assert(config_get_multi_threading_mode(task_config) ==
+         MULTI_THREADING_MODE_PER_GAME_PARALLELISM);
+  free(result);
+  json_destroy(rack_request);
+  config_destroy_for_contribute(task_config);
+  config_destroy(parent);
   error_stack_destroy(error_stack);
 }
 
@@ -2946,5 +3056,6 @@ void test_contribute(void) {
   test_the_decline_body_matches_the_decline_fixture();
   test_the_result_body_carries_movegens();
   test_a_task_counts_its_move_generations();
+  test_a_games_task_takes_its_threading_mode();
   test_an_unverifiable_assignment_is_refused();
 }

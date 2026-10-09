@@ -75,6 +75,15 @@ void config_contribute_apply_run_settings(Config *config,
                                           bool states_cutoff,
                                           ErrorStack *error_stack);
 
+// Applies a games or game_pairs request's threading_mode: igp when absent,
+// and refuses a value other than "igp" or "pgp". Exposed for testing.
+void config_contribute_apply_threading_mode(Config *config,
+                                            const JsonValue *request,
+                                            ErrorStack *error_stack);
+
+// The multi-threading mode a task config is set to. Exposed for testing.
+multi_threading_mode_t config_get_multi_threading_mode(const Config *config);
+
 // Reads the job-wide names every task request carries -- the variant, the
 // letter distribution and the board layout, plus leave generation's top-level
 // lexicon -- and refuses a request that leaves out the variant, the

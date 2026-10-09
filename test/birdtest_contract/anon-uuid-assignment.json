@@ -3,6 +3,7 @@
   "job_id": "92cf1ff9-576c-4f05-9624-073897801892",
   "task_request": {
     "job_type": "games",
+    "threading_mode": "igp",
     "variant": "classic",
     "letter_distribution": "english",
     "board_layout": "standard15",

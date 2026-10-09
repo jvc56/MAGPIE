@@ -679,6 +679,10 @@ game_variant_t config_get_game_variant(const Config *config) {
 
 WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
 
+multi_threading_mode_t config_get_multi_threading_mode(const Config *config) {
+  return config->multi_threading_mode;
+}
+
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
 }
@@ -9269,7 +9273,9 @@ void config_contribute_apply_player_settings(Config *config,
 // - the cutoff decides when a simulation treats two plays as equivalent and
 //   stops distinguishing them;
 // - intra-game parallelism hands a simming player's simulations every thread
-//   rather than one, which changes what a sampled simulation plays;
+//   rather than one, which changes what a sampled simulation plays (a games
+//   or game_pairs request states its mode, applied after this by
+//   config_contribute_apply_threading_mode);
 // - small plays are the endgame's move list shape, not a ranked list.
 //
 // print_interval is cosmetic, but a leftover one prints simulation progress
@@ -9327,6 +9333,40 @@ void config_contribute_apply_run_settings(Config *config,
     return;
   }
   config->cutoff = convert_user_cutoff_to_cutoff(user_cutoff);
+}
+
+// A games or game_pairs task's multi-threading mode, from its request's
+// threading_mode: "igp" (one game at a time, every thread on its
+// simulations) when absent -- birdtest's default, though not the CLI's -- or
+// "pgp" (a game per thread). It only matters when a player simulates or uses
+// the play chooser: autoplay plays static and solving players a game per thread
+// either way, so their games are the same under both. The other job types keep
+// the pgp that config_contribute_reset_shared_settings sets; none of them reads
+// it.
+void config_contribute_apply_threading_mode(Config *config,
+                                            const JsonValue *request,
+                                            ErrorStack *error_stack) {
+  const JsonValue *stated =
+      json_object_get(request, CONTRIBUTE_KEY_THREADING_MODE);
+  if (!stated || json_is_null(stated)) {
+    config->multi_threading_mode = MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM;
+    return;
+  }
+  const char *mode =
+      json_get_string_or_null(request, CONTRIBUTE_KEY_THREADING_MODE);
+  if (mode &&
+      strings_equal(mode, MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING)) {
+    config->multi_threading_mode = MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM;
+  } else if (mode &&
+             strings_equal(mode,
+                           MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING)) {
+    config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
+  } else {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+        get_formatted_string("server sent an unknown threading_mode: %.40s",
+                             mode ? mode : "(not a string)"));
+  }
 }
 
 // impl_move_gen and impl_sim are the entry points the CLI's generate and
@@ -9552,6 +9592,10 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   config_contribute_reset_shared_settings(config);
   config_contribute_apply_run_settings(config, request, /*states_cutoff=*/true,
                                        error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config_contribute_apply_threading_mode(config, request, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
