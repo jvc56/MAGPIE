@@ -27,6 +27,8 @@
 #include "../ent/leave_map.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat.h"
+#include "../ent/pat_eval.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
@@ -205,13 +207,78 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
                                            const Move *move) {
   return static_eval_get_move_equity_with_leave_value(
       &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
-      gen->opening_move_penalties, gen->board_number_of_tiles_played,
+      gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
+      pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
+      &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
       gen->number_of_tiles_in_bag,
+      leave_map_get_current_value(&gen->leave_map));
+}
+
+// Best-move recording computes the PAT term lazily: a candidate whose
+// equity without it, plus an upper bound on the term, is already strictly
+// below the best move's full equity cannot become the best move, so the
+// per-move lane rescans run only while the candidate can still contend
+// (see gen_pat_contender_equity). The stored equity of a skipped candidate
+// is an overestimate used only in a comparison it strictly loses.
+static inline bool gen_pat_is_active(const MoveGen *gen) {
+  return gen->pat_eval_ctx.weights != NULL;
+}
+
+// Static equity without the PAT term. Passes the mover's real active PAT
+// classes, so this and gen_get_static_equity differ only by that term.
+static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
+                                                       const Move *move) {
+  return static_eval_get_move_equity_with_leave_value(
+      &gen->ld, move, &gen->player_rack, &gen->opponent_rack,
+      gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
+      pat_eval_context_get_active_classes(&gen->pat_eval_ctx), NULL,
+      gen->board_number_of_tiles_played, gen->number_of_tiles_in_bag,
       leave_map_get_current_value(&gen->leave_map));
 }
 
 static inline const Move *gen_get_readonly_best_move(const MoveGen *gen) {
   return &gen->best_move_and_current_move[gen->best_move_index];
+}
+
+// The equity a best-move candidate is recorded with when PAT is active: its
+// equity without the term plus the term, which is exact unless the
+// candidate cannot reach the best move's equity. Then it is an overestimate
+// that still strictly loses the compare (see pat_eval_move_penalty_capped).
+static inline Equity gen_pat_contender_equity(const MoveGen *gen,
+                                              const Move *move,
+                                              const Rack *leave,
+                                              Equity equity_without_pat) {
+  const Equity best_equity = move_get_equity(gen_get_readonly_best_move(gen));
+  Equity floor = EQUITY_MIN_VALUE;
+  if (best_equity != EQUITY_INITIAL_VALUE) {
+    // The smallest term with which the candidate still reaches the best.
+    int64_t needed = (int64_t)best_equity - equity_without_pat;
+    if (needed < EQUITY_MIN_VALUE) {
+      needed = EQUITY_MIN_VALUE;
+    } else if (needed > EQUITY_MAX_VALUE) {
+      needed = EQUITY_MAX_VALUE;
+    }
+    floor = (Equity)needed;
+  }
+  return equity_without_pat +
+         pat_eval_move_penalty_capped(&gen->pat_eval_ctx, move, leave, floor);
+}
+
+// The PAT bound, utility correction included, for a WMP anchor's plays:
+// the lane's bound on the defense term, and the largest correction a play
+// of tiles_to_play tiles scoring at most highest_possible_score can get
+// (see pat_eval_utility_bound_for_play). The position-wide correction bound
+// assumes the highest-scoring play of any length, which almost no anchor
+// can make. Zero when the term is off.
+static inline Equity gen_wmp_anchor_pat_bound(const MoveGen *gen, int dir,
+                                              int lane, const Anchor *anchor) {
+  if (!gen_pat_is_active(gen)) {
+    return 0;
+  }
+  return pat_eval_lane_defense_bound(&gen->pat_eval_ctx, dir, lane) +
+         pat_eval_utility_bound_for_play(&gen->pat_eval_ctx,
+                                         anchor->tiles_to_play,
+                                         anchor->highest_possible_score);
 }
 
 static inline Move *gen_get_best_move(MoveGen *gen) {
@@ -275,7 +342,12 @@ static inline Equity gen_get_cutoff_equity_or_score(const MoveGen *gen) {
   return gen->cutoff_equity_or_score;
 }
 
+// The cutoff never falls between resets: the WMP subrack mask in wordmap_gen
+// drops a subrack whose leave bound is below the cutoff when it builds the
+// mask, and relies on the cutoff still being at least that high when the walk
+// reaches the subrack.
 static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
+  const Equity previous_cutoff = gen->cutoff_equity_or_score;
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
@@ -291,18 +363,22 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
     gen->cutoff_equity_or_score =
         gen->best_move_equity_or_score - gen->eq_margin_movegen;
-    return;
+    break;
   case MOVE_RECORD_BEST:;
     const Move *move = gen_get_readonly_best_move(gen);
     gen->cutoff_equity_or_score = (gen->move_sort_type == MOVE_SORT_EQUITY)
                                       ? move_get_equity(move)
                                       : move_get_score(move);
-    return;
+    break;
   case MOVE_RECORD_BEST_SMALL:
     // No Move object; best_move_equity_or_score is already the best score.
     gen->cutoff_equity_or_score = gen->best_move_equity_or_score;
-    return;
+    break;
   }
+  assert(gen->cutoff_equity_or_score >= previous_cutoff);
+  // previous_cutoff is read only by the assert above (compiled out in
+  // release).
+  (void)previous_cutoff;
 }
 
 static inline void
@@ -358,8 +434,16 @@ static inline void update_best_move_or_insert_into_movelist(
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record(current_move, move_type, leftstrip, rightstrip, score,
                         start_row, start_col, tiles_played, dir, strip);
-    move_equity_or_score =
-        get_move_equity_for_sort_type(gen, current_move, score);
+    if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen) &&
+        !gen->stop_on_threshold) {
+      const Equity equity_without_pat =
+          gen_get_static_equity_without_pat(gen, current_move);
+      move_equity_or_score = gen_pat_contender_equity(
+          gen, current_move, &gen->player_rack, equity_without_pat);
+    } else {
+      move_equity_or_score =
+          get_move_equity_for_sort_type(gen, current_move, score);
+    }
     move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
@@ -485,7 +569,13 @@ static inline void record_exchange(MoveGen *gen) {
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
   case MOVE_RECORD_BEST:
     if (gen->move_sort_type == MOVE_SORT_EQUITY) {
-      const Equity leave_value = leave_map_get_current_value(&gen->leave_map);
+      // An exchange's equity is its leave value plus the (<= 0, exactly
+      // known) PAT baseline; the cutoff already includes the best
+      // move's defense term, so compare like with like or every exchange
+      // within the baseline of the cutoff gets needlessly recorded.
+      const Equity leave_value =
+          leave_map_get_current_value(&gen->leave_map) +
+          pat_eval_non_placement_penalty(&gen->pat_eval_ctx);
       if (better_play_has_been_found(gen, leave_value)) {
         return;
       }
@@ -524,7 +614,10 @@ static void record_best_exchange_from_table(MoveGen *gen) {
   }
   const int leave_size = RACK_SIZE - tiles_exchanged;
   const Equity leave_value = gen->best_leaves[leave_size];
-  if (better_play_has_been_found(gen, leave_value)) {
+  // See record_exchange for why the defense baseline is included.
+  if (better_play_has_been_found(
+          gen,
+          leave_value + pat_eval_non_placement_penalty(&gen->pat_eval_ctx))) {
     return;
   }
   // Temporarily set leave_map so gen_get_static_equity reads the correct
@@ -661,7 +754,9 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
   case MOVE_SORT_EQUITY:
     return static_eval_get_move_equity_with_leave_value(
         &gen->ld, move, &gen->leave, &gen->opponent_rack,
-        gen->opening_move_penalties, gen->board_number_of_tiles_played,
+        gen->opening_move_word_penalties, gen->opening_move_letter_penalties,
+        pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
+        &gen->pat_eval_ctx, gen->board_number_of_tiles_played,
         gen->number_of_tiles_in_bag, leave_value);
   case MOVE_SORT_SCORE:
     return move_get_score(move);
@@ -725,24 +820,39 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     const bool has_precomputed_equity = get_wmp_equity_without_move(
         gen, score, leave_value, &precomputed_equity);
     if (has_precomputed_equity && !gen->stop_on_threshold) {
+      // The defense term is <= 0 except for the utility correction, whose
+      // largest possible value keeps these upper-bound skips sound.
+      const Equity equity_bound =
+          precomputed_equity + pat_eval_utility_bound(&gen->pat_eval_ctx);
       if (gen->move_record_type == MOVE_RECORD_ALL &&
           move_list_get_count(gen->move_list) ==
               move_list_get_capacity(gen->move_list) &&
-          precomputed_equity < move_list_peek_equity(gen->move_list)) {
+          equity_bound < move_list_peek_equity(gen->move_list)) {
         return;
       }
       if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST &&
           gen->best_move_equity_or_score != EQUITY_INITIAL_VALUE &&
-          precomputed_equity < gen_get_cutoff_equity_or_score(gen)) {
+          equity_bound < gen_get_cutoff_equity_or_score(gen)) {
         return;
       }
     }
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
-    move_equity_or_score =
-        has_precomputed_equity
-            ? precomputed_equity
-            : get_move_equity_for_sort_type_wmp(gen, move, leave_value);
+    if (has_precomputed_equity) {
+      // precomputed_equity is score plus leave only (see
+      // get_wmp_equity_without_move); the defense term still has to be
+      // added, exactly as get_move_equity_for_sort_type_wmp would. It is
+      // <= 0, so the list-full and cutoff skips above, which compared the
+      // precomputed value, remain sound upper-bound skips.
+      move_equity_or_score = precomputed_equity;
+      if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen)) {
+        move_equity_or_score +=
+            pat_eval_move_penalty(&gen->pat_eval_ctx, move, &gen->leave);
+      }
+    } else {
+      move_equity_or_score =
+          get_move_equity_for_sort_type_wmp(gen, move, leave_value);
+    }
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
       // This updates the cutoff move internally so no update will be pending
       // afterward.
@@ -757,15 +867,39 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     const bool has_precomputed_equity = get_wmp_equity_without_move(
         gen, score, leave_value, &precomputed_equity);
     if (has_precomputed_equity &&
-        precomputed_equity < move_get_equity(gen_get_readonly_best_move(gen))) {
+        precomputed_equity + pat_eval_utility_bound(&gen->pat_eval_ctx) <
+            move_get_equity(gen_get_readonly_best_move(gen))) {
       return;
     }
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
-    move_equity_or_score =
-        has_precomputed_equity
-            ? precomputed_equity
-            : get_move_equity_for_sort_type_wmp(gen, current_move, leave_value);
+    if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen) &&
+        !gen->stop_on_threshold) {
+      // See the lazy defense-term comment on gen_pat_is_active.
+      // precomputed_equity (when available) already equals what a fresh
+      // static_eval_get_move_equity_with_leave_value(..., pat_eval_ctx=NULL,
+      // ...) call would return here: WMP-generated plays that reach this
+      // point always have board_number_of_tiles_played > 0 (see
+      // get_wmp_equity_without_move), so the opening-adjustment term is
+      // always zero and the two computations coincide.
+      const Equity equity_without_pat =
+          has_precomputed_equity
+              ? precomputed_equity
+              : static_eval_get_move_equity_with_leave_value(
+                    &gen->ld, current_move, &gen->leave, &gen->opponent_rack,
+                    gen->opening_move_word_penalties,
+                    gen->opening_move_letter_penalties,
+                    pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
+                    NULL, gen->board_number_of_tiles_played,
+                    gen->number_of_tiles_in_bag, leave_value);
+      move_equity_or_score = gen_pat_contender_equity(
+          gen, current_move, &gen->leave, equity_without_pat);
+    } else {
+      move_equity_or_score = has_precomputed_equity
+                                 ? precomputed_equity
+                                 : get_move_equity_for_sort_type_wmp(
+                                       gen, current_move, leave_value);
+    }
     move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
@@ -993,30 +1127,54 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
   return true;
 }
 
+// The anchor's score bound plus this subrack's leave bounds the equity of
+// every play the subrack can make, so under equity sort a subrack whose bound
+// cannot reach the cutoff is skipped. Under score sort the cutoff is a score,
+// which the anchor-level check already bounded; adding a leave there would
+// skip subracks that still hold plays above the cutoff. This is an equity
+// upper bound independent of the anchor's highest_possible_score, so any
+// positive equity term added to the real evaluation must be added here too:
+// anchor_pat_bound (see gen_wmp_anchor_pat_bound) folds in the PAT term's
+// contribution, which includes the largest utility correction the anchor's
+// plays can get and so can be positive; the opening placement_adjustment
+// (always <= 0) is soundly
+// omitted; see static_eval_get_shadow_equity. The candidate mask applies the
+// same bound (see wordmap_gen_candidate_subracks).
+static inline __attribute__((always_inline)) bool
+wordmap_gen_leave_prunes_subrack(const MoveGen *gen, const Anchor *anchor,
+                                 int subrack_idx, Equity anchor_pat_bound) {
+  if (!gen->wmp_prune_subracks_by_leave) {
+    return false;
+  }
+  const Equity leave_value =
+      wmp_move_gen_get_leave_value(&gen->wmp_move_gen, subrack_idx);
+  return better_play_has_been_found(
+      gen, leave_value + anchor->highest_possible_score + anchor_pat_bound);
+}
+
 // Probes the WMP for one canonical subrack of the current anchor and records
 // every play its words allow. Returns true once the recording threshold has
 // been exceeded, so the caller stops scanning subracks.
 //
-// This has two callers, and with two callers clang keeps it out of line,
-// turning the hottest loop in wordmap_gen into a call per subrack (measured
-// at about -6% sim throughput with WIT off). Force the inline so that loop
-// fuses exactly as it did before the prune; the second copy lands in the
-// out-of-line masked scan below, away from generate_moves.
+// Its one call site is the subrack walk in wordmap_gen, which inlines into
+// generate_moves. Keep it the only one: a second inlined copy there costs
+// several percent of sim throughput, and with two call sites and no attribute
+// clang keeps it out of line, so the walk makes a call per subrack (about -6%
+// with WIT off).
 static inline __attribute__((always_inline)) bool
 wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
-                           bool lazy) {
+                           bool lazy, Equity anchor_pat_bound) {
   WMPMoveGen *wgen = &gen->wmp_move_gen;
-  // The anchor's score bound plus this subrack's leave bounds the equity of
-  // every play the subrack can make, so under equity sort a subrack whose
-  // bound cannot reach the cutoff is skipped. Under score sort the cutoff is
-  // a score, which the anchor-level check already bounded; adding a leave
-  // there would skip subracks that still hold plays above the cutoff.
+  // record_wmp_play prices every play below with wgen->leave_value. Only
+  // equity sort with tiles in the bag reads the subrack's leave, and that is
+  // when the leave prune is on; an empty bag sets it to 0 below, and score
+  // sort ignores it.
   if (gen->wmp_prune_subracks_by_leave) {
-    const Equity leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
-    if (better_play_has_been_found(gen, leave_value +
-                                            anchor->highest_possible_score)) {
-      return false;
-    }
+    wgen->leave_value = wmp_move_gen_get_leave_value(wgen, subrack_idx);
+  }
+  if (wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx,
+                                       anchor_pat_bound)) {
+    return false;
   }
   if (!wmp_move_gen_get_subrack_words(wgen, subrack_idx, lazy)) {
     return false;
@@ -1049,29 +1207,69 @@ wordmap_gen_record_subrack(MoveGen *gen, const Anchor *anchor, int subrack_idx,
   return false;
 }
 
-// Scans the subracks of an anchor whose WIT forbidden set is nonzero, skipping
-// each canonical subrack that holds a forbidden letter before it is probed.
-// Kept out of line on purpose: a second inlined copy of the subrack loop in
-// wordmap_gen (and through it in generate_moves) grows the hot function
-// enough to cost several percent of sim throughput with WIT off, where this
-// scan never runs. One call per anchor here is negligible.
-static __attribute__((noinline)) void
-wordmap_gen_forbidden_subracks(MoveGen *gen, const Anchor *anchor,
-                               uint64_t forbidden_subrack_low,
-                               uint64_t forbidden_subrack_high) {
-  const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  const int num_subrack_combinations =
-      wmp_move_gen_get_num_subrack_combinations(wgen);
-  for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
-       subrack_idx++) {
+// The candidate mask for subracks first_idx onward, from
+// wmp_move_gen_get_candidate_subracks with the leave prune as it stands now.
+//
+// better_play_has_been_found(gen, bound) is exactly bound < cutoff when it
+// holds for EQUITY_MIN_VALUE, and otherwise false for every bound a leave plus
+// a score can reach, so nothing is dropped. Dropping a subrack whose bound is
+// already below the cutoff is safe because the cutoff never falls while plays
+// are recorded: gen_update_cutoff_equity_or_score takes it from the best move,
+// which is only replaced by a move that compare_moves ranks higher and so has
+// at least its equity (MOVE_RECORD_BEST), or from best_move_equity_or_score,
+// which only grows (MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST). That function
+// asserts it. MOVE_RECORD_BEST_SMALL is score-sort only, so the prune is never
+// on there. The check also stays active once it is, since a real move's equity
+// never reaches EQUITY_MAX_VALUE. So wordmap_gen_leave_prunes_subrack would
+// skip the subrack when the walk reaches it.
+static inline __attribute__((always_inline)) uint64_t
+wordmap_gen_candidate_subracks(const MoveGen *gen, const Anchor *anchor,
+                               int first_idx, int count, bool lazy,
+                               Equity anchor_pat_bound,
+                               uint64_t *filter_misses) {
+  const bool prune_by_leave = gen->wmp_prune_subracks_by_leave &&
+                              better_play_has_been_found(gen, EQUITY_MIN_VALUE);
+  // The PAT bound joins the anchor's score bound, exactly as in
+  // wordmap_gen_leave_prunes_subrack; dropping it would be unsound, since
+  // it can be positive.
+  return wmp_move_gen_get_candidate_subracks(
+      &gen->wmp_move_gen, first_idx, count, lazy, prune_by_leave,
+      anchor->highest_possible_score + anchor_pat_bound,
+      gen_get_cutoff_equity_or_score(gen), filter_misses);
+}
+
+// Bit i of the result is set unless subrack first_idx + i holds a WIT
+// forbidden letter. Out of line: with WIT off the forbidden set is always
+// empty and this never runs.
+static __attribute__((noinline)) uint64_t wordmap_gen_allowed_subracks(
+    const WMPMoveGen *wgen, int first_idx, int count,
+    uint64_t forbidden_subrack_low, uint64_t forbidden_subrack_high) {
+  uint64_t allowed = 0;
+  for (int bit_idx = 0; bit_idx < count; bit_idx++) {
     const BitRack *subrack =
-        wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx);
-    if (bit_rack_intersects_mask(subrack, forbidden_subrack_low,
-                                 forbidden_subrack_high)) {
-      continue;
-    }
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, true)) {
-      return;
+        wmp_move_gen_get_nonplaythrough_subrack(wgen, first_idx + bit_idx);
+    allowed |= (uint64_t)(!bit_rack_intersects_mask(
+                   subrack, forbidden_subrack_low, forbidden_subrack_high))
+               << bit_idx;
+  }
+  return allowed;
+}
+
+// Resolves the filter misses in `misses`, bits counted from subrack
+// first_idx, as wordmap_gen_record_subrack would on reaching each one: unless
+// the leave check skips it, its lookup returns NULL and that is stored. Out
+// of line to keep the walk in generate_moves small; it has work only while a
+// lazily resolved rack still has unresolved subracks of the anchor's size.
+static __attribute__((noinline)) void
+wordmap_gen_resolve_filter_misses(MoveGen *gen, const Anchor *anchor,
+                                  int first_idx, uint64_t misses,
+                                  Equity anchor_pat_bound) {
+  while (misses != 0) {
+    const int subrack_idx = first_idx + wmp_move_gen_get_lowest_set_bit(misses);
+    misses &= misses - 1;
+    if (!wordmap_gen_leave_prunes_subrack(gen, anchor, subrack_idx,
+                                          anchor_pat_bound)) {
+      wmp_move_gen_resolve_filter_miss(&gen->wmp_move_gen, subrack_idx);
     }
   }
 }
@@ -1179,22 +1377,58 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   }
 
   // Neither whole-anchor rejection above needs combined subracks. Build
-  // them sequentially once for either surviving subrack scan below.
+  // them sequentially once for the subrack walk below.
   wmp_move_gen_build_playthrough_subracks(wgen);
 
-  // The forbidden set is the same for every subrack, so decide once per
-  // anchor. The masked scan lives out of line; this loop stays the one the
-  // generator ran before the prune existed, with no per-subrack test.
-  if (bit_rack_mask_has_letters(forbidden_subrack_low,
-                                forbidden_subrack_high)) {
-    wordmap_gen_forbidden_subracks(gen, anchor, forbidden_subrack_low,
-                                   forbidden_subrack_high);
-    return;
-  }
-  for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
-       subrack_idx++) {
-    if (wordmap_gen_record_subrack(gen, anchor, subrack_idx, lazy)) {
-      return;
+  // Visit only the candidate subracks, in index order; every other subrack
+  // would record nothing. A full scan would also have resolved each lazy
+  // filter miss to NULL when it reached it, under the cutoff left by the
+  // candidates below it. So each miss is resolved at that point: just before
+  // the next higher candidate is recorded, or after the last one. Misses past
+  // a threshold return stay unresolved, as they would have.
+  //
+  // The forbidden set is the same for every subrack, so the walk tests it
+  // once per chunk and pays nothing for it when it is empty, as it always is
+  // with WIT off.
+  const bool has_forbidden =
+      bit_rack_mask_has_letters(forbidden_subrack_low, forbidden_subrack_high);
+  // Upper bound on the PAT term of every move from this anchor (zero when
+  // the term is off). See wordmap_gen_leave_prunes_subrack.
+  const Equity anchor_pat_bound =
+      gen_wmp_anchor_pat_bound(gen, anchor->dir, anchor->row, anchor);
+  for (int first_idx = 0; first_idx < num_subrack_combinations;
+       first_idx += WMP_MOVE_GEN_SUBRACKS_PER_MASK) {
+    const int remaining = num_subrack_combinations - first_idx;
+    const int count = remaining < WMP_MOVE_GEN_SUBRACKS_PER_MASK
+                          ? remaining
+                          : WMP_MOVE_GEN_SUBRACKS_PER_MASK;
+    uint64_t filter_misses = 0;
+    uint64_t candidates = wordmap_gen_candidate_subracks(
+        gen, anchor, first_idx, count, lazy, anchor_pat_bound, &filter_misses);
+    if (has_forbidden) {
+      const uint64_t allowed = wordmap_gen_allowed_subracks(
+          wgen, first_idx, count, forbidden_subrack_low,
+          forbidden_subrack_high);
+      candidates &= allowed;
+      filter_misses &= allowed;
+    }
+    while (candidates != 0) {
+      const int bit_idx = wmp_move_gen_get_lowest_set_bit(candidates);
+      candidates &= candidates - 1;
+      const uint64_t misses_below = filter_misses & ((1ULL << bit_idx) - 1);
+      if (misses_below != 0) {
+        wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, misses_below,
+                                          anchor_pat_bound);
+        filter_misses ^= misses_below;
+      }
+      if (wordmap_gen_record_subrack(gen, anchor, first_idx + bit_idx, lazy,
+                                     anchor_pat_bound)) {
+        return;
+      }
+    }
+    if (filter_misses != 0) {
+      wordmap_gen_resolve_filter_misses(gen, anchor, first_idx, filter_misses,
+                                        anchor_pat_bound);
     }
   }
 }
@@ -1880,6 +2114,17 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
         &gen->ld, &gen->opponent_rack, best_leaves,
         gen->full_rack_descending_tile_scores, gen->number_of_tiles_in_bag,
         gen->number_of_letters_on_rack, gen->tiles_played);
+    // The PAT term is <= 0, so the bound would stay valid without
+    // it, but then every anchor's bound is loose by roughly the position's
+    // baseline penalty and anchors survive the cutoff on a penalty all of
+    // their moves will pay. The recursive generator's anchors take the
+    // per-lane bound (set when the lane is loaded; zero when the term is
+    // off). WMP slots take one with a tighter utility correction, from
+    // their tile count and score bound, once the anchor's shadow is done
+    // (see gen_add_pat_bounds_to_wmp_anchors).
+    if (!wmp_active) {
+      equity += gen->pat_lane_penalty_bound;
+    }
   }
   if (wmp_active) {
     const int word_length =
@@ -2922,7 +3167,6 @@ static inline void shadow_start_small(MoveGen *gen) {
   }
 
   const uint64_t original_rack_cross_set = gen->rack_cross_set;
-  rack_copy(&gen->full_player_rack, &gen->player_rack);
 
   const MachineLetter current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
@@ -2940,6 +3184,23 @@ static inline void shadow_start_small(MoveGen *gen) {
 // shadow playing was originally developed in wolges.
 // For more details about the shadow playing algorithm, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
+// Adds each touched WMP slot's PAT bound (see gen_wmp_anchor_pat_bound) to
+// its equity bound, which shadow_record left without the term.
+static void gen_add_pat_bounds_to_wmp_anchors(MoveGen *gen) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  for (int word_idx = 0; word_idx < WMP_ANCHOR_MASK_WORDS; word_idx++) {
+    uint64_t touched = wgen->touched_anchor_masks[word_idx];
+    while (touched != 0) {
+      const int slot_idx =
+          word_idx * 64 + wmp_move_gen_get_lowest_set_bit(touched);
+      touched &= touched - 1;
+      Anchor *anchor = &wgen->anchors[slot_idx];
+      anchor->highest_possible_equity += gen_wmp_anchor_pat_bound(
+          gen, gen->dir, gen->current_row_index, anchor);
+    }
+  }
+}
+
 void shadow_play_for_anchor(MoveGen *gen, int col) {
   // Shadow playing is designed to find the best plays first. When we find plays
   // for endgame using MOVE_RECORD_ALL_SMALL, we need to find all of the plays,
@@ -3000,6 +3261,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
   shadow_start(gen);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen)) {
+      gen_add_pat_bounds_to_wmp_anchors(gen);
+    }
     // A one-square perpendicular shadow may touch no slot here (its
     // playthrough anchor is emitted in the opposite orientation); walking an
     // empty touched mask is already a no-op.
@@ -3068,6 +3332,8 @@ void shadow_by_orientation(MoveGen *gen) {
         gen->board, gen->current_row_index, gen->dir, gen->cross_index);
     gen->wit_len_lane = board_get_wit_len_lane(
         gen->board, gen->current_row_index, gen->dir, gen->cross_index);
+    gen->pat_lane_penalty_bound = pat_eval_lane_penalty_bound(
+        &gen->pat_eval_ctx, gen->dir, gen->current_row_index);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
@@ -3287,13 +3553,40 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                                          gen->row_number_of_anchors_cache);
   gen->board_lanes = board_get_readonly_lanes(gen->board, gen->cross_index);
 
-  // opening_move_penalties is read only by gen_get_static_equity (the
-  // equity-recording paths). The endgame's small-record movegen types never
-  // read it, so skip the per-node 120-byte copy for them.
+  // opening_move_word/letter_penalties is read only by gen_get_static_equity
+  // (the equity-recording paths). The endgame's small-record movegen types
+  // never read it, so skip the per-node 240-byte copy for them.
   if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
       gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
       gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
-    board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+    board_copy_opening_penalties(gen->board, gen->opening_move_word_penalties,
+                                 gen->opening_move_letter_penalties);
+    // The PAT term is equity-only, bag-gated like the leave value,
+    // and requires valid cross sets (its scans read them). The weights are
+    // re-read from the player on every position load, so a training loop
+    // that rewrites them between generations needs no extra invalidation,
+    // and so are the player's PAT settings (see player_set_pat_usage).
+    const PATWeights *pat = player_get_pat(player);
+    if (pat && !args->disable_pat && !player_get_pat_disabled(player) &&
+        gen->move_sort_type == MOVE_SORT_EQUITY &&
+        gen->number_of_tiles_in_bag > 0 &&
+        board_get_cross_sets_valid(gen->board)) {
+      pat_eval_context_load(&gen->pat_eval_ctx, pat, gen->board_lanes, &gen->ld,
+                            &gen->player_rack,
+                            PAT_CLASS_MASK_ALL &
+                                ~args->pat_disabled_classes_mask &
+                                ~player_get_pat_disabled_classes_mask(player),
+                            rack_get_total_letters(&gen->opponent_rack));
+      pat_eval_context_set_kwg(&gen->pat_eval_ctx, gen->kwg);
+      pat_eval_context_set_utility(
+          &gen->pat_eval_ctx,
+          equity_to_int(player_get_score(player) - player_get_score(opponent)),
+          gen->number_of_tiles_in_bag);
+    } else {
+      pat_eval_context_disable(&gen->pat_eval_ctx);
+    }
+  } else {
+    pat_eval_context_disable(&gen->pat_eval_ctx);
   }
 
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
@@ -3467,6 +3760,8 @@ void gen_shadow(MoveGen *gen) {
 // Simplified gen_shadow for BEST_SMALL.
 // Skips leave_map setup and uses small shadow functions.
 void gen_shadow_small(MoveGen *gen) {
+  // Every anchor restores this same rack; snapshot it once per generation.
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
   anchor_heap_reset(&gen->anchor_heap);
 
   for (int dir = 0; dir < 2; dir++) {
@@ -3557,6 +3852,11 @@ gen_record_scoring_plays_impl(MoveGen *gen, bool lazy) {
       break;
     }
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
+    // The heap is ordered by highest_possible_equity, so one anchor whose
+    // bound cannot beat the cutoff ends the whole generation. This is only
+    // sound while every anchor's bound is a true upper bound on the equity
+    // of every move from that anchor; see the invariant comment on
+    // static_eval_get_shadow_equity for what that requires of new terms.
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
       break;
     }

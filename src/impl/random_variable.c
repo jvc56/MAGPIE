@@ -437,17 +437,30 @@ typedef struct Simmer {
   SimResults *sim_results;
 } Simmer;
 
-SimmerWorker *simmer_create_worker(const Game *game) {
+// A worker's copy of the game plays the sim's rollouts, so both of its
+// players take the simming player's rollout PAT settings.
+static void simmer_worker_set_rollout_pat(const SimmerWorker *simmer_worker,
+                                          const SimArgs *sim_args) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    player_set_pat_usage(game_get_player(simmer_worker->game, player_index),
+                         sim_args->pat_rollout_disabled,
+                         sim_args->pat_rollout_disabled_classes_mask);
+  }
+}
+
+SimmerWorker *simmer_create_worker(const SimArgs *sim_args) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
-  simmer_worker->game = game_duplicate(game);
+  simmer_worker->game = game_duplicate(sim_args->game);
+  simmer_worker_set_rollout_pat(simmer_worker, sim_args);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   return simmer_worker;
 }
 
-void simmer_reset_worker(SimmerWorker *simmer_worker, const Game *game) {
-  game_copy(simmer_worker->game, game);
+void simmer_reset_worker(SimmerWorker *simmer_worker, const SimArgs *sim_args) {
+  game_copy(simmer_worker->game, sim_args->game);
+  simmer_worker_set_rollout_pat(simmer_worker, sim_args);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -769,7 +782,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->num_threads));
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
-    simmer->workers[thread_index] = simmer_create_worker(sim_args->game);
+    simmer->workers[thread_index] = simmer_create_worker(sim_args);
   }
 
   simmer->win_pcts = sim_args->win_pcts;
@@ -826,7 +839,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
 
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
-    simmer_reset_worker(simmer->workers[thread_index], sim_args->game);
+    simmer_reset_worker(simmer->workers[thread_index], sim_args);
   }
 
   simmer->win_pcts = sim_args->win_pcts;

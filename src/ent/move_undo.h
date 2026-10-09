@@ -256,14 +256,7 @@ static inline void board_set_right_extension_set_with_blank_tracked(
 // Tracked version of board_update_anchors - must match original exactly
 static inline void board_update_anchors_tracked(Board *board, int row, int col,
                                                 MoveUndo *undo) {
-  // Save both direction squares, both cross indices, before modifying
-  for (int ci = 0; ci < 2; ci++) {
-    move_undo_save_square_at(undo, board, row, col, BOARD_HORIZONTAL_DIRECTION,
-                             ci);
-    move_undo_save_square_at(undo, board, row, col, BOARD_VERTICAL_DIRECTION,
-                             ci);
-  }
-
+  // Each tracked anchor setter saves both cross indices before modifying them.
   board_set_anchor_tracked(board, row, col, BOARD_HORIZONTAL_DIRECTION, false,
                            undo);
   board_set_anchor_tracked(board, row, col, BOARD_VERTICAL_DIRECTION, false,

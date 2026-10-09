@@ -65,7 +65,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-31
+          key: downloaded-data-files-32
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -102,9 +102,9 @@ jobs:
           - shard: config
             tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest
-            tests: "hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep"
+            tests: "hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep pat patfile patlexicon patutility patfeatures pateval"
           - shard: ap_rit
-            tests: "ap_rit"
+            tests: "ap_rit patwmp"
           - shard: simdet
             tests: "simdetigp"
     steps:
@@ -123,7 +123,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-31
+          key: downloaded-data-files-32
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -174,7 +174,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-31
+          key: downloaded-data-files-32
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
@@ -207,7 +207,7 @@ jobs:
           path: |
             data/*
             testdata/*
-          key: downloaded-data-files-31
+          key: downloaded-data-files-32
 
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
