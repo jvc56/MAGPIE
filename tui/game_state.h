@@ -562,6 +562,13 @@ typedef struct {
   // Spoiler-free review: with the History cursor on a turn, that turn's
   // move and every later turn stay hidden (tui_history_spoiler).
   bool hide_spoilers;
+  // Analysis settings: what to run when the History cursor lands on a
+  // turn (TuiAutoAnalyze), how long an analysis may run (seconds; 0 =
+  // until stopped), and how many threads searches use (0 = all cores
+  // but one).
+  int auto_analyze;
+  int analysis_time_limit;
+  int thread_limit;
 
   // Transient status-bar notice (e.g. "Copied CGP"). Rendered until
   // notice_expires_at (CLOCK_MONOTONIC); an all-zero timespec means
@@ -797,6 +804,12 @@ void tui_game_state_revalidate_history(TuiGameState *state);
 // none.
 void tui_history_move_to_engine(const char *display, char *out,
                                 size_t out_size);
+
+typedef enum {
+  TUI_AUTO_ANALYZE_OFF = 0,
+  TUI_AUTO_ANALYZE_KIBITZ = 1,
+  TUI_AUTO_ANALYZE_SIM = 2,
+} TuiAutoAnalyze;
 
 // What the spoiler setting hides of history entry `idx`: nothing, its
 // move (the turn under the History cursor: the rack shows, the play

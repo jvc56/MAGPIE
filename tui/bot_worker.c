@@ -66,11 +66,23 @@ enum {
   SIM_DEADLINE_GRACE_MS = 1000,
 };
 
-// Threads for an engine search (sim, endgame, PEG), leaving one core
-// for the UI thread's input and rendering so frames keep their rate.
-static int engine_threads(void) {
+// Threads for an engine search (sim, endgame, PEG): the Threads setting,
+// else every core but one, leaving it for the UI thread's input and
+// rendering so frames keep their rate.
+static int engine_threads(const TuiGameState *state) {
+  if (state->thread_limit > 0) {
+    return state->thread_limit;
+  }
   const int hw_cores = get_num_cores();
   return hw_cores > 1 ? hw_cores - 1 : 1;
+}
+
+// How long an analysis sim or solve may run: the Time limit setting, or
+// (none) until stopped.
+static double analysis_time_limit(const TuiGameState *state) {
+  return state->analysis_time_limit > 0
+             ? (double)state->analysis_time_limit
+             : (double)ANALYSIS_RESUME_TIME_LIMIT_SEC;
 }
 
 static void copy_str(char *dst, size_t dst_size, const char *src) {
@@ -520,7 +532,7 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   const bool wd_started =
       (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
 
-  const int num_threads = engine_threads();
+  const int num_threads = engine_threads(state);
   SimArgs args = {0};
   // Pull sim depth + breadth from state so the Watch setup modal
   // can tune them per game. Clamp to sensible bounds — a 0 ply
@@ -794,7 +806,7 @@ static bool run_endgame_on(TuiGameState *state, const Game *position,
   args.tt_fraction_of_mem = 0.10;
   args.plies = ENDGAME_PLIES;
   args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  args.num_threads = engine_threads();
+  args.num_threads = engine_threads(state);
   args.use_heuristics = true;
   // Ask the solver for a top-K leaderboard. Post-#530 the negamax
   // search uses topk_values[MAX_ENDGAME_DISPLAY_PVS], so that's the
@@ -938,7 +950,7 @@ static bool run_peg_on(TuiGameState *state, const Game *position,
   args.thread_control = tc;
   // peg_solve's calling thread drains the pool alongside its workers, so
   // one fewer worker keeps the search to engine_threads() cores.
-  const int peg_threads = engine_threads();
+  const int peg_threads = engine_threads(state);
   args.num_threads = peg_threads > 1 ? peg_threads - 1 : 1;
   args.time_budget_seconds = budget_sec;
   args.opp_model = PEG_OPP_RATIONAL;
@@ -1434,7 +1446,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   const bool wd_started =
       (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
 
-  const int num_threads = engine_threads();
+  const int num_threads = engine_threads(state);
   SimArgs args = {0};
   args.num_plies = fresh ? fresh_plies : sim_results_get_num_plies(results);
   args.move_list = candidates;
@@ -1455,7 +1467,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   args.bai_options.threshold = BAI_THRESHOLD_NONE;
   args.bai_options.sample_limit = (uint64_t)1e15;
   args.bai_options.sample_minimum = 1;
-  args.bai_options.time_limit_seconds = ANALYSIS_RESUME_TIME_LIMIT_SEC;
+  args.bai_options.time_limit_seconds = analysis_time_limit(state);
   args.bai_options.num_threads = num_threads;
   args.bai_options.cutoff = 0.005;
   args.bai_options.parent_worker_thread_index = 0;
@@ -1510,9 +1522,8 @@ static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
   pthread_mutex_unlock(&state->mutex);
 
   Move *scratch = move_create();
-  run_endgame_on(state, position, turn_idx,
-                 (double)ANALYSIS_RESUME_TIME_LIMIT_SEC, &state->analysis_stop,
-                 scratch);
+  run_endgame_on(state, position, turn_idx, analysis_time_limit(state),
+                 &state->analysis_stop, scratch);
   move_destroy(scratch);
 
   pthread_mutex_lock(&state->mutex);
@@ -1560,7 +1571,7 @@ static void analysis_resume_peg(TuiGameState *state, TuiHistoryEntry *entry,
   pthread_mutex_unlock(&state->mutex);
 
   Move *scratch = move_create();
-  run_peg_on(state, position, turn_idx, (double)ANALYSIS_RESUME_TIME_LIMIT_SEC,
+  run_peg_on(state, position, turn_idx, analysis_time_limit(state),
              &state->analysis_stop, scratch);
   move_destroy(scratch);
 
