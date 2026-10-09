@@ -2,7 +2,9 @@
 #define WMP_H
 
 #include "../compat/endian_conv.h"
+#include "../compat/malloc.h"
 #include "../def/board_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/wmp_defs.h"
 #include "../ent/bit_rack.h"
 #include "../util/fileproxy.h"
@@ -10,10 +12,12 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 // WordMap binary format:
 // ======================
 // 1 byte: major version number
@@ -22,7 +26,8 @@
 // Use the following either to dynamically allocate buffers for intermediate
 // and final results, or to validate that statically allocated buffers are
 // large enough.
-// 4 bytes: maximum size in bytes of word lookup results
+// 4 bytes: maximum size in bytes of word lookup results (a buffer for them
+//          needs WMP_WORD_BUFFER_SLACK_BYTES more)
 // 4 bytes: maximum size in bytes of blank pair results
 // xxxxxx: repeated WordOfSameLengthMap binary data
 
@@ -112,6 +117,20 @@ typedef struct WMPForLength {
   uint32_t num_double_blank_entries;
   uint32_t *double_blank_bucket_starts;
   WMPEntry *double_blank_map_entries;
+
+  // Blankless lookup index, built from the word entries when the WMP is
+  // loaded or made. It holds copies of the entries in buckets of
+  // WMP_INDEX_BUCKET_SLOTS, chosen by the top bits of wmp_index_hash; a full
+  // bucket spills into the next one, and an empty slot (an all-zero key) ends
+  // a probe. A lookup reads one bucket instead of a bucket start and then an
+  // entry.
+  WMPEntry *word_index_slots;
+  uint32_t word_index_bucket_mask;
+  uint32_t word_index_shift;
+  // Blocked Bloom filter over the same hash: each entry sets two bits of one
+  // 64-bit word. Most absent racks fail it without reading the index.
+  uint64_t *word_filter;
+  uint32_t word_filter_shift;
 } WMPForLength;
 
 typedef struct WMP {
@@ -227,11 +246,113 @@ static inline void read_wfl_double_blanks(WMPForLength *wfl, FILE *stream) {
                                wfl->num_double_blank_entries, stream);
 }
 
+// Read full BitRack from WMPEntry
+static inline BitRack wmp_entry_read_bit_rack(const WMPEntry *entry) {
+#if IS_LITTLE_ENDIAN
+  BitRack bit_rack;
+  memcpy(&bit_rack, entry->bit_rack_bytes, WMP_BITRACK_BYTES);
+  return bit_rack;
+#else
+  // Handle big-endian case
+  uint64_t low, high;
+  memcpy(&low, entry->bit_rack_bytes, 8);
+  memcpy(&high, entry->bit_rack_bytes + 8, 8);
+  low = le64toh(low);
+  high = le64toh(high);
+  return (BitRack){.low = low, .high = high};
+#endif
+}
+
+// Linear in the BitRack's two 64-bit halves, so it costs two independent
+// multiplies. Its top bits depend on every input bit: they choose the index
+// bucket and the filter word, and the bits just below them the filter bits.
+static inline uint64_t wmp_index_hash(const BitRack *bit_rack) {
+  return bit_rack_get_low_64(bit_rack) * WMP_INDEX_HASH_LOW_MULTIPLIER +
+         bit_rack_get_high_64(bit_rack) * WMP_INDEX_HASH_HIGH_MULTIPLIER;
+}
+
+static inline uint32_t wmp_index_shift_for_power_of_2(uint32_t power_of_2) {
+  uint32_t log2 = 0;
+  while ((1U << log2) < power_of_2) {
+    log2++;
+  }
+  return 64 - log2;
+}
+
+// The two bits a rack with this hash sets in its filter word.
+static inline uint64_t wmp_filter_word_bits(uint64_t hash,
+                                            uint32_t filter_shift) {
+  const uint64_t below_word_index = hash << (64 - filter_shift);
+  const uint64_t first_bit =
+      below_word_index >> (64 - WMP_FILTER_BIT_INDEX_BITS);
+  const uint64_t second_bit = (below_word_index << WMP_FILTER_BIT_INDEX_BITS) >>
+                              (64 - WMP_FILTER_BIT_INDEX_BITS);
+  return (1ULL << first_bit) | (1ULL << second_bit);
+}
+
+static inline bool wmp_entry_key_is_empty(const WMPEntry *entry) {
+  const BitRack key = wmp_entry_read_bit_rack(entry);
+  return (bit_rack_get_low_64(&key) | bit_rack_get_high_64(&key)) == 0;
+}
+
+static inline void wfl_build_word_index(WMPForLength *wfl) {
+  const uint32_t num_entries = wfl->num_word_entries;
+  const uint64_t min_slots =
+      (((uint64_t)num_entries * 100) + WMP_INDEX_MAX_FILL_PERCENT - 1) /
+      WMP_INDEX_MAX_FILL_PERCENT;
+  uint32_t num_buckets = WMP_INDEX_MIN_BUCKETS;
+  while ((uint64_t)num_buckets * WMP_INDEX_BUCKET_SLOTS < min_slots) {
+    num_buckets <<= 1;
+  }
+  const size_t slots_size =
+      (size_t)num_buckets * WMP_INDEX_BUCKET_SLOTS * sizeof(WMPEntry);
+  void *slots = NULL;
+  if (portable_aligned_alloc(&slots, WMP_INDEX_BUCKET_ALIGNMENT, slots_size) !=
+      0) {
+    log_fatal("could not allocate the wmp word index");
+  }
+  memset(slots, 0, slots_size);
+  wfl->word_index_slots = (WMPEntry *)slots;
+  wfl->word_index_bucket_mask = num_buckets - 1;
+  wfl->word_index_shift = wmp_index_shift_for_power_of_2(num_buckets);
+
+  uint32_t num_filter_words = WMP_FILTER_MIN_WORDS;
+  while ((uint64_t)num_filter_words * 64 <
+         (uint64_t)num_entries * WMP_FILTER_BITS_PER_ENTRY) {
+    num_filter_words <<= 1;
+  }
+  wfl->word_filter = calloc_or_die(num_filter_words, sizeof(uint64_t));
+  wfl->word_filter_shift = wmp_index_shift_for_power_of_2(num_filter_words);
+
+  for (uint32_t entry_idx = 0; entry_idx < num_entries; entry_idx++) {
+    const WMPEntry *entry = &wfl->word_map_entries[entry_idx];
+    const BitRack key = wmp_entry_read_bit_rack(entry);
+    const uint64_t hash = wmp_index_hash(&key);
+    wfl->word_filter[hash >> wfl->word_filter_shift] |=
+        wmp_filter_word_bits(hash, wfl->word_filter_shift);
+    uint32_t bucket_idx = (uint32_t)(hash >> wfl->word_index_shift);
+    bool placed = false;
+    while (!placed) {
+      WMPEntry *bucket =
+          &wfl->word_index_slots[(size_t)bucket_idx * WMP_INDEX_BUCKET_SLOTS];
+      for (int slot_idx = 0; slot_idx < WMP_INDEX_BUCKET_SLOTS; slot_idx++) {
+        if (wmp_entry_key_is_empty(&bucket[slot_idx])) {
+          bucket[slot_idx] = *entry;
+          placed = true;
+          break;
+        }
+      }
+      bucket_idx = (bucket_idx + 1) & wfl->word_index_bucket_mask;
+    }
+  }
+}
+
 static inline void read_wmp_for_length(WMP *wmp, uint32_t len, FILE *stream) {
   WMPForLength *wfl = &wmp->wfls[len];
   read_wfl_blankless_words(wfl, len, stream);
   read_wfl_blanks(wfl, stream);
   read_wfl_double_blanks(wfl, stream);
+  wfl_build_word_index(wfl);
 }
 
 static inline void wmp_load_from_filename_with_stream(WMP *wmp,
@@ -307,6 +428,9 @@ static inline void wmp_destroy(WMP *wmp) {
 
     free(wfl->double_blank_bucket_starts);
     free(wfl->double_blank_map_entries);
+
+    portable_aligned_free(wfl->word_index_slots);
+    free(wfl->word_filter);
   }
   free(wmp);
 }
@@ -330,8 +454,97 @@ static inline uint32_t max_inlined_words(uint32_t word_length) {
   return WMP_INLINE_VALUE_BYTES / word_length;
 }
 
+// For one word length, the last byte of every inline word slot after the
+// first, as masks over the low and high 8 inline bytes read little-endian.
+typedef struct WMPInlineSlotEnds {
+  uint64_t low_mask;
+  uint64_t high_mask;
+  // The byte count when no slot after the first ends in a letter: the length,
+  // or 0 for a length too long for any slot.
+  uint8_t first_slot_bytes;
+  // ceil(2^WMP_INLINE_INVERSE_LENGTH_SHIFT / length). For k words, the byte
+  // count times this is k << WMP_INLINE_INVERSE_LENGTH_SHIFT plus less than
+  // k * length <= WMP_INLINE_VALUE_BYTES, so the shift leaves exactly k.
+  uint8_t inverse_length;
+} WMPInlineSlotEnds;
+
+// The masks are written for two 64-bit halves. The shift keeps the inverse
+// length multiply exact for every byte count and the inverse length of 2
+// within a byte.
+static_assert(WMP_INLINE_VALUE_BYTES == 2 * (int)sizeof(uint64_t),
+              "the slot masks cover two 64-bit halves");
+static_assert(WMP_INLINE_VALUE_BYTES <= (1 << WMP_INLINE_INVERSE_LENGTH_SHIFT),
+              "the word count multiply must be exact for every byte count");
+static_assert((1 << WMP_INLINE_INVERSE_LENGTH_SHIFT) / 2 <= UINT8_MAX,
+              "the inverse length of 2 must fit in a byte");
+
+// Words have at least two letters, so the entries for lengths 0 and 1 are
+// never read and stay zero.
+static const WMPInlineSlotEnds
+    wmp_inline_slot_ends[WMP_INLINE_SLOT_TABLE_SIZE] = {
+        // Bytes 3, 5, 7, 9, 11, 13 and 15.
+        [2] = {0xFF00FF00FF000000ULL, 0xFF00FF00FF00FF00ULL, 2, 128},
+        // Bytes 5, 8, 11 and 14.
+        [3] = {0x0000FF0000000000ULL, 0x00FF0000FF0000FFULL, 3, 86},
+        // Bytes 7, 11 and 15.
+        [4] = {0xFF00000000000000ULL, 0xFF000000FF000000ULL, 4, 64},
+        // Bytes 9 and 14.
+        [5] = {0, 0x00FF00000000FF00ULL, 5, 52},
+        // Byte 11.
+        [6] = {0, 0x00000000FF000000ULL, 6, 43},
+        // Byte 13.
+        [7] = {0, 0x0000FF0000000000ULL, 7, 37},
+        // Byte 15.
+        [8] = {0, 0xFF00000000000000ULL, 8, 32},
+        // A single slot.
+        [9] = {0, 0, 9, 29},
+        [10] = {0, 0, 10, 26},
+        [11] = {0, 0, 11, 24},
+        [12] = {0, 0, 12, 22},
+        [13] = {0, 0, 13, 20},
+        [14] = {0, 0, 14, 19},
+        [15] = {0, 0, 15, 18},
+        [16] = {0, 0, 16, 16},
+        // Longer words never fit, and their entries stay zero.
+};
+
+// The number of bytes of a little-endian load up to and including its last
+// nonzero byte. Zero is counted as one byte; callers choose their own value
+// for it.
+static inline int wmp_bytes_through_last_nonzero(uint64_t bits) {
+  bits |= 1;
+#if defined(__has_builtin) && __has_builtin(__builtin_clzll)
+  return 8 - (__builtin_clzll(bits) >> 3);
+#else
+  int num_bytes = 8;
+  while ((bits >> 56) == 0) {
+    bits <<= 8;
+    num_bytes--;
+  }
+  return num_bytes;
+#endif
+}
+
+// The inlined words end with the last word slot that ends in a letter. Only
+// the last byte of each slot after the first is tested, so the bytes past the
+// words need not be zero.
 static inline int wmp_entry_number_of_inlined_bytes(const WMPEntry *entry,
                                                     int word_length) {
+  assert(word_length >= MINIMUM_WORD_LENGTH &&
+         word_length < WMP_INLINE_SLOT_TABLE_SIZE);
+#if IS_LITTLE_ENDIAN
+  const WMPInlineSlotEnds *slot_ends = &wmp_inline_slot_ends[word_length];
+  uint64_t low;
+  uint64_t high;
+  memcpy(&low, entry->bucket_or_inline, sizeof(low));
+  memcpy(&high, entry->bucket_or_inline + sizeof(low), sizeof(high));
+  low &= slot_ends->low_mask;
+  high &= slot_ends->high_mask;
+  const int low_bytes = low != 0 ? wmp_bytes_through_last_nonzero(low)
+                                 : slot_ends->first_slot_bytes;
+  return high != 0 ? (int)sizeof(low) + wmp_bytes_through_last_nonzero(high)
+                   : low_bytes;
+#else
   int num_bytes = (int)max_inlined_words(word_length) * word_length;
   while (num_bytes > word_length) {
     const int byte_idx = num_bytes - 1;
@@ -341,6 +554,16 @@ static inline int wmp_entry_number_of_inlined_bytes(const WMPEntry *entry,
     num_bytes -= word_length;
   }
   return num_bytes;
+#endif
+}
+
+static inline int wmp_entry_number_of_inlined_words(const WMPEntry *entry,
+                                                    int word_length) {
+  assert(word_length >= MINIMUM_WORD_LENGTH &&
+         word_length < WMP_INLINE_SLOT_TABLE_SIZE);
+  return (wmp_entry_number_of_inlined_bytes(entry, word_length) *
+          wmp_inline_slot_ends[word_length].inverse_length) >>
+         WMP_INLINE_INVERSE_LENGTH_SHIFT;
 }
 
 static inline int wmp_entry_write_inlined_blankless_words_to_buffer(
@@ -368,8 +591,7 @@ static inline const MachineLetter *
 wmp_entry_get_blankless_words(const WMPEntry *entry, const WMPForLength *wfl,
                               int word_length, int *num_words_out) {
   if (wmp_entry_is_inlined(entry)) {
-    *num_words_out =
-        wmp_entry_number_of_inlined_bytes(entry, word_length) / word_length;
+    *num_words_out = wmp_entry_number_of_inlined_words(entry, word_length);
     return entry->bucket_or_inline;
   }
   *num_words_out = (int)entry->num_words;
@@ -388,23 +610,6 @@ wmp_entry_write_blankless_words_to_buffer(const WMPEntry *entry,
       entry, wfl, word_length, buffer);
 }
 
-// Read full BitRack from WMPEntry
-static inline BitRack wmp_entry_read_bit_rack(const WMPEntry *entry) {
-#if IS_LITTLE_ENDIAN
-  BitRack bit_rack;
-  memcpy(&bit_rack, entry->bit_rack_bytes, WMP_BITRACK_BYTES);
-  return bit_rack;
-#else
-  // Handle big-endian case
-  uint64_t low, high;
-  memcpy(&low, entry->bit_rack_bytes, 8);
-  memcpy(&high, entry->bit_rack_bytes + 8, 8);
-  low = le64toh(low);
-  high = le64toh(high);
-  return (BitRack){.low = low, .high = high};
-#endif
-}
-
 // Write full BitRack to WMPEntry
 static inline void wmp_entry_write_bit_rack(WMPEntry *entry,
                                             const BitRack *bit_rack) {
@@ -421,50 +626,123 @@ static inline void wmp_entry_write_bit_rack(WMPEntry *entry,
 #endif
 }
 
-static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
-                                                 const BitRack *bit_rack) {
-  const uint32_t bucket_index =
-      bit_rack_get_bucket_index(bit_rack, wfl->num_word_buckets);
-  const uint32_t start = wfl->word_bucket_starts[bucket_index];
-  const uint32_t end = wfl->word_bucket_starts[bucket_index + 1];
-  for (uint32_t i = start; i < end; i++) {
-    const WMPEntry *entry = &wfl->word_map_entries[i];
-    const BitRack entry_bit_rack = wmp_entry_read_bit_rack(entry);
-    if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
-      return entry;
-    }
+// bits must be nonzero.
+static inline int wmp_lowest_set_bit(uint32_t bits) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+  return __builtin_ctz(bits);
+#else
+  int bit_idx = 0;
+  while ((bits & 1U) == 0) {
+    bits >>= 1;
+    bit_idx++;
   }
-  return NULL;
+  return bit_idx;
+#endif
 }
 
+// Probes the index from the hash's bucket. All of a bucket's slots are
+// compared before branching on the result.
+static inline const WMPEntry *wfl_index_get_entry(const WMPForLength *wfl,
+                                                  uint64_t hash,
+                                                  const BitRack *bit_rack) {
+  const uint64_t low = bit_rack_get_low_64(bit_rack);
+  const uint64_t high = bit_rack_get_high_64(bit_rack);
+  uint32_t bucket_idx = (uint32_t)(hash >> wfl->word_index_shift);
+  while (true) {
+    const WMPEntry *bucket =
+        &wfl->word_index_slots[(size_t)bucket_idx * WMP_INDEX_BUCKET_SLOTS];
+    uint32_t matching_slots = 0;
+    uint32_t empty_slots = 0;
+    for (int slot_idx = 0; slot_idx < WMP_INDEX_BUCKET_SLOTS; slot_idx++) {
+      const BitRack key = wmp_entry_read_bit_rack(&bucket[slot_idx]);
+      const uint64_t key_low = bit_rack_get_low_64(&key);
+      const uint64_t key_high = bit_rack_get_high_64(&key);
+      matching_slots |= (uint32_t)(((key_low ^ low) | (key_high ^ high)) == 0)
+                        << slot_idx;
+      empty_slots |= (uint32_t)((key_low | key_high) == 0) << slot_idx;
+    }
+    if (matching_slots != 0) {
+      return &bucket[wmp_lowest_set_bit(matching_slots)];
+    }
+    if (empty_slots != 0) {
+      return NULL;
+    }
+    bucket_idx = (bucket_idx + 1) & wfl->word_index_bucket_mask;
+  }
+}
+
+static inline bool wfl_filter_may_contain(const WMPForLength *wfl,
+                                          uint64_t hash) {
+  const uint64_t word = wfl->word_filter[hash >> wfl->word_filter_shift];
+  const uint64_t bits = wmp_filter_word_bits(hash, wfl->word_filter_shift);
+  return (word & bits) == bits;
+}
+
+static inline const WMPEntry *wfl_get_word_entry(const WMPForLength *wfl,
+                                                 const BitRack *bit_rack) {
+  const uint64_t hash = wmp_index_hash(bit_rack);
+  if (!wfl_filter_may_contain(wfl, hash)) {
+    return NULL;
+  }
+  return wfl_index_get_entry(wfl, hash, bit_rack);
+}
+
+// False only when the filter proves the blankless rack has no words of this
+// length, in which case wfl_get_word_entry returns NULL. It has no branch, so
+// a caller can test many racks back to back. It is safe to call on a rack
+// with a blank, where the answer means nothing; such a caller ignores the
+// answer rather than branching on the blank first.
+static inline bool wfl_blankless_rack_may_have_words(const WMPForLength *wfl,
+                                                     const BitRack *bit_rack) {
+  return wfl_filter_may_contain(wfl, wmp_index_hash(bit_rack));
+}
+
+// For a rack whose words are known to exist, the filter would only add a
+// load.
+static inline const WMPEntry *
+wfl_get_present_word_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
+  return wfl_index_get_entry(wfl, wmp_index_hash(bit_rack), bit_rack);
+}
+
+// Called for the letters a blank entry says complete a word, so the
+// blankless rack is known to be present. An inlined word list is copied with
+// one WMP_INLINE_VALUE_BYTES move, which can write up to
+// WMP_WORD_BUFFER_SLACK_BYTES past the words.
 static inline int wfl_write_blankless_words_to_buffer(const WMPForLength *wfl,
                                                       const BitRack *bit_rack,
                                                       int word_length,
                                                       uint8_t *buffer) {
-  const WMPEntry *entry = wfl_get_word_entry(wfl, bit_rack);
+  const WMPEntry *entry = wfl_get_present_word_entry(wfl, bit_rack);
   if (entry == NULL) {
     return 0;
   }
-  return wmp_entry_write_blankless_words_to_buffer(entry, wfl, word_length,
-                                                   buffer);
+  if (wmp_entry_is_inlined(entry)) {
+    memcpy(buffer, entry->bucket_or_inline, WMP_INLINE_VALUE_BYTES);
+    return wmp_entry_number_of_inlined_bytes(entry, word_length);
+  }
+  return wmp_entry_write_uninlined_blankless_words_to_buffer(
+      entry, wfl, word_length, buffer);
 }
 
+// Writes the words for each letter at or above min_ml that the blank
+// designates in the entry, in letter order. Each word rack is built in a
+// copy, so *bit_rack is never written.
 static inline int
 wmp_entry_write_blanks_to_buffer(const WMPEntry *entry, const WMPForLength *wfl,
-                                 BitRack *bit_rack, int word_length,
+                                 const BitRack *bit_rack, int word_length,
                                  MachineLetter min_ml, uint8_t *buffer) {
+  BitRack blankless_rack = *bit_rack;
+  bit_rack_set_letter_count(&blankless_rack, BLANK_MACHINE_LETTER, 0);
+  uint32_t letters = entry->blank_letters & ~((1U << min_ml) - 1U);
   int bytes_written = 0;
-  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
-  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
-  for (MachineLetter ml = min_ml; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-    if (entry->blank_letters & (1ULL << ml)) {
-      bit_rack_add_letter(bit_rack, ml);
-      bytes_written += wfl_write_blankless_words_to_buffer(
-          wfl, bit_rack, word_length, buffer + bytes_written);
-      bit_rack_take_letter(bit_rack, ml);
-    }
+  while (letters != 0) {
+    const MachineLetter ml = (MachineLetter)wmp_lowest_set_bit(letters);
+    letters &= letters - 1U;
+    BitRack word_rack = blankless_rack;
+    bit_rack_add_letter(&word_rack, ml);
+    bytes_written += wfl_write_blankless_words_to_buffer(
+        wfl, &word_rack, word_length, buffer + bytes_written);
   }
-  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 1);
   return bytes_written;
 }
 
@@ -555,7 +833,8 @@ wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
 }
 
 static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
-                                             BitRack *bit_rack, int word_length,
+                                             const BitRack *bit_rack,
+                                             int word_length,
                                              MachineLetter min_ml,
                                              uint8_t *buffer) {
   const WMPEntry *entry = wfl_get_blank_entry(wfl, bit_rack);
@@ -566,27 +845,34 @@ static inline int wfl_write_blanks_to_buffer(const WMPForLength *wfl,
                                           min_ml, buffer);
 }
 
+// Expands the first blank over the letters the entry designates, in letter
+// order, and the second over the same letter or later ones. Each one-blank
+// rack is built in a copy, so *bit_rack is never written.
 static inline int wmp_entry_write_double_blanks_to_buffer(
-    const WMPEntry *entry, const WMPForLength *wfl, BitRack *bit_rack,
+    const WMPEntry *entry, const WMPForLength *wfl, const BitRack *bit_rack,
     int word_length, uint8_t *buffer) {
+  BitRack one_blank_rack = *bit_rack;
+  bit_rack_set_letter_count(&one_blank_rack, BLANK_MACHINE_LETTER, 1);
+  // Bit 0 would be the blank itself.
+  uint32_t letters = entry->first_blank_letters & ~1U;
   int bytes_written = 0;
-  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 1);
-  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
-  for (MachineLetter ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-    if (entry->blank_letters & (1ULL << ml)) {
-      bit_rack_add_letter(bit_rack, ml);
-      bytes_written += wfl_write_blanks_to_buffer(wfl, bit_rack, word_length,
-                                                  ml, buffer + bytes_written);
-      bit_rack_take_letter(bit_rack, ml);
-    }
+  while (letters != 0) {
+    const MachineLetter ml = (MachineLetter)wmp_lowest_set_bit(letters);
+    letters &= letters - 1U;
+    BitRack blank_rack = one_blank_rack;
+    bit_rack_add_letter(&blank_rack, ml);
+    bytes_written += wfl_write_blanks_to_buffer(wfl, &blank_rack, word_length,
+                                                ml, buffer + bytes_written);
   }
-  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 2);
   return bytes_written;
 }
 
+// Writes the words of the entry's rack and returns the bytes they fill. The
+// buffer needs max_word_lookup_bytes plus WMP_WORD_BUFFER_SLACK_BYTES, as a
+// blank expansion can store past the words it returns.
 static inline int wmp_entry_write_words_to_buffer(const WMPEntry *entry,
                                                   const WMP *wmp,
-                                                  BitRack *bit_rack,
+                                                  const BitRack *bit_rack,
                                                   int word_length,
                                                   uint8_t *buffer) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
@@ -610,7 +896,10 @@ static inline int wmp_entry_write_words_to_buffer(const WMPEntry *entry,
   return result;
 }
 
-static inline int wmp_write_words_to_buffer(const WMP *wmp, BitRack *bit_rack,
+// Looks up the rack and writes its words like
+// wmp_entry_write_words_to_buffer, so the buffer needs the same slack.
+static inline int wmp_write_words_to_buffer(const WMP *wmp,
+                                            const BitRack *bit_rack,
                                             int word_length, uint8_t *buffer) {
   const WMPEntry *entry = wmp_get_word_entry(wmp, bit_rack, word_length);
   if (entry == NULL) {

@@ -1,6 +1,8 @@
 #include "wmp_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/def/bit_rack_defs.h"
+#include "../src/def/board_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/wmp_defs.h"
 #include "../src/ent/bit_rack.h"
@@ -19,8 +21,10 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 long get_file_size(const char *filename) {
   ErrorStack *error_stack = error_stack_create();
@@ -92,7 +96,8 @@ void test_short_and_long_words(void) {
 
   WMP *wmp = wmp_create_or_die("testdata", "CSW21_3or15");
 
-  MachineLetter *buffer = malloc_or_die(wmp->max_word_lookup_bytes);
+  MachineLetter *buffer =
+      malloc_or_die(wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES);
   BitRack inq = string_to_bit_rack(ld, "INQ");
   int bytes_written = wmp_write_words_to_buffer(wmp, &inq, 3, buffer);
   assert(bytes_written == 3);
@@ -125,6 +130,257 @@ void test_short_and_long_words(void) {
   config_destroy(config);
 }
 
+// The entry for bit_rack found the way the file lays the words out: through
+// the bucket starts, by the full BitRack mix.
+static const WMPEntry *get_entry_by_bucket_starts(const WMPForLength *wfl,
+                                                  const BitRack *bit_rack) {
+  const uint32_t bucket_idx =
+      bit_rack_get_bucket_index(bit_rack, wfl->num_word_buckets);
+  for (uint32_t entry_idx = wfl->word_bucket_starts[bucket_idx];
+       entry_idx < wfl->word_bucket_starts[bucket_idx + 1]; entry_idx++) {
+    const BitRack key =
+        wmp_entry_read_bit_rack(&wfl->word_map_entries[entry_idx]);
+    if (bit_rack_equals(&key, bit_rack)) {
+      return &wfl->word_map_entries[entry_idx];
+    }
+  }
+  return NULL;
+}
+
+static void assert_same_entry(const WMPEntry *expected, const WMPEntry *got) {
+  if (expected == NULL) {
+    assert(got == NULL);
+    return;
+  }
+  assert(got != NULL);
+  assert(memcmp(expected, got, sizeof(WMPEntry)) == 0);
+}
+
+// Every blankless entry is found through the filter and the index, and racks
+// one tile away from an entry get the same answer from the index as from the
+// bucket starts.
+void test_word_index_matches_bucket_starts(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  const int ld_size = ld_get_size(config_get_ld(config));
+  WMP *wmp = wmp_create_or_die("testdata", "CSW21");
+  for (int length = 2; length <= BOARD_DIM; length++) {
+    const WMPForLength *wfl = &wmp->wfls[length];
+    for (uint32_t entry_idx = 0; entry_idx < wfl->num_word_entries;
+         entry_idx++) {
+      const WMPEntry *entry = &wfl->word_map_entries[entry_idx];
+      const BitRack key = wmp_entry_read_bit_rack(entry);
+      assert_same_entry(entry, wfl_get_word_entry(wfl, &key));
+      assert_same_entry(entry, wfl_get_present_word_entry(wfl, &key));
+      // Move generation drops a subrack the filter rejects without looking
+      // it up, so no stored rack may be rejected.
+      assert(wfl_blankless_rack_may_have_words(wfl, &key));
+      if (entry_idx % 16 != 0) {
+        continue;
+      }
+      for (int from_ml = 1; from_ml < ld_size; from_ml++) {
+        if (bit_rack_get_letter(&key, from_ml) == 0) {
+          continue;
+        }
+        for (int to_ml = 1; to_ml < ld_size; to_ml++) {
+          if (to_ml == from_ml) {
+            continue;
+          }
+          BitRack neighbor = key;
+          bit_rack_take_letter(&neighbor, from_ml);
+          bit_rack_add_letter(&neighbor, to_ml);
+          assert_same_entry(get_entry_by_bucket_starts(wfl, &neighbor),
+                            wfl_get_word_entry(wfl, &neighbor));
+        }
+      }
+    }
+  }
+  wmp_destroy(wmp);
+  config_destroy(config);
+}
+
+// The inline byte count as a loop: the words end with the last word slot
+// whose last byte is nonzero, testing every slot after the first from the
+// last one down.
+static int reference_number_of_inlined_bytes(const WMPEntry *entry,
+                                             int word_length) {
+  int num_bytes = (WMP_INLINE_VALUE_BYTES / word_length) * word_length;
+  while (num_bytes > word_length) {
+    if (entry->bucket_or_inline[num_bytes - 1] != 0) {
+      break;
+    }
+    num_bytes -= word_length;
+  }
+  return num_bytes;
+}
+
+static void assert_inlined_counts_match_reference(const WMPEntry *entry,
+                                                  int word_length) {
+  const int expected_bytes =
+      reference_number_of_inlined_bytes(entry, word_length);
+  assert(wmp_entry_number_of_inlined_bytes(entry, word_length) ==
+         expected_bytes);
+  assert(wmp_entry_number_of_inlined_words(entry, word_length) ==
+         expected_bytes / word_length);
+}
+
+// Every inlined entry gets the loop's byte and word counts.
+static void test_inlined_word_counts(void) {
+  WMP *wmp = wmp_create_or_die("testdata", "CSW21");
+  for (int length = 2; length <= BOARD_DIM; length++) {
+    const WMPForLength *wfl = &wmp->wfls[length];
+    for (uint32_t entry_idx = 0; entry_idx < wfl->num_word_entries;
+         entry_idx++) {
+      const WMPEntry *entry = &wfl->word_map_entries[entry_idx];
+      if (!wmp_entry_is_inlined(entry)) {
+        continue;
+      }
+      assert_inlined_counts_match_reference(entry, length);
+      int num_words = 0;
+      const MachineLetter *words =
+          wmp_entry_get_blankless_words(entry, wfl, length, &num_words);
+      assert(words == entry->bucket_or_inline);
+      assert(num_words ==
+             reference_number_of_inlined_bytes(entry, length) / length);
+    }
+  }
+  wmp_destroy(wmp);
+}
+
+// Every pattern of zero and nonzero inline bytes gets the loop's counts at
+// every length in the slot table: only the slot ends are tested, whatever
+// the other bytes hold.
+static void test_inline_slot_patterns(void) {
+  for (int length = 2; length < WMP_INLINE_SLOT_TABLE_SIZE; length++) {
+    for (uint32_t pattern = 0; pattern < (1U << WMP_INLINE_VALUE_BYTES);
+         pattern++) {
+      WMPEntry entry;
+      memset(&entry, 0, sizeof(entry));
+      for (int byte_idx = 0; byte_idx < WMP_INLINE_VALUE_BYTES; byte_idx++) {
+        if ((pattern & (1U << byte_idx)) != 0) {
+          // Any nonzero value, low and high bits alike.
+          entry.bucket_or_inline[byte_idx] =
+              (uint8_t)(1 + ((pattern + ((uint32_t)byte_idx * 37)) % 255));
+        }
+      }
+      assert_inlined_counts_match_reference(&entry, length);
+    }
+  }
+}
+
+// The blank expansion as letter loops over a rack written in place, with
+// each blankless rack found through the bucket starts and its words copied
+// at their exact length.
+static int reference_write_blankless_words(const WMPForLength *wfl,
+                                           const BitRack *bit_rack,
+                                           int word_length, uint8_t *buffer) {
+  const WMPEntry *entry = get_entry_by_bucket_starts(wfl, bit_rack);
+  if (entry == NULL) {
+    return 0;
+  }
+  if (wmp_entry_is_inlined(entry)) {
+    const int num_bytes = reference_number_of_inlined_bytes(entry, word_length);
+    memcpy(buffer, entry->bucket_or_inline, num_bytes);
+    return num_bytes;
+  }
+  const int num_bytes = (int)entry->num_words * word_length;
+  memcpy(buffer, wfl->word_letters + entry->word_start, num_bytes);
+  return num_bytes;
+}
+
+static int reference_write_blanks(const WMPEntry *entry,
+                                  const WMPForLength *wfl, BitRack *bit_rack,
+                                  int word_length, int min_ml,
+                                  uint8_t *buffer) {
+  int bytes_written = 0;
+  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 0);
+  for (int ml = min_ml; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    if ((entry->blank_letters & (1U << ml)) != 0) {
+      bit_rack_add_letter(bit_rack, (MachineLetter)ml);
+      bytes_written += reference_write_blankless_words(
+          wfl, bit_rack, word_length, buffer + bytes_written);
+      bit_rack_take_letter(bit_rack, (MachineLetter)ml);
+    }
+  }
+  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 1);
+  return bytes_written;
+}
+
+static int reference_write_double_blanks(const WMPEntry *entry,
+                                         const WMPForLength *wfl,
+                                         BitRack *bit_rack, int word_length,
+                                         uint8_t *buffer) {
+  int bytes_written = 0;
+  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 1);
+  for (int ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    if ((entry->first_blank_letters & (1U << ml)) != 0) {
+      bit_rack_add_letter(bit_rack, (MachineLetter)ml);
+      const WMPEntry *blank_entry = wfl_get_blank_entry(wfl, bit_rack);
+      if (blank_entry != NULL) {
+        bytes_written +=
+            reference_write_blanks(blank_entry, wfl, bit_rack, word_length, ml,
+                                   buffer + bytes_written);
+      }
+      bit_rack_take_letter(bit_rack, (MachineLetter)ml);
+    }
+  }
+  bit_rack_set_letter_count(bit_rack, BLANK_MACHINE_LETTER, 2);
+  return bytes_written;
+}
+
+// The words go at the end of the buffer with exactly the writers' slack
+// after them, so a write past the slack is out of bounds.
+static void assert_expansion_matches_reference(const WMP *wmp,
+                                               const WMPEntry *entry,
+                                               int length, uint8_t *buffer,
+                                               int buffer_size,
+                                               uint8_t *expected) {
+  const WMPForLength *wfl = &wmp->wfls[length];
+  const BitRack bit_rack = wmp_entry_read_bit_rack(entry);
+  BitRack reference_rack = bit_rack;
+  const int expected_bytes =
+      bit_rack_get_letter(&bit_rack, BLANK_MACHINE_LETTER) == 1
+          ? reference_write_blanks(entry, wfl, &reference_rack, length, 1,
+                                   expected)
+          : reference_write_double_blanks(entry, wfl, &reference_rack, length,
+                                          expected);
+  // The loops leave the rack as they found it.
+  assert(bit_rack_equals(&reference_rack, &bit_rack));
+  uint8_t *output =
+      buffer + (buffer_size - expected_bytes - WMP_WORD_BUFFER_SLACK_BYTES);
+  const int bytes_written =
+      wmp_entry_write_words_to_buffer(entry, wmp, &bit_rack, length, output);
+  assert(bytes_written == expected_bytes);
+  assert(memcmp(output, expected, (size_t)bytes_written) == 0);
+}
+
+// Every single and double blank entry of every length expands to the same
+// bytes as the reference loops, writing nothing past the slack.
+static void test_blank_expansion_matches_reference(void) {
+  WMP *wmp = wmp_create_or_die("testdata", "CSW21");
+  const int buffer_size =
+      (int)wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES;
+  uint8_t *buffer = malloc_or_die(buffer_size);
+  uint8_t *expected = malloc_or_die(wmp->max_word_lookup_bytes);
+  for (int length = 2; length <= BOARD_DIM; length++) {
+    const WMPForLength *wfl = &wmp->wfls[length];
+    for (uint32_t entry_idx = 0; entry_idx < wfl->num_blank_entries;
+         entry_idx++) {
+      assert_expansion_matches_reference(wmp,
+                                         &wfl->blank_map_entries[entry_idx],
+                                         length, buffer, buffer_size, expected);
+    }
+    for (uint32_t entry_idx = 0; entry_idx < wfl->num_double_blank_entries;
+         entry_idx++) {
+      assert_expansion_matches_reference(
+          wmp, &wfl->double_blank_map_entries[entry_idx], length, buffer,
+          buffer_size, expected);
+    }
+  }
+  free(expected);
+  free(buffer);
+  wmp_destroy(wmp);
+}
+
 void check_all_wmp_result_sizes_fit_in_buffer(void) {
   Config *config = config_create_or_die("");
   ErrorStack *error_stack = error_stack_create();
@@ -152,5 +408,9 @@ void check_all_wmp_result_sizes_fit_in_buffer(void) {
 void test_wmp(void) {
   write_wmp_files();
   test_short_and_long_words();
+  test_word_index_matches_bucket_starts();
+  test_inlined_word_counts();
+  test_inline_slot_patterns();
+  test_blank_expansion_matches_reference();
   check_all_wmp_result_sizes_fit_in_buffer();
 }

@@ -207,7 +207,7 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
                      const char *const *forced_racks, int num_forced_racks,
-                     ErrorStack *error_stack);
+                     const char *pat_gen_output_name, ErrorStack *error_stack);
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           Rack *target_played_tiles,
                           Rack *nontarget_known_tiles,

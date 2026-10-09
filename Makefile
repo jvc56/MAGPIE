@@ -153,6 +153,10 @@ cflags.portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -DNDEBUG -Wall -Wn
 cflags.test_portable_release := -O3 -flto -march=$(PORTABLE_MARCH) -Wall -Wno-trigraphs
 # Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+# no_pgo_release plus BAI scheduling instrumentation (src/ent/bai_sched_stats.h),
+# read by the on-demand baisched test. Production builds compile it out.
+cflags.bai_stats := $(cflags.no_pgo_release) -DBAI_SCHED_STATS
+cflags.test_bai_stats := $(cflags.test_no_pgo_release) -DBAI_SCHED_STATS
 # Training runs multithreaded, so counter updates must be atomic. clang 17
 # added the GCC-style -fprofile-update=atomic; older clangs get the LLVM-native
 # equivalent. Probed only for the instrumented builds, with the compiler that
@@ -178,6 +182,7 @@ ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
 ldflags.no_pgo_release := -pthread -flto
 ldflags.portable_release := -pthread -flto
+ldflags.bai_stats := -pthread -flto
 ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
 ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.profile := -pthread
@@ -303,7 +308,7 @@ endif
 
 # Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(if $(filter no_pgo_release portable_release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+	$(CC) $(if $(filter no_pgo_release portable_release bai_stats pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@

@@ -7,6 +7,7 @@
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/wmp_defs.h"
 #include "../src/ent/anchor.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/board.h"
@@ -1119,7 +1120,8 @@ static void test_playthrough_preparation_after_rejection(void) {
   rack_set_to_string(ld, rack, "C??");
   WMPMoveGen wmg = {0};
   wmp_move_gen_init(&wmg, ld, rack, wmp);
-  MachineLetter *expected_words = malloc_or_die(wmp->max_word_lookup_bytes);
+  MachineLetter *expected_words =
+      malloc_or_die(wmp->max_word_lookup_bytes + WMP_WORD_BUFFER_SLACK_BYTES);
   const struct {
     const char *block;
     const char *subracks[2];
@@ -1167,6 +1169,11 @@ static void test_playthrough_preparation_after_rejection(void) {
       wmp_move_gen_playthrough_metadata_init(&wmg, &anchor);
       assert(wmp_move_gen_get_num_subrack_combinations(&wmg) == count);
       wmp_move_gen_build_playthrough_subracks(&wmg);
+      // The candidate mask may drop only subracks that have no words.
+      uint64_t filter_misses = 1;
+      const uint64_t candidates = wmp_move_gen_get_candidate_subracks(
+          &wmg, 0, count, true, false, 0, 0, &filter_misses);
+      assert(filter_misses == 0);
       for (int idx = count - 1; idx >= 0; idx--) {
         BitRack expected =
             string_to_bit_rack(ld, cases[case_idx].subracks[idx]);
@@ -1174,6 +1181,9 @@ static void test_playthrough_preparation_after_rejection(void) {
         bit_rack_add_bit_rack(&expected, &wmg.playthrough_bit_rack);
         const int expected_bytes = wmp_write_words_to_buffer(
             wmp, &expected, (int)anchor.word_length, expected_words);
+        if (expected_bytes > 0) {
+          assert(((candidates >> idx) & 1) != 0);
+        }
         const bool found = wmp_move_gen_get_subrack_words(&wmg, idx, true);
         assert(found == (expected_bytes > 0));
         if (found) {

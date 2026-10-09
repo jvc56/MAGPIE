@@ -44,6 +44,13 @@ typedef struct AutoplayArgs {
   // back in the task response, and a contributor's data directory need not be
   // writable.
   bool leavegen_write_files;
+  // Output name for the PAT weights trained by
+  // AUTOPLAY_TYPE_PAT_GEN; per-generation snapshots are written as
+  // <name>_gen_<N>.pat. Only meaningful for that autoplay type.
+  const char *pat_gen_output_name;
+  // Plies of net result a PAT training label spans; see
+  // PATPendingObservation.
+  int pat_label_plies;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;

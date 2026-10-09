@@ -46,6 +46,14 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // The simming player's rollout PAT settings (see the patrollout and
+  // patrolloutclasses options): whether every rollout ply leaves PAT out,
+  // and which classes it suppresses otherwise. They apply to both players'
+  // plies in the rollouts, each with its own weights; the candidates the sim
+  // is handed come from the candidate-selection settings instead.
+  // sim_args_fill clears them (PAT on, every class); callers set them after.
+  bool pat_rollout_disabled;
+  uint32_t pat_rollout_disabled_classes_mask;
   // Whether a nonterminal sim horizon's spread is projected to the end of the
   // game with the win percentage table's expected swing for that state (see
   // rv_sim_sample).
@@ -120,6 +128,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   // a resume — skipping sim_results_reset and accumulating samples, which
   // made multi-threaded sims non-reproducible vs single-threaded.
   sim_args->resume_results = false;
+  sim_args->pat_rollout_disabled = false;
+  sim_args->pat_rollout_disabled_classes_mask = 0;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

@@ -1,11 +1,13 @@
 #include "../src/def/board_defs.h"
 #include "../src/impl/exec.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "alias_method_test.h"
 #include "alphabet_test.h"
 #include "analyze_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "bai_sched_test.h"
 #include "bai_test.h"
 #include "bai_utility_test.h"
 #include "benchmark_endgame_test.h"
@@ -44,6 +46,13 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pat_eval_test.h"
+#include "pat_features_test.h"
+#include "pat_file_test.h"
+#include "pat_lexicon_test.h"
+#include "pat_opening_sim_test.h"
+#include "pat_test.h"
+#include "pat_utility_test.h"
 #include "path_move_lists_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
@@ -60,6 +69,9 @@
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
+#include "sim_det_sweep_test.h"
+#include "sim_quality_test.h"
+#include "sim_regret_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
@@ -146,6 +158,13 @@ static TestEntry test_table[] = {
     {"wmpmaker", test_wmp_maker},
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
+    {"pat", test_pat},
+    {"patwmp", test_pat_wmp_parity},
+    {"patfile", test_pat_file},
+    {"patlexicon", test_pat_lexicon},
+    {"patutility", test_pat_utility},
+    {"patfeatures", test_pat_features},
+    {"pateval", test_pat_eval},
     {"winpctcoverage", test_win_pct_coverage},
     {"winpctstate", test_win_pct_state},
     {"winpctrecord", test_win_pct_record},
@@ -178,6 +197,8 @@ static TestEntry on_demand_test_table[] = {
     {"peginterrupt", test_peg_interrupted_candidate_outcomes},
     {"playchooserfixed", test_play_chooser_fixed_short_budget},
     {"analyze_sim", test_analyze_sim},
+    {"simdetigp", test_autoplay_sim_determinism_igp},
+    {"simdetsweep", test_sim_determinism_sweep},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},
@@ -213,6 +234,9 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
+    {"baisched", test_bai_sched},
+    {"simquality", test_sim_quality},
+    {"simregret", test_sim_regret},
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
@@ -257,6 +281,14 @@ void run_test(const char *subtest) {
       return;
     }
   }
+  if (has_prefix("pattablecheck:", subtest)) {
+    pat_run_through_table_check(subtest + strlen("pattablecheck:"));
+    return;
+  }
+  if (has_prefix("patopeningsim:", subtest)) {
+    pat_opening_sim_run_spec(subtest + strlen("patopeningsim:"));
+    return;
+  }
   log_fatal("unrecognized test: %s\n", subtest);
 }
 
@@ -265,6 +297,7 @@ void run_all_super(void) {
   test_position_lengths();
   test_bit_rack();
   test_board_layout_super();
+  test_pat_rollout_default_classes();
 }
 
 int main(int argc, char *argv[]) {
@@ -280,12 +313,25 @@ int main(int argc, char *argv[]) {
       }
     }
   } else if (BOARD_DIM == DEFAULT_SUPER_BOARD_DIM) {
-    if (argc > 1) {
-      log_warn("Ignoring test arguments when testing default super board "
-               "dimensions of %d.",
-               DEFAULT_SUPER_BOARD_DIM);
+    // The super suite is the default; a parameterized on-demand test
+    // (a "<name>:<spec>" argument, e.g. patopeningsim:CSW24:<pat>:300)
+    // runs on this board instead, so the board-dependent tooling is
+    // available under the 21x21 build.
+    bool ran_on_demand = false;
+    for (int i = 1; i < argc; i++) {
+      if (strchr(argv[i], ':') != NULL) {
+        run_test(argv[i]);
+        ran_on_demand = true;
+      }
     }
-    run_all_super();
+    if (!ran_on_demand) {
+      if (argc > 1) {
+        log_warn("Ignoring test arguments when testing default super board "
+                 "dimensions of %d.",
+                 DEFAULT_SUPER_BOARD_DIM);
+      }
+      run_all_super();
+    }
   } else {
     log_fatal(
         "Testing with unsupported board dimension of %d. Only %d and %d are "

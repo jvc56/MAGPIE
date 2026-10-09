@@ -861,7 +861,7 @@ static uint32_t wfl_get_word_count(const WMPForLength *wfl,
     if (bit_rack_equals(&entry_rack, bit_rack)) {
       const WMPEntry *e = &wfl->word_map_entries[i];
       if (wmp_entry_is_inlined(e)) {
-        return wmp_entry_number_of_inlined_bytes(e, word_length) / word_length;
+        return (uint32_t)wmp_entry_number_of_inlined_words(e, word_length);
       }
       return e->num_words;
     }
@@ -1185,6 +1185,10 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
 
   // Calculate max_word_lookup_bytes
   wmp->max_word_lookup_bytes = calculate_max_word_lookup_bytes(wmp);
+
+  for (int len = 2; len <= BOARD_DIM; len++) {
+    wfl_build_word_index(&wmp->wfls[len]);
+  }
 
   return wmp;
 }

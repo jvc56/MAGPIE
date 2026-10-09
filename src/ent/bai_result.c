@@ -10,6 +10,7 @@
 struct BAIResult {
   bai_result_status_t status;
   int best_arm;
+  uint64_t num_samples;
   Timer timer;
   double time_limit_seconds;
   cpthread_mutex_t mutex;
@@ -18,6 +19,7 @@ struct BAIResult {
 void bai_result_reset(BAIResult *bai_result, double time_limit_seconds) {
   bai_result->status = BAI_RESULT_STATUS_NONE;
   bai_result->best_arm = -1;
+  bai_result->num_samples = 0;
   bai_result->time_limit_seconds = time_limit_seconds;
   ctimer_start(&bai_result->timer);
 }
@@ -51,6 +53,16 @@ void bai_result_set_best_arm(BAIResult *bai_result, int best_arm) {
 
 int bai_result_get_best_arm(const BAIResult *bai_result) {
   return bai_result->best_arm;
+}
+
+// Not thread safe, set once bai() has joined its workers.
+void bai_result_set_num_samples(BAIResult *bai_result,
+                                const uint64_t num_samples) {
+  bai_result->num_samples = num_samples;
+}
+
+uint64_t bai_result_get_num_samples(const BAIResult *bai_result) {
+  return bai_result->num_samples;
 }
 
 double bai_result_get_elapsed_seconds(const BAIResult *bai_result) {

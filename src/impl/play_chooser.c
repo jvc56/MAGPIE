@@ -12,6 +12,7 @@
 #include "../def/peg_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -40,6 +41,10 @@
 enum {
   PLAY_CHOOSER_DEFAULT_SIM_PLIES = 2,
   PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES = 15,
+  // Rollouts each candidate gets before BAI samples adaptively. One leaves
+  // the candidate's empirical variance at zero, so top-two treats that single
+  // rollout as its exact mean and may never sample it again.
+  PLAY_CHOOSER_SIM_MIN_PLAY_ITERATIONS = 30,
   // Assume roughly four tiles per play across both players when splitting
   // the remaining clock into per-move budgets.
   PLAY_CHOOSER_TILES_PER_PLAY_PAIR = 8,
@@ -492,11 +497,15 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*max_num_display_plays=*/num_candidates,
       /*max_num_display_plies=*/sim_plies, strategy->seed,
       /*max_iterations=*/(uint64_t)1e15,
-      /*min_play_iterations=*/1, /*scond=*/0.0, BAI_THRESHOLD_NONE,
+      /*min_play_iterations=*/PLAY_CHOOSER_SIM_MIN_PLAY_ITERATIONS,
+      /*scond=*/0.0, BAI_THRESHOLD_NONE,
       /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
       /*use_margin_forecast=*/false, /*inference_args=*/NULL, &sim_args);
+  sim_args.pat_rollout_disabled = strategy->pat_rollout_disabled;
+  sim_args.pat_rollout_disabled_classes_mask =
+      strategy->pat_rollout_disabled_classes_mask;
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).
@@ -920,6 +929,13 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
       // on a different scale than a sibling's soft sim/PEG utility and could
       // flip the decision. Report it unevaluated; should_challenge then
       // conservatively defaults to challenging.
+      return PLAY_CHOOSER_BRANCH_INVALID;
+    }
+    if (bai_result_get_num_samples(
+            sim_results_get_bai_result(play_chooser->sim_results)) == 0) {
+      // The budget ran out before any rollout finished. The best play's mean
+      // utility would read 0, a certain loss, and rank this branch below
+      // every evaluated sibling; report it unevaluated instead.
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
     // The sim ranked by (and recorded per rollout) the win%+spread blend; read
