@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#include <time.h>
 #include <unistd.h>
 
 enum {
@@ -159,6 +160,92 @@ static void heartbeat_stop(Heartbeat *heartbeat) {
 }
 
 // ---------------------------------------------------------------------------
+// Task deadline
+// ---------------------------------------------------------------------------
+
+// Nanoseconds on the monotonic clock.
+static int64_t now_ns(void) { return ctimer_monotonic_ns(); }
+
+// How often the deadline thread looks at the clock. A tenth of a second is
+// nothing next to a task's minutes, and keeps a stop prompt.
+#define DEADLINE_POLL_SECONDS 0.1
+
+struct ContributeDeadline {
+  ThreadControl *thread_control;
+  int64_t deadline_ns;
+  cpthread_mutex_t mutex;
+  bool stop;
+  // Written by the deadline thread before it exits, read after the join.
+  bool fired;
+  thread_control_status_t status_before;
+  cpthread_t thread;
+};
+
+// Runs beside the task like the heartbeat, polling a stop flag. At the
+// deadline it stops the task the way the user's `stop` does -- every
+// executor already ends early on that, and nothing else does -- unless the
+// user has stopped it already, in which case the stop is the user's.
+static void *deadline_worker(void *arg) {
+  ContributeDeadline *deadline = (ContributeDeadline *)arg;
+  while (true) {
+    ctime_nap(DEADLINE_POLL_SECONDS);
+    cpthread_mutex_lock(&deadline->mutex);
+    const bool stop = deadline->stop;
+    cpthread_mutex_unlock(&deadline->mutex);
+    if (stop) {
+      break;
+    }
+    if (now_ns() < deadline->deadline_ns) {
+      continue;
+    }
+    const thread_control_status_t status =
+        thread_control_get_status(deadline->thread_control);
+    // set_status says whether it changed anything: a stop that landed
+    // between the read and here leaves it unchanged, and stays the user's.
+    if (status != THREAD_CONTROL_STATUS_USER_INTERRUPT &&
+        thread_control_set_status(deadline->thread_control,
+                                  THREAD_CONTROL_STATUS_USER_INTERRUPT)) {
+      deadline->status_before = status;
+      deadline->fired = true;
+    }
+    break;
+  }
+  return NULL;
+}
+
+ContributeDeadline *contribute_deadline_start(ThreadControl *thread_control,
+                                              double seconds) {
+  if (!thread_control || seconds <= 0) {
+    return NULL;
+  }
+  ContributeDeadline *deadline =
+      (ContributeDeadline *)calloc_or_die(1, sizeof(ContributeDeadline));
+  deadline->thread_control = thread_control;
+  deadline->deadline_ns = now_ns() + (int64_t)(seconds * 1e9);
+  cpthread_mutex_init(&deadline->mutex);
+  cpthread_create(&deadline->thread, deadline_worker, deadline);
+  return deadline;
+}
+
+bool contribute_deadline_finish(ContributeDeadline *deadline) {
+  if (!deadline) {
+    return false;
+  }
+  cpthread_mutex_lock(&deadline->mutex);
+  deadline->stop = true;
+  cpthread_mutex_unlock(&deadline->mutex);
+  cpthread_join(deadline->thread);
+  const bool fired = deadline->fired;
+  if (fired) {
+    // The stop was the deadline's, not the user's: the run goes on.
+    thread_control_set_status(deadline->thread_control,
+                              deadline->status_before);
+  }
+  free(deadline);
+  return fired;
+}
+
+// ---------------------------------------------------------------------------
 // The claim/submit state machine
 // ---------------------------------------------------------------------------
 
@@ -173,6 +260,10 @@ struct ContributeState {
   ClientState *client_state;
   HttpClient *http_client;
   int threads;
+  // Tasks this run has started (claimed and handed to the executor) and
+  // completed (submitted and accepted). The first numbers the
+  // started/finished lines.
+  int started;
   int completed;
   int consecutive_failures;
   char *last_failure;
@@ -234,6 +325,12 @@ struct ContributeState {
   char *claim_token;
   char *claimed_job_id;
   JsonValue *assignment;
+  // The claimed task's job name, as printed, its number this run, the
+  // seconds it may run, and the clock that stops it then.
+  char *job_name;
+  int task_number;
+  int max_task_seconds;
+  ContributeDeadline *deadline;
 };
 
 // ---------------------------------------------------------------------------
@@ -453,9 +550,9 @@ static bool expected_data_matches(ContributeState *state,
     char *log_key =
         get_formatted_string("%s|%s", path ? path : name, expected_digest);
     if (!already_logged(state, log_key)) {
-      thread_control_print_formatted(thread_control, "%s\n", gap);
+      thread_control_print_formatted_err(thread_control, "%s\n", gap);
       if (tarball_date) {
-        thread_control_print_formatted(
+        thread_control_print_formatted_err(
             thread_control,
             "  this comes from MAGPIE-DATA data-%s or later; run "
             "./download_data.sh to update\n",
@@ -616,22 +713,16 @@ static void adopt_server_assigned_uuid(ContributeState *state,
   if (!worker_uuid) {
     return;
   }
+  // Nothing a contributor could do about either of these: the next claim asks
+  // again, and a settings file created to hold the identity is what the run
+  // is meant to do.
   if (!client_state_is_worker_uuid(worker_uuid)) {
-    thread_control_print_formatted(
-        thread_control,
-        "the server sent a worker identity that is not a UUID; ignoring it\n");
     return;
   }
-  const bool file_was_found = client_state->settings_file_found;
   if (client_state_set_worker_uuid(client_state, worker_uuid)) {
-    if (!file_was_found) {
-      thread_control_print_formatted(
-          thread_control, "created %s to save this worker's identity\n",
-          client_state->settings_path);
-      client_state->settings_file_found = true;
-    }
+    client_state->settings_file_found = true;
   } else {
-    thread_control_print_formatted(
+    thread_control_print_formatted_err(
         thread_control,
         "could not save this worker's identity to %s; add the line\n"
         "  uuid %s\n"
@@ -641,37 +732,6 @@ static void adopt_server_assigned_uuid(ContributeState *state,
   }
   http_client_set_worker_uuid(state->http_client, worker_uuid);
 }
-
-// Says that the server is not answering, so a contributor watching a run that
-// has gone quiet can tell waiting from hanging. Once when the trouble starts,
-// then once per wait at the back-off's ceiling -- a line a minute, which is
-// also the rate at which the server is being asked.
-static void report_server_retry(void *context, int retry_idx, int wait_seconds,
-                                bool rate_limited) {
-  ThreadControl *thread_control = (ThreadControl *)context;
-  if (rate_limited) {
-    // One 429 is routine; a claim now waits them out without limit, so a run
-    // of them -- a server limiting this worker for good -- says so once.
-    if (retry_idx == 4) {
-      thread_control_print_formatted(
-          thread_control,
-          "the server is rate-limiting this worker; waiting it out\n");
-    }
-    return;
-  }
-  if (retry_idx == 0) {
-    thread_control_print_formatted(thread_control,
-                                   "the server is not answering; retrying\n");
-  } else if (wait_seconds >= HTTP_CLIENT_MAX_BACKOFF_SECONDS) {
-    thread_control_print_formatted(
-        thread_control,
-        "the server is still not answering; trying again in %d seconds\n",
-        wait_seconds);
-  }
-}
-
-// Nanoseconds on the monotonic clock.
-static int64_t now_ns(void) { return ctimer_monotonic_ns(); }
 
 static bool deferral_active(const DeferredJob *deferred) {
   return deferred->until_ns > now_ns();
@@ -753,55 +813,6 @@ static int seconds_until_a_deferral_ends(const ContributeState *state) {
   return soonest == 0 ? 0 : (int)(soonest / 1000000000LL) + 1;
 }
 
-// The settings the run uses, each marked when it is the default: with the
-// file optional, running from the wrong folder starts a new anonymous worker
-// on the default server rather than stopping, and this is where that shows.
-// The API key itself is never printed, only whether there is one.
-static void print_settings(const ClientState *client_state, int threads,
-                           ThreadControl *thread_control) {
-  const char *const defaulted = " (default)";
-  if (client_state->settings_file_found) {
-    thread_control_print_formatted(thread_control,
-                                   "contribute settings (%s):\n",
-                                   client_state->settings_path);
-  } else {
-    thread_control_print_formatted(
-        thread_control,
-        "contribute settings (%s not found; every setting is its default):\n",
-        client_state->settings_path);
-  }
-  thread_control_print_formatted(thread_control, "  server   %s%s\n",
-                                 client_state->server_url,
-                                 client_state->server_stated ? "" : defaulted);
-  thread_control_print_formatted(thread_control, "  apikey   %s\n",
-                                 client_state->api_key ? "set"
-                                                       : "none (anonymous)");
-  thread_control_print_formatted(
-      thread_control, "  uuid     %s\n",
-      client_state->worker_uuid ? client_state->worker_uuid
-      : client_state->api_key   ? "none"
-                                : "none yet (the server issues one)");
-  const char *threads_note = "";
-  if (client_state->threads <= 0) {
-    threads_note = defaulted;
-  } else if (client_state->threads != threads) {
-    threads_note = " (capped)";
-  }
-  thread_control_print_formatted(thread_control, "  threads  %d%s\n", threads,
-                                 threads_note);
-  const char *max_tasks_note = "";
-  if (!client_state->max_tasks_stated) {
-    max_tasks_note = " (default: no limit)";
-  } else if (client_state->max_tasks == 0) {
-    max_tasks_note = " (no limit)";
-  }
-  thread_control_print_formatted(thread_control, "  maxtasks %d%s\n",
-                                 client_state->max_tasks, max_tasks_note);
-  thread_control_print_formatted(
-      thread_control, "  idlewait %d%s\n", client_state->idle_wait_seconds,
-      client_state->idle_wait_stated ? "" : defaulted);
-}
-
 static bool interrupted_check(void *thread_control) {
   return contribute_interrupted((ThreadControl *)thread_control);
 }
@@ -848,8 +859,9 @@ ContributeState *contribute_state_create(const char *settings_path,
   state->derived_mismatches = string_list_create();
   state->shutdown_requested = false;
   state->reached_server = false;
-  http_client_set_retry_listener(state->http_client, report_server_retry,
-                                 thread_control);
+  // Nothing is said while a request waits for the server, however long: a
+  // claim waits out an outage, and only a request that gives up says so, by
+  // ending the run with its error.
   http_client_set_abort_check(state->http_client, interrupted_check,
                               thread_control);
   memset(&state->heartbeat, 0, sizeof(state->heartbeat));
@@ -857,9 +869,8 @@ ContributeState *contribute_state_create(const char *settings_path,
   state->claimed_job_id = NULL;
   state->assignment = NULL;
 
-  print_settings(client_state, state->threads, thread_control);
   if (!client_state->api_key && client_state->commented_key_line) {
-    thread_control_print_formatted(
+    thread_control_print_formatted_err(
         thread_control,
         "%s line %d is a comment holding an apikey; if it is meant as the "
         "setting, put it on a line of its own\n",
@@ -935,12 +946,70 @@ static void decline_over_http(ContributeState *state, const char *reason,
 // Everything a claim owns, released whether the task ran or was declined.
 static void release_claim(ContributeState *state) {
   heartbeat_stop(&state->heartbeat);
+  // A deadline still running is one nothing asked about: the task ended
+  // some other way first.
+  (void)contribute_deadline_finish(state->deadline);
+  state->deadline = NULL;
   free(state->claim_token);
   state->claim_token = NULL;
   free(state->claimed_job_id);
   state->claimed_job_id = NULL;
+  free(state->job_name);
+  state->job_name = NULL;
   json_destroy(state->assignment);
   state->assignment = NULL;
+}
+
+// A job name from the server, as printed: control characters (a terminal
+// escape, a newline that would forge a line of output) become '?', and a name
+// past the server's own limit is cut short.
+static char *printable_job_name(const char *name) {
+  enum { MAX_PRINTED_JOB_NAME = 200 };
+  StringBuilder *sb = string_builder_create();
+  for (int i = 0; name[i] && i < MAX_PRINTED_JOB_NAME; i++) {
+    const unsigned char c = (unsigned char)name[i];
+    const char printed[2] = {(c < 0x20 || c == 0x7f) ? '?' : (char)c, '\0'};
+    string_builder_add_string(sb, printed);
+  }
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+void contribute_read_job_name_and_limit(const JsonValue *assignment,
+                                        char **job_name, int *max_task_seconds,
+                                        ErrorStack *error_stack) {
+  *job_name = NULL;
+  *max_task_seconds = 0;
+  const char *name =
+      json_get_string(assignment, CONTRIBUTE_KEY_JOB_NAME, error_stack);
+  const int64_t seconds =
+      json_get_int(assignment, CONTRIBUTE_KEY_MAX_TASK_SECONDS, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (seconds < 1 || seconds > INT32_MAX) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string(
+                         "the server sent a task with an unusable %s: %lld",
+                         CONTRIBUTE_KEY_MAX_TASK_SECONDS, (long long)seconds));
+    return;
+  }
+  *job_name = printable_job_name(name);
+  *max_task_seconds = (int)seconds;
+}
+
+// "[14:03:07] started task #3: <job name><suffix>", in local time.
+static void print_task_line(ThreadControl *thread_control, const char *what,
+                            int task_number, const char *job_name,
+                            const char *suffix) {
+  const time_t now = time(NULL);
+  struct tm local;
+  char clock[16] = "??:??:??";
+  if (localtime_r(&now, &local)) {
+    (void)strftime(clock, sizeof(clock), "%H:%M:%S", &local);
+  }
+  thread_control_print_formatted(thread_control, "[%s] %s task #%d: %s%s\n",
+                                 clock, what, task_number,
+                                 job_name ? job_name : "", suffix);
 }
 
 // Prints what this worker is missing, in full, once -- the client knows it
@@ -948,27 +1017,27 @@ static void release_claim(ContributeState *state) {
 static void print_shutdown(const ContributeState *state,
                            ThreadControl *thread_control,
                            const JsonValue *shutdown) {
-  thread_control_print_formatted(thread_control,
-                                 "\nCannot contribute to any available job.\n");
+  thread_control_print_formatted_err(
+      thread_control, "\nCannot contribute to any available job.\n");
   const int gaps = string_list_get_count(state->data_gaps);
   if (gaps > 0) {
-    thread_control_print_formatted(thread_control,
-                                   "\nMissing or outdated input data:\n");
+    thread_control_print_formatted_err(thread_control,
+                                       "\nMissing or outdated input data:\n");
     for (int i = 0; i < gaps; i++) {
-      thread_control_print_formatted(
+      thread_control_print_formatted_err(
           thread_control, "%s\n", string_list_get_string(state->data_gaps, i));
     }
   }
   const char *message = json_get_string_or_null(shutdown, "message");
   if (message) {
-    thread_control_print_formatted(thread_control, "\n%s\n", message);
+    thread_control_print_formatted_err(thread_control, "\n%s\n", message);
   }
   const char *reason = json_get_string_or_null(shutdown, "reason");
   if (reason && strings_equal(reason, "unsupported_build")) {
     // Not a version or data problem, so neither of the fixes below: this
     // binary was compiled for another board or rack, and only a rebuild with
     // the defaults changes that.
-    thread_control_print_formatted(
+    thread_control_print_formatted_err(
         thread_control,
         "This MAGPIE was built with BOARD_DIM=%d and RACK_SIZE=%d. Rebuild it "
         "without setting either (make magpie with no BOARD_DIM= or "
@@ -979,7 +1048,7 @@ static void print_shutdown(const ContributeState *state,
       json_get_string_or_null(shutdown, "required_magpie_version");
   const char *download_url = json_get_string_or_null(shutdown, "download_url");
   if (required_version) {
-    thread_control_print_formatted(
+    thread_control_print_formatted_err(
         thread_control, "Update MAGPIE to %s or newer%s%s.\n", required_version,
         download_url ? ": " : "", download_url ? download_url : "");
   }
@@ -988,7 +1057,7 @@ static void print_shutdown(const ContributeState *state,
   for (int i = 0; i < date_count; i++) {
     const char *date = json_array_get_string(dates, i);
     if (date) {
-      thread_control_print_formatted(
+      thread_control_print_formatted_err(
           thread_control,
           "Run ./download_data.sh from your MAGPIE directory to install "
           "MAGPIE-DATA data-%s or later, then start contribute again.\n",
@@ -1137,14 +1206,8 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
                       shutdown, state->claim_named_deferred)) {
     json_destroy(state->assignment);
     state->assignment = NULL;
-    const int deferral_left = seconds_until_a_deferral_ends(state);
-    if (deferral_left > 0) {
-      thread_control_print_formatted(
-          thread_control,
-          "nothing to do but jobs set aside; asking again in %d seconds\n",
-          deferral_left);
-      nap_unless_interrupted(thread_control, deferral_left);
-    }
+    nap_unless_interrupted(thread_control,
+                           seconds_until_a_deferral_ends(state));
     return CONTRIBUTE_CLAIM_NO_WORK;
   }
   if (shutdown) {
@@ -1165,10 +1228,17 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
   const JsonValue *request = json_object_get(state->assignment, "task_request");
   const char *job_type =
       request ? json_get_string(request, "job_type", error_stack) : "";
+  char *job_name = NULL;
+  int max_task_seconds = 0;
+  if (error_stack_is_empty(error_stack)) {
+    contribute_read_job_name_and_limit(state->assignment, &job_name,
+                                       &max_task_seconds, error_stack);
+  }
   if (error_stack_is_empty(error_stack)) {
     contribute_check_expected_data(state->assignment, error_stack);
   }
   if (!error_stack_is_empty(error_stack)) {
+    free(job_name);
     json_destroy(state->assignment);
     state->assignment = NULL;
     return CONTRIBUTE_CLAIM_FAILED;
@@ -1176,6 +1246,8 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
 
   state->claim_token = string_duplicate(claim_token);
   state->claimed_job_id = string_duplicate(job_id);
+  state->job_name = job_name;
+  state->max_task_seconds = max_task_seconds;
 
   // The server filters on version before it dispatches, so reaching this with
   // a job above this build is a server bug or a race with a floor that was
@@ -1185,7 +1257,7 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
       json_get_string_or_null(state->assignment, "min_magpie_version");
   if (min_version &&
       contribute_compare_versions(this_magpie_version, min_version) < 0) {
-    thread_control_print_formatted(
+    thread_control_print_formatted_err(
         thread_control,
         "declining a job that requires MAGPIE %s; this build is %s\n",
         min_version, this_magpie_version);
@@ -1213,20 +1285,58 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
   free(missing_json);
 
   heartbeat_start(&state->heartbeat, state->http_client, state->claim_token);
+  state->started++;
+  state->task_number = state->started;
+  print_task_line(thread_control, "started", state->task_number,
+                  state->job_name, "");
+  // From here, the task's time is running: the derived files it builds count
+  // against it as well as the run itself.
+  state->deadline =
+      contribute_deadline_start(thread_control, state->max_task_seconds);
 
   *out_job_type = job_type;
   *out_task_request = request;
   return CONTRIBUTE_CLAIM_GOT_TASK;
 }
 
-void contribute_decline_task(ContributeState *state,
-                             ThreadControl *thread_control, const char *reason,
-                             ErrorStack *error_stack) {
+bool contribute_task_hit_time_limit(ContributeState *state) {
+  if (!state) {
+    return false;
+  }
+  const bool fired = contribute_deadline_finish(state->deadline);
+  state->deadline = NULL;
+  return fired;
+}
+
+void contribute_hand_back_timed_out_task(ContributeState *state,
+                                         ThreadControl *thread_control) {
   if (!state || !state->claim_token) {
     return;
   }
-  thread_control_print_formatted(thread_control, "declining this task: %s\n",
-                                 reason);
+  char *counts = get_formatted_string(
+      " at its %d-second limit, handed back (%d started, %d completed)",
+      state->max_task_seconds, state->started, state->completed);
+  print_task_line(thread_control, "stopped", state->task_number,
+                  state->job_name, counts);
+  free(counts);
+  // Not remembered as a job this worker cannot run, and its errors dropped,
+  // as a failed task's are (decline_failed_task): whether a job's tasks fit
+  // the limit is the server's to judge across its workers -- it sets aside a
+  // job whose tasks keep running out of time -- and an undelivered decline
+  // costs only the time until the server lapses the claim.
+  ErrorStack *decline_errors = error_stack_create();
+  decline_over_http(state, CONTRIBUTE_DECLINE_TIME_LIMIT, NULL, decline_errors);
+  error_stack_destroy(decline_errors);
+  release_claim(state);
+}
+
+void contribute_decline_task(ContributeState *state,
+                             ThreadControl *thread_control, const char *reason,
+                             ErrorStack *error_stack) {
+  (void)thread_control;
+  if (!state || !state->claim_token) {
+    return;
+  }
   decline_over_http(state, reason, NULL, error_stack);
   remember_unsupported(state, state->claimed_job_id);
   release_claim(state);
@@ -1234,6 +1344,7 @@ void contribute_decline_task(ContributeState *state,
 
 void contribute_decline_derived_mismatch(ContributeState *state,
                                          ThreadControl *thread_control,
+                                         const char *why,
                                          ErrorStack *error_stack) {
   if (!state || !state->claim_token) {
     return;
@@ -1249,17 +1360,17 @@ void contribute_decline_derived_mismatch(ContributeState *state,
   }
   char *missing_json = string_builder_dump_and_destroy(sb, NULL);
   const bool server_artifact = state->server_artifact_mismatch;
-  int wait_seconds = 0;
+  // Said only for a file built here, which this worker's MAGPIE has to
+  // change to match (and which goes on the shutdown's list besides). The
+  // server's leave KLV is the server's to put right, and the worker simply
+  // comes back to the job later.
   if (server_artifact) {
-    wait_seconds = contribute_defer_job(state, state->claimed_job_id);
-    thread_control_print_formatted(
-        thread_control,
-        "declining this task: the server's leave file is missing or does not "
-        "match the hash it recorded for it; setting the job aside for %d "
-        "seconds\n",
-        wait_seconds);
+    (void)contribute_defer_job(state, state->claimed_job_id);
   } else {
-    thread_control_print_formatted(
+    if (why) {
+      thread_control_print_formatted_err(thread_control, "%s\n", why);
+    }
+    thread_control_print_formatted_err(
         thread_control,
         "declining this task: a file built here does not match what the job "
         "pins\n");
@@ -1387,12 +1498,16 @@ void contribute_submit_result(ContributeState *state,
   if (!result_json) {
     heartbeat_stop(&state->heartbeat);
   }
+  // The caller has asked contribute_task_hit_time_limit already; a deadline
+  // left running could only stop the submission itself.
+  (void)contribute_deadline_finish(state->deadline);
+  state->deadline = NULL;
   // An executor that failed produced no result to submit.
   bool hand_back = error_message && !result_json;
 
   if (error_message) {
-    thread_control_print_formatted(thread_control, "task failed: %s\n",
-                                   error_message);
+    thread_control_print_formatted_err(thread_control, "task failed: %s\n",
+                                       error_message);
     state->consecutive_failures++;
     free(state->last_failure);
     state->last_failure = string_duplicate(error_message);
@@ -1405,20 +1520,27 @@ void contribute_submit_result(ContributeState *state,
                                 result_json, movegens, &rejection, error_stack);
     heartbeat_stop(&state->heartbeat);
     if (error_stack_is_empty(error_stack)) {
+      if (outcome == CONTRIBUTE_SUBMIT_ACCEPTED) {
+        state->completed++;
+      }
+      // Whatever the server made of it, the task ran to its end; why a
+      // result did not count follows on the error stream.
+      char *counts = get_formatted_string(" (%d started, %d completed)",
+                                          state->started, state->completed);
+      print_task_line(thread_control, "finished", state->task_number,
+                      state->job_name, counts);
+      free(counts);
       switch (outcome) {
       case CONTRIBUTE_SUBMIT_ACCEPTED:
-        state->completed++;
         state->consecutive_failures = 0;
-        thread_control_print_formatted(thread_control, "completed %d task(s)\n",
-                                       state->completed);
         break;
       case CONTRIBUTE_SUBMIT_NOT_ACCEPTED:
-        thread_control_print_formatted(
+        thread_control_print_formatted_err(
             thread_control, "result not accepted: the claim had already "
                             "lapsed or been submitted\n");
         break;
       case CONTRIBUTE_SUBMIT_REJECTED:
-        thread_control_print_formatted(thread_control, "%s\n", rejection);
+        thread_control_print_formatted_err(thread_control, "%s\n", rejection);
         state->consecutive_failures++;
         free(state->last_failure);
         state->last_failure = rejection;
@@ -1440,6 +1562,8 @@ void contribute_submit_result(ContributeState *state,
   state->claim_token = NULL;
   free(state->claimed_job_id);
   state->claimed_job_id = NULL;
+  free(state->job_name);
+  state->job_name = NULL;
   json_destroy(state->assignment);
   state->assignment = NULL;
 
@@ -1527,8 +1651,10 @@ void contribute_state_destroy(ContributeState *state) {
     free(state->deferred[i].job_id);
   }
   free(state->deferred);
+  (void)contribute_deadline_finish(state->deadline);
   free(state->claim_token);
   free(state->claimed_job_id);
+  free(state->job_name);
   string_list_destroy(state->unsupported_jobs);
   string_list_destroy(state->data_gaps);
   string_list_destroy(state->logged_gaps);

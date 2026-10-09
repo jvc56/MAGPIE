@@ -21,5 +21,12 @@ void thread_control_print(ThreadControl *thread_control, const char *content);
 void thread_control_print_formatted(ThreadControl *thread_control,
                                     const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
+// The same, to the error stream: for what a user has to see even when the
+// output is redirected or ignored.
+void thread_control_print_err(ThreadControl *thread_control,
+                              const char *content);
+void thread_control_print_formatted_err(ThreadControl *thread_control,
+                                        const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
 
 #endif

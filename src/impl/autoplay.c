@@ -1837,8 +1837,10 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR, postgen_error);
   }
 
-  char *autoplay_results_string = autoplay_results_to_string(
-      autoplay_results, args->human_readable, show_divergent_results);
-  thread_control_print(thread_control, autoplay_results_string);
-  free(autoplay_results_string);
+  if (args->print_results) {
+    char *autoplay_results_string = autoplay_results_to_string(
+        autoplay_results, args->human_readable, show_divergent_results);
+    thread_control_print(thread_control, autoplay_results_string);
+    free(autoplay_results_string);
+  }
 }

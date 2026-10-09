@@ -93,3 +93,22 @@ void thread_control_print_formatted(ThreadControl *thread_control,
     free(content);
   }
 }
+
+void thread_control_print_err(ThreadControl *thread_control,
+                              const char *content) {
+  cpthread_mutex_lock(&thread_control->print_mutex);
+  write_to_stream(get_stream_err(), "%s", content);
+  cpthread_mutex_unlock(&thread_control->print_mutex);
+}
+
+void thread_control_print_formatted_err(ThreadControl *thread_control,
+                                        const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  char *content = format_string_with_va_list(fmt, &args);
+  va_end(args);
+  if (content) {
+    thread_control_print_err(thread_control, content);
+    free(content);
+  }
+}

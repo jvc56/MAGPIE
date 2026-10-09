@@ -661,14 +661,31 @@ static void assert_fixture_pins_derived_files(const JsonValue *fixture) {
 static void assert_fixture_is_an_assignment(const JsonValue *fixture,
                                             const char *where) {
   const char *const envelope_keys[] = {
-      "claim_token",        "job_id",        "task_request",
-      "min_magpie_version", "expected_data",
+      "claim_token",
+      "job_id",
+      "task_request",
+      "min_magpie_version",
+      "expected_data",
+      CONTRIBUTE_KEY_JOB_NAME,
+      CONTRIBUTE_KEY_MAX_TASK_SECONDS,
   };
   assert_fixture_has_keys(fixture, envelope_keys,
                           sizeof(envelope_keys) / sizeof(envelope_keys[0]),
                           where);
   assert(json_get_string_or_null(json_object_get(fixture, "task_request"),
                                  "job_type"));
+  // In the form the claim takes them: a name, and a limit of whole seconds
+  // within what the server's settings allow.
+  ErrorStack *error_stack = error_stack_create();
+  char *job_name = NULL;
+  int max_task_seconds = 0;
+  contribute_read_job_name_and_limit(fixture, &job_name, &max_task_seconds,
+                                     error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(job_name && *job_name);
+  assert(max_task_seconds >= 60 && max_task_seconds <= 86400);
+  free(job_name);
+  error_stack_destroy(error_stack);
 }
 
 static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
@@ -683,6 +700,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
       CONTRIBUTE_KEY_BINGO_BONUS,    CONTRIBUTE_KEY_SIM_CUTOFF,
       CONTRIBUTE_KEY_THREADING_MODE,
   };
+  assert_fixture_is_an_assignment(games, "games assignment");
   assert_fixture_has_keys(request, request_keys,
                           sizeof(request_keys) / sizeof(request_keys[0]),
                           "games task_request");
@@ -715,6 +733,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
   // broken every opening-rack contributor.
   const JsonValue *opening_rack =
       load_task_request_fixture(BIRDTEST_OPENING_RACK_FIXTURE, &request);
+  assert_fixture_is_an_assignment(opening_rack, "opening_rack assignment");
   const char *const opening_rack_keys[] = {
       CONTRIBUTE_KEY_VARIANT,      CONTRIBUTE_KEY_LETTER_DISTRIBUTION,
       CONTRIBUTE_KEY_BOARD_LAYOUT, CONTRIBUTE_KEY_RACKS,
@@ -738,6 +757,7 @@ static void test_contract_fixtures_carry_every_key_contribute_reads(void) {
 
   const JsonValue *leave =
       load_task_request_fixture(BIRDTEST_LEAVE_FIXTURE, &request);
+  assert_fixture_is_an_assignment(leave, "leave_generation assignment");
   const char *const leave_keys[] = {
       CONTRIBUTE_KEY_LEXICON,
       CONTRIBUTE_KEY_VARIANT,
@@ -1318,6 +1338,140 @@ static void test_a_games_task_takes_its_threading_mode(void) {
   config_destroy_for_contribute(task_config);
   config_destroy(parent);
   error_stack_destroy(error_stack);
+}
+
+// An assignment names its job, which the started and finished lines print,
+// and its time limit. Both are required; the limit is whole seconds from 1;
+// a name is printed with any control character made harmless, so a job name
+// cannot write lines of its own into a contributor's terminal.
+static void test_the_assignment_names_its_job_and_limit(void) {
+  ErrorStack *error_stack = error_stack_create();
+  struct {
+    const char *assignment;
+    bool accepted;
+    const char *name;
+    int seconds;
+  } cases[] = {
+      {"{\"job_name\": \"nwl23 sims\", \"max_task_seconds\": 3600}", true,
+       "nwl23 sims", 3600},
+      {"{\"job_name\": \"a\\nb\\u001b[2Jc\", \"max_task_seconds\": 60}", true,
+       "a?b?[2Jc", 60},
+      {"{\"max_task_seconds\": 3600}", false, NULL, 0},
+      {"{\"job_name\": \"x\"}", false, NULL, 0},
+      {"{\"job_name\": \"x\", \"max_task_seconds\": null}", false, NULL, 0},
+      {"{\"job_name\": \"x\", \"max_task_seconds\": 0}", false, NULL, 0},
+      {"{\"job_name\": \"x\", \"max_task_seconds\": -5}", false, NULL, 0},
+      {"{\"job_name\": \"x\", \"max_task_seconds\": \"3600\"}", false, NULL, 0},
+      {"{\"job_name\": 7, \"max_task_seconds\": 3600}", false, NULL, 0},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    const JsonValue *assignment = json_parse(cases[i].assignment, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    char *name = NULL;
+    int seconds = -1;
+    contribute_read_job_name_and_limit(assignment, &name, &seconds,
+                                       error_stack);
+    if (error_stack_is_empty(error_stack) != cases[i].accepted) {
+      log_fatal("assignment case %d: expected %s: %s", (int)i,
+                cases[i].accepted ? "accepted" : "refused",
+                cases[i].assignment);
+    }
+    if (cases[i].accepted) {
+      assert_strings_equal(name, cases[i].name);
+      assert(seconds == cases[i].seconds);
+    } else {
+      assert(!name && seconds == 0);
+    }
+    free(name);
+    error_stack_reset(error_stack);
+    json_destroy(assignment);
+  }
+  error_stack_destroy(error_stack);
+}
+
+// A task still running at its time limit is stopped the way the user's stop
+// stops it, and the clock says it was the one that stopped it and puts the
+// run's status back, so the run goes on -- with the next task on the same
+// config running to its end. A clock that did not run out says nothing and
+// changes nothing, and a stop that was the user's stays the user's.
+static void test_a_task_is_stopped_at_its_time_limit(void) {
+  ThreadControl *thread_control = thread_control_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+
+  // No limit, no clock.
+  assert(!contribute_deadline_start(thread_control, 0));
+  assert(!contribute_deadline_finish(NULL));
+
+  // Finished in time.
+  ContributeDeadline *deadline =
+      contribute_deadline_start(thread_control, 60.0);
+  assert(deadline);
+  assert(!contribute_deadline_finish(deadline));
+  assert(thread_control_get_status(thread_control) ==
+         THREAD_CONTROL_STATUS_STARTED);
+
+  // Stopped by the user before the limit: the stop is the user's.
+  deadline = contribute_deadline_start(thread_control, 0.3);
+  thread_control_set_status(thread_control,
+                            THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  ctime_nap(0.8);
+  assert(!contribute_deadline_finish(deadline));
+  assert(contribute_interrupted(thread_control));
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+
+  // A task far longer than its limit: a million static games, stopped after
+  // one second.
+  Config *parent = config_create_default_test();
+  ErrorStack *error_stack = error_stack_create();
+  Config *task_config = config_create_for_contribute(parent, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  // The task config shares the caller's thread control.
+  ThreadControl *run_control = config_get_thread_control(task_config);
+  thread_control_set_status(run_control, THREAD_CONTROL_STATUS_STARTED);
+  char *text = games_request("games", 1000000, NULL, STATIC_CSW21_PLAYER,
+                             STATIC_CSW21_PLAYER);
+  const JsonValue *request = json_parse(text, error_stack);
+  free(text);
+  assert(error_stack_is_empty(error_stack));
+  Timer timer;
+  ctimer_start(&timer);
+  deadline = contribute_deadline_start(run_control, 1.0);
+  char *result = NULL;
+  uint64_t movegens = 0;
+  assert(config_contribute_execute(task_config, "games", request, 2, NULL,
+                                   &result, &movegens, error_stack));
+  const double elapsed = ctimer_elapsed_seconds(&timer);
+  assert(contribute_deadline_finish(deadline));
+  assert(elapsed >= 1.0 && elapsed < 120.0);
+  assert(thread_control_get_status(run_control) ==
+         THREAD_CONTROL_STATUS_STARTED);
+  free(result);
+  error_stack_reset(error_stack);
+  json_destroy(request);
+
+  // The run goes on: the next task, on the same config, plays all its games.
+  text =
+      games_request("games", 4, NULL, STATIC_CSW21_PLAYER, STATIC_CSW21_PLAYER);
+  request = json_parse(text, error_stack);
+  free(text);
+  assert(error_stack_is_empty(error_stack));
+  deadline = contribute_deadline_start(run_control, 600.0);
+  assert(config_contribute_execute(task_config, "games", request, 2, NULL,
+                                   &result, &movegens, error_stack));
+  assert(!contribute_deadline_finish(deadline));
+  assert(error_stack_is_empty(error_stack) && result);
+  const JsonValue *parsed = json_parse(result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(json_get_int(json_object_get(parsed, CONTRIBUTE_KEY_ALL_GAMES),
+                      CONTRIBUTE_KEY_GAMES, error_stack) == 4);
+  json_destroy(parsed);
+  free(result);
+  json_destroy(request);
+
+  config_destroy_for_contribute(task_config);
+  config_destroy(parent);
+  error_stack_destroy(error_stack);
+  thread_control_destroy(thread_control);
 }
 
 // The board of a CGP: everything before its first space.
@@ -2044,24 +2198,24 @@ static void test_a_runs_state_starts_clean(void) {
   (void)remove(path);
 }
 
-// A run starts by saying which settings it uses and which of them are
-// defaults -- the sign of a run from the wrong folder, which with the file
-// optional is a new anonymous worker rather than an error -- and says only
-// whether there is an API key, never the key.
-// With `path` NULL, the default file, which the caller has checked is not
-// there.
-static char *settings_printed_for(const char *path, const char *contents) {
+// What a run's start prints, on each stream. With `path` NULL, the default
+// file, which the caller has checked is not there.
+static void printed_at_start(const char *path, const char *contents, char **out,
+                             char **err) {
   if (contents) {
     write_settings_file(path, contents);
   }
-  FILE *captured = tmpfile();
-  assert(captured);
-  io_set_stream_out(captured);
+  FILE *captured_out = tmpfile();
+  FILE *captured_err = tmpfile();
+  assert(captured_out && captured_err);
+  io_set_stream_out(captured_out);
+  io_set_stream_err(captured_err);
   ErrorStack *error_stack = error_stack_create();
   ThreadControl *thread_control = thread_control_create();
   ContributeState *state =
       contribute_state_create(path, thread_control, error_stack);
   io_reset_stream_out();
+  io_reset_stream_err();
   assert(error_stack_is_empty(error_stack));
   assert(state);
   contribute_state_destroy(state);
@@ -2069,47 +2223,49 @@ static char *settings_printed_for(const char *path, const char *contents) {
   if (path) {
     (void)remove(path);
   }
-  rewind(captured);
-  char *printed =
-      get_string_from_file_handle(captured, "(captured)", error_stack);
+  rewind(captured_out);
+  rewind(captured_err);
+  *out = get_string_from_file_handle(captured_out, "(stdout)", error_stack);
+  *err = get_string_from_file_handle(captured_err, "(stderr)", error_stack);
   assert(error_stack_is_empty(error_stack));
   error_stack_destroy(error_stack);
-  return printed;
 }
 
-static void test_a_run_says_which_settings_are_defaults(void) {
+// A run starts without a word: no settings listing, whatever the file says
+// or leaves to the defaults. Only a settings file that needs fixing -- an API
+// key left in a comment, so the run is anonymous -- is said, and on the error
+// stream, never with the key.
+static void test_a_run_starts_quietly(void) {
   const char *path = "contribute_test_printed_settings.txt";
-
+  char *out = NULL;
+  char *err = NULL;
   // Skipped where the working directory has a contribute.txt of its own.
   if (access(CONTRIBUTE_SETTINGS_DEFAULT_FILENAME, F_OK) != 0) {
-    char *printed = settings_printed_for(NULL, NULL);
-    assert(strstr(printed, CONTRIBUTE_SETTINGS_DEFAULT_FILENAME
-                  " not found; every setting is its default"));
-    assert(strstr(printed,
-                  "  server   " CONTRIBUTE_DEFAULT_SERVER " (default)\n"));
-    assert(strstr(printed, "  apikey   none (anonymous)\n"));
-    assert(strstr(printed, "  uuid     none yet"));
-    assert(strstr(printed, "(default)\n  maxtasks 0 (default: no limit)\n"));
-    assert(strstr(printed, "  idlewait 5 (default)\n"));
-    free(printed);
+    printed_at_start(NULL, NULL, &out, &err);
+    assert_strings_equal(out, "");
+    assert_strings_equal(err, "");
+    free(out);
+    free(err);
   }
-
-  char *printed = settings_printed_for(path, "apikey bt_SECRETKEY123\n");
-  assert(!strstr(printed, "not found"));
-  assert(
-      strstr(printed, "  server   " CONTRIBUTE_DEFAULT_SERVER " (default)\n"));
-  assert(strstr(printed, "  apikey   set\n"));
-  assert(!strstr(printed, "SECRETKEY"));
-  free(printed);
-
-  printed = settings_printed_for(path, "server http://127.0.0.1:9\n"
-                                       "threads 2\nmaxtasks 3\nidlewait 4\n");
-  assert(strstr(printed, "  server   http://127.0.0.1:9\n"));
-  assert(strstr(printed, "  threads  2\n"));
-  assert(strstr(printed, "  maxtasks 3\n"));
-  assert(strstr(printed, "  idlewait 4\n"));
-  assert(!strstr(printed, "default"));
-  free(printed);
+  const char *settings[] = {
+      "apikey bt_SECRETKEY123\n",
+      "server http://127.0.0.1:9\nthreads 2\nmaxtasks 3\nidlewait 4\n",
+  };
+  for (size_t i = 0; i < sizeof(settings) / sizeof(settings[0]); i++) {
+    printed_at_start(path, settings[i], &out, &err);
+    assert_strings_equal(out, "");
+    assert_strings_equal(err, "");
+    free(out);
+    free(err);
+  }
+  printed_at_start(path,
+                   "server http://127.0.0.1:9\n# apikey bt_SECRETKEY123\n",
+                   &out, &err);
+  assert_strings_equal(out, "");
+  assert(strstr(err, "line 2 is a comment holding an apikey"));
+  assert(!strstr(err, "SECRETKEY"));
+  free(out);
+  free(err);
 }
 
 // contribute.txt's thread count is capped where a task can still get a move
@@ -3046,7 +3202,7 @@ void test_contribute(void) {
   test_a_rewritten_klv_is_read_again();
   test_an_abandoned_temporary_is_removed();
   test_a_runs_state_starts_clean();
-  test_a_run_says_which_settings_are_defaults();
+  test_a_run_starts_quietly();
   test_contribute_maps_rack_info_tables_unless_told_not_to();
   test_a_derived_build_is_held_by_one_process();
   test_a_runs_threads_are_capped();
@@ -3057,5 +3213,7 @@ void test_contribute(void) {
   test_the_result_body_carries_movegens();
   test_a_task_counts_its_move_generations();
   test_a_games_task_takes_its_threading_mode();
+  test_the_assignment_names_its_job_and_limit();
+  test_a_task_is_stopped_at_its_time_limit();
   test_an_unverifiable_assignment_is_refused();
 }

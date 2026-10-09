@@ -36,6 +36,14 @@ enum { CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS = 600 };
 // magpie exits on the task.
 enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 
+// Assignment fields beside the task request, read in contribute.c: the job's
+// name, for the started/finished lines a run prints, and the longest a task
+// may run in seconds. A task still running then is stopped and handed back
+// with the decline reason CONTRIBUTE_DECLINE_TIME_LIMIT.
+#define CONTRIBUTE_KEY_JOB_NAME "job_name"
+#define CONTRIBUTE_KEY_MAX_TASK_SECONDS "max_task_seconds"
+#define CONTRIBUTE_DECLINE_TIME_LIMIT "time_limit"
+
 // Task request fields, read in config.c's config_contribute_* functions.
 #define CONTRIBUTE_KEY_LEXICON "lexicon"
 #define CONTRIBUTE_KEY_VARIANT "variant"

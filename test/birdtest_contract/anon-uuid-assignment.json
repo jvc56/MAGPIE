@@ -1,6 +1,8 @@
 {
   "claim_token": "162c49a3-28fd-49a9-96a1-469178b1c7b1",
   "job_id": "92cf1ff9-576c-4f05-9624-073897801892",
+  "job_name": "e2e-anon-games",
+  "max_task_seconds": 3600,
   "task_request": {
     "job_type": "games",
     "threading_mode": "igp",

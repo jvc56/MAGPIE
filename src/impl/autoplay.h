@@ -54,6 +54,9 @@ typedef struct AutoplayArgs {
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;
+  // Whether the run ends by printing its results. Off for a contribute task,
+  // whose results go back to the server rather than to the terminal.
+  bool print_results;
   autoplay_t type;
   const char *data_paths;
   GameArgs *game_args;

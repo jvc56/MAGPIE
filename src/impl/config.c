@@ -460,6 +460,9 @@ struct Config {
   bool sim_margin_forecast;
   bool use_heat_map;
   bool print_boards;
+  // A config contribute's tasks run in (config_create_for_contribute): its
+  // autoplay prints no results, which go to the server instead.
+  bool contribute_task;
   bool print_on_finish;
   bool show_game_with_moves;
   bool show_prompt;
@@ -4490,6 +4493,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
+  autoplay_args->print_results = !config->contribute_task;
   autoplay_args->print_interval = config->print_interval;
   autoplay_args->seed = config->seed;
   autoplay_args->thread_control = config_get_thread_control(config);
@@ -8139,6 +8143,8 @@ config_contribute_build_pinned_wordmap(Config *config, ContributeState *state,
   char *built = contribute_derived_digest(config, state, lexicon,
                                           DATA_FILEPATH_TYPE_WORDMAP);
   if (built && strings_equal(built, pinned->sha256)) {
+    thread_control_print_formatted(config->thread_control,
+                                   "built the wordmap for %s\n", lexicon);
     free(built);
     return;
   }
@@ -8385,6 +8391,8 @@ static void config_contribute_ensure_word_info_table(Config *config,
                                           DATA_FILEPATH_TYPE_WORD_INFO_TABLE);
   contribute_unlock_build(lock_fd);
   if (built && strings_equal(built, pinned.sha256)) {
+    thread_control_print_formatted(
+        config->thread_control, "built the word info table for %s\n", lexicon);
     free(built);
     return;
   }
@@ -9278,8 +9286,8 @@ void config_contribute_apply_player_settings(Config *config,
 //   config_contribute_apply_threading_mode);
 // - small plays are the endgame's move list shape, not a ranked list.
 //
-// print_interval is cosmetic, but a leftover one prints simulation progress
-// into a contributor's terminal on every rack.
+// print_interval and print_boards are cosmetic, but a leftover one prints
+// simulation progress, or every game's boards, into a contributor's terminal.
 void config_contribute_reset_shared_settings(Config *config) {
   config->bingo_bonus = DEFAULT_BINGO_BONUS;
   config->eq_margin_movegen = int_to_equity(CONFIG_DEFAULT_EQ_MARGIN);
@@ -9289,6 +9297,7 @@ void config_contribute_reset_shared_settings(Config *config) {
   config->use_heat_map = false;
   config->leavegen_max_games = 0;
   config->print_interval = 0;
+  config->print_boards = false;
   // Read by the opening-rack analysis, which simulates with the run-wide
   // settings rather than a player's. Off for the reason
   // config_contribute_reset_player_settings gives.
@@ -10286,6 +10295,7 @@ Config *config_create_for_contribute(Config *parent, ErrorStack *error_stack) {
     return NULL;
   }
   task_config->save_settings = false;
+  task_config->contribute_task = true;
   // How this machine reads a rack info table, not what a task computes: the
   // bytes are the same either way. A contributor maps it unless its own
   // command says `-ritmmap false`: mapped, workers sharing a data directory
@@ -10401,11 +10411,25 @@ void impl_contribute(Config *config, const char *settings_path,
       // so decline and carry on rather than ending the session. Exit is
       // reserved for the case where nothing at all is doable, which the server
       // detects and reports as a shutdown.
+      (void)contribute_task_hit_time_limit(state);
+      thread_control_print_formatted_err(
+          thread_control,
+          "declining a task of type '%.40s', which this MAGPIE cannot run\n",
+          job_type);
       contribute_decline_task(state, config_get_thread_control(config),
                               "unknown_job_type", error_stack);
       if (!error_stack_is_empty(error_stack)) {
         break;
       }
+      continue;
+    }
+    // The task's time limit stops it the same way a stop request does
+    // (below), and what comes back is no more the task the server asked for.
+    // It is handed back for being too long, and the run goes on.
+    if (contribute_task_hit_time_limit(state)) {
+      free(result_json);
+      error_stack_reset(error_stack);
+      contribute_hand_back_timed_out_task(state, thread_control);
       continue;
     }
     // A stop request (the REPL's `stop`, the API's) cuts a running task
@@ -10433,12 +10457,10 @@ void impl_contribute(Config *config, const char *settings_path,
     if (error_stack_top(error_stack) ==
         ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH) {
       char *why = error_stack_get_string_and_reset(error_stack);
-      thread_control_print_formatted(config_get_thread_control(config), "%s\n",
-                                     why);
-      free(why);
       free(result_json);
       contribute_decline_derived_mismatch(
-          state, config_get_thread_control(config), error_stack);
+          state, config_get_thread_control(config), why, error_stack);
+      free(why);
       if (!error_stack_is_empty(error_stack)) {
         break;
       }

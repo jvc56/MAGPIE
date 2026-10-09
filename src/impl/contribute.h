@@ -70,14 +70,20 @@ typedef enum {
 //
 // On CONTRIBUTE_CLAIM_GOT_TASK: *out_job_type and *out_task_request are
 // borrowed views, valid only until the matching contribute_submit_result
-// call, and a heartbeat thread has already been started for the claimed
-// task -- the caller must call contribute_submit_result when done executing
-// it, win or lose, to stop that heartbeat. On CONTRIBUTE_CLAIM_NO_WORK, this
-// call has already slept idlewait seconds before returning.
-// `thread_control` is used only for the "contributing to..."/"completed N
-// task(s)"/"task failed: ..." status prints (on the first call and every
-// later call's contribute_submit_result); it is borrowed, never owned or
-// destroyed by this module.
+// call, a heartbeat thread has already been started for the claimed task,
+// "[HH:MM:SS] started task #<n>: <job name>" has been printed, and the
+// task's clock is running (see contribute_task_hit_time_limit). The caller
+// must call contribute_task_hit_time_limit when the executor returns, then
+// hand the task back or call contribute_submit_result, win or lose, to stop
+// that heartbeat. On CONTRIBUTE_CLAIM_NO_WORK, this call has already slept
+// idlewait seconds before returning.
+//
+// A run prints little: the started line here, a finished line per task
+// (contribute_submit_result), and, on the error stream, only what ends the
+// run or needs the contributor to act -- a shutdown and what to fix, input
+// data this worker lacks, a failed task. `thread_control` carries those
+// prints and the stop request; it is borrowed, never owned or destroyed by
+// this module.
 contribute_claim_outcome_t
 contribute_claim_task(ContributeState **state, const char *settings_path,
                       const char *this_magpie_version, const char *data_paths,
@@ -98,6 +104,51 @@ contribute_claim_task(ContributeState **state, const char *settings_path,
 void contribute_decline_task(ContributeState *state,
                              ThreadControl *thread_control, const char *reason,
                              ErrorStack *error_stack);
+
+// ---------------------------------------------------------------------------
+// The task's time limit
+// ---------------------------------------------------------------------------
+
+// Every assignment states the longest its task may run, `max_task_seconds`,
+// and the server lapses a claim held much past it, heartbeat or not. So the
+// worker stops a task at that point itself and hands it back: the result
+// would be refused anyway, and the time is better spent on another task.
+
+// A clock for one task: a thread that, `seconds` from now, stops the task the
+// way the user's `stop` does -- setting `thread_control` to
+// THREAD_CONTROL_STATUS_USER_INTERRUPT, which every executor ends early on --
+// unless the user has stopped it first. NULL (no clock) for `seconds` <= 0.
+// Exposed for tests.
+typedef struct ContributeDeadline ContributeDeadline;
+ContributeDeadline *contribute_deadline_start(ThreadControl *thread_control,
+                                              double seconds);
+
+// Stops and frees the clock; NULL is a no-op returning false. True when it
+// was the clock that stopped the task, in which case the thread control's
+// status is put back as it was, so the run goes on; a stop that was the
+// user's is left in place. Exposed for tests.
+bool contribute_deadline_finish(ContributeDeadline *deadline);
+
+// To be called as soon as the executor returns: stops the claimed task's
+// clock, and says whether it was the clock that stopped the task. If so, the
+// task is not a result -- hand it back with
+// contribute_hand_back_timed_out_task -- and the run goes on.
+bool contribute_task_hit_time_limit(ContributeState *state);
+
+// Hands a task the time limit stopped back to the server with reason
+// "time_limit", saying so in one line, "[HH:MM:SS] stopped task #<n>: <job
+// name> at its <N>-second limit, handed back (...)". The job is not set aside:
+// the server, which sees every worker's time-limit declines, decides that.
+void contribute_hand_back_timed_out_task(ContributeState *state,
+                                         ThreadControl *thread_control);
+
+// Reads the assignment's job_name and max_task_seconds, both required, the
+// limit a whole number of seconds from 1. The name comes back as it is printed
+// -- control characters replaced, cut to a sane length -- for the caller to
+// free. Exposed for tests.
+void contribute_read_job_name_and_limit(const JsonValue *assignment,
+                                        char **job_name, int *max_task_seconds,
+                                        ErrorStack *error_stack);
 
 // ---------------------------------------------------------------------------
 // Derived files
@@ -205,8 +256,13 @@ void contribute_record_derived_mismatch(ContributeState *state,
 // KLV, which the server can put right: then the job is set aside for a while
 // (contribute_defer_job: from the idle interval, doubling up to
 // CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS) and claimed again after.
+//
+// `why` is the executor's account of the mismatch. It is printed, with the
+// decline, only for a file built here -- the contributor's MAGPIE is what has
+// to change -- and not for the server's KLV, which is the server's to fix.
 void contribute_decline_derived_mismatch(ContributeState *state,
                                          ThreadControl *thread_control,
+                                         const char *why,
                                          ErrorStack *error_stack);
 
 // The body of POST /api/worker/result: the claim it answers, the task's
@@ -218,7 +274,9 @@ char *contribute_result_body(const char *claim_token, const char *result_json,
 
 // Submits the result for the task claimed by the last contribute_claim_task
 // call, with the move generations it took (see contribute_result_body), and
-// stops its heartbeat. Exactly one of result_json/error_message
+// stops its heartbeat. A task that produced a result prints "[HH:MM:SS]
+// finished task #<n>: <job name> (<started> started, <completed> completed)",
+// the counts this run's. Exactly one of result_json/error_message
 // should be non-NULL: result_json on success, error_message (printed for the
 // contributor, not sent to the server) on failure -- a failed task is never
 // submitted but handed straight back (a decline with reason `task_failed`),
