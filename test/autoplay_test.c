@@ -3,6 +3,7 @@
 #include "../src/def/pat_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/autoplay_results.h"
+#include "../src/ent/bai_sched_stats.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -19,6 +20,7 @@
 #include "test_util.h"
 #include "wmp_move_gen_test.h"
 #include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -709,4 +711,82 @@ void test_autoplay(void) {
   test_autoplay_remaining();
   test_autoplay_default();
   test_autoplay_wmp_correctness();
+}
+
+// Regression test for multithreaded sim determinism under intra-game
+// parallelism (-mtmode igp), where a single sim gets every worker thread.
+//
+// With identical p1/p2 configurations every game pair must be non-divergent.
+// game_get_player_draw_index is seat-based (player_index ^
+// starting_player_index) and the pair swaps only the starting player index
+// while keeping the same bag seed, so at every turn the two games present the
+// same board, rack and bag to whoever is on turn. Two identical strategies can
+// therefore only disagree if the sim itself is nondeterministic, which makes
+// the divergent count an exact, binary determinism check with no statistical
+// interpretation needed.
+//
+// Must be run under igp specifically. Under pgp every sim gets exactly one
+// worker thread, so there is no thread timing inside a sim and the property
+// holds trivially; passing under pgp proves nothing.
+//
+// Requires -tlim 0. A clocked sim is nondeterministic by construction and can
+// never be made pair-exact, so this test must not be run with a time limit or
+// with the -pc1/-pc2 play choosers, whose budgets are clocks.
+//
+// SIMDETIGP_PAIRS and SIMDETIGP_ITERS (defaults 2 and 500) scale the check.
+// The default budget runs well past the initial phase (4 plays x 5 samples)
+// and the round-robin rounds laid out before it folds, so most samples come
+// from top-two rounds, and with six workers on adaptive rounds that lag only
+// two rounds behind, idle workers speculate.
+void test_autoplay_sim_determinism_igp(void) {
+  const char *pairs_env = getenv("SIMDETIGP_PAIRS");
+  const int num_pairs =
+      pairs_env != NULL ? (int)strtol(pairs_env, NULL, 10) : 1;
+  const char *iters_env = getenv("SIMDETIGP_ITERS");
+  const int num_iters =
+      iters_env != NULL ? (int)strtol(iters_env, NULL, 10) : 200;
+  char *settings = get_formatted_string(
+      "set -lex CSW21 -pl1 1 -pl2 1 -np1 4 -np2 4 -iterations %d "
+      "-minplayiterations 5 -tlim 0 -threads 6 -mtmode igp",
+      num_iters);
+  Config *config = config_create_or_die(settings);
+  free(settings);
+  bai_sched_stats_reset();
+  char *autoplay_cmd =
+      get_formatted_string("autoplay games %d -gp true -seed 7", num_pairs);
+  load_and_exec_config_or_die(config, autoplay_cmd);
+  free(autoplay_cmd);
+
+  char *res = autoplay_results_to_string(config_get_autoplay_results(config),
+                                         false, true);
+  char *expected_total =
+      get_formatted_string("autoplay games %d", num_pairs * 2);
+  assert_autoplay_output(res, 2,
+                         (const char *[]){expected_total, "autoplay games 0"});
+  free(expected_total);
+  free(res);
+  config_destroy(config);
+
+  printf("IGP sim determinism: PASSED (%d game pairs, 0 divergent)\n",
+         num_pairs);
+#ifdef BAI_SCHED_STATS
+  // An instrumented build (make BUILD=bai_stats) shows how much of the budget
+  // went past the initial phase and how often idle workers speculated.
+  uint64_t bai_samples = 0;
+  uint64_t speculations = 0;
+  uint64_t speculation_hits = 0;
+  const int num_sims = bai_sched_stats_get_count();
+  for (int sim_idx = 0; sim_idx < num_sims; sim_idx++) {
+    BAISchedSimStats sim_stats;
+    bai_sched_stats_get(sim_idx, &sim_stats);
+    bai_samples += sim_stats.bai_samples;
+    speculations += sim_stats.speculations;
+    speculation_hits += sim_stats.speculation_hits;
+  }
+  printf("IGP sim determinism coverage: %d sims, %" PRIu64
+         " samples past the initial phase, %" PRIu64 " speculations, %" PRIu64
+         " used\n",
+         num_sims, bai_samples, speculations, speculation_hits);
+  bai_sched_stats_reset();
+#endif
 }

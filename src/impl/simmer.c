@@ -38,7 +38,6 @@
 // - num plies
 struct SimCtx {
   RandomVariables *rvs;
-  RandomVariables *rng;
   InferenceCtx *inference_ctx;
 };
 
@@ -47,7 +46,6 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
     return;
   }
   rvs_destroy(sim_ctx->rvs);
-  rvs_destroy(sim_ctx->rng);
   inference_ctx_destroy(sim_ctx->inference_ctx);
   free(sim_ctx);
 }
@@ -101,7 +99,6 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   if (*sim_ctx == NULL) {
     *sim_ctx = malloc_or_die(sizeof(SimCtx));
     (*sim_ctx)->rvs = NULL;
-    (*sim_ctx)->rng = NULL;
     (*sim_ctx)->inference_ctx = NULL;
   }
 
@@ -125,17 +122,10 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
       .sim_results = sim_results,
   };
 
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .seed = sim_args->seed,
-  };
-
   if ((*sim_ctx)->rvs) {
     rvs_reset((*sim_ctx)->rvs, &rv_sim_args);
-    rvs_reset((*sim_ctx)->rng, &rng_args);
   } else {
     (*sim_ctx)->rvs = rvs_create(&rv_sim_args);
-    (*sim_ctx)->rng = rvs_create(&rng_args);
   }
 
   // On resume the existing results already carry the rack / known
@@ -149,8 +139,8 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   sim_results_set_cutoff(sim_results, sim_args->bai_options.cutoff);
   sim_results_set_utility_w_spread(sim_results, sim_args->utility_w_spread);
 
-  bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
-      sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));
+  bai(&sim_args->bai_options, (*sim_ctx)->rvs, sim_args->thread_control, NULL,
+      sim_results_get_bai_result(sim_results));
 
   // Reset the sim args to their original values in case they were modified for
   // endgame sims

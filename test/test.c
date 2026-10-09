@@ -7,6 +7,7 @@
 #include "analyze_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "bai_sched_test.h"
 #include "bai_test.h"
 #include "bai_utility_test.h"
 #include "benchmark_endgame_test.h"
@@ -66,6 +67,9 @@
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
+#include "sim_det_sweep_test.h"
+#include "sim_quality_test.h"
+#include "sim_regret_test.h"
 #include "sim_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
@@ -189,6 +193,8 @@ static TestEntry on_demand_test_table[] = {
     {"peginterrupt", test_peg_interrupted_candidate_outcomes},
     {"playchooserfixed", test_play_chooser_fixed_short_budget},
     {"analyze_sim", test_analyze_sim},
+    {"simdetigp", test_autoplay_sim_determinism_igp},
+    {"simdetsweep", test_sim_determinism_sweep},
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},
@@ -223,6 +229,9 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
+    {"baisched", test_bai_sched},
+    {"simquality", test_sim_quality},
+    {"simregret", test_sim_regret},
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver

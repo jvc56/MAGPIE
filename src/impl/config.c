@@ -2409,7 +2409,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "simulation. " MULTI_THREADING_MODE_PER_GAME_PARALLELISM_STRING
              " runs N games in parallel "
              "(default). " MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING
-             " runs one game at a time using all threads for simulation.";
+             " runs one game at a time using all threads for simulation. "
+             "igp only applies when at least one player sims or uses a play "
+             "chooser; autoplay with two static players always runs N games "
+             "in parallel, whichever mode is set.";
       break;
     case ARG_TOKEN_VERSION:
       usages[0] = "";

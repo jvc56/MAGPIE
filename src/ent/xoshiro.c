@@ -95,6 +95,14 @@ uint64_t prng_next(XoshiroPRNG *prng) {
   return result;
 }
 
+uint64_t prng_peek(const XoshiroPRNG *prng, uint64_t ahead) {
+  XoshiroPRNG peek_prng = *prng;
+  for (uint64_t step = 0; step < ahead; step++) {
+    prng_next(&peek_prng);
+  }
+  return prng_next(&peek_prng);
+}
+
 // Use the prng_next function to get a random number
 // in the range [0, n)
 uint64_t prng_get_random_number(XoshiroPRNG *prng, uint64_t n) {

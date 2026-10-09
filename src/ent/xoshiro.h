@@ -13,6 +13,10 @@ void prng_copy(XoshiroPRNG *dst, const XoshiroPRNG *src);
 
 void prng_seed(XoshiroPRNG *prng, uint64_t seed);
 uint64_t prng_next(XoshiroPRNG *prng);
+// The value prng_next would return after `ahead` further calls, without
+// advancing the generator. It works on a copy of the state on the stack, so it
+// allocates nothing.
+uint64_t prng_peek(const XoshiroPRNG *prng, uint64_t ahead);
 void prng_jump(XoshiroPRNG *prng);
 uint64_t prng_get_random_number(XoshiroPRNG *prng, uint64_t n);
 
