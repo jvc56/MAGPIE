@@ -2,6 +2,7 @@
 
 #include "bot_worker.h"
 #include "game_state.h"
+#include "input_menus.h"
 #include "move_entry.h"
 #include "slash_commands.h"
 #include "time_picker.h"
@@ -71,6 +72,25 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
     return true;
   }
 
+  if (ui->modal == TUI_MODAL_NONE && !state->slash_active &&
+      state->focused_panel == TUI_FOCUS_ANALYSIS &&
+      state->analysis_cursor < 0 &&
+      (key == ' ' || key == NCKEY_ENTER || key == '\r' || key == '\n')) {
+    // Space or Enter on the [5] badge opens the analysis menu for the
+    // turn selected in History, focused on its first available item.
+    ui->modal = TUI_MODAL_ANALYSIS_MENU;
+    ui->analysis_menu_focus = TUI_ANALYSIS_MENU_BACK;
+    pthread_mutex_lock(&state->mutex);
+    for (int item = 0; item < TUI_ANALYSIS_MENU_ITEM_COUNT; item++) {
+      if (tui_analysis_menu_reason(state, item) == NULL) {
+        ui->analysis_menu_focus = item;
+        break;
+      }
+    }
+    pthread_mutex_unlock(&state->mutex);
+    return true;
+  }
+
   if (key == NCKEY_ESC && !state->slash_active) {
     // Esc while typing a slash command cancels the command instead
     // (handled with the rest of the slash input below).
@@ -90,6 +110,13 @@ bool tui_input_game(TuiGameState *state, TuiUiState *ui,
       state->slash_buf[0] = '\0';
     }
     state->focused_panel = new_focus;
+    // "5" lands on the analysis panel's [5] badge, where Space or Enter
+    // opens its menu; the arrows move down into the rows.
+    if (new_focus == TUI_FOCUS_ANALYSIS) {
+      state->analysis_cursor = -1;
+      state->analysis_cursor_column = TUI_ANALYSIS_COLUMN_RANK;
+      state->analysis_anchored_move[0] = '\0';
+    }
     pthread_mutex_unlock(&state->mutex);
   } else if ((key == NCKEY_TAB || key == '\t') && !state->slash_active) {
     // Tab cycles forward through 0..5 (Command → Board → ... →

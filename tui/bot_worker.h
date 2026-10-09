@@ -34,6 +34,22 @@ void tui_bot_worker_append_clock_event(TuiGameState *state, int kind,
                                        int player_idx, int adjustment,
                                        int cumulative_after);
 
+// What the analysis commands ("/sim", "/resume", "/kibitz", "/stop")
+// and the analysis panel's menu can do.
+typedef enum {
+  TUI_ANALYSIS_SIM,
+  TUI_ANALYSIS_RESUME,
+  TUI_ANALYSIS_KIBITZ,
+  TUI_ANALYSIS_STOP,
+} TuiAnalysisAction;
+
+// NULL when `action` can run on history entry `turn_idx` now; otherwise
+// a short reason it can't, for a notice or a disabled menu item's help.
+// Caller holds state->mutex.
+const char *tui_analysis_unavailable_reason(const TuiGameState *state,
+                                            int turn_idx,
+                                            TuiAnalysisAction action);
+
 // Start the analysis worker on history entry `turn_idx`, streaming
 // progress to the analysis panel until "/stop".
 //   request_sim (true, "/sim"): simulate the turn, continuing its saved

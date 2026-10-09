@@ -194,9 +194,25 @@ static int modal_focus(const TuiUiState *ui) {
     return ui->play_setup_focus;
   case TUI_MODAL_ANNOTATE_SETUP:
     return ui->annotate_setup_focus;
+  case TUI_MODAL_ANALYSIS_MENU:
+    return ui->analysis_menu_focus;
   default:
     return -1;
   }
+}
+
+// The open dialog's help line. The analysis menu's depends on the game:
+// a disabled item says why it can't run. Caller holds state->mutex.
+static const char *modal_help_line(const TuiGameState *state,
+                                   const TuiUiState *ui) {
+  if (ui->modal == TUI_MODAL_ANALYSIS_MENU) {
+    const char *reason =
+        tui_analysis_menu_reason(state, ui->analysis_menu_focus);
+    if (reason != NULL) {
+      return reason;
+    }
+  }
+  return tui_modal_help(ui->modal, modal_focus(ui));
 }
 
 // Writes the display name of `lexicon`'s language to `out` for a setup
@@ -217,8 +233,10 @@ static void lexicon_language(TuiUiState *ui, const char *lexicon, char *out,
 }
 
 // Draws the open modal (if any) over the rendered game.
+// `state` is non-const because the analysis menu locks its mutex to read
+// which items can run.
 static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
-                                 const TuiGameState *state, TuiUiState *ui,
+                                 TuiGameState *state, TuiUiState *ui,
                                  const TuiSession *session) {
   if (ui->modal == TUI_MODAL_MAIN_MENU) {
     tui_game_render_menu(std_plane, theme, ui->main_menu_focus);
@@ -236,6 +254,18 @@ static void render_modal_overlay(struct ncplane *std_plane, const Theme *theme,
     tui_game_render_time_picker(std_plane, theme, ui->time_focus);
   } else if (ui->modal == TUI_MODAL_QUIT_CONFIRM) {
     tui_game_render_quit_confirm(std_plane, theme, ui->quit_confirm_focus);
+  } else if (ui->modal == TUI_MODAL_ANALYSIS_MENU) {
+    bool disabled[TUI_ANALYSIS_MENU_ITEM_COUNT];
+    pthread_mutex_lock(&state->mutex);
+    for (int item = 0; item < TUI_ANALYSIS_MENU_ITEM_COUNT; item++) {
+      disabled[item] = tui_analysis_menu_reason(state, item) != NULL;
+    }
+    const int turn = state->history_cursor;
+    const bool sim_continues = turn >= 0 && turn < state->history_count &&
+                               state->history[turn].sim_results_saved != NULL;
+    pthread_mutex_unlock(&state->mutex);
+    tui_game_render_analysis_menu(std_plane, theme, ui->analysis_menu_focus,
+                                  disabled, sim_continues);
   } else if (ui->modal == TUI_MODAL_STARTUP_MENU) {
     tui_game_render_startup_menu(std_plane, theme, ui->startup_menu_focus);
   } else if (ui->modal == TUI_MODAL_WATCH_SETUP) {
@@ -541,6 +571,10 @@ static void dispatch_input(struct notcurses *nc, struct ncplane *std_plane,
     return;
   }
 
+  if (tui_input_analysis_menu(state, ui, key, input)) {
+    return;
+  }
+
   // When the History cursor sits on a pending entry and the
   // user hasn't opened the editor yet, Tab / Enter / → / ↓ all
   // drop into the move cell. Up / Left stay reserved for
@@ -839,7 +873,7 @@ int main(int argc, char *argv[]) {
           (long)(lock_acquired.tv_sec - render_begin.tv_sec) * 1000000L +
           (lock_acquired.tv_nsec - render_begin.tv_nsec) / 1000L;
       tui_game_render(std_plane, theme, &game_state, session.chosen_time,
-                      ui.modal, tui_modal_help(ui.modal, modal_focus(&ui)));
+                      ui.modal, modal_help_line(&game_state, &ui));
       pthread_mutex_unlock(&game_state.mutex);
       render_modal_overlay(std_plane, theme, &game_state, &ui, &session);
       emit_frame_and_record_stats(nc, render_begin, lock_us, input_dirty_ts,
