@@ -13,6 +13,9 @@
 //   SIMREG_MODE=ref  SIMREG_FILE=ref.txt ./bin/magpie_test simregret
 //   SIMREG_MODE=eval SIMREG_FILE=ref.txt ./bin/magpie_test simregret
 //
+// Every evaluated decision is printed as a "SIMREG decision" line, so two
+// builds can also be compared decision by decision.
+//
 // Env vars:
 //   SIMREG_MODE     ref or eval (default eval)
 //   SIMREG_FILE     reference file (default simregret_ref.txt)
@@ -207,6 +210,10 @@ static void simreg_evaluate(const char *file_name, const char *threads,
       total_win_pct_regret += win_pct_regret;
       total_equity_regret += plays[best_idx].equity - plays[chosen_idx].equity;
       position_regret += win_pct_regret;
+      printf("SIMREG decision pos=%d seed=%d win%%_regret=%.9f "
+             "equity_regret=%.9f\n",
+             pos_idx, seed, 100.0 * win_pct_regret,
+             plays[best_idx].equity - plays[chosen_idx].equity);
       num_best += chosen_idx == best_idx;
       num_decisions++;
     }
