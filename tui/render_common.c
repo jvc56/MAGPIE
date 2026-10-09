@@ -7,6 +7,7 @@
 #include "../src/util/string_util.h"
 #include "config.h"
 #include "theme.h"
+#include "tile_input.h"
 #include <dirent.h>
 #include <notcurses/notcurses.h>
 #include <stdint.h>
@@ -249,9 +250,6 @@ void format_clock(int seconds, char *buf, size_t buf_size) {
 // pre-built engine-side as alphabetical-with-? alphagrams; we
 // re-bucket them at render time so the user sees rack/leave
 // orderings consistent with the live rack panel.
-static int alphagram_char_cmp(const void *a, const void *b) {
-  return *(const unsigned char *)a - *(const unsigned char *)b;
-}
 void tui_format_alphagram_for_sort(const char *in,
                                    const struct LetterDistribution *ld,
                                    TuiRackSort sort, char *out,
@@ -262,6 +260,32 @@ void tui_format_alphagram_for_sort(const char *in,
   format_alphagram_for_sort(in, (const LetterDistribution *)ld, sort, out,
                             out_size);
 }
+// One tile of a rack being sorted for display: its move-text token
+// ("E", "Ç", "[QU]", "?"), its place in the letter distribution, and
+// whether it's a vowel or the blank.
+typedef struct {
+  char text[TUI_TILE_TEXT_MAX];
+  int rank;
+  bool vowel;
+  bool blank;
+} AlphagramTile;
+
+enum { ALPHAGRAM_MAX_TILES = 32, ALPHAGRAM_UNKNOWN_RANK = 1 << 20 };
+
+// Groups a sort mode lists, in order: blanks, vowels, consonants, or all
+// letters (the alphabetical modes don't split vowels).
+enum { GROUP_BLANKS, GROUP_VOWELS, GROUP_CONSONANTS, GROUP_LETTERS };
+
+static bool alphagram_in_group(const AlphagramTile *tile, int group) {
+  if (group == GROUP_BLANKS || tile->blank) {
+    return group == GROUP_BLANKS && tile->blank;
+  }
+  if (group == GROUP_LETTERS) {
+    return true;
+  }
+  return group == GROUP_VOWELS ? tile->vowel : !tile->vowel;
+}
+
 void format_alphagram_for_sort(const char *in, const LetterDistribution *ld,
                                TuiRackSort sort, char *out, size_t out_size) {
   if (out == NULL || out_size == 0) {
@@ -271,95 +295,69 @@ void format_alphagram_for_sort(const char *in, const LetterDistribution *ld,
   if (in == NULL || ld == NULL) {
     return;
   }
-  // Bucket each input char into blanks / vowels / consonants. We
-  // also keep a flat "alphas" run (everything except blanks) in
-  // input order, so the alpha-with-? modes don't need to scan
-  // twice.
-  char blanks[32] = {0};
-  int nb = 0;
-  char vowels[32] = {0};
-  int nv = 0;
-  char cons[32] = {0};
-  int nc = 0;
-  char alphas[64] = {0};
-  int na = 0;
-  for (const char *p = in; *p != '\0'; p++) {
-    const char c = *p;
-    if (c == '?') {
-      if (nb < (int)sizeof(blanks)) {
-        blanks[nb++] = c;
-      }
-      continue;
-    }
-    if (na < (int)sizeof(alphas)) {
-      alphas[na++] = c;
-    }
-    // Map char back to ML for vowel classification. Linear scan
-    // over the LD's letter table — small (≤30ish entries), and
-    // alphagrams are short (≤7 chars), so this stays cheap.
-    bool is_vowel = false;
-    for (int ml = 1; ml < ld_get_size(ld); ml++) {
-      if (ld->ld_ml_to_hl[ml][0] == c && ld->ld_ml_to_hl[ml][1] == '\0') {
-        is_vowel = ld_get_is_vowel(ld, (MachineLetter)ml);
-        break;
-      }
-    }
-    if (is_vowel) {
-      if (nv < (int)sizeof(vowels)) {
-        vowels[nv++] = c;
-      }
-    } else {
-      if (nc < (int)sizeof(cons)) {
-        cons[nc++] = c;
-      }
-    }
+  // Split the rack into tiles (a bracketed multi-letter tile or a UTF-8
+  // letter each) and order them as the letter distribution does, so Ç
+  // follows C and [L·L] follows L. Unknown text keeps its input order at
+  // the end.
+  AlphagramTile tiles[ALPHAGRAM_MAX_TILES];
+  int count = 0;
+  for (const char *pos = in; *pos != '\0' && count < ALPHAGRAM_MAX_TILES;) {
+    const int len = tui_tile_token_len(pos);
+    AlphagramTile *tile = &tiles[count++];
+    (void)snprintf(tile->text, sizeof(tile->text), "%.*s", len, pos);
+    tile->blank = strcmp(tile->text, "?") == 0;
+    char face[TUI_TILE_TEXT_MAX];
+    tui_tile_token_face(pos, len, face, sizeof(face));
+    const int ml = tile->blank ? -1 : tui_tile_for_text(ld, face);
+    tile->rank = ml >= 0 ? ml : ALPHAGRAM_UNKNOWN_RANK + count;
+    tile->vowel = ml >= 0 && ld_get_is_vowel(ld, (MachineLetter)ml);
+    pos += len;
   }
-  // Sort each bucket alphabetically so the user-visible order
-  // doesn't depend on what the input happened to be. Committed
-  // rack_strs come from string_builder_add_rack (already in
-  // ml-order, so this is a no-op) — but the annotation editor's
-  // user-typed rack buffer can be in arbitrary entry order, and
-  // we don't want a typed "ACKQUEL" to surface as "AUECKQL".
-  if (na > 1) {
-    qsort(alphas, (size_t)na, 1, alphagram_char_cmp);
+  // Insertion sort: racks are a handful of tiles, and it keeps equal
+  // tiles in input order.
+  for (int idx = 1; idx < count; idx++) {
+    const AlphagramTile moving = tiles[idx];
+    int slot = idx;
+    while (slot > 0 && tiles[slot - 1].rank > moving.rank) {
+      tiles[slot] = tiles[slot - 1];
+      slot--;
+    }
+    tiles[slot] = moving;
   }
-  if (nv > 1) {
-    qsort(vowels, (size_t)nv, 1, alphagram_char_cmp);
-  }
-  if (nc > 1) {
-    qsort(cons, (size_t)nc, 1, alphagram_char_cmp);
-  }
-  size_t pos = 0;
-#define ALPHAGRAM_APPEND(buf, n)                                               \
-  do {                                                                         \
-    for (int _i = 0; _i < (n) && pos + 1 < out_size; _i++) {                   \
-      out[pos++] = (buf)[_i];                                                  \
-    }                                                                          \
-  } while (0)
+  int order[3] = {GROUP_LETTERS, GROUP_BLANKS, -1};
   switch (sort) {
   case TUI_RACK_SORT_BLANKS_ALPHA:
-    ALPHAGRAM_APPEND(blanks, nb);
-    ALPHAGRAM_APPEND(alphas, na);
+    order[0] = GROUP_BLANKS;
+    order[1] = GROUP_LETTERS;
     break;
   case TUI_RACK_SORT_VOWELS:
-    ALPHAGRAM_APPEND(vowels, nv);
-    ALPHAGRAM_APPEND(cons, nc);
-    ALPHAGRAM_APPEND(blanks, nb);
+    order[0] = GROUP_VOWELS;
+    order[1] = GROUP_CONSONANTS;
+    order[2] = GROUP_BLANKS;
     break;
   case TUI_RACK_SORT_BLANKS_VOWELS:
-    ALPHAGRAM_APPEND(blanks, nb);
-    ALPHAGRAM_APPEND(vowels, nv);
-    ALPHAGRAM_APPEND(cons, nc);
+    order[0] = GROUP_BLANKS;
+    order[1] = GROUP_VOWELS;
+    order[2] = GROUP_CONSONANTS;
     break;
   case TUI_RACK_SORT_ALPHA:
   case TUI_RACK_SORT_COUNT:
   default:
-    ALPHAGRAM_APPEND(alphas, na);
-    ALPHAGRAM_APPEND(blanks, nb);
     break;
   }
-#undef ALPHAGRAM_APPEND
-  out[pos < out_size ? pos : out_size - 1] = '\0';
+  size_t used = 0;
+  for (int group_idx = 0; group_idx < 3 && order[group_idx] >= 0; group_idx++) {
+    for (int idx = 0; idx < count; idx++) {
+      const size_t text_len = strlen(tiles[idx].text);
+      if (!alphagram_in_group(&tiles[idx], order[group_idx]) ||
+          used + text_len + 1 > out_size) {
+        continue;
+      }
+      memcpy(out + used, tiles[idx].text, text_len);
+      used += text_len;
+    }
+  }
+  out[used] = '\0';
 }
 // Render a GCG-style move notation with played-through letters (the
 // segments wrapped in parentheses) and the post-play leave (in square
@@ -379,6 +377,19 @@ void format_alphagram_for_sort(const char *in, const LetterDistribution *ld,
 //                            around lowercase content (blank designation).
 //                            Ignored when hide_parens is true.
 // Both modes still render parens content non-bold.
+// Screen columns `text` takes: one per UTF-8 character (move text is
+// letters, dots, and brackets — all narrow).
+static int utf8_text_columns(const char *text) {
+  int cols = 0;
+  for (const unsigned char *ch = (const unsigned char *)text; *ch != '\0';
+       ch++) {
+    if ((*ch & 0xc0) != 0x80) {
+      cols++;
+    }
+  }
+  return cols;
+}
+
 void render_move_styled(struct ncplane *plane, int row, int col,
                         const char *move_str, bool hide_parens,
                         bool hide_playthrough_parens) {
@@ -468,7 +479,7 @@ void render_move_styled(struct ncplane *plane, int row, int col,
         memcpy(rbuf, run_start, rlen);
         rbuf[rlen] = '\0';
         ncplane_putstr_yx(plane, row, x, rbuf);
-        x += (int)strlen(rbuf);
+        x += utf8_text_columns(rbuf);
       }
       p = seg_end;
       continue;
@@ -482,7 +493,7 @@ void render_move_styled(struct ncplane *plane, int row, int col,
     memcpy(buf, seg_start, len);
     buf[len] = '\0';
     ncplane_putstr_yx(plane, row, x, buf);
-    x += (int)strlen(buf);
+    x += utf8_text_columns(buf);
     // When we dropped the parens for this group we landed on ')'; skip
     // past it so it doesn't render as a stray bracket. (seg_end was
     // not advanced over ')' in the drop branch.)
