@@ -66,6 +66,13 @@ enum {
   SIM_DEADLINE_GRACE_MS = 1000,
 };
 
+// Threads for an engine search (sim, endgame, PEG), leaving one core
+// for the UI thread's input and rendering so frames keep their rate.
+static int engine_threads(void) {
+  const int hw_cores = get_num_cores();
+  return hw_cores > 1 ? hw_cores - 1 : 1;
+}
+
 static void copy_str(char *dst, size_t dst_size, const char *src) {
   if (dst_size == 0) {
     return;
@@ -511,13 +518,7 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   const bool wd_started =
       (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
 
-  // Reserve a core for the UI thread + notcurses so frame
-  // rendering doesn't fight the simmer for scheduler time.
-  // On a 10+ core machine giving up 1-2 cores is barely
-  // perceptible in sim throughput; in exchange the TUI stays
-  // smooth during "bot thinking" frames.
-  const int hw_cores = get_num_cores();
-  const int num_threads = hw_cores > 2 ? hw_cores - 1 : hw_cores;
+  const int num_threads = engine_threads();
   SimArgs args = {0};
   // Pull sim depth + breadth from state so the Watch setup modal
   // can tune them per game. Clamp to sensible bounds — a 0 ply
@@ -791,10 +792,7 @@ static bool run_endgame_on(TuiGameState *state, const Game *position,
   args.tt_fraction_of_mem = 0.10;
   args.plies = ENDGAME_PLIES;
   args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  {
-    const int hw = get_num_cores();
-    args.num_threads = hw > 2 ? hw - 1 : hw;
-  }
+  args.num_threads = engine_threads();
   args.use_heuristics = true;
   // Ask the solver for a top-K leaderboard. Post-#530 the negamax
   // search uses topk_values[MAX_ENDGAME_DISPLAY_PVS], so that's the
@@ -936,10 +934,10 @@ static bool run_peg_on(TuiGameState *state, const Game *position,
   PegArgs args = {0};
   args.game = position;
   args.thread_control = tc;
-  {
-    const int hw = get_num_cores();
-    args.num_threads = hw > 2 ? hw - 1 : hw;
-  }
+  // peg_solve's calling thread drains the pool alongside its workers, so
+  // one fewer worker keeps the search to engine_threads() cores.
+  const int peg_threads = engine_threads();
+  args.num_threads = peg_threads > 1 ? peg_threads - 1 : 1;
   args.time_budget_seconds = budget_sec;
   args.opp_model = PEG_OPP_RATIONAL;
   args.scenario_stride = 0; // bag-size default
@@ -1442,8 +1440,7 @@ static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
   const bool wd_started =
       (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
 
-  const int hw_cores = get_num_cores();
-  const int num_threads = hw_cores > 2 ? hw_cores - 1 : hw_cores;
+  const int num_threads = engine_threads();
   SimArgs args = {0};
   args.num_plies = fresh ? fresh_plies : sim_results_get_num_plies(results);
   args.move_list = candidates;
