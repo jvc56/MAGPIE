@@ -1,5 +1,6 @@
 #include "random_variable_test.h"
 
+#include "../src/ent/xoshiro.h"
 #include "../src/impl/random_variable.h"
 #include "test_util.h"
 #include <assert.h>
@@ -115,7 +116,28 @@ void test_random_variable_normal_predetermined(void) {
   rvs_destroy(rvs2);
 }
 
+void test_prng_peek(void) {
+  XoshiroPRNG *prng = prng_create(42);
+  XoshiroPRNG *reference = prng_create(42);
+  for (uint64_t ahead = 0; ahead < 10; ahead++) {
+    const uint64_t peeked = prng_peek(prng, ahead);
+    assert(peeked == prng_peek(prng, ahead));
+    XoshiroPRNG *copy = prng_create(0);
+    prng_copy(copy, reference);
+    for (uint64_t step = 0; step < ahead; step++) {
+      prng_next(copy);
+    }
+    assert(peeked == prng_next(copy));
+    prng_destroy(copy);
+  }
+  // Peeking never advances the generator.
+  assert(prng_next(prng) == prng_next(reference));
+  prng_destroy(reference);
+  prng_destroy(prng);
+}
+
 void test_random_variable(void) {
+  test_prng_peek();
   test_random_variable_uniform();
   test_random_variable_uniform_predetermined();
   test_random_variable_normal();
