@@ -12,14 +12,16 @@
 #include <unistd.h>
 
 enum {
-  // ASCII (0-127) covers letters/digits; the bump to 8704 reaches
-  // through the Arrows block (U+2190-U+21FF) so we can rasterize
-  // → / ↓ for the annotation cursor. Pointer array cost: 8704 * 8
-  // = 68 KB per cache; with 4 caches * 2 (regular + bold) that's
-  // ~545 KB total — fine. A real hash table would be lower memory
-  // but most slots stay NULL and we only ever look up a handful
-  // of codepoints, so a flat array is the simpler win.
-  GLYPH_CACHE_CAPACITY = 8704,
+  // ASCII (0-127) covers letters/digits; 0x2600 reaches through the
+  // Arrows block (U+2190-U+21FF) for the annotation cursor's → / ↓ and
+  // through Box Drawing, Block Elements, and Geometric Shapes
+  // (U+2500-U+25FF), which frame_dump needs for dialog borders, shadows,
+  // and the ◀ / ▶ chevrons. Pointer array cost: 9728 * 8 = 76 KB per
+  // cache; with 4 caches * 2 (regular + bold) that's ~620 KB total —
+  // fine. A real hash table would be lower memory but most slots stay
+  // NULL and we only ever look up a handful of codepoints, so a flat
+  // array is the simpler win.
+  GLYPH_CACHE_CAPACITY = 0x2600,
 };
 
 struct TuiGlyphCache {

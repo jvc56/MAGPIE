@@ -1,8 +1,5 @@
 #include "input_mouse.h"
 
-#include "../src/def/letter_distribution_defs.h"
-#include "../src/ent/board.h"
-#include "../src/ent/game.h"
 #include "game_state.h"
 #include "move_entry.h"
 #include "render_hit_test.h"
@@ -269,18 +266,14 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
         }
       } else if (hit == TUI_FOCUS_BOARD &&
                  state->app_mode != TUI_APP_MODE_WATCH) {
-        // Board move-entry: click an empty cell to anchor and start
-        // typing; click the same anchor again to toggle direction.
-        // A click on an occupied cell (that isn't the anchor) just
-        // focuses the board.
+        // Board move-entry: click a cell to anchor and start typing;
+        // click the same cell again to toggle direction. A click on a
+        // tile starts at the first empty square after the tiles it
+        // belongs to, so typing continues that word.
         int cell_row = -1;
         int cell_col = -1;
         if (tui_board_cell_at(std_plane, state, input.y, input.x, &cell_row,
                               &cell_col)) {
-          const Board *brd = game_get_board(state->game);
-          const bool empty_cell =
-              brd != NULL && board_get_letter(brd, cell_row, cell_col) ==
-                                 ALPHABET_EMPTY_SQUARE_MARKER;
           if (state->board_entry_active &&
               cell_row == state->board_origin_row &&
               cell_col == state->board_origin_col) {
@@ -289,7 +282,7 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
             // comparing against the anchor made the toggle
             // unreachable whenever the walk-back had moved it).
             tui_board_builder_toggle_dir(state);
-          } else if (empty_cell) {
+          } else {
             const int dir =
                 tui_board_builder_default_dir(state, cell_row, cell_col);
             tui_board_builder_set_anchor(state, cell_row, cell_col, dir);
