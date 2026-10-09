@@ -24,6 +24,7 @@
 #include "inference.h"
 #include "move_gen.h"
 #include "random_variable.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -76,8 +77,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
       string_builder_add_string(sb, "opponent rack '");
       string_builder_add_rack(sb, known_opp_rack, ld, false);
       string_builder_add_string(sb, "' is not available in the bag");
-      char *err_msg = string_builder_dump(sb, NULL);
-      string_builder_destroy(sb);
+      char *err_msg = string_builder_dump_and_destroy(sb, NULL);
       error_stack_push(error_stack, ERROR_STATUS_SIM_OPP_RACK_NOT_IN_BAG,
                        err_msg);
       return;
@@ -160,10 +160,15 @@ void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
 // but they are passed in separately because this function needs to generate
 // moves on a nonconst MoveList pointer but the SimArgs MoveList pointer is
 // const.
+//
+// Sets *simulated to whether a simulation ran. A position with one legal play
+// (a forced pass) is not simulated, and sim_results then still holds whatever
+// the last simulation left in it, which describes another position.
 const Move *get_top_simming_move(Game *game, MoveList *move_list,
                                  SimArgs *sim_args, SimCtx **sim_ctx,
-                                 SimResults *sim_results,
+                                 SimResults *sim_results, bool *simulated,
                                  ErrorStack *error_stack) {
+  *simulated = false;
   const MoveGenArgs gen_args = {
       .game = game,
       .move_list = move_list,
@@ -184,6 +189,18 @@ const Move *get_top_simming_move(Game *game, MoveList *move_list,
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
+  // A stop request cuts the simulation short, and one that lands during the
+  // inference that precedes it returns before the simulation starts: the
+  // results are then still the last simulation's, of another position, and
+  // their best play may not even be on this rack. Playing it corrupted the
+  // game (rack counts below zero); the caller is abandoning the run anyway,
+  // so the top static play stands in, as for a turn with nothing to simulate.
+  if (thread_control_get_status(sim_args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    move_list_sort_moves(move_list);
+    return move_list_get_move(move_list, 0);
+  }
+  *simulated = true;
 
   return sim_results_get_best_move(sim_results);
 }

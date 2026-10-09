@@ -2,10 +2,13 @@
 #define AUTOPLAY_RESULTS_H
 
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/string_util.h"
 #include "game.h"
+#include "inference_results.h"
 #include "klv.h"
 #include "move.h"
+#include "sim_results.h"
 #include <stdbool.h>
 
 typedef enum {
@@ -13,10 +16,44 @@ typedef enum {
   AUTOPLAY_RECORDER_TYPE_FJ,
   AUTOPLAY_RECORDER_TYPE_WIN_PCT,
   AUTOPLAY_RECORDER_TYPE_LEAVES,
+  AUTOPLAY_RECORDER_TYPE_POSITION,
   NUMBER_OF_AUTOPLAY_RECORDERS,
 } autoplay_recorder_t;
 
 typedef struct AutoplayResults AutoplayResults;
+
+// How a turn's move was chosen, as the positions recorder reports it.
+typedef enum {
+  POSITION_ANALYSIS_STATIC,
+  POSITION_ANALYSIS_SIM,
+  POSITION_ANALYSIS_PEG,
+  POSITION_ANALYSIS_ENDGAME,
+} position_analysis_t;
+
+// One play an endgame or PEG solve ranked. `move` carries its static equity.
+typedef struct SolverRankedPlay {
+  Move move;
+  // PEG only: the play's win probability over the bag's draws, as a
+  // percentage (the same scale as a simulation's win_percentage).
+  bool has_win_percentage;
+  double win_percentage;
+  // The mover's projected final spread, in points.
+  double mean_spread;
+  // The endgame depth the play was ranked at (a PEG play's deepest tier; 0 is
+  // PEG's greedy seed).
+  int fidelity_plies;
+} SolverRankedPlay;
+
+// The analysis behind a turn a solver decided, best play first. NULL for a
+// static or simulated turn, which the recorder reads from the move list and
+// simulation results instead.
+typedef struct SolverAnalysis {
+  position_analysis_t type;
+  // How many plays the solver ranked, before any cap.
+  int num_moves;
+  const SolverRankedPlay *plays;
+  int num_plays;
+} SolverAnalysis;
 
 typedef struct AutoplayGameTiming {
   bool active[2];
@@ -33,9 +70,32 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   ErrorStack *error_stack);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
-void autoplay_results_add_move(AutoplayResults *autoplay_results,
-                               const Game *game, const Move *move,
-                               const Rack *leave);
+
+// The most inferred leaves a captured position keeps: inference for a
+// position that is captured keeps a list of at least this many.
+enum { AUTOPLAY_CAPTURED_INFERENCE_LEAVES = 10 };
+
+// inference_results is the inference behind this turn's simulation, when the
+// player inferred the opponent's leave before simming; NULL otherwise.
+void autoplay_results_add_move(
+    AutoplayResults *autoplay_results, const Game *game, const Move *move,
+    const Move *previous_move, const Rack *leave, const MoveList *move_list,
+    SimResults *sim_results, InferenceResults *inference_results,
+    const SolverAnalysis *solver_analysis, int game_number,
+    int pair_game_number, int turn_number, int play_cap);
+// Appends a "moves" array field -- the ranked plays of one analysed position --
+// to the JSON object being written to sb. With sim_results (a simming player)
+// the plays come in the simulation's ranking, each with its win percentage,
+// blended utility and up to max_plies per-ply statistics; without it they come
+// in move-list order with score and equity only. play_cap > 0 limits how many
+// plays are written. Shared by captured in-game positions and the contribute
+// opening-rack executor, so both report the same fields the same way. Returns
+// how many plays were ranked before the cap.
+int autoplay_results_write_ranked_plays_json(StringBuilder *sb, bool *first,
+                                             const Game *game,
+                                             const MoveList *move_list,
+                                             SimResults *sim_results,
+                                             int play_cap, int max_plies);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);
@@ -52,8 +112,77 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
                                            const Game *game, int turns,
                                            bool divergent, uint64_t seed,
                                            const AutoplayGameTiming *timing);
+
+// Records one completed game pair as a single pentanomial observation.
+// `game1` and `game2` are the two games of the pair, which share a seed and
+// differ only in which player moved first; player index 0 is the same player
+// in both. The pair lands in the bucket given by player 0's score across the
+// two games in half-points (0 = lost both, 2 = split, 4 = won both).
+//
+// Called once per pair, in addition to the two per-game
+// autoplay_results_add_game calls, and only in paired mode. The pair -- not
+// the game -- is the independent unit of a paired run, which is why the
+// counts this builds are what a statistical test should consume: the two
+// games of a pair share a seed and are not independent observations.
+void autoplay_results_add_game_pair(AutoplayResults *autoplay_results,
+                                    const Game *game1, const Game *game2);
+
+// The positions recorder's "divergentpositions" mode, which keeps only each
+// game pair's first divergence: both games' positions at the first turn the
+// two games play different moves, or none for a pair played identically.
+//
+// The recorder cannot tell which turn that is when it records a position --
+// the second game's move is not chosen yet -- so in this mode it holds what it
+// records until the pair's play commits it (the first divergence) or discards
+// it (any other turn). Outside the mode, both are no-ops on a recorder that
+// keeps every position as it records it.
+bool autoplay_results_keeps_first_divergences(
+    const AutoplayResults *autoplay_results);
+void autoplay_results_commit_positions(AutoplayResults *autoplay_results);
+void autoplay_results_discard_positions(AutoplayResults *autoplay_results);
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary);
+
+// Returns a finished autoplay run's results as a JSON object, one key per
+// active recorder -- the same "each recorder decides how it writes itself"
+// design as autoplay_results_to_string, just producing JSON instead of
+// human/status text. This is what the contribution client submits.
+//
+// The returned string is owned by autoplay_results, not the caller: it is
+// cached and freed on the next call (or when autoplay_results is destroyed),
+// so callers that need to keep it past that point must copy it themselves.
+//
+// The game recorder (when active) writes "all_games" (game counts and score
+// moments, read straight out of the recorder rather than parsed back out of
+// formatted output) and, when `show_divergent` is true, two more entries
+// describing the paired run:
+//
+//   "pentanomial"     five counts over *every* completed pair, indexed by
+//                     player 1's half-point score across the pair. This is
+//                     the statistically meaningful summary of a paired run:
+//                     the pair is the independent unit, and pairs that played
+//                     identically are 1-1 ties that belong in the sample.
+//   "divergent_games" the subset whose two games did not play identically.
+//                     A diagnostic -- it says how often the two players
+//                     actually differ -- and NOT a sample to run a test on,
+//                     since selecting it conditions on the outcome.
+//
+// The positions recorder (when active) writes "positions" -- every position,
+// or with "divergentpositions" only each pair's first divergence: each worker
+// thread accumulates its own captures, and consolidation renders all of them
+// into this recorder's share of the JSON, so they are *not* in game or turn
+// order -- each carries its own game and turn number.
+const char *autoplay_results_get_json(AutoplayResults *autoplay_results,
+                                      bool show_divergent);
+
+// Leave generation only. Set by postgen_prebroadcast_func once a
+// generation's RackList target is reached (or leavegen_max_games ends the
+// run first); NULL otherwise. See the struct comment in autoplay_results.c.
+void autoplay_results_set_leave_results_json(AutoplayResults *autoplay_results,
+                                             char *leave_results_json);
+const char *autoplay_results_get_leave_results_json(
+    const AutoplayResults *autoplay_results);
+
 char *autoplay_results_to_string(AutoplayResults *autoplay_results,
                                  bool human_readable, bool show_divergent);
 char *autoplay_results_get_status(AutoplayResults *autoplay_results);

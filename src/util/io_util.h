@@ -81,7 +81,6 @@ typedef enum {
   ERROR_STATUS_AUTOPLAY_MALFORMED_NUM_GAMES,
   ERROR_STATUS_AUTOPLAY_FORCE_RACKS_MALFORMED_RACK,
   ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK,
-  ERROR_STATUS_AUTOPLAY_FORCE_RACKS_FILE_EMPTY,
   // Board layout errors
   ERROR_STATUS_BOARD_LAYOUT_MALFORMED_START_COORDS,
   ERROR_STATUS_BOARD_LAYOUT_OUT_OF_BOUNDS_START_COORDS,
@@ -98,6 +97,11 @@ typedef enum {
   ERROR_STATUS_CONVERT_MALFORMED_KWG,
   ERROR_STATUS_CONVERT_UNRECOGNIZED_CONVERSION_TYPE,
   ERROR_STATUS_CONVERT_UNIMPLEMENTED_CONVERSION_TYPE,
+  // A row of a rackequity2klv CSV that is not `rack,count,equity_sum` with a
+  // full RACK_SIZE rack, or a file that does not cover every full rack exactly
+  // once.
+  ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+  ERROR_STATUS_CONVERT_INCOMPLETE_RACK_EQUITY_CSV,
   // Create data errors
   ERROR_STATUS_CREATE_DATA_MISSING_LETTER_DISTRIBUTION,
   // GCG Parse errors
@@ -277,6 +281,30 @@ typedef enum {
   ERROR_STATUS_CONFIG_WIN_PCT_TOO_SMALL,
   ERROR_STATUS_WIN_PCT_INVALID_HEADER,
   ERROR_STATUS_WIN_PCT_INVALID_ROW,
+  // Contribution client errors
+  ERROR_STATUS_HTTP_UNAVAILABLE,
+  ERROR_STATUS_HTTP_REQUEST_FAILED,
+  ERROR_STATUS_RANDOM_UNAVAILABLE,
+  ERROR_STATUS_FILE_PERMISSIONS_FAILED,
+  ERROR_STATUS_JSON_PARSE_FAILED,
+  ERROR_STATUS_JSON_FIELD_MISSING,
+  ERROR_STATUS_JSON_FIELD_WRONG_TYPE,
+  ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
+  ERROR_STATUS_CONTRIBUTE_SETTINGS_MALFORMED,
+  ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+  // A wordmap or rack info table built here does not have the SHA-256 the
+  // claimed job pins for it. Handled by handing the claim back with reason
+  // "derived_mismatch" rather than by submitting a failed result: the task is
+  // fine, this build cannot reproduce the file, and the server needs to see
+  // both hashes.
+  ERROR_STATUS_CONTRIBUTE_DERIVED_MISMATCH,
+  // A stop request arrived while this worker waited for another process to
+  // finish building a derived file it needs. The task is handed back.
+  ERROR_STATUS_CONTRIBUTE_INTERRUPTED,
+  // An endgame or pre-endgame solve chose no move for an autoplay player.
+  ERROR_STATUS_AUTOPLAY_SOLVER_NO_MOVE,
+  // A player's endgame / pre-endgame settings are out of range.
+  ERROR_STATUS_AUTOPLAY_INVALID_SOLVER_SETTINGS,
   ERROR_STATUS_PAT_UTILITY_WIN_PCT,
 } error_code_t;
 
@@ -367,6 +395,26 @@ void fprintf_or_die(FILE *stream, const char *format, ...);
 FILE *popen_or_die(const char *command, const char *mode);
 
 bool path_is_directory(const char *path);
+
+// Identity of a file's *contents*, as far as the filesystem can report it:
+// size, mtime, inode and ctime, the times to the nanosecond where the
+// filesystem records them. Two calls return the same string only if nothing
+// has written to or replaced the file in between. Returns NULL if the file
+// cannot be stat'ed; the caller frees.
+char *get_file_identity(const char *path);
+
+// A name beside `filename` for writing it in full before renaming it into
+// place -- `<filename>.<pid>-<n>-<ns>.tmp` -- so that no reader, and no other
+// process writing the same file, ever sees half of it. Open it exclusively
+// ("wbx"): two containers sharing a volume can both be PID 1. Removes the
+// temporaries of earlier writes of `filename` left untouched for an hour -- a
+// killed writer's. The caller frees.
+char *temporary_sibling(const char *filename);
+
+// Renames `temporary` over `filename`, or removes it and pushes an error
+// naming `what` if it cannot. Frees nothing.
+void rename_into_place(const char *temporary, const char *filename,
+                       const char *what, ErrorStack *error_stack);
 
 // Returns a sorted, heap-allocated array of filenames ending with suffix found
 // in dir_path. *num_files is set to the count. Caller frees each string and

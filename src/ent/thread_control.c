@@ -15,6 +15,9 @@ struct ThreadControl {
   cpthread_mutex_t status_mutex; // protects cond var signaling only
   cpthread_cond_t status_cond;
   cpthread_mutex_t print_mutex;
+  // See thread_control_set_parent. Set before the threads that read the
+  // status start, and not changed while they run.
+  ThreadControl *parent;
 };
 
 ThreadControl *thread_control_create(void) {
@@ -23,6 +26,7 @@ ThreadControl *thread_control_create(void) {
   cpthread_mutex_init(&thread_control->status_mutex);
   cpthread_mutex_init(&thread_control->print_mutex);
   cpthread_cond_init(&thread_control->status_cond);
+  thread_control->parent = NULL;
   return thread_control;
 }
 
@@ -37,8 +41,21 @@ thread_control_status_t
 thread_control_get_status(ThreadControl *thread_control) {
   // Lock-free read: avoids mutex contention on the hot per-node search path.
   // acquire ordering ensures we see any prior store from the timer thread.
-  return (thread_control_status_t)atomic_load_explicit(&thread_control->status,
-                                                       memory_order_acquire);
+  const thread_control_status_t status =
+      (thread_control_status_t)atomic_load_explicit(&thread_control->status,
+                                                    memory_order_acquire);
+  if (status != THREAD_CONTROL_STATUS_USER_INTERRUPT &&
+      thread_control->parent != NULL &&
+      thread_control_get_status(thread_control->parent) ==
+          THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    return THREAD_CONTROL_STATUS_USER_INTERRUPT;
+  }
+  return status;
+}
+
+void thread_control_set_parent(ThreadControl *thread_control,
+                               ThreadControl *parent) {
+  thread_control->parent = parent;
 }
 
 // Returns true if the status was set successfully.
@@ -90,6 +107,25 @@ void thread_control_print_formatted(ThreadControl *thread_control,
   va_end(args);
   if (content) {
     thread_control_print(thread_control, content);
+    free(content);
+  }
+}
+
+void thread_control_print_err(ThreadControl *thread_control,
+                              const char *content) {
+  cpthread_mutex_lock(&thread_control->print_mutex);
+  write_to_stream(get_stream_err(), "%s", content);
+  cpthread_mutex_unlock(&thread_control->print_mutex);
+}
+
+void thread_control_print_formatted_err(ThreadControl *thread_control,
+                                        const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  char *content = format_string_with_va_list(fmt, &args);
+  va_end(args);
+  if (content) {
+    thread_control_print_err(thread_control, content);
     free(content);
   }
 }

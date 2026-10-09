@@ -1,6 +1,7 @@
 #include "rack_list.h"
 
 #include "../compat/cpthread.h"
+#include "../def/contribute_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"
@@ -16,19 +17,22 @@
 #include "../ent/xoshiro.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum {
-  RACK_LIST_FORCED_RACKS_INITIAL_CAPACITY = 4096,
-};
+// A count no observation can produce, so "never drawn" and "never supplied"
+// stay distinguishable through rack_list_mark_all_racks_unset. Only
+// rackequity2klv uses it; every other path leaves counts at zero or above
+// from creation onwards.
+enum { RACK_LIST_COUNT_UNSET = -1 };
 
 typedef struct RackListItem {
   // Index of this item in the rack list items ordered by count.
@@ -56,8 +60,8 @@ struct RackList {
   RackListItem **racks_ordered_by_index;
   RackListItem **racks_partitioned_by_target_count;
   // rack_list_index values (see convert_word_index_to_rack_list_index) of
-  // the racks read from a forced_racks_filename, if any (see
-  // rack_list_create). NULL, with num_forced_racks 0, when unrestricted.
+  // the forced racks given to rack_list_create, if any. NULL, with
+  // num_forced_racks 0, when unrestricted.
   // Reapplied on every rack_list_reset so the same restriction persists
   // across leavegen generations.
   uint32_t *forced_rack_indices;
@@ -256,38 +260,26 @@ void rack_list_destroy(RackList *rack_list) {
   free(rack_list);
 }
 
-// Reads racks (one per line) from filename and returns a malloc'd array of
-// their rack_list indices (see convert_word_index_to_rack_list_index), for
-// use as forced_rack_indices. Pushes an error and returns NULL on a
-// missing/unopenable file, a line that isn't a full RACK_SIZE rack, or a
-// file with no racks at all.
-static uint32_t *rack_list_read_forced_rack_indices(
+// Resolves each of the num_forced_racks rack strings in forced_racks to its
+// rack_list index (see convert_word_index_to_rack_list_index) and returns a
+// malloc'd array of them, for use as forced_rack_indices. Pushes an error
+// and returns NULL if a rack isn't a full RACK_SIZE rack or is listed twice.
+static uint32_t *rack_list_resolve_forced_rack_indices(
     const RackList *rack_list, const LetterDistribution *ld,
-    const char *filename, int *num_forced_racks_out, ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "r", error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-
-  int capacity = RACK_LIST_FORCED_RACKS_INITIAL_CAPACITY;
-  uint32_t *indices = malloc_or_die(sizeof(uint32_t) * capacity);
-  *num_forced_racks_out = 0;
+    const char *const *forced_racks, int num_forced_racks,
+    ErrorStack *error_stack) {
+  uint32_t *indices = malloc_or_die(sizeof(uint32_t) * num_forced_racks);
 
   // Tracks which rack_list indices have already been added to indices, so a
-  // duplicate line in the file can be rejected instead of silently corrupting
-  // the rare partition (see rack_list_restrict_to_forced_racks).
+  // duplicate rack can be rejected instead of silently corrupting the rare
+  // partition (see rack_list_restrict_to_forced_racks).
   bool *index_seen = calloc_or_die(rack_list->number_of_racks, sizeof(bool));
 
   Rack rack;
   rack_set_dist_size(&rack, ld_get_size(ld));
-  char *line = NULL;
-  size_t line_capacity = 0;
-  while (getline_ignore_carriage_return(&line, &line_capacity, stream) != -1) {
-    trim_whitespace(line);
-    if (is_string_empty_or_whitespace(line)) {
-      continue;
-    }
-    const int num_letters = rack_set_to_string(ld, &rack, line);
+  for (int i = 0; i < num_forced_racks; i++) {
+    const char *forced_rack = forced_racks[i];
+    const int num_letters = rack_set_to_string(ld, &rack, forced_rack);
     uint32_t word_index = KLV_UNFOUND_INDEX;
     if (num_letters == (RACK_SIZE)) {
       word_index = klv_get_word_index(rack_list->klv, &rack);
@@ -295,10 +287,9 @@ static uint32_t *rack_list_read_forced_rack_indices(
     if (word_index == KLV_UNFOUND_INDEX) {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_FORCE_RACKS_MALFORMED_RACK,
-          get_formatted_string(
-              "force racks file '%s' must contain only full racks of %d "
-              "tiles, found: %s",
-              filename, (RACK_SIZE), line));
+          get_formatted_string("forced racks must all be full racks of %d "
+                               "tiles, found: %s",
+                               (RACK_SIZE), forced_rack));
       break;
     }
     const uint32_t rack_list_index =
@@ -306,33 +297,16 @@ static uint32_t *rack_list_read_forced_rack_indices(
     if (index_seen[rack_list_index]) {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK,
-          get_formatted_string(
-              "force racks file '%s' contains a duplicate rack: %s", filename,
-              line));
+          get_formatted_string("forced racks contain a duplicate rack: %s",
+                               forced_rack));
       break;
     }
     index_seen[rack_list_index] = true;
-    if (*num_forced_racks_out == capacity) {
-      capacity *= 2;
-      indices = realloc_or_die(indices, sizeof(uint32_t) * (size_t)capacity);
-    }
-    indices[*num_forced_racks_out] = rack_list_index;
-    (*num_forced_racks_out)++;
+    indices[i] = rack_list_index;
   }
-  free(line);
   free(index_seen);
-  fclose_or_die(stream);
 
   if (!error_stack_is_empty(error_stack)) {
-    free(indices);
-    return NULL;
-  }
-
-  if (*num_forced_racks_out == 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_AUTOPLAY_FORCE_RACKS_FILE_EMPTY,
-        get_formatted_string("force racks file '%s' does not contain any racks",
-                             filename));
     free(indices);
     return NULL;
   }
@@ -341,8 +315,8 @@ static uint32_t *rack_list_read_forced_rack_indices(
 }
 
 RackList *rack_list_create(const LetterDistribution *ld, int target_rack_count,
-                           const char *forced_racks_filename,
-                           ErrorStack *error_stack) {
+                           const char *const *forced_racks,
+                           int num_forced_racks, ErrorStack *error_stack) {
   RackList *rack_list = malloc_or_die(sizeof(RackList));
   rack_list->total_combos_sum = 0;
 
@@ -389,14 +363,14 @@ RackList *rack_list_create(const LetterDistribution *ld, int target_rack_count,
   rack_list->forced_rack_indices = NULL;
   rack_list->num_forced_racks = 0;
 
-  if (!is_string_empty_or_null(forced_racks_filename)) {
-    rack_list->forced_rack_indices = rack_list_read_forced_rack_indices(
-        rack_list, ld, forced_racks_filename, &rack_list->num_forced_racks,
-        error_stack);
+  if (num_forced_racks > 0) {
+    rack_list->forced_rack_indices = rack_list_resolve_forced_rack_indices(
+        rack_list, ld, forced_racks, num_forced_racks, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       rack_list_destroy(rack_list);
       return NULL;
     }
+    rack_list->num_forced_racks = num_forced_racks;
     rack_list_restrict_to_forced_racks(rack_list);
   }
 
@@ -463,6 +437,54 @@ void rack_list_add_rack(RackList *rack_list, const Rack *rack, double equity) {
       convert_word_index_to_rack_list_index(
           klv_get_word_index(rack_list->klv, rack)),
       equity);
+}
+
+void rack_list_set_rack_count_and_mean(RackList *rack_list, const Rack *rack,
+                                       uint64_t count, double mean,
+                                       ErrorStack *error_stack) {
+  const uint32_t word_index = rack_get_total_letters(rack) == (RACK_SIZE)
+                                  ? klv_get_word_index(rack_list->klv, rack)
+                                  : KLV_UNFOUND_INDEX;
+  if (word_index == KLV_UNFOUND_INDEX) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+        get_formatted_string("rack equity rows must name full racks of %d "
+                             "tiles drawable from this letter distribution",
+                             (RACK_SIZE)));
+    return;
+  }
+  const uint32_t rack_list_index =
+      convert_word_index_to_rack_list_index(word_index);
+  RackListItem *item = rack_list->racks_ordered_by_index[rack_list_index];
+  if (item->count != RACK_LIST_COUNT_UNSET) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_MALFORMED_RACK_EQUITY_ROW,
+        string_duplicate("this rack has already been given a count"));
+    return;
+  }
+  // `count` is a uint64_t on the way in because that is what an aggregate of a
+  // whole generation is counted in, and an int on the item because that is
+  // what a single leavegen run needs. Only rack_list_write_to_klv reads it
+  // back, and only to decide whether the rack was observed at all, so the
+  // saturation below loses nothing that is used.
+  item->count = count > (uint64_t)INT_MAX ? INT_MAX : (int)count;
+  item->mean = mean;
+}
+
+void rack_list_mark_all_racks_unset(RackList *rack_list) {
+  for (int i = 0; i < rack_list->number_of_racks; i++) {
+    rack_list->racks_ordered_by_index[i]->count = RACK_LIST_COUNT_UNSET;
+  }
+}
+
+int rack_list_get_number_of_unset_racks(const RackList *rack_list) {
+  int unset = 0;
+  for (int i = 0; i < rack_list->number_of_racks; i++) {
+    if (rack_list->racks_ordered_by_index[i]->count == RACK_LIST_COUNT_UNSET) {
+      unset++;
+    }
+  }
+  return unset;
 }
 
 int rack_list_get_racks_below_target_count(const RackList *rack_list) {
@@ -614,33 +636,46 @@ const KLV *rack_list_get_klv(const RackList *rack_list) {
   return rack_list->klv;
 }
 
-// Writes "<rack>,<count>,<mean>" for every rack (not just forced ones) that
-// has been observed at least once. Whether this is worth calling at all
-// (e.g. only when forced_racks_filename was used, since dumping every
-// observed rack for an unrestricted run could mean millions of rows) is the
-// caller's decision, not this function's.
-void rack_list_write_rack_equity_csv(const RackList *rack_list,
-                                     const LetterDistribution *ld,
-                                     const char *filename,
-                                     ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "w", error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
+// {"racks":[{"rack":"AA","count":30,"mean":1.5}, ...]}, one entry per rack
+// actually observed (count > 0) -- forced racks and any other rack that
+// happened to occur alike. Traverses racks_ordered_by_index directly rather
+// than going through
+// rack_list_get_count/get_mean/get_encoded_rack, which take a *KLV* index
+// and convert it -- the wrong index space here and not what those were built
+// for.
+char *rack_list_get_rack_equity_json(const RackList *rack_list,
+                                     const LetterDistribution *ld) {
+  StringBuilder *sb = string_builder_create();
+  bool first = true;
+  json_write_object_start(sb);
+  json_write_array_start(sb, CONTRIBUTE_KEY_RACKS, &first);
   Rack rack;
   rack_set_dist_size(&rack, ld_get_size(ld));
-  StringBuilder *line_sb = string_builder_create();
+  bool any_written = false;
   for (int i = 0; i < rack_list->number_of_racks; i++) {
     const RackListItem *item = rack_list->racks_ordered_by_index[i];
     if (item->count == 0) {
       continue;
     }
+    if (any_written) {
+      string_builder_add_string(sb, ",");
+    }
+    any_written = true;
     rack_decode(&item->encoded_rack, &rack);
-    string_builder_clear(line_sb);
-    string_builder_add_rack(line_sb, &rack, ld, false);
-    write_to_stream(stream, "%s,%d,%f\n", string_builder_peek(line_sb),
-                    item->count, item->mean);
+    char rack_str[(RACK_SIZE)*MAX_LETTER_BYTE_LENGTH + 1];
+    rack_get_string(&rack, ld, false, rack_str, sizeof(rack_str));
+    bool rack_first = true;
+    json_write_object_start(sb);
+    json_write_string_field(sb, CONTRIBUTE_KEY_RACK, rack_str, &rack_first);
+    json_write_int_field(sb, CONTRIBUTE_KEY_COUNT, (int64_t)item->count,
+                         &rack_first);
+    json_write_double_field(sb, CONTRIBUTE_KEY_MEAN, item->mean, &rack_first);
+    json_write_object_end(sb);
   }
-  string_builder_destroy(line_sb);
-  fclose_or_die(stream);
+  json_write_array_end(sb);
+  // The enclosing object: without it the result was a bare `"racks":[...]`,
+  // which is not JSON, and the server refused every leave result.
+  json_write_object_end(sb);
+  char *json = string_builder_dump_and_destroy(sb, NULL);
+  return json;
 }

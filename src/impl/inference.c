@@ -287,8 +287,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
     string_builder_add_string(sb, ") and inferred player known rack (");
     string_builder_add_rack(sb, args->target_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
-    char *err_msg = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *err_msg = string_builder_dump_and_destroy(sb, NULL);
     log_fatal(err_msg);
     free(err_msg);
   }
@@ -302,8 +301,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
     string_builder_add_string(sb, "failed to draw nontarget player rack (");
     string_builder_add_rack(sb, args->nontarget_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
-    char *err_msg = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *err_msg = string_builder_dump_and_destroy(sb, NULL);
     log_fatal(err_msg);
     free(err_msg);
   }
@@ -552,8 +550,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
                               ") is greater than the maximum rack size of ");
     string_builder_add_int(sb, RACK_SIZE);
     error_stack_push(error_stack, ERROR_STATUS_INFERENCE_RACK_OVERFLOW,
-                     string_builder_dump(sb, NULL));
-    string_builder_destroy(sb);
+                     string_builder_dump_and_destroy(sb, NULL));
     return;
   }
 
@@ -567,8 +564,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
       string_builder_add_string(sb, ") not available in the bag");
       error_stack_push(error_stack,
                        ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG,
-                       string_builder_dump(sb, NULL));
-      string_builder_destroy(sb);
+                       string_builder_dump_and_destroy(sb, NULL));
       return;
     }
   }
@@ -591,8 +587,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
       string_builder_add_rack(sb, args->nontarget_known_rack,
                               game_get_ld(game_dup), false);
       string_builder_add_string(sb, ") not available in the bag");
-      char *err_msg = string_builder_dump(sb, NULL);
-      string_builder_destroy(sb);
+      char *err_msg = string_builder_dump_and_destroy(sb, NULL);
       log_fatal(err_msg);
       free(err_msg);
       return;

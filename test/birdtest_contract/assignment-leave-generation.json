@@ -1,0 +1,96 @@
+{
+  "claim_token": "b1d0b2b6-0f8f-4a4b-9a5f-6f4a2f2a1c33",
+  "job_id": "9c2f1a48-5f3b-4c2a-8a7d-1b0e3f7c9d20",
+  "job_name": "NWL23 leaves",
+  "max_task_seconds": 3600,
+  "min_magpie_version": "0.1.1",
+  "expected_data": {
+    "algorithm": "sha256",
+    "files": [
+      {
+        "role": "kwg",
+        "name": "NWL23",
+        "path": "lexica/NWL23.kwg",
+        "sha256": "3e74af981fdd974e107283f686da0fe4b7ec84ad0d825d444330c338c33b91ba",
+        "tarball_date": "20260925"
+      },
+      {
+        "role": "letterdist",
+        "name": "english",
+        "path": "letterdistributions/english.csv",
+        "sha256": "e698ce0b93e025daccd3390107a914d74581c4603de38df65131768b1c6f9102",
+        "tarball_date": "20260925"
+      },
+      {
+        "role": "layout",
+        "name": "standard15",
+        "path": "layouts/standard15.txt",
+        "sha256": "c1a81c35a7730f64abcca23c8c56cc872e892a68f95289a4189b373c8cc5a01f",
+        "tarball_date": "20260925"
+      }
+    ],
+    "derived": [
+      {
+        "role": "wmp",
+        "name": "NWL23",
+        "sha256": "214a46d74fb6540fec309c4181b14ebd8f1c019cec76d7373d3c412cb08fc187",
+        "builder": "wmp-1",
+        "build_target": "nehalem"
+      }
+    ]
+  },
+  "task_request": {
+    "job_type": "leave_generation",
+    "lexicon": "NWL23",
+    "variant": "classic",
+    "letter_distribution": "english",
+    "board_layout": "standard15",
+    "generation": 1,
+    "seed": "18446744073709551557",
+    "forced_racks": [
+      "AEINRST",
+      "?AEGLNT"
+    ],
+    "previous_artifact_key": "leaves/9c2f1a48-5f3b-4c2a-8a7d-1b0e3f7c9d20/generation-0.klv2",
+    "previous_artifact_sha256": "5b1c0f3e9a2d47c8b6e1f0a3d5c7e9b2a4f6d8c0e2b4a6c8d0f2e4a6b8c0d2e4",
+    "num_games": 10000,
+    "bingo_bonus": 50,
+    "player": {
+      "name": "static-NWL23@20260925",
+      "recorder_type": "best",
+      "sort_strategy": "equity",
+      "lexicon": "NWL23",
+      "leaves": "NWL23",
+      "max_iterations": null,
+      "num_plies": 0,
+      "num_plies_recorded": 2,
+      "num_plays": 100,
+      "num_plays_recorded": 10,
+      "stopping_pct": null,
+      "use_inference": null,
+      "time_limit_secs": null,
+      "use_wordmap": true,
+      "use_rit": false,
+      "rit_name": null,
+      "use_wit": false,
+      "min_play_iterations": null,
+      "threshold": null,
+      "sampling_rule": null,
+      "inference_margin": null,
+      "utility_w_winpct": null,
+      "utility_w_spread": null,
+      "utility_spread_scale": null,
+      "win_pct_model": null,
+      "movegen_margin": 5.0,
+      "endgame_plies": 0,
+      "peg_max_bag": 0,
+      "peg_stage_top_k": null,
+      "peg_scenario_stride": null,
+      "peg_opp_model": null,
+      "peg_nested": null,
+      "peg_nested_cand_caps": null,
+      "peg_nested_max_depth": null,
+      "peg_nested_strides": null
+    }
+  }
+}

@@ -10,6 +10,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 void test_small_klv(void) {
@@ -97,7 +98,38 @@ void test_normal_klv(void) {
   error_stack_destroy(error_stack);
 }
 
+// A leave that does not parse, or that the KLV does not hold, has no index.
+// csv2klv used KLV_UNFOUND_INDEX as one (a SEGV), and a lower-case leave was
+// counted outside its rack first; each is refused as an invalid leave.
+static void test_a_leave_with_no_index_is_refused(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -ld english_small");
+  const LetterDistribution *ld = config_get_ld(config);
+  const char *data_path = DEFAULT_TEST_DATA_PATH;
+  const char *bad_leaves[] = {"a", "C", "AAAAAAAA"};
+  for (size_t i = 0; i < sizeof(bad_leaves) / sizeof(bad_leaves[0]); i++) {
+    ErrorStack *error_stack = error_stack_create();
+    char *leaves_filename = data_filepaths_get_writable_filename(
+        data_path, "badleaves", DATA_FILEPATH_TYPE_LEAVES, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    FILE *stream = fopen(leaves_filename, "we");
+    assert(stream);
+    (void)fprintf(stream, "?,1.0\n%s,1.0\n", bad_leaves[i]);
+    (void)fclose(stream);
+
+    KLV *klv = klv_read_from_csv(ld, data_path, "badleaves", error_stack);
+    assert(error_stack_top(error_stack) == ERROR_STATUS_KLV_INVALID_LEAVE);
+    if (klv) {
+      klv_destroy(klv);
+    }
+    delete_file(leaves_filename);
+    free(leaves_filename);
+    error_stack_destroy(error_stack);
+  }
+  config_destroy(config);
+}
+
 void test_klv(void) {
   test_small_klv();
   test_normal_klv();
+  test_a_leave_with_no_index_is_refused();
 }

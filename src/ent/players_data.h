@@ -93,6 +93,11 @@ void players_data_set_data(PlayersData *players_data,
                            void *data);
 void players_data_validate_word_info_tables(const PlayersData *players_data,
                                             ErrorStack *error_stack);
+// Destroys both players' data of this type and leaves the slots empty, so the
+// next players_data_set loads from disk even for a name that is already
+// loaded. The use-when-available flags are left as they are.
+void players_data_evict(PlayersData *players_data,
+                        players_data_t players_data_type);
 void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *data_paths, ErrorStack *error_stack);

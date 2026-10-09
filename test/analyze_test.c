@@ -43,14 +43,21 @@ static char *make_temp_gcg_dir(void) {
   return string_duplicate(tmp_dir);
 }
 
+// Removes everything analyzing the directory can leave in it -- the game, its
+// report, and the tournament summary a directory analysis writes -- and then
+// the directory. The rmdir is checked: a file this misses would otherwise
+// leave a directory in /tmp behind on every run.
 static void remove_temp_gcg_dir(const char *dir_path) {
-  char *gcg_path = get_formatted_string("%s/test_game.gcg", dir_path);
-  char *report_path = get_formatted_string("%s/test_game_report.txt", dir_path);
-  (void)remove(gcg_path);
-  (void)remove(report_path);
-  free(gcg_path);
-  free(report_path);
-  (void)rmdir(dir_path);
+  const char *files[] = {"test_game.gcg", "test_game_report.txt",
+                         "tournament_summary.txt"};
+  for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+    char *path = get_formatted_string("%s/%s", dir_path, files[i]);
+    (void)remove(path);
+    free(path);
+  }
+  const int removed = rmdir(dir_path);
+  assert(removed == 0);
+  (void)removed;
 }
 
 // PATH D1: single GCG file as argument (CSV output, plies=0).

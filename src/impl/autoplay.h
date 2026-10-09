@@ -3,6 +3,7 @@
 
 #include "../def/autoplay_defs.h"
 #include "../ent/autoplay_results.h"
+#include "../ent/autoplay_solver_settings.h"
 #include "../ent/game.h"
 #include "../ent/sim_args.h"
 #include "../ent/thread_control.h"
@@ -15,17 +16,34 @@ typedef struct GameStringOptions GameStringOptions;
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
   int games_before_force_draw_start;
-  // Optional: path to a file listing racks (one per line) that restricts
-  // which racks leavegen's RackList ever selects as rare (see
-  // rack_list_create). Only meaningful with AUTOPLAY_TYPE_LEAVE_GEN. NULL
-  // means every rack is eligible, as leavegen normally expects.
-  const char *force_racks_filename;
-  // Whether each leavegen generation should also dump rack_list's
-  // "<rack>,<count>,<mean>" data to a CSV (see
-  // rack_list_write_rack_equity_csv). Set explicitly by the user rather than
-  // inferred from force_racks_filename, since an unrestricted run could mean
-  // dumping millions of rows.
-  bool write_rack_equity_csv;
+  // Optional: racks that restrict which racks leavegen's RackList ever
+  // selects as rare (see rack_list_create). Only meaningful with
+  // AUTOPLAY_TYPE_LEAVE_GEN. num_forced_racks 0 means every rack is
+  // eligible, as leavegen normally expects.
+  const char *const *forced_racks;
+  int num_forced_racks;
+  // How many ranked plays the positions recorder reports per captured
+  // position, when active. Sizes each static player's move list up front
+  // (see autoplay_worker_create) and is threaded through to
+  // positions_data_add_move via RecorderArgs.play_cap.
+  int position_play_cap;
+  // AUTOPLAY_TYPE_LEAVE_GEN only: a hard cap on games played across the whole
+  // run, independent of whether the generations' rack targets are ever
+  // reached. Leavegen otherwise stops only on its targets -- there is no
+  // per-generation game count anywhere in num_games_or_min_rack_targets,
+  // which carries the targets themselves -- so without this a run is
+  // unbounded, which is what 0 means and what the CLI leavegen command does.
+  // A contribute leave_generation task, whose single generation's target
+  // belongs to the server rather than to the task, sets this so the task
+  // cannot run indefinitely when its own forced-rack subset never reaches
+  // that target.
+  uint64_t leavegen_max_games;
+  // AUTOPLAY_TYPE_LEAVE_GEN only: whether each generation's KLV, leaves CSV
+  // and report are written into the data directory. The CLI leavegen command
+  // writes them. A contribute leave_generation task does not: its results go
+  // back in the task response, and a contributor's data directory need not be
+  // writable.
+  bool leavegen_write_files;
   // Output name for the PAT weights trained by
   // AUTOPLAY_TYPE_PAT_GEN; per-generation snapshots are written as
   // <name>_gen_<N>.pat. Only meaningful for that autoplay type.
@@ -36,6 +54,9 @@ typedef struct AutoplayArgs {
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;
+  // Whether the run ends by printing its results. Off for a contribute task,
+  // whose results go back to the server rather than to the terminal.
+  bool print_results;
   autoplay_t type;
   const char *data_paths;
   GameArgs *game_args;
@@ -56,10 +77,33 @@ typedef struct AutoplayArgs {
   // Templates copied into each game runner, which supplies the per-game
   // timer and seed before constructing its choosers.
   PlayChooserStrategy play_chooser_strategies[2];
+  // Each player's endgame and pre-endgame solving (see
+  // AutoplaySolverSettings). Only AUTOPLAY_TYPE_DEFAULT reads them: a leavegen
+  // game ends before the bag is small enough for either solver.
+  AutoplaySolverSettings solver_settings[2];
+  // The run's whole thread count. num_threads above is how many autoplay
+  // workers it runs, a game at a time each: all of them under pgp, or one
+  // simulating on every thread under igp. Autoplay divides this between the
+  // games it plays at once for their endgame and PEG solves (see
+  // autoplay_solver_num_threads).
+  int total_num_threads;
+  // Fraction of memory the run's one endgame transposition table takes,
+  // shared by every worker's endgame and PEG leaf solves.
+  double solver_tt_fraction_of_mem;
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack);
+
+// The threads each endgame or PEG solve gets in a run of `total_num_threads`
+// threads that plays `num_concurrent_games` games at once: an even share, at
+// least one. A solve takes its threads on top of the game's own, and each of
+// its threads holds a move generator from the pool of MAX_THREADS while it
+// lives, so giving every one of N concurrent games' solves all N threads
+// (N + N^2 at once) exhausts the pool from N = 22; shared, they take at most
+// N more.
+int autoplay_solver_num_threads(int total_num_threads,
+                                int num_concurrent_games);
 
 // Benchmark instrumentation: returns accumulated sim iteration count across
 // all autoplay sims since process start (or last reset). Used by simbench.

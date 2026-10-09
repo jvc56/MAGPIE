@@ -727,6 +727,8 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 strategy->peg_scenario_stride, /*nested_enabled=*/false,
                 /*nested_cand_cap=*/0, /*nested_cand_caps=*/NULL,
                 /*nested_n_cand_caps=*/0, /*nested_stride=*/0,
+                /*nested_strides_by_bag=*/NULL,
+                /*nested_n_strides_by_bag=*/0,
                 /*nested_emptier_ply_cap=*/0, /*nested_max_depth=*/0,
                 /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0,
                 /*only_moves=*/NULL, /*n_only_moves=*/0,
@@ -736,7 +738,7 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 benchmarking ? play_chooser_benchmark_peg_candidate_done : NULL,
                 /*on_scenario_done=*/NULL,
                 /*user_data=*/benchmarking ? &benchmark_context : NULL,
-                /*poll=*/NULL, &peg_args);
+                /*poll=*/NULL, /*shared_endgame_tt=*/NULL, &peg_args);
   PegResult peg_result = {0};
   peg_solve(&peg_args, &peg_result, error_stack);
   if (benchmarking) {

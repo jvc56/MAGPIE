@@ -491,8 +491,13 @@ static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
 static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
                                                  const char *filename,
                                                  ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "wb", error_stack);
+  // Written beside the final name and renamed into place: a table is 1.9 GB
+  // and minutes to write, and a contributor's second process (or a loader
+  // hashing it) must never see a half-written one under the real name.
+  char *temporary = temporary_sibling(filename);
+  FILE *stream = fopen_safe(temporary, "wbx", error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    free(temporary);
     return;
   }
   const uint8_t version = rit->version;
@@ -511,6 +516,8 @@ static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
                            stream, "rit bucket starts");
   rit_write_entries_or_die(rit->entries, rit->num_entries, stream);
   fclose_or_die(stream);
+  rename_into_place(temporary, filename, "rack info table", error_stack);
+  free(temporary);
 }
 
 static inline void rit_read_uint32_or_die(uint32_t *out, FILE *stream) {

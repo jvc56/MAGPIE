@@ -13,6 +13,7 @@
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/autoplay_results.h"
+#include "../ent/autoplay_solver_settings.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/checkpoint.h"
@@ -34,6 +35,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/transposition_table.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
@@ -41,6 +43,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "autoplay_solvers.h"
 #include "gameplay.h"
 #include "pat_gen.h"
 #include "play_chooser.h"
@@ -110,13 +113,15 @@ typedef struct LeavegenSharedData {
   const char *data_paths;
   KLV *klv;
   RackList *rack_list;
-  // Whether each generation should also dump rack_list's
-  // "<rack>,<count>,<mean>" data to a CSV (see rack_list_write_rack_equity_
-  // csv).
-  bool write_rack_equity_csv;
   Checkpoint *postgen_checkpoint;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
+  // See AutoplayArgs.leavegen_write_files.
+  bool write_files;
+  // The first generation-file write that failed, if any. Recorded rather
+  // than fatal -- postgen runs on a worker thread with no error stack to
+  // push to -- and pushed onto the caller's stack when autoplay returns.
+  char *postgen_error;
 } LeavegenSharedData;
 
 // Shared state for AUTOPLAY_TYPE_PAT_GEN: the live weights object
@@ -170,6 +175,12 @@ typedef struct AutoplaySharedData {
   cpthread_mutex_t iter_completed_mutex;
   ThreadControl *thread_control;
   LeavegenSharedData *leavegen_shared_data;
+  // The endgame transposition table every worker's endgame and PEG leaf solves
+  // share, or NULL when no player solves.
+  TranspositionTable *solver_tt;
+  // The threads each endgame or PEG solve gets; see
+  // autoplay_solver_num_threads.
+  int solver_num_threads;
   PATGenSharedData *pat_gen_shared_data;
 } AutoplaySharedData;
 
@@ -230,19 +241,16 @@ void autoplay_shared_data_copy_to_dst_and_jump(AutoplaySharedData *shared_data,
   prng_jump(shared_data->prng);
 }
 
-void postgen_prebroadcast_func(void *data) {
-  AutoplaySharedData *shared_data = (AutoplaySharedData *)data;
+// Writes the generation's KLV, leaves CSV and report into the data directory.
+// A failed write is recorded in postgen_error (the first one only) and ends
+// this generation's writes; it does not end the process.
+static void leavegen_write_generation_files(AutoplaySharedData *shared_data) {
   LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
-  rack_list_write_to_klv(lg_shared_data->rack_list, lg_shared_data->ld,
-                         lg_shared_data->klv);
-  lg_shared_data->gens_completed++;
-
-  // Write the KLV for the current generation.
   char *label = get_formatted_string("_gen_%d", lg_shared_data->gens_completed);
   char *gen_labeled_klv_name =
       insert_before_dot(lg_shared_data->klv->name, label);
-
   ErrorStack *error_stack = error_stack_create();
+  const char *failure = NULL;
 
   char *gen_labeled_klv_filename = data_filepaths_get_writable_filename(
       lg_shared_data->data_paths, gen_labeled_klv_name, DATA_FILEPATH_TYPE_KLV,
@@ -250,27 +258,105 @@ void postgen_prebroadcast_func(void *data) {
   char *leaves_filename = data_filepaths_get_writable_filename(
       lg_shared_data->data_paths, gen_labeled_klv_name,
       DATA_FILEPATH_TYPE_LEAVES, error_stack);
-
   if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("leavegen failed to write results to file");
+    failure = "leavegen could not find a writable location for its results";
   }
 
-  klv_write(lg_shared_data->klv, lg_shared_data->data_paths,
-            gen_labeled_klv_name, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("leavegen failed to write klv to file: %s",
-              gen_labeled_klv_filename);
+  if (!failure) {
+    klv_write(lg_shared_data->klv, lg_shared_data->data_paths,
+              gen_labeled_klv_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      failure = "leavegen failed to write the generation's klv";
+    }
   }
 
-  klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld,
-                   lg_shared_data->data_paths, gen_labeled_klv_name, NULL,
-                   error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("leavegen failed to write klv to CSV");
+  if (!failure) {
+    klv_write_to_csv(lg_shared_data->klv, lg_shared_data->ld,
+                     lg_shared_data->data_paths, gen_labeled_klv_name, NULL,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      failure = "leavegen failed to write the generation's klv to CSV";
+    }
   }
+
+  if (!failure) {
+    // Print info about the current state.
+    StringBuilder *leave_gen_sb = string_builder_create();
+
+    string_builder_add_string(
+        leave_gen_sb, "************************\n"
+                      "Cumulative Autoplay Data\n************************\n\n");
+
+    string_builder_add_formatted_string(
+        leave_gen_sb, "Seconds: %f\n",
+        ctimer_elapsed_seconds(&shared_data->timer));
+    char *cumul_game_data_str = autoplay_results_to_string(
+        lg_shared_data->primary_autoplay_results, true, false);
+    string_builder_add_string(leave_gen_sb, cumul_game_data_str);
+    free(cumul_game_data_str);
+
+    string_builder_add_string(
+        leave_gen_sb,
+        "\n**************************\n"
+        "Generational Autoplay Data\n**************************\n\n");
+
+    char *gen_game_data_str = autoplay_results_to_string(
+        lg_shared_data->gen_autoplay_results, true, false);
+    string_builder_add_string(leave_gen_sb, gen_game_data_str);
+    free(gen_game_data_str);
+
+    string_builder_add_formatted_string(
+        leave_gen_sb,
+        "\nTarget Minimum "
+        "Leave "
+        "Count: %d\nLeaves Under "
+        "Target Minimum Leave Count: %d\n\n",
+        rack_list_get_target_rack_count(lg_shared_data->rack_list),
+        rack_list_get_racks_below_target_count(lg_shared_data->rack_list));
+
+    char *report_name_prefix =
+        cut_off_after_last_char(gen_labeled_klv_filename, '.');
+    char *report_name =
+        get_formatted_string("%s_report.txt", report_name_prefix);
+
+    write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb),
+                         error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      failure = "leavegen failed to write the generation's report";
+    }
+    string_builder_destroy(leave_gen_sb);
+    free(report_name);
+    free(report_name_prefix);
+  }
+
+  if (failure) {
+    error_stack_print_and_reset(error_stack);
+    if (!lg_shared_data->postgen_error) {
+      lg_shared_data->postgen_error = get_formatted_string(
+          "%s (generation %d)", failure, lg_shared_data->gens_completed);
+    }
+  }
+
+  error_stack_destroy(error_stack);
+  free(gen_labeled_klv_filename);
+  free(gen_labeled_klv_name);
+  free(label);
+  free(leaves_filename);
+}
+
+void postgen_prebroadcast_func(void *data) {
+  AutoplaySharedData *shared_data = (AutoplaySharedData *)data;
+  LeavegenSharedData *lg_shared_data = shared_data->leavegen_shared_data;
+  rack_list_write_to_klv(lg_shared_data->rack_list, lg_shared_data->ld,
+                         lg_shared_data->klv);
+  // The direct RackList read that contribute's leave_generation executor
+  // needs (birdtest's PLAN.md, "Leave generation on the client"): the
+  // results go back in the task's JSON response rather than through a file.
+  autoplay_results_set_leave_results_json(
+      lg_shared_data->primary_autoplay_results,
+      rack_list_get_rack_equity_json(lg_shared_data->rack_list,
+                                     lg_shared_data->ld));
+  lg_shared_data->gens_completed++;
 
   // Get total game data.
   autoplay_results_consolidate(lg_shared_data->autoplay_results_list,
@@ -287,76 +373,9 @@ void postgen_prebroadcast_func(void *data) {
     autoplay_results_reset(lg_shared_data->autoplay_results_list[i]);
   }
 
-  // Print info about the current state.
-  StringBuilder *leave_gen_sb = string_builder_create();
-
-  string_builder_add_string(
-      leave_gen_sb, "************************\n"
-                    "Cumulative Autoplay Data\n************************\n\n");
-
-  string_builder_add_formatted_string(
-      leave_gen_sb, "Seconds: %f\n",
-      ctimer_elapsed_seconds(&shared_data->timer));
-  char *cumul_game_data_str = autoplay_results_to_string(
-      lg_shared_data->primary_autoplay_results, true, false);
-  string_builder_add_string(leave_gen_sb, cumul_game_data_str);
-  free(cumul_game_data_str);
-
-  string_builder_add_string(
-      leave_gen_sb,
-      "\n**************************\n"
-      "Generational Autoplay Data\n**************************\n\n");
-
-  char *gen_game_data_str = autoplay_results_to_string(
-      lg_shared_data->gen_autoplay_results, true, false);
-  string_builder_add_string(leave_gen_sb, gen_game_data_str);
-  free(gen_game_data_str);
-
-  string_builder_add_formatted_string(
-      leave_gen_sb,
-      "\nTarget Minimum "
-      "Leave "
-      "Count: %d\nLeaves Under "
-      "Target Minimum Leave Count: %d\n\n",
-      rack_list_get_target_rack_count(lg_shared_data->rack_list),
-      rack_list_get_racks_below_target_count(lg_shared_data->rack_list));
-
-  char *report_name_prefix =
-      cut_off_after_last_char(gen_labeled_klv_filename, '.');
-  char *report_name = get_formatted_string("%s_report.txt", report_name_prefix);
-
-  write_string_to_file(report_name, "w", string_builder_peek(leave_gen_sb),
-                       error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("leavegen failed to write result summary to file");
+  if (lg_shared_data->write_files) {
+    leavegen_write_generation_files(shared_data);
   }
-
-  // When -writerackequitycsv is set, also dump rack_list's
-  // "<rack>,<count>,<mean>" data for every observed rack, so a distributed
-  // caller doesn't have to parse the full per-generation KLV to get results.
-  if (lg_shared_data->write_rack_equity_csv) {
-    char *rack_equity_csv_name =
-        get_formatted_string("%s_rack_equity.csv", report_name_prefix);
-    rack_list_write_rack_equity_csv(lg_shared_data->rack_list,
-                                    lg_shared_data->ld, rack_equity_csv_name,
-                                    error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_print_and_reset(error_stack);
-      log_fatal("leavegen failed to write rack equity results to file");
-    }
-    free(rack_equity_csv_name);
-  }
-
-  string_builder_destroy(leave_gen_sb);
-  error_stack_destroy(error_stack);
-
-  free(report_name);
-  free(report_name_prefix);
-  free(gen_labeled_klv_filename);
-  free(gen_labeled_klv_name);
-  free(label);
-  free(leaves_filename);
 
   // Reset data for the next generation.
   if (lg_shared_data->gens_completed < lg_shared_data->num_gens) {
@@ -521,6 +540,21 @@ typedef struct AutoplayWorker {
   Rack nontarget_known_rack;
   Rack target_known_rack;
   MoveList *move_lists[2];
+  // Endgame and pre-endgame solving; NULL when no player solves.
+  AutoplaySolverCtx *solver_ctx;
+  // Whether a solver chose the move this turn, so the positions recorder takes
+  // the solver's analysis instead of the move list and sim results, which then
+  // describe an earlier turn.
+  bool turn_was_solved;
+  // Whether a simulation ran this turn, so the positions recorder takes the
+  // sim results only then. A simming player's turn with one legal play (a
+  // forced pass) runs none, and sim_results still holds the last simulation
+  // this worker ran -- another turn's, or another game's.
+  bool turn_was_simmed;
+  // Whether the positions recorder is active for this run. A static player
+  // otherwise only ever ranks the one move it plays; this asks it to keep the
+  // whole ranked list instead, the same way a simming player already does.
+  bool captures_positions;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -529,13 +563,40 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        AutoplaySharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = *args;
-  // 0 plies indicate that the player is using static equity, so the move list
-  // only needs a capacity of 1
+  autoplay_worker->captures_positions =
+      (autoplay_results_get_options(target) &
+       autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_POSITION)) != 0;
+  // A static player normally only needs a move list capacity of 1 (0 plies
+  // indicates static equity), but position capture wants the whole ranked
+  // list up to the job's reporting cap, the same as a simming player's
+  // num_plays already provides.
+  const int position_play_cap =
+      autoplay_worker->captures_positions ? args->position_play_cap : 0;
   if (autoplay_worker->args.p1_sim_args.num_plays == 0) {
     autoplay_worker->args.p1_sim_args.num_plays = 1;
   }
   if (autoplay_worker->args.p2_sim_args.num_plays == 0) {
     autoplay_worker->args.p2_sim_args.num_plays = 1;
+  }
+  if (autoplay_worker->args.p1_sim_args.num_plays < position_play_cap) {
+    autoplay_worker->args.p1_sim_args.num_plays = position_play_cap;
+  }
+  if (autoplay_worker->args.p2_sim_args.num_plays < position_play_cap) {
+    autoplay_worker->args.p2_sim_args.num_plays = position_play_cap;
+  }
+  // A captured position keeps the opponent's most drawn inferred leaves,
+  // which inference lists only when asked to keep a list of them; nothing
+  // else in autoplay asks.
+  if (autoplay_worker->captures_positions) {
+    SimArgs *seats[] = {&autoplay_worker->args.p1_sim_args,
+                        &autoplay_worker->args.p2_sim_args};
+    for (int i = 0; i < 2; i++) {
+      if (seats[i]->inference_args.leave_list_capacity <
+          AUTOPLAY_CAPTURED_INFERENCE_LEAVES) {
+        seats[i]->inference_args.leave_list_capacity =
+            AUTOPLAY_CAPTURED_INFERENCE_LEAVES;
+      }
+    }
   }
   autoplay_worker->worker_index = worker_index;
   autoplay_worker->autoplay_results =
@@ -558,6 +619,9 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->sim_results = NULL;
   autoplay_worker->inference_results = NULL;
   autoplay_worker->error_stack = NULL;
+  autoplay_worker->solver_ctx = NULL;
+  autoplay_worker->turn_was_solved = false;
+  autoplay_worker->turn_was_simmed = false;
 
   const bool any_player_sims =
       ap_args->p1_sim_args.num_plies > 0 || ap_args->p2_sim_args.num_plies > 0;
@@ -567,6 +631,12 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   // the legacy autoplay simmer.
   if (any_player_uses_play_chooser) {
     autoplay_worker->error_stack = error_stack_create();
+  }
+  if (shared_data->solver_tt) {
+    autoplay_worker->solver_ctx = autoplay_solver_ctx_create();
+    if (autoplay_worker->error_stack == NULL) {
+      autoplay_worker->error_stack = error_stack_create();
+    }
   }
   if (any_player_sims) {
     autoplay_worker->sim_results = sim_results_create(ap_args->cutoff);
@@ -594,26 +664,29 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   sim_ctx_destroy(autoplay_worker->sim_ctx);
   sim_results_destroy(autoplay_worker->sim_results);
   inference_results_destroy(autoplay_worker->inference_results);
+  autoplay_solver_ctx_destroy(autoplay_worker->solver_ctx);
   error_stack_destroy(autoplay_worker->error_stack);
   move_list_destroy(autoplay_worker->move_lists[0]);
   move_list_destroy(autoplay_worker->move_lists[1]);
   free(autoplay_worker);
 }
 
-// forced_racks_filename is optional (NULL/empty for an unrestricted run) and
+// forced_racks is optional (num_forced_racks 0 for an unrestricted run) and
 // is passed straight through to rack_list_create; see its documentation for
-// what it does. Pushes to error_stack and returns NULL if that file can't be
-// read.
+// what it does. Pushes to error_stack and returns NULL if a forced rack is
+// malformed or duplicated.
 LeavegenSharedData *leavegen_shared_data_create(
     AutoplayResults *primary_autoplay_results,
     AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
     const char *data_paths, KLV *klv, int number_of_threads, int num_gens,
-    int *min_rack_targets, const char *forced_racks_filename,
-    bool write_rack_equity_csv, ErrorStack *error_stack) {
+    int *min_rack_targets, const char *const *forced_racks,
+    int num_forced_racks, ErrorStack *error_stack) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->num_gens = num_gens;
   shared_data->gens_completed = 0;
+  shared_data->write_files = true;
+  shared_data->postgen_error = NULL;
   shared_data->gen_start_games = 0;
   shared_data->klv = klv;
   shared_data->gen_autoplay_results =
@@ -623,31 +696,30 @@ LeavegenSharedData *leavegen_shared_data_create(
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->min_rack_targets = min_rack_targets;
-  shared_data->rack_list = rack_list_create(ld, min_rack_targets[0],
-                                            forced_racks_filename, error_stack);
+  shared_data->rack_list = rack_list_create(
+      ld, min_rack_targets[0], forced_racks, num_forced_racks, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     autoplay_results_destroy(shared_data->gen_autoplay_results);
     free(shared_data);
     return NULL;
   }
-  shared_data->write_rack_equity_csv = write_rack_equity_csv;
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   return shared_data;
 }
 
-// Use NULL for the KLV when not running in leave gen mode. forced_racks_
-// filename and write_rack_equity_csv are only meaningful when klv is
-// non-NULL (see leavegen_shared_data_create); pushes to error_stack and
-// returns NULL on the same conditions that function does.
+// Use NULL for the KLV when not running in leave gen mode. forced_racks and
+// num_forced_racks are only meaningful when klv is non-NULL (see
+// leavegen_shared_data_create); pushes to error_stack and returns NULL on
+// the same conditions that function does.
 AutoplaySharedData *
 autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
                             const uint64_t first_gen_num_games,
                             AutoplayResults *primary_autoplay_results,
                             AutoplayResults **autoplay_results_list, KLV *klv,
                             int num_gens, int *min_rack_targets,
-                            const char *forced_racks_filename,
-                            ErrorStack *error_stack) {
+                            const char *const *forced_racks,
+                            int num_forced_racks, ErrorStack *error_stack) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
   shared_data->num_threads = num_autoplay_threads;
   shared_data->print_interval = args->print_interval;
@@ -661,17 +733,27 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
   cpthread_mutex_init(&shared_data->iter_completed_mutex);
   shared_data->thread_control = args->thread_control;
   shared_data->leavegen_shared_data = NULL;
+  shared_data->solver_tt = NULL;
+  shared_data->solver_num_threads = 1;
+  if (args->type == AUTOPLAY_TYPE_DEFAULT &&
+      (autoplay_solver_settings_solves(&args->solver_settings[0]) ||
+       autoplay_solver_settings_solves(&args->solver_settings[1]))) {
+    shared_data->solver_tt =
+        transposition_table_create(args->solver_tt_fraction_of_mem);
+  }
   shared_data->pat_gen_shared_data = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
         args->data_paths, klv, num_autoplay_threads, num_gens, min_rack_targets,
-        forced_racks_filename, args->write_rack_equity_csv, error_stack);
+        forced_racks, num_forced_racks, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       prng_destroy(shared_data->prng);
+      transposition_table_destroy(shared_data->solver_tt);
       free(shared_data);
       return NULL;
     }
+    shared_data->leavegen_shared_data->write_files = args->leavegen_write_files;
   }
   return shared_data;
 }
@@ -683,6 +765,7 @@ void leavegen_shared_data_destroy(LeavegenSharedData *lg_shared_data) {
   rack_list_destroy(lg_shared_data->rack_list);
   checkpoint_destroy(lg_shared_data->postgen_checkpoint);
   autoplay_results_destroy(lg_shared_data->gen_autoplay_results);
+  free(lg_shared_data->postgen_error);
   free(lg_shared_data);
 }
 
@@ -729,6 +812,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   }
   prng_destroy(shared_data->prng);
   leavegen_shared_data_destroy(shared_data->leavegen_shared_data);
+  transposition_table_destroy(shared_data->solver_tt);
   pat_gen_shared_data_destroy(shared_data->pat_gen_shared_data);
   free(shared_data);
 }
@@ -851,7 +935,7 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   if (game_runner->shared_data->leavegen_shared_data &&
       // We only force draws if we've played enough games for this
       // generation. This also applies when leavegen's rack list is
-      // restricted to a forceracksfile (see rack_list_create): clients
+      // restricted to a set of forced racks (see rack_list_create): clients
       // fulfilling requests can just pass 0 if they want forcing
       // from the start.
       (iter_output->iter_count -
@@ -931,8 +1015,9 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   ErrorStack *error_stack = autoplay_worker->error_stack;
   const Move *move =
       get_top_simming_move(game, move_list, sim_args, &autoplay_worker->sim_ctx,
-                           autoplay_worker->sim_results, error_stack);
-  if (autoplay_worker->sim_results != NULL) {
+                           autoplay_worker->sim_results,
+                           &autoplay_worker->turn_was_simmed, error_stack);
+  if (autoplay_worker->turn_was_simmed) {
     atomic_fetch_add_explicit(
         &autoplay_total_sim_iterations,
         sim_results_get_iteration_count(autoplay_worker->sim_results),
@@ -959,6 +1044,8 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
 
 const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                       GameRunner *game_runner) {
+  autoplay_worker->turn_was_solved = false;
+  autoplay_worker->turn_was_simmed = false;
   const int player_on_turn_index =
       game_get_player_on_turn_index(game_runner->game);
   PlayChooser *play_chooser = game_runner->play_choosers[player_on_turn_index];
@@ -982,12 +1069,50 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
     }
     return &game_runner->play_chooser_move;
   }
+  // The end of the game, for a player that solves it: the endgame once the bag
+  // is empty, the pre-endgame while it is small.
+  const AutoplaySolverSettings *solver_settings =
+      &autoplay_worker->args.solver_settings[player_on_turn_index];
+  if (autoplay_worker->solver_ctx &&
+      autoplay_solver_applies(solver_settings, game_runner->game)) {
+    ErrorStack *error_stack = autoplay_worker->error_stack;
+    const Move *solved = autoplay_solver_solve(
+        autoplay_worker->solver_ctx, solver_settings, game_runner->game,
+        autoplay_worker->shared_data->solver_tt,
+        autoplay_worker->shared_data->solver_num_threads,
+        autoplay_solver_seed(game_runner->seed, game_runner->turn_number,
+                             player_on_turn_index),
+        autoplay_worker->shared_data->thread_control,
+        autoplay_worker->captures_positions, error_stack);
+    if (!solved && error_stack_is_empty(error_stack)) {
+      // The run was stopped -- by the user, or a contribute task's time limit
+      // -- before or during the solve, which chose nothing. The run is being
+      // abandoned (a task's results are discarded), so the game plays out on
+      // static plays, as a stopped simulation's turn does: every later solve
+      // and simulation returns at once.
+      return get_top_move_for_player_on_turn(
+          game_runner->game, autoplay_worker->move_lists[player_on_turn_index],
+          autoplay_worker->captures_positions);
+    }
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("autoplay worker %d failed to solve for player %d on turn %d "
+                "of game number %llu with seed %llu",
+                autoplay_worker->worker_index, player_on_turn_index + 1,
+                game_runner->turn_number + 1,
+                (unsigned long long)game_runner->game_number + 1,
+                (unsigned long long)game_runner->seed);
+    }
+    autoplay_worker->turn_was_solved = true;
+    return solved;
+  }
   const SimArgs *sim_args = (player_on_turn_index == 0)
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
     return get_top_move_for_player_on_turn(
-        game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
+        game_runner->game, autoplay_worker->move_lists[player_on_turn_index],
+        autoplay_worker->captures_positions);
   }
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);
 }
@@ -1027,7 +1152,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     // A forced rack is under no obligation to have a legal play, and a
     // pass's equity is a sentinel value that can't be recorded, so passes
     // are skipped entirely here. This is more likely than usual when
-    // lg_shared_data->rack_list is restricted to a forceracksfile (see
+    // lg_shared_data->rack_list is restricted to forced racks (see
     // rack_list_create), since those racks are picked externally rather
     // than drawn from the actual remaining tile pool.
     if (move_get_type(forced_move) != GAME_EVENT_PASS) {
@@ -1039,6 +1164,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
 
   const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
+  const SimArgs *sim_args_for_player =
+      (game_get_player_on_turn_index(game_runner->game) == 0)
+          ? &autoplay_worker->args.p1_sim_args
+          : &autoplay_worker->args.p2_sim_args;
 
   if (game_runner->turn_number == 0 &&
       move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
@@ -1090,8 +1219,37 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   const int pat_pre_move_bag_count =
       pat_gen_shared_data ? bag_get_letters(game_get_bag(game)) : 0;
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
-  autoplay_results_add_move(autoplay_worker->autoplay_results,
-                            game_runner->game, move, &rare_rack_or_move_leave);
+  // Only when a simulation actually ran this turn: sim_results holds
+  // whatever the last simulation produced, so passing it on a static player's
+  // turn, on a turn a solver decided, or on a simmer's turn with one legal
+  // play -- which is recorded as the static analysis of that play -- would
+  // attribute another turn's analysis to this one.
+  const bool simmed_this_turn = autoplay_worker->turn_was_simmed;
+  // And it inferred first exactly when game_runner_get_sim_move turned
+  // inference on for the sim: the player infers, and the opponent has a
+  // previous move that was not a pass to infer from. The inference runs
+  // inside the simulation, so a turn that did not simulate did not infer.
+  const bool inferred_this_turn =
+      simmed_this_turn && sim_args_for_player->use_inference &&
+      game_runner->turn_number > 0 &&
+      move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS;
+  // The move list holds the candidates this turn; it is reused next turn, so a
+  // recorder that keeps them must copy.
+  autoplay_results_add_move(
+      autoplay_worker->autoplay_results, game_runner->game, move,
+      // previous_move is only meaningful once a turn has actually been
+      // played; game_runner->previous_move is stale/uninitialized before that.
+      game_runner->turn_number > 0 ? &game_runner->previous_move : NULL,
+      &rare_rack_or_move_leave,
+      autoplay_worker
+          ->move_lists[game_get_player_on_turn_index(game_runner->game)],
+      simmed_this_turn ? autoplay_worker->sim_results : NULL,
+      inferred_this_turn ? autoplay_worker->inference_results : NULL,
+      autoplay_worker->turn_was_solved
+          ? autoplay_solver_get_analysis(autoplay_worker->solver_ctx)
+          : NULL,
+      (int)game_runner->game_number, game_runner->pair_game_number,
+      game_runner->turn_number, autoplay_worker->args.position_play_cap);
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {
@@ -1115,7 +1273,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     const SimArgs *sim_args = (player_on_turn_index == 0)
                                   ? &autoplay_worker->args.p1_sim_args
                                   : &autoplay_worker->args.p2_sim_args;
-    if (sim_args->num_plies > 0 &&
+    if (autoplay_worker->turn_was_simmed &&
         !autoplay_worker->args.use_play_chooser[player_on_turn_index]) {
       char *sim_str = sim_results_get_string(
           game, autoplay_worker->sim_results, sim_args->max_num_display_plays,
@@ -1259,11 +1417,22 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
                       1 - starting_player_index, 2);
   }
   bool games_are_divergent = false;
+  // Positions recorded this turn are held until the comparison below says
+  // whether it is the pair's first divergence, and only that turn's are kept.
+  AutoplayResults *results = autoplay_worker->autoplay_results;
+  const bool keep_first_divergence =
+      game_runner2 && autoplay_results_keeps_first_divergences(results);
   while (true) {
+    // Each game's move, as that game's runner kept it after playing it.
+    // Not the pointer game_runner_play_move returns: a solved turn returns
+    // the worker's one solver buffer, which the other game's solve
+    // overwrites, so two solved turns compared as one move however
+    // differently they were played.
     const Move *move1 = NULL;
     bool game1_is_over = game_runner_is_game_over(game_runner1);
     if (!game1_is_over) {
-      move1 = game_runner_play_move(autoplay_worker, game_runner1);
+      game_runner_play_move(autoplay_worker, game_runner1);
+      move1 = &game_runner1->previous_move;
     }
 
     const Move *move2 = NULL;
@@ -1271,7 +1440,8 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
     if (game_runner2) {
       game2_is_over = game_runner_is_game_over(game_runner2);
       if (!game2_is_over) {
-        move2 = game_runner_play_move(autoplay_worker, game_runner2);
+        game_runner_play_move(autoplay_worker, game_runner2);
+        move2 = &game_runner2->previous_move;
       }
     }
 
@@ -1285,6 +1455,12 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
         (!move1 || !move2 ||
          compare_moves_without_equity(move1, move2, true) != -1)) {
       games_are_divergent = true;
+      if (keep_first_divergence) {
+        autoplay_results_commit_positions(results);
+      }
+    }
+    if (keep_first_divergence) {
+      autoplay_results_discard_positions(results);
     }
   }
   game_runner_assess_overtime(autoplay_worker, game_runner1);
@@ -1326,6 +1502,13 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
     // game runner. The second game carries the pair's combined spread.
     autoplay_add_game(autoplay_worker, game_runner2, game_runner1,
                       games_are_divergent);
+    // Both games of the pair are final here, which is the only point at which
+    // the pair's own outcome exists. Recorded whether or not the two games
+    // diverged: an identically-played pair is a 1-1 tie and belongs in the
+    // distribution, since dropping it would condition the sample on its
+    // outcome.
+    autoplay_results_add_game_pair(autoplay_worker->autoplay_results,
+                                   game_runner1->game, game_runner2->game);
   }
 }
 
@@ -1460,14 +1643,38 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
   if (options == 0) {
     return;
   }
-  if (options != autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME) &&
-      args->use_game_pairs) {
+  // The other recorders accumulate per-leave or per-rack statistics that game
+  // pairs would double-count. The positions recorder does not: it records each
+  // turn independently and carries its own game and pair numbers, so it is
+  // meaningful alongside pairing.
+  const uint64_t pairable_options =
+      autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_GAME) |
+      autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_POSITION);
+  if ((options & ~pairable_options) != 0 && args->use_game_pairs) {
     error_stack_push(
         error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
-        string_duplicate(
-            "the game pairs setting can only be used with the games recorder"));
+        string_duplicate("the game pairs setting can only be used with the "
+                         "games and positions recorders"));
     return;
   }
+  // A first divergence is a pair's: without pairs nothing would be kept.
+  if (autoplay_results_keeps_first_divergences(autoplay_results) &&
+      !args->use_game_pairs) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
+        string_duplicate("divergentpositions keeps each game pair's first "
+                         "divergence, so it needs game pairs (-gp true)"));
+    return;
+  }
+}
+
+int autoplay_solver_num_threads(int total_num_threads,
+                                int num_concurrent_games) {
+  if (num_concurrent_games < 1) {
+    num_concurrent_games = 1;
+  }
+  const int share = total_num_threads / num_concurrent_games;
+  return share > 1 ? share : 1;
 }
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
@@ -1527,7 +1734,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
                                args->num_games_or_min_rack_targets));
       return;
     }
-    first_gen_num_games = UINT64_MAX;
+    first_gen_num_games =
+        args->leavegen_max_games > 0 ? args->leavegen_max_games : UINT64_MAX;
   } else {
     first_gen_num_games =
         string_to_uint64(args->num_games_or_min_rack_targets, error_stack);
@@ -1564,13 +1772,23 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
       args, autoplay_num_threads, first_gen_num_games, autoplay_results,
       autoplay_results_list, klv, num_gens, min_rack_targets,
-      args->force_racks_filename, error_stack);
+      args->forced_racks, args->num_forced_racks, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     free(autoplay_results_list);
     free(min_rack_targets);
     free(pat_games_per_gen);
     return;
   }
+
+  // Every worker plays a game at a time, and a worker the run has no game
+  // for exits before it plays one, so the run plays this many games at once.
+  int num_concurrent_games = autoplay_num_threads;
+  if (!is_leavegen_mode && !is_patgen_mode &&
+      first_gen_num_games < (uint64_t)num_concurrent_games) {
+    num_concurrent_games = (int)first_gen_num_games;
+  }
+  shared_data->solver_num_threads = autoplay_solver_num_threads(
+      args->total_num_threads, num_concurrent_games);
 
   if (is_patgen_mode) {
     // We can use player index 0 here since it is guaranteed that the
@@ -1635,6 +1853,11 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   free(autoplay_workers);
   free(worker_ids);
+  char *postgen_error = NULL;
+  if (shared_data->leavegen_shared_data) {
+    postgen_error = shared_data->leavegen_shared_data->postgen_error;
+    shared_data->leavegen_shared_data->postgen_error = NULL;
+  }
   autoplay_shared_data_destroy(shared_data);
   free(min_rack_targets);
   free(pat_games_per_gen);
@@ -1644,9 +1867,14 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     players_data_reload(args->game_args->players_data, PLAYERS_DATA_TYPE_KLV,
                         args->data_paths, error_stack);
   }
+  if (postgen_error) {
+    error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR, postgen_error);
+  }
 
-  char *autoplay_results_string = autoplay_results_to_string(
-      autoplay_results, args->human_readable, show_divergent_results);
-  thread_control_print(thread_control, autoplay_results_string);
-  free(autoplay_results_string);
+  if (args->print_results) {
+    char *autoplay_results_string = autoplay_results_to_string(
+        autoplay_results, args->human_readable, show_divergent_results);
+    thread_control_print(thread_control, autoplay_results_string);
+    free(autoplay_results_string);
+  }
 }

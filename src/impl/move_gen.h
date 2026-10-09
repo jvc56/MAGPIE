@@ -77,6 +77,10 @@ typedef struct UnrestrictedMultiplier {
 } UnrestrictedMultiplier;
 
 typedef struct MoveGen {
+  // Move generations made on this MoveGen: generate_moves and
+  // generate_small_moves_in_lanes calls, by whichever thread holds it. Never
+  // reset; see gen_get_movegen_count.
+  uint64_t movegen_count;
   // Owned by this MoveGen struct
   int current_row_index;
   int current_anchor_col;
@@ -322,6 +326,25 @@ typedef struct MoveGenArgs {
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
+
+// The move generations made in this process so far, on every thread: each
+// generate_moves call, and each generate_small_moves_in_lanes call (the
+// endgame's incremental move list for a node, which stands in for a
+// generate_moves call), whoever made it -- autoplay, a simulation, an
+// inference, an endgame or pre-endgame solve. The difference between two
+// readings is what was made in between.
+//
+// Each thread counts on its own MoveGen, unsynchronized, so nothing is shared
+// in the hot path; this sums them, and so is only exact while no thread is
+// generating moves: read it before and after a command, not during one.
+uint64_t gen_get_movegen_count(void);
+
+// The most pool slots (see MAX_THREADS) live threads have held at once since
+// the last gen_reset_slots_high_water, which starts the count again from the
+// slots held now. A thread takes its slot on its first move generation and
+// gives it back when it exits; past MAX_THREADS at once, magpie exits.
+int gen_get_slots_high_water(void);
+void gen_reset_slots_high_water(void);
 
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this

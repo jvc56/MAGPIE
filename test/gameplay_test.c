@@ -4,6 +4,7 @@
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/gameplay_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
@@ -992,14 +993,16 @@ void test_get_top_move_for_player_on_turn_respects_sort_type(void) {
   draw_rack_string_from_bag(game, 0, "DEKNRTY");
 
   player_set_move_sort_type(player0, MOVE_SORT_SCORE);
-  const Move *score_move = get_top_move_for_player_on_turn(game, move_list);
+  const Move *score_move =
+      get_top_move_for_player_on_turn(game, move_list, false);
   assert(equity_to_int(move_get_score(score_move)) == 36);
   // The move chosen by score has no leave value applied, so its equity
   // exactly equals its score.
   assert(move_get_score(score_move) == move_get_equity(score_move));
 
   player_set_move_sort_type(player0, MOVE_SORT_EQUITY);
-  const Move *equity_move = get_top_move_for_player_on_turn(game, move_list);
+  const Move *equity_move =
+      get_top_move_for_player_on_turn(game, move_list, false);
   assert(equity_to_int(move_get_score(equity_move)) == 36);
   // The move chosen by equity leaves a better rack behind, so its equity is
   // strictly higher than its raw score.
@@ -1009,6 +1012,65 @@ void test_get_top_move_for_player_on_turn_respects_sort_type(void) {
   assert(compare_moves_without_equity(score_move, equity_move, true) != 0);
 
   move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+// get_top_move_for_player_on_turn with record_all, as autoplay calls it when
+// positions are captured, must play the same move as without it and leave the
+// recorded moves ranked best-first. Recording every move leaves the list a
+// min-heap, and reading its first element played the *worst* move -- a pass
+// -- on every turn of every capture job's games.
+static void test_get_top_move_for_player_on_turn_records_all_ranked(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best");
+  Game *game = config_game_create(config);
+  MoveList *move_list = move_list_create(1000);
+  draw_rack_string_from_bag(game, 0, "DEKNRTY");
+
+  const Move *best = get_top_move_for_player_on_turn(game, move_list, false);
+  Move played;
+  move_copy(&played, best);
+  assert(move_get_type(&played) != GAME_EVENT_PASS);
+
+  // Equal equity rather than the same move: two plays can tie (an opening
+  // placement and its mirror), and the two record types break ties
+  // differently.
+  const Move *top = get_top_move_for_player_on_turn(game, move_list, true);
+  assert(move_get_equity(top) == move_get_equity(&played));
+  const int count = move_list_get_count(move_list);
+  assert(count > 1);
+  for (int i = 1; i < count; i++) {
+    assert(move_get_equity(move_list_get_move(move_list, i - 1)) >=
+           move_get_equity(move_list_get_move(move_list, i)));
+  }
+  assert(move_get_type(move_list_get_move(move_list, count - 1)) ==
+         GAME_EVENT_PASS);
+
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+// A server-sent opening rack is drawn with draw_rack_string_from_bag. A
+// lower-case letter in it was counted outside the rack's array and crashed the
+// worker, release build included; it is refused as malformed, and nothing is
+// drawn.
+static void test_a_designated_letter_is_not_a_drawable_rack(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp false");
+  Game *game = config_game_create(config);
+  const Bag *bag = game_get_bag(game);
+  const int in_bag = bag_get_letters(bag);
+
+  assert(draw_rack_string_from_bag(game, 0, "aEINST?") ==
+         DRAW_RACK_STRING_MALFORMED);
+  assert(draw_rack_string_from_bag(game, 0, "AEINSTz") ==
+         DRAW_RACK_STRING_MALFORMED);
+  assert(rack_is_empty(player_get_rack(game_get_player(game, 0))));
+  assert(bag_get_letters(bag) == in_bag);
+
+  assert(draw_rack_string_from_bag(game, 0, "AEINST?") == 7);
+
   game_destroy(game);
   config_destroy(config);
 }
@@ -1027,4 +1089,6 @@ void test_gameplay(void) {
   test_moves_are_similar();
   test_incremental_cross_set_undo();
   test_get_top_move_for_player_on_turn_respects_sort_type();
+  test_get_top_move_for_player_on_turn_records_all_ranked();
+  test_a_designated_letter_is_not_a_drawable_rack();
 }

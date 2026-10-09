@@ -1,5 +1,6 @@
 #include "io_util.h"
 
+#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include <assert.h>
 #include <ctype.h>
@@ -7,12 +8,14 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 enum { ERROR_STACK_CAPACITY = 100 };
 
@@ -574,6 +577,119 @@ bool path_is_directory(const char *path) {
   }
   struct stat path_stat;
   return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
+}
+
+// (size, mtime) alone collides: a file replaced with different bytes of the
+// same size inside one mtime tick is identical to the old one, and archive
+// extraction routinely sets mtimes rather than letting them fall to now. The
+// inode and the ctime close that -- ctime moves on any change to the inode and
+// cannot be set backwards by a program -- but only at the resolution they are
+// read at: whole seconds is not enough, because the whole problem is two
+// writes inside one tick. So the identity carries nanoseconds where the
+// filesystem records them.
+#if defined(__APPLE__)
+#define STAT_MTIM(info) ((info).st_mtimespec)
+#define STAT_CTIM(info) ((info).st_ctimespec)
+#else
+#define STAT_MTIM(info) ((info).st_mtim)
+#define STAT_CTIM(info) ((info).st_ctim)
+#endif
+
+char *get_file_identity(const char *path) {
+  struct stat info;
+  if (!path || stat(path, &info) != 0) {
+    return NULL;
+  }
+  return get_formatted_string(
+      "%lld|%lld.%09ld|%llu|%lld.%09ld", (long long)info.st_size,
+      (long long)STAT_MTIM(info).tv_sec, (long)STAT_MTIM(info).tv_nsec,
+      (unsigned long long)info.st_ino, (long long)STAT_CTIM(info).tv_sec,
+      (long)STAT_CTIM(info).tv_nsec);
+}
+
+enum {
+  // A writer touches its temporary file continuously, and the largest (a
+  // rack info table) takes minutes; one untouched this long was abandoned.
+  STALE_TEMPORARY_SECONDS = 60 * 60,
+};
+
+// Whether `entry` is `<base>.<pid>-<n>.tmp` (or `<base>.<pid>.tmp`, the
+// earlier form): a temporary_sibling of `base`.
+static bool is_temporary_sibling_of(const char *entry, const char *base) {
+  const size_t base_length = strlen(base);
+  if (strncmp(entry, base, base_length) != 0 || entry[base_length] != '.') {
+    return false;
+  }
+  const char *pid = entry + base_length + 1;
+  const char *end = pid;
+  while (isdigit((unsigned char)*end) || *end == '-') {
+    end++;
+  }
+  return end > pid && strcmp(end, ".tmp") == 0;
+}
+
+// Removes the temporaries of writes of `filename` that never finished -- a
+// process killed while writing a 1.9 GB table leaves its whole temporary
+// behind, and nothing else would ever remove it. Best effort: a failure here
+// costs disk, never the write.
+static void remove_stale_temporary_siblings(const char *filename) {
+  const char *slash = strrchr(filename, '/');
+  char *dir =
+      slash ? get_formatted_string("%.*s", (int)(slash - filename), filename)
+            : get_formatted_string("%s", ".");
+  const char *base = slash ? slash + 1 : filename;
+  DIR *listing = opendir(dir[0] ? dir : "/");
+  if (!listing) {
+    free(dir);
+    return;
+  }
+  const time_t now = time(NULL);
+  const struct dirent *entry;
+  while ((entry = readdir(listing)) != NULL) {
+    if (!is_temporary_sibling_of(entry->d_name, base)) {
+      continue;
+    }
+    char *path = get_formatted_string("%s/%s", dir, entry->d_name);
+    struct stat info;
+    if (stat(path, &info) == 0 &&
+        now - info.st_mtime > STALE_TEMPORARY_SECONDS) {
+      (void)remove(path);
+    }
+    free(path);
+  }
+  closedir(listing);
+  free(dir);
+}
+
+char *temporary_sibling(const char *filename) {
+  remove_stale_temporary_siblings(filename);
+  // The process id, a per-process counter and the clock to the nanosecond.
+  // The first two alone are unique within one PID space, but two containers
+  // sharing a data volume can both be PID 1 with their counters in step (the
+  // same generation's KLV, fetched at the same point in two runs). Writers
+  // still open the name exclusively ("wbx"), so a clash fails rather than
+  // truncating the other's file.
+  static atomic_uint_least64_t counter = 0;
+  const unsigned long long sequence =
+      (unsigned long long)atomic_fetch_add(&counter, 1);
+  TimeSpec now = {0};
+  ctimer_clock_gettime_realtime(&now);
+  const unsigned long long nonce =
+      (unsigned long long)now.tv_sec * 1000000000ULL +
+      (unsigned long long)now.tv_nsec;
+  return get_formatted_string("%s.%ld-%llu-%llu.tmp", filename, (long)getpid(),
+                              sequence, nonce);
+}
+
+void rename_into_place(const char *temporary, const char *filename,
+                       const char *what, ErrorStack *error_stack) {
+  if (rename(temporary, filename) != 0) {
+    const int error_number = errno;
+    (void)remove(temporary);
+    error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+                     get_formatted_string("could not write %s %s: %s", what,
+                                          filename, strerror(error_number)));
+  }
 }
 
 enum {

@@ -105,6 +105,9 @@ typedef struct PegWorker {
   // dominant endgame speedup.
   TranspositionTable *eg_tt;
   double eg_tt_fraction;
+  // True when eg_tt is the caller's (PegArgs.shared_endgame_tt), which this
+  // worker must not destroy.
+  bool eg_tt_shared;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
 
@@ -119,6 +122,8 @@ typedef struct PegWorker {
   const int *nested_cand_caps; // inner-peg stage schedule (NULL = flat cap)
   int nested_n_cand_caps;
   int nested_stride;
+  const int *nested_strides_by_bag; // see PegArgs.nested_strides_by_bag
+  int nested_n_strides_by_bag;
   int nested_emptier_ply_cap;
   int nested_max_depth;
   // Free-list of reusable scratch frames (see PegNestFrame). nest_free holds
@@ -1365,6 +1370,11 @@ static void peg_nest_enum_splits(PegNestCtx *nc, int ml, int mover_left,
 // nested_stride > 0 overrides; otherwise bag-dependent (2-peg full, 3-peg 1/5,
 // 4-peg 1/7) so deeper inner pegs sample rather than enumerate every split.
 static int peg_nested_stride_for_bag(const PegWorker *worker, int bag) {
+  if (worker->nested_strides_by_bag != NULL && bag >= 0 &&
+      bag < worker->nested_n_strides_by_bag &&
+      worker->nested_strides_by_bag[bag] > 0) {
+    return worker->nested_strides_by_bag[bag];
+  }
   if (worker->nested_stride > 0) {
     return worker->nested_stride;
   }
@@ -2804,7 +2814,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].eg_ctx = endgame_ctx_create();
     workers[worker_idx].template_game = NULL;
     workers[worker_idx].scratch_game = NULL;
-    workers[worker_idx].eg_tt = NULL;
+    workers[worker_idx].eg_tt = args->shared_endgame_tt;
+    workers[worker_idx].eg_tt_shared = args->shared_endgame_tt != NULL;
     workers[worker_idx].eg_tt_fraction = tt_fraction;
     workers[worker_idx].prune_cache = prune_cache;
     // Nested-PEG lookahead config + free-list scratch.
@@ -2824,6 +2835,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].nested_cand_caps = args->nested_cand_caps;
     workers[worker_idx].nested_n_cand_caps = args->nested_n_cand_caps;
     workers[worker_idx].nested_stride = args->nested_stride;
+    workers[worker_idx].nested_strides_by_bag = args->nested_strides_by_bag;
+    workers[worker_idx].nested_n_strides_by_bag = args->nested_n_strides_by_bag;
     workers[worker_idx].nested_emptier_ply_cap = args->nested_emptier_ply_cap;
     workers[worker_idx].nested_max_depth = args->nested_max_depth;
     workers[worker_idx].nest_free = NULL;
@@ -3326,7 +3339,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       free(frame);
       frame = next;
     }
-    transposition_table_destroy(workers[worker_idx].eg_tt);
+    if (!workers[worker_idx].eg_tt_shared) {
+      transposition_table_destroy(workers[worker_idx].eg_tt);
+    }
   }
   free(workers);
   // Safe now that every worker's scratch game (which referenced cached KWGs via

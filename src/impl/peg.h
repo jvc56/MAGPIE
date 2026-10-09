@@ -7,6 +7,7 @@
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/thread_control.h"
+#include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -203,6 +204,14 @@ typedef struct PegArgs {
   const int *nested_cand_caps; // per-level cap sequence; NULL = use flat cap
   int nested_n_cand_caps;      // length of nested_cand_caps
   int nested_stride;
+  // Optional per-bag-size override of the nested stride: element b is the
+  // stride an inner peg with a bag of b tiles samples at (element 0 is
+  // unused). An element > 0 takes precedence over nested_stride and over the
+  // bag-dependent default; NULL / 0 = no override. Lets a caller state every
+  // stride rather than leave one to a built-in default that can change between
+  // builds (birdtest's contribute requests do this).
+  const int *nested_strides_by_bag;
+  int nested_n_strides_by_bag; // length of nested_strides_by_bag
   int nested_emptier_ply_cap;
   int nested_max_depth;
 
@@ -252,6 +261,13 @@ typedef struct PegArgs {
   // a separate thread (e.g. a TUI render loop) can read the current ranking
   // concurrently via peg_poll_read. The caller owns the PegPoll.
   PegPoll *poll;
+  // Optional caller-owned endgame transposition table every leaf solve uses,
+  // in place of the per-worker tables peg_solve otherwise allocates (sized
+  // from RAM) on every call. Transposition tables are safe to share between
+  // threads, and between solves of different positions. Autoplay passes one
+  // table for the whole run, so concurrent games each solving a pre-endgame do
+  // not each claim a share of RAM. NULL = allocate per worker (default).
+  TranspositionTable *shared_endgame_tt;
 } PegArgs;
 
 // Fills every PegArgs field from an explicit argument, so that adding a field
@@ -260,22 +276,23 @@ typedef struct PegArgs {
 // and add a parameter here rather than a default when a field is added.
 // (sim_args_fill deliberately does not go this far; see the note there.) The
 // tests build PegArgs literals instead, opting out of that check knowingly.
-static inline void
-peg_args_fill(const Game *game, ThreadControl *thread_control,
-              const int num_threads, const double time_budget_seconds,
-              const int max_stage, const bool greedy_seed_only,
-              const int *stage_top_k, const int num_stages,
-              const int inner_top_k, const PegOppModel opp_model,
-              const int scenario_stride, const bool nested_enabled,
-              const int nested_cand_cap, const int *nested_cand_caps,
-              const int nested_n_cand_caps, const int nested_stride,
-              const int nested_emptier_ply_cap, const int nested_max_depth,
-              const MachineLetter *eval_bag_order, const int eval_bag_order_len,
-              const Move *const *only_moves, const int n_only_moves,
-              const Move *const *protect_moves, const int n_protect_moves,
-              const bool include_per_scenario, PegOnStageStart on_stage_start,
-              PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
-              void *user_data, PegPoll *poll, PegArgs *peg_args) {
+static inline void peg_args_fill(
+    const Game *game, ThreadControl *thread_control, const int num_threads,
+    const double time_budget_seconds, const int max_stage,
+    const bool greedy_seed_only, const int *stage_top_k, const int num_stages,
+    const int inner_top_k, const PegOppModel opp_model,
+    const int scenario_stride, const bool nested_enabled,
+    const int nested_cand_cap, const int *nested_cand_caps,
+    const int nested_n_cand_caps, const int nested_stride,
+    const int *nested_strides_by_bag, const int nested_n_strides_by_bag,
+    const int nested_emptier_ply_cap, const int nested_max_depth,
+    const MachineLetter *eval_bag_order, const int eval_bag_order_len,
+    const Move *const *only_moves, const int n_only_moves,
+    const Move *const *protect_moves, const int n_protect_moves,
+    const bool include_per_scenario, PegOnStageStart on_stage_start,
+    PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
+    void *user_data, PegPoll *poll, TranspositionTable *shared_endgame_tt,
+    PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
@@ -292,6 +309,8 @@ peg_args_fill(const Game *game, ThreadControl *thread_control,
   peg_args->nested_cand_caps = nested_cand_caps;
   peg_args->nested_n_cand_caps = nested_n_cand_caps;
   peg_args->nested_stride = nested_stride;
+  peg_args->nested_strides_by_bag = nested_strides_by_bag;
+  peg_args->nested_n_strides_by_bag = nested_n_strides_by_bag;
   peg_args->nested_emptier_ply_cap = nested_emptier_ply_cap;
   peg_args->nested_max_depth = nested_max_depth;
   peg_args->eval_bag_order = eval_bag_order;
@@ -306,6 +325,7 @@ peg_args_fill(const Game *game, ThreadControl *thread_control,
   peg_args->on_scenario_done = on_scenario_done;
   peg_args->user_data = user_data;
   peg_args->poll = poll;
+  peg_args->shared_endgame_tt = shared_endgame_tt;
 }
 
 // ----- Stage progress snapshot ------------------------------------------

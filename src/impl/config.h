@@ -6,6 +6,7 @@
 #include "../def/convert_defs.h"
 #include "../def/game_defs.h"
 #include "../ent/autoplay_results.h"
+#include "../ent/autoplay_solver_settings.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
 #include "../ent/endgame_results.h"
@@ -22,8 +23,10 @@
 #include "../ent/win_pct.h"
 #include "../impl/simmer.h"
 #include "../util/io_util.h"
+#include "../util/json.h"
 #include "peg.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct Config Config;
 
@@ -34,6 +37,93 @@ typedef struct ConfigArgs {
 } ConfigArgs;
 
 // Constructors and Destructors
+// This build's version, for the contribution client's version negotiation.
+const char *config_get_magpie_version(void);
+
+// One player's simulation settings, for tests of the contribute path.
+// A player's autoplay endgame and pre-endgame solving settings.
+const AutoplaySolverSettings *
+config_get_player_solver_settings(const Config *config, int player_index);
+int config_get_player_sim_plies(const Config *config, int player_index);
+bool config_get_player_sim_margin_forecast(const Config *config,
+                                           int player_index);
+bool config_get_sim_margin_forecast(const Config *config);
+int config_get_player_num_plays(const Config *config, int player_index);
+uint64_t config_get_player_max_iterations(const Config *config,
+                                          int player_index);
+
+// Applies one player object from a birdtest task request to player
+// `player_index`, first resetting every per-player setting the request can
+// leave null to MAGPIE's defaults. Exposed so the reset can be tested: it is
+// what stops one task's settings leaking into the next.
+void config_contribute_apply_player_settings(Config *config,
+                                             const JsonValue *player,
+                                             int player_index,
+                                             ErrorStack *error_stack);
+
+// Resets the run-wide settings no task request states -- bingo bonus, movegen
+// margin, sim cutoff, multi-threading mode, small plays -- to MAGPIE's
+// defaults, so a contributor's settings.txt or an earlier task cannot change
+// what a task computes. Exposed so the reset can be tested.
+void config_contribute_reset_shared_settings(Config *config);
+
+// Applies the run-wide settings a task request states: the bingo bonus, and
+// the simulation cutoff when states_cutoff. Both are required. Exposed for
+// testing.
+void config_contribute_apply_run_settings(Config *config,
+                                          const JsonValue *request,
+                                          bool states_cutoff,
+                                          ErrorStack *error_stack);
+
+// Applies a games or game_pairs request's threading_mode: igp when absent,
+// and refuses a value other than "igp" or "pgp". Exposed for testing.
+void config_contribute_apply_threading_mode(Config *config,
+                                            const JsonValue *request,
+                                            ErrorStack *error_stack);
+
+// The multi-threading mode a task config is set to. Exposed for testing.
+multi_threading_mode_t config_get_multi_threading_mode(const Config *config);
+
+// Reads the job-wide names every task request carries -- the variant, the
+// letter distribution and the board layout, plus leave generation's top-level
+// lexicon -- and refuses a request that leaves out the variant, the
+// distribution or the layout, or names any of them with something that is not
+// a plain data name. The distribution and the layout are required rather than
+// defaulted: both change what a task computes, and a default is this build's
+// to choose. Exposed for testing.
+bool config_contribute_validate_common(const JsonValue *request,
+                                       const char **lexicon,
+                                       const char **variant,
+                                       const char **letter_distribution,
+                                       const char **board_layout,
+                                       ErrorStack *error_stack);
+
+// Copies one player's simulation settings into the run-wide ones that
+// impl_move_gen and impl_sim read. The opening-rack executor analyses through
+// those entry points, which ignore the per-player settings a request applies.
+// The first half of analysing one opening rack: the empty board, the rack
+// drawn, and the moves to rank generated -- every play up to num_plays for a
+// simulating player, whatever its recorder. False, with the error pushed, on
+// an unusable rack.
+bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
+                                         uint64_t seed, bool simming,
+                                         ErrorStack *error_stack);
+
+void config_contribute_use_player_settings_for_analysis(Config *config,
+                                                        int player_index);
+
+// Loads the variant, board layout, lexicon, letter distribution and leaves a
+// task states, with each player's wordmap, rack info table and word info table
+// use set before the load reads those flags. Exposed so that ordering can be
+// tested: set afterwards, each task's flags applied to the next task.
+void config_contribute_load_lexicon_and_variant(
+    Config *config, const char *lexicon, const char *variant,
+    const char *letter_distribution, const char *board_layout,
+    const char *p1_lexicon, const char *p2_lexicon, const char *p1_leaves,
+    const char *p2_leaves, bool p1_use_wordmap, bool p2_use_wordmap,
+    const char *p1_rit_name, const char *p2_rit_name, bool p1_use_wit,
+    bool p2_use_wit, ErrorStack *error_stack);
+
 Config *config_create(const ConfigArgs *args, ErrorStack *error_stack);
 void config_destroy(Config *config);
 
@@ -72,6 +162,8 @@ void config_set_human_readable(Config *config, bool human_readable);
 bool config_get_show_mistakes(const Config *config);
 bool config_get_show_prompt(const Config *config);
 bool config_get_save_settings(const Config *config);
+// Whether a rack info table this config loads is memory-mapped (-ritmmap).
+bool config_get_use_mmap_for_rit(const Config *config);
 bool config_get_fg_required(const Config *config);
 bool config_get_loaded_settings(const Config *config);
 void config_set_loaded_settings(Config *config, const bool value);
@@ -123,7 +215,7 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
-                     const char *force_racks_filename,
+                     const char *const *forced_racks, int num_forced_racks,
                      const char *pat_gen_output_name, ErrorStack *error_stack);
 void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           Rack *target_played_tiles,
@@ -143,5 +235,31 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
 // Settings
 void config_add_settings_to_string_builder(const Config *config,
                                            StringBuilder *sb);
+// Writes config's current settings to config_get_settings_filename(config)
+// (settings.txt by default), the same file the REPL loop keeps in sync after
+// every command. No-op if config_get_save_settings(config) is false.
+void save_config_settings(const Config *config, ErrorStack *error_stack);
+// The Config contribute's tasks run in, sharing the caller's thread control
+// and never saving settings, so the caller's session and settings file are
+// left as they were; and its destruction, which leaves the thread control to
+// the caller.
+Config *config_create_for_contribute(Config *parent, ErrorStack *error_stack);
+void config_destroy_for_contribute(Config *task_config);
+
+struct ContributeState;
+// Runs one claimed contribute task of `job_type` in `task_config` (see
+// config_create_for_contribute) on `threads` threads. Returns false, running
+// nothing, for a job type this build does not know. Otherwise *result_json is
+// the result the caller submits and frees -- NULL, with the reason on
+// error_stack, if the task failed -- and *movegens the move generations it
+// made on every thread (gen_get_movegen_count), simulations, inferences and
+// endgame and pre-endgame solves included. `state` supplies the derived files
+// the claim pins, and may be NULL for a task that asks for none. Exposed for
+// tests.
+bool config_contribute_execute(Config *task_config, const char *job_type,
+                               const JsonValue *request, int threads,
+                               struct ContributeState *state,
+                               char **result_json, uint64_t *movegens,
+                               ErrorStack *error_stack);
 
 #endif

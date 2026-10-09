@@ -1,5 +1,6 @@
 #include "klv_csv.h"
 
+#include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
@@ -211,8 +212,20 @@ void klv_read_from_csv_internal(const LetterDistribution *ld,
     char *value_str = strtok(NULL, "\n");
     trim_whitespace(value_str);
     if (leave_str && value_str) {
-      rack_set_to_string(ld, &leave_rack, leave_str);
-      const uint32_t leave_index = klv_get_word_index(klv, &leave_rack);
+      // A leave that does not parse, or is not in the KLV, has no index:
+      // KLV_UNFOUND_INDEX indexed leave_was_set and the leave values far out
+      // of bounds.
+      const int num_mls = rack_set_to_string(ld, &leave_rack, leave_str);
+      const uint32_t leave_index = num_mls > 0
+                                       ? klv_get_word_index(klv, &leave_rack)
+                                       : KLV_UNFOUND_INDEX;
+      if (leave_index == KLV_UNFOUND_INDEX) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_KLV_INVALID_LEAVE,
+            get_formatted_string("invalid leave found in klv csv file %s: %s",
+                                 leaves_filename, leave_str));
+        break;
+      }
       if (leave_was_set[leave_index]) {
         error_stack_push(
             error_stack, ERROR_STATUS_KLV_DUPLICATE_LEAVE,

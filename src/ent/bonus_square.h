@@ -82,8 +82,10 @@ static inline const char *bonus_square_to_alt_string(BonusSquare bonus_square) {
 }
 
 static inline BonusSquare bonus_square_from_char(char bonus_square_char) {
+  // As unsigned: a byte above 0x7f read as a negative index, out of the
+  // table's bounds, and accepted `\xc3` (the start of an `é`) as a square.
   return (BonusSquare){
-      .raw = bonus_square_chars_to_raw_map[(int)bonus_square_char]};
+      .raw = bonus_square_chars_to_raw_map[(unsigned char)bonus_square_char]};
 }
 
 static inline uint8_t
