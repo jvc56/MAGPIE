@@ -23,6 +23,7 @@
 #include "../src/ent/validated_move.h"
 #include "../src/ent/win_pct.h"
 #include "../src/ent/words.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/peg.h"
@@ -1819,6 +1820,123 @@ void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap) {
   snap->depth = 0;
   snap->solving_player = 0;
   snap->valid = false;
+}
+
+const char *tui_game_state_branch_reason(const TuiGameState *state, int idx) {
+  if (idx < 0 || idx >= state->history_count) {
+    return "Select a turn in History to carry on from.";
+  }
+  const TuiHistoryEntry *entry = &state->history[idx];
+  if (entry->pending || entry->kind != TUI_HISTORY_ENTRY_MOVE) {
+    return "Select a played turn in History to carry on from.";
+  }
+  if (entry->cgp_before[0] == '\0') {
+    return "This turn has no saved position to carry on from.";
+  }
+  return NULL;
+}
+
+// Writes `cgp` (on-turn player's rack and score first) into `out` with
+// the racks and scores in player order: swapped when player 2 is on
+// turn. Returns false when it doesn't have the fields to swap.
+static bool cgp_in_player_order(const char *cgp, int on_turn_idx, char *out,
+                                size_t out_size) {
+  if (on_turn_idx == 0) {
+    (void)snprintf(out, out_size, "%s", cgp);
+    return true;
+  }
+  // Fields: board, racks "A/B", scores "a/b", then the rest.
+  const char *racks = strchr(cgp, ' ');
+  const char *scores = racks != NULL ? strchr(racks + 1, ' ') : NULL;
+  const char *rest = scores != NULL ? strchr(scores + 1, ' ') : NULL;
+  if (racks == NULL || scores == NULL) {
+    return false;
+  }
+  const char *rest_or_end = rest != NULL ? rest : cgp + strlen(cgp);
+  const char *rack_slash = memchr(racks + 1, '/', (size_t)(scores - racks - 1));
+  const char *score_slash =
+      memchr(scores + 1, '/', (size_t)(rest_or_end - scores - 1));
+  if (rack_slash == NULL || score_slash == NULL) {
+    return false;
+  }
+  (void)snprintf(out, out_size, "%.*s %.*s/%.*s %.*s/%.*s%s",
+                 (int)(racks - cgp), cgp, (int)(scores - rack_slash - 1),
+                 rack_slash + 1, (int)(rack_slash - racks - 1), racks + 1,
+                 (int)(rest_or_end - score_slash - 1), score_slash + 1,
+                 (int)(score_slash - scores - 1), scores + 1, rest_or_end);
+  return true;
+}
+
+bool tui_game_state_branch_at(TuiGameState *state, int idx) {
+  if (tui_game_state_branch_reason(state, idx) != NULL) {
+    return false;
+  }
+  const TuiHistoryEntry *entry = &state->history[idx];
+  const int on_turn_idx = entry->player_idx;
+  char cgp[sizeof(entry->cgp_before) + 8];
+  if (!cgp_in_player_order(entry->cgp_before, on_turn_idx, cgp, sizeof(cgp))) {
+    return false;
+  }
+  Game *game = game_duplicate(state->game);
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(game, cgp, err);
+  const bool loaded = error_stack_is_empty(err);
+  error_stack_destroy(err);
+  if (!loaded) {
+    game_destroy(game);
+    return false;
+  }
+  game_set_player_on_turn_index(game, on_turn_idx);
+  // A record may give only the on-turn rack (a loaded GCG has no
+  // opponent racks); deal the rest from the bag.
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    draw_to_full_rack(game, player_idx);
+  }
+  // Keep each placed tile's player color.
+  if (entry->board_before != NULL) {
+    Board *board = game_get_board(game);
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        board_set_square_owner(
+            board, row, col,
+            board_get_square_owner(entry->board_before, row, col));
+      }
+    }
+  }
+  game_destroy(state->game);
+  state->game = game;
+  // Clocks as they stood when the turn began; a record without them
+  // starts both players on a full clock.
+  const int per_side = state->time_per_side_seconds;
+  const bool has_clocks = per_side > 0 && entry->clock_at_start > 0;
+  state->seconds_used[on_turn_idx] =
+      has_clocks ? per_side - entry->clock_at_start : 0.0;
+  state->seconds_used[1 - on_turn_idx] =
+      has_clocks ? per_side - entry->opp_clock_at_start : 0.0;
+  clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
+  for (int drop_idx = idx; drop_idx < state->history_count; drop_idx++) {
+    tui_history_entry_release(&state->history[drop_idx]);
+  }
+  state->history_count = idx;
+  state->history_cursor = -1;
+  state->time_forfeit_player_idx = -1;
+  state->time_penalties_applied = false;
+  atomic_store(&state->sim_results_active, false);
+  atomic_store(&state->sim_results_turn_idx, -1);
+  atomic_store(&state->endgame_results_active, false);
+  atomic_store(&state->endgame_results_turn_idx, -1);
+  atomic_store(&state->endgame_initial_spread, 0);
+  atomic_store(&state->peg_results_active, false);
+  atomic_store(&state->peg_results_turn_idx, -1);
+  state->peg_live_meta.valid = false;
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  if (state->endgame_ctx != NULL) {
+    endgame_ctx_clear_transposition_table(state->endgame_ctx);
+  }
+  state->board_entry_active = false;
+  state->edit_history_idx = -1;
+  atomic_fetch_add(&state->render_version, 1);
+  return true;
 }
 
 void tui_history_entry_release(TuiHistoryEntry *entry) {
