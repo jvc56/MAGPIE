@@ -348,7 +348,9 @@ void test_bai_abandon_folds_finished_samples(void) {
   // Claim a batch of the first round and finish only some of it; the rest
   // stays in flight, so the round is incomplete and nothing has folded.
   BAIClaim claim;
-  assert(bai_schedule_claim_while_locked(sync_data, &claim));
+  const bool claimed = bai_schedule_claim_while_locked(sync_data, &claim);
+  assert(claimed);
+  (void)claimed;
   assert(claim.round_number == 0);
   assert(claim.num_slots > 3);
   const int num_finished = 3;

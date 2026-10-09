@@ -127,11 +127,14 @@ void test_prng_peek(void) {
     for (uint64_t step = 0; step < ahead; step++) {
       prng_next(copy);
     }
-    assert(peeked == prng_next(copy));
+    const uint64_t expected = prng_next(copy);
+    assert(peeked == expected);
     prng_destroy(copy);
   }
   // Peeking never advances the generator.
-  assert(prng_next(prng) == prng_next(reference));
+  const uint64_t next = prng_next(prng);
+  const uint64_t reference_next = prng_next(reference);
+  assert(next == reference_next);
   prng_destroy(reference);
   prng_destroy(prng);
 }
