@@ -59,6 +59,7 @@ typedef struct {
   char load_game_error[160];
   int quit_confirm_focus;
   int analysis_menu_focus;
+  int phony_confirm_focus;
   TuiModalState quit_confirm_return;
   LexiconList *lexicon_list;
   bool frame_dirty;

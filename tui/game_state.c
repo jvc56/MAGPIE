@@ -22,9 +22,11 @@
 #include "../src/ent/sim_results.h"
 #include "../src/ent/validated_move.h"
 #include "../src/ent/win_pct.h"
+#include "../src/ent/words.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/peg.h"
+#include "../src/str/letter_distribution_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -238,6 +240,8 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   // label rather than at memset's 0 (entry 0).
   out_state->history_cursor = -1;
   out_state->analysis_cursor = -1;
+  out_state->phony_confirm_idx = -1;
+  out_state->phony_confirmed_idx = -1;
   out_state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
   out_state->analysis_anchored_move[0] = '\0';
   out_state->last_rendered_analysis_row_count = 0;
@@ -1285,6 +1289,9 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
   if (record_errors) {
     for (int idx = 0; idx < state->history_count; idx++) {
       state->history[idx].error_str[0] = '\0';
+      state->history[idx].phony_main = false;
+      state->history[idx].phony_words[0] = '\0';
+      state->history[idx].phony_hooks[0] = '\0';
     }
   }
   game_reset(state->game);
@@ -1460,6 +1467,11 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
       // annotator wants to see.
       break;
     }
+    if (record_errors) {
+      (void)tui_game_state_phony_words(
+          state, e->player_idx, applied_move, &e->phony_main, e->phony_words,
+          sizeof(e->phony_words), e->phony_hooks, sizeof(e->phony_hooks));
+    }
     // Move validated successfully. Apply on the engine and tag
     // tile owners for placement moves so the board renderer paints
     // each placed tile in its player's color.
@@ -1535,6 +1547,68 @@ static void replay_history_prefix(TuiGameState *state, int up_to,
     }
     error_stack_destroy(err);
   }
+}
+
+// Appends word `word_idx` of `fw` to `sb` with "*", after ", " when the
+// builder isn't empty.
+static void add_phony_word(StringBuilder *sb, const LetterDistribution *ld,
+                           const FormedWords *fw, int word_idx) {
+  if (string_builder_length(sb) > 0) {
+    string_builder_add_string(sb, ", ");
+  }
+  const int word_len = formed_words_get_word_length(fw, word_idx);
+  for (int letter_idx = 0; letter_idx < word_len; letter_idx++) {
+    string_builder_add_user_visible_letter(
+        sb, ld,
+        (MachineLetter)formed_words_get_word_letter(fw, word_idx, letter_idx));
+  }
+  string_builder_add_string(sb, "*");
+}
+
+bool tui_game_state_phony_words(const TuiGameState *state, int player_idx,
+                                const Move *move, bool *out_main,
+                                char *out_words, size_t words_size,
+                                char *out_hooks, size_t hooks_size) {
+  *out_main = false;
+  out_words[0] = '\0';
+  out_hooks[0] = '\0';
+  if (state->game == NULL || move == NULL ||
+      move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return false;
+  }
+  const Player *player = game_get_player(state->game, player_idx);
+  FormedWords *fw = formed_words_create(game_get_board(state->game), move);
+  formed_words_populate_validities(player_get_kwg(player), fw,
+                                   game_get_variant(state->game) ==
+                                       GAME_VARIANT_WORDSMOG);
+  const int num_words = formed_words_get_num_words(fw);
+  // The main word comes last; a one-tile play's is a single letter, and
+  // its real word is the (only) cross-word, first.
+  int main_idx = num_words - 1;
+  if (main_idx >= 0 && formed_words_get_word_length(fw, main_idx) < 2) {
+    main_idx = num_words > 1 ? 0 : -1;
+  }
+  StringBuilder *all = string_builder_create();
+  StringBuilder *hooks = string_builder_create();
+  for (int word_idx = 0; word_idx < num_words; word_idx++) {
+    if (formed_words_get_word_length(fw, word_idx) < 2 ||
+        formed_words_get_word_valid(fw, word_idx)) {
+      continue;
+    }
+    add_phony_word(all, state->ld, fw, word_idx);
+    if (word_idx == main_idx) {
+      *out_main = true;
+    } else {
+      add_phony_word(hooks, state->ld, fw, word_idx);
+    }
+  }
+  (void)snprintf(out_words, words_size, "%s", string_builder_peek(all));
+  (void)snprintf(out_hooks, hooks_size, "%s", string_builder_peek(hooks));
+  const bool any = string_builder_length(all) > 0;
+  string_builder_destroy(all);
+  string_builder_destroy(hooks);
+  formed_words_destroy(fw);
+  return any;
 }
 
 void tui_game_state_revalidate_history(TuiGameState *state) {

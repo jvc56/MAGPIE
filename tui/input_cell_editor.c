@@ -22,6 +22,36 @@
 #include <string.h>
 #include <time.h>
 
+// Annotation: holds back committing turn `idx` when its play forms
+// words not in the lexicon, until the annotator answers the phony
+// dialog (opened by the main loop from phony_confirm_idx). A play the
+// annotator already kept goes through. Returns whether the commit must
+// wait. Caller holds state->mutex.
+static bool phony_gate(TuiGameState *state, int idx, TuiPhonyAction action) {
+  if (state->app_mode != TUI_APP_MODE_ANNOTATE || idx < 0 ||
+      idx >= state->history_count || !state->edit_preview_move_valid ||
+      state->edit_preview_move == NULL) {
+    return false;
+  }
+  char move_text[sizeof(state->phony_confirmed_move)];
+  tui_game_state_edit_move_display(state, move_text, sizeof(move_text));
+  if (state->phony_confirmed_idx == idx &&
+      strcmp(state->phony_confirmed_move, move_text) == 0) {
+    return false;
+  }
+  bool main_phony = false;
+  char hooks[sizeof(state->phony_confirm_words)];
+  if (!tui_game_state_phony_words(
+          state, state->history[idx].player_idx, state->edit_preview_move,
+          &main_phony, state->phony_confirm_words,
+          sizeof(state->phony_confirm_words), hooks, sizeof(hooks))) {
+    return false;
+  }
+  state->phony_confirm_idx = idx;
+  state->phony_confirm_action = (int)action;
+  return true;
+}
+
 // A key while board move entry is active: drives the on-board move
 // builder (Space toggles direction, arrows move the anchor, Backspace
 // retracts, Enter submits, Esc cancels) and swallows everything else.
@@ -35,7 +65,10 @@ static bool cell_editor_board_entry_key(TuiGameState *state, uint32_t key,
   }
   if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
     pthread_mutex_lock(&state->mutex);
-    tui_board_entry_submit(state);
+    tui_game_state_parse_edit_buf(state);
+    if (!phony_gate(state, state->edit_history_idx, TUI_PHONY_ACTION_BOARD)) {
+      tui_board_entry_submit(state);
+    }
     pthread_mutex_unlock(&state->mutex);
     return true;
   }
@@ -271,6 +304,31 @@ static bool cell_editor_advance_to_rack(TuiGameState *state, int idx) {
   return true;
 }
 
+// Right past a turn's LEAVE: blur-commits, then advances onto the next
+// turn's label if it exists, or — when this is the LAST turn and it
+// holds a valid move — creates the next turn and lands on its label.
+// Forward-nav past the final turn is how new turns get created (no
+// Enter required). Caller holds state->mutex.
+static void cell_editor_forward_out(TuiGameState *state) {
+  const int cur = state->edit_history_idx;
+  tui_commit_edit_and_revalidate(state);
+  if (cur + 1 < state->history_count) {
+    state->history_cursor = cur + 1;
+    state->edit_history_idx = -1;
+  } else if (cur >= 0 && cur < state->history_count &&
+             state->history[cur].move_str[0] != '\0' &&
+             state->history[cur].error_str[0] == '\0') {
+    // After revalidate the engine sits at the post-game
+    // position, so the on-turn index is the next player.
+    const int next_player = game_get_player_on_turn_index(state->game);
+    tui_bot_worker_append_pending_history(state, next_player, NULL,
+                                          state->time_per_side_seconds);
+    state->history_cursor = state->history_count - 1;
+    state->edit_history_idx = -1;
+  }
+  // else: last turn with no valid move — stay put.
+}
+
 // Enter on RACK or LEAVE (Enter on MOVE goes to
 // cell_editor_advance_to_rack): plays the turn into the game, marks the
 // entry committed, and moves the editor onto the next turn, appending
@@ -383,6 +441,10 @@ static bool cell_editor_commit(TuiGameState *state, int idx, bool field_move) {
       (state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT ||
        state->edit_move_kind == TUI_EDIT_MOVE_KIND_EXCHANGE ||
        state->edit_move_kind == TUI_EDIT_MOVE_KIND_PASS)) {
+    if (phony_gate(state, idx, TUI_PHONY_ACTION_ENTER)) {
+      pthread_mutex_unlock(&state->mutex);
+      return true;
+    }
     const int playing_idx =
         (idx < state->history_count) ? state->history[idx].player_idx : 0;
     // play_move_without_drawing_tiles: place the tiles, debit
@@ -788,28 +850,10 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
       state->edit_leave_cursor = 0;
     } else {
       // LEAVE end → forward out of the turn.
-      // Blur-commit, then advance: onto the next turn's label
-      // if it exists, or — when this is the LAST turn and it
-      // holds a valid move — create the next turn and land on
-      // its label. Forward-nav past the final turn is how new
-      // turns get created (no Enter required).
-      const int cur = state->edit_history_idx;
-      tui_commit_edit_and_revalidate(state);
-      if (cur + 1 < state->history_count) {
-        state->history_cursor = cur + 1;
-        state->edit_history_idx = -1;
-      } else if (cur >= 0 && cur < state->history_count &&
-                 state->history[cur].move_str[0] != '\0' &&
-                 state->history[cur].error_str[0] == '\0') {
-        // After revalidate the engine sits at the post-game
-        // position, so the on-turn index is the next player.
-        const int next_player = game_get_player_on_turn_index(state->game);
-        tui_bot_worker_append_pending_history(state, next_player, NULL,
-                                              state->time_per_side_seconds);
-        state->history_cursor = state->history_count - 1;
-        state->edit_history_idx = -1;
+      tui_game_state_parse_edit_buf(state);
+      if (!phony_gate(state, state->edit_history_idx, TUI_PHONY_ACTION_RIGHT)) {
+        cell_editor_forward_out(state);
       }
-      // else: last turn with no valid move — stay put.
     }
     pthread_mutex_unlock(&state->mutex);
     return true;
@@ -862,4 +906,39 @@ bool tui_input_cell_editor(TuiGameState *state, uint32_t key, ncinput input) {
   (void)idx;
   (void)buf;
   return true;
+}
+
+void tui_cell_editor_phony_resolve(TuiGameState *state, bool keep) {
+  pthread_mutex_lock(&state->mutex);
+  const int idx = state->phony_confirm_idx;
+  const int action = state->phony_confirm_action;
+  state->phony_confirm_idx = -1;
+  if (idx < 0 || idx != state->edit_history_idx) {
+    pthread_mutex_unlock(&state->mutex);
+    return;
+  }
+  if (!keep) {
+    // Back to the move, to fix the spelling. Board entry stays on the
+    // board with its tiles.
+    if (action != TUI_PHONY_ACTION_BOARD) {
+      state->edit_field = TUI_EDIT_FIELD_MOVE;
+      state->edit_move_cursor = state->edit_move_len;
+    }
+    pthread_mutex_unlock(&state->mutex);
+    return;
+  }
+  state->phony_confirmed_idx = idx;
+  tui_game_state_edit_move_display(state, state->phony_confirmed_move,
+                                   sizeof(state->phony_confirmed_move));
+  if (action == TUI_PHONY_ACTION_ENTER) {
+    pthread_mutex_unlock(&state->mutex);
+    (void)cell_editor_commit(state, idx, /*field_move=*/false);
+    return;
+  }
+  if (action == TUI_PHONY_ACTION_RIGHT) {
+    cell_editor_forward_out(state);
+  } else {
+    tui_board_entry_submit(state);
+  }
+  pthread_mutex_unlock(&state->mutex);
 }

@@ -274,6 +274,15 @@ typedef struct {
   // (e.g. "not enough P's …; Q's …") since a single play can
   // overrun more than one letter at once.
   char error_str[192];
+
+  // Words this play forms that aren't in the lexicon (a phony the
+  // annotator kept), recomputed whenever history is replayed:
+  // phony_main — the main word is one of them (History shows "*");
+  // phony_words — all of them, e.g. "QZX*, ZE*"; phony_hooks — just the
+  // cross-words among them, shown as an informational row.
+  bool phony_main;
+  char phony_words[64];
+  char phony_hooks[64];
 } TuiHistoryEntry;
 
 typedef struct {
@@ -411,6 +420,17 @@ typedef struct {
   _Atomic bool analysis_stop;
   _Atomic bool analysis_running;
   int analysis_resume_turn_idx; // history idx being resumed; -1 = none
+
+  // Annotation phony confirmation. A commit whose play forms phonies
+  // stops and sets phony_confirm_idx (the entry) and phony_confirm_action
+  // (TuiPhonyAction: which gesture to resume); the main loop opens the
+  // confirm dialog from it. Keep records phony_confirmed_idx /
+  // phony_confirmed_move so the resumed commit goes through.
+  int phony_confirm_idx;
+  int phony_confirm_action;
+  char phony_confirm_words[64];
+  int phony_confirmed_idx;
+  char phony_confirmed_move[64];
   // true: "/sim" (simulate the turn, fresh or continuing its saved sim);
   // false: "/resume" (continue whatever analysis the turn saved).
   bool analysis_request_sim;
@@ -760,6 +780,17 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state);
 // the live game state matches the committed sequence and
 // every entry's error_str is empty.
 void tui_game_state_revalidate_history(TuiGameState *state);
+
+// The words `move` (played by `player_idx` on the engine's current
+// board) forms that aren't in that player's lexicon. `out_words` gets
+// all of them ("QZX*, ZE*"), `out_hooks` the cross-words among them;
+// `*out_main` whether the main word is one. Words shorter than two
+// letters aren't words; a one-tile play's main word is its cross-word.
+// Returns whether there are any.
+bool tui_game_state_phony_words(const TuiGameState *state, int player_idx,
+                                const struct Move *move, bool *out_main,
+                                char *out_words, size_t words_size,
+                                char *out_hooks, size_t hooks_size);
 
 // Position the engine board at the START of turn `idx` (replays
 // committed turns [0, idx)). The annotation editor calls this so
