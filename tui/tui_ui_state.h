@@ -22,7 +22,8 @@ typedef struct {
   TuiModalState modal;
   int startup_menu_focus;
   int main_menu_focus;
-  int settings_focus;
+  int settings_focus;  // a row from tui_settings_rows
+  int settings_scroll; // first Settings row shown when they must scroll
   TuiModalState settings_return;
   int time_focus;
   TuiModalState time_picker_return;

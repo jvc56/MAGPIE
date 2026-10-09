@@ -1611,6 +1611,13 @@ bool tui_game_state_phony_words(const TuiGameState *state, int player_idx,
   return any;
 }
 
+void tui_game_state_notice(TuiGameState *state, const char *message) {
+  (void)snprintf(state->notice_buf, sizeof(state->notice_buf), "%s", message);
+  clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
+  state->notice_expires_at.tv_sec += 3;
+  atomic_fetch_add(&state->render_version, 1);
+}
+
 void tui_game_state_revalidate_history(TuiGameState *state) {
   if (state == NULL || state->game == NULL) {
     return;
