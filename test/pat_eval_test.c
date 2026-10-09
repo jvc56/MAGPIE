@@ -134,6 +134,7 @@ static void test_pat_eval_hand_position(void) {
     assert(exact <= 0);
     assert(exact <= pat_eval_move_penalty_bound(pat_eval_ctx, move, &leave));
     assert(exact <= pat_eval_move_penalty_bound(pat_eval_ctx, move, NULL));
+    pat_test_assert_capped_penalty(pat_eval_ctx, move, &leave, exact);
     if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
       assert(exact == 7 * PAT_EVAL_TEST_HOOK_WEIGHT);
       continue;
@@ -371,6 +372,7 @@ static Equity pat_eval_test_fresh_run_penalty(const char *move_string,
   get_leave_for_move(move, game, &leave);
   const Equity penalty = pat_eval_move_penalty(pat_eval_ctx, move, &leave);
   assert(penalty <= pat_eval_move_penalty_bound(pat_eval_ctx, move, &leave));
+  pat_test_assert_capped_penalty(pat_eval_ctx, move, &leave, penalty);
   validated_moves_destroy(vms);
   free(pat_eval_ctx);
   pat_destroy(pat);

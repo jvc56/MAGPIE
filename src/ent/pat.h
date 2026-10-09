@@ -229,6 +229,10 @@ enum {
   // Double word squares further apart than this cannot be joined by one
   // word even with playthrough, so they are not a window.
   PAT_DD_MAX_SPAN = 2 * RACK_SIZE,
+  // A unit's scan writes only its group's features: a premium square's
+  // group is its class, a window's is PAT_NUM_PREMIUM_CLASSES plus its tier
+  // (see pat_unit_group_features).
+  PAT_NUM_UNIT_GROUPS = PAT_NUM_PREMIUM_CLASSES + PAT_WINDOW_TIER_COUNT,
 };
 
 // Parses a comma-separated list of class names (tws, dws, tls, dls, qws,

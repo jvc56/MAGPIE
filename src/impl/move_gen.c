@@ -215,11 +215,11 @@ static inline Equity gen_get_static_equity(const MoveGen *gen,
 }
 
 // Best-move recording computes the PAT term lazily: a candidate whose
-// equity without it, plus pat_eval_move_penalty_bound, is already strictly
+// equity without it, plus an upper bound on the term, is already strictly
 // below the best move's full equity cannot become the best move, so the
-// per-move lane rescans run only for genuine contenders. The stored equity
-// of a skipped candidate is an overestimate used only in a comparison it
-// strictly loses.
+// per-move lane rescans run only while the candidate can still contend
+// (see gen_pat_contender_equity). The stored equity of a skipped candidate
+// is an overestimate used only in a comparison it strictly loses.
 static inline bool gen_pat_is_active(const MoveGen *gen) {
   return gen->pat_eval_ctx.weights != NULL;
 }
@@ -238,6 +238,47 @@ static inline Equity gen_get_static_equity_without_pat(const MoveGen *gen,
 
 static inline const Move *gen_get_readonly_best_move(const MoveGen *gen) {
   return &gen->best_move_and_current_move[gen->best_move_index];
+}
+
+// The equity a best-move candidate is recorded with when PAT is active: its
+// equity without the term plus the term, which is exact unless the
+// candidate cannot reach the best move's equity. Then it is an overestimate
+// that still strictly loses the compare (see pat_eval_move_penalty_capped).
+static inline Equity gen_pat_contender_equity(const MoveGen *gen,
+                                              const Move *move,
+                                              const Rack *leave,
+                                              Equity equity_without_pat) {
+  const Equity best_equity = move_get_equity(gen_get_readonly_best_move(gen));
+  Equity floor = EQUITY_MIN_VALUE;
+  if (best_equity != EQUITY_INITIAL_VALUE) {
+    // The smallest term with which the candidate still reaches the best.
+    int64_t needed = (int64_t)best_equity - equity_without_pat;
+    if (needed < EQUITY_MIN_VALUE) {
+      needed = EQUITY_MIN_VALUE;
+    } else if (needed > EQUITY_MAX_VALUE) {
+      needed = EQUITY_MAX_VALUE;
+    }
+    floor = (Equity)needed;
+  }
+  return equity_without_pat +
+         pat_eval_move_penalty_capped(&gen->pat_eval_ctx, move, leave, floor);
+}
+
+// The PAT bound, utility correction included, for a WMP anchor's plays:
+// the lane's bound on the defense term, and the largest correction a play
+// of tiles_to_play tiles scoring at most highest_possible_score can get
+// (see pat_eval_utility_bound_for_play). The position-wide correction bound
+// assumes the highest-scoring play of any length, which almost no anchor
+// can make. Zero when the term is off.
+static inline Equity gen_wmp_anchor_pat_bound(const MoveGen *gen, int dir,
+                                              int lane, const Anchor *anchor) {
+  if (!gen_pat_is_active(gen)) {
+    return 0;
+  }
+  return pat_eval_lane_defense_bound(&gen->pat_eval_ctx, dir, lane) +
+         pat_eval_utility_bound_for_play(&gen->pat_eval_ctx,
+                                         anchor->tiles_to_play,
+                                         anchor->highest_possible_score);
 }
 
 static inline Move *gen_get_best_move(MoveGen *gen) {
@@ -397,21 +438,8 @@ static inline void update_best_move_or_insert_into_movelist(
         !gen->stop_on_threshold) {
       const Equity equity_without_pat =
           gen_get_static_equity_without_pat(gen, current_move);
-      const Equity best_equity =
-          move_get_equity(gen_get_readonly_best_move(gen));
-      const Equity penalty_bound = pat_eval_move_penalty_bound(
-          &gen->pat_eval_ctx, current_move, &gen->player_rack);
-      if (best_equity != EQUITY_INITIAL_VALUE &&
-          equity_without_pat + penalty_bound < best_equity) {
-        // Cannot become the best move even with its best possible defense
-        // term; the stored overestimate still strictly loses the compare.
-        move_equity_or_score = equity_without_pat + penalty_bound;
-      } else {
-        move_equity_or_score =
-            equity_without_pat + pat_eval_move_penalty(&gen->pat_eval_ctx,
-                                                       current_move,
-                                                       &gen->player_rack);
-      }
+      move_equity_or_score = gen_pat_contender_equity(
+          gen, current_move, &gen->player_rack, equity_without_pat);
     } else {
       move_equity_or_score =
           get_move_equity_for_sort_type(gen, current_move, score);
@@ -864,18 +892,8 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                     pat_eval_context_get_active_classes(&gen->pat_eval_ctx),
                     NULL, gen->board_number_of_tiles_played,
                     gen->number_of_tiles_in_bag, leave_value);
-      const Equity best_equity =
-          move_get_equity(gen_get_readonly_best_move(gen));
-      const Equity penalty_bound = pat_eval_move_penalty_bound(
-          &gen->pat_eval_ctx, current_move, &gen->leave);
-      if (best_equity != EQUITY_INITIAL_VALUE &&
-          equity_without_pat + penalty_bound < best_equity) {
-        move_equity_or_score = equity_without_pat + penalty_bound;
-      } else {
-        move_equity_or_score = equity_without_pat +
-                               pat_eval_move_penalty(&gen->pat_eval_ctx,
-                                                     current_move, &gen->leave);
-      }
+      move_equity_or_score = gen_pat_contender_equity(
+          gen, current_move, &gen->leave, equity_without_pat);
     } else {
       move_equity_or_score = has_precomputed_equity
                                  ? precomputed_equity
@@ -1116,9 +1134,10 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
 // skip subracks that still hold plays above the cutoff. This is an equity
 // upper bound independent of the anchor's highest_possible_score, so any
 // positive equity term added to the real evaluation must be added here too:
-// anchor_pat_bound (see pat_eval_lane_penalty_bound) folds in the PAT term's
-// contribution, which includes the utility correction's largest value and so
-// can be positive; the opening placement_adjustment (always <= 0) is soundly
+// anchor_pat_bound (see gen_wmp_anchor_pat_bound) folds in the PAT term's
+// contribution, which includes the largest utility correction the anchor's
+// plays can get and so can be positive; the opening placement_adjustment
+// (always <= 0) is soundly
 // omitted; see static_eval_get_shadow_equity. The candidate mask applies the
 // same bound (see wordmap_gen_candidate_subracks).
 static inline __attribute__((always_inline)) bool
@@ -1376,7 +1395,7 @@ wordmap_gen(MoveGen *gen, const Anchor *anchor, bool lazy) {
   // Upper bound on the PAT term of every move from this anchor (zero when
   // the term is off). See wordmap_gen_leave_prunes_subrack.
   const Equity anchor_pat_bound =
-      pat_eval_lane_penalty_bound(&gen->pat_eval_ctx, anchor->dir, anchor->row);
+      gen_wmp_anchor_pat_bound(gen, anchor->dir, anchor->row, anchor);
   for (int first_idx = 0; first_idx < num_subrack_combinations;
        first_idx += WMP_MOVE_GEN_SUBRACKS_PER_MASK) {
     const int remaining = num_subrack_combinations - first_idx;
@@ -2098,9 +2117,14 @@ shadow_record_impl(MoveGen *gen, bool wmp_active, uint32_t allowed_lengths) {
     // The PAT term is <= 0, so the bound would stay valid without
     // it, but then every anchor's bound is loose by roughly the position's
     // baseline penalty and anchors survive the cutoff on a penalty all of
-    // their moves will pay. The per-lane bound (set when the lane is
-    // loaded; zero when the term is off) recovers most of that for free.
-    equity += gen->pat_lane_penalty_bound;
+    // their moves will pay. The recursive generator's anchors take the
+    // per-lane bound (set when the lane is loaded; zero when the term is
+    // off). WMP slots take one with a tighter utility correction, from
+    // their tile count and score bound, once the anchor's shadow is done
+    // (see gen_add_pat_bounds_to_wmp_anchors).
+    if (!wmp_active) {
+      equity += gen->pat_lane_penalty_bound;
+    }
   }
   if (wmp_active) {
     const int word_length =
@@ -3160,6 +3184,23 @@ static inline void shadow_start_small(MoveGen *gen) {
 // shadow playing was originally developed in wolges.
 // For more details about the shadow playing algorithm, see
 // https://github.com/andy-k/wolges/blob/main/details.txt
+// Adds each touched WMP slot's PAT bound (see gen_wmp_anchor_pat_bound) to
+// its equity bound, which shadow_record left without the term.
+static void gen_add_pat_bounds_to_wmp_anchors(MoveGen *gen) {
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  for (int word_idx = 0; word_idx < WMP_ANCHOR_MASK_WORDS; word_idx++) {
+    uint64_t touched = wgen->touched_anchor_masks[word_idx];
+    while (touched != 0) {
+      const int slot_idx =
+          word_idx * 64 + wmp_move_gen_get_lowest_set_bit(touched);
+      touched &= touched - 1;
+      Anchor *anchor = &wgen->anchors[slot_idx];
+      anchor->highest_possible_equity += gen_wmp_anchor_pat_bound(
+          gen, gen->dir, gen->current_row_index, anchor);
+    }
+  }
+}
+
 void shadow_play_for_anchor(MoveGen *gen, int col) {
   // Shadow playing is designed to find the best plays first. When we find plays
   // for endgame using MOVE_RECORD_ALL_SMALL, we need to find all of the plays,
@@ -3220,6 +3261,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
   shadow_start(gen);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    if (gen->move_sort_type == MOVE_SORT_EQUITY && gen_pat_is_active(gen)) {
+      gen_add_pat_bounds_to_wmp_anchors(gen);
+    }
     // A one-square perpendicular shadow may touch no slot here (its
     // playthrough anchor is emitted in the opposite orientation); walking an
     // empty touched mask is already a no-op.

@@ -2,6 +2,7 @@
 #define PAT_EVAL_H
 
 #include "../def/board_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/pat_defs.h"
 #include "board.h"
@@ -66,7 +67,6 @@ typedef struct PATEvalContext {
   // either. The player's whole rack is excluded, not the leave the move
   // would keep, since the context is built once for the position.
   uint8_t unseen_counts[MAX_ALPHABET_SIZE];
-  int32_t unit_features[PAT_MAX_SCAN_UNITS][PAT_NUM_FEATURES];
   // Each unit's baseline contribution to pre_penalty (always <= 0), used
   // to bound a move's penalty from above without rescanning.
   Equity unit_penalty[PAT_MAX_SCAN_UNITS];
@@ -77,10 +77,12 @@ typedef struct PATEvalContext {
   // order the move does not reach.
   int64_t total_unit_penalty;
   uint16_t units_by_penalty[PAT_MAX_SCAN_UNITS];
-  // The features carrying a nonzero weight, so a unit's dot product visits
-  // only those; every other term is exactly zero.
-  int nonzero_feature_index[PAT_NUM_FEATURES];
-  int num_nonzero_features;
+  // For each unit group (see PAT_NUM_UNIT_GROUPS), the features its scans
+  // can write that carry a nonzero weight, and those weights, so a unit's
+  // dot product visits only those; every other term is exactly zero.
+  uint8_t group_feature_index[PAT_NUM_UNIT_GROUPS][PAT_NUM_FEATURES];
+  Equity group_feature_weight[PAT_NUM_UNIT_GROUPS][PAT_NUM_FEATURES];
+  uint8_t group_num_features[PAT_NUM_UNIT_GROUPS];
   // Whether scans compute the hook-score channels: always for training
   // rows; at runtime only when a hook-score weight is nonzero.
   bool score_channels;
@@ -120,6 +122,10 @@ typedef struct PATEvalContext {
   // get this position (folded into every movegen bound).
   Equity utility_non_placement;
   Equity utility_bound;
+  // utility_prefix_max[d][s] is the largest correction any placement that
+  // draws d tiles and scores at most s points can get this position (see
+  // pat_eval_utility_bound_for_play).
+  Equity utility_prefix_max[RACK_SIZE + 1][PAT_UTILITY_PREFIX_MAX_SCORE + 1];
   // Bitmask of PAT_CLASS_MASK_* classes this context actually applies
   // (weighted in the file and not excluded by the runtime mask); see
   // pat_eval_context_get_active_classes, the safe way to read this from outside
@@ -183,6 +189,15 @@ void pat_eval_context_load_all_units(PATEvalContext *pat_eval_ctx,
 // PATWeights.own_asset_discount); NULL forgoes the credit.
 Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
                              const Move *move, const Rack *leave);
+// pat_eval_move_penalty(move, leave) when that is at least floor. Otherwise
+// a value below floor that is still no less than the exact term: the lane
+// rescans stop once an upper bound on the term falls below floor, and that
+// bound is returned. So in a comparison against floor the result decides
+// exactly as the exact term would; nothing else about it is exact.
+// EQUITY_MIN_VALUE always returns the exact term.
+Equity pat_eval_move_penalty_capped(const PATEvalContext *pat_eval_ctx,
+                                    const Move *move, const Rack *leave,
+                                    Equity floor);
 // Returns an upper bound on pat_eval_move_penalty for the move without any
 // lane rescans: the baseline penalty minus the baseline contributions of
 // the units the move can affect or its leave could exploit (each of which
@@ -213,6 +228,26 @@ pat_eval_utility_bound(const PATEvalContext *pat_eval_ctx) {
   }
   return pat_eval_ctx->utility_bound;
 }
+// The largest utility correction a placement drawing tiles_played tiles and
+// scoring at most max_score can get this position: never above
+// pat_eval_utility_bound, and 0 when the context is NULL, disabled, or
+// carries no correction.
+static inline Equity
+pat_eval_utility_bound_for_play(const PATEvalContext *pat_eval_ctx,
+                                int tiles_played, Equity max_score) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights || !pat_eval_ctx->utility_row) {
+    return 0;
+  }
+  if (max_score > PAT_UTILITY_PREFIX_MAX_SCORE * EQUITY_RESOLUTION) {
+    return pat_eval_ctx->utility_bound;
+  }
+  // A placement scores whole points, so the ceiling of max_score bounds it.
+  const int max_points =
+      max_score > 0
+          ? (int)((max_score + EQUITY_RESOLUTION - 1) / EQUITY_RESOLUTION)
+          : 0;
+  return pat_eval_ctx->utility_prefix_max[tiles_played][max_points];
+}
 // Bitmask of PAT_CLASS_MASK_* classes this context actually applies, or 0
 // when the context is NULL or disabled. See placement_adjustment, which
 // uses PAT_CLASS_MASK_WORD_MULT/PAT_CLASS_MASK_LETTER_MULT against this to
@@ -234,6 +269,17 @@ static inline Equity pat_eval_scaled(const PATEvalContext *pat_eval_ctx,
     return term;
   }
   return (Equity)lround((double)term * pat_eval_ctx->term_scale);
+}
+
+// The same bound as pat_eval_lane_penalty_bound without the utility
+// correction's, for callers that bound the correction per play.
+static inline Equity
+pat_eval_lane_defense_bound(const PATEvalContext *pat_eval_ctx, int dir,
+                            int lane) {
+  if (!pat_eval_ctx || !pat_eval_ctx->weights) {
+    return 0;
+  }
+  return pat_eval_ctx->lane_penalty_bound[dir][lane];
 }
 
 // The upper bound on the defense term of every tile placement in lane

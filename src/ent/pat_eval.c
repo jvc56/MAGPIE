@@ -22,18 +22,36 @@
 #include <stdlib.h>
 #include <string.h>
 
-// The same product over only the weighted features; the other terms are
-// zero. Every path that has a context uses this one.
-static Equity pat_dot_ctx(const PATEvalContext *pat_eval_ctx,
-                          const int32_t *features) {
-  const Equity *weights = pat_eval_ctx->weights->weights;
-  int64_t acc = 0;
-  for (int nonzero_idx = 0; nonzero_idx < pat_eval_ctx->num_nonzero_features;
-       nonzero_idx++) {
-    const int feature_index = pat_eval_ctx->nonzero_feature_index[nonzero_idx];
-    acc += (int64_t)weights[feature_index] * features[feature_index];
+static_assert(PAT_NUM_FEATURES <= UINT8_MAX + 1,
+              "group feature indexes are bytes");
+
+// The unit group of a context unit (see PAT_NUM_UNIT_GROUPS).
+static int pat_unit_group(const PATEvalContext *pat_eval_ctx, int unit_index) {
+  const int num_premium_units = pat_eval_ctx->num_premium * 2;
+  if (unit_index < num_premium_units) {
+    return pat_eval_ctx->premium_classes[unit_index / 2];
   }
-  return pat_clamp_dot(acc);
+  return PAT_NUM_PREMIUM_CLASSES +
+         pat_eval_ctx->dd_tiers[unit_index - num_premium_units];
+}
+
+// The weights' product with a unit's feature row, over only the weighted
+// features the unit's group can write; the row's other terms are zero.
+// Every path that has a context uses this one.
+static Equity pat_dot_unit(const PATEvalContext *pat_eval_ctx, int unit_index,
+                           const int32_t *features) {
+  const int unit_group = pat_unit_group(pat_eval_ctx, unit_index);
+  const uint8_t *feature_index = pat_eval_ctx->group_feature_index[unit_group];
+  const Equity *feature_weight = pat_eval_ctx->group_feature_weight[unit_group];
+  const int num_features = pat_eval_ctx->group_num_features[unit_group];
+  int64_t acc = 0;
+  for (int group_idx = 0; group_idx < num_features; group_idx++) {
+    acc +=
+        (int64_t)feature_weight[group_idx] * features[feature_index[group_idx]];
+  }
+  const Equity penalty = pat_clamp_dot(acc);
+  assert(penalty == pat_dot(pat_eval_ctx->weights, features));
+  return penalty;
 }
 
 // The per-row and per-column unit masks are 64-bit.
@@ -168,6 +186,28 @@ void pat_eval_context_set_utility(PATEvalContext *pat_eval_ctx, int margin,
     }
   }
   pat_eval_ctx->utility_bound = bound;
+  // Each draw count's row read from the current margin up, a point of score
+  // at a time, clamped at the table's edges as pat_utility_index clamps:
+  // utility_prefix_max[d][s] is the running maximum.
+  for (int drawn = 0; drawn <= RACK_SIZE; drawn++) {
+    const int bag_after = bag > drawn ? bag - drawn : 0;
+    const Equity *row =
+        weights->utility_table +
+        pat_utility_index(weights, bag_after, -PAT_UTILITY_MARGIN_LIMIT);
+    Equity running = EQUITY_MIN_VALUE;
+    for (int score = 0; score <= PAT_UTILITY_PREFIX_MAX_SCORE; score++) {
+      int offset = margin + score + PAT_UTILITY_MARGIN_LIMIT;
+      if (offset < 0) {
+        offset = 0;
+      } else if (offset >= PAT_UTILITY_WIDTH) {
+        offset = PAT_UTILITY_WIDTH - 1;
+      }
+      if (row[offset] > running) {
+        running = row[offset];
+      }
+      pat_eval_ctx->utility_prefix_max[drawn][score] = running;
+    }
+  }
 }
 
 // The utility correction for move (see PAT_UTILITY_ADJUST_ROW_PREFIX), 0
@@ -410,23 +450,32 @@ static void pat_eval_context_load_units(
     pat_eval_ctx->term_scale =
         weights->stage_scale[pat_stage_for_bag(bag_count)];
   }
-  pat_eval_ctx->num_nonzero_features = 0;
   pat_eval_ctx->score_channels = !drop_unweighted_units;
-  for (int feature_index = 0; feature_index < PAT_NUM_FEATURES;
-       feature_index++) {
-    if (weights->weights[feature_index] != 0) {
-      pat_eval_ctx
-          ->nonzero_feature_index[pat_eval_ctx->num_nonzero_features++] =
-          feature_index;
-      if (feature_index >= PAT_FEATURE_HOOK_SCORE_START &&
-          feature_index < PAT_FEATURE_HOOK_SCORE_START + PAT_HOOK_BIN_COUNT) {
-        pat_eval_ctx->score_channels = true;
-      }
+  for (int bin_idx = 0; bin_idx < PAT_HOOK_BIN_COUNT; bin_idx++) {
+    if (weights->weights[PAT_FEATURE_HOOK_SCORE_START + bin_idx] != 0) {
+      pat_eval_ctx->score_channels = true;
     }
   }
+  for (int unit_group = 0; unit_group < PAT_NUM_UNIT_GROUPS; unit_group++) {
+    uint8_t group_features[PAT_NUM_FEATURES];
+    const int num_group_features =
+        pat_unit_group_features(unit_group, group_features);
+    int num_weighted = 0;
+    for (int group_idx = 0; group_idx < num_group_features; group_idx++) {
+      const int feature_index = group_features[group_idx];
+      if (weights->weights[feature_index] != 0) {
+        pat_eval_ctx->group_feature_index[unit_group][num_weighted] =
+            (uint8_t)feature_index;
+        pat_eval_ctx->group_feature_weight[unit_group][num_weighted] =
+            weights->weights[feature_index];
+        num_weighted++;
+      }
+    }
+    pat_eval_ctx->group_num_features[unit_group] = (uint8_t)num_weighted;
+  }
   for (int unit_index = 0; unit_index < pat_eval_ctx->num_units; unit_index++) {
-    int32_t *unit_features = pat_eval_ctx->unit_features[unit_index];
-    memset(unit_features, 0, sizeof(int32_t) * PAT_NUM_FEATURES);
+    int32_t unit_features[PAT_NUM_FEATURES];
+    memset(unit_features, 0, sizeof(unit_features));
     int dir = 0;
     int lane = 0;
     int extent_lo = 0;
@@ -436,7 +485,7 @@ static void pat_eval_context_load_units(
                           &lane, &extent_lo, &extent_hi,
                           &pat_eval_ctx->unit_hook_letters[unit_index]);
     pat_eval_ctx->unit_penalty[unit_index] =
-        pat_dot_ctx(pat_eval_ctx, unit_features);
+        pat_dot_unit(pat_eval_ctx, unit_index, unit_features);
     // A move affects this unit only when it has a tile on or directly
     // beside the lane (perpendicular halo of one) within the span of
     // squares the baseline walk visited: squares beyond the walk's break
@@ -716,24 +765,48 @@ static inline Equity pat_opening_adjustment(const PATEvalContext *pat_eval_ctx,
 }
 
 static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
-                                           const Move *move, const Rack *leave);
+                                           const Move *move, const Rack *leave,
+                                           Equity scaled_floor);
 
-Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
-                             const Move *move, const Rack *leave) {
+Equity pat_eval_move_penalty_capped(const PATEvalContext *pat_eval_ctx,
+                                    const Move *move, const Rack *leave,
+                                    Equity floor) {
   if (!pat_eval_ctx || !pat_eval_ctx->weights) {
     return 0;
   }
   // The opening adjustment is <= 0 like everything else here, so every
   // bound on the term stays a bound without knowing about it. The utility
-  // correction is not; see pat_eval_utility_bound.
-  return pat_eval_move_penalty_scaled(pat_eval_ctx, move, leave) +
-         pat_opening_adjustment(pat_eval_ctx, move) +
-         pat_eval_utility_adjustment(pat_eval_ctx, move);
+  // correction is not; see pat_eval_utility_bound. Both are exact and
+  // cheap, so the floor passes through them to the scaled term.
+  const Equity adjustments = pat_opening_adjustment(pat_eval_ctx, move) +
+                             pat_eval_utility_adjustment(pat_eval_ctx, move);
+  Equity scaled_floor = EQUITY_MIN_VALUE;
+  if (floor > EQUITY_MIN_VALUE) {
+    int64_t needed = (int64_t)floor - adjustments;
+    if (needed < EQUITY_MIN_VALUE) {
+      needed = EQUITY_MIN_VALUE;
+    } else if (needed > EQUITY_MAX_VALUE) {
+      needed = EQUITY_MAX_VALUE;
+    }
+    scaled_floor = (Equity)needed;
+  }
+  return pat_eval_move_penalty_scaled(pat_eval_ctx, move, leave, scaled_floor) +
+         adjustments;
 }
 
+Equity pat_eval_move_penalty(const PATEvalContext *pat_eval_ctx,
+                             const Move *move, const Rack *leave) {
+  return pat_eval_move_penalty_capped(pat_eval_ctx, move, leave,
+                                      EQUITY_MIN_VALUE);
+}
+
+// The scaled term, rescanning the units the move reaches. Once an upper
+// bound on the term falls below scaled_floor, returns that bound instead
+// (see pat_eval_move_penalty_capped); EQUITY_MIN_VALUE never stops early,
+// since no combination falls below it.
 static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
-                                           const Move *move,
-                                           const Rack *leave) {
+                                           const Move *move, const Rack *leave,
+                                           Equity scaled_floor) {
   if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
     // Exchanges and passes leave the board unchanged, so their defense term
     // is exactly the position baseline. Including it keeps the comparison
@@ -784,63 +857,31 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
   // Rescan only the units the move can reach (geometrically, or through
   // its own leave) and combine the whole set: the units in neither set
   // keep exactly the penalty they were loaded with, so the sum is the
-  // total moved by each reached unit's change and the worst is the lesser
-  // of the reached units' new penalties and the first unreached unit in
-  // penalty order.
+  // unreached units' baselines plus each reached unit's new penalty, and
+  // the worst is the lesser of the reached units' new penalties and the
+  // first unreached unit in penalty order.
+  //
+  // A reached unit not rescanned yet counts as 0, the most the move can
+  // gain there, so combining what is known bounds the term from above at
+  // every step: pat_combine is nondecreasing in each unit, and scaling
+  // keeps the order. With a floor, the reached units are rescanned worst
+  // baseline first, which lowers that bound fastest, and the rescans stop
+  // once it falls below the floor. The sum and the worst do not depend on
+  // the order, so a finished scan gives the same term either way.
+  const double combine_gamma = pat_eval_ctx->weights->combine_gamma;
   int64_t sum = pat_eval_ctx->total_unit_penalty;
-  int64_t worst = 0;
+  uint16_t reached_units[PAT_MAX_SCAN_UNITS];
+  int num_reached = 0;
   for (int word = 0; word < PAT_MASK_WORDS; word++) {
     uint64_t bits = combined_units[word];
     while (bits != 0) {
       const int unit_index = word * 64 + pat_ctz(bits);
       bits &= bits - 1;
-      Equity penalty;
-      bool qualifies_for_credit;
-      if (pat_mask_test(affected_units, unit_index)) {
-        int32_t overlay_features[PAT_NUM_FEATURES] = {0};
-        int scan_dir = 0;
-        int scan_lane = 0;
-        uint64_t fresh_hook_letters = 0;
-        // The same rack the training label was built against: whatever the
-        // player holds now, not the leave this move would keep. Training
-        // opens its observation after the mover has drawn back to full, so
-        // scoring a candidate against its leave would call every hook
-        // uncontested in proportion to how many tiles the move played,
-        // which is a penalty on bingos and nothing to do with hooks.
-        pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
-                              overlay_features, &scan_dir, &scan_lane, NULL,
-                              NULL,
-                              discount > 0.0 ? &fresh_hook_letters : NULL);
-        penalty = pat_dot_ctx(pat_eval_ctx, overlay_features);
-        // The move's own placement can create or destroy this unit's hook
-        // letters (a newly hooked square, or covering one that existed at
-        // baseline), so eligibility is re-checked against the fresh,
-        // overlay-aware scan rather than trusted from the baseline reverse
-        // index that built leave_units.
-        qualifies_for_credit =
-            discount > 0.0 &&
-            (leave_has_blank ? (fresh_hook_letters != 0)
-                             : (fresh_hook_letters & leave_mask) != 0);
-      } else {
-        // Reached only through the leave: the move's placement never
-        // touched this unit, so its geometry (and hence its hook letters)
-        // is exactly what was loaded, and the baseline membership test is
-        // still correct.
-        penalty = pat_eval_ctx->unit_penalty[unit_index];
-        qualifies_for_credit = pat_mask_test(leave_units, unit_index);
-      }
-      if (qualifies_for_credit) {
-        // p <= 0 and discount in [0, 1], so p * (1 - discount) always
-        // lands in [p, 0]: the credit can shrink a penalty toward zero
-        // but never past it, so no new shadow-pruning bound is needed.
-        penalty = (Equity)lround((double)penalty * (1.0 - discount));
-      }
-      sum += penalty - pat_eval_ctx->unit_penalty[unit_index];
-      if (penalty < worst) {
-        worst = penalty;
-      }
+      sum -= pat_eval_ctx->unit_penalty[unit_index];
+      reached_units[num_reached++] = (uint16_t)unit_index;
     }
   }
+  int64_t worst = 0;
   for (int order_idx = 0; order_idx < pat_eval_ctx->num_units; order_idx++) {
     const int unit_index = pat_eval_ctx->units_by_penalty[order_idx];
     if (!pat_mask_test(combined_units, unit_index)) {
@@ -850,7 +891,77 @@ static Equity pat_eval_move_penalty_scaled(const PATEvalContext *pat_eval_ctx,
       break;
     }
   }
-  return pat_eval_scaled(
-      pat_eval_ctx,
-      pat_combine(worst, sum, pat_eval_ctx->weights->combine_gamma));
+  const bool has_floor = scaled_floor > EQUITY_MIN_VALUE;
+  if (has_floor) {
+    // Every reached unit at 0 (pat_eval_move_penalty_bound's bound).
+    const Equity bound =
+        pat_eval_scaled(pat_eval_ctx, pat_combine(worst, sum, combine_gamma));
+    if (bound < scaled_floor) {
+      return bound;
+    }
+    int num_ordered = 0;
+    for (int order_idx = 0;
+         order_idx < pat_eval_ctx->num_units && num_ordered < num_reached;
+         order_idx++) {
+      const int unit_index = pat_eval_ctx->units_by_penalty[order_idx];
+      if (pat_mask_test(combined_units, unit_index)) {
+        reached_units[num_ordered++] = (uint16_t)unit_index;
+      }
+    }
+  }
+  for (int reached_idx = 0; reached_idx < num_reached; reached_idx++) {
+    const int unit_index = reached_units[reached_idx];
+    Equity penalty;
+    bool qualifies_for_credit;
+    if (pat_mask_test(affected_units, unit_index)) {
+      int32_t overlay_features[PAT_NUM_FEATURES] = {0};
+      int scan_dir = 0;
+      int scan_lane = 0;
+      uint64_t fresh_hook_letters = 0;
+      // The same rack the training label was built against: whatever the
+      // player holds now, not the leave this move would keep. Training
+      // opens its observation after the mover has drawn back to full, so
+      // scoring a candidate against its leave would call every hook
+      // uncontested in proportion to how many tiles the move played,
+      // which is a penalty on bingos and nothing to do with hooks.
+      pat_scan_context_unit(pat_eval_ctx, unit_index, &overlay,
+                            overlay_features, &scan_dir, &scan_lane, NULL, NULL,
+                            discount > 0.0 ? &fresh_hook_letters : NULL);
+      penalty = pat_dot_unit(pat_eval_ctx, unit_index, overlay_features);
+      // The move's own placement can create or destroy this unit's hook
+      // letters (a newly hooked square, or covering one that existed at
+      // baseline), so eligibility is re-checked against the fresh,
+      // overlay-aware scan rather than trusted from the baseline reverse
+      // index that built leave_units.
+      qualifies_for_credit =
+          discount > 0.0 &&
+          (leave_has_blank ? (fresh_hook_letters != 0)
+                           : (fresh_hook_letters & leave_mask) != 0);
+    } else {
+      // Reached only through the leave: the move's placement never
+      // touched this unit, so its geometry (and hence its hook letters)
+      // is exactly what was loaded, and the baseline membership test is
+      // still correct.
+      penalty = pat_eval_ctx->unit_penalty[unit_index];
+      qualifies_for_credit = pat_mask_test(leave_units, unit_index);
+    }
+    if (qualifies_for_credit) {
+      // p <= 0 and discount in [0, 1], so p * (1 - discount) always
+      // lands in [p, 0]: the credit can shrink a penalty toward zero
+      // but never past it, so no new shadow-pruning bound is needed.
+      penalty = (Equity)lround((double)penalty * (1.0 - discount));
+    }
+    sum += penalty;
+    if (penalty < worst) {
+      worst = penalty;
+    }
+    if (has_floor && reached_idx + 1 < num_reached) {
+      const Equity bound =
+          pat_eval_scaled(pat_eval_ctx, pat_combine(worst, sum, combine_gamma));
+      if (bound < scaled_floor) {
+        return bound;
+      }
+    }
+  }
+  return pat_eval_scaled(pat_eval_ctx, pat_combine(worst, sum, combine_gamma));
 }

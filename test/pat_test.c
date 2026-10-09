@@ -1696,7 +1696,15 @@ static void pat_path_parity_run(double utility_adjust) {
             pat_eval_move_penalty(parity_ctx, move, &leave);
         assert(with_utility <=
                pat_eval_move_penalty_bound(parity_ctx, move, &leave));
+        pat_test_assert_capped_penalty(parity_ctx, move, &leave, with_utility);
         assert(with_utility - without_utility[i] <= utility_bound);
+        if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          // The bound from the play's tile count and score alone.
+          const Equity play_bound = pat_eval_utility_bound_for_play(
+              parity_ctx, move_get_tiles_played(move), move_get_score(move));
+          assert(with_utility - without_utility[i] <= play_bound);
+          assert(play_bound <= utility_bound);
+        }
         if (with_utility != without_utility[i]) {
           utility_nonzero++;
         }
