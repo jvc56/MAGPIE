@@ -13,6 +13,34 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+
+enum {
+  // Two presses on the same history entry within this window open it
+  // for editing.
+  HISTORY_DOUBLE_CLICK_NS = 400000000,
+};
+
+// The last left-button press on a history entry, for double-click
+// detection. Only the input thread touches it.
+static int g_last_history_press_target = -1;
+static struct timespec g_last_history_press_at;
+
+// Records a press on history entry `target` and returns whether it
+// completes a double-click on that entry.
+static bool history_press_is_double_click(int target) {
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  const long long elapsed_ns =
+      (long long)(now.tv_sec - g_last_history_press_at.tv_sec) * 1000000000LL +
+      (now.tv_nsec - g_last_history_press_at.tv_nsec);
+  const bool is_double = target == g_last_history_press_target &&
+                         elapsed_ns < HISTORY_DOUBLE_CLICK_NS;
+  // A double-click consumes the pair, so a third press starts over.
+  g_last_history_press_target = is_double ? -1 : target;
+  g_last_history_press_at = now;
+  return is_double;
+}
 
 // Mouse handling on the game screen: wheel scrolling of the Analysis panel,
 // Analysis scrollbar click / drag, and click-to-focus / click-to-select on
@@ -137,11 +165,13 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
       // cursor — clicks on the title / chrome row snap back to
       // -1, clicks on a turn jump to that entry.
       //
-      // Exception: a click that lands directly on a PENDING entry
-      // skips the two-step "focus first, act second" dance and
-      // jumps straight into edit mode. The pending row is the
-      // primary input surface in annotation mode; needing to
-      // click twice to start typing felt broken in testing.
+      // A single click on a turn selects it (showing that position),
+      // read-only; a double-click opens its editor, like Enter.
+      // Exceptions that open the editor on a single click: the
+      // PENDING entry (the primary input surface in annotation mode;
+      // needing two clicks to start typing felt broken in testing),
+      // and the entry already being edited (to move between its
+      // fields).
       bool pending_edit_handled = false;
       // Play-vs-computer never opens the history-cell text editor:
       // the human enters moves on the board, and the cell editor's
@@ -153,14 +183,17 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
         int entry_row_off = 0;
         const int target =
             tui_history_cursor_field_at(input.y, input.x, &entry_row_off);
-        // Click into any history entry's textedit (move/rack/
-        // leave) opens the editor on that field — committed
-        // entries included. Previously the pending-only check
-        // meant clicks on already-finalized turns just parked
-        // the history cursor on the row label, with no way to
-        // jump straight into the cell. Annotation flow needs to
-        // revise prior turns, so all entries are addressable.
-        if (target >= 0 && target < state->history_count) {
+        // Opening the editor lands on the clicked field (move/rack/
+        // leave), committed entries included: annotation flow needs
+        // to revise prior turns.
+        const bool press = input.evtype != NCTYPE_RELEASE;
+        const bool double_click =
+            press && target >= 0 && history_press_is_double_click(target);
+        const bool opens_editor =
+            target >= 0 && target < state->history_count &&
+            (state->history[target].pending ||
+             target == state->edit_history_idx || double_click);
+        if (opens_editor) {
           const TuiHistoryEntry *e = &state->history[target];
           int field;
           switch (entry_row_off) {
@@ -238,7 +271,12 @@ bool tui_input_mouse(TuiGameState *state, struct ncplane *std_plane,
           state->analysis_cursor = 0;
           state->analysis_cursor_column = TUI_ANALYSIS_COLUMN_RANK;
           state->analysis_anchored_move[0] = '\0';
-          // Non-pending row clicked: just move the in-panel cursor.
+          // Selecting a turn closes any editor that was open on
+          // another one, keeping its text as a blur does.
+          if (state->edit_history_idx >= 0 &&
+              state->edit_history_idx != target) {
+            tui_commit_edit_and_revalidate(state);
+          }
           state->edit_history_idx = -1;
         }
         (void)entry_row_off;

@@ -7,7 +7,9 @@
 #include "mach_compat.h"
 #include "render_common.h"
 #include "render_layout.h"
+#include "slash_commands.h"
 #include "theme.h"
+#include "tui_history_edit.h"
 #include "tui_ui_types.h"
 #include <notcurses/notcurses.h>
 #include <stdatomic.h>
@@ -51,6 +53,12 @@ void tui_debug_record_sprixel_stats(uint64_t emits, uint64_t elides) {
   last_elides = elides;
 }
 // Last measured keypress-to-pixels latency (microseconds). -1 = none yet.
+enum {
+  // The status bar shows the last keypress-to-pixels latency only at or
+  // above this many microseconds; below it, input feels instant.
+  STATUS_LAG_SHOW_US = 100000,
+};
+
 static _Atomic long g_input_lag_us = -1;
 void tui_debug_set_input_lag_us(long us) { atomic_store(&g_input_lag_us, us); }
 void tui_debug_record_frame_us(long frame_us) {
@@ -209,18 +217,8 @@ void render_command_palette(struct ncplane *plane, const Theme *theme,
   if (state == NULL || !state->slash_active) {
     return;
   }
-  struct Cmd {
-    const char *name;
-    const char *desc;
-  };
-  static const struct Cmd cmds[] = {
-      {"copy", "Copy current position to clipboard as CGP"},
-      {"exit", "Quit MAGPIE TUI (alias for /quit)"},
-      {"new", "Start a new game"},
-      {"quit", "Quit MAGPIE TUI"},
-      {"settings", "Open settings"},
-  };
-  static const int n_cmds = (int)(sizeof(cmds) / sizeof(cmds[0]));
+  int n_cmds = 0;
+  const TuiSlashCommand *cmds = tui_slash_commands(&n_cmds);
 
   // Filter to prefix matches against the lowercase slash buffer.
   int match_idx[16];
@@ -228,10 +226,8 @@ void render_command_palette(struct ncplane *plane, const Theme *theme,
   for (int i = 0;
        i < n_cmds && n_match < (int)(sizeof(match_idx) / sizeof(match_idx[0]));
        i++) {
-    if (state->slash_len == 0 ||
-        ((int)strlen(cmds[i].name) >= state->slash_len &&
-         strncmp(cmds[i].name, state->slash_buf, (size_t)state->slash_len) ==
-             0)) {
+    if (tui_slash_command_matches(&cmds[i], state->slash_buf,
+                                  state->slash_len)) {
       match_idx[n_match++] = i;
     }
   }
@@ -273,7 +269,7 @@ void render_command_palette(struct ncplane *plane, const Theme *theme,
 
   for (int i = 0; i < n_match; i++) {
     const int row = popup_top + i;
-    const struct Cmd *c = &cmds[match_idx[i]];
+    const TuiSlashCommand *c = &cmds[match_idx[i]];
     // Clear row to theme->bg first so we don't inherit colored
     // content from the panel that was drawn below.
     theme_apply_fg(plane, theme->fg);
@@ -583,9 +579,10 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
     ncplane_putstr(plane, nps_buf);
   }
   // Keypress-to-pixels latency (the time from a keystroke dirtying a
-  // frame to that frame rendering). Shown in ms once we've measured one.
+  // frame to that frame rendering). Like fps, it only appears when it's
+  // worth noticing: at or above STATUS_LAG_SHOW_US.
   const long input_lag_us = atomic_load(&g_input_lag_us);
-  if (input_lag_us >= 0) {
+  if (input_lag_us >= STATUS_LAG_SHOW_US) {
     char lag_buf[32];
     (void)snprintf(lag_buf, sizeof(lag_buf), " \xc2\xb7 %ld ms lag",
                    (input_lag_us + 500) / 1000);
@@ -641,6 +638,16 @@ void render_status_bar(struct ncplane *plane, const Theme *theme,
     hint = " Enter load \xc2\xb7 Esc cancel ";
     break;
   case TUI_MODAL_NONE:
+    // History focused and browsing (not editing): the arrows walk the
+    // turns and Enter opens the selected one, when it can be edited.
+    if (!state->slash_active && state->focused_panel == TUI_FOCUS_HISTORY &&
+        state->edit_history_idx < 0) {
+      hint = tui_history_entry_editable(state, state->history_cursor)
+                 ? " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter edit "
+                   "\xc2\xb7 Esc menu "
+                 : " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Esc menu ";
+    }
+    break;
   default:
     break;
   }
