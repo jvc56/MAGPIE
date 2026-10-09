@@ -1,11 +1,10 @@
 {
-  "claim_token": "b20adc88-f9d4-4301-905a-4579546e422b",
-  "job_id": "dc81790b-2289-4f0f-9640-3e1457dd56ad",
-  "job_name": "e2e-wordmap-pairs",
+  "claim_token": "c29428b3-f79c-47e6-a41f-e19020dbb692",
+  "job_id": "f865e3b9-2673-4695-9e92-9484a400921f",
+  "job_name": "tier 6 game pairs: e2e-wordmap-equity vs e2e-wordmap-score",
   "max_task_seconds": 3600,
   "task_request": {
     "job_type": "game_pairs",
-    "threading_mode": "igp",
     "variant": "classic",
     "letter_distribution": "english",
     "board_layout": "standard15",
@@ -15,6 +14,7 @@
     "capture_first_divergence": true,
     "bingo_bonus": 50,
     "sim_cutoff": 0.005,
+    "threading_mode": "igp",
     "player1": {
       "name": "e2e-wordmap-equity",
       "recorder_type": "best",

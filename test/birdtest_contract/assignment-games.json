@@ -1,7 +1,7 @@
 {
   "claim_token": "6f3d7198-178a-47c8-9ccc-6aa6995a5a9c",
   "job_id": "1d4a7f60-3c1e-4a55-9f2e-2f0f5d9e6a31",
-  "job_name": "nwl23-static-vs-static",
+  "job_name": "NWL23 4-ply simmer vs static",
   "max_task_seconds": 3600,
   "min_magpie_version": "0.1.1",
   "expected_data": {
@@ -69,7 +69,6 @@
   },
   "task_request": {
     "job_type": "games",
-    "threading_mode": "igp",
     "variant": "classic",
     "letter_distribution": "english",
     "board_layout": "standard15",
@@ -79,6 +78,7 @@
     "capture_first_divergence": false,
     "bingo_bonus": 50,
     "sim_cutoff": 0.005,
+    "threading_mode": "igp",
     "player1": {
       "name": "simmer-NWL23-4ply@20260925",
       "recorder_type": "best",

@@ -1,11 +1,10 @@
 {
-  "claim_token": "162c49a3-28fd-49a9-96a1-469178b1c7b1",
-  "job_id": "92cf1ff9-576c-4f05-9624-073897801892",
-  "job_name": "e2e-anon-games",
+  "claim_token": "456ef2ec-b26d-4dfc-9e34-f2114e48ee4c",
+  "job_id": "4043fda1-5385-4b73-8b8d-b72a44bb4a47",
+  "job_name": "tier 6 games",
   "max_task_seconds": 3600,
   "task_request": {
     "job_type": "games",
-    "threading_mode": "igp",
     "variant": "classic",
     "letter_distribution": "english",
     "board_layout": "standard15",
@@ -15,6 +14,7 @@
     "capture_first_divergence": false,
     "bingo_bonus": 50,
     "sim_cutoff": 0.005,
+    "threading_mode": "igp",
     "player1": {
       "name": "e2e-solving",
       "recorder_type": "best",
@@ -129,5 +129,5 @@
     ],
     "derived": []
   },
-  "worker_uuid": "84c7136f-28cd-41d7-85ed-426562c434b8"
+  "worker_uuid": "07747000-494e-409c-be57-378cf9be99bc"
 }
