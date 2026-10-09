@@ -214,7 +214,6 @@ typedef struct BAISyncData {
   // True until the round holding the last initial-phase sample has folded.
   bool initial_phase;
   BAIArmDatum *arm_data;
-  RandomVariables *rng;
   cpthread_mutex_t mutex;
   ThreadControl *thread_control;
   BAIResult *bai_result;
@@ -369,8 +368,7 @@ static inline void bai_sync_lock(BAISyncData *bai_sync_data,
 
 static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
                                                 ThreadControl *thread_control,
-                                                const int num_initial_arms,
-                                                RandomVariables *rng) {
+                                                const int num_initial_arms) {
   BAISyncData *bai_sync_data = malloc_or_die(sizeof(BAISyncData));
   bai_sync_data->num_arms = num_initial_arms;
   bai_sync_data->num_total_samples_completed = 0;
@@ -381,7 +379,6 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->initial_phase = true;
   bai_sync_data->arm_data =
       calloc_or_die(num_initial_arms, sizeof(BAIArmDatum));
-  bai_sync_data->rng = rng;
   cpthread_mutex_init(&bai_sync_data->mutex);
   cpthread_cond_init(&bai_sync_data->work_available);
   bai_sync_data->thread_control = thread_control;
@@ -1604,17 +1601,16 @@ static inline void *bai_worker(void *args) {
 }
 
 // Assumes rvs are normally distributed.
-// Assumes rng is uniformly distributed between 0 and 1.
 static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
-                       RandomVariables *rng, ThreadControl *thread_control,
-                       BAILogger *bai_logger, BAIResult *bai_result) {
+                       ThreadControl *thread_control, BAILogger *bai_logger,
+                       BAIResult *bai_result) {
 #ifdef BAI_SCHED_STATS
   const int64_t sched_start_ns = bai_sched_now();
 #endif
   bai_result_reset(bai_result, bai_options->time_limit_seconds);
 
   BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control,
-                                                (int)rvs_get_num_rvs(rvs), rng);
+                                                (int)rvs_get_num_rvs(rvs));
   sync_data->record_size = rvs_get_sample_record_size(rvs);
   sync_data->num_threads = bai_options->num_threads;
 #ifdef BAI_SCHED_STATS

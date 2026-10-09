@@ -36,11 +36,11 @@ static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
 
 void bai_wrapper(BAIOptions *bai_options, RandomVariables *rvs,
-                 RandomVariables *rng, ThreadControl *thread_control,
-                 BAILogger *bai_logger, BAIResult *bai_result) {
+                 ThreadControl *thread_control, BAILogger *bai_logger,
+                 BAIResult *bai_result) {
   bai_options->parent_worker_thread_index = 0;
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
-  bai(bai_options, rvs, rng, thread_control, bai_logger, bai_result);
+  bai(bai_options, rvs, thread_control, bai_logger, bai_result);
 }
 
 void test_bai_top_two(int num_threads) {
@@ -59,13 +59,6 @@ void test_bai_top_two(int num_threads) {
   };
   RandomVariables *rvs = rvs_create(&rv_args);
 
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .num_rvs = num_rvs,
-      .seed = 10,
-  };
-  RandomVariables *rng = rvs_create(&rng_args);
-
   BAIOptions bai_options = {
       .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
       .threshold = BAI_THRESHOLD_GK16,
@@ -79,12 +72,11 @@ void test_bai_top_two(int num_threads) {
 
   ThreadControl *thread_control = thread_control_create();
   BAIResult *bai_result = bai_result_create();
-  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  bai_wrapper(&bai_options, rvs, thread_control, NULL, bai_result);
   assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_THRESHOLD);
   assert(bai_result_get_best_arm(bai_result) == 1);
   thread_control_destroy(thread_control);
   bai_result_destroy(bai_result);
-  rvs_destroy(rng);
   rvs_destroy(rvs);
 }
 
@@ -98,13 +90,6 @@ void test_bai_sample_limit(int num_threads) {
       .seed = 10,
   };
   RandomVariables *rvs = rvs_create(&rv_args);
-
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .num_rvs = num_rvs,
-      .seed = 10,
-  };
-  RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
       .threshold = BAI_THRESHOLD_NONE,
@@ -120,7 +105,7 @@ void test_bai_sample_limit(int num_threads) {
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
     rvs_reset(rvs, &rv_args);
-    bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+    bai_wrapper(&bai_options, rvs, thread_control, NULL, bai_result);
     assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_SAMPLE_LIMIT);
     assert(bai_result_get_best_arm(bai_result) == 1);
     uint64_t expected_num_samples = bai_options.sample_limit;
@@ -136,7 +121,6 @@ void test_bai_sample_limit(int num_threads) {
   ctime_nap(0.2);
   assert(bai_time_elapsed == bai_result_get_elapsed_seconds(bai_result));
   bai_result_destroy(bai_result);
-  rvs_destroy(rng);
   rvs_destroy(rvs);
 }
 
@@ -150,13 +134,6 @@ void test_bai_win_pct_cutoff_helper(int num_threads,
       .seed = 10,
   };
   RandomVariables *rvs = rvs_create(&rv_args);
-
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .num_rvs = num_rvs,
-      .seed = 10,
-  };
-  RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
       .threshold = BAI_THRESHOLD_NONE,
@@ -172,7 +149,7 @@ void test_bai_win_pct_cutoff_helper(int num_threads,
   for (int i = 0; i < num_sampling_rules; i++) {
     bai_options.sampling_rule = sampling_rules[i];
     rvs_reset(rvs, &rv_args);
-    bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+    bai_wrapper(&bai_options, rvs, thread_control, NULL, bai_result);
     assert(bai_result_get_status(bai_result) ==
            BAI_RESULT_STATUS_WIN_PCT_CUTOFF);
     assert(bai_result_get_best_arm(bai_result) == 1);
@@ -193,7 +170,6 @@ void test_bai_win_pct_cutoff_helper(int num_threads,
   ctime_nap(0.2);
   assert(bai_time_elapsed == bai_result_get_elapsed_seconds(bai_result));
   bai_result_destroy(bai_result);
-  rvs_destroy(rng);
   rvs_destroy(rvs);
 }
 
@@ -212,7 +188,6 @@ void test_bai_win_pct_cutoff(int num_threads) {
 typedef struct BAITestArgs {
   BAIOptions *options;
   RandomVariables *rvs;
-  RandomVariables *rng;
   ThreadControl *thread_control;
   BAIResult *result;
   cpthread_mutex_t *mutex;
@@ -222,7 +197,7 @@ typedef struct BAITestArgs {
 
 void *bai_thread_func(void *arg) {
   BAITestArgs *args = (BAITestArgs *)arg;
-  bai_wrapper(args->options, args->rvs, args->rng, args->thread_control, NULL,
+  bai_wrapper(args->options, args->rvs, args->thread_control, NULL,
               args->result);
 
   cpthread_mutex_lock(args->mutex);
@@ -243,13 +218,6 @@ void test_bai_time_limit(int num_threads) {
       .seed = 10,
   };
   RandomVariables *rvs = rvs_create(&rv_args);
-
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .num_rvs = num_rvs,
-      .seed = 10,
-  };
-  RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
       .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
@@ -273,7 +241,6 @@ void test_bai_time_limit(int num_threads) {
 
   BAITestArgs args = {.options = &bai_options,
                       .rvs = rvs,
-                      .rng = rng,
                       .thread_control = thread_control,
                       .result = bai_result,
                       .mutex = &mutex,
@@ -289,7 +256,6 @@ void test_bai_time_limit(int num_threads) {
 
   bai_result_destroy(bai_result);
   thread_control_destroy(thread_control);
-  rvs_destroy(rng);
   rvs_destroy(rvs);
 }
 
@@ -303,13 +269,6 @@ void test_bai_interrupt(int num_threads) {
       .seed = 10,
   };
   RandomVariables *rvs = rvs_create(&rv_args);
-
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .num_rvs = num_rvs,
-      .seed = 10,
-  };
-  RandomVariables *rng = rvs_create(&rng_args);
 
   BAIOptions bai_options = {
       .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
@@ -333,7 +292,6 @@ void test_bai_interrupt(int num_threads) {
 
   BAITestArgs args = {.options = &bai_options,
                       .rvs = rvs,
-                      .rng = rng,
                       .thread_control = thread_control,
                       .result = bai_result,
                       .mutex = &mutex,
@@ -352,7 +310,6 @@ void test_bai_interrupt(int num_threads) {
 
   bai_result_destroy(bai_result);
   thread_control_destroy(thread_control);
-  rvs_destroy(rng);
   rvs_destroy(rvs);
 }
 
@@ -390,10 +347,6 @@ void test_bai_similarity(int num_threads) {
       .num_samples = num_samples,
       .samples = samples,
   };
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .seed = 10,
-  };
   BAIOptions bai_options = {
       .delta = 0.01,
       .sample_minimum = 50,
@@ -418,22 +371,18 @@ void test_bai_similarity(int num_threads) {
       }
       rv_args.num_rvs = num_rvs;
       rv_args.means_and_vars = means_and_vars;
-      rng_args.num_rvs = num_rvs;
       for (int i = 0; i < num_strategies_entries; i++) {
         RandomVariables *rvs = rvs_create(&rv_args);
-        RandomVariables *rng = rvs_create(&rng_args);
         BAILogger *bai_logger = NULL;
         bai_options.sampling_rule = strategies[i][0];
         bai_options.threshold = strategies[i][1];
-        bai_wrapper(&bai_options, rvs, rng, thread_control, bai_logger,
-                    bai_result);
+        bai_wrapper(&bai_options, rvs, thread_control, bai_logger, bai_result);
         bai_logger_flush(bai_logger);
         bai_logger_destroy(bai_logger);
         assert(bai_result_get_best_arm(bai_result) % max_classes == 0);
         assert(bai_result_get_status(bai_result) ==
                BAI_RESULT_STATUS_THRESHOLD);
         rvs_destroy(rvs);
-        rvs_destroy(rng);
       }
       free(means_and_vars);
     }
@@ -458,7 +407,9 @@ void test_bai_from_seed(const char *bai_seed) {
   const uint64_t num_rvs =
       prng_get_random_number(prng, (uint64_t)20) + (uint64_t)2;
   const uint64_t rv_seed = prng_get_random_number(prng, UINT64_MAX);
-  const uint64_t rng_seed = prng_get_random_number(prng, UINT64_MAX);
+  // Formerly the seed of BAI's coin; still drawn so that a given BAI_SEED
+  // keeps producing the same means.
+  prng_get_random_number(prng, UINT64_MAX);
 
   double *means_and_vars = malloc_or_die(num_rvs * 2 * sizeof(double));
   int means_map[NUM_UNIQUE_MEANS];
@@ -490,13 +441,6 @@ void test_bai_from_seed(const char *bai_seed) {
   };
   RandomVariables *rvs = rvs_create(&rv_args);
 
-  RandomVariablesArgs rng_args = {
-      .type = RANDOM_VARIABLES_UNIFORM,
-      .num_rvs = 1,
-      .seed = rng_seed,
-  };
-  RandomVariables *rng = rvs_create(&rng_args);
-
   BAIOptions bai_options = {
       .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
       .threshold = BAI_THRESHOLD_GK16,
@@ -511,7 +455,7 @@ void test_bai_from_seed(const char *bai_seed) {
   BAIResult *bai_result = bai_result_create();
   BAILogger *bai_logger = bai_logger_create("bai_log.txt");
 
-  bai_wrapper(&bai_options, rvs, rng, thread_control, bai_logger, bai_result);
+  bai_wrapper(&bai_options, rvs, thread_control, bai_logger, bai_result);
 
   bai_logger_log_int(bai_logger, "result",
                      bai_result_get_best_arm(bai_result) + 1);
@@ -521,7 +465,6 @@ void test_bai_from_seed(const char *bai_seed) {
   bai_logger_destroy(bai_logger);
   thread_control_destroy(thread_control);
   rvs_destroy(rvs);
-  rvs_destroy(rng);
   free(means_and_vars);
 }
 
