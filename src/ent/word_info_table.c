@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/endian_io.h"
 #include "../def/board_defs.h"
+#include "../def/cpthread_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
@@ -508,10 +509,12 @@ static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
     *status = ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM;
     return false;
   }
-  const uint8_t known_flags =
-      header[0] >= 5   ? WIT_FLAG_WORD_PLUS_FLOATER | WIT_FLAG_POSITION_LENGTHS
-      : header[0] == 4 ? WIT_FLAG_WORD_PLUS_FLOATER
-                       : 0;
+  uint8_t known_flags = 0;
+  if (header[0] >= 5) {
+    known_flags = WIT_FLAG_WORD_PLUS_FLOATER | WIT_FLAG_POSITION_LENGTHS;
+  } else if (header[0] == 4) {
+    known_flags = WIT_FLAG_WORD_PLUS_FLOATER;
+  }
   if (header[3] != 0 || (header[2] & ~known_flags) != 0) {
     *message = "unsupported word info table flags";
     return false;
