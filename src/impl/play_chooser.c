@@ -12,6 +12,7 @@
 #include "../def/peg_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -918,6 +919,13 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
       // on a different scale than a sibling's soft sim/PEG utility and could
       // flip the decision. Report it unevaluated; should_challenge then
       // conservatively defaults to challenging.
+      return PLAY_CHOOSER_BRANCH_INVALID;
+    }
+    if (bai_result_get_num_samples(
+            sim_results_get_bai_result(play_chooser->sim_results)) == 0) {
+      // The budget ran out before any rollout finished. The best play's mean
+      // utility would read 0, a certain loss, and rank this branch below
+      // every evaluated sibling; report it unevaluated instead.
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
     // The sim ranked by (and recorded per rollout) the win%+spread blend; read

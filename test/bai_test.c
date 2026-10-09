@@ -313,6 +313,76 @@ void test_bai_interrupt(int num_threads) {
   rvs_destroy(rvs);
 }
 
+// A sim cut short by the clock or an interrupt folds every sample that has
+// finished, even when no round is complete, and discards any that finish
+// later. Drives the scheduler single-threaded, so it does not depend on
+// timing.
+void test_bai_abandon_folds_finished_samples(void) {
+  const double means_and_vars[] = {0.1, 1, 0.5, 1, 0.2, 1};
+  const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.01,
+      .sample_minimum = 50,
+      .sample_limit = 1000,
+      .num_threads = 1,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  bai_result_reset(bai_result, 0);
+  BAISyncData *sync_data =
+      bai_sync_data_create(bai_result, thread_control, num_rvs);
+  sync_data->record_size = rvs_get_sample_record_size(rvs);
+  BAISampleArgs sample_args =
+      bai_sample_args_create(sync_data, rvs, &bai_options);
+  bai_sync_data_start_schedule(&sample_args, bai_options.sample_minimum);
+
+  // Claim a batch of the first round and finish only some of it; the rest
+  // stays in flight, so the round is incomplete and nothing has folded.
+  BAIClaim claim;
+  assert(bai_schedule_claim_while_locked(sync_data, &claim));
+  assert(claim.round_number == 0);
+  assert(claim.num_slots > 3);
+  const int num_finished = 3;
+  const BAIRound *round = &sync_data->rounds[0];
+  for (int slot = 0; slot < num_finished; slot++) {
+    const double sample =
+        rvs_sample_with_seed(rvs, (uint64_t)round->arm_indices[slot],
+                             round->seeds[slot], 0, NULL, NULL);
+    bai_schedule_complete_while_locked(&sample_args, 0, slot, sample);
+  }
+  assert(sync_data->num_total_samples_completed == 0);
+  assert(sync_data->astar_index == -1);
+
+  bai_abandon_rounds_while_locked(&sample_args);
+  assert(sync_data->stopped);
+  assert(sync_data->num_total_samples_completed == (uint64_t)num_finished);
+  // The first round is round-robin, so each arm got one of the samples.
+  for (int arm_index = 0; arm_index < num_rvs; arm_index++) {
+    assert(sync_data->arm_data[arm_index].num_samples == 1);
+  }
+  assert(sync_data->astar_index >= 0 && sync_data->astar_index < num_rvs);
+
+  // A sample finishing after the abandon is discarded, and a second abandon
+  // changes nothing.
+  bai_schedule_complete_while_locked(&sample_args, 0, num_finished, 0.5);
+  bai_abandon_rounds_while_locked(&sample_args);
+  assert(sync_data->num_total_samples_completed == (uint64_t)num_finished);
+
+  bai_sync_data_destroy(sync_data);
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+  rvs_destroy(rvs);
+}
+
 // Assumes rv_args are normal predetermined
 // Assumes rng_args are uniform
 void write_bai_input(const double delta, const RandomVariablesArgs *rv_args,
@@ -473,6 +543,7 @@ void test_bai(void) {
   if (bai_seed) {
     test_bai_from_seed(bai_seed);
   } else {
+    test_bai_abandon_folds_finished_samples();
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {
