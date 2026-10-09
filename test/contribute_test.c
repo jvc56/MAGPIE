@@ -30,6 +30,7 @@
 #include "../src/impl/contribute.h"
 #include "../src/impl/convert.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/rack_list.h"
 #include "../src/impl/simmer.h"
 #include "../src/util/hash.h"
@@ -1139,6 +1140,10 @@ static char *execute_task(const char *job_type, const char *request_json,
   ErrorStack *error_stack = error_stack_create();
   Config *task_config = config_create_for_contribute(config, error_stack);
   assert(error_stack_is_empty(error_stack));
+  // As a command runs, and as contribute's tasks do: an inference reads any
+  // other status as a stop.
+  thread_control_set_status(config_get_thread_control(task_config),
+                            THREAD_CONTROL_STATUS_STARTED);
   const JsonValue *request = json_parse(request_json, error_stack);
   assert(error_stack_is_empty(error_stack));
   char *result_json = NULL;
@@ -1231,6 +1236,37 @@ static void test_a_task_counts_its_move_generations(void) {
   error_stack_destroy(error_stack);
 }
 
+// A simulating CSW21 player: 2 plies over its 3 best plays, at most 30
+// iterations each, inferring the opponent's leave when `infer`.
+static char *simming_csw21_player(bool infer) {
+  return get_formatted_string(
+      "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
+      "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "\"win_pct_model\": \"winpct_english\", \"max_iterations\": 30, "
+      "\"num_plies\": 2, \"num_plies_recorded\": 2, \"num_plays\": 3, "
+      "\"num_plays_recorded\": 3, \"stopping_pct\": 99.0, "
+      "\"use_inference\": %s, \"time_limit_secs\": 0, "
+      "\"use_wordmap\": false, \"use_rit\": false, \"rit_name\": null, "
+      "\"use_wit\": false, \"min_play_iterations\": 10, "
+      "\"threshold\": \"gk16\", \"sampling_rule\": \"top_two_ids\", "
+      "\"inference_margin\": 5.0, \"utility_w_winpct\": 1.0, "
+      "\"utility_w_spread\": 0.5, \"utility_spread_scale\": 100.0, "
+      "\"movegen_margin\": 5.0, \"endgame_plies\": 0, \"peg_max_bag\": 0}",
+      infer ? "true" : "false");
+}
+
+// A static CSW21 player that solves its endgames 2 plies deep and its
+// pre-endgames with up to 2 tiles in the bag.
+#define SOLVING_CSW21_PLAYER                                                   \
+  "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "                           \
+  "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "               \
+  "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "          \
+  "\"num_plays_recorded\": 5, \"movegen_margin\": 5.0, "                       \
+  "\"use_wordmap\": false, \"use_rit\": false, \"use_wit\": false, "           \
+  "\"endgame_plies\": 2, \"peg_max_bag\": 2, \"peg_stage_top_k\": [2], "       \
+  "\"peg_scenario_stride\": 1, \"peg_opp_model\": \"rational\", "              \
+  "\"peg_nested\": false}"
+
 // The games or game_pairs request for `num_games` games between two players,
 // capturing every turn's position.
 static char *games_request(const char *job_type, int num_games,
@@ -1250,6 +1286,225 @@ static char *games_request(const char *job_type, int num_games,
       job_type, mode, num_games, player1, player2);
   free(mode);
   return request;
+}
+
+// The fewest move generations a games task's captured positions account for,
+// each counted from what the result itself reports rather than from the
+// counter under test:
+//
+// - every turn generates its player's moves at least once (static play, a
+//   simulation's candidates, a solver's root);
+// - a simulation iteration of a play generates once per ply -- counted only
+//   on a game's first turns, where the bag is too full for a playout to end
+//   the game early;
+// - an inference generates once per leave it found.
+//
+// *turns is the number of positions; *simulated and *inferred the parts of
+// the bound from simulations and inferences.
+static uint64_t movegens_accounted_for(const char *result_json, int plies,
+                                       int *turns, uint64_t *simulated,
+                                       uint64_t *inferred) {
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *result = json_parse(result_json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *positions =
+      json_object_get(result, CONTRIBUTE_KEY_POSITIONS);
+  *turns = json_array_length(positions);
+  *simulated = 0;
+  *inferred = 0;
+  for (int i = 0; i < *turns; i++) {
+    const JsonValue *position = json_array_get(positions, i);
+    const JsonValue *inference =
+        json_object_get(position, CONTRIBUTE_KEY_INFERENCE);
+    if (inference) {
+      *inferred += (uint64_t)json_get_int(inference, CONTRIBUTE_KEY_NUM_LEAVES,
+                                          error_stack);
+    }
+    if (!strings_equal(json_get_string_or_null(position, "analysis"),
+                       CONTRIBUTE_ANALYSIS_SIM) ||
+        json_get_int(position, CONTRIBUTE_KEY_TURN_NUMBER, error_stack) >= 6) {
+      continue;
+    }
+    const JsonValue *moves = json_object_get(position, CONTRIBUTE_KEY_MOVES);
+    for (int m = 0; m < json_array_length(moves); m++) {
+      *simulated +=
+          (uint64_t)json_get_int(json_array_get(moves, m),
+                                 CONTRIBUTE_KEY_ITERATIONS, error_stack) *
+          (uint64_t)plies;
+    }
+  }
+  assert(error_stack_is_empty(error_stack));
+  json_destroy(result);
+  error_stack_destroy(error_stack);
+  return (uint64_t)*turns + *simulated + *inferred;
+}
+
+// The positions in a games result decided by a solver.
+static int solved_positions(const char *result_json) {
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *result = json_parse(result_json, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *positions =
+      json_object_get(result, CONTRIBUTE_KEY_POSITIONS);
+  int solved = 0;
+  for (int i = 0; i < json_array_length(positions); i++) {
+    const char *analysis =
+        json_get_string_or_null(json_array_get(positions, i), "analysis");
+    if (strings_equal(analysis, CONTRIBUTE_ANALYSIS_PEG) ||
+        strings_equal(analysis, CONTRIBUTE_ANALYSIS_ENDGAME)) {
+      solved++;
+    }
+  }
+  json_destroy(result);
+  error_stack_destroy(error_stack);
+  return solved;
+}
+
+// Every job type's move generations are counted, on every thread that made
+// them -- the simulation threads of either threading mode, which exit (and
+// release their generators to the pool) before the count is read, an
+// inference's, a solver's -- checked against what the task's own result
+// says was done.
+static void test_every_job_type_counts_its_move_generations(void) {
+  // Static games: exactly one generation a turn, so a captured position per
+  // generation. (birdtest's game-pairs fixture, 96 for four static games, is
+  // 24 turns a game.)
+  for (int pairs = 0; pairs < 2; pairs++) {
+    char *request = games_request(pairs ? "game_pairs" : "games", 4, NULL,
+                                  STATIC_CSW21_PLAYER, STATIC_CSW21_PLAYER);
+    uint64_t movegens = 0;
+    char *result =
+        execute_task(pairs ? "game_pairs" : "games", request, 2, &movegens);
+    int turns = 0;
+    uint64_t simulated = 0;
+    uint64_t inferred = 0;
+    (void)movegens_accounted_for(result, 0, &turns, &simulated, &inferred);
+    assert(turns >= 4 * 10);
+    assert(movegens == (uint64_t)turns);
+    free(result);
+    free(request);
+  }
+
+  // Simulating games, under both threading modes: the simulation threads'
+  // generations are counted whether they serve one game (igp) or each game
+  // its own (pgp).
+  char *simmer = simming_csw21_player(false);
+  const char *modes[] = {"igp", "pgp"};
+  for (int m = 0; m < 2; m++) {
+    char *request = games_request("games", 2, modes[m], simmer, simmer);
+    uint64_t movegens = 0;
+    char *result = execute_task("games", request, 3, &movegens);
+    int turns = 0;
+    uint64_t simulated = 0;
+    uint64_t inferred = 0;
+    const uint64_t bound =
+        movegens_accounted_for(result, 2, &turns, &simulated, &inferred);
+    assert(simulated > 0 && inferred == 0);
+    assert(movegens >= bound);
+    free(result);
+    free(request);
+  }
+  free(simmer);
+
+  // Inference: each leave found was a generation of its own.
+  char *inferrer = simming_csw21_player(true);
+  char *request = games_request("games", 1, "igp", inferrer, inferrer);
+  uint64_t movegens = 0;
+  char *result = execute_task("games", request, 2, &movegens);
+  int turns = 0;
+  uint64_t simulated = 0;
+  uint64_t inferred = 0;
+  uint64_t bound =
+      movegens_accounted_for(result, 2, &turns, &simulated, &inferred);
+  assert(simulated > 0 && inferred > 0);
+  assert(movegens >= bound);
+  free(result);
+  free(request);
+  free(inferrer);
+
+  // Endgame and pre-endgame solving, on the solver's own threads: a solve
+  // generates at its root and again below it, so each solved turn is at
+  // least two generations where a static turn is one.
+  request = games_request("games", 1, NULL, SOLVING_CSW21_PLAYER,
+                          SOLVING_CSW21_PLAYER);
+  result = execute_task("games", request, 2, &movegens);
+  (void)movegens_accounted_for(result, 0, &turns, &simulated, &inferred);
+  const int solved = solved_positions(result);
+  assert(solved > 0);
+  assert(movegens >= (uint64_t)turns + (uint64_t)solved);
+  free(result);
+  free(request);
+
+  // A simulating opening-rack analysis: the candidates' generation for each
+  // rack, and a generation per ply of every iteration of every play.
+  const char *racks[] = {"AEINRST", "QI", "EEEIIOU"};
+  const int num_racks = (int)(sizeof(racks) / sizeof(racks[0]));
+  simmer = simming_csw21_player(false);
+  request = get_formatted_string(
+      "{\"job_type\": \"opening_rack\", \"variant\": \"classic\", "
+      "\"letter_distribution\": \"english\", "
+      "\"board_layout\": \"standard15\", \"seed\": \"7\", "
+      "\"bingo_bonus\": 50, \"sim_cutoff\": 0.005, "
+      "\"racks\": [\"%s\", \"%s\", \"%s\"], \"player\": %s}",
+      racks[0], racks[1], racks[2], simmer);
+  free(simmer);
+  result = execute_task("opening_rack", request, 2, &movegens);
+  free(request);
+  ErrorStack *error_stack = error_stack_create();
+  const JsonValue *parsed = json_parse(result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *analysed = json_object_get(parsed, CONTRIBUTE_KEY_RACKS);
+  assert(json_array_length(analysed) == num_racks);
+  bound = (uint64_t)num_racks;
+  for (int r = 0; r < num_racks; r++) {
+    const JsonValue *moves =
+        json_object_get(json_array_get(analysed, r), CONTRIBUTE_KEY_MOVES);
+    for (int m = 0; m < json_array_length(moves); m++) {
+      bound +=
+          2 * (uint64_t)json_get_int(json_array_get(moves, m),
+                                     CONTRIBUTE_KEY_ITERATIONS, error_stack);
+    }
+  }
+  assert(error_stack_is_empty(error_stack));
+  assert(bound > (uint64_t)num_racks);
+  // Exactly: nothing else in an opening-rack task generates moves.
+  assert(movegens == bound);
+  json_destroy(parsed);
+  free(result);
+
+  // Leave generation with forced racks. Its executor fetches the
+  // generation's KLV from the server, so this runs the autoplay it hands the
+  // forced racks to, as it does: every turn is a generation, and every full
+  // rack the generation counts was a turn's.
+  Config *ab_config =
+      config_create_or_die("set -lex CSW21_ab -ld english_ab -wmp false -s1 "
+                           "equity -s2 equity -r1 best -r2 best -numplays 1 "
+                           "-threads 2 -seed 3");
+  AutoplayResults *autoplay_results = autoplay_results_create();
+  autoplay_results_set_options(autoplay_results, "games", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const char *forced_racks[] = {"AAAAAAB", "ABBBBBB"};
+  const uint64_t before = gen_get_movegen_count();
+  config_autoplay(ab_config, autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, "3", 0,
+                  forced_racks, 2, NULL, error_stack);
+  movegens = gen_get_movegen_count() - before;
+  assert(error_stack_is_empty(error_stack));
+  parsed = json_parse(autoplay_results_get_leave_results_json(autoplay_results),
+                      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const JsonValue *rack_counts = json_object_get(parsed, "racks");
+  uint64_t rack_turns = 0;
+  for (int i = 0; i < json_array_length(rack_counts); i++) {
+    rack_turns += (uint64_t)json_get_int(json_array_get(rack_counts, i),
+                                         CONTRIBUTE_KEY_COUNT, error_stack);
+  }
+  assert(error_stack_is_empty(error_stack));
+  assert(rack_turns >= 2 * 3);
+  assert(movegens >= rack_turns);
+  json_destroy(parsed);
+  autoplay_results_destroy(autoplay_results);
+  config_destroy(ab_config);
+  error_stack_destroy(error_stack);
 }
 
 // A games or game_pairs task shares its threads as its request says: igp,
@@ -3212,6 +3467,7 @@ void test_contribute(void) {
   test_the_decline_body_matches_the_decline_fixture();
   test_the_result_body_carries_movegens();
   test_a_task_counts_its_move_generations();
+  test_every_job_type_counts_its_move_generations();
   test_a_games_task_takes_its_threading_mode();
   test_the_assignment_names_its_job_and_limit();
   test_a_task_is_stopped_at_its_time_limit();
