@@ -305,10 +305,6 @@ typedef struct BAIWorkerSchedStats {
 
 static inline int64_t bai_sched_now(void) { return ctimer_monotonic_ns(); }
 
-static inline void bai_sched_worker_init(BAIWorkerSchedStats *worker_stats) {
-  memset(worker_stats, 0, sizeof(*worker_stats));
-}
-
 static inline void bai_sched_sample_done(BAIWorkerSchedStats *worker_stats,
                                          const int64_t start_ns) {
   const int64_t cost_ns = ctimer_monotonic_ns() - start_ns;
@@ -339,10 +335,6 @@ typedef struct BAIWorkerSchedStats {
 } BAIWorkerSchedStats;
 
 static inline int64_t bai_sched_now(void) { return 0; }
-
-static inline void bai_sched_worker_init(const BAIWorkerSchedStats
-                                         __attribute__((unused)) *
-                                         worker_stats) {}
 
 static inline void bai_sched_sample_done(const BAIWorkerSchedStats
                                              __attribute__((unused)) *
@@ -1582,7 +1574,7 @@ static inline void bai_sched_record(BAISyncData *sync_data,
 static inline void *bai_worker(void *args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)args;
   BAIWorkerSchedStats worker_stats;
-  bai_sched_worker_init(&worker_stats);
+  memset(&worker_stats, 0, sizeof(worker_stats));
   bai_worker_round_loop(bai_worker_args, &worker_stats);
 #ifdef BAI_SCHED_STATS
   const int64_t exit_ns = bai_sched_now();
