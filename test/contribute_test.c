@@ -2768,6 +2768,41 @@ static void test_a_forced_turn_is_not_simulated(void) {
   // The opening's simulation, which describes another position.
   assert(sim_results_get_number_of_plays(sim_results) == 3);
 
+  // A stop request -- the user's, or a task's time limit -- that lands before
+  // the simulation runs (an inferring player's stops during its inference)
+  // leaves the results describing the opening, whose best play is not on
+  // this rack. The turn plays its top static play instead, not simulated:
+  // playing the stale one took tiles the rack did not have.
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
+              "RSTUVWY/HIJKLMN 0/0 0 -lex CSW21;");
+  game = config_get_game(config);
+  sim_args.game = game;
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  move = get_top_simming_move(game, move_list, &sim_args, &sim_ctx, sim_results,
+                              &simulated, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(move && !simulated);
+  Rack rack;
+  rack_copy(&rack, player_get_rack(game_get_player(game, 0)));
+  for (int i = 0; i < move_get_tiles_length(move); i++) {
+    const MachineLetter tile = move_get_tile(move, i);
+    if (tile == PLAYED_THROUGH_MARKER) {
+      continue;
+    }
+    const MachineLetter letter =
+        get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
+    assert(rack_get_letter(&rack, letter) > 0);
+    rack_take_letter(&rack, letter);
+  }
+  // The best of this rack's plays, as the list ranks them.
+  assert(move == move_list_get_move(move_list, 0));
+  for (int i = 1; i < move_list_get_count(move_list); i++) {
+    assert(move_get_equity(move_list_get_move(move_list, i)) <=
+           move_get_equity(move));
+  }
+
   error_stack_destroy(error_stack);
   sim_ctx_destroy(sim_ctx);
   move_list_destroy(move_list);

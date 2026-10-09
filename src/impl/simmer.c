@@ -189,6 +189,17 @@ const Move *get_top_simming_move(Game *game, MoveList *move_list,
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
   }
+  // A stop request cuts the simulation short, and one that lands during the
+  // inference that precedes it returns before the simulation starts: the
+  // results are then still the last simulation's, of another position, and
+  // their best play may not even be on this rack. Playing it corrupted the
+  // game (rack counts below zero); the caller is abandoning the run anyway,
+  // so the top static play stands in, as for a turn with nothing to simulate.
+  if (thread_control_get_status(sim_args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    move_list_sort_moves(move_list);
+    return move_list_get_move(move_list, 0);
+  }
   *simulated = true;
 
   return sim_results_get_best_move(sim_results);
