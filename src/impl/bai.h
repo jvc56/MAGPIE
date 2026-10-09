@@ -41,25 +41,25 @@ enum {
   // BAI_FIXED_POINT_SHIFT (bai_defs.h), which is what lets a multithreaded sim
   // reproduce a single-threaded one exactly.
   //
-  // A single sample is rejected beyond this magnitude, well outside the range
-  // of any random variable this is used with, so that the llround below cannot
-  // be handed a value outside the range of int64_t.
-  BAI_SAMPLE_MAX_MAGNITUDE = 1 << 20,
+  // A sample is rejected beyond this magnitude, well outside the range of
+  // any random variable this is used with. The bound is on the raw sample, and
+  // its square is what limits it: a sample of at most 2^10 has a square of at
+  // most 2^20, which quantizes to at most 2^50, far inside int64_t.
+  BAI_SAMPLE_MAX_MAGNITUDE = 1 << 10,
 };
 
 // samples_squared_sum accumulates the quantized value of (value * value), NOT
 // the square of the quantized value. Squaring after quantizing would
-// accumulate 2^60-scale terms and overflow int64 after only eight samples,
-// whereas quantizing the square gives it exactly the same bound as the value
-// sum.
+// accumulate 2^60-scale terms and overflow int64 after only eight samples.
 //
 // For sim utilities, which sim_utility_blend bounds to [0, 1], a quantized
 // sample and a quantized square are each at most 2^30, so both accumulators
-// stay exact past 8e9 samples (int64 holds about 9.22e18). bai() is generic
-// over RandomVariables, though, and the normal RVs the unit tests drive it
-// with are unbounded, so nothing here can bound an arbitrary RV's range in
-// advance. bai_accumulate_checked therefore fails loudly rather than silently
-// wrapping.
+// stay exact past 8e9 samples (int64 holds about 9.22e18). At the magnitude
+// bound a quantized square is 2^50, so samples_squared_sum overflows after
+// about 8000 such samples. bai() is generic over RandomVariables, though, and
+// the normal RVs the unit tests drive it with are unbounded, so nothing here
+// can bound an arbitrary RV's range in advance. bai_accumulate_checked
+// therefore fails loudly rather than silently wrapping.
 static_assert(BAI_FIXED_POINT_SHIFT < 62,
               "BAI fixed-point scale must leave headroom in int64");
 
@@ -458,15 +458,10 @@ typedef struct BAISampleArgs {
   double cutoff;
 } BAISampleArgs;
 
-// Quantizes a sample value into the fixed-point integer domain the arm
-// accumulators use. Does not clamp to [0, 1]: sim samples are utilities in
-// that range, but bai() is generic over RandomVariables and the normal RVs
-// the unit tests drive it with are unbounded.
-static inline int64_t bai_quantize_sample(const double value) {
-  if (!(value >= -(double)BAI_SAMPLE_MAX_MAGNITUDE &&
-        value <= (double)BAI_SAMPLE_MAX_MAGNITUDE)) {
-    log_fatal("BAI sample value out of range: %f", value);
-  }
+// Quantizes a value into the fixed-point integer domain the arm accumulators
+// use. The caller bounds the value (see bai_accumulate_sample), so that the
+// llround cannot be handed a value outside the range of int64_t.
+static inline int64_t bai_quantize(const double value) {
   return llround(value * (double)BAI_FIXED_POINT_SCALE);
 }
 
@@ -480,6 +475,23 @@ static inline void bai_accumulate_checked(int64_t *accumulator,
     log_fatal("BAI sample accumulator overflowed");
   }
   *accumulator += addend;
+}
+
+// Adds one sample to an arm's accumulators. Does not clamp to [0, 1]: sim
+// samples are utilities in that range, but bai() is generic over
+// RandomVariables and the normal RVs the unit tests drive it with are
+// unbounded. The raw sample is checked against BAI_SAMPLE_MAX_MAGNITUDE, which
+// also bounds its square.
+static inline void bai_accumulate_sample(BAIArmDatum *arm_datum,
+                                         const double value) {
+  if (!(value >= -(double)BAI_SAMPLE_MAX_MAGNITUDE &&
+        value <= (double)BAI_SAMPLE_MAX_MAGNITUDE)) {
+    log_fatal("BAI sample value out of range: %f", value);
+  }
+  arm_datum->num_samples++;
+  bai_accumulate_checked(&arm_datum->samples_sum, bai_quantize(value));
+  bai_accumulate_checked(&arm_datum->samples_squared_sum,
+                         bai_quantize(value * value));
 }
 
 // Derives mean and variance from the exact integer accumulators. The
@@ -927,13 +939,8 @@ static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
   BAISyncData *bai_sync_data = args->bai_sync_data;
   for (int slot = 0; slot < round->num_samples; slot++) {
     const int arm_index = round->arm_indices[slot];
-    const double sample_value = round->values[slot];
-    BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
-    arm_datum->num_samples++;
-    bai_accumulate_checked(&arm_datum->samples_sum,
-                           bai_quantize_sample(sample_value));
-    bai_accumulate_checked(&arm_datum->samples_squared_sum,
-                           bai_quantize_sample(sample_value * sample_value));
+    bai_accumulate_sample(&bai_sync_data->arm_data[arm_index],
+                          round->values[slot]);
     if (round->records != NULL) {
       rvs_apply_sample_record(args->rvs, (uint64_t)arm_index,
                               round->records +
