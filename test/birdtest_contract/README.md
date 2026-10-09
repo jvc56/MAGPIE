@@ -50,7 +50,11 @@ Beside `claim_token`, `job_id`, `min_magpie_version`, `expected_data` and the
   this. A worker that reaches it stops the task, hands it back unfinished and
   declines it with `"reason": "time_limit"` (`decline-time-limit.json`). A
   minute past the deadline the server takes the claim back whether or not the
-  worker still heartbeats, and answers a result for it `{"accepted": false}`.
+  worker still heartbeats, and answers a result for it `{"accepted": false}`;
+  a claim taken back so while its worker heartbeats, or a result that late,
+  counts against the job as the decline would. The floor is ten minutes
+  because a task's first claim on a machine may build a rack info table, which
+  cannot be stopped part-way.
 
 A `games` or `game_pairs` request also states `threading_mode`, after
 `sim_cutoff`: `"igp"` (the default) gives all of a task's threads to one game's
