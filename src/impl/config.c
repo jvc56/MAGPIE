@@ -4515,12 +4515,12 @@ void config_fill_autoplay_args(const Config *config,
   }
   autoplay_args->overtime_penalty_points = config->overtime_penalty_points;
   autoplay_args->overtime_period_seconds = config->overtime_period_ms / 1000.0;
-  // Solving is per player, and every solve gets the run's whole thread count:
-  // the multi-threading mode below decides how autoplay shares threads
-  // between games and sims, not what a solve is given.
+  // Solving is per player. Autoplay gives each solve its share of the run's
+  // threads once it knows how many games it plays at once, which the
+  // multi-threading mode below decides.
   autoplay_args->solver_settings[0] = config->solver_settings[0];
   autoplay_args->solver_settings[1] = config->solver_settings[1];
-  autoplay_args->solver_num_threads = config->num_threads;
+  autoplay_args->total_num_threads = config->num_threads;
   autoplay_args->solver_tt_fraction_of_mem = config->tt_fraction_of_mem;
 
   autoplay_args->num_threads = config->num_threads;

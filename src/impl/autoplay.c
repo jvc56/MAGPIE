@@ -178,6 +178,9 @@ typedef struct AutoplaySharedData {
   // The endgame transposition table every worker's endgame and PEG leaf solves
   // share, or NULL when no player solves.
   TranspositionTable *solver_tt;
+  // The threads each endgame or PEG solve gets; see
+  // autoplay_solver_num_threads.
+  int solver_num_threads;
   PATGenSharedData *pat_gen_shared_data;
 } AutoplaySharedData;
 
@@ -731,6 +734,7 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
   shared_data->thread_control = args->thread_control;
   shared_data->leavegen_shared_data = NULL;
   shared_data->solver_tt = NULL;
+  shared_data->solver_num_threads = 1;
   if (args->type == AUTOPLAY_TYPE_DEFAULT &&
       (autoplay_solver_settings_solves(&args->solver_settings[0]) ||
        autoplay_solver_settings_solves(&args->solver_settings[1]))) {
@@ -1075,7 +1079,7 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
     const Move *solved = autoplay_solver_solve(
         autoplay_worker->solver_ctx, solver_settings, game_runner->game,
         autoplay_worker->shared_data->solver_tt,
-        autoplay_worker->args.solver_num_threads,
+        autoplay_worker->shared_data->solver_num_threads,
         autoplay_solver_seed(game_runner->seed, game_runner->turn_number,
                              player_on_turn_index),
         autoplay_worker->shared_data->thread_control,
@@ -1664,6 +1668,15 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
   }
 }
 
+int autoplay_solver_num_threads(int total_num_threads,
+                                int num_concurrent_games) {
+  if (num_concurrent_games < 1) {
+    num_concurrent_games = 1;
+  }
+  const int share = total_num_threads / num_concurrent_games;
+  return share > 1 ? share : 1;
+}
+
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack) {
   valid_autoplay_results_options(autoplay_results, args, error_stack);
@@ -1766,6 +1779,16 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     free(pat_games_per_gen);
     return;
   }
+
+  // Every worker plays a game at a time, and a worker the run has no game
+  // for exits before it plays one, so the run plays this many games at once.
+  int num_concurrent_games = autoplay_num_threads;
+  if (!is_leavegen_mode && !is_patgen_mode &&
+      first_gen_num_games < (uint64_t)num_concurrent_games) {
+    num_concurrent_games = (int)first_gen_num_games;
+  }
+  shared_data->solver_num_threads = autoplay_solver_num_threads(
+      args->total_num_threads, num_concurrent_games);
 
   if (is_patgen_mode) {
     // We can use player index 0 here since it is guaranteed that the

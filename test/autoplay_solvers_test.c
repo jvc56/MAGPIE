@@ -4,12 +4,15 @@
 #include "../src/compat/ctime.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/autoplay_results.h"
 #include "../src/ent/autoplay_solver_settings.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
+#include "../src/impl/autoplay.h"
 #include "../src/impl/autoplay_solvers.h"
 #include "../src/impl/config.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -19,6 +22,79 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+// Both players static, solving their endgames 2 plies deep and their
+// pre-endgames with a tile in the bag over a short schedule, without nested
+// lookahead: a game's last turns are solves, each over quickly. (A 2-tile
+// pre-endgame takes seconds a game even so.)
+#define QUICK_SOLVERS                                                          \
+  "-eplies1 2 -eplies2 2 -pegbag1 1 -pegbag2 1 -pegtopk1 2 -pegtopk2 2 "       \
+  "-pegnested1 false -pegnested2 false"
+
+// The share of a run's threads each solve gets: an even split between the
+// games played at once, never less than one thread.
+static void test_the_solve_share(void) {
+  assert(autoplay_solver_num_threads(40, 40) == 1);
+  assert(autoplay_solver_num_threads(40, 1) == 40);
+  assert(autoplay_solver_num_threads(40, 2) == 20);
+  assert(autoplay_solver_num_threads(40, 3) == 13);
+  assert(autoplay_solver_num_threads(3, 8) == 1);
+  assert(autoplay_solver_num_threads(1, 1) == 1);
+  assert(autoplay_solver_num_threads(8, 0) == 8);
+}
+
+// Runs `command` on a config made with `settings` and returns the most move
+// generators its threads held at once; *solve_threads is the most threads a
+// solve in it was given (0 if nothing was solved).
+static int run_autoplay(const char *settings, const char *command,
+                        int *solve_threads) {
+  Config *config = config_create_or_die(settings);
+  gen_reset_slots_high_water();
+  autoplay_solver_reset_max_num_threads();
+  load_and_exec_config_or_die(config, command);
+  const int high_water = gen_get_slots_high_water();
+  *solve_threads = autoplay_solver_get_max_num_threads();
+  config_destroy(config);
+  return high_water;
+}
+
+// Under pgp, a run at N threads plays N games at once, and each game's solves
+// get one thread: before, each got all N, and N games solving at once took
+// N + N^2 move generators, which exhausted the pool of MAX_THREADS from
+// N = 22 and ended the run. At 40 threads the run now stays within the 2N+2
+// contribute's thread cap assumes (CONTRIBUTE_MAX_THREADS). With fewer games
+// than threads, the threads go to the games there are.
+static void test_concurrent_games_share_their_threads(void) {
+  int solve_threads = 0;
+  const int high_water = run_autoplay(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "-threads 40 -mtmode pgp " QUICK_SOLVERS,
+      "autoplay games 40 -seed 8", &solve_threads);
+  printf("pgp, 40 threads, 40 games: %d move generators at most, solves on %d "
+         "thread(s)\n",
+         high_water, solve_threads);
+  assert(solve_threads == 1);
+  assert(high_water <= 2 * 40 + 2);
+
+  // Two games at 8 threads: four threads a solve.
+  run_autoplay("set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best "
+               "-r2 best -threads 8 -mtmode pgp " QUICK_SOLVERS,
+               "autoplay games 2 -seed 11", &solve_threads);
+  assert(solve_threads == 4);
+
+  // Under igp a simulating player puts the run on one game at a time, which
+  // its solves then have to themselves.
+  const int igp_high_water = run_autoplay(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "-threads 6 -mtmode igp -pl1 2 -np1 3 -i1 20 -mi1 5 -tlim 0 "
+      "-sinfer false " QUICK_SOLVERS,
+      "autoplay games 1 -seed 11", &solve_threads);
+  printf("igp, 6 threads, a simulating player: %d move generators at most, "
+         "solves on %d thread(s)\n",
+         igp_high_water, solve_threads);
+  assert(solve_threads == 6);
+  assert(igp_high_water <= 2 * 6 + 2);
+}
 
 // Sets the run's stop after a delay, as the user's `stop` or a contribute
 // task's time limit does, and notes when; then waits for the solve to come
@@ -179,6 +255,8 @@ static void test_a_thread_control_sees_its_parents_stop(void) {
 }
 
 void test_autoplay_solvers(void) {
+  test_the_solve_share();
   test_a_thread_control_sees_its_parents_stop();
+  test_concurrent_games_share_their_threads();
   test_a_stop_ends_a_running_solve();
 }

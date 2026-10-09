@@ -339,6 +339,13 @@ void gen_destroy_cache(void);
 // generating moves: read it before and after a command, not during one.
 uint64_t gen_get_movegen_count(void);
 
+// The most pool slots (see MAX_THREADS) live threads have held at once since
+// the last gen_reset_slots_high_water, which starts the count again from the
+// slots held now. A thread takes its slot on its first move generation and
+// gives it back when it exits; past MAX_THREADS at once, magpie exits.
+int gen_get_slots_high_water(void);
+void gen_reset_slots_high_water(void);
+
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this
 // so far is using a reduced wordlist kwg (done with wordprune) for endgame

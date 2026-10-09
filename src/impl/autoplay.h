@@ -81,9 +81,12 @@ typedef struct AutoplayArgs {
   // AutoplaySolverSettings). Only AUTOPLAY_TYPE_DEFAULT reads them: a leavegen
   // game ends before the bag is small enough for either solver.
   AutoplaySolverSettings solver_settings[2];
-  // Threads every endgame and PEG solve uses: the run's own thread count, not
-  // the per-game share autoplay's multi-threading mode gives sims.
-  int solver_num_threads;
+  // The run's whole thread count. num_threads above is how many autoplay
+  // workers it runs, a game at a time each: all of them under pgp, or one
+  // simulating on every thread under igp. Autoplay divides this between the
+  // games it plays at once for their endgame and PEG solves (see
+  // autoplay_solver_num_threads).
+  int total_num_threads;
   // Fraction of memory the run's one endgame transposition table takes,
   // shared by every worker's endgame and PEG leaf solves.
   double solver_tt_fraction_of_mem;
@@ -91,6 +94,16 @@ typedef struct AutoplayArgs {
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack);
+
+// The threads each endgame or PEG solve gets in a run of `total_num_threads`
+// threads that plays `num_concurrent_games` games at once: an even share, at
+// least one. A solve takes its threads on top of the game's own, and each of
+// its threads holds a move generator from the pool of MAX_THREADS while it
+// lives, so giving every one of N concurrent games' solves all N threads
+// (N + N^2 at once) exhausts the pool from N = 22; shared, they take at most
+// N more.
+int autoplay_solver_num_threads(int total_num_threads,
+                                int num_concurrent_games);
 
 // Benchmark instrumentation: returns accumulated sim iteration count across
 // all autoplay sims since process start (or last reset). Used by simbench.

@@ -20,6 +20,7 @@
 #include "endgame.h"
 #include "move_gen.h"
 #include "peg.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -30,6 +31,26 @@ enum {
   // its score as its equity.
   AUTOPLAY_SOLVER_EQUITY_LIST_CAP = 16384,
 };
+
+// The most threads a solve has been given since the last reset; see
+// autoplay_solver_get_max_num_threads.
+static atomic_int max_solve_num_threads = 0;
+
+int autoplay_solver_get_max_num_threads(void) {
+  return atomic_load(&max_solve_num_threads);
+}
+
+void autoplay_solver_reset_max_num_threads(void) {
+  atomic_store(&max_solve_num_threads, 0);
+}
+
+static void autoplay_solver_note_num_threads(int num_threads) {
+  int seen = atomic_load(&max_solve_num_threads);
+  while (num_threads > seen &&
+         !atomic_compare_exchange_weak(&max_solve_num_threads, &seen,
+                                       num_threads)) {
+  }
+}
 
 // Whether the run the solve belongs to was asked to stop: by the user, or by
 // a contribute task's time limit.
@@ -190,7 +211,7 @@ static const Move *autoplay_solver_solve_endgame(
   EndgameArgs endgame_args;
   endgame_args_fill(
       thread_control, game, /*tt_fraction_of_mem=*/0.0, settings->endgame_plies,
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, num_threads > 0 ? num_threads : 1,
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, num_threads,
       /*use_heuristics=*/true, /*num_top_moves=*/1,
       /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
       /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
@@ -312,7 +333,7 @@ static const Move *autoplay_solver_solve_peg(
       autoplay_solver_thread_control_create(run_thread_control);
   PegArgs peg_args;
   peg_args_fill(
-      game, thread_control, num_threads > 0 ? num_threads : 1,
+      game, thread_control, num_threads,
       // No time limit: the schedule bounds the work.
       /*time_budget_seconds=*/0.0, /*max_stage=*/0, /*greedy_seed_only=*/false,
       settings->peg_stage_top_k, settings->peg_num_stages, /*inner_top_k=*/0,
@@ -363,9 +384,13 @@ const Move *autoplay_solver_solve(AutoplaySolverCtx *ctx,
                                   ThreadControl *run_thread_control,
                                   bool record, ErrorStack *error_stack) {
   ctx->analysis = (SolverAnalysis){0};
+  if (num_threads < 1) {
+    num_threads = 1;
+  }
   if (autoplay_solver_stopped(run_thread_control)) {
     return NULL;
   }
+  autoplay_solver_note_num_threads(num_threads);
   if (bag_get_letters(game_get_bag(game)) == 0) {
     return autoplay_solver_solve_endgame(ctx, settings, game, shared_tt,
                                          num_threads, seed, run_thread_control,

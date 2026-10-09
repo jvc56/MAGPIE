@@ -65,6 +65,10 @@ static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 // The move generations counted on gens gen_destroy_cache has freed, so the
 // process's count never goes back (gen_get_movegen_count). Under cache_mutex.
 static uint64_t freed_gens_movegen_count = 0;
+// The slots live threads hold now, and the most they have held at once since
+// gen_reset_slots_high_water (gen_get_slots_high_water). Under cache_mutex.
+static int slots_in_use_count = 0;
+static int slots_in_use_high_water = 0;
 
 void generator_destroy(MoveGen *gen) {
   if (!gen) {
@@ -101,6 +105,7 @@ static void gen_release_slot(void *ptr) {
   for (int i = 0; i < MAX_THREADS; i++) {
     if (cached_gens[i] == ptr) {
       slot_in_use[i] = false;
+      slots_in_use_count--;
       break;
     }
   }
@@ -133,6 +138,10 @@ MoveGen *get_movegen(void) {
     log_fatal("movegen pool exhausted: more than %d concurrent threads",
               MAX_THREADS);
   }
+  slots_in_use_count++;
+  if (slots_in_use_count > slots_in_use_high_water) {
+    slots_in_use_high_water = slots_in_use_count;
+  }
   // cppcheck-suppress negativeIndex ; slot >= 0 here (log_fatal above is
   // noreturn)
   gen = cached_gens[slot];
@@ -159,6 +168,7 @@ void gen_destroy_cache(void) {
     cached_gens[i] = NULL;
     slot_in_use[i] = false;
   }
+  slots_in_use_count = 0;
   cpthread_mutex_unlock(&cache_mutex);
   // The calling thread's key still points at the gen we just freed (key
   // destructors don't fire for a thread that keeps running), so clear it.
@@ -181,6 +191,19 @@ uint64_t gen_get_movegen_count(void) {
   }
   cpthread_mutex_unlock(&cache_mutex);
   return total;
+}
+
+int gen_get_slots_high_water(void) {
+  cpthread_mutex_lock(&cache_mutex);
+  const int high_water = slots_in_use_high_water;
+  cpthread_mutex_unlock(&cache_mutex);
+  return high_water;
+}
+
+void gen_reset_slots_high_water(void) {
+  cpthread_mutex_lock(&cache_mutex);
+  slots_in_use_high_water = slots_in_use_count;
+  cpthread_mutex_unlock(&cache_mutex);
 }
 
 // Cache getter functions

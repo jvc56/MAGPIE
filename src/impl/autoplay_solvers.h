@@ -29,7 +29,7 @@ bool autoplay_solver_applies(const AutoplaySolverSettings *settings,
 // to play, owned by `ctx` and valid until its next solve. Only call when
 // autoplay_solver_applies says so.
 //
-// Every solve runs with `num_threads` threads, no time limit,
+// Every solve runs with `num_threads` threads (at least one), no time limit,
 // and the endgame depth / PEG schedule `settings` states. `shared_tt` is the
 // run's endgame transposition table, shared by every worker's endgame and PEG
 // leaf solves. `seed` seeds the solve; a nonzero seed derived from the task
@@ -63,5 +63,11 @@ autoplay_solver_get_analysis(const AutoplaySolverCtx *ctx);
 // player, so a task's solves are seeded by the task alone.
 uint64_t autoplay_solver_seed(uint64_t game_seed, int turn_number,
                               int player_index);
+
+// The most threads any solve in this process has been given since the last
+// reset, for tests: what autoplay's split of its threads between concurrent
+// games and their solves came to.
+int autoplay_solver_get_max_num_threads(void);
+void autoplay_solver_reset_max_num_threads(void);
 
 #endif

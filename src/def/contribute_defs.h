@@ -29,11 +29,16 @@ enum { CONTRIBUTE_BAD_ARTIFACT_MAX_WAIT_SECONDS = 600 };
 
 // The most threads a task runs on. Move generation keeps a pool of MAX_THREADS
 // per-thread generators, each held until its thread exits. A task at N threads
-// runs N autoplay workers, each with one simulation or inference thread at a
-// time (pgp: a game per thread), or one autoplay worker simulating on N (igp),
-// plus the contribute thread, which keeps its generator across tasks, and
-// possibly the thread that called contribute: 2N+2 at most. Past the pool,
-// magpie exits on the task.
+// plays G games at once, G <= N (pgp: a game per thread; igp with a simming
+// player: one game simulating on all N), each on its autoplay worker thread.
+// A turn runs one simulation, inference or solve at a time, and its threads
+// come on top of the worker's: a simulation or inference shares the N with the
+// other games' (1 each under pgp, all N under igp), and an endgame or PEG solve
+// gets N/G of them (at least 1) -- an endgame N/G threads, a PEG its pool of
+// N/G and at most N/G - 1 endgame helpers it lends idle cores to. So the games
+// hold at most 2N generators, and with the contribute thread, which keeps its
+// generator across tasks, and possibly the thread that called contribute,
+// 2N+2. Past the pool, magpie exits on the task.
 enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 
 // Assignment fields beside the task request, read in contribute.c: the job's
