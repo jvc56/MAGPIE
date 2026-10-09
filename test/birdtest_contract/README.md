@@ -66,10 +66,8 @@ anything else is a `400` listing them.
 ## Capturing
 
 The first nine, `decline-time-limit.json` and `result-games-inference.json`
-were written by hand. The rest were **captured from a real exchange**, though
-`assignment-game-pairs.json` and `anon-uuid-assignment.json` were given
-`job_name`, `max_task_seconds` and `threading_mode` by hand when the server
-began sending them, until the next recapture: `scripts/capture_contract.py` is a recording proxy that sits
+were written by hand. The rest were **captured from a real exchange**:
+`scripts/capture_contract.py` is a recording proxy that sits
 between `magpie contribute` and the backend, forwards everything unchanged, and
 writes the first body of each message type here. Nothing is normalised --
 tokens, ids and timings are the ones that crossed the wire, so a recapture
