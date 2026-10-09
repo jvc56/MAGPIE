@@ -1,7 +1,9 @@
 #include "benchmark_peg_test.h"
 
+#include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
+#include "../src/def/cpthread_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -11,6 +13,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/validated_move.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -46,7 +49,8 @@
 // (~hundreds of seconds/position); the A/B times are the in-game-relevant ones.
 //
 // Configs (including the oracle) are hardcoded in the test_benchmark_peg_*
-// entry points below — there are deliberately no environment-variable knobs.
+// entry points below. The separate pegregretbench driver uses environment
+// variables to reproduce equal-budget common-oracle comparisons.
 // Positions come from the committed notes/peg_positions/random_Npeg.txt
 // fixtures (run from the repo root); each line's embedded "-lex CSW24" is
 // honored by loading via the cgp command. The on-demand entry points hardcode
@@ -1363,5 +1367,173 @@ void test_peg_strength_curve(void) {
     }
     (void)fclose(fp);
   }
+  config_destroy(config);
+}
+
+typedef struct PegRegretRecord {
+  int stage;
+  int64_t elapsed_ns;
+  char move[64];
+  double win;
+  double spread;
+} PegRegretRecord;
+
+typedef struct PegRegretTrace {
+  const Game *game;
+  cpthread_mutex_t mutex;
+  int64_t started_ns;
+  PegRegretRecord *records;
+  int count;
+  int capacity;
+} PegRegretTrace;
+
+static void peg_regret_collect(int stage, int rank, const Move *move,
+                               double win, double spread, int scenarios,
+                               int64_t completed_ns, bool reordered,
+                               void *user_data) {
+  (void)rank;
+  (void)scenarios;
+  (void)completed_ns;
+  (void)reordered;
+  PegRegretTrace *trace = user_data;
+  if (win < 0) {
+    return;
+  }
+  cpthread_mutex_lock(&trace->mutex);
+  if (trace->count == trace->capacity) {
+    trace->capacity = trace->capacity == 0 ? 64 : 2 * trace->capacity;
+    trace->records = realloc_or_die(
+        trace->records, (size_t)trace->capacity * sizeof(*trace->records));
+  }
+  PegRegretRecord *record = &trace->records[trace->count++];
+  record->stage = stage;
+  record->win = win;
+  record->spread = spread;
+  StringBuilder *text = string_builder_create();
+  string_builder_add_ucgi_move(text, move, game_get_board(trace->game),
+                               game_get_ld(trace->game));
+  (void)snprintf(record->move, sizeof(record->move), "%s",
+                 string_builder_peek(text));
+  string_builder_destroy(text);
+  record->elapsed_ns = ctimer_monotonic_ns() - trace->started_ns;
+  cpthread_mutex_unlock(&trace->mutex);
+}
+
+static int peg_regret_parse_int(const char *setting) {
+  ErrorStack *errors = error_stack_create();
+  const int value = string_to_int(setting, errors);
+  assert(error_stack_is_empty(errors));
+  error_stack_destroy(errors);
+  return value;
+}
+
+void test_peg_regret_bench(void) {
+  log_set_level(LOG_FATAL);
+  const char *setting = getenv("PEGP_GENERATE");
+  if (setting != NULL && peg_regret_parse_int(setting)) {
+    const char *path = getenv("PEGP_FILE");
+    assert(path != NULL);
+    const char *bag = getenv("PEGP_BAG");
+    const char *count = getenv("PEGP_COUNT");
+    const char *seed = getenv("PEGP_SEED");
+    assert(bag != NULL && count != NULL && seed != NULL);
+    const char *contested = getenv("PEGP_CONTESTED");
+    generate_peg_cgps(strtoull(seed, NULL, 10), peg_regret_parse_int(bag),
+                      peg_regret_parse_int(count), path, false,
+                      contested != NULL && peg_regret_parse_int(contested));
+    return;
+  }
+  const char *cgp = getenv("PEGP_CGP");
+  assert(cgp != NULL);
+  setting = getenv("PEGP_ORACLE");
+  const bool oracle = setting != NULL && peg_regret_parse_int(setting);
+  setting = getenv("PEGP_FIRSTWIN");
+  const bool first_win = setting != NULL && peg_regret_parse_int(setting);
+  assert(!oracle || !first_win);
+  setting = getenv("PEGP_SECONDS");
+  assert(setting != NULL);
+  const double seconds = strtod(setting, NULL);
+  setting = getenv("PEGP_THREADS");
+  const int threads = setting == NULL ? 8 : peg_regret_parse_int(setting);
+  Config *config =
+      config_create_or_die("set -lex CSW24 -wmp true -rit true -wit true");
+  char command[4128];
+  (void)snprintf(command, sizeof(command), "cgp %s", cgp);
+  exec_config_quiet(config, command);
+  const Game *game = config_get_game(config);
+  PegPoll *poll = peg_poll_create();
+  const int oracle_top_k[] = {32, 32, 32};
+  const PegBenchConfig cfg = {
+      .num_threads = threads,
+      .time_budget_seconds = seconds,
+      .scenario_stride = 1,
+      .stage_top_k = oracle ? oracle_top_k : NULL,
+      .num_stages = oracle ? 3 : 0,
+      .nested_enabled = true,
+      .nested_max_depth = 1,
+      .poll = poll,
+  };
+  PegArgs args;
+  fill_peg_args(&args, config, &cfg);
+  args.first_win_optim = first_win;
+  ErrorStack *errors = error_stack_create();
+  ValidatedMoves *validated = NULL;
+  const Move *protected_moves[8];
+  setting = getenv("PEGP_PROTECT");
+  if (setting != NULL && setting[0] != '\0') {
+    validated =
+        validated_moves_create(game, game_get_player_on_turn_index(game),
+                               setting, false, true, errors);
+    assert(error_stack_is_empty(errors));
+    const int count = validated_moves_get_number_of_moves(validated);
+    assert(count > 0 && count <= 8);
+    for (int index = 0; index < count; index++) {
+      protected_moves[index] = validated_moves_get_move(validated, index);
+    }
+    args.protect_moves = protected_moves;
+    args.n_protect_moves = count;
+  }
+  PegRegretTrace trace = {.game = game};
+  cpthread_mutex_init(&trace.mutex);
+  args.on_cand_done = peg_regret_collect;
+  args.user_data = &trace;
+  PegResult result;
+  Timer timer;
+  ctimer_start(&timer);
+  trace.started_ns = ctimer_monotonic_ns();
+  peg_solve(&args, &result, errors);
+  const double elapsed = ctimer_elapsed_seconds(&timer);
+  assert(error_stack_is_empty(errors));
+  assert(result.n_top_cands > 0);
+  StringBuilder *best = string_builder_create();
+  string_builder_add_ucgi_move(best, &result.best_move, game_get_board(game),
+                               game_get_ld(game));
+  printf("PEGPICK\t%s\t%.9f\t%d\t%d\t%.12f\t%.12f\n", string_builder_peek(best),
+         elapsed, result.last_completed_stage, result.last_stage_partial,
+         result.best_win, result.best_spread);
+  // Also keep the final published field, including stage 0 if no deep stage
+  // completed. Earlier callbacks allow the oracle to fall back to a common
+  // completed stage when its final partial stage omitted a protected move.
+  for (int index = 0; index < result.n_top_cands; index++) {
+    const PegRankedCand *candidate = &result.top_cands[index];
+    peg_regret_collect(result.last_completed_stage, index, &candidate->move,
+                       candidate->win_pct, candidate->mean_spread,
+                       candidate->n_scenarios, 0, false, &trace);
+  }
+  for (int index = 0; index < trace.count; index++) {
+    const PegRegretRecord *record = &trace.records[index];
+    printf("PEGTRACE\t%d\t%s\t%.12f\t%.12f\t%lld\n", record->stage,
+           record->move, record->win, record->spread,
+           (long long)record->elapsed_ns);
+  }
+  (void)fflush(stdout);
+  free(trace.records);
+  string_builder_destroy(best);
+  peg_result_destroy(&result);
+  peg_poll_destroy(poll);
+  if (validated != NULL) {
+    validated_moves_destroy(validated);
+  }
+  error_stack_destroy(errors);
   config_destroy(config);
 }
