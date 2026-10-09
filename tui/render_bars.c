@@ -7,6 +7,7 @@
 #include "mach_compat.h"
 #include "render_common.h"
 #include "render_layout.h"
+#include "render_planes.h"
 #include "settings_table.h"
 #include "slash_commands.h"
 #include "theme.h"
@@ -252,6 +253,40 @@ static void render_palette_row(struct ncplane *plane, const Theme *theme,
 // setting it could be, with its current value, the values it takes, and
 // what it does. Once the name is complete: the setting's values (for a
 // choice, those matching what's typed).
+// The palette's own plane, `rows` tall just above the command bar and
+// on top of everything (the pixel tiles included), created or resized
+// as needed. NULL when it doesn't fit.
+static struct ncplane *palette_plane(struct ncplane *parent, const Layout *L,
+                                     int rows) {
+  const int top = L->command_bar_row - rows;
+  if (top < 0 || rows <= 0) {
+    return NULL;
+  }
+  TuiGridPlanes *planes = tui_grid_planes();
+  if (planes->palette == NULL) {
+    ncplane_options opts = {0};
+    opts.y = top;
+    opts.x = 0;
+    opts.rows = (unsigned)rows;
+    opts.cols = L->plane_cols;
+    opts.name = "palette";
+    planes->palette = ncplane_create(parent, &opts);
+    if (planes->palette == NULL) {
+      return NULL;
+    }
+  } else {
+    unsigned cur_rows = 0;
+    unsigned cur_cols = 0;
+    ncplane_dim_yx(planes->palette, &cur_rows, &cur_cols);
+    if ((int)cur_rows != rows || cur_cols != L->plane_cols) {
+      ncplane_resize_simple(planes->palette, (unsigned)rows, L->plane_cols);
+    }
+    ncplane_move_yx(planes->palette, top, 0);
+  }
+  ncplane_move_top(planes->palette);
+  return planes->palette;
+}
+
 static void render_set_palette(struct ncplane *plane, const Theme *theme,
                                const TuiGameState *state, const Layout *L,
                                const TuiSlashWords *words) {
@@ -368,12 +403,12 @@ static void render_set_palette(struct ncplane *plane, const Theme *theme,
     cell_counts[0] = 1;
     row_count = 1;
   }
-  const int popup_top = L->command_bar_row - row_count;
-  if (popup_top < 0) {
+  struct ncplane *popup = palette_plane(plane, L, row_count);
+  if (popup == NULL) {
     return;
   }
   for (int row_idx = 0; row_idx < row_count; row_idx++) {
-    render_palette_row(plane, theme, L, popup_top + row_idx, cells[row_idx],
+    render_palette_row(popup, theme, L, row_idx, cells[row_idx],
                        cell_counts[row_idx]);
   }
 }
@@ -388,7 +423,12 @@ static void render_set_palette(struct ncplane *plane, const Theme *theme,
 // over it when the popup goes away.
 void render_command_palette(struct ncplane *plane, const Theme *theme,
                             const TuiGameState *state, const Layout *L) {
+  TuiGridPlanes *planes = tui_grid_planes();
   if (state == NULL || !state->slash_active) {
+    if (planes->palette != NULL) {
+      tui_plane_destroy(planes->palette);
+      planes->palette = NULL;
+    }
     return;
   }
   TuiSlashWords words;
@@ -417,8 +457,8 @@ void render_command_palette(struct ncplane *plane, const Theme *theme,
     }
   }
   const int popup_rows = n_match > 0 ? n_match : 1;
-  const int popup_top = L->command_bar_row - popup_rows;
-  if (popup_top < 0) {
+  struct ncplane *popup = palette_plane(plane, L, popup_rows);
+  if (popup == NULL) {
     return;
   }
   if (n_match == 0) {
@@ -426,7 +466,7 @@ void render_command_palette(struct ncplane *plane, const Theme *theme,
     (void)snprintf(buf, sizeof(buf), "No commands match \"/%s\"",
                    state->slash_buf);
     const PaletteCell cell = {buf, 1, 0};
-    render_palette_row(plane, theme, L, popup_top, &cell, 1);
+    render_palette_row(popup, theme, L, 0, &cell, 1);
     return;
   }
   // Descriptions align in a column: "/" + the longest name + a 3-cell
@@ -437,7 +477,7 @@ void render_command_palette(struct ncplane *plane, const Theme *theme,
     // The leading "/" stays dim; it isn't part of the typed match.
     const PaletteCell cells[3] = {
         {"/", 1, 0}, {cmd->name, 2, typed_len}, {cmd->desc, desc_col, 0}};
-    render_palette_row(plane, theme, L, popup_top + row_idx, cells, 3);
+    render_palette_row(popup, theme, L, row_idx, cells, 3);
   }
 }
 void render_command_bar(struct ncplane *plane, const Theme *theme,
