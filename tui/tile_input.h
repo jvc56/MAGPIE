@@ -14,10 +14,14 @@
 //     becomes that tile, and its remaining letters are skipped when typed
 //     next (Catalan Q is QU; the U that follows is absorbed);
 //   - a key with no tile of its own that joins the previous tile into
-//     one becomes that tile (Catalan N then Y is NY; L, then "." or "-"
-//     or "·", then L is L·L).
+//     one becomes that tile (Catalan N then Y is NY; L, then "·", then
+//     L is L·L).
 // Letters that also spell separate tiles stay separate (Catalan LL is
 // two Ls); brackets choose the joined tile.
+//
+// tui/assets/tile_aliases.csv lists other ways to type a letter
+// distribution's letters, read wherever typed text meets tile faces:
+// Catalan "." and "-" for the middle dot, Ł for L·L, Ý for NY.
 
 enum { TUI_TILE_TEXT_MAX = 16 };
 
@@ -35,10 +39,19 @@ typedef enum {
   TUI_TILE_KEY_REJECT,       // no tile
 } TuiTileKeyAction;
 
+// Finds the tile alias file next to the binary's assets. Returns false
+// when there's none.
+bool tui_tile_aliases_find_path(char *out, size_t out_size);
+
+// Loads the tile aliases from `path`, replacing any loaded before.
+// Call before other threads start; returns the row count, or -1 when
+// the file can't be read (and then no aliases apply).
+int tui_tile_aliases_load(const char *path);
+
 void tui_tile_key_reset(TuiTileKeyState *state);
 
 // The unblanked machine letter of the tile whose face is `text` (any
-// case), or -1 when none.
+// case, aliases read as their letters), or -1 when none.
 int tui_tile_for_text(const LetterDistribution *ld, const char *text);
 
 // One key (a UTF-8 character) typed into a move. `last_tile` is the face
@@ -75,6 +88,13 @@ typedef enum {
 // by `kind`, a blank or a played-through square).
 bool tui_tiles_valid(const LetterDistribution *ld, const char *text, int len,
                      TuiTilesKind kind);
+
+// The first `len` bytes of rack text `text` with each tile written as
+// the engine writes it: "ç" as "Ç", "Ł" and "[L.L]" as "[L·L]". Blanks
+// ("?"), an unclosed bracket, and anything that isn't a tile are kept as
+// typed.
+void tui_tiles_canonical_rack(const LetterDistribution *ld, const char *text,
+                              int len, char *out, size_t out_size);
 
 // `text`'s tiles in the letter distribution's order, blanks ("?") first;
 // anything unrecognized keeps its order at the end.
