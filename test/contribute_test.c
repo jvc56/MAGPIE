@@ -684,7 +684,7 @@ static void assert_fixture_is_an_assignment(const JsonValue *fixture,
                                      error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(job_name && *job_name);
-  assert(max_task_seconds >= 60 && max_task_seconds <= 86400);
+  assert(max_task_seconds >= 600 && max_task_seconds <= 86400);
   free(job_name);
   error_stack_destroy(error_stack);
 }
@@ -1610,7 +1610,9 @@ static void test_a_games_task_takes_its_threading_mode(void) {
 // An assignment names its job, which the started and finished lines print,
 // and its time limit. Both are required; the limit is whole seconds from 1;
 // a name is printed with any control character made harmless, so a job name
-// cannot write lines of its own into a contributor's terminal.
+// cannot write lines of its own into a contributor's terminal. The server
+// sends limits of 600 to 86,400 seconds; the 60 below is under that floor on
+// purpose, as magpie takes any positive limit.
 static void test_the_assignment_names_its_job_and_limit(void) {
   ErrorStack *error_stack = error_stack_create();
   struct {
@@ -1656,6 +1658,10 @@ static void test_the_assignment_names_its_job_and_limit(void) {
   error_stack_destroy(error_stack);
 }
 
+// The limits here, a second or so, are far below the server's floor of 600
+// seconds on purpose: magpie takes any positive limit, and a short one
+// exercises the stop path quickly.
+//
 // A task still running at its time limit is stopped the way the user's stop
 // stops it, and the clock says it was the one that stopped it and puts the
 // run's status back, so the run goes on -- with the next task on the same

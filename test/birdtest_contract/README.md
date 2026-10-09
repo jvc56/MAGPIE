@@ -44,7 +44,7 @@ Beside `claim_token`, `job_id`, `min_magpie_version`, `expected_data` and the
 - `job_name` -- a string, never empty: the job's name, or for a job created
   without one its type and the start of its id (`"games job 1d4a7f60"`). What
   the worker calls the job when it says what it is running.
-- `max_task_seconds` -- a whole number, 60 to 86,400: how long the worker may
+- `max_task_seconds` -- a whole number, 600 to 86,400: how long the worker may
   run this task. It is the server's setting (`/admin/settings`) as it stood
   when the claim was made, and the claim's deadline is its claim time plus
   this. A worker that reaches it stops the task, hands it back unfinished and
