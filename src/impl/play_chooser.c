@@ -497,6 +497,9 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
       /*use_margin_forecast=*/false, /*inference_args=*/NULL, &sim_args);
+  sim_args.pat_rollout_disabled = strategy->pat_rollout_disabled;
+  sim_args.pat_rollout_disabled_classes_mask =
+      strategy->pat_rollout_disabled_classes_mask;
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).

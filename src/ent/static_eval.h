@@ -10,6 +10,8 @@
 #include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/pat.h"
+#include "../ent/pat_eval.h"
 #include "../ent/rack.h"
 
 static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
@@ -19,9 +21,18 @@ static const Equity peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {0};
 // static const double peg_adjust_values[PEG_ADJUST_VALUES_LENGTH] = {
 //    0, -8, 0, -0.5, -2, -3.5, -2, 2, 10, 7, 4, -1, -2};
 
-static inline Equity
-placement_adjustment(const LetterDistribution *ld, const Move *move,
-                     const Equity *opening_move_penalties) {
+// word_penalties and letter_penalties are the halves of the opening penalty
+// driven by word and by letter multipliers (see update_opening_penalty).
+// pat_active_classes is the mover's live PAT_CLASS_MASK_* set (see
+// pat_eval_context_get_active_classes): a live class already prices its axis,
+// so that half is skipped. Callers pass the true set even when they leave the
+// PAT term itself out (see gen_get_static_equity_without_pat), so both
+// computations of a move's equity differ only by that term.
+static inline Equity placement_adjustment(const LetterDistribution *ld,
+                                          const Move *move,
+                                          const Equity *word_penalties,
+                                          const Equity *letter_penalties,
+                                          uint32_t pat_active_classes) {
   int start = move_get_col_start(move);
   int offset = 0;
 
@@ -31,6 +42,9 @@ placement_adjustment(const LetterDistribution *ld, const Move *move,
   }
 
   const int end = start + move_get_tiles_played(move);
+  const bool skip_word = (pat_active_classes & PAT_CLASS_MASK_WORD_MULT) != 0;
+  const bool skip_letter =
+      (pat_active_classes & PAT_CLASS_MASK_LETTER_MULT) != 0;
 
   int j = start;
   Equity penalty = 0;
@@ -40,7 +54,14 @@ placement_adjustment(const LetterDistribution *ld, const Move *move,
     if (get_is_blanked(tile)) {
       tile = get_unblanked_machine_letter(tile);
     }
-    penalty += ld_get_is_vowel(ld, tile) * opening_move_penalties[offset + j];
+    if (ld_get_is_vowel(ld, tile)) {
+      if (!skip_word) {
+        penalty += word_penalties[offset + j];
+      }
+      if (!skip_letter) {
+        penalty += letter_penalties[offset + j];
+      }
+    }
     j++;
   }
   return penalty;
@@ -101,6 +122,16 @@ static inline Equity static_eval_get_nonopening_move_equity(
   return equity;
 }
 
+// Computes the non-score part of the per-anchor equity upper bound used by
+// shadow pruning (see shadow_record in move_gen.c). INVARIANT: any term of
+// the real static evaluation that is omitted here must be <= 0 for every
+// move, or shadow equities stop being valid upper bounds and moves are
+// wrongly pruned. Two terms rely on this: the opening placement_adjustment
+// (each entry is <= 0 by construction in board_apply_layout) and the PAT
+// term (pat_eval_move_penalty), whose defense and opening parts are <= 0 and
+// whose utility correction, the one part that can be positive, movegen adds
+// to its bounds separately (see pat_eval_utility_bound). If you add a term
+// that can be positive, you must account for it here.
 static inline Equity
 static_eval_get_shadow_equity(const LetterDistribution *ld,
                               const Rack *opp_rack, const Equity *best_leaves,
@@ -132,16 +163,28 @@ static_eval_get_shadow_equity(const LetterDistribution *ld,
 }
 
 // Assumes all fields of the move are set except the equity.
+// pat_eval_ctx may be NULL (or disabled), which makes the PAT term zero;
+// pat_active_classes must still be the mover's real set (see
+// placement_adjustment).
 static inline Equity static_eval_get_move_equity_with_leave_value(
     const LetterDistribution *ld, const Move *move, const Rack *player_leave,
-    const Rack *opp_rack, const Equity *opening_move_penalties,
-    int board_number_of_tiles_played, int number_of_tiles_in_bag,
-    Equity leave_value) {
+    const Rack *opp_rack, const Equity *word_penalties,
+    const Equity *letter_penalties, uint32_t pat_active_classes,
+    const PATEvalContext *pat_eval_ctx, int board_number_of_tiles_played,
+    int number_of_tiles_in_bag, Equity leave_value) {
   Equity other_adjustments = 0;
 
   if (board_number_of_tiles_played == 0 &&
       move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-    other_adjustments = placement_adjustment(ld, move, opening_move_penalties);
+    other_adjustments = placement_adjustment(
+        ld, move, word_penalties, letter_penalties, pat_active_classes);
+  }
+
+  // PAT term (see the invariant comment on static_eval_get_shadow_equity).
+  // Scoped to bag > 0, like the endgame adjustment.
+  if (number_of_tiles_in_bag > 0) {
+    other_adjustments +=
+        pat_eval_move_penalty(pat_eval_ctx, move, player_leave);
   }
 
   return static_eval_get_nonopening_move_equity(
@@ -154,15 +197,17 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
 static inline Equity static_eval_get_move_equity(
     const LetterDistribution *ld, const KLV *klv, const Move *move,
     const Rack *player_leave, const Rack *opp_rack,
-    const Equity *opening_move_penalties, int board_number_of_tiles_played,
-    int number_of_tiles_in_bag) {
+    const Equity *word_penalties, const Equity *letter_penalties,
+    uint32_t pat_active_classes, const PATEvalContext *pat_eval_ctx,
+    int board_number_of_tiles_played, int number_of_tiles_in_bag) {
   Equity leave_equity = 0;
   if (player_leave && !rack_is_empty(player_leave)) {
     leave_equity = klv_get_leave_value(klv, player_leave);
   }
   return static_eval_get_move_equity_with_leave_value(
-      ld, move, player_leave, opp_rack, opening_move_penalties,
-      board_number_of_tiles_played, number_of_tiles_in_bag, leave_equity);
+      ld, move, player_leave, opp_rack, word_penalties, letter_penalties,
+      pat_active_classes, pat_eval_ctx, board_number_of_tiles_played,
+      number_of_tiles_in_bag, leave_equity);
 }
 
 static inline Equity static_eval_get_move_score(const LetterDistribution *ld,
