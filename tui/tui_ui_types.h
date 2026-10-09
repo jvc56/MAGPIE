@@ -19,7 +19,7 @@ typedef enum {
   TUI_MODAL_LOAD_GAME = 8,
   TUI_MODAL_ANNOTATE_SETUP = 9,
   TUI_MODAL_PLAY_SETUP = 10,
-  TUI_MODAL_ANALYSIS_MENU = 11,
+  TUI_MODAL_PANEL_MENU = 11, // a panel's context menu (panel_menu.h)
   TUI_MODAL_PHONY_CONFIRM = 12,
 } TuiModalState;
 
@@ -91,17 +91,6 @@ typedef enum {
   TUI_MENU_QUIT = 3,
   TUI_MENU_ITEM_COUNT = 4,
 } TuiMenuItem;
-
-// The analysis panel's menu (Space/Enter on its [5] badge): what can be
-// done with the turn selected in History.
-typedef enum {
-  TUI_ANALYSIS_MENU_SIM = 0,
-  TUI_ANALYSIS_MENU_KIBITZ = 1,
-  TUI_ANALYSIS_MENU_RESUME = 2,
-  TUI_ANALYSIS_MENU_STOP = 3,
-  TUI_ANALYSIS_MENU_BACK = 4,
-  TUI_ANALYSIS_MENU_ITEM_COUNT = 5,
-} TuiAnalysisMenuItem;
 
 // Annotation's phony dialog: a play forms words not in the lexicon.
 typedef enum {
