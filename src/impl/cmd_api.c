@@ -223,7 +223,7 @@ void magpie_stop_current_command(Magpie *mp) {
     return;
   }
   ThreadControl *tc = config_get_thread_control(mp->config);
-  thread_control_set_status(tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  thread_control_stop(tc);
 }
 
 magpie_thread_status magpie_get_thread_status(const Magpie *mp) {

@@ -65,6 +65,16 @@ bool thread_control_set_status(ThreadControl *thread_control,
   return success;
 }
 
+void thread_control_stop(ThreadControl *thread_control) {
+  cpthread_mutex_lock(&thread_control->status_mutex);
+  int expected = THREAD_CONTROL_STATUS_STARTED;
+  if (atomic_compare_exchange_strong(&thread_control->status, &expected,
+                                     THREAD_CONTROL_STATUS_USER_INTERRUPT)) {
+    cpthread_cond_broadcast(&thread_control->status_cond);
+  }
+  cpthread_mutex_unlock(&thread_control->status_mutex);
+}
+
 void thread_control_wait_for_status_change(ThreadControl *thread_control) {
   cpthread_mutex_lock(&thread_control->status_mutex);
   while ((thread_control_status_t)atomic_load_explicit(&thread_control->status,
