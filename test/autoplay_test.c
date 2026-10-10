@@ -733,18 +733,14 @@ void test_autoplay(void) {
 // never be made pair-exact, so this test must not be run with a time limit or
 // with the -pc1/-pc2 play choosers, whose budgets are clocks.
 //
-// SIMDETIGP_PAIRS and SIMDETIGP_ITERS (defaults 2 and 500) scale the check.
-// The default budget runs well past the initial phase (4 plays x 5 samples)
-// and the round-robin rounds laid out before it folds, so most samples come
-// from top-two rounds, and with six workers on adaptive rounds that lag only
-// two rounds behind, idle workers speculate.
+// One game pair at 200 iterations per sim. The budget runs well past the
+// initial phase (4 plays x 5 samples) and the round-robin rounds laid out
+// before it folds, so most samples come from top-two rounds, and with six
+// workers on adaptive rounds that lag only two rounds behind, idle workers
+// speculate.
 void test_autoplay_sim_determinism_igp(void) {
-  const char *pairs_env = getenv("SIMDETIGP_PAIRS");
-  const int num_pairs =
-      pairs_env != NULL ? (int)strtol(pairs_env, NULL, 10) : 1;
-  const char *iters_env = getenv("SIMDETIGP_ITERS");
-  const int num_iters =
-      iters_env != NULL ? (int)strtol(iters_env, NULL, 10) : 200;
+  const int num_pairs = 1;
+  const int num_iters = 200;
   char *settings = get_formatted_string(
       "set -lex CSW21 -pl1 1 -pl2 1 -np1 4 -np2 4 -iterations %d "
       "-minplayiterations 5 -tlim 0 -threads 6 -mtmode igp",

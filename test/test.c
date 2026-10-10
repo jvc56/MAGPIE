@@ -231,6 +231,7 @@ static TestEntry on_demand_test_table[] = {
     {"simbench", test_sim_benchmark},
     {"baisched", test_bai_sched},
     {"simquality", test_sim_quality},
+    {"simregretref", test_sim_regret_reference},
     {"simregret", test_sim_regret},
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
