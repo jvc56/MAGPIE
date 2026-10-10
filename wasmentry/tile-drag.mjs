@@ -43,8 +43,8 @@ export function installTileDrag({board, rack, sourceFor, targetFor, onDrop, onTa
       const rect = (next || previous || rack).getBoundingClientRect();
       const left = next ? rect.left - 3 : previous ? rect.right + 3 : rect.left + rect.width / 2;
       caret.style.left = `${left}px`;
-      caret.style.top = `${rect.top}px`;
-      caret.style.height = `${rect.height}px`;
+      caret.style.top = `${rect.top - 4}px`;
+      caret.style.height = `${rect.height + 8}px`;
       caret.hidden = false;
     }
     ghost.classList.toggle("invalid-drop", !drag.target);

@@ -1020,7 +1020,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   pointer-events: none;
   margin: 0;
   transform: none;
-  opacity: 0.95;
+  opacity: 1;
   box-shadow: 0 4px 12px #0006;
 }
 .drag-tile.invalid-drop { opacity: 0.65; }
@@ -1031,8 +1031,20 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   background: var(--accent);
   transform: translateX(-50%);
   pointer-events: none;
-  z-index: 1001;
+  z-index: 999;
 }
+.rack-drop-caret::before,
+.rack-drop-caret::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  width: 9px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.rack-drop-caret::before { top: 0; }
+.rack-drop-caret::after { bottom: 0; }
 .blank-letters {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
