@@ -389,6 +389,7 @@ typedef struct {
   WordPair *pairs;
   WordPair *temp;
   LengthScratchBuffers *scratch;
+  WMPBuildProgress *progress;
   ThreadSemaphore *sem; // NULL if running single-threaded
   int length;
   uint32_t pair_count;
@@ -527,6 +528,9 @@ static void *build_words_and_extract_racks(void *arg) {
     }
   }
 
+  if (a->progress) {
+    atomic_fetch_add(&a->progress->completed, 1);
+  }
   if (a->sem) {
     thread_sem_release(a->sem);
   }
@@ -541,6 +545,7 @@ typedef struct {
   LengthScratchBuffers *scratch;
   WMPForLength *wfl;
   int length;
+  WMPBuildProgress *progress;
   ThreadSemaphore *sem;
 } BlankBuildArg;
 
@@ -673,6 +678,9 @@ static void *build_blank_entries_direct(void *arg) {
     }
   }
 
+  if (a->progress) {
+    atomic_fetch_add(&a->progress->completed, 1);
+  }
   if (a->sem) {
     thread_sem_release(a->sem);
   }
@@ -687,6 +695,7 @@ typedef struct {
   LengthScratchBuffers *scratch;
   WMPForLength *wfl;
   int length;
+  WMPBuildProgress *progress;
   ThreadSemaphore *sem;
 } DoubleBlankBuildArg;
 
@@ -840,6 +849,9 @@ static void *build_double_blank_entries_direct(void *arg) {
     }
   }
 
+  if (a->progress) {
+    atomic_fetch_add(&a->progress->completed, 1);
+  }
   if (a->sem) {
     thread_sem_release(a->sem);
   }
@@ -953,8 +965,18 @@ static void sort_lengths_by_work(int *lengths, const uint32_t *work,
   }
 }
 
-WMP *make_wmp_from_words(const DictionaryWordList *words,
-                         const LetterDistribution *ld, int num_threads) {
+static void set_build_stage(WMPBuildProgress *progress, int stage, int total) {
+  if (progress) {
+    atomic_store(&progress->completed, 0);
+    atomic_store(&progress->total, total);
+    atomic_store(&progress->stage, stage);
+  }
+}
+
+static WMP *make_wmp_from_words_with_progress(const DictionaryWordList *words,
+                                              const LetterDistribution *ld,
+                                              int num_threads,
+                                              WMPBuildProgress *progress) {
   if (ld->distribution[BLANK_MACHINE_LETTER] > 2) {
     log_fatal("cannot create WMP with more than 2 blanks");
     return NULL;
@@ -1077,6 +1099,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
   ThreadSemaphore sem;
   thread_sem_init(&sem, num_threads);
 
+  set_build_stage(progress, 1, num_active_lengths);
   // Phase 1: Build word entries in parallel and extract unique racks
   // Launch threads in work-descending order for better scheduling
   WordBuildArg word_args[BOARD_DIM + 1];
@@ -1093,6 +1116,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       word_args[len].temp = temp_by_length[len];
       word_args[len].pair_count = pair_counts[len];
       word_args[len].scratch = &scratch[len];
+      word_args[len].progress = progress;
       word_args[len].sem = NULL;
       build_words_and_extract_racks(&word_args[len]);
     }
@@ -1107,6 +1131,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       word_args[len].temp = temp_by_length[len];
       word_args[len].pair_count = pair_counts[len];
       word_args[len].scratch = &scratch[len];
+      word_args[len].progress = progress;
       word_args[len].sem = &sem;
       thread_sem_acquire(&sem);
       cpthread_create(&word_threads[len], build_words_and_extract_racks,
@@ -1117,6 +1142,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     }
   }
 
+  set_build_stage(progress, 2, num_active_lengths);
   // Phase 2: Build blank entries in parallel (reusing scratch buffers)
   BlankBuildArg blank_args[BOARD_DIM + 1];
   cpthread_t blank_threads[BOARD_DIM + 1];
@@ -1127,6 +1153,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       blank_args[len].scratch = &scratch[len];
       blank_args[len].wfl = &wmp->wfls[len];
       blank_args[len].length = len;
+      blank_args[len].progress = progress;
       blank_args[len].sem = NULL;
       build_blank_entries_direct(&blank_args[len]);
     }
@@ -1136,6 +1163,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       blank_args[len].scratch = &scratch[len];
       blank_args[len].wfl = &wmp->wfls[len];
       blank_args[len].length = len;
+      blank_args[len].progress = progress;
       blank_args[len].sem = &sem;
       thread_sem_acquire(&sem);
       cpthread_create(&blank_threads[len], build_blank_entries_direct,
@@ -1146,6 +1174,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     }
   }
 
+  set_build_stage(progress, 3, num_active_lengths);
   // Phase 3: Build double-blank entries in parallel (reusing scratch buffers)
   DoubleBlankBuildArg dbl_args[BOARD_DIM + 1];
   cpthread_t dbl_threads[BOARD_DIM + 1];
@@ -1156,6 +1185,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       dbl_args[len].scratch = &scratch[len];
       dbl_args[len].wfl = &wmp->wfls[len];
       dbl_args[len].length = len;
+      dbl_args[len].progress = progress;
       dbl_args[len].sem = NULL;
       build_double_blank_entries_direct(&dbl_args[len]);
     }
@@ -1165,6 +1195,7 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
       dbl_args[len].scratch = &scratch[len];
       dbl_args[len].wfl = &wmp->wfls[len];
       dbl_args[len].length = len;
+      dbl_args[len].progress = progress;
       dbl_args[len].sem = &sem;
       thread_sem_acquire(&sem);
       cpthread_create(&dbl_threads[len], build_double_blank_entries_direct,
@@ -1183,21 +1214,39 @@ WMP *make_wmp_from_words(const DictionaryWordList *words,
     free(scratch[len].unique_racks);
   }
 
+  set_build_stage(progress, 4, BOARD_DIM - 1);
   // Calculate max_word_lookup_bytes
   wmp->max_word_lookup_bytes = calculate_max_word_lookup_bytes(wmp);
 
   for (int len = 2; len <= BOARD_DIM; len++) {
     wfl_build_word_index(&wmp->wfls[len]);
+    if (progress) {
+      atomic_fetch_add(&progress->completed, 1);
+    }
   }
 
   return wmp;
 }
 
-WMP *make_wmp_from_kwg(const KWG *kwg, const LetterDistribution *ld,
-                       int num_threads) {
+WMP *make_wmp_from_words(const DictionaryWordList *words,
+                         const LetterDistribution *ld, int num_threads) {
+  return make_wmp_from_words_with_progress(words, ld, num_threads, NULL);
+}
+
+WMP *make_wmp_from_kwg_with_progress(const KWG *kwg,
+                                     const LetterDistribution *ld,
+                                     int num_threads,
+                                     WMPBuildProgress *progress) {
+  set_build_stage(progress, 0, 0);
   DictionaryWordList *words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
-  WMP *wmp = make_wmp_from_words(words, ld, num_threads);
+  WMP *wmp =
+      make_wmp_from_words_with_progress(words, ld, num_threads, progress);
   dictionary_word_list_destroy(words);
   return wmp;
+}
+
+WMP *make_wmp_from_kwg(const KWG *kwg, const LetterDistribution *ld,
+                       int num_threads) {
+  return make_wmp_from_kwg_with_progress(kwg, ld, num_threads, NULL);
 }
