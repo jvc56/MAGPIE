@@ -20,6 +20,7 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/random_variable.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
@@ -143,6 +144,57 @@ void test_sim_single_iteration(void) {
   assert(bai_result_get_status(
              sim_results_get_bai_result(config_get_sim_results(config))) ==
          BAI_RESULT_STATUS_SAMPLE_LIMIT);
+  config_destroy(config);
+}
+
+// Sims cycle the bag by default: each sample plays every rotation of its
+// shuffle by RACK_SIZE until they wrap around, from an opening rack one per
+// RACK_SIZE of the other letters, rounded up. The budget and the iteration
+// count both count rollouts, so a budget of 40 cycles' rollouts runs exactly
+// 40 cycles. A minimum below two cycles still gives every play two.
+void test_sim_bag_cycle(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 4 -plies 2 -threads 1 -minp 1 -scond none -seed 10");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  const int unseen = ld_get_total_tiles(config_get_ld(config)) - RACK_SIZE;
+  const int rotations = (unseen + RACK_SIZE - 1) / RACK_SIZE;
+  assert(rv_sim_bag_cycle_rotations(config_get_game(config)) == rotations);
+  const int cycles = 40;
+  char *budget = get_formatted_string("set -iter %d", cycles * rotations);
+  load_and_exec_config_or_die(config, budget);
+  free(budget);
+  SimResults *sim_results = config_get_sim_results(config);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  assert(bai_result_get_status(sim_results_get_bai_result(sim_results)) ==
+         BAI_RESULT_STATUS_SAMPLE_LIMIT);
+  const uint64_t cycled_rollouts = (uint64_t)cycles * (uint64_t)rotations;
+  assert(sim_results_get_iteration_count(sim_results) == cycled_rollouts);
+  uint64_t play_rollouts = 0;
+  uint64_t min_play_rollouts = UINT64_MAX;
+  uint64_t max_play_rollouts = 0;
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const uint64_t num_rollouts = simmed_play_get_num_rollouts(
+        sim_results_get_simmed_play(sim_results, play_idx));
+    assert(num_rollouts >= 2 * (uint64_t)rotations);
+    play_rollouts += num_rollouts;
+    if (num_rollouts < min_play_rollouts) {
+      min_play_rollouts = num_rollouts;
+    }
+    if (num_rollouts > max_play_rollouts) {
+      max_play_rollouts = num_rollouts;
+    }
+  }
+  assert(play_rollouts == cycled_rollouts);
+  // BAI sizes its rounds in rollouts, so the top-two rule takes over within
+  // this budget and the plays' counts differ. Rounds of 32 cycles would have
+  // kept the whole sim round-robin.
+  assert(max_play_rollouts > min_play_rollouts);
   config_destroy(config);
 }
 
@@ -1373,6 +1425,7 @@ void test_sim(void) {
     test_sim_error_cases();
     test_sim_opp_rack_not_in_bag();
     test_sim_single_iteration();
+    test_sim_bag_cycle();
     test_sim_threshold();
     test_sim_time_limit();
     test_all_plays_are_similar();

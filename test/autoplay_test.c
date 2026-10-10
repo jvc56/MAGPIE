@@ -738,13 +738,13 @@ void test_autoplay(void) {
 // before it folds, so most samples come from top-two rounds, and with six
 // workers on adaptive rounds that lag only two rounds behind, idle workers
 // speculate.
-void test_autoplay_sim_determinism_igp(void) {
+static void run_sim_determinism_igp(const bool bag_cycle) {
   const int num_pairs = 1;
   const int num_iters = 200;
   char *settings = get_formatted_string(
       "set -lex CSW21 -pl1 1 -pl2 1 -np1 4 -np2 4 -iterations %d "
-      "-minplayiterations 5 -tlim 0 -threads 6 -mtmode igp",
-      num_iters);
+      "-minplayiterations 5 -tlim 0 -threads 6 -mtmode igp -sbagcycle %s",
+      num_iters, bag_cycle ? "true" : "false");
   Config *config = config_create_or_die(settings);
   free(settings);
   bai_sched_stats_reset();
@@ -763,8 +763,8 @@ void test_autoplay_sim_determinism_igp(void) {
   free(res);
   config_destroy(config);
 
-  printf("IGP sim determinism: PASSED (%d game pairs, 0 divergent)\n",
-         num_pairs);
+  printf("IGP sim determinism%s: PASSED (%d game pairs, 0 divergent)\n",
+         bag_cycle ? " (bag cycle)" : "", num_pairs);
 #ifdef BAI_SCHED_STATS
   // An instrumented build (make BUILD=bai_stats) shows how much of the budget
   // went past the initial phase and how often idle workers speculated.
@@ -785,4 +785,11 @@ void test_autoplay_sim_determinism_igp(void) {
          num_sims, bai_samples, speculations, speculation_hits);
   bai_sched_stats_reset();
 #endif
+}
+
+void test_autoplay_sim_determinism_igp(void) {
+  run_sim_determinism_igp(false);
+  // Bag-cycled sims take the same budget in rollouts; their samples are whole
+  // cycles, and the budget still runs past the initial phase.
+  run_sim_determinism_igp(true);
 }

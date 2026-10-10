@@ -98,6 +98,8 @@ typedef struct PlayChooserStrategy {
   // SimArgs.pat_rollout_disabled). Zero/unset: PAT on, every class.
   bool pat_rollout_disabled;
   uint32_t pat_rollout_disabled_classes_mask;
+  // SimArgs.bag_cycle for the chooser's sims.
+  bool sim_bag_cycle;
   uint64_t seed;
 } PlayChooserStrategy;
 

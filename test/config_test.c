@@ -1890,17 +1890,22 @@ void test_config_anno(void) {
   // Allow the sim to hit the stopping threshold
   assert_config_exec_status(config, "sim -seed 1 -iterations 100 -threads 10",
                             ERROR_STATUS_SUCCESS);
+  const Equity best_simmed_score =
+      move_get_score(sim_results_get_best_move(config_get_sim_results(config)));
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   // No rack was given to the top commit command, so it should commit the best
-  // simmed play which should be anything except for 8H BARCHAN.
+  // simmed play, which is not the static best, 8H BARCHAN for 86.
   const Equity p0_score = player_get_score(game_get_player(game, 0));
-  assert(p0_score > int_to_equity(80) && p0_score < int_to_equity(86));
+  assert(p0_score == best_simmed_score);
+  assert(p0_score != int_to_equity(86));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
 
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack BARCHAN", ERROR_STATUS_SUCCESS);
-  // Generate and sim
-  assert_config_exec_status(config, "gsim -seed 1", ERROR_STATUS_SUCCESS);
+  // Generate and sim. Single rollouts, so that 8D BARCHAN sims best on this
+  // seed: the plays below build on it.
+  assert_config_exec_status(config, "gsim -seed 1 -sbagcycle false",
+                            ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 1 -shplies 1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 2 -shplies 25", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shm 5 -shplies 3", ERROR_STATUS_SUCCESS);

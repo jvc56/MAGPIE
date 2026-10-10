@@ -243,7 +243,7 @@ bool string_builder_add_sim_stats_with_display_lock(
 
     string_grid_set_cell(
         sg, curr_row, curr_col++,
-        get_formatted_string("%lu", stat_get_num_samples(win_pct_stat)));
+        get_formatted_string("%lu", simmed_play_get_num_rollouts(sp)));
 
     for (int j = 0; j < num_display_plies; j++) {
       const Stat *score_stat = simmed_play_get_score_stat(sp, j);
