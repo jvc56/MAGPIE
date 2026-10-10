@@ -340,13 +340,23 @@ main {
   outline-offset: 0;
   z-index: 1;
 }
-.square.cursor:after {
-  content: attr(data-arrow);
+.square.cursor:not(.played) > .tile-letter,
+.square.cursor > .premium-label {
+  visibility: hidden;
+}
+.square.cursor::after {
+  content: "";
   position: absolute;
-  color: #111;
-  font-size: 18px;
-  bottom: 0;
-  left: 0;
+  width: 70%;
+  height: 70%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 12h16M12 4l8 8-8 8' fill='none' stroke='%23111' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
+}
+.square.cursor[data-arrow="↓"]::after {
+  transform: translate(-50%, -50%) rotate(90deg);
 }
 .square:disabled {
   opacity: 1;
