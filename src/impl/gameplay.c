@@ -1577,9 +1577,10 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
 // Use event index 0 to go to the start of the game.
 // Calling with event index N will set the game state to after the
 // Nth turn has been played where n is 1-indexed.
-void game_play_n_events(GameHistory *game_history, Game *game,
-                        int num_events_to_play, const bool validate,
-                        ErrorStack *error_stack) {
+static void replay_history(GameHistory *game_history, Game *game,
+                           int num_events_to_play, const bool validate,
+                           GameHistoryVisitor visitor, void *context,
+                           ErrorStack *error_stack) {
   game_reset(game);
   if (game_history_get_num_events(game_history) == 0) {
     const int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -1592,9 +1593,12 @@ void game_play_n_events(GameHistory *game_history, Game *game,
         return;
       }
     }
+    if (visitor) {
+      visitor(game_history, game, 0, context);
+    }
     return;
   }
-  if (num_events_to_play <= 0) {
+  if (visitor || num_events_to_play <= 0) {
     const GameEvent *first_game_event = game_history_get_event(game_history, 0);
     set_rack_from_bag_or_push_to_error_stack(
         game, game_event_get_player_index(first_game_event),
@@ -1602,6 +1606,9 @@ void game_play_n_events(GameHistory *game_history, Game *game,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+  }
+  if (visitor) {
+    visitor(game_history, game, 0, context);
   }
   const int ld_size = ld_get_size(game_get_ld(game));
 
@@ -1637,9 +1644,24 @@ void game_play_n_events(GameHistory *game_history, Game *game,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+    if (visitor) {
+      visitor(game_history, game, game_event_index + 1, context);
+    }
   }
   for (int i = 0; i < 2; i++) {
     rack_copy(player_get_known_rack_from_phonies(game_get_player(game, i)),
               &play_events_data.known_letters_from_phonies_racks[i]);
   }
+}
+
+void game_play_n_events(GameHistory *history, Game *game, int count,
+                        bool validate, ErrorStack *errors) {
+  replay_history(history, game, count, validate, NULL, NULL, errors);
+}
+
+void game_replay_history(GameHistory *history, Game *game,
+                         GameHistoryVisitor visitor, void *context,
+                         ErrorStack *errors) {
+  replay_history(history, game, game_history_get_num_events(history), false,
+                 visitor, context, errors);
 }
