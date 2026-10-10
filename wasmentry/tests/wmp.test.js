@@ -261,3 +261,43 @@ test('cache provenance and upgrades are independent of the database schema', asy
   });
   expect(report).toEqual({valid:true,mismatch:null,survived:true,stale:null,stillStored:1});
 });
+
+test('Stop during a transient cache read preserves saved files and never starts a download', async ({page}) => {
+  const downloads = [];
+  page.on('request', request => {
+    if (request.url().includes('wmp-manifest') || request.url().includes('-gzip.bin')) downloads.push(request.url());
+  });
+  await page.route('**/wmp-cache.mjs', async route => {
+    const response = await route.fetch();
+    const source = (await response.text()).replace('export async function readWMP(lexicon, kwgHash) {', `export async function readWMP(lexicon, kwgHash) {
+      if (typeof window === 'undefined') {
+        postMessage({type:'test_cache_read_started'});
+        await new Promise(resolve => setTimeout(resolve, 100));
+        throw new DOMException('Temporary connection loss', 'UnknownError');
+      }`);
+    await route.fulfill({response, body:source});
+  });
+  await page.goto('/wasmentry/');
+  await expect(page.locator('#status')).toHaveText('Engine ready');
+  const result = await page.evaluate(async () => {
+    const {EngineClient} = await import('./engine-client.mjs');
+    const {saveWMP, listWMPs} = await import('./wmp-cache.mjs');
+    await saveWMP('NWL23', 'saved-hash', 'saved-checksum', 'build', new Uint8Array([3,15]), null, null);
+    const before = await listWMPs();
+    const engine = new EngineClient();
+    const messages = [];
+    engine.addEventListener('message', ({detail}) => messages.push(detail));
+    engine.worker.addEventListener('message', ({data}) => {
+      if (data.type === 'test_cache_read_started') engine.stop();
+    });
+    try {
+      await engine.prepare('NWL23');
+      await engine.prepareWMP('NWL23', 'download', 2, false);
+      return {before, after:await listWMPs(), stopped:messages.some(m => m.type === 'wmp_ready' && m.stopped), warned:messages.some(m => m.type === 'wmp_cache_warning')};
+    } finally {engine.worker.terminate();}
+  });
+  expect(result.stopped).toBe(true);
+  expect(result.warned).toBe(true);
+  expect(result.after).toEqual(result.before);
+  expect(downloads).toEqual([]);
+});

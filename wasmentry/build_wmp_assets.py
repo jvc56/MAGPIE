@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -54,7 +55,16 @@ def main():
             'kwg_sha256': digest(ROOT / f'data/lexica/{lexicon}.kwg'),
         }
         scratch.cleanup()
-    (ROOT / 'data/wmp-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    manifest_path = ROOT / 'data/wmp-manifest.json'
+    pending_manifest = manifest_path.with_suffix('.json.tmp')
+    pending_manifest.write_text(json.dumps(manifest, indent=2) + '\n')
+    pending_manifest.replace(manifest_path)
+    referenced = {part['file'] for entry in manifest['lexica'].values()
+                  for part in entry['files']}
+    for previous in (ROOT / 'data/wmp').glob('*-gzip.bin'):
+        if (re.fullmatch(r'(CSW24|NWL23)-[a-f0-9]{64}-[0-9]{2}-gzip.bin', previous.name)
+                and f'wmp/{previous.name}' not in referenced):
+            previous.unlink()
 
 
 if __name__ == '__main__':
