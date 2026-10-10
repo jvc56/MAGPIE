@@ -312,7 +312,7 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
   running = true;
   stopping = false;
   activeCommand = "WMP";
-  let ptr = 0, witPtr = 0, name = 0, nativeStarted = false, nativeFinished = false, retryBuild = false;
+  let ptr = 0, witPtr = 0, name = 0, nativeStarted = false, nativeFinished = false, retryBuild = false, unavailable = false;
   wmpAbort = new AbortController();
   const progress = (text) => send("wmp_progress", { text });
   const warning = (error) => send("wmp_cache_warning", { text: `WMP cache unavailable: ${error.message}` });
@@ -358,13 +358,13 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
     if (stopping) return send("wmp_ready", { stopped: true });
     if (bytes) {
       ptr = Module._malloc(bytes.length);
-      if (!ptr) throw new Error("Not enough memory to load WMP.");
+      if (!ptr) throw Object.assign(new Error("Not enough memory to load WMP."), {code: "WMP_MEMORY"});
       Module.HEAPU8.set(bytes, ptr);
       progress(fromCache ? "Loading cached WMP indexes…" : "Loading WMP indexes…");
     }
     if (wit) {
       witPtr = Module._malloc(wit.length);
-      if (!witPtr) throw new Error("Not enough memory to load WIT.");
+      if (!witPtr) throw Object.assign(new Error("Not enough memory to load WIT."), {code: "WMP_MEMORY"});
       Module.HEAPU8.set(wit, witPtr);
     }
     name = Module.stringToNewUTF8(lexicon);
@@ -426,6 +426,7 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
     if (!retryBuild) send("wmp_ready", { stopped: stopping, fromCache, witFromCache, cached });
   } catch (error) {
     if (stopping && error.name === "AbortError") send("wmp_ready", { stopped: true });
+    else if (!fatal && error.code === "WMP_MEMORY") unavailable = true;
     else throw error;
   } finally {
     // Do not release borrowed memory while the native coordinator owns it.
@@ -439,6 +440,10 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
     wmpAbort = null;
     running = false;
     activeCommand = "";
+  }
+  if (unavailable) {
+    send("wmp_cache_warning", {text: "Not enough memory for word maps. Using standard move generation; saved files were kept."});
+    send("wmp_ready", {unavailable: true, cached: false});
   }
   if (retryBuild && stopping) return send("wmp_ready", { stopped: true });
   if (retryBuild) await prepareWMP({ source: "build", lexicon, threads, manifestURL, cache, skipCache: true });

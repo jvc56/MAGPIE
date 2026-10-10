@@ -108,7 +108,7 @@ export class EngineClient extends EventTarget {
   }
   async prepareWMP(lexicon, source, threads, cache = false) {
     const key = `${lexicon}:${source}`;
-    if (this.wmpKey === key && (!cache || this.wmpCached || source === "off")) return;
+    if (this.wmpKey === key && (!cache || this.wmpCached || this.wmpUnavailable || source === "off")) return;
     this.wmpKey = null;
     // Disable the old map before changing lexica so Config never tries to
     // discover an optional WMP on disk. Installing transfers the new map.

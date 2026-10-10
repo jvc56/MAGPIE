@@ -59,17 +59,26 @@ export async function readWMP(lexicon, kwgHash) {
     wit: wit ? new Uint8Array(wit instanceof Blob ? await wit.arrayBuffer() : wit) : null,
   } : null;
 }
-export function saveWMP(lexicon, kwgHash, sha256, source, bytes, wit, witHash) {
-  return transaction("readwrite", (tx) => {
+export async function saveWMP(lexicon, kwgHash, sha256, source, bytes, wit, witHash) {
+  const write = (useBlobs) => transaction("readwrite", (tx) => {
     const files = tx.objectStore("files");
     const metadata = tx.objectStore("metadata");
     metadata.put({ lexicon, format: FORMAT, builder: BUILDER, wmp_version: 3,
       board_dim: 15, kwg_sha256: kwgHash, sha256, source, bytes: bytes.byteLength,
       wit_bytes: wit?.byteLength || 0, wit_sha256: witHash || null });
-    files.put(new Blob([bytes], { type: "application/octet-stream" }), lexicon);
-    if (wit) files.put(new Blob([wit], { type: "application/octet-stream" }), `${lexicon}:wit`);
+    files.put(useBlobs ? new Blob([bytes], { type: "application/octet-stream" }) : bytes, lexicon);
+    if (wit) files.put(useBlobs ? new Blob([wit], { type: "application/octet-stream" }) : wit, `${lexicon}:wit`);
     else files.delete(`${lexicon}:wit`);
   });
+  try {
+    await write(true);
+  } catch (error) {
+    // Some WebKit environments cannot persist Blob data from a worker. The
+    // aborted transaction is atomic; retry the same record as typed arrays.
+    // Do not retry quota failures or other unrelated storage errors.
+    if (error.name !== "UnknownError" || !/Blob\/File data/.test(error.message)) throw error;
+    await write(false);
+  }
 }
 export function removeWMP(lexicon) {
   return transaction("readwrite", (tx) => {

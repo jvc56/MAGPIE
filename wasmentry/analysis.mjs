@@ -2845,7 +2845,7 @@ async function startEngine() {
         $("stop-wmp").hidden = false;
         $("stop-wmp").disabled = canceled;
       }
-      if (detail.type === "wmp_ready" && !$("wmp-cache-status").textContent.startsWith("WMP cache unavailable"))
+      if (detail.type === "wmp_ready" && !detail.unavailable && !$("wmp-cache-status").textContent.startsWith("WMP cache unavailable"))
         $("wmp-cache-status").textContent = detail.stopped ? "Stopped" : "WMP ready";
       if (detail.type === "wmp_cache_warning") $("wmp-cache-status").textContent = detail.text;
       if (detail.type === "output" || detail.type === "status")
