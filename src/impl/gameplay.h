@@ -61,6 +61,11 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game);
 // parallel WIT block caches; unplay invalidates those derived entries.
 void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game);
 
+typedef void (*GameHistoryVisitor)(const GameHistory *history, const Game *game,
+                                   int event_index, void *context);
+void game_replay_history(GameHistory *history, Game *game,
+                         GameHistoryVisitor visitor, void *context,
+                         ErrorStack *errors);
 void game_play_n_events(GameHistory *game_history, Game *game,
                         int num_events_to_play, bool validate,
                         ErrorStack *error_stack);
