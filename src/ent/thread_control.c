@@ -68,8 +68,11 @@ bool thread_control_set_status(ThreadControl *thread_control,
 void thread_control_stop(ThreadControl *thread_control) {
   cpthread_mutex_lock(&thread_control->status_mutex);
   int expected = THREAD_CONTROL_STATUS_STARTED;
-  if (atomic_compare_exchange_strong(&thread_control->status, &expected,
-                                     THREAD_CONTROL_STATUS_USER_INTERRUPT)) {
+  // Publish cancellation to search threads that acquire-load the status.
+  if (atomic_compare_exchange_strong_explicit(
+          &thread_control->status, &expected,
+          THREAD_CONTROL_STATUS_USER_INTERRUPT, memory_order_release,
+          memory_order_relaxed)) {
     cpthread_cond_broadcast(&thread_control->status_cond);
   }
   cpthread_mutex_unlock(&thread_control->status_mutex);

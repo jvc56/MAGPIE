@@ -138,6 +138,7 @@ static TestEntry test_table[] = {
     {"baiutil", test_bai_utility},
     {"command", test_command},
     {"embedding", test_embedding_lifecycle},
+    {"fileproxy", test_fileproxy_cache},
     {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
