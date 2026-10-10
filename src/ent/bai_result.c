@@ -4,11 +4,14 @@
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 struct BAIResult {
-  bai_result_status_t status;
+  // A bai_result_status_t. Atomic so that BAI's workers can check it after
+  // every sample without the mutex, which orders the writes.
+  _Atomic int status;
   int best_arm;
   uint64_t num_samples;
   Timer timer;
@@ -17,7 +20,7 @@ struct BAIResult {
 };
 
 void bai_result_reset(BAIResult *bai_result, double time_limit_seconds) {
-  bai_result->status = BAI_RESULT_STATUS_NONE;
+  atomic_store(&bai_result->status, BAI_RESULT_STATUS_NONE);
   bai_result->best_arm = -1;
   bai_result->num_samples = 0;
   bai_result->time_limit_seconds = time_limit_seconds;
@@ -39,6 +42,7 @@ BAIResult *bai_result_duplicate(const BAIResult *bai_result) {
   }
   BAIResult *new_bai_result = malloc_or_die(sizeof(BAIResult));
   *new_bai_result = *bai_result;
+  atomic_init(&new_bai_result->status, atomic_load(&bai_result->status));
   cpthread_mutex_init(&new_bai_result->mutex);
   return new_bai_result;
 }
@@ -77,27 +81,32 @@ double bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
   return bai_result->time_limit_seconds;
 }
 
-// Sets user interrupt or timeout status if the conditions for either are met
-bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
-                                                  const bool user_interrupt) {
-  cpthread_mutex_lock(&bai_result->mutex);
-  if (bai_result->status == BAI_RESULT_STATUS_NONE) {
-    if (user_interrupt) {
-      bai_result->status = BAI_RESULT_STATUS_USER_INTERRUPT;
-    } else if (bai_result->time_limit_seconds > 0 &&
-               bai_result_get_elapsed_seconds(bai_result) >=
-                   bai_result->time_limit_seconds) {
-      bai_result->status = BAI_RESULT_STATUS_TIMEOUT;
-    }
-  }
-  bai_result_status_t status = bai_result->status;
-  cpthread_mutex_unlock(&bai_result->mutex);
-  return status;
+bai_result_status_t bai_result_get_status(BAIResult *bai_result) {
+  return (bai_result_status_t)atomic_load(&bai_result->status);
 }
 
-bai_result_status_t bai_result_get_status(BAIResult *bai_result) {
+// Sets user interrupt or timeout status if the conditions for either are met.
+// BAI's workers call this after every sample, so the usual case, a sim still
+// running with no interrupt and time to spare, takes no lock.
+bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
+                                                  const bool user_interrupt) {
+  bai_result_status_t status = bai_result_get_status(bai_result);
+  if (status != BAI_RESULT_STATUS_NONE) {
+    return status;
+  }
+  const bool timed_out = bai_result->time_limit_seconds > 0 &&
+                         bai_result_get_elapsed_seconds(bai_result) >=
+                             bai_result->time_limit_seconds;
+  if (!user_interrupt && !timed_out) {
+    return BAI_RESULT_STATUS_NONE;
+  }
   cpthread_mutex_lock(&bai_result->mutex);
-  bai_result_status_t status = bai_result->status;
+  status = bai_result_get_status(bai_result);
+  if (status == BAI_RESULT_STATUS_NONE) {
+    status = user_interrupt ? BAI_RESULT_STATUS_USER_INTERRUPT
+                            : BAI_RESULT_STATUS_TIMEOUT;
+    atomic_store(&bai_result->status, status);
+  }
   cpthread_mutex_unlock(&bai_result->mutex);
   return status;
 }
@@ -105,6 +114,6 @@ bai_result_status_t bai_result_get_status(BAIResult *bai_result) {
 void bai_result_set_status(BAIResult *bai_result,
                            const bai_result_status_t status) {
   cpthread_mutex_lock(&bai_result->mutex);
-  bai_result->status = status;
+  atomic_store(&bai_result->status, status);
   cpthread_mutex_unlock(&bai_result->mutex);
 }
