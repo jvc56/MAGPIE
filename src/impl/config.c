@@ -4083,10 +4083,10 @@ static char *config_peg_display_table(const Config *config, PegPoll *poll) {
 
 static char *config_peg_display(const Config *config, PegPoll *poll) {
   char *table = config_peg_display_table(config, poll);
-  if (!config->peg_json || !poll) {
+  if (!config->peg_json || !config->peg_poll) {
     return table;
   }
-  char *json = peg_poll_get_json(poll, config->game);
+  char *json = peg_poll_get_json(config->peg_poll, config->game);
   char *output = get_formatted_string("peginfo %s\n%s", json, table);
   free(json);
   free(table);
@@ -4928,7 +4928,7 @@ char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
                      string_duplicate("no PEG results to show"));
     return empty_string();
   }
-  return config_peg_display(config, config->peg_json ? config->peg_poll : NULL);
+  return config_peg_display(config, NULL);
 }
 
 void execute_show_peg(Config *config, ErrorStack *error_stack) {
@@ -9107,8 +9107,7 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result =
-      config_peg_display(config, config->peg_json ? config->peg_poll : NULL);
+  char *result = config_peg_display(config, NULL);
   thread_control_print(config->thread_control, result);
   free(result);
 }

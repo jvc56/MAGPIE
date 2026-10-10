@@ -2,7 +2,7 @@
 
 #include "../src/compat/cpthread.h"
 #include "../src/def/cpthread_defs.h"
-#include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"

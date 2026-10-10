@@ -5,6 +5,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 void test_peg_embedding(void) {
   Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
@@ -21,18 +22,28 @@ void test_peg_embedding(void) {
           "I3E10/COIFS10 BDFHMX?/AAORTT? 420/412 0 -lex CSW24") ==
       MAGPIE_SUCCESS);
   // The command-line protocol stays text-only until an embedder opts in.
-  for (int pass = 0; pass < 3; pass++) {
-    if (pass > 0) {
-      magpie_set_peg_json(mp, pass == 1);
+  for (int mode_idx = 0; mode_idx < 3; mode_idx++) {
+    if (mode_idx > 0) {
+      magpie_set_peg_json(mp, mode_idx == 1);
     }
     assert(magpie_run_sync(mp, "peg") == MAGPIE_SUCCESS);
     char *output = magpie_get_last_command_output(mp);
-    assert(has_substring(output, "peginfo {") == (pass == 1));
+    assert(has_substring(output, "peginfo {") == (mode_idx == 1));
     free(output);
     assert(magpie_run_sync(mp, "shpeg") == MAGPIE_SUCCESS);
     output = magpie_get_last_command_output(mp);
-    assert(has_substring(output, "peginfo {") == (pass == 1));
+    assert(has_substring(output, "peginfo {") == (mode_idx == 1));
     free(output);
   }
+  magpie_set_peg_json(mp, false);
+  assert(magpie_run_sync(mp, "shpeg") == MAGPIE_SUCCESS);
+  char *text = magpie_get_last_command_output(mp);
+  magpie_set_peg_json(mp, true);
+  assert(magpie_run_sync(mp, "shpeg") == MAGPIE_SUCCESS);
+  char *structured = magpie_get_last_command_output(mp);
+  const char *table = strchr(structured, '\n');
+  assert(table && strings_equal(table + 1, text));
+  free(text);
+  free(structured);
   magpie_destroy(mp);
 }

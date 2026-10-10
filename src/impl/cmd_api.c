@@ -216,7 +216,7 @@ char *magpie_get_last_command_output(const Magpie *mp) {
 }
 
 void magpie_set_peg_json(Magpie *mp, bool enabled) {
-  if (mp) {
+  if (mp && mp->config && !async_command_is_active(mp)) {
     config_set_peg_json(mp->config, enabled);
   }
 }
