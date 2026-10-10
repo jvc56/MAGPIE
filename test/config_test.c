@@ -3096,11 +3096,15 @@ void test_config_endgame_played_move(void) {
       endgame_results_get_string(results, config_get_game(config), NULL);
   assert(strstr(output, "\npass") != NULL);
   free(output);
+  assert_config_exec_status(config, "endgame 5K DA...", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
   // The requested move belongs to this invocation, not subsequent searches.
   assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
   assert(!endgame_results_get_actual_move_found(results));
   assert_config_exec_status(config, "endgame pass,pass",
                             ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert(!endgame_results_get_valid_for_current_game_state(results));
   config_destroy(config);
 }
 

@@ -228,7 +228,7 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
   // Keep the caller's played move visible even when it is below the top-K.
   // The solver evaluates it with a full root window and stores its own PV.
   const PVLine **display_pvs =
-      malloc_or_die((size_t)(num_pvs + 1) * sizeof(*display_pvs));
+      malloc_or_die((size_t)(num_pvs + 1) * sizeof(const PVLine *));
   int num_display_pvs = num_pvs;
   for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
     display_pvs[pv_idx] =

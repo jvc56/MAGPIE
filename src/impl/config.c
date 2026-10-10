@@ -3686,6 +3686,9 @@ void config_endgame(Config *config, EndgameResults *endgame_results,
 }
 
 void impl_endgame(Config *config, ErrorStack *error_stack) {
+  endgame_results_lock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
+  endgame_results_reset(config->endgame_results);
+  endgame_results_unlock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot run endgame without lexicon"));
@@ -3702,7 +3705,7 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
         "%s%s%s", move_text, tiles ? " " : "", tiles ? tiles : "");
     actual = validated_moves_create(config->game,
                                     game_get_player_on_turn_index(config->game),
-                                    full_move, true, true, error_stack);
+                                    full_move, false, true, error_stack);
     free(full_move);
     if (error_stack_is_empty(error_stack) &&
         validated_moves_get_number_of_moves(actual) != 1) {
@@ -3718,6 +3721,15 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
   }
   endgame_solve(&config->endgame_ctx, &args, config->endgame_results,
                 error_stack);
+  if (actual && error_stack_is_empty(error_stack) &&
+      !endgame_results_get_actual_move_found(config->endgame_results) &&
+      thread_control_get_status(config->thread_control) !=
+          THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE,
+        string_duplicate(
+            "played move was not evaluated by the endgame search"));
+  }
   validated_moves_destroy(actual);
   if (!error_stack_is_empty(error_stack)) {
     return;
