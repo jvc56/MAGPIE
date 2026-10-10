@@ -1598,17 +1598,27 @@ static void replay_history(GameHistory *game_history, Game *game,
     }
     return;
   }
+  Game *initial =
+      visitor && num_events_to_play > 0 ? game_duplicate(game) : NULL;
   if (visitor || num_events_to_play <= 0) {
     const GameEvent *first_game_event = game_history_get_event(game_history, 0);
     set_rack_from_bag_or_push_to_error_stack(
         game, game_event_get_player_index(first_game_event),
         game_event_get_const_rack(first_game_event), error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      game_destroy(initial);
       return;
     }
   }
   if (visitor) {
     visitor(game_history, game, 0, context);
+  }
+  if (initial) {
+    game_copy(game, initial);
+    game_destroy(initial);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
   const int ld_size = ld_get_size(game_get_ld(game));
 
@@ -1644,8 +1654,16 @@ static void replay_history(GameHistory *game_history, Game *game,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      rack_copy(
+          player_get_known_rack_from_phonies(game_get_player(game, player_idx)),
+          &play_events_data.known_letters_from_phonies_racks[player_idx]);
+    }
     if (visitor) {
       visitor(game_history, game, game_event_index + 1, context);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
     }
   }
   for (int i = 0; i < 2; i++) {
@@ -1654,9 +1672,11 @@ static void replay_history(GameHistory *game_history, Game *game,
   }
 }
 
-void game_play_n_events(GameHistory *history, Game *game, int count,
-                        bool validate, ErrorStack *errors) {
-  replay_history(history, game, count, validate, NULL, NULL, errors);
+void game_play_n_events(GameHistory *game_history, Game *game,
+                        int num_events_to_play, bool validate,
+                        ErrorStack *error_stack) {
+  replay_history(game_history, game, num_events_to_play, validate, NULL, NULL,
+                 error_stack);
 }
 
 void game_replay_history(GameHistory *history, Game *game,
