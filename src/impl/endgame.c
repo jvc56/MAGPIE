@@ -1315,23 +1315,37 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
   int best_play_length = 0;
   MachineLetter best_ml = 0; // for blank: the letter the blank plays as
 
+  // Read actual occupancy: is_cross_word can be stale after unplay.
+  // Keep these masks local, with no maintenance on other move paths.
+  uint32_t occupied_rows[BOARD_DIM] = {0};
+  uint32_t unavailable_rows[BOARD_DIM] = {0};
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
+      const uint32_t square_bit = UINT32_C(1) << col;
+      if (!board_is_empty(board, row, col)) {
+        occupied_rows[row] |= square_bit;
+      }
       if (board_is_nonempty_or_bricked(board, row, col)) {
-        continue;
+        unavailable_rows[row] |= square_bit;
       }
-      // Check actual board occupancy (not the stored is_cross_word flag, which
-      // is set on tile placement but not cleared on unplay — using it would
-      // give stale results during the search tree's play/unplay cycle).
-      bool has_v_nbrs =
-          (row > 0 && !board_is_empty(board, row - 1, col)) ||
-          (row < BOARD_DIM - 1 && !board_is_empty(board, row + 1, col));
-      bool has_h_nbrs =
-          (col > 0 && !board_is_empty(board, row, col - 1)) ||
-          (col < BOARD_DIM - 1 && !board_is_empty(board, row, col + 1));
-      if (!has_v_nbrs && !has_h_nbrs) {
-        continue;
-      }
+    }
+  }
+  const uint32_t row_mask = (UINT32_C(1) << BOARD_DIM) - 1;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    const uint32_t horizontal_neighbors =
+        (occupied_rows[row] << 1) | (occupied_rows[row] >> 1);
+    const uint32_t vertical_neighbors =
+        (row > 0 ? occupied_rows[row - 1] : 0) |
+        (row < BOARD_DIM - 1 ? occupied_rows[row + 1] : 0);
+    uint32_t candidates = (horizontal_neighbors | vertical_neighbors) &
+                          ~unavailable_rows[row] & row_mask;
+    // Ascending columns preserve the original row-major tie-breaking order.
+    while (candidates) {
+      const int col = __builtin_ctz(candidates);
+      const uint32_t square_bit = UINT32_C(1) << col;
+      candidates &= candidates - 1;
+      const bool has_v_nbrs = (vertical_neighbors & square_bit) != 0;
+      const bool has_h_nbrs = (horizontal_neighbors & square_bit) != 0;
 
       // cross_set(H) validates the vertical word; cross_set(V) validates
       // the horizontal word.  The tile must satisfy both.
