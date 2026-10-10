@@ -16,6 +16,7 @@
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
 #include "board_test.h"
+#include "browser_game_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
 #include "cmd_api_test.h"
@@ -146,6 +147,7 @@ static TestEntry test_table[] = {
     {"pegjson", test_peg_embedding},
     {"wordmapapi", test_word_map_embedding},
     {"cmdapi", test_cmd_api},
+    {"browsergame", test_browser_game},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},

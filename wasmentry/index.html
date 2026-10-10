@@ -1,0 +1,761 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    />
+    <meta name="theme-color" content="#1e1e2e" />
+    <title>Magpie</title>
+    <script src="theme.js"></script>
+    <link rel="stylesheet" href="analysis.css?v=wmp-1" />
+    <script type="module" src="analysis.mjs?v=wmp-1"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand-rail" id="brand-rail">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true">M</span>
+            <h1>Magpie</h1>
+            <span class="badge">Beta</span>
+          </div>
+        </div>
+        <div class="header-actions" id="game-header-actions">
+          <button
+            id="open-lexicon-settings"
+            aria-controls="settings-view"
+          >
+            Lexicon: <span id="current-lexicon">CSW24</span></button
+          ><button id="open-settings" aria-controls="settings-view">
+            Settings</button>
+        </div>
+      </header>
+      <main id="game-view">
+        <section class="position panel" aria-label="Position">
+          <div class="game-toolbar">
+            <button id="new-game">New game</button>
+            <details class="game-menu" id="game-menu">
+              <summary>Game</summary>
+              <div class="menu-content">
+                <button id="load-gcg">Open GCG…</button>
+                <button id="save-gcg" disabled>Save GCG</button>
+                <button id="copy-gcg" disabled>Copy GCG</button>
+                <hr />
+                <button id="import">Paste CGP…</button>
+                <button id="copy">Copy CGP</button>
+              </div>
+            </details>
+            <span id="bag-count">93 in bag</span>
+            <input
+              id="gcg-file"
+              type="file"
+              accept=".gcg,text/plain"
+              hidden
+            />
+          </div>
+          <div class="player-scoreboard" aria-label="Scoreboard">
+            <div class="player-block player-one" id="player-one">
+              <span class="player-name" id="name-one">Player 1</span>
+              <strong class="player-score" id="points-one">0</strong>
+              <span class="player-clock" id="clock-one"></span>
+              <span class="turn-marker" id="turn-one"></span>
+            </div>
+            <div class="player-block player-two" id="player-two">
+              <span class="player-name" id="name-two">Player 2</span>
+              <strong class="player-score" id="points-two">0</strong>
+              <span class="player-clock" id="clock-two"></span>
+              <span class="turn-marker" id="turn-two"></span>
+            </div>
+          </div>
+          <div id="error" role="alert" hidden></div>
+          <div id="play-session" hidden>
+            <div class="toolbar">
+              <button id="pause-game">Pause</button
+              ><button id="step-game">One turn</button
+              ><button id="finish-game">Resign</button
+              ><label class="check"
+                ><input type="checkbox" id="show-live-analysis" />
+                Show analysis</label
+              >
+            </div>
+            <p id="session-result" role="status"></p>
+          </div>
+
+          <div
+            id="board"
+            role="grid"
+            aria-label="Scrabble board"
+          ></div>
+          <div
+            id="rack-tiles"
+            class="rack"
+            aria-label="On-turn tiles"
+          ></div>
+          <div class="rack-actions">
+            <button id="shuffle-rack">Shuffle rack</button
+            ><button id="sort-rack">Sort rack</button>
+          </div>
+          <section id="move-entry" aria-label="Move entry">
+            <div class="move-actions">
+              <button id="play-move" class="primary">
+                Play move <kbd aria-label="Enter">↵</kbd></button
+              ><button id="recall-tiles">Recall tiles</button
+              ><button id="pass-move">Pass</button
+              ><button id="exchange-move">Exchange</button>
+            </div>
+            <p id="move-feedback" role="status" class="hint"></p>
+          </section>
+          <div id="unseen-home">
+            <details
+              open
+              class="unseen"
+              id="unseen-pool"
+              aria-labelledby="unseen-label"
+            >
+              <summary>
+                <span id="unseen-label">Unseen tiles</span>
+                <span id="unseen-counts"></span>
+              </summary>
+              <div id="unseen-tiles"></div>
+            </details>
+          </div>
+          <details class="position-editor" id="position-editor">
+            <summary>Edit position</summary>
+            <div class="position-tools">
+              <label
+                >Example
+                <select id="sample">
+                  <option value="opening">Opening</option>
+                  <option value="midgame">Midgame</option>
+                  <option value="peg">Pre-endgame</option>
+                  <option value="endgame">Endgame</option>
+                </select></label
+              ><label
+                >Recent
+                <select id="recent">
+                  <option value="">Select position…</option>
+                </select></label
+              >
+            </div>
+            <div class="scoreboard">
+              <label
+                >On turn
+                <input
+                  id="score"
+                  type="number"
+                  min="-10000"
+                  max="10000"
+                  value="0"
+                  aria-label="On-turn score" /></label
+              ><label
+                >Opponent
+                <input
+                  id="opponent-score"
+                  type="number"
+                  min="-10000"
+                  max="10000"
+                  value="0"
+                  aria-label="Opponent score"
+              /></label>
+            </div>
+            <div class="board-tools">
+              <label class="check"
+                ><input id="edit" type="checkbox" /> Edit board</label
+              ><button id="undo" disabled>Undo edit</button
+              ><button id="clear">Clear board</button>
+            </div>
+            <div class="ownership-tools" id="ownership-tools" hidden>
+              <label
+                >Tile owner
+                <select id="tile-owner">
+                  <option value="0">Player 1 · gold</option>
+                  <option value="1">Player 2 · green</option>
+                  <option value="-1">Unknown</option>
+                </select></label
+              >
+              <button id="assign-owner">Assign owner</button>
+            </div>
+            <div class="tile-legend">
+              <span class="player-one">Player 1</span
+              ><span class="player-two">Player 2</span
+              ><span class="player-unknown">Unknown</span
+              ><label
+                >On turn
+                <select id="on-turn-player">
+                  <option value="0">Player 1</option>
+                  <option value="1">Player 2</option>
+                </select></label
+              >
+            </div>
+
+            <div class="rack-inputs">
+              <label
+                >Rack
+                <input
+                  id="rack"
+                  maxlength="7"
+                  spellcheck="false"
+                  autocomplete="off"
+                  value="AEINRST"
+                  aria-label="On-turn rack" /></label
+              ><label
+                >Known opponent tiles
+                <input
+                  id="opponent-rack"
+                  maxlength="7"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="Unknown"
+                  aria-label="Known opponent rack"
+              /></label>
+            </div>
+          </details>
+          <details class="controls-help move-controls-help">
+            <summary>Controls</summary>
+            <p class="hint">
+              Click a square and type, or drag a rack tile. On touch
+              screens, tap a tile, then a square.
+            </p>
+            <p class="hint">
+              <kbd>Shift + letter</kbd> Blank ·
+              <kbd>Space</kbd> Direction · <kbd>Enter</kbd> Play ·
+              <kbd>Esc</kbd> Recall
+            </p>
+            <p class="hint">
+              Use ? for a blank in a rack. Select an analysis move to
+              preview it.
+            </p>
+          </details>
+        </section>
+        <section class="analysis panel" aria-label="Analysis">
+          <div class="panel-header">
+            <h2>Analysis</h2>
+            <div class="toolbar">
+              <button
+                id="analysis-details"
+                aria-label="Analysis details"
+              >
+                Details
+              </button>
+              <button id="stop" disabled>Stop <kbd>Esc</kbd></button>
+            </div>
+          </div>
+          <div class="analysis-actions" aria-label="Analysis actions">
+            <button
+              data-mode="kibitz"
+              title="Rank moves by score and leave"
+            >
+              Kibitz
+            </button>
+            <button
+              data-mode="sim"
+              title="Compare moves with Monte Carlo simulation"
+            >
+              Run sim
+            </button>
+            <button
+              data-mode="peg"
+              title="Analyze with 1–4 tiles in the bag"
+            >
+              Solve PEG
+            </button>
+            <button
+              data-mode="endgame"
+              title="Solve with an empty bag"
+            >
+              Solve endgame
+            </button>
+          </div>
+          <button
+            id="open-analysis-settings"
+            class="search-settings-link"
+            aria-controls="settings-view"
+          >
+            <span>Search settings</span
+            ><span id="settings-summary"></span>
+          </button>
+          <div class="toolbar">
+            <button id="fresh-analysis" hidden>Start fresh</button>
+          </div>
+          <div class="status-line">
+            <span id="analysis-meta"></span>
+            <span id="status" role="status" aria-live="polite"
+              >Loading engine…</span
+            ><span id="elapsed"></span>
+          </div>
+          <div
+            id="peg-progress"
+            class="peg-progress"
+            aria-label="PEG search stages"
+            hidden
+          ></div>
+          <div class="results-scroll">
+            <table id="results">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+            <div id="empty" class="empty">No analysis yet</div>
+          </div>
+          <div id="selection" class="selection" hidden></div>
+        </section>
+        <section
+          id="game-history"
+          class="game-history panel review"
+          aria-label="Game record"
+          hidden
+        >
+          <strong id="game-players"></strong>
+          <div class="history-actions">
+            <button id="edit-history-move">Edit this move</button
+            ><button id="undo-game" disabled>Undo game change</button>
+          </div>
+          <div class="history-navigation">
+            <button id="history-first" aria-label="Start of game">
+              ⇤
+            </button>
+            <button id="history-previous" aria-label="Previous event">
+              ←
+            </button>
+            <select
+              id="history-position"
+              aria-label="Game position"
+            ></select>
+            <button id="history-next" aria-label="Next event">
+              →
+            </button>
+            <button id="history-last" aria-label="End of game">
+              ⇥
+            </button>
+          </div>
+          <div class="review-actions">
+            <label class="check"
+              ><input type="checkbox" id="hide-spoilers" /> Hide
+              upcoming moves</label
+            >
+            <button id="play-from">Play from here</button
+            ><button id="watch-from">Watch from here</button>
+            <button id="review-game">Analyze game</button
+            ><button id="stop-review" hidden>Stop review</button>
+          </div>
+          <div class="history-scroll">
+            <table id="history-table">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p id="review-progress" class="hint" role="status"></p>
+          <p id="history-note" class="hint"></p>
+          <details id="annotation">
+            <summary>Notes &amp; challenge</summary>
+            <label for="event-note">Note for this event</label>
+            <textarea
+              id="event-note"
+              rows="3"
+              maxlength="10000"
+            ></textarea>
+            <button id="save-note">Save note</button>
+            <button id="challenge-move">Challenge last play</button>
+          </details>
+          <p id="history-edited" class="hint" hidden>
+            Edited position · Return to history to play a move.
+          </p>
+        </section>
+      </main>
+      <main
+        id="settings-view"
+        hidden
+        aria-labelledby="settings-heading"
+      >
+        <div class="settings-header">
+          <button id="back-to-game" class="back-button">
+            <span aria-hidden="true">←</span> Back to game
+          </button>
+          <h2 id="settings-heading" tabindex="-1">Settings</h2>
+        </div>
+        <nav class="settings-nav" aria-label="Settings categories">
+          <button
+            data-settings-section="appearance"
+            aria-current="page"
+            aria-controls="appearance-settings"
+          >
+            Appearance
+          </button>
+          <button
+            data-settings-section="lexicon"
+            aria-controls="lexicon-settings"
+          >
+            Lexicon
+          </button>
+          <button
+            data-settings-section="board"
+            aria-controls="board-settings"
+          >
+            Board
+          </button>
+          <button
+            data-settings-section="analysis"
+            aria-controls="analysis-settings"
+          >
+            Analysis
+          </button>
+        </nav>
+        <div class="settings-content">
+          <section
+            id="appearance-settings"
+            aria-labelledby="appearance-settings-heading"
+          >
+            <h3 id="appearance-settings-heading">Appearance</h3>
+            <label class="setting-row" for="theme">
+              <span class="setting-name">Theme</span>
+              <select id="theme">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="system">Browser / system</option>
+              </select>
+            </label>
+          </section>
+          <section
+            id="lexicon-settings"
+            hidden
+            aria-labelledby="lexicon-settings-heading"
+          >
+            <h3 id="lexicon-settings-heading">Lexicon</h3>
+            <p id="lexicon-busy" class="hint" hidden>
+              Stop analysis to change the lexicon.
+            </p>
+            <label class="setting-row" for="lexicon">
+              <span class="setting-name">Word list</span>
+              <select id="lexicon">
+                <option value="CSW24">CSW24 · Collins</option>
+                <option value="NWL23">NWL23 · North America</option>
+              </select>
+            </label>
+          </section>
+          <section
+            hidden
+            id="board-settings"
+            aria-labelledby="board-settings-heading"
+          >
+            <h3 id="board-settings-heading">Board</h3>
+
+            <label class="setting-row" for="premium-labels">
+              <span class="setting-name">Premium labels</span>
+              <input
+                id="premium-labels"
+                class="setting-switch"
+                type="checkbox"
+                role="switch"
+              />
+            </label>
+          </section>
+          <section
+            id="analysis-settings"
+            hidden
+            aria-labelledby="analysis-settings-heading"
+          >
+            <h3 id="analysis-settings-heading">Analysis</h3>
+            <label class="setting-row" for="wmp-source">
+              <span class="setting-name">Word maps (experimental)</span>
+              <select id="wmp-source">
+                <option value="off">Off</option>
+                <option value="build">Build on this device</option>
+              </select>
+            </label>
+            <label class="setting-row" for="wmp-cache-enabled">
+              <span class="setting-name">Cache WMP and WIT on this device</span>
+              <input id="wmp-cache-enabled" type="checkbox" />
+            </label>
+            <div id="wmp-files" aria-label="Cached word maps"></div>
+            <p id="wmp-cache-status" class="hint" role="status"></p>
+            <button id="stop-wmp" type="button" hidden>Stop</button>
+            <label class="setting-row" for="auto-analyze"
+              ><span class="setting-name">Auto-analyze turns</span
+              ><select id="auto-analyze">
+                <option value="off">Off</option>
+                <option value="kibitz">Kibitz</option>
+                <option value="auto">Sim / solve</option>
+              </select></label
+            >
+            <p id="settings-busy" class="hint" hidden>
+              Stop analysis to change these settings.
+            </p>
+            <label class="setting-row" for="seconds">
+              <span class="setting-name">Time limit (seconds)</span>
+              <input
+                id="seconds"
+                type="number"
+                min="1"
+                max="120"
+                value="10"
+              />
+            </label>
+            <label class="setting-row" for="candidates">
+              <span class="setting-name">Sim candidates</span>
+              <input
+                id="candidates"
+                type="number"
+                min="2"
+                max="100"
+                value="50"
+              />
+            </label>
+            <label class="setting-row" for="plies">
+              <span class="setting-name">Lookahead (plies)</span>
+              <input
+                id="plies"
+                type="number"
+                min="1"
+                max="8"
+                value="4"
+              />
+            </label>
+            <label class="setting-row" for="tt-memory">
+              <span class="setting-name">Transposition tables</span>
+              <select id="tt-memory">
+                <option value="16">16 MiB</option>
+                <option value="32" selected>32 MiB</option>
+              </select>
+            </label>
+            <label class="setting-row" for="threads">
+              <span class="setting-name">Threads</span>
+              <input
+                id="threads"
+                type="number"
+                min="1"
+                max="4"
+                value="1"
+              />
+            </label>
+          </section>
+        </div>
+      </main>
+    </div>
+    <div
+      id="context-status"
+      role="status"
+      aria-label="Control hint"
+      aria-live="off"
+    ></div>
+    <dialog id="analysis-details-dialog">
+      <div class="panel-header">
+        <h2>Analysis details</h2>
+        <button
+          id="close-analysis-details"
+          aria-label="Close analysis details"
+        >
+          ×
+        </button>
+      </div>
+      <p id="result-note" class="hint"></p>
+      <details class="engine-details">
+        <summary>Engine diagnostics</summary>
+        <pre id="raw"></pre>
+      </details>
+    </dialog>
+    <dialog id="exchange-dialog" aria-labelledby="exchange-heading">
+      <h2 id="exchange-heading">Exchange tiles</h2>
+      <div id="exchange-tiles" class="rack" aria-label="Tiles to exchange"></div>
+      <div class="move-actions">
+        <button id="confirm-exchange" class="primary" disabled>Exchange</button>
+        <button id="cancel-exchange">Cancel</button>
+      </div>
+    </dialog>
+    <dialog id="blank-dialog">
+      <div class="panel-header">
+        <h2>Choose a blank letter</h2>
+        <button id="cancel-blank" aria-label="Cancel blank">×</button>
+      </div>
+      <div id="blank-letters" class="blank-letters"></div>
+    </dialog>
+    <dialog id="game-confirm">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-message"></p>
+      <div class="move-actions">
+        <button id="confirm-yes" class="primary">Continue</button
+        ><button id="confirm-no">Cancel</button>
+      </div>
+    </dialog>
+    <dialog id="new-game-dialog">
+      <form id="new-game-form">
+        <div class="panel-header">
+          <h2>New game</h2>
+          <button
+            type="button"
+            id="cancel-new-game"
+            aria-label="Cancel new game"
+          >
+            ×
+          </button>
+        </div>
+        <div
+          class="game-kind-options"
+          role="group"
+          aria-label="Game mode"
+        >
+          <button
+            type="button"
+            data-game-kind="play"
+            aria-pressed="true"
+          >
+            Play Magpie
+          </button>
+          <button
+            type="button"
+            data-game-kind="record"
+            aria-pressed="false"
+          >
+            Record a game
+          </button>
+          <button
+            type="button"
+            data-game-kind="watch"
+            aria-pressed="false"
+          >
+            Watch computers
+          </button>
+        </div>
+        <select id="game-kind" aria-label="Game mode" hidden>
+          <option value="play" selected>Play against computer</option>
+          <option value="record">Record / annotate</option>
+          <option value="watch">Watch computers</option>
+        </select>
+        <label
+          >Player 1<input
+            id="player-one-name"
+            value="You"
+            maxlength="80"
+            required /></label
+        ><label
+          >Player 2<input
+            id="player-two-name"
+            value="Magpie"
+            maxlength="80"
+            required
+        /></label>
+        <div id="computer-setup">
+          <label
+            >Time per player<select id="game-time">
+              <option value="0">Untimed</option>
+              <option value="180">3 minutes</option>
+              <option value="300">5 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1500" selected>25 minutes</option>
+            </select></label
+          >
+          <details class="game-options">
+            <summary>Game options</summary>
+            <div class="advanced-game-options">
+              <label
+                >You play<select id="human-side">
+                  <option value="0">Player 1</option>
+                  <option value="1">Player 2</option>
+                </select></label
+              >
+              <label
+                >First player<select id="first-player">
+                  <option value="0">Player 1</option>
+                  <option value="1">Player 2</option>
+                  <option value="random">Random</option>
+                </select></label
+              >
+              <label
+                >Overtime<select id="overtime">
+                  <option value="0">None · lose on time</option>
+                  <option value="60" selected>1 minute</option>
+                  <option value="300">5 minutes</option>
+                  <option value="600">10 minutes</option>
+                  <option value="unlimited">Unlimited</option>
+                </select></label
+              >
+              <label
+                >Time penalty<select id="time-penalty">
+                  <option value="minute">10 points / minute</option>
+                  <option value="second">1 point / second</option>
+                </select></label
+              >
+              <label
+                >Challenge rule<select id="challenge-rule">
+                  <option value="void">Void</option>
+                  <option value="single">Single</option>
+                  <option value="double">Double</option>
+                  <option value="five">5 points</option>
+                  <option value="ten">10 points</option>
+                </select></label
+              >
+              <label
+                >Computer analysis<select id="bot-analysis">
+                  <option value="auto">Sim / solve</option>
+                  <option value="kibitz">Static equity</option>
+                </select></label
+              >
+              <label
+                >Seconds per computer move<input
+                  id="bot-seconds"
+                  type="number"
+                  min="1"
+                  max="120"
+                  value="5"
+              /></label>
+              <label
+                >Watch delay (seconds)<input
+                  id="watch-delay"
+                  type="number"
+                  min="0"
+                  max="30"
+                  value="1"
+              /></label>
+            </div>
+          </details>
+        </div>
+        <button class="primary">Start game</button>
+      </form>
+    </dialog>
+    <dialog id="gcg-dialog" aria-labelledby="gcg-heading">
+      <form id="gcg-form">
+        <div class="panel-header">
+          <h2 id="gcg-heading">Open game</h2>
+          <button type="button" id="close-gcg" aria-label="Close game import">×</button>
+        </div>
+        <div id="gcg-drop-zone">
+          <button type="button" id="choose-gcg">Choose file…</button>
+          <span class="hint">or drop a GCG here</span>
+        </div>
+        <label for="gcg-text">Paste GCG</label>
+        <textarea id="gcg-text" rows="8" spellcheck="false" autocomplete="off" autofocus></textarea>
+        <p id="gcg-load-status" role="status" class="hint"></p>
+        <p id="gcg-load-error" role="alert"></p>
+        <button id="submit-gcg" class="primary" type="submit">Load game</button>
+        <details id="gcg-diagnostics" class="engine-details">
+          <summary>Loading diagnostics</summary>
+          <button type="button" id="copy-gcg-diagnostics">Copy log</button>
+          <pre id="gcg-diagnostics-log" tabindex="0"></pre>
+        </details>
+      </form>
+    </dialog>
+    <dialog id="import-dialog">
+      <form id="import-form">
+        <div class="panel-header">
+          <h2>Paste a position</h2>
+          <button type="button" id="close-import" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <label for="cgp">CGP</label
+        ><textarea
+          id="cgp"
+          rows="6"
+          spellcheck="false"
+          placeholder="board rack/opponent score/score 0 -lex CSW24"
+        ></textarea>
+        <p class="hint">
+          Lowercase letters are blanks. Tile ownership is not
+          included.
+        </p>
+        <p id="import-error" role="alert"></p>
+        <button class="primary" type="submit">Load position</button>
+      </form>
+    </dialog>
+  </body>
+</html>

@@ -215,7 +215,7 @@ examples: libmagpie
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
-magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
+magpie_test: $(OBJ_SRC) $(OBJ_TEST) $(OBJ_DIR)/wasmentry/browser_game.o | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
 magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
@@ -364,3 +364,9 @@ pgo_workload: pgo_toolchain_check
 -include $(OBJ_TEST:.o=.d)
 -include $(PGO_TRAIN_OBJ:.o=.d)
 -include $(CONVERT_OBJ:.o=.d)
+
+$(OBJ_DIR)/wasmentry/browser_game.o: wasmentry/browser_game.c wasmentry/browser_game.h Makefile
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+-include $(OBJ_DIR)/wasmentry/browser_game.d

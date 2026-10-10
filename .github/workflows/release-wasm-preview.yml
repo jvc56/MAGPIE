@@ -1,0 +1,107 @@
+name: Release WASM preview
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-wasm-preview.yml
+      - wasmentry/package_preview.py
+      - wasmentry/package.json
+      - wasmentry/package-lock.json
+      - wasmentry/fetch_preview_data.py
+      - wasmentry/release-build.json
+      - wasmentry/qa/release-smoke.mjs
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New release tag (e.g. wasm-preview-v0.1.0); never reuse a version'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-release-${{ github.event.inputs.version || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ github.event.inputs.version || 'wasm-preview-v0.0.0-ci' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read pinned build inputs and validate the version
+        id: build
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          assert re.fullmatch(r'wasm-preview-v\d+\.\d+\.\d+(?:-[a-z0-9.]+)?', os.environ['VERSION'])
+          with open('wasmentry/release-build.json') as source:
+              build = json.load(source)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('emscripten=' + build['emscripten_version'], file=output)
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ steps.build.outputs.emscripten }}
+      - run: python3 wasmentry/fetch_preview_data.py
+      - run: make -f Makefile-wasm -j2 magpie_wasm
+      - run: python3 wasmentry/package_preview.py preview-dist --version "$VERSION"
+      - name: Test the packaged engine without service workers
+        run: |
+          npm ci --prefix wasmentry
+          cd wasmentry && npx playwright install --with-deps chromium && cd ..
+          python3 preview-dist/serve_preview.py --port 8012 > /tmp/preview-server.log 2>&1 &
+          server=$!
+          trap 'kill "$server"' EXIT
+          for attempt in {1..50}; do
+            if curl -fsS http://localhost:8012/wasmentry/ >/dev/null; then break; fi
+            sleep .2
+          done
+          node wasmentry/qa/release-smoke.mjs http://localhost:8012/wasmentry/
+      - name: Archive the versioned release
+        run: |
+          tar -czf magpie-wasm-preview.tar.gz -C preview-dist .
+          sha256sum magpie-wasm-preview.tar.gz > magpie-wasm-preview.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: magpie-wasm-release
+          path: |
+            magpie-wasm-preview.tar.gz
+            magpie-wasm-preview.tar.gz.sha256
+          retention-days: 14
+
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: magpie-wasm-release
+      - name: Publish a new prerelease (existing tags are refused)
+        run: |
+          # gh release create refuses an existing release. Also refuse an
+          # existing tag so the release always names this workflow's source.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$VERSION" >/dev/null 2>&1; then
+            echo "Tag already exists: $VERSION" >&2
+            exit 1
+          fi
+          gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Magpie beta $VERSION" \
+            --notes "Magpie browser beta built from $GITHUB_SHA. Includes UI, threaded WASM and CSW24/NWL23 data. See wasmentry/README.md for hosting and verification." \
+            magpie-wasm-preview.tar.gz magpie-wasm-preview.tar.gz.sha256

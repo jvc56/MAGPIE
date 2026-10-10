@@ -56,11 +56,36 @@ jobs:
         working-directory: ./wasmentry
         run: |
           npm install
-          npx playwright install chromium
+          npx playwright install --with-deps chromium webkit
+
+      - name: Cache optional WMP test downloads
+        id: cache-wmp
+        uses: actions/cache@v3
+        with:
+          path: |
+            data/wmp/
+            data/wmp-manifest.json
+          key: wasm-test-wmp-${{ hashFiles('src/**', 'wasmentry/build_wmp_assets.py', 'data/lexica/CSW24.kwg', 'data/lexica/NWL23.kwg') }}
+
+      - name: Build optional WMP downloads
+        if: steps.cache-wmp.outputs.cache-hit != 'true'
+        run: |
+          make -j2 magpie BUILD=no_pgo_release
+          python3 wasmentry/build_wmp_assets.py --threads 2
 
       - name: Run Playwright tests
         working-directory: ./wasmentry
         run: npm test
+
+      - name: Package Magpie beta
+        run: python3 wasmentry/package_preview.py preview-dist
+
+      - name: Upload Magpie beta
+        uses: actions/upload-artifact@v6
+        with:
+          name: magpie-wasm-preview
+          path: preview-dist/
+          retention-days: 14
 
       - name: Upload test results
         if: failure()
@@ -68,5 +93,5 @@ jobs:
         with:
           name: playwright-results
           path: |
-            test-results/
-            playwright-report/
+            wasmentry/test-results/
+            wasmentry/playwright-report/
