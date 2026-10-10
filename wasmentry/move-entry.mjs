@@ -2,14 +2,7 @@
 // use the same rack accounting and notation builder.
 export const tileKey = (row, col) => `${row},${col}`;
 export function remainingRack(rack, tiles) {
-  const remaining = [...rack];
-  for (const { letter } of tiles) {
-    const token = letter === letter.toLowerCase() ? "?" : letter;
-    const index = remaining.indexOf(token);
-    if (index < 0) throw new Error(`The rack has no ${token} tile left.`);
-    remaining.splice(index, 1);
-  }
-  return remaining;
+  return rackSlots(rack, tiles).remaining.map(slot => slot.letter);
 }
 export function placeTile(
   position,
@@ -18,6 +11,7 @@ export function placeTile(
   col,
   letter,
   forceBlank = false,
+  rackIndex = null,
 ) {
   if (row < 0 || row >= 15 || col < 0 || col >= 15 || position.board[row][col])
     throw new Error("Choose an empty board square.");
@@ -25,12 +19,15 @@ export function placeTile(
     throw new Error("There is already a pending tile on that square.");
   if (!/^[A-Za-z]$/.test(letter))
     throw new Error("Choose a letter for the blank.");
-  const rack = remainingRack(position.racks[0], tiles);
+  const slots = rackSlots(position.racks[0], tiles).remaining;
+  const rack = slots.map(slot => slot.letter);
   const upper = letter.toUpperCase();
   const blank = forceBlank || !rack.includes(upper);
   if (!rack.includes(blank ? "?" : upper))
     throw new Error(`The rack has no ${blank ? "blank" : upper} tile left.`);
-  return [...tiles, { row, col, letter: blank ? upper.toLowerCase() : upper }];
+  const slot = slots.find(slot => slot.letter === (blank ? "?" : upper) && (rackIndex == null || slot.index === rackIndex));
+  if (!slot) throw new Error("That rack tile is no longer available.");
+  return [...tiles, { row, col, letter: blank ? upper.toLowerCase() : upper, rackIndex:slot.index }];
 }
 export function moveNotation(position, tiles, vertical = false) {
   if (!tiles.length) return "";
@@ -91,4 +88,41 @@ export function normalizeMove(value) {
       "Enter a move such as 8H TRAIN, H8 TRAIN, ex AE, or pass. Lowercase tiles are blanks.",
     );
   return `${play[1].toUpperCase()} ${play[2]}`;
+}
+
+// Keep the identity of duplicate letters while pending tiles reserve rack slots.
+// Imported/preview moves have no slot yet; assign those deterministically.
+export function rackSlots(rack, tiles = []) {
+  const slots = [...rack].map((letter, index) => ({letter, index}));
+  const reserved = new Set();
+  const indexes = tiles.map(tile => {
+    const token = tile.letter === tile.letter.toLowerCase() ? "?" : tile.letter;
+    const slot = slots.find(slot => slot.index === tile.rackIndex && slot.letter === token && !reserved.has(slot.index));
+    if (slot) reserved.add(slot.index);
+    return slot?.index;
+  });
+  tiles.forEach((tile, index) => {
+    if (indexes[index] != null) return;
+    const token = tile.letter === tile.letter.toLowerCase() ? "?" : tile.letter;
+    const slot = slots.find(slot => slot.letter === token && !reserved.has(slot.index));
+    if (!slot) throw new Error(`The rack has no ${token} tile left.`);
+    indexes[index] = slot.index;
+    reserved.add(slot.index);
+  });
+  return {remaining: slots.filter(slot => !reserved.has(slot.index)), indexes};
+}
+
+// Destination is a gap in the visible rack, before removing the dragged tile.
+export function reorderRack(rack, tiles, sourceIndex, gap) {
+  const {remaining, indexes} = rackSlots(rack, tiles);
+  if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= rack.length ||
+      !Number.isInteger(gap) || gap < 0 || gap > remaining.length) throw new Error("Invalid rack drop.");
+  const order = [...rack].map((_, index) => index);
+  const destination = remaining[gap]?.index ?? rack.length;
+  order.splice(sourceIndex, 1);
+  order.splice(destination - (sourceIndex < destination ? 1 : 0), 0, sourceIndex);
+  return {
+    rack: order.map(index => rack[index]).join(""),
+    tiles: tiles.map((tile, index) => ({...tile, rackIndex:order.indexOf(indexes[index])})),
+  };
 }

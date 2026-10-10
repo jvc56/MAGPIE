@@ -1,3 +1,4 @@
+import { installTileDrag } from "./tile-drag.mjs";
 import { deviceBudget } from "./device-budget.mjs";
 import { listWMPs } from "./wmp-cache.mjs";
 import { parsePegProgress, mergePegRows } from "./peg-review.mjs";
@@ -22,6 +23,8 @@ import {
 } from "./analysis-model.mjs";
 import {
   remainingRack,
+  rackSlots,
+  reorderRack,
   placeTile,
   moveNotation,
   normalizeMove,
@@ -40,6 +43,7 @@ let cursor = null,
   undo = [],
   engine,
   timer;
+let tileDrag = null;
 let draftTiles = [],
   rackChoice = null,
   gameUndo = [];
@@ -244,6 +248,7 @@ try {
 }
 function setBusy(value) {
   value = value || Boolean(engine?.fatalError);
+  if (value) tileDrag?.cancel();
   busy = value;
   if (!value) $("stop-wmp").hidden = true;
   document.body.classList.toggle("busy", value);
@@ -356,8 +361,10 @@ function setPosition(next, rememberPosition = false, fromHistory = false) {
   renderSession();
 }
 function renderBoard() {
+  tileDrag?.cancel();
   const drawPosition = continuationPosition || position;
   const board = $("board");
+  board.classList.toggle("position-editing", $("edit").checked);
   const preview = new Map(
     previewMove(drawPosition, continuationPosition ? "" : selectedMove).map(
       (t) => [`${t.row},${t.col}`, t.letter],
@@ -524,13 +531,11 @@ function renderPosition() {
     }
   }
   $("rack-tiles").replaceChildren();
-  for (const letter of remainingRack(
-    shownRack,
-    rackIndex ? [] : draftTiles,
-  )) {
+  for (const {letter, index} of rackSlots(shownRack, rackIndex ? [] : draftTiles).remaining) {
     const tile = document.createElement("button");
     tile.type = "button";
     tile.dataset.letter = letter;
+    tile.dataset.rackIndex = index;
     tile.setAttribute(
       "aria-label",
       letter === "?" ? "Blank tile" : `Tile ${letter}`,
@@ -539,7 +544,7 @@ function renderPosition() {
       busy ||
       terminalPosition() ||
       (isLive() && (!humanTurn() || session.paused));
-    tile.classList.toggle("chosen", rackChoice === letter);
+    tile.classList.toggle("chosen", rackChoice?.index === index);
     tile.classList.add("rack-tile");
     const glyph = document.createElement("span");
     glyph.className = "tile-letter";
@@ -1015,7 +1020,7 @@ $("premium-labels")?.addEventListener("change", () => {
   }
 });
 $("board").addEventListener("click", (event) => {
-  if (busy || suppressBoardClick) return;
+  if (busy) return;
   if (!$("edit").checked) {
     if (recordedGame) entryClick(event);
     return;
@@ -1500,14 +1505,14 @@ function advanceCursor() {
   );
   if (cursor.row >= 15 || cursor.col >= 15) cursor = null;
 }
-function addEntryTile(row, col, letter, blank = false, source = null) {
+function addEntryTile(row, col, letter, blank = false, source = null, rackIndex = null) {
   try {
     const rest = source
       ? draftTiles.filter(
           (tile) => tile.row !== source.row || tile.col !== source.col,
         )
       : draftTiles;
-    draftTiles = placeTile(position, rest, row, col, letter, blank);
+    draftTiles = placeTile(position, rest, row, col, letter, blank, rackIndex);
     cursor = { row, col };
     advanceCursor();
     rackChoice = null;
@@ -1518,8 +1523,8 @@ function addEntryTile(row, col, letter, blank = false, source = null) {
   }
 }
 let blankTarget = null;
-function chooseBlank(row, col, source = null) {
-  blankTarget = { row, col, source };
+function chooseBlank(row, col, source = null, rackIndex = null, apply = null) {
+  blankTarget = { row, col, source, rackIndex, apply, generation:positionGeneration, editing:$("edit").checked };
   $("blank-dialog").showModal();
 }
 for (const letter of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
@@ -1529,8 +1534,10 @@ for (const letter of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
   button.addEventListener("click", () => {
     const target = blankTarget;
     $("blank-dialog").close();
-    if (target)
-      addEntryTile(target.row, target.col, letter, true, target.source);
+    if (!target || busy || target.generation !== positionGeneration || target.editing !== $("edit").checked ||
+        (isLive() && (!humanTurn() || session.paused))) return;
+    if (target.apply) target.apply(letter.toLowerCase());
+    else addEntryTile(target.row, target.col, letter, true, target.source, target.rackIndex);
   });
   $("blank-letters").append(button);
 }
@@ -1546,8 +1553,8 @@ function entryClick(event) {
   const row = +cell.dataset.row,
     col = +cell.dataset.col;
   if (rackChoice) {
-    if (rackChoice === "?") chooseBlank(row, col);
-    else addEntryTile(row, col, rackChoice);
+    if (rackChoice.letter === "?") chooseBlank(row, col, null, rackChoice.index);
+    else addEntryTile(row, col, rackChoice.letter, false, null, rackChoice.index);
     return;
   }
   if (cursor?.row === row && cursor?.col === col) vertical = !vertical;
@@ -1607,6 +1614,7 @@ function entryKey(event) {
             cursor.col,
             tile.letter,
             tile.letter === tile.letter.toLowerCase(),
+            tile.rackIndex,
           );
           advanceCursor();
         }
@@ -1935,119 +1943,97 @@ async function changeRecordedEvent(action) {
 }
 $("save-note").addEventListener("click", () => changeRecordedEvent(2));
 $("challenge-move").addEventListener("click", () => changeRecordedEvent(3));
-// Pointer capture supports mouse, pen and touch with the same drag behavior.
-let dragging = null,
-  suppressBoardClick = false;
-function pointerStart(event) {
-  if (terminalPosition()) return;
-  if (isLive() && (!humanTurn() || session.paused)) return;
-  if (busy || !recordedGame || $("edit").checked || event.button !== 0)
-    return;
-  const rackTile = event.target.closest("#rack-tiles [data-letter]");
-  const square = event.target.closest(".square.pending");
-  if (!rackTile && !square) return;
-  const source = square
-    ? { row: +square.dataset.row, col: +square.dataset.col }
-    : null;
-  const letter =
-    rackTile?.dataset.letter ||
-    draftTiles.find(
-      (tile) => tile.row === source.row && tile.col === source.col,
-    )?.letter;
-  if (!letter) return;
-  dragging = {
-    letter,
-    source,
-    startX: event.clientX,
-    startY: event.clientY,
-    id: event.pointerId,
-    moved: false,
-    element: event.currentTarget,
-    ghost: null,
-  };
-  event.currentTarget.setPointerCapture(event.pointerId);
+// During play, only draft tiles move. Explicit position editing can also move
+// recorded tiles, preserving ownership and participating in editor undo.
+function canDragTiles() {
+  return !busy && !terminalPosition() && !(isLive() && (!humanTurn() || session.paused));
 }
-for (const id of ["rack-tiles", "board"]) {
-  $(id).addEventListener("pointerdown", pointerStart);
-  $(id).addEventListener("pointermove", (event) => {
-    if (!dragging || event.pointerId !== dragging.id) return;
-    if (
-      Math.hypot(
-        event.clientX - dragging.startX,
-        event.clientY - dragging.startY,
-      ) < 5 &&
-      !dragging.moved
-    )
-      return;
-    dragging.moved = true;
-    event.preventDefault();
-    if (!dragging.ghost) {
-      dragging.ghost = document.createElement("div");
-      dragging.ghost.className = "drag-tile";
-      dragging.ghost.textContent = dragging.letter.toUpperCase();
-      document.body.append(dragging.ghost);
+function rackDrop(source, gap) {
+  const next = reorderRack(position.racks[0], draftTiles, source.rackIndex, gap);
+  position.racks[0] = next.rack;
+  draftTiles = next.tiles.filter(tile => !source.square || tile.row !== source.row || tile.col !== source.col);
+  rackChoice = null;
+  if (source.square) renderDraft();
+  else renderPosition();
+}
+tileDrag = installTileDrag({
+  board:$("board"), rack:$("rack-tiles"),
+  sourceFor(target) {
+    if (!canDragTiles()) return null;
+    const rackTile = target.closest("#rack-tiles .rack-tile");
+    if (rackTile) return {element:rackTile, letter:rackTile.dataset.letter, rackIndex:+rackTile.dataset.rackIndex};
+    if (!recordedGame && !$("edit").checked) return null;
+    const square = target.closest("#board .square");
+    if (!square) return null;
+    const row = +square.dataset.row, col = +square.dataset.col;
+    if ($("edit").checked) {
+      const letter = position.board[row][col];
+      return letter ? {element:square, square, row, col, letter} : null;
     }
-    dragging.ghost.style.left = `${event.clientX}px`;
-    dragging.ghost.style.top = `${event.clientY}px`;
-    document.querySelector(".drop-target")?.classList.remove("drop-target");
-    document
-      .elementFromPoint(event.clientX, event.clientY)
-      ?.closest(".square:not(.played)")
-      ?.classList.add("drop-target");
-  });
-  $(id).addEventListener("pointerup", (event) => finishPointer(event, false));
-  $(id).addEventListener("pointercancel", (event) =>
-    finishPointer(event, true),
-  );
-}
-function finishPointer(event, cancel) {
-  if (!dragging || event.pointerId !== dragging.id) return;
-  const drag = dragging;
-  dragging = null;
-  drag.ghost?.remove();
-  document.querySelector(".drop-target")?.classList.remove("drop-target");
-  if (drag.element.hasPointerCapture(event.pointerId))
-    drag.element.releasePointerCapture(event.pointerId);
-  if (cancel) return;
-  if (!drag.moved) {
-    if (!drag.source) {
-      rackChoice = rackChoice === drag.letter ? null : drag.letter;
-      renderPosition();
+    const index = draftTiles.findIndex(tile => tile.row === row && tile.col === col);
+    return index < 0 ? null : {element:square, square, row, col, letter:draftTiles[index].letter,
+      rackIndex:rackSlots(position.racks[0], draftTiles).indexes[index]};
+  },
+  targetFor(x, y, source) {
+    if (!canDragTiles()) return null;
+    const target = document.elementFromPoint(x, y);
+    const rack = target?.closest("#rack-tiles");
+    if (rack) {
+      if ($("edit").checked && source.square && position.racks[0].length >= 7) return null;
+      const tiles = [...rack.children];
+      const before = tiles.findIndex(tile => { const rect = tile.getBoundingClientRect(); return x < rect.left + rect.width / 2; });
+      return {rack, gap:before < 0 ? tiles.length : before};
     }
-    return;
-  }
-  suppressBoardClick = true;
-  setTimeout(() => {
-    suppressBoardClick = false;
-  }, 0);
-  const target = document.elementFromPoint(event.clientX, event.clientY);
-  const square = target?.closest("[data-row]");
-  if (square) {
-    const row = +square.dataset.row,
-      col = +square.dataset.col;
-    if (drag.letter === "?") chooseBlank(row, col, drag.source);
-    else
-      addEntryTile(
-        row,
-        col,
-        drag.letter,
-        drag.letter === drag.letter.toLowerCase(),
-        drag.source,
-      );
-  } else if (drag.source && target?.closest("#rack-tiles")) {
-    draftTiles = draftTiles.filter(
-      (tile) => tile.row !== drag.source.row || tile.col !== drag.source.col,
-    );
-    renderDraft();
-  }
-}
+    if (!recordedGame && !$("edit").checked) return null;
+    const square = target?.closest("#board .square");
+    if (!square) return null;
+    const row = +square.dataset.row, col = +square.dataset.col;
+    if (source.square === square) return {square, row, col};
+    if (position.board[row][col] || draftTiles.some(tile => tile.row === row && tile.col === col)) return null;
+    return {square, row, col};
+  },
+  onTap(source) {
+    if (source.square || $("edit").checked || !recordedGame) return;
+    rackChoice = rackChoice?.index === source.rackIndex ? null : {letter:source.letter, index:source.rackIndex};
+    renderPosition();
+  },
+  onDrop(source, target) {
+    if (!canDragTiles() || source.square === target.square && source.square) return;
+    if (!source.square && target.rack) { rackDrop(source, target.gap); return; }
+    if ($("edit").checked) {
+      const apply = letter => {
+        const next = structuredClone(position);
+        const owner = source.square ? next.owners[source.row][source.col] : Number($("tile-owner").value);
+        if (source.square) { next.board[source.row][source.col] = ""; next.owners[source.row][source.col] = -1; }
+        else next.racks[0] = [...next.racks[0]].filter((_, index) => index !== source.rackIndex).join("");
+        if (target.rack) {
+          const rack = [...next.racks[0]];
+          rack.splice(target.gap, 0, letter === letter.toLowerCase() ? "?" : letter);
+          next.racks[0] = rack.join("");
+        } else { next.board[target.row][target.col] = letter; next.owners[target.row][target.col] = owner; }
+        commitEdit(next);
+      };
+      if (source.letter === "?" && target.square) chooseBlank(target.row, target.col, null, source.rackIndex, apply);
+      else apply(source.letter);
+    } else if (target.rack) rackDrop(source, target.gap);
+    else if (source.letter === "?") chooseBlank(target.row, target.col, null, source.rackIndex);
+    else addEntryTile(target.row, target.col, source.letter, source.letter === source.letter.toLowerCase(), source.square ? source : null, source.rackIndex);
+  },
+});
 $("rack-tiles").addEventListener("keydown", (event) => {
-  if (
-    (event.key === "Enter" || event.key === " ") &&
-    event.target.dataset.letter
-  ) {
+  if (!canDragTiles() || !event.target.dataset.letter) return;
+  const index = +event.target.dataset.rackIndex;
+  if (event.altKey && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
     event.preventDefault();
-    rackChoice = event.target.dataset.letter;
+    const slots = rackSlots(position.racks[0], draftTiles).remaining;
+    const from = slots.findIndex(slot => slot.index === index);
+    const to = from + (event.key === "ArrowLeft" ? -1 : 1);
+    if (to < 0 || to >= slots.length) return;
+    rackDrop({rackIndex:index}, to < from ? to : to + 1);
+    $("rack-tiles").children[to]?.focus();
+  } else if ((event.key === "Enter" || event.key === " ") && recordedGame && !$("edit").checked) {
+    event.preventDefault();
+    rackChoice = {letter:event.target.dataset.letter, index};
     renderPosition();
     $("board").querySelector('[tabindex="0"]')?.focus();
   }
@@ -2765,8 +2751,8 @@ function renderContextHint() {
           : "Select an analysis move to preview it, or enable Edit board to change tiles.";
   } else if (target?.id === "rack-tiles") {
     hint = recordedGame
-      ? "Drag a tile to the board, or select it then click a square."
-      : "Edit the Rack field to change your tiles.";
+      ? "Drag to arrange tiles or place them on the board · Alt + arrows: arrange selected tile"
+      : "Drag to arrange tiles · Alt + arrows: arrange selected tile · Edit the Rack field to change tiles";
   } else if (target?.id === "results") {
     hint =
       "Select a move to preview it on the board; select it again to clear the preview.";
