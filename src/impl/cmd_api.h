@@ -112,6 +112,9 @@ char *magpie_get_last_command_status_message(Magpie *mp);
 
 char *magpie_get_last_command_output(const Magpie *mp);
 
+// Opt in to structured PEG progress; call only while no command is running.
+void magpie_set_peg_json(Magpie *mp, bool enabled);
+
 // Signals the currently running command to stop.
 void magpie_stop_current_command(Magpie *mp);
 

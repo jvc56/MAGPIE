@@ -2,20 +2,25 @@
 
 #include "../src/compat/cpthread.h"
 #include "../src/def/cpthread_defs.h"
+#include "../src/def/game_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/impl/config.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
+#include "../src/str/peg_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -121,6 +126,14 @@ void test_peg_poll(void) {
   peg_poll_read(poll, &final);
   assert(final.done);
   assert(final.n_entries >= 1);
+  char *json = peg_poll_get_json(poll, game);
+  assert(has_substring(json, "\"done\":true"));
+  assert(has_substring(json, "\"stages\":[{"));
+  assert(has_substring(json, "\"entries\":[{"));
+  assert(!has_substring(json, "nan"));
+  assert(!has_substring(json, "inf"));
+  assert(!has_substring(json, "\"seconds\":-"));
+  free(json);
 
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -136,6 +149,33 @@ void test_peg_poll(void) {
          poller.reads, poller.max_entries_seen, poller.max_stage_seen,
          (unsigned long long) final.version, string_builder_peek(poll_best),
          100.0 * final.entries[0].win_pct);
+
+  // Synthetic display snapshot: non-finite values and unusual distribution
+  // glyphs must still serialize as valid JSON; malformed timing stays zero.
+  PegPollSnapshot synthetic = {0};
+  synthetic.n_entries = 1;
+  synthetic.n_stage_history = 1;
+  synthetic.entries[0].win_pct = NAN;
+  synthetic.entries[0].mean_spread = INFINITY;
+  synthetic.entries[0].move.move_type = GAME_EVENT_EXCHANGE;
+  synthetic.entries[0].move.tiles_played = 1;
+  synthetic.entries[0].move.tiles_length = 1;
+  synthetic.entries[0].move.tiles[0] = 1;
+  synthetic.stage_history[0].start_ns = 10;
+  synthetic.stage_history[0].end_ns = 5;
+  LetterDistribution *mutable_ld = config_get_ld(config);
+  char original[MAX_LETTER_BYTE_LENGTH];
+  memcpy(original, mutable_ld->ld_ml_to_hl[1], sizeof(original));
+  strcpy(mutable_ld->ld_ml_to_hl[1], "\"\\\n");
+  json = peg_snapshot_get_json(&synthetic, game);
+  memcpy(mutable_ld->ld_ml_to_hl[1], original, sizeof(original));
+  assert(has_substring(json, "\\\""));
+  assert(has_substring(json, "\\\\"));
+  assert(has_substring(json, "\\u000a"));
+  assert(has_substring(json, "\"win\":0.000000"));
+  assert(has_substring(json, "\"spread\":0.000000"));
+  assert(has_substring(json, "\"seconds\":0.000"));
+  free(json);
 
   string_builder_destroy(poll_best);
   string_builder_destroy(solve_best);
