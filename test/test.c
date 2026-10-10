@@ -101,6 +101,7 @@ typedef struct {
 
 static TestEntry test_table[] = {
     {"config", test_config},
+    {"endgame_review", test_config_endgame_played_move},
     {"players", test_players_data},
     {"string", test_string_util},
     {"alpha", test_alphabet},

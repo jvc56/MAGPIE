@@ -150,8 +150,11 @@ void endgame_results_destroy(EndgameResults *endgame_results) {
   free(endgame_results);
 }
 
-// NOT THREAD SAFE: Caller must ensure synchronization
+// Caller holds DISPLAY when shared with a status reader; lock PV publishers
+// here.
 void endgame_results_reset(EndgameResults *endgame_results) {
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_BEST);
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_ACTUAL);
   endgame_results->best_pv_data.depth = -1;
   endgame_results->best_pv_data.pv_line.num_moves = 0;
   endgame_results->display_pv_data.depth = -1;
@@ -169,6 +172,8 @@ void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results->solving_player = 0;
   endgame_results->max_depth = 0;
   endgame_results->status = ENDGAME_RESULT_STATUS_NONE;
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_ACTUAL);
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_BEST);
 }
 
 bool endgame_results_get_valid_for_current_game_state(
