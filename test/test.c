@@ -88,6 +88,7 @@
 #include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
+#include "word_map_embedding_test.h"
 #include "zobrist_test.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,6 +144,7 @@ static TestEntry test_table[] = {
     {"fileproxy", test_fileproxy_cache},
     {"historyreplay", test_history_replay},
     {"peg_embedding", test_peg_embedding},
+    {"wordmapapi", test_word_map_embedding},
     {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
