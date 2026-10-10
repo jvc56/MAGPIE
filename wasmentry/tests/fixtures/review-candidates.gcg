@@ -1,0 +1,36 @@
+#character-encoding UTF-8
+#description Magpie finished: Game over · CLI Magpie 437 — 348 Browser Magpie
+#description Created with MAGPIE
+#lexicon CSW24
+#game-type classic
+#board-layout CrosswordGame
+#tile-distribution english
+#player1 p1 CLI Magpie
+#player2 p2 Browser Magpie
+>p1: EEEFHOW 8H WHEE +20 20
+>p2: EEFLNQU L4 QUEEN +42 42
+>p1: AAEFGOX 7G GOAF +27 47
+>p2: CFGLNUV 6F GULF +30 72
+>p1: AEEEHMX -AEE +0 47
+>p2: CILNRVY M3 VIRL +29 101
+>p1: AEHMSXZ 9G MESH +40 87
+>p2: CENNRRY 10D CRYER +30 131
+>p1: AAEIOXZ D7 ZOE.IA +36 123
+>p2: AINNTTT 5C TITAN +17 148
+>p1: AENOSTX 4C AX +38 161
+>p2: CDDINNT 8A DIC.T +24 172
+>p1: ELNOOST B7 O.LSTONE +70 231
+>p2: DEIINNO A11 INION +27 199
+>p1: ?EINOST 11F OESTrIN +81 312
+>p2: DEKPTUW 6K W..K +21 220
+>p1: AADELOR O3 ORDEAL +36 348
+>p2: DEPSTUY B1 PYET +28 248
+>p1: ?AAABEP 5J BA.. +22 370
+>p2: ADDGISU 3A D.G +18 266
+>p1: ?AAEMOP 1A A.P +21 391
+>p2: ADIRSUV 12L UVA +16 282
+>p1: ?AEIJMO N10 JI.O +27 418
+>p2: BDIRRSU 14J BIRDS +52 334
+>p1: ?AEM 15H AME +19 437
+>p2: RU 12F UR +14 348
+>p2: (?) +0 348

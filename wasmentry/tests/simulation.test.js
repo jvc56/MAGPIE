@@ -96,14 +96,11 @@ test.describe("WASM Worker Simulation Tests", () => {
       timeout: 30000,
     });
 
-    // Wait a bit for simulation to actually start running
-    await page.waitForTimeout(2000);
-
     // Click stop
     await page.click("#stopButton");
 
     // Verify it stopped (should see "Stopped" status eventually)
-    await expect(page.locator("#status")).toContainText(/Complete|Stopped/, {
+    await expect(page.locator("#status")).toContainText("Stopped", {
       timeout: 10000,
     });
 

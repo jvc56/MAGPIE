@@ -15,7 +15,6 @@ Default port is 8080.
 
 import sys
 import http.server
-import socketserver
 from functools import partial
 
 
@@ -44,26 +43,16 @@ class CORSRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-    import socket
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 
     handler = partial(CORSRequestHandler, directory="..")
 
     # Enable socket reuse to avoid "Address already in use" errors
-    socketserver.TCPServer.allow_reuse_address = True
+    http.server.ThreadingHTTPServer.allow_reuse_address = True
+    http.server.ThreadingHTTPServer.request_queue_size = 128
 
-    # Get local IP for mobile access
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-    except:
-        local_ip = "unknown"
-
-    with socketserver.TCPServer(("0.0.0.0", port), handler) as httpd:
+    with http.server.ThreadingHTTPServer(("127.0.0.1", port), handler) as httpd:
         print(f"Server running at http://localhost:{port}/")
-        print(f"Mobile access: http://{local_ip}:{port}/")
         print(f"Serving files from: .. (project root)")
         print()
         print("Headers enabled:")
@@ -72,7 +61,6 @@ def main():
         print("  ✓ Access-Control-Allow-Origin: *")
         print()
         print(f"Desktop: http://localhost:{port}/wasmentry/test-worker.html")
-        print(f"iPhone:  http://{local_ip}:{port}/wasmentry/test-worker.html")
         print()
         print("Press Ctrl+C to stop")
         print()
