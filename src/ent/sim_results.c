@@ -97,6 +97,9 @@ struct SimmedPlay {
   // Mean of the per-sample blended utility (see sim_utility_blend). Only
   // meaningful for comparison/display when utility_w_spread > 0.
   Stat *utility_stat;
+  // The rollouts behind the samples: one per sample, or a bag-cycled sample's
+  // rotations. For display; the stats count samples.
+  uint64_t num_rollouts;
   // Exact, order-independent counterparts of the three stats above that
   // compare_simmed_plays ranks by. equity accumulates raw Equity millipoints,
   // which are already integral, so its mean carries no quantization at all.
@@ -176,6 +179,7 @@ SimmedPlay *simmed_play_create(const MoveList *move_list, int num_plies,
   exact_mean_reset(&simmed_play->exact_equity);
   exact_mean_reset(&simmed_play->exact_win_pct);
   exact_mean_reset(&simmed_play->exact_utility);
+  simmed_play->num_rollouts = 0;
   simmed_play->num_alloc_plies = num_plies;
   simmed_play->ply_infos = malloc_or_die(sizeof(PlyInfo) * num_plies);
   for (int j = 0; j < num_plies; j++) {
@@ -202,6 +206,7 @@ SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
   exact_mean_reset(&simmed_play->exact_equity);
   exact_mean_reset(&simmed_play->exact_win_pct);
   exact_mean_reset(&simmed_play->exact_utility);
+  simmed_play->num_rollouts = 0;
   for (int j = 0; j < simmed_play->num_alloc_plies && j < new_num_plies; j++) {
     ply_info_reset(&simmed_play->ply_infos[j], use_heat_map);
   }
@@ -308,6 +313,7 @@ void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
   dst->exact_equity = src->exact_equity;
   dst->exact_win_pct = src->exact_win_pct;
   dst->exact_utility = src->exact_utility;
+  dst->num_rollouts = src->num_rollouts;
   dst->similarity_key = src->similarity_key;
   dst->play_index_by_sort_type = src->play_index_by_sort_type;
   for (int i = 0; i < num_plies; i++) {
@@ -336,6 +342,7 @@ static SimmedPlay *simmed_play_duplicate(const SimmedPlay *src) {
   dst->exact_equity = src->exact_equity;
   dst->exact_win_pct = src->exact_win_pct;
   dst->exact_utility = src->exact_utility;
+  dst->num_rollouts = src->num_rollouts;
   dst->similarity_key = src->similarity_key;
   dst->play_index_by_sort_type = src->play_index_by_sort_type;
   dst->num_alloc_plies = src->num_alloc_plies;
@@ -529,6 +536,10 @@ const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
 }
 
+uint64_t simmed_play_get_num_rollouts(const SimmedPlay *simmed_play) {
+  return simmed_play->num_rollouts;
+}
+
 const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play) {
   return simmed_play->utility_stat;
 }
@@ -591,6 +602,11 @@ uint64_t sim_results_get_iteration_count(const SimResults *sim_results) {
 
 void sim_results_increment_iteration_count(SimResults *sim_results) {
   atomic_fetch_add(&sim_results->iteration_count, 1);
+}
+
+void sim_results_add_iteration_count(SimResults *sim_results,
+                                     const uint64_t count) {
+  atomic_fetch_add(&sim_results->iteration_count, count);
 }
 
 SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
@@ -658,6 +674,7 @@ void simmed_play_sample_record_clear(SimmedPlaySampleRecord *record) {
   record->win_pct = 0.0;
   record->utility = 0.0;
   record->has_utility = false;
+  record->num_rollouts = 1;
   record->num_plies = 0;
 }
 
@@ -685,8 +702,10 @@ static void simmed_play_apply_equity_while_locked(SimmedPlay *simmed_play,
 
 // Assumes the caller holds simmed_play->mutex.
 static void simmed_play_apply_win_pct_while_locked(SimmedPlay *simmed_play,
-                                                   const double wpct) {
+                                                   const double wpct,
+                                                   const int num_rollouts) {
   stat_push(simmed_play->win_pct_stat, wpct, 1);
+  simmed_play->num_rollouts += (uint64_t)num_rollouts;
   exact_mean_push_scaled(&simmed_play->exact_win_pct,
                          exact_mean_scale_unit_value(wpct));
 }
@@ -807,7 +826,7 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
     return wpct;
   }
   cpthread_mutex_lock(&simmed_play->mutex);
-  simmed_play_apply_win_pct_while_locked(simmed_play, wpct);
+  simmed_play_apply_win_pct_while_locked(simmed_play, wpct, 1);
   cpthread_mutex_unlock(&simmed_play->mutex);
   return wpct;
 }
@@ -825,7 +844,8 @@ void simmed_play_apply_sample_record(SimmedPlay *simmed_play,
   }
   simmed_play_apply_equity_while_locked(simmed_play, record->equity_sample,
                                         record->leftover);
-  simmed_play_apply_win_pct_while_locked(simmed_play, record->win_pct);
+  simmed_play_apply_win_pct_while_locked(simmed_play, record->win_pct,
+                                         record->num_rollouts);
   if (record->has_utility) {
     simmed_play_apply_utility_while_locked(simmed_play, record->utility);
   }

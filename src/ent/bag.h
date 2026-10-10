@@ -33,6 +33,10 @@ MachineLetter bag_draw_random_letter(Bag *bag, int player_draw_index);
 void bag_seed(Bag *bag, uint64_t seed);
 void bag_reset(const LetterDistribution *ld, Bag *bag);
 void bag_shuffle(Bag *bag);
+// Rotates the letters in the bag left by shift (taken modulo the number of
+// letters): the letter shift places from the start moves to the start, and
+// the letters before it move to the end. Uses no randomness.
+void bag_rotate(Bag *bag, int shift);
 void bag_increment_unseen_count(const Bag *bag, int *unseen_count);
 
 #endif

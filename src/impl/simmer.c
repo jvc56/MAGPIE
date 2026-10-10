@@ -27,6 +27,12 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+enum {
+  // The fewest cycles a bag-cycled sim gives each play (see
+  // sim_args_set_bag_cycle_budget).
+  SIM_BAG_CYCLE_MIN_CYCLES = 2,
+};
+
 // The sim context allows zero-alloc autoplay sims by maintaining the
 // dynamically allocated sim structs in between sim calls. The following
 // options are allowed to change in between sim calls:
@@ -48,6 +54,26 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   rvs_destroy(sim_ctx->rvs);
   inference_ctx_destroy(sim_ctx->inference_ctx);
   free(sim_ctx);
+}
+
+// A bag-cycled sample is a whole cycle of rollouts, but the sample limit
+// (-iterations) and minimum (-minplayiterations) count rollouts. Converts them
+// to this position's cycles, rounding up, and gives every play at least
+// SIM_BAG_CYCLE_MIN_CYCLES, so that BAI never estimates a play's variance from
+// one sample.
+static void sim_args_set_bag_cycle_budget(SimArgs *sim_args) {
+  const uint64_t rotations =
+      (uint64_t)rv_sim_bag_cycle_rotations(sim_args->game);
+  const uint64_t limit = sim_args->bai_options.sample_limit;
+  const uint64_t minimum = sim_args->bai_options.sample_minimum;
+  uint64_t minimum_cycles =
+      minimum / rotations + (minimum % rotations != 0 ? 1 : 0);
+  if (minimum_cycles < SIM_BAG_CYCLE_MIN_CYCLES) {
+    minimum_cycles = SIM_BAG_CYCLE_MIN_CYCLES;
+  }
+  sim_args->bai_options.sample_limit =
+      limit / rotations + (limit % rotations != 0 ? 1 : 0);
+  sim_args->bai_options.sample_minimum = minimum_cycles;
 }
 
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
@@ -84,18 +110,6 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     }
   }
 
-  // If the bag is empty, set sample_limit to the number of moves and
-  // sample_minimum to 1 for endgame simulations
-  const uint64_t original_sample_limit = sim_args->bai_options.sample_limit;
-  const uint64_t original_sample_minimum = sim_args->bai_options.sample_minimum;
-  const int original_num_plies = sim_args->num_plies;
-  if (bag_is_empty(game_get_bag(sim_args->game))) {
-    sim_args->bai_options.sample_limit =
-        move_list_get_count(sim_args->move_list);
-    sim_args->bai_options.sample_minimum = 1;
-    sim_args->num_plies = MAX_PLIES;
-  }
-
   if (*sim_ctx == NULL) {
     *sim_ctx = malloc_or_die(sizeof(SimCtx));
     (*sim_ctx)->rvs = NULL;
@@ -114,6 +128,21 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     num_infer_leaves =
         stat_get_num_unique_samples(inference_results_get_equity_values(
             sim_args->inference_results, INFERENCE_TYPE_LEAVE));
+  }
+
+  // If the bag is empty, set sample_limit to the number of moves and
+  // sample_minimum to 1 for endgame simulations. These are set after inference,
+  // which can return early, so that the reset below always undoes them.
+  const uint64_t original_sample_limit = sim_args->bai_options.sample_limit;
+  const uint64_t original_sample_minimum = sim_args->bai_options.sample_minimum;
+  const int original_num_plies = sim_args->num_plies;
+  if (bag_is_empty(game_get_bag(sim_args->game))) {
+    sim_args->bai_options.sample_limit =
+        move_list_get_count(sim_args->move_list);
+    sim_args->bai_options.sample_minimum = 1;
+    sim_args->num_plies = MAX_PLIES;
+  } else if (sim_args->bag_cycle) {
+    sim_args_set_bag_cycle_budget(sim_args);
   }
 
   RandomVariablesArgs rv_sim_args = {
@@ -143,7 +172,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
       sim_results_get_bai_result(sim_results));
 
   // Reset the sim args to their original values in case they were modified for
-  // endgame sims
+  // endgame or bag-cycled sims
   sim_args->bai_options.sample_limit = original_sample_limit;
   sim_args->bai_options.sample_minimum = original_sample_minimum;
   sim_args->num_plies = original_num_plies;

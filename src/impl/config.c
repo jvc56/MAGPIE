@@ -185,6 +185,7 @@ typedef enum {
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_SIM_MARGIN_FORECAST,
+  ARG_TOKEN_SIM_BAG_CYCLE,
   ARG_TOKEN_USE_HEAT_MAP,
   ARG_TOKEN_WRITE_BUFFER_SIZE,
   ARG_TOKEN_HUMAN_READABLE,
@@ -251,6 +252,8 @@ typedef enum {
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
   ARG_TOKEN_P1_SIM_MARGIN_FORECAST,
   ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
+  ARG_TOKEN_P1_SIM_BAG_CYCLE,
+  ARG_TOKEN_P2_SIM_BAG_CYCLE,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
   ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
@@ -421,6 +424,7 @@ struct Config {
   bool use_small_plays;
   bool sim_with_inference;
   bool sim_margin_forecast;
+  bool sim_bag_cycle;
   bool use_heat_map;
   bool print_boards;
   bool print_on_finish;
@@ -442,6 +446,8 @@ struct Config {
   bool p2_sim_with_inference;
   bool p1_sim_margin_forecast;
   bool p2_sim_margin_forecast;
+  bool p1_sim_bag_cycle;
+  bool p2_sim_bag_cycle;
   // Set when the most recent sim ran inference internally and it completed
   // (not interrupted). Separate from inference_results's own valid flag,
   // which a sim-driven inference deliberately does not set so that an
@@ -2039,6 +2045,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "state. The projection feeds the equity and the spread term "
              "of the utility blend.";
       break;
+    case ARG_TOKEN_SIM_BAG_CYCLE:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether each simulation sample plays every rotation of "
+             "its shuffled bag by the rack size, until the rotations wrap "
+             "around, and counts their mean as one sample. Every unseen tile "
+             "starts on the opponent's rack once per shuffle. Iterations and "
+             "minimum iterations still count rollouts, and every play gets at "
+             "least two cycles. On by default.";
+      break;
     case ARG_TOKEN_USE_HEAT_MAP:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2341,6 +2358,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether simulation projects the final margin (see "
              "smargin) for player 1 or 2 during autoplay.";
       break;
+    case ARG_TOKEN_P1_SIM_BAG_CYCLE:
+    case ARG_TOKEN_P2_SIM_BAG_CYCLE:
+      usages[0] = "<true_or_false>";
+      text = "Specifies whether simulation cycles each sample's bag through "
+             "its rotations (see sbagcycle) for player 1 or 2 during "
+             "autoplay.";
+      break;
     case ARG_TOKEN_P1_TIME_LIMIT:
     case ARG_TOKEN_P2_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
@@ -2620,6 +2644,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_STOP_COND_PCT,           /* scondition */
         ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
         ARG_TOKEN_SIM_MARGIN_FORECAST,     /* smargin */
+        ARG_TOKEN_SIM_BAG_CYCLE,           /* sbagcycle */
         ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
@@ -2629,6 +2654,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
         ARG_TOKEN_P1_SIM_MARGIN_FORECAST,  /* sm1 */
         ARG_TOKEN_P2_SIM_MARGIN_FORECAST,  /* sm2 */
+        ARG_TOKEN_P1_SIM_BAG_CYCLE,        /* sbc1 */
+        ARG_TOKEN_P2_SIM_BAG_CYCLE,        /* sbc2 */
         ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
         ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
         ARG_TOKEN_P1_THRESHOLD,            /* th1 */
@@ -3256,6 +3283,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sampling_rule, config->cutoff, config->utility_w_winpct,
       config->utility_w_spread, config->utility_spread_scale,
       config->sim_margin_forecast, &inference_args, sim_args);
+  sim_args->bag_cycle = config->sim_bag_cycle;
   if (config->game) {
     config_set_sim_args_pat_rollout(
         config, game_get_player_on_turn_index(config->game), sim_args);
@@ -4142,6 +4170,7 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_utility_w_winpct, config->p1_utility_w_spread,
       config->p1_utility_spread_scale, config->p1_sim_margin_forecast,
       &p1_inference_args, &autoplay_args->p1_sim_args);
+  autoplay_args->p1_sim_args.bag_cycle = config->p1_sim_bag_cycle;
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -4156,6 +4185,7 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
       config->p2_utility_spread_scale, config->p2_sim_margin_forecast,
       &p2_inference_args, &autoplay_args->p2_sim_args);
+  autoplay_args->p2_sim_args.bag_cycle = config->p2_sim_bag_cycle;
 
   config_set_sim_args_pat_rollout(config, 0, &autoplay_args->p1_sim_args);
   config_set_sim_args_pat_rollout(config, 1, &autoplay_args->p2_sim_args);
@@ -4184,6 +4214,8 @@ void config_fill_autoplay_args(const Config *config,
             .pat_rollout_disabled_classes_mask =
                 players_data_get_pat_rollout_disabled_classes_mask(
                     config->players_data, player_index),
+            .sim_bag_cycle = player_index == 0 ? config->p1_sim_bag_cycle
+                                               : config->p2_sim_bag_cycle,
         };
   }
 }
@@ -7615,6 +7647,26 @@ exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
 }
 
 // Assumes all args are parsed and correctly set in pargs.
+// Loads -sbagcycle and the per-player -sbc1 and -sbc2, which default to it.
+static void config_load_sim_bag_cycle(Config *config, ErrorStack *error_stack) {
+  config_load_bool(config, ARG_TOKEN_SIM_BAG_CYCLE, &config->sim_bag_cycle,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_SIM_BAG_CYCLE, 0) != NULL) {
+    config->p1_sim_bag_cycle = config->sim_bag_cycle;
+    config->p2_sim_bag_cycle = config->sim_bag_cycle;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_SIM_BAG_CYCLE,
+                   &config->p1_sim_bag_cycle, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_SIM_BAG_CYCLE,
+                   &config->p2_sim_bag_cycle, error_stack);
+}
+
 void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
   if (new_path) {
@@ -8404,6 +8456,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
   config_load_bool(config, ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
                    &config->p2_sim_margin_forecast, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_sim_bag_cycle(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -10022,6 +10079,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_SIM_MARGIN_FORECAST, "smargin", 1, 1);
+  arg(ARG_TOKEN_SIM_BAG_CYCLE, "sbagcycle", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
   arg(ARG_TOKEN_HUMAN_READABLE, "hr", 1, 1);
   arg(ARG_TOKEN_SHOW_MISTAKES, "mistakes", 1, 1);
@@ -10059,6 +10117,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_MARGIN_FORECAST, "sm1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_MARGIN_FORECAST, "sm2", 1, 1);
+  arg(ARG_TOKEN_P1_SIM_BAG_CYCLE, "sbc1", 1, 1);
+  arg(ARG_TOKEN_P2_SIM_BAG_CYCLE, "sbc2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
   arg(ARG_TOKEN_P1_PLAY_CHOOSER_TIME, "pc1", 1, 1);
@@ -10161,6 +10221,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->sim_with_inference = true;
   config->pat_label_plies = 1;
   config->sim_margin_forecast = false;
+  config->sim_bag_cycle = true;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
   config->p1_num_plays = config->num_plays;
@@ -10175,6 +10236,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_sim_with_inference = config->sim_with_inference;
   config->p1_sim_margin_forecast = config->sim_margin_forecast;
   config->p2_sim_margin_forecast = config->sim_margin_forecast;
+  config->p1_sim_bag_cycle = config->sim_bag_cycle;
+  config->p2_sim_bag_cycle = config->sim_bag_cycle;
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
   config->p1_play_chooser_time_ms = -1.0;
@@ -10784,6 +10847,18 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_SIM_MARGIN_FORECAST:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->p2_sim_margin_forecast);
+      break;
+    case ARG_TOKEN_SIM_BAG_CYCLE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->sim_bag_cycle);
+      break;
+    case ARG_TOKEN_P1_SIM_BAG_CYCLE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_sim_bag_cycle);
+      break;
+    case ARG_TOKEN_P2_SIM_BAG_CYCLE:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_sim_bag_cycle);
       break;
     case ARG_TOKEN_USE_HEAT_MAP:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
