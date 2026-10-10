@@ -1574,12 +1574,25 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
   }
 }
 
-// Use event index 0 to go to the start of the game.
-// Calling with event index N will set the game state to after the
-// Nth turn has been played where n is 1-indexed.
+// Publish an initial rack without changing the replay bag's draw order.
+static bool replay_initial_position(GameHistory *game_history, const Game *game,
+                                    GameHistoryCallback callback,
+                                    void *user_data, ErrorStack *error_stack) {
+  Game *initial_game = game_duplicate(game);
+  const GameEvent *first_event = game_history_get_event(game_history, 0);
+  set_rack_from_bag_or_push_to_error_stack(
+      initial_game, game_event_get_player_index(first_event),
+      game_event_get_const_rack(first_event), error_stack);
+  const bool keep_replaying =
+      error_stack_is_empty(error_stack) &&
+      callback(game_history, initial_game, 0, user_data);
+  game_destroy(initial_game);
+  return keep_replaying;
+}
+
 static void replay_history(GameHistory *game_history, Game *game,
                            int num_events_to_play, const bool validate,
-                           GameHistoryVisitor visitor, void *context,
+                           GameHistoryCallback callback, void *user_data,
                            ErrorStack *error_stack) {
   game_reset(game);
   if (game_history_get_num_events(game_history) == 0) {
@@ -1593,22 +1606,24 @@ static void replay_history(GameHistory *game_history, Game *game,
         return;
       }
     }
-    if (visitor) {
-      visitor(game_history, game, 0, context);
+    if (callback) {
+      callback(game_history, game, 0, user_data);
     }
     return;
   }
-  if (visitor || num_events_to_play <= 0) {
-    const GameEvent *first_game_event = game_history_get_event(game_history, 0);
+  if (num_events_to_play <= 0) {
+    const GameEvent *first_event = game_history_get_event(game_history, 0);
     set_rack_from_bag_or_push_to_error_stack(
-        game, game_event_get_player_index(first_game_event),
-        game_event_get_const_rack(first_game_event), error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+        game, game_event_get_player_index(first_event),
+        game_event_get_const_rack(first_event), error_stack);
+    if (callback && error_stack_is_empty(error_stack)) {
+      callback(game_history, game, 0, user_data);
     }
+    return;
   }
-  if (visitor) {
-    visitor(game_history, game, 0, context);
+  if (callback && !replay_initial_position(game_history, game, callback,
+                                           user_data, error_stack)) {
+    return;
   }
   const int ld_size = ld_get_size(game_get_ld(game));
 
@@ -1644,24 +1659,56 @@ static void replay_history(GameHistory *game_history, Game *game,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    if (visitor) {
-      visitor(game_history, game, game_event_index + 1, context);
+    if (callback) {
+      // Owner metadata is presentation-only; indexed replay and searches do
+      // not pay for it. Challenge rollback restores the prior board snapshot.
+      const GameEvent *event =
+          game_history_get_event(game_history, game_event_index);
+      if (game_event_get_type(event) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        const Move *move =
+            validated_moves_get_move(game_event_get_vms(event), 0);
+        const bool vertical = move_get_dir(move) == BOARD_VERTICAL_DIRECTION;
+        for (int tile_idx = 0; tile_idx < move_get_tiles_length(move);
+             tile_idx++) {
+          if (move_get_tile(move, tile_idx) != PLAYED_THROUGH_MARKER) {
+            board_set_square_owner(
+                game_get_board(game),
+                move_get_row_start(move) + (vertical ? tile_idx : 0),
+                move_get_col_start(move) + (vertical ? 0 : tile_idx),
+                game_event_get_player_index(event));
+          }
+        }
+      }
+      for (int player_idx = 0; player_idx < 2; player_idx++) {
+        rack_copy(
+            player_get_known_rack_from_phonies(
+                game_get_player(game, player_idx)),
+            &play_events_data.known_letters_from_phonies_racks[player_idx]);
+      }
+      if (!callback(game_history, game, game_event_index + 1, user_data)) {
+        return;
+      }
     }
   }
-  for (int i = 0; i < 2; i++) {
-    rack_copy(player_get_known_rack_from_phonies(game_get_player(game, i)),
-              &play_events_data.known_letters_from_phonies_racks[i]);
+  if (!callback) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      rack_copy(
+          player_get_known_rack_from_phonies(game_get_player(game, player_idx)),
+          &play_events_data.known_letters_from_phonies_racks[player_idx]);
+    }
   }
 }
 
-void game_play_n_events(GameHistory *history, Game *game, int count,
-                        bool validate, ErrorStack *errors) {
-  replay_history(history, game, count, validate, NULL, NULL, errors);
+void game_play_n_events(GameHistory *game_history, Game *game,
+                        int num_events_to_play, bool validate,
+                        ErrorStack *error_stack) {
+  replay_history(game_history, game, num_events_to_play, validate, NULL, NULL,
+                 error_stack);
 }
 
-void game_replay_history(GameHistory *history, Game *game,
-                         GameHistoryVisitor visitor, void *context,
-                         ErrorStack *errors) {
-  replay_history(history, game, game_history_get_num_events(history), false,
-                 visitor, context, errors);
+void game_replay_history(GameHistory *game_history, Game *game,
+                         GameHistoryCallback callback, void *user_data,
+                         ErrorStack *error_stack) {
+  replay_history(game_history, game, game_history_get_num_events(game_history),
+                 false, callback, user_data, error_stack);
 }
