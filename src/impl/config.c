@@ -1339,7 +1339,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_ENDGAME:
       usages[0] = "";
-      text = "Runs the endgame solver.";
+      usages[1] = "<played_move>";
+      examples[0] = "pass";
+      examples[1] = "1H BORONIA";
+      text = "Runs the endgame solver. An optional played move is evaluated "
+             "with a full root window and included in the displayed results "
+             "even when it falls outside the top-K.";
       break;
     case ARG_TOKEN_PEG:
       usages[0] = "";
@@ -3687,7 +3692,33 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
     return;
   }
   config_init_game(config);
-  config_endgame(config, config->endgame_results, error_stack);
+  EndgameArgs args;
+  config_fill_endgame_args(config, &args);
+  ValidatedMoves *actual = NULL;
+  const char *move_text = config_get_parg_value(config, ARG_TOKEN_ENDGAME, 0);
+  if (move_text && !is_string_empty_or_whitespace(move_text)) {
+    const char *tiles = config_get_parg_value(config, ARG_TOKEN_ENDGAME, 1);
+    char *full_move = get_formatted_string(
+        "%s%s%s", move_text, tiles ? " " : "", tiles ? tiles : "");
+    actual = validated_moves_create(config->game,
+                                    game_get_player_on_turn_index(config->game),
+                                    full_move, true, true, error_stack);
+    free(full_move);
+    if (error_stack_is_empty(error_stack) &&
+        validated_moves_get_number_of_moves(actual) != 1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE,
+          string_duplicate("endgame expects exactly one played move"));
+    }
+    if (!error_stack_is_empty(error_stack)) {
+      validated_moves_destroy(actual);
+      return;
+    }
+    args.actual_move = validated_moves_get_move(actual, 0);
+  }
+  endgame_solve(&config->endgame_ctx, &args, config->endgame_results,
+                error_stack);
+  validated_moves_destroy(actual);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -9939,7 +9970,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_RACK_AND_GEN_AND_SIM, "rgsimulate", 1, 2, rack_and_gen_and_sim,
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
-  cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
+  cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 2, endgame, endgame, false);
   cmd(ARG_TOKEN_PEG, "peg", 0, 1, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
