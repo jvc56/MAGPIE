@@ -8,6 +8,7 @@
 #include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include "game.h"
+#include <stdatomic.h>
 #include <stdlib.h>
 
 typedef struct PVData {
@@ -150,8 +151,8 @@ void endgame_results_destroy(EndgameResults *endgame_results) {
   free(endgame_results);
 }
 
-// Caller holds DISPLAY when shared with a status reader; lock PV publishers
-// here.
+// NOT THREAD SAFE: Caller must ensure synchronization.
+// Hold DISPLAY when shared with a status reader; PV publishers lock below.
 void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results_lock(endgame_results, ENDGAME_RESULT_BEST);
   endgame_results_lock(endgame_results, ENDGAME_RESULT_ACTUAL);

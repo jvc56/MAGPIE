@@ -1471,6 +1471,48 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
   return 1;
 }
 
+// One tile making words in both directions has two legal notations. Compare
+// its board square and machine letter (including blank designation), not the
+// direction or the surrounding playthrough letters.
+static bool endgame_moves_match(const Move *candidate,
+                                const Move *actual_move) {
+  if (compare_moves_without_equity(candidate, actual_move, true) == -1) {
+    return true;
+  }
+  if (move_get_type(candidate) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
+      move_get_type(actual_move) != GAME_EVENT_TILE_PLACEMENT_MOVE ||
+      candidate->tiles_played != 1 || actual_move->tiles_played != 1) {
+    return false;
+  }
+  int candidate_offset = 0;
+  int actual_offset = 0;
+  while (candidate_offset < candidate->tiles_length &&
+         candidate->tiles[candidate_offset] == PLAYED_THROUGH_MARKER) {
+    candidate_offset++;
+  }
+  while (actual_offset < actual_move->tiles_length &&
+         actual_move->tiles[actual_offset] == PLAYED_THROUGH_MARKER) {
+    actual_offset++;
+  }
+  if (candidate_offset == candidate->tiles_length ||
+      actual_offset == actual_move->tiles_length) {
+    return false;
+  }
+  const bool candidate_vertical = board_is_dir_vertical(candidate->dir);
+  const bool actual_vertical = board_is_dir_vertical(actual_move->dir);
+  const int candidate_row =
+      candidate->row_start + (candidate_vertical ? candidate_offset : 0);
+  const int candidate_col =
+      candidate->col_start + (candidate_vertical ? 0 : candidate_offset);
+  const int actual_row =
+      actual_move->row_start + (actual_vertical ? actual_offset : 0);
+  const int actual_col =
+      actual_move->col_start + (actual_vertical ? 0 : actual_offset);
+  return candidate_row == actual_row && candidate_col == actual_col &&
+         candidate->tiles[candidate_offset] ==
+             actual_move->tiles[actual_offset];
+}
+
 // generate_single_tile_plays only keeps the single highest-scoring placement
 // (see above), so the caller-specified actual_move (EndgameArgs.actual_move,
 // pinned to root index 0 for exact-value extraction) can be entirely absent
@@ -1490,8 +1532,7 @@ static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
   const SmallMove *existing = (SmallMove *)worker->small_move_arena->memory;
   Move candidate;
   small_move_to_move(&candidate, existing, board);
-  if (compare_moves_without_equity(&candidate, solver->actual_move, true) ==
-      -1) {
+  if (endgame_moves_match(&candidate, solver->actual_move)) {
     return move_count; // already present
   }
 
@@ -1502,14 +1543,8 @@ static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
     small_move_set_as_pass(actual_sm);
   } else {
     const bool is_vertical = board_is_dir_vertical(solver->actual_move->dir);
-    // Move.row_start/col_start are stored pre-swapped for vertical plays
-    // (see move_gen.c's move_set_row_start/move_set_col_start swap when
-    // building a vertical Move), but small_move_set_all expects raw,
-    // unswapped row/col and performs that same swap itself. Passing the
-    // already-swapped Move fields straight through double-swaps the
-    // position, silently encoding the wrong square, so the solver could
-    // never find the actual move among its root moves. Undo the Move's
-    // swap here before calling small_move_set_all.
+    // small_move_set_all consumes movegen's traversal coordinates and swaps
+    // vertical ones. Convert the validated move's physical coordinates first.
     int row_start = solver->actual_move->row_start;
     int col_start = solver->actual_move->col_start;
     if (is_vertical) {
@@ -3445,8 +3480,7 @@ static void force_actual_move_to_front(const EndgameCtxWorker *worker,
   Move candidate;
   for (int idx = 0; idx < n_root; idx++) {
     small_move_to_move(&candidate, &root_moves[idx], board);
-    if (compare_moves_without_equity(&candidate, solver->actual_move, true) ==
-        -1) {
+    if (endgame_moves_match(&candidate, solver->actual_move)) {
       if (idx != 0) {
         SmallMove tmp = root_moves[0];
         root_moves[0] = root_moves[idx];
@@ -4074,8 +4108,7 @@ static bool extract_actual_move_pvline(EndgameCtx *solver,
   Move candidate;
   for (int idx = 0; idx < n_root; idx++) {
     small_move_to_move(&candidate, &root_moves[idx], board);
-    if (compare_moves_without_equity(&candidate, solver->actual_move, true) !=
-        -1) {
+    if (!endgame_moves_match(&candidate, solver->actual_move)) {
       continue;
     }
     out_pv->moves[0] = root_moves[idx];

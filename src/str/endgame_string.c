@@ -195,6 +195,53 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
   endgame_results_unlock(endgame_results, ENDGAME_RESULT_DISPLAY);
 }
 
+static const PVLine **build_display_pvs(EndgameResults *endgame_results,
+                                        const Game *source_game, int num_pvs,
+                                        PVLine *actual_copy,
+                                        int *num_display_pvs) {
+  // Keep the caller's played move visible even when it is below the top-K.
+  // The solver evaluates it with a full root window and stores its own PV.
+  const PVLine **display_pvs =
+      malloc_or_die((size_t)(num_pvs + 1) * sizeof(const PVLine *));
+  *num_display_pvs = num_pvs;
+  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+    display_pvs[pv_idx] =
+        endgame_results_get_multi_pvline(endgame_results, pv_idx);
+  }
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_ACTUAL);
+  const bool actual_found =
+      endgame_results_get_actual_move_found(endgame_results);
+  if (actual_found) {
+    *actual_copy =
+        *endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_ACTUAL);
+  }
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_ACTUAL);
+  if (actual_found) {
+    const PVLine *actual = actual_copy;
+    if (actual->num_moves > 0) {
+      Move actual_move;
+      small_move_to_move(&actual_move, &actual->moves[0],
+                         game_get_board(source_game));
+      bool present = false;
+      for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+        Move candidate;
+        small_move_to_move(&candidate, &display_pvs[pv_idx]->moves[0],
+                           game_get_board(source_game));
+        if (compare_moves_without_equity(&candidate, &actual_move, true) ==
+            -1) {
+          present = true;
+          break;
+        }
+      }
+      if (!present) {
+        display_pvs[(*num_display_pvs)++] = actual;
+      }
+    }
+  }
+
+  return display_pvs;
+}
+
 static void string_builder_endgame_results(StringBuilder *pv_description,
                                            EndgameResults *endgame_results,
                                            const Game *game,
@@ -225,46 +272,10 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
     return;
   }
 
-  // Keep the caller's played move visible even when it is below the top-K.
-  // The solver evaluates it with a full root window and stores its own PV.
-  const PVLine **display_pvs =
-      malloc_or_die((size_t)(num_pvs + 1) * sizeof(*display_pvs));
-  int num_display_pvs = num_pvs;
-  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-    display_pvs[pv_idx] =
-        endgame_results_get_multi_pvline(endgame_results, pv_idx);
-  }
   PVLine actual_copy;
-  endgame_results_lock(endgame_results, ENDGAME_RESULT_ACTUAL);
-  const bool actual_found =
-      endgame_results_get_actual_move_found(endgame_results);
-  if (actual_found) {
-    actual_copy =
-        *endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_ACTUAL);
-  }
-  endgame_results_unlock(endgame_results, ENDGAME_RESULT_ACTUAL);
-  if (actual_found) {
-    const PVLine *actual = &actual_copy;
-    if (actual->num_moves > 0) {
-      Move actual_move;
-      small_move_to_move(&actual_move, &actual->moves[0],
-                         game_get_board(source_game));
-      bool present = false;
-      for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-        Move candidate;
-        small_move_to_move(&candidate, &display_pvs[pv_idx]->moves[0],
-                           game_get_board(source_game));
-        if (compare_moves_without_equity(&candidate, &actual_move, true) ==
-            -1) {
-          present = true;
-          break;
-        }
-      }
-      if (!present) {
-        display_pvs[num_display_pvs++] = actual;
-      }
-    }
-  }
+  int num_display_pvs;
+  const PVLine **display_pvs = build_display_pvs(
+      endgame_results, source_game, num_pvs, &actual_copy, &num_display_pvs);
 
   // num_pvs > 0: solve is complete; multi_pvs are already fully extended by
   // endgame_solve, so display them directly in a StringGrid without

@@ -1345,7 +1345,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_ENDGAME:
       usages[0] = "";
-      usages[1] = "<played_move>";
+      usages[1] = "<position> <tiles>";
+      usages[2] = "pass";
       examples[0] = "pass";
       examples[1] = "1H BORONIA";
       text = "Runs the endgame solver. An optional played move is evaluated "
@@ -3705,15 +3706,12 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       /*external_deadline_ns=*/0, /*actual_move=*/NULL, endgame_args);
 }
 
-void config_endgame(Config *config, EndgameResults *endgame_results,
-                    ErrorStack *error_stack) {
-  EndgameArgs endgame_args;
-  config_fill_endgame_args(config, &endgame_args);
-  endgame_solve(&config->endgame_ctx, &endgame_args, endgame_results,
-                error_stack);
-}
-
-void impl_endgame(Config *config, ErrorStack *error_stack) {
+static void impl_endgame_with_pos_args(Config *config, const char *move_text,
+                                       const char *tiles,
+                                       ErrorStack *error_stack) {
+  endgame_results_lock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
+  endgame_results_reset(config->endgame_results);
+  endgame_results_unlock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot run endgame without lexicon"));
@@ -3723,14 +3721,12 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
   EndgameArgs args;
   config_fill_endgame_args(config, &args);
   ValidatedMoves *actual = NULL;
-  const char *move_text = config_get_parg_value(config, ARG_TOKEN_ENDGAME, 0);
   if (move_text && !is_string_empty_or_whitespace(move_text)) {
-    const char *tiles = config_get_parg_value(config, ARG_TOKEN_ENDGAME, 1);
-    char *full_move = get_formatted_string(
-        "%s%s%s", move_text, tiles ? " " : "", tiles ? tiles : "");
+    char *full_move = tiles ? get_formatted_string("%s %s", move_text, tiles)
+                            : string_duplicate(move_text);
     actual = validated_moves_create(config->game,
                                     game_get_player_on_turn_index(config->game),
-                                    full_move, true, true, error_stack);
+                                    full_move, false, true, error_stack);
     free(full_move);
     if (error_stack_is_empty(error_stack) &&
         validated_moves_get_number_of_moves(actual) != 1) {
@@ -3746,10 +3742,25 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
   }
   endgame_solve(&config->endgame_ctx, &args, config->endgame_results,
                 error_stack);
+  if (actual && error_stack_is_empty(error_stack) &&
+      !endgame_results_get_actual_move_found(config->endgame_results) &&
+      thread_control_get_status(config->thread_control) !=
+          THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE,
+        string_duplicate(
+            "played move was not evaluated by the endgame search"));
+  }
   validated_moves_destroy(actual);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+}
+
+void impl_endgame(Config *config, ErrorStack *error_stack) {
+  impl_endgame_with_pos_args(
+      config, config_get_parg_value(config, ARG_TOKEN_ENDGAME, 0),
+      config_get_parg_value(config, ARG_TOKEN_ENDGAME, 1), error_stack);
 }
 
 char *status_endgame(Config *config) {
@@ -5823,6 +5834,25 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
   }
 
   return return_str;
+}
+
+char *config_commit_move(Config *config, const char *move_text,
+                         ErrorStack *error_stack) {
+  StringSplitter *parts = split_string_by_whitespace(move_text, true);
+  const int num_parts = string_splitter_get_number_of_items(parts);
+  if (num_parts < 1 || num_parts > 2) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
+        string_duplicate(
+            "expected a move position and tiles, pass, or exchange"));
+    string_splitter_destroy(parts);
+    return empty_string();
+  }
+  char *result = impl_commit_with_pos_args(
+      config, error_stack, string_splitter_get_item(parts, 0),
+      num_parts == 2 ? string_splitter_get_item(parts, 1) : NULL, NULL, false);
+  string_splitter_destroy(parts);
+  return result;
 }
 
 char *impl_commit(Config *config, ErrorStack *error_stack) {
