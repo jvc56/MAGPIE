@@ -3844,6 +3844,9 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
       /*on_scenario_done=*/NULL, /*user_data=*/NULL, /*poll=*/NULL, peg_args);
+#ifdef __EMSCRIPTEN__
+  peg_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
+#endif
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)

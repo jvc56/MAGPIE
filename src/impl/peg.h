@@ -121,6 +121,10 @@ typedef struct PegArgs {
   // across cands and across scenarios within a cand.
   int num_threads;
 
+  // Optional aggregate TT budget as a fraction of get_total_memory(). Zero
+  // retains platform defaults; browser callers supply the selected budget.
+  double tt_fraction_of_mem;
+
   // Total wall-clock budget in seconds for the whole peg_solve call.
   // 0 = unbounded (run to the last stage). When the budget is hit mid-stage,
   // the last *fully-completed* stage's top-K is returned; partial-stage work
@@ -279,6 +283,7 @@ peg_args_fill(const Game *game, ThreadControl *thread_control,
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
+  peg_args->tt_fraction_of_mem = 0;
   peg_args->time_budget_seconds = time_budget_seconds;
   peg_args->max_stage = max_stage;
   peg_args->greedy_seed_only = greedy_seed_only;

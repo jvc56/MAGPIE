@@ -33,7 +33,7 @@
 #define TT_STORED_HASH_MASK ((1ULL << 40) - 1)
 
 #ifdef __EMSCRIPTEN__
-#define TT_MIN_SIZE_POWER 21 // 2^21 minimum (32 MB) for mobile
+#define TT_MIN_SIZE_POWER 12 // 64 KiB permits splitting a browser PEG budget
 #else
 #define TT_MIN_SIZE_POWER 24 // 2^24 minimum (256 MB) for performance
 #endif
@@ -95,6 +95,18 @@ typedef struct TranspositionTable {
   atomic_int lookups;
   atomic_int t2_collisions;
 } TranspositionTable;
+
+// Reserve overhead as well as entries within an aggregate worker budget.
+static inline double transposition_table_worker_fraction(double total_fraction,
+                                                         int workers) {
+  const double memory = (double)get_total_memory();
+  const double overhead = NPROC_SIZE * sizeof(atomic_uchar) +
+                          sizeof(TranspositionTable) + sizeof(Zobrist);
+  const double fraction = total_fraction / workers - overhead / memory;
+  const double minimum =
+      (double)((uint64_t)TTENTRY_SIZE_BYTES << TT_MIN_SIZE_POWER) / memory;
+  return fraction > minimum ? fraction : minimum;
+}
 
 static inline TranspositionTable *
 transposition_table_create(double fraction_of_memory) {
