@@ -101,7 +101,12 @@ Move entry follows the Qt and TUI workflows:
   natural letter is exhausted.
 - Drag rack tiles onto the board with mouse, pen or touch, or tap a rack tile then
   a square. Dropping a blank opens a letter picker. Pending tiles can move on the
-  board or return to the rack. The rack can be shuffled or sorted.
+  board or return to the rack. Drag between rack tiles to insert at the caret;
+  duplicate letters keep their individual slots. Returned blanks become `?`
+  again. Escape, lost pointer capture and invalid drops leave tiles unchanged.
+  Touch drags scroll near the screen edge. Alt + Left/Right reorders a focused
+  rack tile; shuffle and sort remain available. Committed tiles stay fixed
+  during play; **Edit board** allows moving them, preserving ownership and undo.
 - The Move field accepts `8H TRAIN`, `H8 TRAIN`, `ex AE`, and `pass`. The engine
   previews the score and validates/scores commits. A phony requires explicit
   confirmation to record; the Notes & challenge panel can challenge it off.
@@ -223,6 +228,11 @@ This is a browser adaptation of existing Magpie UI work, using the engine on
   `b1dc1f4004816860153f087c4b7e85880402c550`: board/rack/analysis arrangement,
   board and tile colors from `src/qt/views/Main.qml`, and recent-position
   access adapted from its recent-game work.
+- `qtpie-oct2025` at `f8e7d15a2d65da5024ee5615882645f17507d886`:
+  rack insertion caret, dimmed drag source and a tile-shaped drag image from
+  `RackView`; the QML rack in `feature/qt-recent-games` also informs insertion
+  ordering. The web version preserves duplicate-tile identity and never replaces
+  an occupied tile on an invalid drop.
 - Merged [#705](https://github.com/jvc56/MAGPIE/pull/705) supplies `Square` owner
   storage. The UI keeps the same 0/1/unknown convention in local
   snapshots and derives owners from recorded GCG events, including challenge
@@ -249,12 +259,18 @@ and Playwright WebKit: startup, move generation, constrained heap reservations,
 WMP cancellation, and cached WMP/WIT allocation failure followed by baseline
 move generation and simulation. These tests use real WASM with injected failures;
 a mobile viewport and user-agent override do not reproduce a phone's RAM pressure.
-Playwright WebKit is not the shipping Safari application.
+Playwright WebKit is not the shipping Safari application. The tile-drag suite runs
+in Chromium, Firefox, WebKit and branded Edge: rack insertion, duplicate tiles,
+board placement/movement/return, blank designation, canceled gestures, occupied
+squares, history replacement, editor undo and busy-state changes. Real touch
+movement and edge scrolling are tested via CDP in Chromium and Edge; shipping
+iOS Safari still needs physical-device touch testing.
 
 CI also installs Microsoft Edge and runs that engine suite with its `msedge`
 channel. To include branded Edge locally, install it with
 `npx playwright install msedge`, then run
-`MAGPIE_TEST_EDGE=1 npx playwright test --project=edge`.
+`MAGPIE_TEST_EDGE=1 npx playwright test --project=edge`. A temporary Edge copy
+can be selected with `MAGPIE_EDGE_PATH` without installing it system-wide.
 Before release, separately check real iPhone/iPad Safari and a low-memory Android
 Chrome device, including background/resume and memory pressure. Browser-process
 termination by the OS cannot be caught by the page.

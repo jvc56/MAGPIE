@@ -49,3 +49,19 @@ test("notation absorbs existing prefixes and suffixes and rejects gaps and bends
   expect(normalizeMove("exchange ae?")).toBe("ex AE?");
   expect(() => normalizeMove("8H CAT -lex NWL23")).toThrow();
 });
+
+test("duplicate rack tiles keep their slots through placement, movement and rack insertion", async () => {
+  const {rackSlots, reorderRack} = await import('../move-entry.mjs');
+  const position = parseCGP(SAMPLES.opening);
+  position.racks[0] = 'ABAC?';
+  const tiles = placeTile(position, [], 7, 7, 'A', false, 2);
+  expect(remainingRack(position.racks[0], tiles).join('')).toBe('ABC?');
+  const reordered = reorderRack(position.racks[0], tiles, 4, 1);
+  expect(remainingRack(reordered.rack, reordered.tiles).join('')).toBe('A?BC');
+  expect(reordered.tiles[0].rackIndex).toBe(3);
+  const moved = placeTile({...position, racks:[reordered.rack,'']}, [], 8, 8, 'A', false, reordered.tiles[0].rackIndex);
+  expect(remainingRack(reordered.rack, moved).join('')).toBe('A?BC');
+  const returned = reorderRack(reordered.rack, moved, moved[0].rackIndex, 4);
+  expect(returned.rack).toBe('A?BCA');
+  expect(rackSlots('A?A', [{row:0,col:0,letter:'A'}, {row:0,col:1,letter:'A',rackIndex:0}]).indexes).toEqual([2,0]);
+});

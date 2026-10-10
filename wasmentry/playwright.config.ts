@@ -17,9 +17,25 @@ export default defineConfig({
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "firefox", testMatch: "**/engine-compat.test.js", use: { ...devices["Desktop Firefox"] } },
-    ...(process.env.MAGPIE_TEST_EDGE ? [{ name: "edge", testMatch: "**/engine-compat.test.js", use: { ...devices["Desktop Edge"], channel: "msedge" } }] : []),
-    { name: "webkit", testMatch: "**/engine-compat.test.js", use: { ...devices["Desktop Safari"] } },
+    {
+      name: "firefox",
+      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js"],
+      use: { ...devices["Desktop Firefox"] },
+    },
+    ...(process.env.MAGPIE_TEST_EDGE ? [{
+      name: "edge",
+      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js"],
+      use: {
+        ...devices["Desktop Edge"],
+        channel: "msedge",
+        launchOptions: { executablePath: process.env.MAGPIE_EDGE_PATH },
+      },
+    }] : []),
+    {
+      name: "webkit",
+      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js"],
+      use: { ...devices["Desktop Safari"] },
+    },
     {
       name: "static-host",
       testMatch: "**/analysis.test.js",
