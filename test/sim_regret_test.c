@@ -10,32 +10,23 @@
 // positions, candidates and seeds, so their mean regrets are directly
 // comparable.
 //
-// Regret is scored in the utility the sims rank plays by: the win% and spread
-// blend (BU) set by SIMREG_USPREAD, or plain win% when it is 0. The reference
-// file records the weight it was built with and the evaluation reuses it, so
-// the reference's best play is the play an evaluated sim is trying to find.
-// The reference uses its own seed, disjoint from the evaluation seeds, so no
-// evaluated sim replays the reference's rollouts.
+// Regret is scored in the utility the sims rank plays by, the win% and spread
+// blend (BU) at -uspread 0.5, so the reference's best play is the play an
+// evaluated sim is trying to find. The reference uses its own seed, disjoint
+// from the evaluation seeds, so no evaluated sim replays the reference's
+// rollouts.
 //
-//   SIMREG_MODE=ref  SIMREG_FILE=ref.txt ./bin/magpie_test simregret
-//   SIMREG_MODE=eval SIMREG_FILE=ref.txt ./bin/magpie_test simregret
+//   ./bin/magpie_test simregretref   (writes simregret_ref.txt)
+//   ./bin/magpie_test simregret      (evaluates against it)
+//
+// The reference gives each play 8000 samples. Each evaluation runs 8 seeds
+// per position at -iterations 1000 and -minplayiterations 10. Both sim 2
+// plies on every core.
 //
 // Every evaluated decision is printed as a "SIMREG decision" line, so two
 // builds can also be compared decision by decision: average each position's
 // regret difference over its seeds, then treat the positions as the
 // independent units, as the summary's interval does.
-//
-// Env vars:
-//   SIMREG_MODE     ref or eval (default eval)
-//   SIMREG_FILE     reference file (default simregret_ref.txt)
-//   SIMREG_REFITERS samples per play in the reference (default 8000)
-//   SIMREG_REFSEED  reference sim seed (default 1000003)
-//   SIMREG_USPREAD  spread weight of the utility, reference only (default 0.5)
-//   SIMREG_ITERS    -iterations per evaluated sim (default 1000)
-//   SIMREG_SEEDS    seeds per position, 1..N (default 8)
-//   SIMREG_THREADS  sim threads (default <cores>)
-//   SIMREG_PLIES    sim plies (default 2)
-//   SIMREG_MINPLAY  -minplayiterations for evaluated sims (default 10)
 
 #include "sim_regret_test.h"
 
@@ -61,7 +52,12 @@ enum {
   SIMREG_NUM_PLAYS = 15,
   SIMREG_MAX_MOVE_STRING = 64,
   SIMREG_NUM_FIELDS = 6,
+  SIMREG_REF_ITERS_PER_PLAY = 8000,
+  SIMREG_REF_SEED = 1000003,
+  SIMREG_NUM_SEEDS = 8,
 };
+
+static const char *const SIMREG_FILE = "simregret_ref.txt";
 
 // The z value of a two-sided 95% interval.
 static const double SIMREG_Z95 = 1.96;
@@ -77,11 +73,6 @@ typedef struct SimRegretPlay {
   double utility;
   double utility_se;
 } SimRegretPlay;
-
-static const char *simreg_env_or(const char *name, const char *fallback) {
-  const char *value = getenv(name);
-  return value != NULL && value[0] != '\0' ? value : fallback;
-}
 
 static const char *const simreg_positions[] = {
     DOUG_V_EMELY_CGP,  GUY_VS_BOT_ALMOST_COMPLETE_CGP,
@@ -118,37 +109,28 @@ static Config *simreg_sim(const char *settings, const char *cgp) {
 }
 
 // The play's mean of the utility the sim ranks by, and its standard error.
-static void simreg_play_utility(const SimmedPlay *simmed_play,
-                                const bool weighs_spread, double *mean,
+static void simreg_play_utility(const SimmedPlay *simmed_play, double *mean,
                                 double *standard_error) {
-  const Stat *stat = weighs_spread ? simmed_play_get_utility_stat(simmed_play)
-                                   : simmed_play_get_win_pct_stat(simmed_play);
-  *mean = weighs_spread ? simmed_play_get_exact_utility_mean(simmed_play)
-                        : simmed_play_get_exact_win_pct_mean(simmed_play);
+  const Stat *stat = simmed_play_get_utility_stat(simmed_play);
+  *mean = simmed_play_get_exact_utility_mean(simmed_play);
   const uint64_t num_samples = stat_get_num_samples(stat);
   *standard_error =
       num_samples > 1 ? stat_get_stdev(stat) / sqrt((double)num_samples) : 0.0;
 }
 
-static void simreg_reference(const char *file_name, const char *threads,
-                             const char *plies) {
-  const int ref_iters_per_play =
-      (int)strtol(simreg_env_or("SIMREG_REFITERS", "8000"), NULL, 10);
-  const char *ref_seed = simreg_env_or("SIMREG_REFSEED", "1000003");
-  const char *uspread = simreg_env_or("SIMREG_USPREAD", "0.5");
-  const bool weighs_spread = strtod(uspread, NULL) > 0.0;
-  FILE *file = fopen_or_die(file_name, "w");
-  fprintf_or_die(file, "#uspread\t%s\n", uspread);
+void test_sim_regret_reference(void) {
+  FILE *file = fopen_or_die(SIMREG_FILE, "w");
   const int num_positions =
       (int)(sizeof(simreg_positions) / sizeof(simreg_positions[0]));
   for (int pos_idx = 0; pos_idx < num_positions; pos_idx++) {
     char *settings = get_formatted_string(
         "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-        "-numplays %d -plies %s -threads %s -iterations %d "
-        "-minplayiterations %d -scond none -sr rr -tlim 0 -seed %s "
-        "-uwin 1 -uspread %s -uspreadscale 100 -savesettings false",
-        SIMREG_NUM_PLAYS, plies, threads, SIMREG_NUM_PLAYS * ref_iters_per_play,
-        ref_iters_per_play, ref_seed, uspread);
+        "-numplays %d -plies 2 -threads %d -iterations %d "
+        "-minplayiterations %d -scond none -sr rr -tlim 0 -seed %d "
+        "-uwin 1 -uspread 0.5 -uspreadscale 100 -savesettings false",
+        SIMREG_NUM_PLAYS, get_num_cores(),
+        SIMREG_NUM_PLAYS * SIMREG_REF_ITERS_PER_PLAY, SIMREG_REF_ITERS_PER_PLAY,
+        SIMREG_REF_SEED);
     Config *config = simreg_sim(settings, simreg_positions[pos_idx]);
     free(settings);
     const SimResults *sim_results = config_get_sim_results(config);
@@ -160,7 +142,7 @@ static void simreg_reference(const char *file_name, const char *threads,
       simreg_move_string(config, simmed_play_get_move(simmed_play), move);
       double utility = 0.0;
       double utility_se = 0.0;
-      simreg_play_utility(simmed_play, weighs_spread, &utility, &utility_se);
+      simreg_play_utility(simmed_play, &utility, &utility_se);
       fprintf_or_die(file, "%d\t%s\t%.9f\t%.9f\t%.9f\t%.9f\n", pos_idx, move,
                      simmed_play_get_exact_win_pct_mean(simmed_play),
                      simmed_play_get_exact_equity_mean(simmed_play), utility,
@@ -171,26 +153,6 @@ static void simreg_reference(const char *file_name, const char *threads,
     config_destroy(config);
   }
   fclose_or_die(file);
-}
-
-// The spread weight the reference was built with, which the evaluated sims
-// must rank by too.
-static char *simreg_read_uspread(const char *file_name) {
-  FILE *file = fopen_or_die(file_name, "r");
-  char line[256];
-  char *uspread = NULL;
-  const char *prefix = "#uspread\t";
-  if (fgets(line, sizeof(line), file) != NULL &&
-      strncmp(line, prefix, strlen(prefix)) == 0) {
-    line[strcspn(line, "\r\n")] = '\0';
-    uspread = string_duplicate(line + strlen(prefix));
-  }
-  fclose_or_die(file);
-  if (uspread == NULL) {
-    log_fatal("%s has no #uspread header; rebuild it with SIMREG_MODE=ref",
-              file_name);
-  }
-  return uspread;
 }
 
 // Reads the reference plays for one position. Returns the count.
@@ -263,13 +225,7 @@ static double simreg_moments_half_width(const SimRegretMoments *moments) {
          sqrt((double)moments->count);
 }
 
-static void simreg_evaluate(const char *file_name, const char *threads,
-                            const char *plies) {
-  const char *iters = simreg_env_or("SIMREG_ITERS", "1000");
-  const char *min_play = simreg_env_or("SIMREG_MINPLAY", "10");
-  const int num_seeds =
-      (int)strtol(simreg_env_or("SIMREG_SEEDS", "8"), NULL, 10);
-  char *uspread = simreg_read_uspread(file_name);
+void test_sim_regret(void) {
   const int num_positions =
       (int)(sizeof(simreg_positions) / sizeof(simreg_positions[0]));
   SimRegretMoments utility_regret = {0};
@@ -280,7 +236,7 @@ static void simreg_evaluate(const char *file_name, const char *threads,
   int num_unseparated = 0;
   for (int pos_idx = 0; pos_idx < num_positions; pos_idx++) {
     SimRegretPlay plays[SIMREG_NUM_PLAYS];
-    const int num_plays = simreg_read_position(file_name, pos_idx, plays);
+    const int num_plays = simreg_read_position(SIMREG_FILE, pos_idx, plays);
     assert(num_plays > 0);
     int best_idx = 0;
     for (int play_idx = 1; play_idx < num_plays; play_idx++) {
@@ -309,13 +265,13 @@ static void simreg_evaluate(const char *file_name, const char *threads,
     double position_utility_regret = 0.0;
     double position_win_pct_regret = 0.0;
     double position_equity_regret = 0.0;
-    for (int seed = 1; seed <= num_seeds; seed++) {
+    for (int seed = 1; seed <= SIMREG_NUM_SEEDS; seed++) {
       char *settings = get_formatted_string(
           "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-          "-numplays %d -plies %s -threads %s -iterations %s "
-          "-minplayiterations %s -scond 99 -sr tt -tlim 0 -seed %d "
-          "-uwin 1 -uspread %s -uspreadscale 100 -savesettings false",
-          SIMREG_NUM_PLAYS, plies, threads, iters, min_play, seed, uspread);
+          "-numplays %d -plies 2 -threads %d -iterations 1000 "
+          "-minplayiterations 10 -scond 99 -sr tt -tlim 0 -seed %d "
+          "-uwin 1 -uspread 0.5 -uspreadscale 100 -savesettings false",
+          SIMREG_NUM_PLAYS, get_num_cores(), seed);
       Config *config = simreg_sim(settings, simreg_positions[pos_idx]);
       free(settings);
       char chosen[SIMREG_MAX_MOVE_STRING];
@@ -346,18 +302,21 @@ static void simreg_evaluate(const char *file_name, const char *threads,
       num_best += chosen_idx == best_idx;
       num_decisions++;
     }
-    simreg_moments_add(&utility_regret, position_utility_regret / num_seeds);
-    simreg_moments_add(&win_pct_regret, position_win_pct_regret / num_seeds);
-    simreg_moments_add(&equity_regret, position_equity_regret / num_seeds);
+    simreg_moments_add(&utility_regret,
+                       position_utility_regret / SIMREG_NUM_SEEDS);
+    simreg_moments_add(&win_pct_regret,
+                       position_win_pct_regret / SIMREG_NUM_SEEDS);
+    simreg_moments_add(&equity_regret,
+                       position_equity_regret / SIMREG_NUM_SEEDS);
     printf("SIMREG pos=%d mean utility regret %.4f, reference gap %.4f "
            "(se %.4f)%s\n",
-           pos_idx, 100.0 * position_utility_regret / num_seeds,
+           pos_idx, 100.0 * position_utility_regret / SIMREG_NUM_SEEDS,
            100.0 * runner_up_gap, 100.0 * runner_up_se,
            separated ? "" : ", top two not separated");
     (void)fflush(stdout);
   }
-  printf("SIMREG iters=%s uspread=%s decisions=%d best=%d (%.1f%%)\n", iters,
-         uspread, num_decisions, num_best, 100.0 * num_best / num_decisions);
+  printf("SIMREG iters=1000 uspread=0.5 decisions=%d best=%d (%.1f%%)\n",
+         num_decisions, num_best, 100.0 * num_best / num_decisions);
   printf("SIMREG mean utility regret %.4f +/- %.4f, win%% regret %.4f +/- "
          "%.4f, equity regret %.4f +/- %.4f (95%%, over %d positions)\n",
          100.0 * simreg_moments_mean(&utility_regret),
@@ -369,20 +328,4 @@ static void simreg_evaluate(const char *file_name, const char *threads,
   printf("SIMREG %d of %d positions have a reference that does not separate "
          "its top two plays by %.0f standard errors\n",
          num_unseparated, num_positions, SIMREG_MIN_SEPARATION_SE);
-  free(uspread);
-}
-
-void test_sim_regret(void) {
-  char default_threads[16];
-  (void)snprintf(default_threads, sizeof(default_threads), "%d",
-                 get_num_cores());
-  const char *mode = simreg_env_or("SIMREG_MODE", "eval");
-  const char *file_name = simreg_env_or("SIMREG_FILE", "simregret_ref.txt");
-  const char *threads = simreg_env_or("SIMREG_THREADS", default_threads);
-  const char *plies = simreg_env_or("SIMREG_PLIES", "2");
-  if (strings_equal(mode, "ref")) {
-    simreg_reference(file_name, threads, plies);
-  } else {
-    simreg_evaluate(file_name, threads, plies);
-  }
 }

@@ -8,16 +8,9 @@
 // builds that should behave identically can be compared by running this
 // sweep under each.
 //
-// Env vars (comma-separated lists):
-//   SIMDET_THREADS  thread counts (default 1,2,4,8,<cores>)
-//   SIMDET_ITERS    -iterations budgets (default 500,3000)
-//   SIMDET_SCOND    stop conditions (default 99,none)
-//   SIMDET_SR       sampling rules (default tt,rr)
-//   SIMDET_PLAYS    -numplays (default 15)
-//   SIMDET_PLIES    sim plies (default 2)
-//   SIMDET_MINPLAY  -minplayiterations (default 10)
-//   SIMDET_POS      position indices to run (default all)
-//   SIMDET_VERBOSE  1 prints every play's count and means for every run
+// The sweep covers 1, 2, 4, 8 and <cores> threads, -iterations 500 and 3000,
+// -scond 99 and none, and -sr tt and rr, all at 15 plays, 2 plies and
+// -minplayiterations 10.
 
 #include "sim_det_sweep_test.h"
 
@@ -31,43 +24,10 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-enum {
-  SIMDET_MAX_LIST = 16,
-  SIMDET_MAX_TOKEN = 32,
-};
-
-static const char *simdet_env_or(const char *name, const char *fallback) {
-  const char *value = getenv(name);
-  return value != NULL && value[0] != '\0' ? value : fallback;
-}
-
-// Splits a comma-separated list into tokens. Returns the count.
-static int simdet_split(const char *list,
-                        char tokens[SIMDET_MAX_LIST][SIMDET_MAX_TOKEN]) {
-  int count = 0;
-  const char *cursor = list;
-  while (*cursor != '\0' && count < SIMDET_MAX_LIST) {
-    const char *comma = strchr(cursor, ',');
-    size_t length = comma != NULL ? (size_t)(comma - cursor) : strlen(cursor);
-    if (length >= SIMDET_MAX_TOKEN) {
-      length = SIMDET_MAX_TOKEN - 1;
-    }
-    memcpy(tokens[count], cursor, length);
-    tokens[count][length] = '\0';
-    count++;
-    if (comma == NULL) {
-      break;
-    }
-    cursor = comma + 1;
-  }
-  return count;
-}
 
 // The exact means are bit-reproducible for a given sample multiset, so their
 // raw bits are the fingerprint. (The Stat means are Welford means, whose last
@@ -80,8 +40,7 @@ static uint64_t simdet_bits(const double value) {
   return bits;
 }
 
-static uint64_t simdet_run(const char *settings, const char *cgp,
-                           const bool verbose) {
+static uint64_t simdet_run(const char *settings, const char *cgp) {
   Config *config = config_create_or_die(settings);
   char *cgp_command = get_formatted_string("cgp %s", cgp);
   load_and_exec_config_or_die(config, cgp_command);
@@ -99,11 +58,6 @@ static uint64_t simdet_run(const char *settings, const char *cgp,
     const double equity_mean = simmed_play_get_exact_equity_mean(simmed_play);
     const double win_pct_mean = simmed_play_get_exact_win_pct_mean(simmed_play);
     const double utility_mean = simmed_play_get_exact_utility_mean(simmed_play);
-    if (verbose) {
-      printf("  play %2d: n=%llu eq=%.17g wp=%.17g bu=%.17g\n", play_idx,
-             (unsigned long long)num_samples, equity_mean, win_pct_mean,
-             utility_mean);
-    }
     hash = fnv64a_step(hash, num_samples);
     hash = fnv64a_step(hash, simdet_bits(equity_mean));
     hash = fnv64a_step(hash, simdet_bits(win_pct_mean));
@@ -114,12 +68,6 @@ static uint64_t simdet_run(const char *settings, const char *cgp,
   hash = fnv64a_step(hash, (uint64_t)bai_result_get_status(
                                sim_results_get_bai_result(sim_results)));
   hash = fnv64a_step(hash, sim_results_get_iteration_count(sim_results));
-  if (verbose) {
-    printf("  best=%d status=%d iterations=%llu\n",
-           sim_results_get_best_move_index(sim_results),
-           (int)bai_result_get_status(sim_results_get_bai_result(sim_results)),
-           (unsigned long long)sim_results_get_iteration_count(sim_results));
-  }
   config_destroy(config);
   return hash;
 }
@@ -131,48 +79,19 @@ void test_sim_determinism_sweep(void) {
   };
   const int num_positions = (int)(sizeof(positions) / sizeof(positions[0]));
 
-  char default_threads[64];
-  (void)snprintf(default_threads, sizeof(default_threads), "1,2,4,8,%d",
-                 get_num_cores());
-  char thread_tokens[SIMDET_MAX_LIST][SIMDET_MAX_TOKEN];
-  char iter_tokens[SIMDET_MAX_LIST][SIMDET_MAX_TOKEN];
-  char scond_tokens[SIMDET_MAX_LIST][SIMDET_MAX_TOKEN];
-  char sr_tokens[SIMDET_MAX_LIST][SIMDET_MAX_TOKEN];
-  const int num_threads = simdet_split(
-      simdet_env_or("SIMDET_THREADS", default_threads), thread_tokens);
-  const int num_iters =
-      simdet_split(simdet_env_or("SIMDET_ITERS", "500,3000"), iter_tokens);
-  const int num_sconds =
-      simdet_split(simdet_env_or("SIMDET_SCOND", "99,none"), scond_tokens);
-  const int num_srs =
-      simdet_split(simdet_env_or("SIMDET_SR", "tt,rr"), sr_tokens);
-  bool run_position[SIMDET_MAX_LIST] = {false};
-  const char *position_list = getenv("SIMDET_POS");
-  if (position_list == NULL || position_list[0] == '\0') {
-    for (int pos_idx = 0; pos_idx < num_positions; pos_idx++) {
-      run_position[pos_idx] = true;
-    }
-  } else {
-    char pos_tokens[SIMDET_MAX_LIST][SIMDET_MAX_TOKEN];
-    const int num_pos_tokens = simdet_split(position_list, pos_tokens);
-    for (int token_idx = 0; token_idx < num_pos_tokens; token_idx++) {
-      const int pos_idx = (int)strtol(pos_tokens[token_idx], NULL, 10);
-      if (pos_idx >= 0 && pos_idx < num_positions) {
-        run_position[pos_idx] = true;
-      }
-    }
-  }
-  const bool verbose = strcmp(simdet_env_or("SIMDET_VERBOSE", "0"), "1") == 0;
-  const char *plays = simdet_env_or("SIMDET_PLAYS", "15");
-  const char *plies = simdet_env_or("SIMDET_PLIES", "2");
-  const char *min_play = simdet_env_or("SIMDET_MINPLAY", "10");
+  const int thread_counts[] = {1, 2, 4, 8, get_num_cores()};
+  const int num_threads =
+      (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
+  const char *const iter_tokens[] = {"500", "3000"};
+  const int num_iters = (int)(sizeof(iter_tokens) / sizeof(iter_tokens[0]));
+  const char *const scond_tokens[] = {"99", "none"};
+  const int num_sconds = (int)(sizeof(scond_tokens) / sizeof(scond_tokens[0]));
+  const char *const sr_tokens[] = {"tt", "rr"};
+  const int num_srs = (int)(sizeof(sr_tokens) / sizeof(sr_tokens[0]));
 
   uint64_t combined = FNV_64_OFFSET_BASIS;
   int num_mismatches = 0;
   for (int pos_idx = 0; pos_idx < num_positions; pos_idx++) {
-    if (!run_position[pos_idx]) {
-      continue;
-    }
     for (int iter_idx = 0; iter_idx < num_iters; iter_idx++) {
       for (int scond_idx = 0; scond_idx < num_sconds; scond_idx++) {
         for (int sr_idx = 0; sr_idx < num_srs; sr_idx++) {
@@ -182,27 +101,22 @@ void test_sim_determinism_sweep(void) {
             (void)snprintf(
                 settings, sizeof(settings),
                 "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all "
-                "-r2 all -numplays %s -plies %s -threads %s -iterations %s "
-                "-minplayiterations %s -scond %s -sr %s -tlim 0 -seed 42 "
+                "-r2 all -numplays 15 -plies 2 -threads %d -iterations %s "
+                "-minplayiterations 10 -scond %s -sr %s -tlim 0 -seed 42 "
                 "-savesettings false -hr false",
-                plays, plies, thread_tokens[thread_idx], iter_tokens[iter_idx],
-                min_play, scond_tokens[scond_idx], sr_tokens[sr_idx]);
-            if (verbose) {
-              printf("SIMDET run pos=%d iters=%s scond=%s sr=%s threads=%s\n",
-                     pos_idx, iter_tokens[iter_idx], scond_tokens[scond_idx],
-                     sr_tokens[sr_idx], thread_tokens[thread_idx]);
-            }
+                thread_counts[thread_idx], iter_tokens[iter_idx],
+                scond_tokens[scond_idx], sr_tokens[sr_idx]);
             const uint64_t fingerprint =
-                simdet_run(settings, positions[pos_idx], verbose);
+                simdet_run(settings, positions[pos_idx]);
             if (thread_idx == 0) {
               reference = fingerprint;
               combined = fnv64a_step(combined, fingerprint);
             } else if (fingerprint != reference) {
               num_mismatches++;
               printf("SIMDET MISMATCH pos=%d iters=%s scond=%s sr=%s "
-                     "threads=%s: %016llx != %016llx\n",
+                     "threads=%d: %016llx != %016llx\n",
                      pos_idx, iter_tokens[iter_idx], scond_tokens[scond_idx],
-                     sr_tokens[sr_idx], thread_tokens[thread_idx],
+                     sr_tokens[sr_idx], thread_counts[thread_idx],
                      (unsigned long long)fingerprint,
                      (unsigned long long)reference);
             }

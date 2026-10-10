@@ -12,16 +12,9 @@
 //
 //   make magpie_test BUILD=bai_stats && ./bin/magpie_test baisched
 //
-// Env vars (comma-separated lists sweep the matrix):
-//   BAISCHED_THREADS  per-sim thread counts (default 1,2,4,8,<cores>)
-//   BAISCHED_ITERS    -iterations sample budgets (default 300,1000,3000,10000)
-//   BAISCHED_PLIES    sim plies (default 2)
-//   BAISCHED_PLAYS    -numplays (default 15)
-//   BAISCHED_MINPLAY  -minplayiterations (default 10)
-//   BAISCHED_SR       sampling rule, tt or rr (default tt)
-//   BAISCHED_SCOND    stop condition, a percentage or none (default 99)
-//   BAISCHED_GAMES    games per configuration (default 1)
-//   BAISCHED_LEX      lexicon (default CSW21)
+// The matrix is 1, 2, 4, 8 and <cores> threads per sim by -iterations 300,
+// 1000, 3000 and 10000, each one CSW21 game simming 15 plays at 2 plies with
+// -minplayiterations 10, -sr tt and -scond 99.
 
 #include "bai_sched_test.h"
 
@@ -37,30 +30,8 @@
 #include <stdlib.h>
 
 enum {
-  BAISCHED_MAX_LIST = 32,
   BAISCHED_MIN_SAMPLES_FOR_TAIL_QUANTILE = 1000,
 };
-
-static const char *baisched_env_or(const char *name, const char *fallback) {
-  const char *value = getenv(name);
-  return value != NULL && value[0] != '\0' ? value : fallback;
-}
-
-// Parses a comma-separated list of positive integers. Returns the count.
-static int baisched_parse_list(const char *list, int *values) {
-  int count = 0;
-  const char *cursor = list;
-  while (*cursor != '\0' && count < BAISCHED_MAX_LIST) {
-    char *end = NULL;
-    const long value = strtol(cursor, &end, 10);
-    if (end == cursor) {
-      break;
-    }
-    values[count++] = (int)value;
-    cursor = (*end == ',') ? end + 1 : end;
-  }
-  return count;
-}
 
 static int compare_doubles(const void *a, const void *b) {
   const double value_a = *(const double *)a;
@@ -182,27 +153,15 @@ static void baisched_print_row(const int threads, const int iters,
 }
 
 void test_bai_sched(void) {
-  char default_threads[64];
-  (void)snprintf(default_threads, sizeof(default_threads), "1,2,4,8,%d",
-                 get_num_cores());
-  int thread_counts[BAISCHED_MAX_LIST];
-  int iteration_counts[BAISCHED_MAX_LIST];
-  const int num_thread_counts = baisched_parse_list(
-      baisched_env_or("BAISCHED_THREADS", default_threads), thread_counts);
-  const int num_iteration_counts = baisched_parse_list(
-      baisched_env_or("BAISCHED_ITERS", "300,1000,3000,10000"),
-      iteration_counts);
-  const char *plies = baisched_env_or("BAISCHED_PLIES", "2");
-  const char *plays = baisched_env_or("BAISCHED_PLAYS", "15");
-  const char *min_play = baisched_env_or("BAISCHED_MINPLAY", "10");
-  const char *sampling_rule = baisched_env_or("BAISCHED_SR", "tt");
-  const char *stop_cond = baisched_env_or("BAISCHED_SCOND", "99");
-  const char *games = baisched_env_or("BAISCHED_GAMES", "1");
-  const char *lexicon = baisched_env_or("BAISCHED_LEX", "CSW21");
+  const int thread_counts[] = {1, 2, 4, 8, get_num_cores()};
+  const int num_thread_counts =
+      (int)(sizeof(thread_counts) / sizeof(thread_counts[0]));
+  const int iteration_counts[] = {300, 1000, 3000, 10000};
+  const int num_iteration_counts =
+      (int)(sizeof(iteration_counts) / sizeof(iteration_counts[0]));
 
-  printf("baisched: lex=%s plies=%s plays=%s minplay=%s sr=%s scond=%s "
-         "games=%s\n",
-         lexicon, plies, plays, min_play, sampling_rule, stop_cond, games);
+  printf("baisched: lex=CSW21 plies=2 plays=15 minplay=10 sr=tt scond=99 "
+         "games=1\n");
   baisched_print_header();
 
   autoplay_set_bench_static_move(true);
@@ -211,21 +170,17 @@ void test_bai_sched(void) {
       char settings[512];
       (void)snprintf(
           settings, sizeof(settings),
-          "set -lex %s -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-          "-numplays %s -plies %s -threads %d -iterations %d "
-          "-minplayiterations %s -scond %s -sr %s -tlim 0 -seed 42 "
+          "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+          "-numplays 15 -plies 2 -threads %d -iterations %d "
+          "-minplayiterations 10 -scond 99 -sr tt -tlim 0 -seed 42 "
           "-mtmode igp -savesettings false -autosavegcg false",
-          lexicon, plays, plies, thread_counts[thread_idx],
-          iteration_counts[iter_idx], min_play, stop_cond, sampling_rule);
+          thread_counts[thread_idx], iteration_counts[iter_idx]);
       Config *config = config_create_or_die(settings);
-      char command[64];
-      (void)snprintf(command, sizeof(command), "autoplay games %s -gp false",
-                     games);
       bai_sched_stats_reset();
       autoplay_reset_total_sim_iterations();
       Timer timer;
       ctimer_start(&timer);
-      load_and_exec_config_or_die(config, command);
+      load_and_exec_config_or_die(config, "autoplay games 1 -gp false");
       ctimer_stop(&timer);
       baisched_print_row(thread_counts[thread_idx], iteration_counts[iter_idx],
                          autoplay_get_total_sim_iterations(),
