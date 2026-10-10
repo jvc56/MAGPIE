@@ -1,0 +1,4 @@
+#ifndef WORD_MAP_EMBEDDING_TEST_H
+#define WORD_MAP_EMBEDDING_TEST_H
+void test_word_map_embedding(void);
+#endif

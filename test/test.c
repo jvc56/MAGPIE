@@ -85,6 +85,7 @@
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
 #include "word_info_table_test.h"
+#include "word_map_embedding_test.h"
 #include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
@@ -143,6 +144,7 @@ static TestEntry test_table[] = {
     {"embedding", test_embedding_lifecycle},
     {"historyreplay", test_history_replay},
     {"pegjson", test_peg_embedding},
+    {"wordmapapi", test_word_map_embedding},
     {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
