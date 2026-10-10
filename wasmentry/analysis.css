@@ -1003,7 +1003,7 @@ body.busy #status:before {
   margin-top: 5px;
   padding: 8px;
 }
-.square.pending {
+#board .square.pending:not(:disabled) {
   cursor: grab;
   touch-action: none;
 }
