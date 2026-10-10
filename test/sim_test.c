@@ -175,14 +175,26 @@ void test_sim_bag_cycle(void) {
   const uint64_t cycled_rollouts = (uint64_t)cycles * (uint64_t)rotations;
   assert(sim_results_get_iteration_count(sim_results) == cycled_rollouts);
   uint64_t play_rollouts = 0;
+  uint64_t min_play_rollouts = UINT64_MAX;
+  uint64_t max_play_rollouts = 0;
   const int num_plays = sim_results_get_number_of_plays(sim_results);
   for (int play_idx = 0; play_idx < num_plays; play_idx++) {
     const uint64_t num_rollouts = simmed_play_get_num_rollouts(
         sim_results_get_simmed_play(sim_results, play_idx));
     assert(num_rollouts >= 2 * (uint64_t)rotations);
     play_rollouts += num_rollouts;
+    if (num_rollouts < min_play_rollouts) {
+      min_play_rollouts = num_rollouts;
+    }
+    if (num_rollouts > max_play_rollouts) {
+      max_play_rollouts = num_rollouts;
+    }
   }
   assert(play_rollouts == cycled_rollouts);
+  // BAI sizes its rounds in rollouts, so the top-two rule takes over within
+  // this budget and the plays' counts differ. Rounds of 32 cycles would have
+  // kept the whole sim round-robin.
+  assert(max_play_rollouts > min_play_rollouts);
   config_destroy(config);
 }
 

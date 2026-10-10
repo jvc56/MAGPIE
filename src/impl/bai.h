@@ -82,8 +82,11 @@ enum {
   // sample budget, so an N-sample sim's schedule is a prefix of a 2N-sample
   // one up to the point where a stop condition fires.
   //
-  // BAI_SCHEDULE_ROUND_SIZE is the fold granularity. A fold and a schedule
-  // each cost O(num_arms + round size) under the mutex.
+  // BAI_SCHEDULE_ROUND_SIZE is the fold granularity, in draws: a round holds
+  // that many single-draw samples, or about that many draws' worth of samples
+  // that average several (see bai_round_size), so that the lags below cost
+  // the same number of draws either way. A fold and a schedule each cost
+  // O(num_arms + round size) under the mutex.
   BAI_SCHEDULE_ROUND_SIZE = 32,
   // Round j is scheduled when round j - lag - 1 folds, from the statistics
   // committed by then. Initial-phase rounds need no statistics, so they run
@@ -94,9 +97,11 @@ enum {
   // staler. Measured as move-choice regret against a high-budget reference,
   // two rounds (64 samples) choose as well as scheduling every sample from
   // fully current statistics, while 128 samples of lag already choose
-  // measurably worse and 1024 much worse at 500-1000 sample budgets. When
-  // this little lag leaves a worker nothing to claim, it speculates instead
-  // of waiting (see BAISpeculation).
+  // measurably worse and 1024 much worse at 500-1000 sample budgets. Bag-
+  // cycled sims, whose samples average about 12 rollouts, chose much worse
+  // than plain ones at 1000-3000 rollouts with 32-sample rounds, and as well
+  // with rounds sized in rollouts. When this little lag leaves a worker
+  // nothing to claim, it speculates instead of waiting (see BAISpeculation).
   BAI_SCHEDULE_ADAPTIVE_LAG = 2,
   // The ring needs one more round than the longest lag: the slot freed by
   // the round that just folded is the one the newly scheduled round takes.
@@ -107,10 +112,11 @@ enum {
   // running them on one thread keeps that thread's RIT cache hot. Adaptive
   // rounds are claimed one slot at a time.
   BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH = 8,
-  // Speculative samples held per worker thread, and how many rounds past the
-  // last one laid out speculation looks. A straggler under OS preemption can
-  // run 10x the mean sample, during which each other worker wants about that
-  // many samples of other work.
+  // Speculative samples held per worker thread, and how many rounds of
+  // BAI_SCHEDULE_ROUND_SIZE slots past the last one laid out speculation
+  // looks. A straggler under OS preemption can run 10x the mean sample,
+  // during which each other worker wants about that many samples of other
+  // work.
   BAI_SPECULATIONS_PER_THREAD = 16,
   BAI_SPECULATION_ROUNDS = 8,
   BAI_SPECULATION_SLOTS = BAI_SPECULATION_ROUNDS * BAI_SCHEDULE_ROUND_SIZE,
@@ -259,6 +265,8 @@ typedef struct BAISyncData {
   // The round that holds the last initial-phase sample, once it has been
   // laid out; UINT64_MAX before that.
   uint64_t initial_last_round;
+  // Samples per round (see bai_round_size).
+  int round_size;
   // The speculation cache, or NULL when the random variables cannot peek at
   // future seeds (and so a sample is not a function of its slot).
   BAISpeculation *speculations;
@@ -396,6 +404,8 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->astar_index = -1;
   bai_sync_data->avoid_prune_best_arm_idx = -1;
   bai_sync_data->initial_phase = true;
+  // bai() sets it from the options.
+  bai_sync_data->round_size = BAI_SCHEDULE_ROUND_SIZE;
   bai_sync_data->arm_data =
       calloc_or_die(num_initial_arms, sizeof(BAIArmDatum));
   cpthread_mutex_init(&bai_sync_data->mutex);
@@ -830,7 +840,7 @@ static inline void bai_schedule_round_while_locked(BAISampleArgs *args) {
       bai_sync_data->initial_limit < round_end) {
     round_end = bai_sync_data->initial_limit;
   }
-  int num_samples = BAI_SCHEDULE_ROUND_SIZE;
+  int num_samples = bai_sync_data->round_size;
   if ((uint64_t)num_samples > round_end - requested) {
     num_samples = (int)(round_end - requested);
   }
@@ -1193,6 +1203,18 @@ static inline void bai_abandon_rounds_while_locked(BAISampleArgs *args) {
   bai_sync_data->scheduling_finished = true;
 }
 
+// The samples in a round: BAI_SCHEDULE_ROUND_SIZE draws' worth, to the
+// nearest sample, and at least one.
+static inline int bai_round_size(const uint64_t draws_per_sample) {
+  if (draws_per_sample <= 1) {
+    return BAI_SCHEDULE_ROUND_SIZE;
+  }
+  const uint64_t round_size =
+      ((uint64_t)BAI_SCHEDULE_ROUND_SIZE + draws_per_sample / 2) /
+      draws_per_sample;
+  return round_size > 0 ? (int)round_size : 1;
+}
+
 // Allocates the rounds and fills the pipeline with the first rounds of the
 // initial phase. Runs once, single-threaded, before any worker starts.
 static inline void bai_sync_data_start_schedule(BAISampleArgs *args,
@@ -1203,7 +1225,7 @@ static inline void bai_sync_data_start_schedule(BAISampleArgs *args,
   const uint64_t samples_per_arm = sample_minimum > 0 ? sample_minimum : 1;
   bai_sync_data->initial_limit =
       (uint64_t)bai_sync_data->num_arms * samples_per_arm;
-  const size_t round_size = BAI_SCHEDULE_ROUND_SIZE;
+  const size_t round_size = (size_t)bai_sync_data->round_size;
   for (int i = 0; i < BAI_SCHEDULE_ROUNDS; i++) {
     bai_sync_data->rounds[i].arm_indices =
         malloc_or_die(sizeof(int) * round_size);
@@ -1249,10 +1271,10 @@ static inline void bai_sync_data_start_schedule(BAISampleArgs *args,
   bai_schedule_rounds_while_locked(args);
 }
 
-// Assumes the caller has locked the bai sync data mutex. Lays out the slots
-// the next BAI_SPECULATION_ROUNDS rounds are expected to hold: exactly, when
-// they will be round-robin, or as the top-two rule would lay them out from
-// the statistics committed so far, round after round. Returns false when
+// Assumes the caller has locked the bai sync data mutex. Lays out the
+// BAI_SPECULATION_SLOTS slots the next rounds are expected to hold: exactly,
+// when they will be round-robin, or as the top-two rule would lay them out
+// from the statistics committed so far, round after round. Returns false when
 // there is nothing sound to predict from yet.
 static inline bool bai_speculation_expected_arms(BAISampleArgs *args,
                                                  int *arm_indices) {
@@ -1275,10 +1297,15 @@ static inline bool bai_speculation_expected_arms(BAISampleArgs *args,
   }
   // Each predicted round counts the ones predicted before it, as scheduling
   // will; the counts are put back afterwards.
-  for (int round_idx = 0; round_idx < BAI_SPECULATION_ROUNDS; round_idx++) {
-    int *round_arms = arm_indices + round_idx * BAI_SCHEDULE_ROUND_SIZE;
-    bai_schedule_top_two_arms(args, BAI_SCHEDULE_ROUND_SIZE, round_arms);
-    for (int slot = 0; slot < BAI_SCHEDULE_ROUND_SIZE; slot++) {
+  for (int first_slot = 0; first_slot < BAI_SPECULATION_SLOTS;
+       first_slot += bai_sync_data->round_size) {
+    int num_slots = BAI_SPECULATION_SLOTS - first_slot;
+    if (num_slots > bai_sync_data->round_size) {
+      num_slots = bai_sync_data->round_size;
+    }
+    int *round_arms = arm_indices + first_slot;
+    bai_schedule_top_two_arms(args, num_slots, round_arms);
+    for (int slot = 0; slot < num_slots; slot++) {
       bai_sync_data->arm_data[round_arms[slot]].num_scheduled++;
     }
   }
@@ -1691,7 +1718,7 @@ static inline void bai_sched_record(BAISyncData *sync_data,
   const BAISchedHistogram *histogram = &sync_data->sched_histogram;
   sim_stats->num_threads = bai_options->num_threads;
   sim_stats->num_arms = sync_data->num_arms;
-  sim_stats->round_size = BAI_SCHEDULE_ROUND_SIZE;
+  sim_stats->round_size = sync_data->round_size;
   sim_stats->lag_rounds = BAI_SCHEDULE_ADAPTIVE_LAG;
   sim_stats->sample_limit = bai_options->sample_limit;
   sim_stats->bai_samples =
@@ -1759,6 +1786,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                                                 (int)rvs_get_num_rvs(rvs));
   sync_data->record_size = rvs_get_sample_record_size(rvs);
   sync_data->num_threads = bai_options->num_threads;
+  sync_data->round_size = bai_round_size(bai_options->draws_per_sample);
 #ifdef BAI_SCHED_STATS
   sync_data->sched_start_ns = sched_start_ns;
 #endif

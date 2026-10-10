@@ -29,7 +29,7 @@
 
 enum {
   // The fewest cycles a bag-cycled sim gives each play (see
-  // sim_args_set_bag_cycle_budget).
+  // sim_args_set_bag_cycle_bai_options).
   SIM_BAG_CYCLE_MIN_CYCLES = 2,
 };
 
@@ -60,8 +60,9 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
 // (-iterations) and minimum (-minplayiterations) count rollouts. Converts them
 // to this position's cycles, rounding up, and gives every play at least
 // SIM_BAG_CYCLE_MIN_CYCLES, so that BAI never estimates a play's variance from
-// one sample.
-static void sim_args_set_bag_cycle_budget(SimArgs *sim_args) {
+// one sample. Also tells BAI how many rollouts a cycle averages, so that its
+// rounds hold about as many rollouts as a plain sim's.
+static void sim_args_set_bag_cycle_bai_options(SimArgs *sim_args) {
   const uint64_t rotations =
       (uint64_t)rv_sim_bag_cycle_rotations(sim_args->game);
   const uint64_t limit = sim_args->bai_options.sample_limit;
@@ -74,6 +75,7 @@ static void sim_args_set_bag_cycle_budget(SimArgs *sim_args) {
   sim_args->bai_options.sample_limit =
       limit / rotations + (limit % rotations != 0 ? 1 : 0);
   sim_args->bai_options.sample_minimum = minimum_cycles;
+  sim_args->bai_options.draws_per_sample = rotations;
 }
 
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
@@ -135,6 +137,8 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   // which can return early, so that the reset below always undoes them.
   const uint64_t original_sample_limit = sim_args->bai_options.sample_limit;
   const uint64_t original_sample_minimum = sim_args->bai_options.sample_minimum;
+  const uint64_t original_draws_per_sample =
+      sim_args->bai_options.draws_per_sample;
   const int original_num_plies = sim_args->num_plies;
   if (bag_is_empty(game_get_bag(sim_args->game))) {
     sim_args->bai_options.sample_limit =
@@ -142,7 +146,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     sim_args->bai_options.sample_minimum = 1;
     sim_args->num_plies = MAX_PLIES;
   } else if (sim_args->bag_cycle) {
-    sim_args_set_bag_cycle_budget(sim_args);
+    sim_args_set_bag_cycle_bai_options(sim_args);
   }
 
   RandomVariablesArgs rv_sim_args = {
@@ -175,6 +179,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   // endgame or bag-cycled sims
   sim_args->bai_options.sample_limit = original_sample_limit;
   sim_args->bai_options.sample_minimum = original_sample_minimum;
+  sim_args->bai_options.draws_per_sample = original_draws_per_sample;
   sim_args->num_plies = original_num_plies;
 }
 
