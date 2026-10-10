@@ -6,6 +6,7 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
@@ -19,6 +20,7 @@
 #include "../src/ent/validated_move.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
+#include "../src/str/endgame_string.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -28,6 +30,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #define TEST_GCG_FILENAME "a.gcg"
@@ -3074,6 +3077,34 @@ void test_config_sim_with_inference_results_saved_to_game_event(void) {
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shinfer", ERROR_STATUS_SUCCESS);
 
+  config_destroy(config);
+}
+
+void test_config_endgame_played_move(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -threads 1 -ttfraction 0.0001 -eplies 10 -etopk 1");
+  load_and_exec_config_or_die(
+      config, "cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/"
+              "5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/"
+              "4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0");
+  assert_config_exec_status(config, "endgame pass", ERROR_STATUS_SUCCESS);
+  EndgameResults *results = config_get_endgame_results(config);
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL) <
+         endgame_results_get_value(results, ENDGAME_RESULT_BEST));
+  char *output =
+      endgame_results_get_string(results, config_get_game(config), NULL);
+  assert(strstr(output, "\npass") != NULL);
+  free(output);
+  assert_config_exec_status(config, "endgame 5K DA...", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  // The requested move belongs to this invocation, not subsequent searches.
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert_config_exec_status(config, "endgame pass,pass",
+                            ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert(!endgame_results_get_valid_for_current_game_state(results));
   config_destroy(config);
 }
 
