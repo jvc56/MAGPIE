@@ -14,6 +14,16 @@
 #include <stdlib.h>
 
 void test_word_map_embedding(void) {
+  assert(magpie_build_wmp(NULL, 1, NULL) == NULL);
+  assert(magpie_build_wit(NULL) == NULL);
+  assert(!magpie_install_wmp(NULL, NULL, NULL));
+  Magpie *failed = magpie_create("./nonexistent_data_path");
+  assert(magpie_has_error(failed));
+  magpie_set_peg_json(failed, true);
+  assert(magpie_build_wmp(failed, 1, NULL) == NULL);
+  assert(magpie_build_wit(failed) == NULL);
+  assert(!magpie_install_wmp(failed, NULL, NULL));
+  magpie_destroy(failed);
   Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
   assert(!magpie_has_error(mp));
   WMPBuildProgress progress = {0};
@@ -30,6 +40,9 @@ void test_word_map_embedding(void) {
       MAGPIE_SUCCESS);
   assert(magpie_run_sync(mp, "generate") == MAGPIE_SUCCESS);
   char *baseline = magpie_get_last_command_output(mp);
+  atomic_store(&progress.cancelled, true);
+  assert(magpie_build_wmp(mp, 1, &progress) == NULL);
+  atomic_store(&progress.cancelled, false);
   WMP *wmp = magpie_build_wmp(mp, 2, &progress);
   assert(wmp != NULL);
   assert(atomic_load(&progress.stage) == 4);
@@ -43,6 +56,16 @@ void test_word_map_embedding(void) {
   assert(!magpie_install_wmp(mp, wmp, wit));
   free(wmp->name);
   wmp->name = name;
+  assert(magpie_run_sync(mp, "set -l2 NWL23") == MAGPIE_SUCCESS);
+  assert(!magpie_install_wmp(mp, wmp, wit));
+  assert(magpie_run_sync(mp, "generate") == MAGPIE_SUCCESS);
+  assert(magpie_run_sync(mp, "set -l2 CSW24") == MAGPIE_SUCCESS);
+  wmp->kwg_hash ^= 1;
+  assert(!magpie_install_wmp(mp, wmp, wit));
+  wmp->kwg_hash ^= 1;
+  wmp->ld_fingerprint ^= 1;
+  assert(!magpie_install_wmp(mp, wmp, wit));
+  wmp->ld_fingerprint ^= 1;
   const uint64_t hash = wit->kwg_hash;
   wit->kwg_hash ^= 1;
   assert(!magpie_install_wmp(mp, wmp, wit));

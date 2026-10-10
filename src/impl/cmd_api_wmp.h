@@ -1,9 +1,10 @@
 #ifndef CMD_API_WMP_H
 #define CMD_API_WMP_H
 
+#include "../def/cmd_api_defs.h"
 #include "../ent/word_info_table.h"
-#include "cmd_api.h"
 #include "wmp_maker.h"
+#include <stdbool.h>
 
 // Embedding helpers. The caller must exclusively own an idle handle until
 // completion. Builders return owned tables; installation transfers ownership

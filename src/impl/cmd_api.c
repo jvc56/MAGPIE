@@ -5,12 +5,14 @@
 #include "../def/players_data_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/players_data.h"
 #include "../ent/thread_control.h"
 #include "../ent/wmp.h"
 #include "../ent/word_info_table.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "cmd_api_wmp.h"
 #include "config.h"
 #include "exec.h"
 #include "wmp_maker.h"
@@ -251,7 +253,7 @@ magpie_thread_status magpie_get_thread_status(const Magpie *mp) {
 void magpie_free_string(char *str) { free(str); }
 
 WMP *magpie_build_wmp(Magpie *mp, int threads, WMPBuildProgress *progress) {
-  if (async_command_is_active(mp)) {
+  if (!mp || !mp->config || async_command_is_active(mp)) {
     return NULL;
   }
   const PlayersData *pd = config_get_players_data(mp->config);
@@ -261,12 +263,14 @@ WMP *magpie_build_wmp(Magpie *mp, int threads, WMPBuildProgress *progress) {
   }
   WMP *wmp = make_wmp_from_kwg_with_progress(kwg, config_get_ld(mp->config),
                                              threads, progress);
-  wmp->name = string_duplicate(kwg_get_name(kwg));
+  if (wmp) {
+    wmp->name = string_duplicate(kwg_get_name(kwg));
+  }
   return wmp;
 }
 
 WordInfoTable *magpie_build_wit(Magpie *mp) {
-  if (async_command_is_active(mp)) {
+  if (!mp || !mp->config || async_command_is_active(mp)) {
     return NULL;
   }
   const KWG *kwg = players_data_get_kwg(config_get_players_data(mp->config), 0);
@@ -287,26 +291,34 @@ WordInfoTable *magpie_build_wit(Magpie *mp) {
 }
 
 bool magpie_install_wmp(Magpie *mp, WMP *wmp, WordInfoTable *wit) {
-  if (!wmp || !wit || async_command_is_active(mp)) {
+  if (!mp || !mp->config || !wmp || !wit || async_command_is_active(mp)) {
     return false;
   }
   PlayersData *pd = config_get_players_data(mp->config);
-  const KWG *kwg = players_data_get_kwg(pd, 0);
-  if (!kwg || !strings_equal(kwg_get_name(kwg), wmp->name) ||
-      !strings_equal(kwg_get_name(kwg), wit->name) ||
-      kwg_get_hash(kwg) != word_info_table_get_kwg_hash(wit)) {
+  const LetterDistribution *ld = config_get_ld(mp->config);
+  if (!ld || (wmp->ld_fingerprint &&
+              wmp->ld_fingerprint != ld_get_content_fingerprint(ld))) {
     return false;
+  }
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const KWG *kwg = players_data_get_kwg(pd, player_idx);
+    if (!kwg || !strings_equal(kwg_get_name(kwg), wmp->name) ||
+        !strings_equal(kwg_get_name(kwg), wit->name) ||
+        kwg_get_hash(kwg) != word_info_table_get_kwg_hash(wit) ||
+        (wmp->kwg_hash && wmp->kwg_hash != kwg_get_hash(kwg))) {
+      return false;
+    }
   }
   players_data_set(pd, PLAYERS_DATA_TYPE_WMP, NULL, NULL, NULL, false,
                    mp->error);
   players_data_set(pd, PLAYERS_DATA_TYPE_WIT, NULL, NULL, NULL, false,
                    mp->error);
-  for (int player = 0; player < 2; player++) {
-    players_data_set_data(pd, PLAYERS_DATA_TYPE_WIT, player, wit);
-    players_data_set_use_when_available(pd, PLAYERS_DATA_TYPE_WIT, player,
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    players_data_set_data(pd, PLAYERS_DATA_TYPE_WIT, player_idx, wit);
+    players_data_set_use_when_available(pd, PLAYERS_DATA_TYPE_WIT, player_idx,
                                         true);
-    players_data_set_data(pd, PLAYERS_DATA_TYPE_WMP, player, wmp);
-    players_data_set_use_when_available(pd, PLAYERS_DATA_TYPE_WMP, player,
+    players_data_set_data(pd, PLAYERS_DATA_TYPE_WMP, player_idx, wmp);
+    players_data_set_use_when_available(pd, PLAYERS_DATA_TYPE_WMP, player_idx,
                                         true);
   }
   players_data_set_is_shared(pd, PLAYERS_DATA_TYPE_WMP, true);

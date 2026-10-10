@@ -15,6 +15,7 @@
 #include "../util/io_util.h"
 #include "kwg_maker.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -397,6 +398,12 @@ typedef struct {
 
 static void *build_words_and_extract_racks(void *arg) {
   WordBuildArg *a = (WordBuildArg *)arg;
+  if (a->progress && atomic_load(&a->progress->cancelled)) {
+    if (a->sem) {
+      thread_sem_release(a->sem);
+    }
+    return NULL;
+  }
   WordPair *pairs = a->pairs;
   WordPair *temp = a->temp;
   uint32_t count = a->pair_count;
@@ -551,6 +558,12 @@ typedef struct {
 
 static void *build_blank_entries_direct(void *arg) {
   BlankBuildArg *a = (BlankBuildArg *)arg;
+  if (a->progress && atomic_load(&a->progress->cancelled)) {
+    if (a->sem) {
+      thread_sem_release(a->sem);
+    }
+    return NULL;
+  }
   LengthScratchBuffers *scratch = a->scratch;
   const BitRack *unique_racks = scratch->unique_racks;
   uint32_t num_racks = scratch->num_unique_racks;
@@ -701,6 +714,12 @@ typedef struct {
 
 static void *build_double_blank_entries_direct(void *arg) {
   DoubleBlankBuildArg *a = (DoubleBlankBuildArg *)arg;
+  if (a->progress && atomic_load(&a->progress->cancelled)) {
+    if (a->sem) {
+      thread_sem_release(a->sem);
+    }
+    return NULL;
+  }
   LengthScratchBuffers *scratch = a->scratch;
   const BitRack *unique_racks = scratch->unique_racks;
   uint32_t num_racks = scratch->num_unique_racks;
@@ -965,14 +984,6 @@ static void sort_lengths_by_work(int *lengths, const uint32_t *work,
   }
 }
 
-static void set_build_stage(WMPBuildProgress *progress, int stage, int total) {
-  if (progress) {
-    atomic_store(&progress->completed, 0);
-    atomic_store(&progress->total, total);
-    atomic_store(&progress->stage, stage);
-  }
-}
-
 static WMP *make_wmp_from_words_with_progress(const DictionaryWordList *words,
                                               const LetterDistribution *ld,
                                               int num_threads,
@@ -1048,8 +1059,10 @@ static WMP *make_wmp_from_words_with_progress(const DictionaryWordList *words,
   // Now sort lengths by work (pair_counts)
   sort_lengths_by_work(sorted_lengths, pair_counts, num_active_lengths);
 
-  WMP *wmp = malloc_or_die(sizeof(WMP));
+  WMP *wmp = calloc_or_die(1, sizeof(WMP));
   wmp->name = NULL;
+  wmp->kwg_hash = 0;
+  wmp->ld_fingerprint = ld_get_content_fingerprint(ld);
   wmp->version = WMP_VERSION;
   wmp->board_dim = BOARD_DIM;
 
@@ -1099,7 +1112,7 @@ static WMP *make_wmp_from_words_with_progress(const DictionaryWordList *words,
   ThreadSemaphore sem;
   thread_sem_init(&sem, num_threads);
 
-  set_build_stage(progress, 1, num_active_lengths);
+  wmp_build_progress_set_stage(progress, 1, num_active_lengths);
   // Phase 1: Build word entries in parallel and extract unique racks
   // Launch threads in work-descending order for better scheduling
   WordBuildArg word_args[BOARD_DIM + 1];
@@ -1142,7 +1155,7 @@ static WMP *make_wmp_from_words_with_progress(const DictionaryWordList *words,
     }
   }
 
-  set_build_stage(progress, 2, num_active_lengths);
+  wmp_build_progress_set_stage(progress, 2, num_active_lengths);
   // Phase 2: Build blank entries in parallel (reusing scratch buffers)
   BlankBuildArg blank_args[BOARD_DIM + 1];
   cpthread_t blank_threads[BOARD_DIM + 1];
@@ -1174,7 +1187,7 @@ static WMP *make_wmp_from_words_with_progress(const DictionaryWordList *words,
     }
   }
 
-  set_build_stage(progress, 3, num_active_lengths);
+  wmp_build_progress_set_stage(progress, 3, num_active_lengths);
   // Phase 3: Build double-blank entries in parallel (reusing scratch buffers)
   DoubleBlankBuildArg dbl_args[BOARD_DIM + 1];
   cpthread_t dbl_threads[BOARD_DIM + 1];
@@ -1214,7 +1227,11 @@ static WMP *make_wmp_from_words_with_progress(const DictionaryWordList *words,
     free(scratch[len].unique_racks);
   }
 
-  set_build_stage(progress, 4, BOARD_DIM - 1);
+  if (progress && atomic_load(&progress->cancelled)) {
+    wmp_destroy(wmp);
+    return NULL;
+  }
+  wmp_build_progress_set_stage(progress, 4, BOARD_DIM - 1);
   // Calculate max_word_lookup_bytes
   wmp->max_word_lookup_bytes = calculate_max_word_lookup_bytes(wmp);
 
@@ -1237,12 +1254,15 @@ WMP *make_wmp_from_kwg_with_progress(const KWG *kwg,
                                      const LetterDistribution *ld,
                                      int num_threads,
                                      WMPBuildProgress *progress) {
-  set_build_stage(progress, 0, 0);
+  wmp_build_progress_set_stage(progress, 0, 0);
   DictionaryWordList *words = dictionary_word_list_create();
   kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), words, NULL);
   WMP *wmp =
       make_wmp_from_words_with_progress(words, ld, num_threads, progress);
   dictionary_word_list_destroy(words);
+  if (wmp) {
+    wmp->kwg_hash = kwg_get_hash(kwg);
+  }
   return wmp;
 }
 

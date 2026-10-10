@@ -135,6 +135,10 @@ typedef struct WMPForLength {
 
 typedef struct WMP {
   char *name;
+  // Runtime provenance for locally built tables; legacy serialized tables
+  // omit these and must have their provenance checked by their loader.
+  uint64_t kwg_hash;
+  uint64_t ld_fingerprint;
   uint8_t version;
   uint8_t board_dim;
   uint32_t max_word_lookup_bytes;
