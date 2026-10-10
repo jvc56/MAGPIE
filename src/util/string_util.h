@@ -105,6 +105,8 @@ double string_to_double_prefix(const char *str, const char **end,
                                ErrorStack *error_stack);
 
 // JSON utilities
+// Append a quoted JSON string, escaping quotes, backslashes and control bytes.
+void string_builder_add_json_string(StringBuilder *sb, const char *value);
 char *json_unescape_string(const char *json_string);
 char *get_process_output(const char *cmd);
 

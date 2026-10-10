@@ -2,7 +2,7 @@
 
 #include "../src/compat/cpthread.h"
 #include "../src/def/cpthread_defs.h"
-#include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"
@@ -166,13 +166,13 @@ void test_peg_poll(void) {
   LetterDistribution *mutable_ld = config_get_ld(config);
   char original[MAX_LETTER_BYTE_LENGTH];
   memcpy(original, mutable_ld->ld_ml_to_hl[1], sizeof(original));
-  strcpy(mutable_ld->ld_ml_to_hl[1], "\"\\\n");
+  memcpy(mutable_ld->ld_ml_to_hl[1], "\"\\\n", sizeof("\"\\\n"));
   json = peg_snapshot_get_json(&synthetic, game);
   memcpy(mutable_ld->ld_ml_to_hl[1], original, sizeof(original));
   assert(has_substring(json, "\\\""));
   assert(has_substring(json, "\\\\"));
   assert(has_substring(json, "\\u000a"));
-  assert(has_substring(json, "\"win\":0.000000"));
+  assert(has_substring(json, "\"win\":null"));
   assert(has_substring(json, "\"spread\":0.000000"));
   assert(has_substring(json, "\"seconds\":0.000"));
   free(json);

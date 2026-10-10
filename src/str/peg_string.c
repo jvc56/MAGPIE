@@ -1344,41 +1344,32 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
   return out;
 }
 
-// Machine-readable companion to the text table. Read one mutex-protected
-// snapshot so a browser can distinguish queued, evaluated and pruned moves.
 static void peg_json_move(StringBuilder *sb, const Move *move,
                           const Game *game) {
   StringBuilder *text = string_builder_create();
   string_builder_add_move(text, game_get_board(game), move, game_get_ld(game),
                           false);
-  string_builder_add_string(sb, "\"");
-  const unsigned char *cursor =
-      (const unsigned char *)string_builder_peek(text);
-  for (; *cursor; cursor++) {
-    if (*cursor == '"' || *cursor == '\\') {
-      string_builder_add_formatted_string(sb, "\\%c", *cursor);
-    } else if (*cursor < 32) {
-      string_builder_add_formatted_string(sb, "\\u%04x", *cursor);
-    } else {
-      string_builder_add_char(sb, (char)*cursor);
-    }
-  }
-  string_builder_add_string(sb, "\"");
+  string_builder_add_json_string(sb, string_builder_peek(text));
   string_builder_destroy(text);
 }
 
 static void peg_json_candidates(StringBuilder *sb, const PegRankedCand *rows,
                                 int count, int depth, const Game *game) {
   string_builder_add_string(sb, "[");
-  for (int index = 0; index < count; index++) {
-    const PegRankedCand *row = &rows[index];
-    string_builder_add_string(sb, index ? ",{\"move\":" : "{\"move\":");
+  for (int entry_idx = 0; entry_idx < count; entry_idx++) {
+    const PegRankedCand *row = &rows[entry_idx];
+    string_builder_add_string(sb, entry_idx > 0 ? ",{\"move\":" : "{\"move\":");
     peg_json_move(sb, &row->move, game);
+    string_builder_add_string(sb, ",\"win\":");
+    if (row->weight_sum > 0 && isfinite(row->win_pct) && row->win_pct >= 0) {
+      string_builder_add_formatted_string(sb, "%.6f", 100.0 * row->win_pct);
+    } else {
+      string_builder_add_string(sb, "null");
+    }
     string_builder_add_formatted_string(
         sb,
-        ",\"win\":%.6f,\"spread\":%.6f,\"wins\":%" PRId64 ",\"ties\":%" PRId64
+        ",\"spread\":%.6f,\"wins\":%" PRId64 ",\"ties\":%" PRId64
         ",\"losses\":%" PRId64 ",\"depth\":%d}",
-        isfinite(row->win_pct) ? 100.0 * row->win_pct : 0.0,
         isfinite(row->mean_spread) ? row->mean_spread : 0.0, row->win_count,
         row->tie_count, row->weight_sum - row->win_count - row->tie_count,
         depth);
@@ -1394,13 +1385,13 @@ char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game) {
       snapshot->stage, snapshot->fidelity_plies,
       snapshot->done ? "true" : "false", snapshot->field_size);
   const int64_t now = ctimer_monotonic_ns();
-  for (int index = 0; index < snapshot->n_stage_history; index++) {
-    const PegStageSnapshot *stage = &snapshot->stage_history[index];
+  for (int entry_idx = 0; entry_idx < snapshot->n_stage_history; entry_idx++) {
+    const PegStageSnapshot *stage = &snapshot->stage_history[entry_idx];
     string_builder_add_formatted_string(
         sb,
         "%s{\"depth\":%d,\"completed\":%d,\"total\":%d,\"closed\":%s,"
         "\"seconds\":%.3f}",
-        index ? "," : "", stage->fidelity_plies, stage->cands_done,
+        entry_idx > 0 ? "," : "", stage->fidelity_plies, stage->cands_done,
         stage->field_size, stage->end_ns ? "true" : "false",
         stage->start_ns > 0
             ? fmax(0.0, (double)((stage->end_ns ? stage->end_ns : now) -
@@ -1409,11 +1400,11 @@ char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game) {
             : 0.0);
   }
   string_builder_add_string(sb, "],\"moves\":[");
-  for (int index = 0; index < snapshot->n_stage_moves; index++) {
-    if (index) {
+  for (int entry_idx = 0; entry_idx < snapshot->n_stage_moves; entry_idx++) {
+    if (entry_idx > 0) {
       string_builder_add_string(sb, ",");
     }
-    peg_json_move(sb, &snapshot->stage_moves[index], game);
+    peg_json_move(sb, &snapshot->stage_moves[entry_idx], game);
   }
   string_builder_add_string(sb, "],\"evaluating\":");
   const int active = snapshot->currently_evaluating_move_idx;

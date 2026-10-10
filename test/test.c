@@ -142,7 +142,7 @@ static TestEntry test_table[] = {
     {"embedding", test_embedding_lifecycle},
     {"fileproxy", test_fileproxy_cache},
     {"historyreplay", test_history_replay},
-    {"pegjson", test_peg_embedding},
+    {"peg_embedding", test_peg_embedding},
     {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},

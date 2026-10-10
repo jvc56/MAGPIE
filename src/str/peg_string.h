@@ -36,7 +36,7 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
 // frees.
 char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows);
 
-// Caller frees the structured snapshot.
+// Caller frees the returned JSON string.
 char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game);
 // Read a synchronized live snapshot and serialize it.
 char *peg_poll_get_json(PegPoll *poll, const Game *game);
