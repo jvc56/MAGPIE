@@ -2137,7 +2137,7 @@ function renderSession() {
     (session.paused
       ? "Paused"
       : botRunning
-        ? `${recordedGame.players[position.onTurn]} thinking…`
+        ? `${recordedGame.players[position.onTurn]} is thinking…`
         : recordedGame.players[position.onTurn] === "You"
           ? "Your turn"
           : `${recordedGame.players[position.onTurn]}’s turn`);
