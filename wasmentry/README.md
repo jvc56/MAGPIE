@@ -233,7 +233,7 @@ This is a browser adaptation of existing Magpie UI work, using the engine on
 ```sh
 cd wasmentry
 npm install
-npx playwright install chromium
+npx playwright install chromium firefox webkit
 npm test
 ```
 
@@ -243,6 +243,21 @@ previews and mobile layout. The UI suite also runs against an ordinary static
 server without isolation headers, checks the single startup reload and real
 WASM calculations, and uses no browser flags that relax SharedArrayBuffer
 requirements. Diagnostic-page simulation tests remain in the suite.
+
+The full UI suite runs in Chromium. A focused engine suite also runs in Firefox
+and Playwright WebKit: startup, move generation, constrained heap reservations,
+WMP cancellation, and cached WMP/WIT allocation failure followed by baseline
+move generation and simulation. These tests use real WASM with injected failures;
+a mobile viewport and user-agent override do not reproduce a phone's RAM pressure.
+Playwright WebKit is not the shipping Safari application.
+
+CI also installs Microsoft Edge and runs that engine suite with its `msedge`
+channel. To include branded Edge locally, install it with
+`npx playwright install msedge`, then run
+`MAGPIE_TEST_EDGE=1 npx playwright test --project=edge`.
+Before release, separately check real iPhone/iPad Safari and a low-memory Android
+Chrome device, including background/resume and memory pressure. Browser-process
+termination by the OS cannot be caught by the page.
 
 ## Playing UI audit games with the native playfinder
 
@@ -346,9 +361,14 @@ files remain outside Git.
 ### Recovery and optional word-map caching
 
 A saved word-map preference falls back to ordinary move generation if the browser
-can reserve less than a 1 GiB WASM heap. Cache records include the builder version,
+can reserve less than a 1 GiB WASM heap. A null allocation while copying a cached
+WMP or WIT into WASM also falls back after freeing partial input buffers, keeps the
+saved files, and avoids retrying the same unavailable map on every analysis.
+A native abort during construction still stops the engine and requires a reload;
+this fallback does not cover OS termination of the tab. Cache records include the builder version,
 lexicon hash and binary format. An incompatible cached installation is removed and
-rebuilt once; transient storage failures do not delete saved maps. Stop requests
+rebuilt once; transient storage failures do not delete saved maps. If WebKit
+rejects storing Blob/File data, saving retries atomically with typed arrays. Stop requests
 interrupt WMP construction between word-length groups; a WIT build already in
 progress must finish before cancellation completes.
 

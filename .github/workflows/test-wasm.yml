@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   test-wasm:
@@ -56,7 +55,7 @@ jobs:
         working-directory: ./wasmentry
         run: |
           npm install
-          npx playwright install --with-deps chromium webkit
+          npx playwright install --with-deps chromium webkit firefox msedge
 
       - name: Cache optional WMP test downloads
         id: cache-wmp
@@ -74,6 +73,8 @@ jobs:
           python3 wasmentry/build_wmp_assets.py --threads 2
 
       - name: Run Playwright tests
+        env:
+          MAGPIE_TEST_EDGE: "1"
         working-directory: ./wasmentry
         run: npm test
 
