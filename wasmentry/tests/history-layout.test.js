@@ -69,10 +69,11 @@ test("computer game history occupies the right panel without overlapping the boa
   await page.locator("#pause-game").click();
   for (const width of [1936, 1536, 1280]) {
     await page.setViewportSize({ width, height: 890 });
-    const board = await page.locator(".position").boundingBox();
-    const history = await page.locator("#game-history").boundingBox();
-    expect(history.x).toBeGreaterThanOrEqual(board.x + board.width);
-    expect(history.y).toBe(board.y);
+    await expect.poll(() => page.evaluate(() => {
+      const board = document.querySelector(".position").getBoundingClientRect();
+      const history = document.querySelector("#game-history").getBoundingClientRect();
+      return {right: history.x >= board.right, aligned: history.y === board.y};
+    })).toEqual({right:true, aligned:true});
   }
   await page.setViewportSize({ width: 1936, height: 890 });
   await page.evaluate(() => window.scrollTo(0, 0));
