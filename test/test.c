@@ -54,6 +54,7 @@
 #include "pat_test.h"
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
+#include "peg_embedding_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -141,6 +142,7 @@ static TestEntry test_table[] = {
     {"command", test_command},
     {"embedding", test_embedding_lifecycle},
     {"historyreplay", test_history_replay},
+    {"pegjson", test_peg_embedding},
     {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},

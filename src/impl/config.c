@@ -417,6 +417,7 @@ struct Config {
   bool peg_show_outcomes;
   bool use_game_pairs;
   bool human_readable;
+  bool peg_json;
   bool show_mistakes;
   bool use_small_plays;
   bool sim_with_inference;
@@ -637,6 +638,10 @@ bool config_get_use_small_plays(const Config *config) {
 
 bool config_get_human_readable(const Config *config) {
   return config->human_readable;
+}
+
+void config_set_peg_json(Config *config, bool enabled) {
+  config->peg_json = enabled;
 }
 
 void config_set_human_readable(Config *config, bool human_readable) {
@@ -4047,7 +4052,7 @@ static char *config_write_peg_chart_file(const char *contents) {
 // Renders the peg result for display. When the outcomes column truncates any
 // cell at the configured width/line caps, writes the full (unlimited-lines)
 // chart to a data/pegcharts/ file and embeds its path above the table.
-static char *config_peg_display(const Config *config, PegPoll *poll) {
+static char *config_peg_display_table(const Config *config, PegPoll *poll) {
   const int width = config->peg_out_width;
   const int lines = config->peg_out_lines;
   bool truncated = false;
@@ -4074,6 +4079,18 @@ static char *config_peg_display(const Config *config, PegPoll *poll) {
   free(note);
   free(path);
   return out;
+}
+
+static char *config_peg_display(const Config *config, PegPoll *poll) {
+  char *table = config_peg_display_table(config, poll);
+  if (!config->peg_json || !poll) {
+    return table;
+  }
+  char *json = peg_poll_get_json(poll, config->game);
+  char *output = get_formatted_string("peginfo %s\n%s", json, table);
+  free(json);
+  free(table);
+  return output;
 }
 
 char *status_peg(Config *config) {
@@ -4911,7 +4928,7 @@ char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
                      string_duplicate("no PEG results to show"));
     return empty_string();
   }
-  return config_peg_display(config, /*poll=*/NULL);
+  return config_peg_display(config, config->peg_json ? config->peg_poll : NULL);
 }
 
 void execute_show_peg(Config *config, ErrorStack *error_stack) {
@@ -9090,7 +9107,8 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = config_peg_display(config, /*poll=*/NULL);
+  char *result =
+      config_peg_display(config, config->peg_json ? config->peg_poll : NULL);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -10200,6 +10218,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = true;
+  config->peg_json = false;
   config->show_mistakes = false;
   config->sim_with_inference = true;
   config->pat_label_plies = 1;

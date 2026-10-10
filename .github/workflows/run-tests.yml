@@ -102,7 +102,7 @@ jobs:
           - shard: config
             tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest
-            tests: "embedding historyreplay endgame_review hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep pat patfile patlexicon patutility patfeatures pateval"
+            tests: "embedding historyreplay endgame_review pegjson pegpoll hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep pat patfile patlexicon patutility patfeatures pateval"
           - shard: ap_rit
             tests: "ap_rit patwmp"
           - shard: simdet
@@ -217,7 +217,7 @@ jobs:
         run: make -f Makefile-wasm magpie_wasm_test
 
       - name: Run WASM tests
-        run: node ./bin/magpie_wasm_test.js endgame_wasm tt zobrist embedding historyreplay endgame_review
+        run: node ./bin/magpie_wasm_test.js endgame_wasm tt zobrist embedding historyreplay endgame_review pegjson
 
   ci-summary:
     if: always()
