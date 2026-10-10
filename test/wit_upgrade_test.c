@@ -210,7 +210,7 @@ static void write_wit_with_copied_identity(const char *filename,
                                            const KWG *contents,
                                            uint64_t copied_identity) {
   ErrorStack *error_stack = error_stack_create();
-  WordInfoTable *wit = make_word_info_table_from_kwg(contents);
+  WordInfoTable *wit = make_word_info_table_from_kwg(contents, 1);
   make_word_plus_floater_from_kwg(contents, wit, error_stack);
   assert(error_stack_is_empty(error_stack));
   wit->kwg_hash = copied_identity;
@@ -254,9 +254,16 @@ static void test_upgrade_and_repair(void) {
                         word_plus_floater_cells_per_key(length) *
                         sizeof(uint32_t);
   }
+  // The position-length rows follow the positional rows.
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    positional_bytes += (size_t)wit->tries[length].num_values *
+                        wit_stride_for_len(length) * sizeof(uint32_t);
+  }
   word_info_table_destroy(wit);
   WitFileSnapshot current = snapshot_file(fixture.first_wit);
-  assert(current.bytes[2] == WIT_FLAG_WORD_PLUS_FLOATER);
+  assert(current.bytes[2] ==
+         (WIT_FLAG_WORD_PLUS_FLOATER | WIT_FLAG_POSITION_LENGTHS));
   assert(current.size > positional_bytes);
   const size_t ordinary_size = current.size - positional_bytes;
   assert_read_only_reuse(&fixture, fixture.first_wit);
@@ -271,7 +278,7 @@ static void test_upgrade_and_repair(void) {
   free(after_force.bytes);
 
   uint8_t *damaged = malloc_or_die(current.size + 1);
-  // Both a valid v3 and an ordinary-only v4 need the positional payload.
+  // A valid v3 and ordinary-only v4 and v5 files need the positional payload.
   for (int version = WIT_EARLIEST_SUPPORTED_VERSION; version <= WIT_VERSION;
        version++) {
     memcpy(damaged, current.bytes, current.size);
@@ -380,10 +387,15 @@ static void test_upgrade_data_path_precedence(void) {
   WitUpgradeFixture fixture = make_fixture(kwg, "english");
   run_upgrade(&fixture, ERROR_STATUS_SUCCESS);
   WordInfoTable *wit = load_current(&fixture, kwg);
-  const size_t positional_bytes = (word_plus_floater_cells_per_key(2) +
-                                   word_plus_floater_cells_per_key(3)) *
-                                  sizeof(uint32_t);
+  // The positional rows, then the position-length rows, follow the tries.
+  const size_t positional_bytes =
+      (word_plus_floater_cells_per_key(2) + word_plus_floater_cells_per_key(3) +
+       (size_t)wit_stride_for_len(2) + (size_t)wit_stride_for_len(3)) *
+      sizeof(uint32_t);
   assert(wit->tries[2].num_values == 1 && wit->tries[3].num_values == 1);
+  for (int length = 4; length <= BOARD_DIM; length++) {
+    assert(wit->tries[length].num_values == 0);
+  }
   word_info_table_destroy(wit);
   WitFileSnapshot current = snapshot_file(fixture.first_wit);
   const int moved = rename(fixture.first_wit, fixture.later_wit);
@@ -419,7 +431,7 @@ static void test_upgrade_data_path_precedence(void) {
   make_directory(fixture.first_lexica);
   run_upgrade(&fixture, ERROR_STATUS_SUCCESS);
   current.bytes[0] = WIT_VERSION;
-  current.bytes[2] = WIT_FLAG_WORD_PLUS_FLOATER;
+  current.bytes[2] = WIT_FLAG_WORD_PLUS_FLOATER | WIT_FLAG_POSITION_LENGTHS;
   assert_file_matches(fixture.first_wit, &current, false);
   assert_file_matches(fixture.later_wit, &legacy, true);
   free(legacy.bytes);
@@ -451,8 +463,9 @@ static void test_upgrade_ordinary_only_reuse(void) {
     assert(index == 0 ? wit->tries[2].num_values == 0
                       : wit->tries[2].num_values == 1);
     word_info_table_destroy(wit);
+    // No positional rows, but a KWG hash, so position lengths.
     WitFileSnapshot current = snapshot_file(fixture.first_wit);
-    assert(current.bytes[2] == 0);
+    assert(current.bytes[2] == WIT_FLAG_POSITION_LENGTHS);
     free(current.bytes);
     assert_read_only_reuse(&fixture, fixture.first_wit);
     destroy_fixture(&fixture);

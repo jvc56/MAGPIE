@@ -66,7 +66,7 @@ static Config *create_cache_config(void) {
     KWG *kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                    KWG_MAKER_MERGE_EXACT);
     WMP *wmp = make_wmp_from_words(words, ld, 1);
-    WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+    WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
     char *kwg_path = data_filepaths_get_writable_filename(
         DEFAULT_TEST_DATA_PATH, CACHE_LEXICA[lexicon_idx],
         DATA_FILEPATH_TYPE_KWG, error_stack);
@@ -394,7 +394,7 @@ void test_wit_equivalence_sweep(void) {
   PlayersData *players_data = config_get_players_data(with_wit);
   assert(players_data_get_word_info_table(players_data, 0) == NULL);
   WordInfoTable *wit =
-      make_word_info_table_from_kwg(players_data_get_kwg(players_data, 0));
+      make_word_info_table_from_kwg(players_data_get_kwg(players_data, 0), 1);
   players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, wit);
   players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, wit);
 

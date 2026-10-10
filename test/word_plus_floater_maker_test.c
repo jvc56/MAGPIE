@@ -218,7 +218,7 @@ static void test_full_tables(void) {
   DictionaryWordList *words = make_tiny_words();
   KWG *kwg =
       make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
-  WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+  WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
   ErrorStack *error_stack = error_stack_create();
   make_word_plus_floater_from_kwg(kwg, wit, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -245,7 +245,7 @@ static void test_no_covered_base_lengths(void) {
   add_literal(words, "AAAAA");
   KWG *kwg =
       make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
-  WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+  WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
   ErrorStack *error_stack = error_stack_create();
   make_word_plus_floater_from_kwg(kwg, wit, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -271,7 +271,7 @@ static void test_invalid_inputs(void) {
   DictionaryWordList *words = make_tiny_words();
   KWG *kwg =
       make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
-  WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+  WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
   ErrorStack *error_stack = error_stack_create();
   const uint64_t correct_hash = wit->kwg_hash;
   const uint64_t bad_hashes[] = {0, correct_hash ^ UINT64_C(1)};
@@ -296,7 +296,7 @@ static void test_invalid_inputs(void) {
   KWG *unsupported_kwg = make_kwg_from_words(
       unsupported_words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
   WordInfoTable *unsupported_wit =
-      make_word_info_table_from_kwg(unsupported_kwg);
+      make_word_info_table_from_kwg(unsupported_kwg, 1);
   make_word_plus_floater_from_kwg(unsupported_kwg, unsupported_wit,
                                   error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -319,7 +319,7 @@ static void test_invalid_wit_layouts(void) {
       make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
   ErrorStack *error_stack = error_stack_create();
   for (int corruption = 0; corruption < BAD_TRIE_COUNT; corruption++) {
-    WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+    WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
     make_word_plus_floater_from_kwg(kwg, wit, error_stack);
     assert(error_stack_is_empty(error_stack));
     WitTrie *trie = &wit->tries[2];
@@ -406,7 +406,7 @@ static void test_writer_preserves_existing_output(void) {
   DictionaryWordList *words = make_tiny_words();
   KWG *kwg =
       make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
-  WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+  WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
   ErrorStack *error_stack = error_stack_create();
   make_word_plus_floater_from_kwg(kwg, wit, error_stack);
   assert(error_stack_is_empty(error_stack));

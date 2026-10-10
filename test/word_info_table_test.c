@@ -163,7 +163,14 @@ static void test_combined_wit_format(void) {
   add_word(words, atat, 4);
   WordInfoTable *wit = make_word_info_table_from_words(words);
   wit->kwg_hash = 1234567;
+  // A table with a KWG hash carries position lengths, as the maker builds.
+  word_info_table_build_position_lengths(wit, 1);
   size_t positional_bytes = 0;
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    positional_bytes += (size_t)wit->tries[length].num_values *
+                        wit_stride_for_len(length) * sizeof(uint32_t);
+  }
   for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
        length++) {
     const size_t count =
@@ -194,8 +201,9 @@ static void test_combined_wit_format(void) {
   const size_t read_size = fread(bytes, 1, size, stream);
   assert(read_size == size);
   fclose_or_die(stream);
-  assert(bytes[0] == 4 && bytes[1] == BOARD_DIM);
-  assert(bytes[2] == WIT_FLAG_WORD_PLUS_FLOATER && bytes[3] == 0);
+  assert(bytes[0] == WIT_VERSION && bytes[1] == BOARD_DIM);
+  assert(bytes[2] == (WIT_FLAG_WORD_PLUS_FLOATER | WIT_FLAG_POSITION_LENGTHS) &&
+         bytes[3] == 0);
   WordInfoTable *loaded = calloc_or_die(1, sizeof(WordInfoTable));
   word_info_table_load(loaded, "combined", filename, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -212,6 +220,16 @@ static void test_combined_wit_format(void) {
     assert(memcmp(wit->word_plus_floater[length],
                   loaded->word_plus_floater[length],
                   count * sizeof(uint32_t)) == 0);
+  }
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    const size_t cells =
+        (size_t)wit->tries[length].num_values * wit_stride_for_len(length);
+    if (cells != 0) {
+      assert(memcmp(wit->position_lengths[length],
+                    loaded->position_lengths[length],
+                    cells * sizeof(uint32_t)) == 0);
+    }
   }
 
   // The ordinary prefix remains exactly v3-compatible. Reloading v3 clears
@@ -234,7 +252,13 @@ static void test_combined_wit_format(void) {
   assert(error_stack_is_empty(error_stack));
   assert(loaded->version == 4);
   assert_no_positional_rows(loaded);
-  bytes[2] = WIT_FLAG_WORD_PLUS_FLOATER;
+  // A version-5 file with a KWG hash must carry its position lengths.
+  bytes[0] = WIT_VERSION;
+  write_fixture_bytes(filename, bytes, ordinary_size);
+  word_info_table_load(loaded, "ordinary-v5", filename, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_RW_READ_ERROR);
+  error_stack_reset(error_stack);
+  bytes[2] = WIT_FLAG_WORD_PLUS_FLOATER | WIT_FLAG_POSITION_LENGTHS;
 
   const size_t truncated_sizes[] = {0, 11, ordinary_size - 1, ordinary_size,
                                     size - 1};
@@ -252,7 +276,7 @@ static void test_combined_wit_format(void) {
     uint8_t value;
     error_code_t status;
   } corruptions[] = {
-      {0, 5, ERROR_STATUS_WMP_UNSUPPORTED_VERSION},
+      {0, WIT_VERSION + 1, ERROR_STATUS_WMP_UNSUPPORTED_VERSION},
       {1, 0, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM},
       {2, 2, ERROR_STATUS_RW_READ_ERROR},
       {3, 1, ERROR_STATUS_RW_READ_ERROR},
@@ -272,6 +296,15 @@ static void test_combined_wit_format(void) {
     error_stack_reset(error_stack);
     bytes[offset] = original;
   }
+  // The last word of the file is a position-length row; bit 0 (a length-0
+  // word) is never a valid position length.
+  bytes[size - 4] |= 1;
+  write_fixture_bytes(filename, bytes, size);
+  word_info_table_load(loaded, "malformed-position", filename, error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_RW_READ_ERROR);
+  assert_no_positional_rows(loaded);
+  error_stack_reset(error_stack);
+  bytes[size - 4] &= (uint8_t)~1U;
   const WitTrie *first_trie = &wit->tries[1];
   const size_t section_offset =
       12 + 12 + ((size_t)first_trie->num_nodes * 10) +

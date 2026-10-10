@@ -124,18 +124,22 @@ static void test_literal_derivation(void) {
   DictionaryWordList *words = oracle_words();
   KWG *kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
                                  KWG_MAKER_MERGE_EXACT);
-  WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+  WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
   assert_literal_cache(words, wit);
+  // Several threads build exactly the same rows.
+  WordInfoTable *threaded = make_word_info_table_from_kwg(kwg, 4);
+  assert_literal_cache(words, threaded);
+  word_info_table_destroy(threaded);
   WordInfoTable *unidentified = make_word_info_table_from_words(words);
   assert(unidentified->kwg_hash == 0);
-  word_info_table_build_position_lengths(unidentified);
+  word_info_table_build_position_lengths(unidentified, 1);
   for (int length = 0; length <= BOARD_DIM; length++) {
     assert(unidentified->position_lengths[length] == NULL);
   }
   word_info_table_destroy(unidentified);
   // Explicit reconstruction must be idempotent and replace stale contents.
   wit->position_lengths[2][0] = 0;
-  word_info_table_build_position_lengths(wit);
+  word_info_table_build_position_lengths(wit, 1);
   assert_literal_cache(words, wit);
   // Terminal IDs need not follow lexical order. Reversing IDs must simply
   // permute cache rows, without changing the literal result for any base.
@@ -147,7 +151,7 @@ static void test_literal_derivation(void) {
             (int32_t)permuted->num_values - 1 - permuted->node_value[node];
       }
     }
-    word_info_table_build_position_lengths(wit);
+    word_info_table_build_position_lengths(wit, 1);
     assert_literal_cache(words, wit);
   }
   const MachineLetter zz[] = {26, 26};
@@ -165,7 +169,7 @@ static void test_literal_derivation(void) {
   assert((positions[1] & (UINT32_C(1) << 3)) == 0);
   assert((positions[1] & (UINT32_C(1) << 4)) != 0);
   assert((positions[BOARD_DIM - 2] & (UINT32_C(1) << BOARD_DIM)) != 0);
-  WordInfoTable *foreign = make_word_info_table_from_kwg(kwg);
+  WordInfoTable *foreign = make_word_info_table_from_kwg(kwg, 1);
   const uint32_t *foreign_row = word_info_table_lookup(foreign, at, 2);
   assert(word_info_table_get_position_lengths(wit, foreign_row, 2) == NULL);
   assert(word_info_table_get_position_lengths(wit, ordinary + 1, 2) == NULL);
@@ -180,7 +184,7 @@ static void test_literal_derivation(void) {
   word_info_table_clear_position_lengths(foreign);
   assert(word_info_table_get_position_lengths(foreign, foreign_row, 2) == NULL);
   foreign->kwg_hash = 0;
-  word_info_table_build_position_lengths(foreign);
+  word_info_table_build_position_lengths(foreign, 1);
   for (int length = 0; length <= BOARD_DIM; length++) {
     assert(foreign->position_lengths[length] == NULL);
   }
@@ -229,7 +233,7 @@ static void test_load_rebuild_and_cleanup(void) {
   DictionaryWordList *words = oracle_words();
   KWG *kwg =
       make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_EXACT);
-  WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+  WordInfoTable *wit = make_word_info_table_from_kwg(kwg, 1);
   WordInfoTable *loaded = calloc_or_die(1, sizeof(WordInfoTable));
   ErrorStack *errors = error_stack_create();
   char *filename = data_filepaths_get_writable_filename(
@@ -242,10 +246,32 @@ static void test_load_rebuild_and_cleanup(void) {
   assert(error_stack_is_empty(errors));
   assert_literal_cache(words, loaded);
   // Version3 ordinary rows remain loadable and still derive literal positions.
-  FILE *file = fopen_or_die(filename, "r+b");
-  const int written = fputc(3, file);
-  assert(written == 3);
+  // The file holds them, then its position-length rows: keep only the rows,
+  // under a version-3 header with no flags.
+  size_t position_bytes = 0;
+  for (int length = WIT_POSITION_MIN_BASE_LENGTH;
+       length <= WIT_POSITION_MAX_BASE_LENGTH; length++) {
+    position_bytes += (size_t)wit->tries[length].num_values *
+                      wit_stride_for_len(length) * sizeof(uint32_t);
+  }
+  FILE *file = fopen_or_die(filename, "rb");
+  fseek_or_die(file, 0, SEEK_END);
+  const long file_size = ftell(file);
+  assert(file_size > 0 && (size_t)file_size > position_bytes);
+  const size_t ordinary_size = (size_t)file_size - position_bytes;
+  uint8_t *bytes = malloc_or_die(ordinary_size);
+  fseek_or_die(file, 0, SEEK_SET);
+  const size_t read_size = fread(bytes, 1, ordinary_size, file);
+  assert(read_size == ordinary_size);
   fclose_or_die(file);
+  assert(bytes[2] == WIT_FLAG_POSITION_LENGTHS);
+  bytes[0] = 3;
+  bytes[2] = 0;
+  file = fopen_or_die(filename, "wb");
+  const size_t written = fwrite(bytes, 1, ordinary_size, file);
+  assert(written == ordinary_size);
+  fclose_or_die(file);
+  free(bytes);
   word_info_table_load(loaded, "position_lengths_v3", filename, errors);
   assert(error_stack_is_empty(errors));
   assert_literal_cache(words, loaded);
@@ -318,7 +344,7 @@ static Config *tiny_config(bool with_wmp) {
     WMP *wmp = make_wmp_from_words(words, config_get_ld(config), 1);
     replace_shared_data(players, PLAYERS_DATA_TYPE_WMP, wmp);
     replace_shared_data(players, PLAYERS_DATA_TYPE_WIT,
-                        make_word_info_table_from_kwg(kwg));
+                        make_word_info_table_from_kwg(kwg, 1));
   }
   dictionary_word_list_destroy(words);
   return config;
@@ -455,7 +481,7 @@ static void test_shadow_boundary_moves(void) {
       // Reusing a loaded board with the derived cache missing must fall back.
       word_info_table_clear_position_lengths(wit);
       assert_same_moves(game, reference);
-      word_info_table_build_position_lengths(wit);
+      word_info_table_build_position_lengths(wit, 1);
       assert_same_moves(reused, reference);
       free(cgp);
     }
@@ -484,7 +510,7 @@ static void test_shadow_foreign_rows_and_undo(void) {
   load_cgp_or_die(reference, cgp);
   const PlayersData *players = config_get_players_data(config);
   WordInfoTable *foreign =
-      make_word_info_table_from_kwg(players_data_get_kwg(players, 0));
+      make_word_info_table_from_kwg(players_data_get_kwg(players, 0), 1);
   const MachineLetter at[] = {1, 20};
   const uint32_t *foreign_row = word_info_table_lookup(foreign, at, 2);
   assert(foreign_row != NULL);
