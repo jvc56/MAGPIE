@@ -32,12 +32,6 @@
 #endif
 #define TT_STORED_HASH_MASK ((1ULL << 40) - 1)
 
-#ifdef __EMSCRIPTEN__
-#define TT_MIN_SIZE_POWER 12 // 64 KiB permits splitting a browser PEG budget
-#else
-#define TT_MIN_SIZE_POWER 24 // 2^24 minimum (256 MB) for performance
-#endif
-
 enum {
   TT_EXACT = 0x01,
   TT_LOWER = 0x02,
@@ -96,23 +90,12 @@ typedef struct TranspositionTable {
   atomic_int t2_collisions;
 } TranspositionTable;
 
-// Reserve overhead as well as entries within an aggregate worker budget.
-static inline double transposition_table_worker_fraction(double total_fraction,
-                                                         int workers) {
-  const double memory = (double)get_total_memory();
-  const double overhead = NPROC_SIZE * sizeof(atomic_uchar) +
-                          sizeof(TranspositionTable) + sizeof(Zobrist);
-  const double fraction = total_fraction / workers - overhead / memory;
-  const double minimum =
-      (double)((uint64_t)TTENTRY_SIZE_BYTES << TT_MIN_SIZE_POWER) / memory;
-  return fraction > minimum ? fraction : minimum;
-}
-
 static inline TranspositionTable *
-transposition_table_create(double fraction_of_memory) {
+transposition_table_create_with_minimum(double fraction_of_memory,
+                                        int minimum_size_power) {
   TranspositionTable *tt = malloc_or_die(sizeof(TranspositionTable));
 
-  uint64_t total_memory = get_total_memory();
+  uint64_t total_memory = get_search_memory_budget_base();
   uint64_t desired_n_elems =
       (uint64_t)(fraction_of_memory *
                  ((double)(total_memory) / (double)TTENTRY_SIZE_BYTES));
@@ -125,11 +108,11 @@ transposition_table_create(double fraction_of_memory) {
   tt->size_power_of_2 = size_required;
 
   // Platform-specific minimum table size
-  if (tt->size_power_of_2 < TT_MIN_SIZE_POWER) {
-    tt->size_power_of_2 = TT_MIN_SIZE_POWER;
-    log_warn("TT size clamped to minimum: 2^%d elements (%d MB)",
-             TT_MIN_SIZE_POWER,
-             (1 << TT_MIN_SIZE_POWER) * TTENTRY_SIZE_BYTES / (1024 * 1024));
+  if (tt->size_power_of_2 < minimum_size_power) {
+    tt->size_power_of_2 = minimum_size_power;
+    log_warn("TT size clamped to minimum: 2^%d elements (%d KiB)",
+             minimum_size_power,
+             (1 << minimum_size_power) * TTENTRY_SIZE_BYTES / 1024);
   }
   int num_elems = 1 << tt->size_power_of_2;
   size_t memory_mb = ((size_t)TTENTRY_SIZE_BYTES * num_elems) / (1024 * 1024);
@@ -158,6 +141,12 @@ transposition_table_create(double fraction_of_memory) {
   atomic_init(&tt->lookups, 0);
   atomic_init(&tt->t2_collisions, 0);
   return tt;
+}
+
+static inline TranspositionTable *
+transposition_table_create(double fraction_of_memory) {
+  return transposition_table_create_with_minimum(fraction_of_memory,
+                                                 TT_MIN_SIZE_POWER);
 }
 
 static inline void transposition_table_reset(TranspositionTable *tt) {

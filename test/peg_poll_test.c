@@ -1,6 +1,7 @@
 #include "peg_poll_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/memory_info.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
@@ -193,6 +194,15 @@ void test_peg_poll(void) {
 
   string_builder_destroy(poll_best);
   string_builder_destroy(solve_best);
+  if (search_memory_is_bounded()) {
+    error_stack_reset(error_stack);
+    args.tt_fraction_of_mem = 0.0000001;
+    peg_solve(&args, &result, error_stack);
+    assert(!error_stack_is_empty(error_stack));
+    peg_poll_read(poll, &final);
+    assert(final.done);
+    error_stack_reset(error_stack);
+  }
   error_stack_destroy(error_stack);
   peg_result_destroy(&result);
   peg_poll_destroy(poll);

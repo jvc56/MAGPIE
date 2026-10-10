@@ -1,35 +1,55 @@
 #include "transposition_table_test.h"
 
+#include "../src/compat/memory_info.h"
+#include "../src/def/board_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/transposition_table.h"
+#include "../src/ent/xoshiro.h"
+#include "../src/ent/zobrist.h"
+#include "../src/impl/peg_memory.h"
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdint.h>
 
 void test_transposition_table(void) {
-#ifdef __EMSCRIPTEN__
-  const uint64_t budget_base = get_total_memory();
-  assert(budget_base == 256ULL * 1024 * 1024);
-  // Deep PEG may allocate a table for every worker plus the helper. Check
-  // actual allocations, including ABDADA storage, at every supported count.
-  for (int budget_mb = 16; budget_mb <= 32; budget_mb *= 2) {
-    for (int workers = 1; workers <= 33; workers++) {
-      TranspositionTable *worker_tt =
-          transposition_table_create(transposition_table_worker_fraction(
-              (double)budget_mb / 256, workers));
-      const uint64_t bytes =
-          ((uint64_t)TTENTRY_SIZE_BYTES << worker_tt->size_power_of_2) +
-          NPROC_SIZE * sizeof(atomic_uchar) + sizeof(TranspositionTable) +
-          sizeof(Zobrist);
-      assert(bytes * workers <= (uint64_t)budget_mb * 1024 * 1024);
-      transposition_table_destroy(worker_tt);
+  const uint64_t zobrist_bytes =
+      sizeof(Zobrist) + prng_allocation_size() +
+      ((uint64_t)BOARD_DIM * BOARD_DIM * sizeof(uint64_t *)) +
+      ((uint64_t)BOARD_DIM * BOARD_DIM * ZOBRIST_MAX_LETTERS * 2 *
+       sizeof(uint64_t)) +
+      (2ULL * ZOBRIST_MAX_LETTERS * sizeof(uint64_t *)) +
+      (2ULL * ZOBRIST_MAX_LETTERS * (RACK_SIZE + 1) * sizeof(uint64_t));
+  assert(zobrist_allocation_size() == zobrist_bytes);
+  if (search_memory_is_bounded()) {
+    const uint64_t budget_base = get_search_memory_budget_base();
+    assert(budget_base == 256ULL * 1024 * 1024);
+    // Deep PEG may allocate a table for every worker plus the helper. Check
+    // actual allocations, including ABDADA storage, at every supported count.
+    for (int budget_mb = 16; budget_mb <= 32; budget_mb *= 2) {
+      const int capacity = peg_memory_max_tables((double)budget_mb / 256);
+      assert(capacity >= 33);
+      double worker_fraction = 0;
+      assert(!peg_memory_worker_fraction((double)budget_mb / 256, capacity + 1,
+                                         &worker_fraction));
+      for (int workers = 1; workers <= capacity; workers++) {
+        assert(peg_memory_worker_fraction((double)budget_mb / 256, workers,
+                                          &worker_fraction));
+        TranspositionTable *worker_tt = transposition_table_create_with_minimum(
+            worker_fraction, PEG_TT_MIN_SIZE_POWER);
+        const uint64_t bytes =
+            ((uint64_t)TTENTRY_SIZE_BYTES << worker_tt->size_power_of_2) +
+            NPROC_SIZE * sizeof(atomic_uchar) + sizeof(TranspositionTable) +
+            zobrist_bytes;
+        assert(bytes * workers <= (uint64_t)budget_mb * 1024 * 1024);
+        transposition_table_destroy(worker_tt);
+      }
+      TranspositionTable *endgame_tt =
+          transposition_table_create((double)budget_mb / 256);
+      assert(((uint64_t)TTENTRY_SIZE_BYTES << endgame_tt->size_power_of_2) ==
+             (uint64_t)32 * 1024 * 1024);
+      transposition_table_destroy(endgame_tt);
     }
-    TranspositionTable *endgame_tt =
-        transposition_table_create((double)budget_mb / 256);
-    assert(((uint64_t)TTENTRY_SIZE_BYTES << endgame_tt->size_power_of_2) ==
-           (uint64_t)budget_mb * 1024 * 1024);
-    transposition_table_destroy(endgame_tt);
   }
-#endif
   // Passing 0 clamps to the platform minimum.
   TranspositionTable *tt = transposition_table_create(0);
   assert(tt->size_power_of_2 == TT_MIN_SIZE_POWER);

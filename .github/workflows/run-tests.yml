@@ -226,7 +226,7 @@ jobs:
         run: make -f Makefile-wasm magpie_wasm_test
 
       - name: Run WASM tests
-        run: node ./bin/magpie_wasm_test.js endgame_wasm tt zobrist embedding fileproxy historyreplay peg_embedding wordmapapi
+        run: node ./bin/magpie_wasm_test.js endgame_wasm tt zobrist embedding fileproxy historyreplay peg_embedding pegpoll wordmapapi
 
   ci-summary:
     if: always()

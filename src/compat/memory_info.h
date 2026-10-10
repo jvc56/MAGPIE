@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "../util/io_util.h"
@@ -22,7 +23,27 @@
 #include <unistd.h>
 #endif
 
-static inline uint64_t get_total_memory(void) {
+// Search budgets use a fixed base on browsers; linear-memory growth must not
+// increase subsequent search allocations. Native budgets use physical RAM.
+#ifdef __EMSCRIPTEN__
+#define DEFAULT_TT_FRACTION 0.125
+#define TT_MIN_SIZE_POWER 21
+#define PEG_TT_MIN_SIZE_POWER 12
+#else
+#define DEFAULT_TT_FRACTION 0.25
+#define TT_MIN_SIZE_POWER 24
+#define PEG_TT_MIN_SIZE_POWER TT_MIN_SIZE_POWER
+#endif
+
+static inline bool search_memory_is_bounded(void) {
+#ifdef __EMSCRIPTEN__
+  return true;
+#else
+  return false;
+#endif
+}
+
+static inline uint64_t get_search_memory_budget_base(void) {
   uint64_t total_memory = 0;
 
 #if defined(__EMSCRIPTEN__)

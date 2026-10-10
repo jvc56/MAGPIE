@@ -121,8 +121,9 @@ typedef struct PegArgs {
   // across cands and across scenarios within a cand.
   int num_threads;
 
-  // Optional aggregate TT budget as a fraction of get_total_memory(). Zero
-  // retains platform defaults; browser callers supply the selected budget.
+  // Browser-only aggregate TT budget as a fraction of
+  // get_search_memory_budget_base(). Zero retains platform defaults; browser
+  // callers supply the selected budget. Ignored on native builds.
   double tt_fraction_of_mem;
 
   // Total wall-clock budget in seconds for the whole peg_solve call.

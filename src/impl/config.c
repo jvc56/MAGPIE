@@ -3874,9 +3874,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
       /*on_scenario_done=*/NULL, /*user_data=*/NULL, /*poll=*/NULL, peg_args);
-#ifdef __EMSCRIPTEN__
   peg_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
-#endif
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -4045,6 +4043,14 @@ void config_peg(Config *config, ErrorStack *error_stack) {
 }
 
 void impl_peg(Config *config, ErrorStack *error_stack) {
+  if (search_memory_is_bounded()) {
+    endgame_results_lock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
+    endgame_results_reset(config->endgame_results);
+    endgame_ctx_destroy(config->endgame_ctx);
+    config->endgame_ctx = NULL;
+    endgame_results_unlock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
+  }
+
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot run peg without lexicon"));
@@ -10354,7 +10360,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->endgame_results = endgame_results_create();
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
-  config->tt_fraction_of_mem = 0.25;
+  config->tt_fraction_of_mem = DEFAULT_TT_FRACTION;
   config->game_string_options = game_string_options_create_pretty();
   config->gcg_result = (GetGCGResult){0};
 
