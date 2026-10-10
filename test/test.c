@@ -25,6 +25,7 @@
 #include "create_data_test.h"
 #include "cross_set_test.h"
 #include "dawg_packed_test.h"
+#include "embedding_lifecycle_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
@@ -136,6 +137,7 @@ static TestEntry test_table[] = {
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},
+    {"embedding", test_embedding_lifecycle},
     {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
