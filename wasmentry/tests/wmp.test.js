@@ -191,7 +191,7 @@ test('WMP-only and damaged WIT caches are repaired locally', async ({page}) => {
   await expect(page.locator('#status')).toHaveText('Engine ready');
   const report = await page.evaluate(async () => {
     const { EngineClient } = await import('./engine-client.mjs');
-    const { listWMPs, readWMP } = await import('./wmp-cache.mjs');
+    const { listWMPs, readWMP, saveWMP } = await import('./wmp-cache.mjs');
     const { sha256 } = await import('./wmp-assets.mjs');
     const engine = new EngineClient(), messages = [];
     engine.addEventListener('message', ({detail}) => messages.push(detail));
@@ -223,10 +223,18 @@ test('WMP-only and damaged WIT caches are repaired locally', async ({page}) => {
       const saved = await readWMP('NWL23', meta.kwg_sha256);
       repairs.push({ready, valid: saved.wit.length > 100 && await sha256(saved.wit) === meta.wit_sha256});
     }
+    const meta = (await listWMPs())[0];
+    const saved = await readWMP('NWL23', meta.kwg_sha256);
+    saved.wit[4] ^= 1; // Valid file/checksum, but wrong native KWG hash.
+    await saveWMP('NWL23', meta.kwg_sha256, meta.sha256, 'build', saved.bytes, saved.wit, await sha256(saved.wit));
+    engine.wmpKey = null;
+    await engine.prepareWMP('NWL23', 'build', 4, true);
+    const rebuilt = messages.filter(message => message.type === 'wmp_ready').at(-1);
     engine.worker.terminate();
-    return repairs;
+    return {repairs, rebuilt};
   });
-  for (const repair of report) {
+  expect(report.rebuilt).toMatchObject({fromCache:false, witFromCache:false, cached:true});
+  for (const repair of report.repairs) {
     expect(repair.ready).toMatchObject({fromCache:true, witFromCache:false, cached:true});
     expect(repair.valid).toBe(true);
   }

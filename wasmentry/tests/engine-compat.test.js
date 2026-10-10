@@ -39,15 +39,15 @@ test("mobile defaults can cancel a word-map build and keep the engine usable", a
     const messages = [];
     engine.addEventListener('message', ({detail}) => {
       messages.push(detail);
-      if (detail.type === 'wmp_progress' && detail.text.includes('word entries')) engine.stop();
+      if (detail.type === 'wmp_progress' && /word entries|single blanks|double blanks/.test(detail.text)) engine.stop();
     });
     try {
       await engine.prepare('NWL23');
       await engine.prepareWMP('NWL23', 'build', 2, false);
       await engine.run(['set -lex NWL23 -wmp false -wit false', 'cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0', 'generate']);
-      return {stopped:messages.some(message => message.type === 'wmp_ready' && message.stopped), output: messages.filter(message => message.type === 'output').map(message => message.text).join('')};
+      return {stages:messages.filter(message => message.type === "wmp_progress").map(message => message.text), stopped:messages.some(message => message.type === 'wmp_ready' && message.stopped), output: messages.filter(message => message.type === 'output').map(message => message.text).join('')};
     } finally {engine.worker.terminate();}
   });
-  expect(result.stopped).toBe(true);
+  expect(result.stopped, JSON.stringify(result.stages)).toBe(true);
   expect(result.output).toMatch(/TRAIN|RETAIN|NASTIER/);
 });

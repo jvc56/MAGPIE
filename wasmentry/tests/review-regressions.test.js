@@ -248,3 +248,17 @@ test('a low-memory WMP refusal preserves ordinary analysis', async () => {
   expect(client.worker.sent.data.commands[0]).toBe('set -wmp false -wit false');
   client.worker.emit({type:'complete',requestId:client.worker.sent.requestId}); await run;
 });
+
+
+test("a pending history click is applied before starting analysis", async ({page}) => {
+  await ready(page);
+  await page.locator('#gcg-file').setInputFiles('tests/fixtures/standard.gcg');
+  await expect(page.locator('#game-history')).toBeVisible();
+  await page.locator('#history-last').click();
+  await page.evaluate(() => {
+    document.querySelector('[data-event-index="0"]').dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1}));
+    document.querySelector('[data-mode="kibitz"]').click();
+  });
+  await expect(page.locator('#status')).toHaveText('Complete');
+  await expect(page.locator('#history-position')).toHaveValue('0');
+});
