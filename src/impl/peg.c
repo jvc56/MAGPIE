@@ -2793,6 +2793,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   if (tt_fraction > 0.05) {
     tt_fraction = 0.05;
   }
+#ifdef __EMSCRIPTEN__
+  // The browser budget is aggregate, including the helper. Subtract the
+  // per-table ABDADA array and metadata before rounding entries down to a
+  // power of two. Native sizing is unchanged.
+  const double total_fraction =
+      args->tt_fraction_of_mem > 0 ? args->tt_fraction_of_mem : 0.125;
+  tt_fraction = transposition_table_worker_fraction(total_fraction, n_scratch);
+#endif
   // One prune cache shared by every worker (cross-worker board reuse).
   PegPruneCache *prune_cache = peg_prune_cache_create();
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));

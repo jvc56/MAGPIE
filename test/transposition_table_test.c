@@ -6,7 +6,31 @@
 #include <stdint.h>
 
 void test_transposition_table(void) {
-  // Passing 0 clamps to the platform minimum: 2^24 native, 2^21 WASM.
+#ifdef __EMSCRIPTEN__
+  const uint64_t budget_base = get_total_memory();
+  assert(budget_base == 256ULL * 1024 * 1024);
+  // Deep PEG may allocate a table for every worker plus the helper. Check
+  // actual allocations, including ABDADA storage, at every supported count.
+  for (int budget_mb = 16; budget_mb <= 32; budget_mb *= 2) {
+    for (int workers = 1; workers <= 33; workers++) {
+      TranspositionTable *worker_tt =
+          transposition_table_create(transposition_table_worker_fraction(
+              (double)budget_mb / 256, workers));
+      const uint64_t bytes =
+          ((uint64_t)TTENTRY_SIZE_BYTES << worker_tt->size_power_of_2) +
+          NPROC_SIZE * sizeof(atomic_uchar) + sizeof(TranspositionTable) +
+          sizeof(Zobrist);
+      assert(bytes * workers <= (uint64_t)budget_mb * 1024 * 1024);
+      transposition_table_destroy(worker_tt);
+    }
+    TranspositionTable *endgame_tt =
+        transposition_table_create((double)budget_mb / 256);
+    assert(((uint64_t)TTENTRY_SIZE_BYTES << endgame_tt->size_power_of_2) ==
+           (uint64_t)budget_mb * 1024 * 1024);
+    transposition_table_destroy(endgame_tt);
+  }
+#endif
+  // Passing 0 clamps to the platform minimum.
   TranspositionTable *tt = transposition_table_create(0);
   assert(tt->size_power_of_2 == TT_MIN_SIZE_POWER);
 
