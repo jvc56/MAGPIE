@@ -26,11 +26,9 @@ static inline uint64_t get_total_memory(void) {
   uint64_t total_memory = 0;
 
 #if defined(__EMSCRIPTEN__)
-  // WASM/Emscripten implementation
-  // Return the heap size via EM_ASM
-  total_memory = EM_ASM_INT({
-    return HEAP8.length;
-  });
+  // Fixed browser budgeting base: growing the heap for data must not also
+  // grow search tables on the next solve. 0.125 reserves a stable 32 MiB TT.
+  total_memory = 256ULL * 1024 * 1024;
 
 #elif defined(_WIN32) || defined(_WIN64)
   // Windows implementation
