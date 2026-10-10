@@ -30,6 +30,8 @@ struct XoshiroPRNG {
   uint64_t s[4];
 };
 
+size_t prng_allocation_size(void) { return sizeof(XoshiroPRNG); }
+
 /*  Written in 2015 by Sebastiano Vigna (vigna@acm.org)
 
 To the extent possible under law, the author has dedicated all copyright

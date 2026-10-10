@@ -2778,7 +2778,21 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
 
   // Per-worker scratch. One extra slot for the main thread when it helps the
   // pool drain the queue (helper index == num_workers).
-  const int n_threads = args->num_threads > 1 ? args->num_threads : 1;
+  int n_threads = args->num_threads > 1 ? args->num_threads : 1;
+#ifdef __EMSCRIPTEN__
+  const double total_fraction =
+      args->tt_fraction_of_mem > 0 ? args->tt_fraction_of_mem : 0.125;
+  const int max_tables = transposition_table_max_workers(total_fraction);
+  if (max_tables < 1) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_INT_ARG_OUT_OF_BOUNDS,
+        string_duplicate("PEG memory budget is too small for one table"));
+    return;
+  }
+  if (n_threads > 1 && n_threads + 1 > max_tables) {
+    n_threads = max_tables > 2 ? max_tables - 1 : 1;
+  }
+#endif
   PegPool *pool = n_threads > 1 ? peg_pool_create(n_threads, 0) : NULL;
   if (pool) {
     // Leaf endgames at the deep stages legitimately run for minutes; the
@@ -2797,8 +2811,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // The browser budget is aggregate, including the helper. Subtract the
   // per-table ABDADA array and metadata before rounding entries down to a
   // power of two. Native sizing is unchanged.
-  const double total_fraction =
-      args->tt_fraction_of_mem > 0 ? args->tt_fraction_of_mem : 0.125;
   tt_fraction = transposition_table_worker_fraction(total_fraction, n_scratch);
 #endif
   // One prune cache shared by every worker (cross-worker board reuse).

@@ -4015,6 +4015,14 @@ void config_peg(Config *config, ErrorStack *error_stack) {
 }
 
 void impl_peg(Config *config, ErrorStack *error_stack) {
+#ifdef __EMSCRIPTEN__
+  endgame_results_lock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
+  endgame_results_reset(config->endgame_results);
+  endgame_ctx_destroy(config->endgame_ctx);
+  config->endgame_ctx = NULL;
+  endgame_results_unlock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
+#endif
+
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot run peg without lexicon"));
@@ -10283,7 +10291,11 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->endgame_results = endgame_results_create();
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
+#ifdef __EMSCRIPTEN__
+  config->tt_fraction_of_mem = 0.125;
+#else
   config->tt_fraction_of_mem = 0.25;
+#endif
   config->game_string_options = game_string_options_create_pretty();
   config->gcg_result = (GetGCGResult){0};
 

@@ -96,16 +96,27 @@ typedef struct TranspositionTable {
   atomic_int t2_collisions;
 } TranspositionTable;
 
+// Maximum table count that fits even at the minimum entry count.
+static inline int transposition_table_max_workers(double total_fraction) {
+  const uint64_t minimum = ((uint64_t)TTENTRY_SIZE_BYTES << TT_MIN_SIZE_POWER) +
+                           (NPROC_SIZE * sizeof(atomic_uchar)) +
+                           sizeof(TranspositionTable) +
+                           zobrist_allocation_size();
+  return (int)(total_fraction * (double)get_total_memory() / (double)minimum);
+}
+
 // Reserve overhead as well as entries within an aggregate worker budget.
 static inline double transposition_table_worker_fraction(double total_fraction,
                                                          int workers) {
   const double memory = (double)get_total_memory();
-  const double overhead = NPROC_SIZE * sizeof(atomic_uchar) +
-                          sizeof(TranspositionTable) + sizeof(Zobrist);
-  const double fraction = total_fraction / workers - overhead / memory;
+  const uint64_t overhead = (NPROC_SIZE * sizeof(atomic_uchar)) +
+                            sizeof(TranspositionTable) +
+                            zobrist_allocation_size();
+  const double fraction =
+      (total_fraction / workers) - ((double)overhead / memory);
   const double minimum =
       (double)((uint64_t)TTENTRY_SIZE_BYTES << TT_MIN_SIZE_POWER) / memory;
-  return fraction > minimum ? fraction : minimum;
+  return fraction >= minimum ? fraction : 0;
 }
 
 static inline TranspositionTable *
@@ -127,9 +138,9 @@ transposition_table_create(double fraction_of_memory) {
   // Platform-specific minimum table size
   if (tt->size_power_of_2 < TT_MIN_SIZE_POWER) {
     tt->size_power_of_2 = TT_MIN_SIZE_POWER;
-    log_warn("TT size clamped to minimum: 2^%d elements (%d MB)",
+    log_warn("TT size clamped to minimum: 2^%d elements (%d KiB)",
              TT_MIN_SIZE_POWER,
-             (1 << TT_MIN_SIZE_POWER) * TTENTRY_SIZE_BYTES / (1024 * 1024));
+             (1 << TT_MIN_SIZE_POWER) * TTENTRY_SIZE_BYTES / 1024);
   }
   int num_elems = 1 << tt->size_power_of_2;
   size_t memory_mb = ((size_t)TTENTRY_SIZE_BYTES * num_elems) / (1024 * 1024);

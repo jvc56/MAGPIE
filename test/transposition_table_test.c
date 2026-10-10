@@ -1,25 +1,42 @@
 #include "transposition_table_test.h"
 
+#include "../src/def/board_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/transposition_table.h"
+#include "../src/ent/xoshiro.h"
+#include "../src/ent/zobrist.h"
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdint.h>
 
 void test_transposition_table(void) {
+  const uint64_t zobrist_bytes =
+      sizeof(Zobrist) + prng_allocation_size() +
+      ((uint64_t)BOARD_DIM * BOARD_DIM * sizeof(uint64_t *)) +
+      ((uint64_t)BOARD_DIM * BOARD_DIM * ZOBRIST_MAX_LETTERS * 2 *
+       sizeof(uint64_t)) +
+      (2ULL * ZOBRIST_MAX_LETTERS * sizeof(uint64_t *)) +
+      (2ULL * ZOBRIST_MAX_LETTERS * (RACK_SIZE + 1) * sizeof(uint64_t));
+  assert(zobrist_allocation_size() == zobrist_bytes);
 #ifdef __EMSCRIPTEN__
   const uint64_t budget_base = get_total_memory();
   assert(budget_base == 256ULL * 1024 * 1024);
   // Deep PEG may allocate a table for every worker plus the helper. Check
   // actual allocations, including ABDADA storage, at every supported count.
   for (int budget_mb = 16; budget_mb <= 32; budget_mb *= 2) {
-    for (int workers = 1; workers <= 33; workers++) {
+    const int capacity =
+        transposition_table_max_workers((double)budget_mb / 256);
+    assert(capacity >= 33);
+    assert(transposition_table_worker_fraction((double)budget_mb / 256,
+                                               capacity + 1) == 0);
+    for (int workers = 1; workers <= capacity; workers++) {
       TranspositionTable *worker_tt =
           transposition_table_create(transposition_table_worker_fraction(
               (double)budget_mb / 256, workers));
       const uint64_t bytes =
           ((uint64_t)TTENTRY_SIZE_BYTES << worker_tt->size_power_of_2) +
           NPROC_SIZE * sizeof(atomic_uchar) + sizeof(TranspositionTable) +
-          sizeof(Zobrist);
+          zobrist_bytes;
       assert(bytes * workers <= (uint64_t)budget_mb * 1024 * 1024);
       transposition_table_destroy(worker_tt);
     }

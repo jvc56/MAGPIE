@@ -1,11 +1,13 @@
 #ifndef XOSHIRO_H
 #define XOSHIRO_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define XOSHIRO_MAX UINT64_C(18446744073709551615)
 
 typedef struct XoshiroPRNG XoshiroPRNG;
+size_t prng_allocation_size(void);
 
 XoshiroPRNG *prng_create(uint64_t seed);
 void prng_destroy(XoshiroPRNG *prng);
