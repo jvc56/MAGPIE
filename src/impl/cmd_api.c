@@ -215,6 +215,12 @@ char *magpie_get_last_command_output(const Magpie *mp) {
   return string_duplicate(mp->output);
 }
 
+void magpie_set_peg_json(Magpie *mp, bool enabled) {
+  if (mp && mp->config && !async_command_is_active(mp)) {
+    config_set_peg_json(mp->config, enabled);
+  }
+}
+
 // Semantically a mutation even though the compiler can't see one through
 // the const getter for ThreadControl.
 // cppcheck-suppress constParameterPointer
