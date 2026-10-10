@@ -39,14 +39,12 @@
 //    magpie_destroy(mp);
 // clang-format on
 
+typedef struct Magpie Magpie;
 #include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Opaque struct of magpie internal state
-typedef struct Magpie Magpie;
 
 typedef enum {
   MAGPIE_SUCCESS = 0,

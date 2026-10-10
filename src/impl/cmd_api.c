@@ -5,6 +5,7 @@
 #include "../def/players_data_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/kwg.h"
+#include "../ent/letter_distribution.h"
 #include "../ent/players_data.h"
 #include "../ent/thread_control.h"
 #include "../ent/wmp.h"
@@ -244,35 +245,59 @@ magpie_thread_status magpie_get_thread_status(const Magpie *mp) {
 
 void magpie_free_string(char *str) { free(str); }
 
-WMP *magpie_build_wmp(Magpie *mp, int threads, WMPBuildProgress *progress) {
-  if (async_command_is_active(mp)) {
+// Do not mutate the shared error stack while an async command owns it.
+static bool prepare_word_map_operation(Magpie *mp) {
+  if (!mp || async_command_is_active(mp)) {
+    return false;
+  }
+  error_stack_reset(mp->error);
+  if (!mp->config) {
+    error_stack_push(
+        mp->error, ERROR_STATUS_CMD_API_UNINITIALIZED,
+        string_duplicate("cannot build word maps: magpie creation failed"));
+    return false;
+  }
+  return true;
+}
+
+static void word_map_error(Magpie *mp, const char *message) {
+  error_stack_push(mp->error, ERROR_STATUS_CMD_API_WORD_MAP,
+                   string_duplicate(message));
+}
+
+WMP *cmd_api_build_wmp(Magpie *mp, int threads, WMPBuildProgress *progress) {
+  if (!prepare_word_map_operation(mp)) {
     return NULL;
   }
   const PlayersData *pd = config_get_players_data(mp->config);
   const KWG *kwg = players_data_get_kwg(pd, 0);
   if (!kwg || !config_get_ld(mp->config)) {
+    word_map_error(
+        mp, "word map construction requires a lexicon and letter distribution");
     return NULL;
   }
   WMP *wmp = make_wmp_from_kwg_with_progress(kwg, config_get_ld(mp->config),
                                              threads, progress);
-  wmp->name = string_duplicate(kwg_get_name(kwg));
+  if (wmp) {
+    wmp->name = string_duplicate(kwg_get_name(kwg));
+  } else {
+    word_map_error(mp, "word map construction cancelled");
+  }
   return wmp;
 }
 
-WordInfoTable *magpie_build_wit(Magpie *mp) {
-  if (async_command_is_active(mp)) {
+WordInfoTable *cmd_api_build_wit(Magpie *mp) {
+  if (!prepare_word_map_operation(mp)) {
     return NULL;
   }
   const KWG *kwg = players_data_get_kwg(config_get_players_data(mp->config), 0);
   if (!kwg) {
+    word_map_error(mp, "word information construction requires a lexicon");
     return NULL;
   }
   WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
-  ErrorStack *errors = error_stack_create();
-  make_word_plus_floater_from_kwg(kwg, wit, errors);
-  const bool failed = !error_stack_is_empty(errors);
-  error_stack_destroy(errors);
-  if (failed) {
+  make_word_plus_floater_from_kwg(kwg, wit, mp->error);
+  if (!error_stack_is_empty(mp->error)) {
     word_info_table_destroy(wit);
     return NULL;
   }
@@ -280,27 +305,44 @@ WordInfoTable *magpie_build_wit(Magpie *mp) {
   return wit;
 }
 
-bool magpie_install_wmp(Magpie *mp, WMP *wmp, WordInfoTable *wit) {
-  if (!wmp || !wit || async_command_is_active(mp)) {
+bool cmd_api_install_wmp(Magpie *mp, WMP *wmp, WordInfoTable *wit) {
+  if (!prepare_word_map_operation(mp)) {
+    return false;
+  }
+  if (!wmp || !wit) {
+    word_map_error(mp, "installation requires both WMP and WIT");
     return false;
   }
   PlayersData *pd = config_get_players_data(mp->config);
-  const KWG *kwg = players_data_get_kwg(pd, 0);
-  if (!kwg || !strings_equal(kwg_get_name(kwg), wmp->name) ||
-      !strings_equal(kwg_get_name(kwg), wit->name) ||
-      kwg_get_hash(kwg) != word_info_table_get_kwg_hash(wit)) {
+  const LetterDistribution *ld = config_get_ld(mp->config);
+  if (!ld || (wmp->ld_fingerprint &&
+              wmp->ld_fingerprint != ld_get_content_fingerprint(ld))) {
+    word_map_error(mp, "word map letter distribution does not match");
     return false;
+  }
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const KWG *kwg = players_data_get_kwg(pd, player_idx);
+    if (!kwg || !strings_equal(kwg_get_name(kwg), wmp->name) ||
+        !strings_equal(kwg_get_name(kwg), wit->name) ||
+        kwg_get_hash(kwg) != word_info_table_get_kwg_hash(wit) ||
+        (wmp->kwg_hash && wmp->kwg_hash != kwg_get_hash(kwg))) {
+      word_map_error(mp, "word maps must match both player lexica");
+      return false;
+    }
   }
   players_data_set(pd, PLAYERS_DATA_TYPE_WMP, NULL, NULL, NULL, false,
                    mp->error);
   players_data_set(pd, PLAYERS_DATA_TYPE_WIT, NULL, NULL, NULL, false,
                    mp->error);
-  for (int player = 0; player < 2; player++) {
-    players_data_set_data(pd, PLAYERS_DATA_TYPE_WIT, player, wit);
-    players_data_set_use_when_available(pd, PLAYERS_DATA_TYPE_WIT, player,
+  if (!error_stack_is_empty(mp->error)) {
+    return false;
+  }
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    players_data_set_data(pd, PLAYERS_DATA_TYPE_WIT, player_idx, wit);
+    players_data_set_use_when_available(pd, PLAYERS_DATA_TYPE_WIT, player_idx,
                                         true);
-    players_data_set_data(pd, PLAYERS_DATA_TYPE_WMP, player, wmp);
-    players_data_set_use_when_available(pd, PLAYERS_DATA_TYPE_WMP, player,
+    players_data_set_data(pd, PLAYERS_DATA_TYPE_WMP, player_idx, wmp);
+    players_data_set_use_when_available(pd, PLAYERS_DATA_TYPE_WMP, player_idx,
                                         true);
   }
   players_data_set_is_shared(pd, PLAYERS_DATA_TYPE_WMP, true);

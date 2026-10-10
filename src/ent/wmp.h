@@ -135,6 +135,10 @@ typedef struct WMPForLength {
 
 typedef struct WMP {
   char *name;
+  // Runtime provenance for locally built tables; legacy serialized tables
+  // omit these and must have their provenance checked by their loader.
+  uint64_t kwg_hash;
+  uint64_t ld_fingerprint;
   uint8_t version;
   uint8_t board_dim;
   uint32_t max_word_lookup_bytes;
@@ -954,12 +958,7 @@ static inline void write_wfl_to_stream(int length, const WMPForLength *wfl,
                 "double blank map entries");
 }
 
-static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
-                                     ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "wb", error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
+static inline void wmp_write_to_stream(const WMP *wmp, FILE *stream) {
   write_byte_to_stream_or_die(wmp->version, stream, "wmp version");
   write_byte_to_stream_or_die(wmp->board_dim, stream, "wmp board dim");
   write_uint32_to_stream_or_die(wmp->max_word_lookup_bytes, stream,
@@ -967,6 +966,15 @@ static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
   for (int len = 2; len <= BOARD_DIM; len++) {
     write_wfl_to_stream(len, &wmp->wfls[len], stream);
   }
+}
+
+static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
+                                     ErrorStack *error_stack) {
+  FILE *stream = fopen_safe(filename, "wb", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  wmp_write_to_stream(wmp, stream);
   fclose_or_die(stream);
 }
 

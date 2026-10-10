@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 // WordInfoTable (parallel to RackInfoTable): one trie per key-word length. At a
@@ -191,6 +192,11 @@ static inline void word_info_table_clear_word_plus_floater(WordInfoTable *wit) {
 
 // Version 4 keeps the version-3 trie representation and appends optional
 // positional masks. Both use one KWG identity and the same terminal IDs.
+// The caller owns and closes the stream.
+void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
+                                     ErrorStack *error_stack);
+void word_info_table_load_from_stream(WordInfoTable *wit, const char *name,
+                                      FILE *stream, ErrorStack *error_stack);
 void word_info_table_write_to_file(const WordInfoTable *wit,
                                    const char *filename,
                                    ErrorStack *error_stack);

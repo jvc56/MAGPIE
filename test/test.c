@@ -85,10 +85,10 @@
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
 #include "word_info_table_test.h"
+#include "word_map_embedding_test.h"
 #include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
-#include "word_map_embedding_test.h"
 #include "zobrist_test.h"
 #include <stdio.h>
 #include <stdlib.h>

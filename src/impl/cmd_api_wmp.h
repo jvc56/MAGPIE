@@ -4,13 +4,15 @@
 #include "../ent/word_info_table.h"
 #include "cmd_api.h"
 #include "wmp_maker.h"
+#include <stdbool.h>
 
-// Embedding helpers. The caller must exclusively own an idle handle until
-// completion. Builders return owned tables; installation transfers ownership
-// only on success. No engine search can overlap either operation.
-WMP *magpie_build_wmp(Magpie *mp, int threads, WMPBuildProgress *progress);
-WordInfoTable *magpie_build_wit(Magpie *mp);
+// Internal embedding helpers (not exported by libmagpie). The caller must
+// exclusively own an idle handle until completion. Builders return owned
+// tables; installation transfers ownership only on success. No engine search
+// can overlap either operation.
+WMP *cmd_api_build_wmp(Magpie *mp, int threads, WMPBuildProgress *progress);
+WordInfoTable *cmd_api_build_wit(Magpie *mp);
 // Installs matching WMP/WIT together, transferring both only on success.
-bool magpie_install_wmp(Magpie *mp, WMP *wmp, WordInfoTable *wit);
+bool cmd_api_install_wmp(Magpie *mp, WMP *wmp, WordInfoTable *wit);
 
 #endif

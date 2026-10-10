@@ -1,19 +1,25 @@
 #ifndef WMP_MAKER_H
 #define WMP_MAKER_H
 
+#include "../def/wmp_defs.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 #include "../ent/wmp.h"
-#include <stdatomic.h>
+#include <stdbool.h>
 
-// Optional builder-only progress. Read concurrently using atomic_load.
-// One completed unit is a word-length group, not an estimate of elapsed time.
-typedef struct {
-  _Atomic int
-      stage; // 0 words from KWG, 1 words, 2 blanks, 3 double blanks, 4 indexes
-  _Atomic int completed;
-  _Atomic int total;
-} WMPBuildProgress;
+// Optional progress for one build at a time. Snapshot reads and cancellation
+// may run concurrently with the builder. Destroy only after the builder joins.
+// A completed unit is one word-length group, not elapsed-time progress.
+typedef struct WMPBuildProgress WMPBuildProgress;
+WMPBuildProgress *wmp_build_progress_create(void);
+void wmp_build_progress_destroy(WMPBuildProgress *progress);
+void wmp_build_progress_cancel(WMPBuildProgress *progress);
+bool wmp_build_progress_is_cancelled(const WMPBuildProgress *progress);
+void wmp_build_progress_set_stage(WMPBuildProgress *progress,
+                                  wmp_build_stage_t stage, int total);
+void wmp_build_progress_snapshot(WMPBuildProgress *progress,
+                                 wmp_build_stage_t *stage, int *completed,
+                                 int *total);
 
 WMP *make_wmp_from_kwg_with_progress(const KWG *kwg,
                                      const LetterDistribution *ld,
