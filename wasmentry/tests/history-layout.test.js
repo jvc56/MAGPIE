@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { formatHistoryPlay, parseCGP, SAMPLES } from "../analysis-model.mjs";
+import { formatHistoryPlay, historyPlayParts, parseCGP, SAMPLES } from "../analysis-model.mjs";
 
 test("history notation groups existing tiles and preserves blanks and special events", () => {
   const position = parseCGP(SAMPLES.opening);
@@ -14,6 +14,19 @@ test("history notation groups existing tiles and preserves blanks and special ev
   expect(formatHistoryPlay(">p1: AE - +0 24", position)).toBe("- +0 24");
   expect(formatHistoryPlay(">p1: AE -AE +0 24", position)).toBe("-AE +0 24");
   expect(formatHistoryPlay(">p1: AE -- -24 0", position)).toBe("-- -24 0");
+});
+
+test("history identifies end-rack and time adjustments without grouping passes or challenges", () => {
+  const position = parseCGP(SAMPLES.opening);
+  for (const line of [">p1: (I) +2 378", ">p1: I (I) -1 376", ">p1: (time) -20 358"]) {
+    expect(historyPlayParts(line, position).adjustment).toBe(true);
+  }
+  for (const line of [">p1: AE - +0 24", ">p1: AE -- -24 0", ">p1: AE (challenge) +5 29"]) {
+    expect(historyPlayParts(line, position).adjustment).toBe(false);
+  }
+  expect(historyPlayParts(">p1: (I) +2 378", position)).toEqual({
+    move: "(I)", score: "+2", cumulative: "378", adjustment: true,
+  });
 });
 
 async function ready(page) {
@@ -94,4 +107,34 @@ test("computer game history occupies the right panel without overlapping the boa
     path: test.info().outputPath("history-right-mobile.png"),
     fullPage: true,
   });
+});
+
+test("final adjustments stay in the last turn and scores align in both player columns", async ({page}) => {
+  await ready(page);
+  await page.locator('#gcg-file').setInputFiles('tests/fixtures/standard.gcg');
+  await expect(page.locator('#status')).toContainText('Loaded');
+  const rows = page.locator('#history-table tbody tr');
+  const events = await page.locator('#history-position option').count() - 1;
+  const finalRow = rows.last();
+  await expect(finalRow.locator(`button[data-event-index="${events - 3}"]`)).toBeVisible();
+  await expect(finalRow.locator(`button[data-event-index="${events - 2}"] .history-score`)).toHaveText('+2');
+  await expect(finalRow.locator(`button[data-event-index="${events - 1}"] .history-cumulative`)).toHaveText('358');
+  await expect(finalRow.locator('button')).toHaveCount(4);
+  const count = await rows.count();
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({width, height:900});
+    const alignment = await rows.first().locator('.history-score, .history-cumulative').evaluateAll(cells =>
+      cells.map(cell => getComputedStyle(cell).textAlign));
+    expect(alignment).toEqual(['right', 'right', 'right', 'right']);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await finalRow.locator(`button[data-event-index="${events - 2}"]`).click();
+  await expect(page.locator('#history-position')).toHaveValue(String(events - 2));
+  await expect(rows).toHaveCount(count);
+  await page.locator('#hide-spoilers').check();
+  await expect(finalRow.locator(`button[data-event-index="${events - 2}"]`)).toHaveText('•••');
+  await page.locator('#hide-spoilers').uncheck();
+  await page.setViewportSize({width:1440, height:900});
+  await finalRow.scrollIntoViewIfNeeded();
+  await page.locator('#game-history').screenshot({path:test.info().outputPath('history-aligned-scores.png')});
 });

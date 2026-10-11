@@ -1156,6 +1156,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   font-size: 12px;
 }
 #history-table td {
+  vertical-align: top;
   text-align: left;
   padding: 5px;
 }
@@ -1423,8 +1424,18 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   width: 38px;
 }
 #history-table button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4ch 4ch;
+  align-items: baseline;
+  column-gap: 0.6ch;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+#history-table .history-score,
+#history-table .history-cumulative {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Keep the board and decisions prominent; supporting tools stay quiet. */

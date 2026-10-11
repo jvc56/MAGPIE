@@ -18,6 +18,7 @@ import {
   inventory,
   parseResults,
   formatHistoryPlay,
+  historyPlayParts,
   previewMove,
   analysisCommands,
   combineSim,
@@ -2689,7 +2690,8 @@ function renderReviewTable() {
     const parsed = line.match(/^>([^:]+):\s+(.*)$/);
     const player =
       parsed[1] === recordedGame.gcg.match(/^#player2\s+(\S+)/m)?.[1] ? 1 : 0;
-    if (!cells || player <= previousPlayer) {
+    const parts = historyPlayParts(line, restorePosition(recordedGame.positions[index]));
+    if (!cells || (!parts.adjustment && player <= previousPlayer)) {
       const row = document.createElement("tr");
       const number = document.createElement("td");
       number.textContent = String(rows.length + 1);
@@ -2698,15 +2700,22 @@ function renderReviewTable() {
       row.append(...cells);
       rows.push(row);
     }
-    previousPlayer = player;
+    if (!parts.adjustment) previousPlayer = player;
     const cell = cells[player];
-    cell.classList.toggle("current", historyIndex === index);
+    if (historyIndex === index) cell.classList.add("current");
     const button = document.createElement("button");
     button.dataset.eventIndex = index;
-    button.textContent =
-      hidden && index >= historyIndex
-        ? "•••"
-        : formatHistoryPlay(line, restorePosition(recordedGame.positions[index]));
+    if (hidden && index >= historyIndex) {
+      button.textContent = "•••";
+    } else {
+      for (const [key, value] of [["play", parts.move], ["score", parts.score], ["cumulative", parts.cumulative]]) {
+        const span = document.createElement("span");
+        span.className = `history-${key}`;
+        span.textContent = value;
+        if (button.childNodes.length) button.append(" ");
+        button.append(span);
+      }
+    }
     button.disabled = busy;
     button.addEventListener("click", (event) => {
       clearTimeout(historyClickTimer);

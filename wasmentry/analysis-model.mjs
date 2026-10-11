@@ -270,7 +270,7 @@ export function parseResults(text, mode) {
 }
 // Display a GCG event using the board before that event, preserving scores.
 export function formatHistoryPlay(line, position) {
-  const play = line.replace(/^>[^:]+:\s+\S+\s+/, "");
+  const play = line.replace(/^>[^:]+:\s+/, "").replace(/^(?!\()\S+\s+/, "");
   return play.replace(/^([A-O]\d+|\d+[A-O]) ([A-Za-z.]+)/, (_, coordinate, word) => {
     const vertical = /^[A-O]/.test(coordinate);
     let row = Number(coordinate.match(/\d+/)[0]) - 1;
@@ -290,6 +290,17 @@ export function formatHistoryPlay(line, position) {
     if (through) formatted += `(${through})`;
     return `${coordinate} ${formatted}`;
   });
+}
+
+export function historyPlayParts(line, position) {
+  const display = formatHistoryPlay(line, position);
+  const parts = display.match(/^(.*?)\s+([+-]\d+)\s+(-?\d+)$/);
+  return {
+    move: parts?.[1] ?? display,
+    score: parts?.[2] ?? "",
+    cumulative: parts?.[3] ?? "",
+    adjustment: /^>[^:]+:\s+(?:\S+\s+)?\((?:[A-Z?]+|time)\)\s+[+-]\d+\s+-?\d+\s*$/.test(line),
+  };
 }
 
 export function previewMove(position, move) {
