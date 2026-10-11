@@ -914,23 +914,33 @@ static inline int wmp_write_words_to_buffer(const WMP *wmp,
                                          buffer);
 }
 
-// Stream serialization must remain recoverable for memory-constrained embedders.
+// Stream serialization must remain recoverable for memory-constrained
+// embedders.
 static inline bool write_wfl_to_stream(int length, const WMPForLength *wfl,
-                                      FILE *stream) {
+                                       FILE *stream) {
   return fwrite_le_uint32s(&wfl->num_word_buckets, 1, stream) &&
-         fwrite_le_uint32s(wfl->word_bucket_starts, (size_t)wfl->num_word_buckets + 1, stream) &&
+         fwrite_le_uint32s(wfl->word_bucket_starts,
+                           (size_t)wfl->num_word_buckets + 1, stream) &&
          fwrite_le_uint32s(&wfl->num_word_entries, 1, stream) &&
-         fwrite(wfl->word_map_entries, sizeof(WMPEntry), wfl->num_word_entries, stream) == wfl->num_word_entries &&
+         fwrite(wfl->word_map_entries, sizeof(WMPEntry), wfl->num_word_entries,
+                stream) == wfl->num_word_entries &&
          fwrite_le_uint32s(&wfl->num_uninlined_words, 1, stream) &&
-         fwrite(wfl->word_letters, sizeof(MachineLetter), (size_t)wfl->num_uninlined_words * length, stream) == (size_t)wfl->num_uninlined_words * length &&
+         fwrite(wfl->word_letters, sizeof(MachineLetter),
+                (size_t)wfl->num_uninlined_words * length,
+                stream) == (size_t)wfl->num_uninlined_words * length &&
          fwrite_le_uint32s(&wfl->num_blank_buckets, 1, stream) &&
-         fwrite_le_uint32s(wfl->blank_bucket_starts, (size_t)wfl->num_blank_buckets + 1, stream) &&
+         fwrite_le_uint32s(wfl->blank_bucket_starts,
+                           (size_t)wfl->num_blank_buckets + 1, stream) &&
          fwrite_le_uint32s(&wfl->num_blank_entries, 1, stream) &&
-         fwrite(wfl->blank_map_entries, sizeof(WMPEntry), wfl->num_blank_entries, stream) == wfl->num_blank_entries &&
+         fwrite(wfl->blank_map_entries, sizeof(WMPEntry),
+                wfl->num_blank_entries, stream) == wfl->num_blank_entries &&
          fwrite_le_uint32s(&wfl->num_double_blank_buckets, 1, stream) &&
-         fwrite_le_uint32s(wfl->double_blank_bucket_starts, (size_t)wfl->num_double_blank_buckets + 1, stream) &&
+         fwrite_le_uint32s(wfl->double_blank_bucket_starts,
+                           (size_t)wfl->num_double_blank_buckets + 1, stream) &&
          fwrite_le_uint32s(&wfl->num_double_blank_entries, 1, stream) &&
-         fwrite(wfl->double_blank_map_entries, sizeof(WMPEntry), wfl->num_double_blank_entries, stream) == wfl->num_double_blank_entries;
+         fwrite(wfl->double_blank_map_entries, sizeof(WMPEntry),
+                wfl->num_double_blank_entries,
+                stream) == wfl->num_double_blank_entries;
 }
 
 static inline bool wmp_write_to_stream(const WMP *wmp, FILE *stream) {
