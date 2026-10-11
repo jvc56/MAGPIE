@@ -16,9 +16,60 @@ static void assert_success(char *json) {
   free(json);
 }
 
+static void test_cgp_start(void) {
+  StringBuilder *board = string_builder_create();
+  for (int row = 0; row < BOARD_DIM; row++) {
+    if (row) {
+      string_builder_add_char(board, '/');
+    }
+    if (row == BOARD_DIM / 2) {
+      string_builder_add_formatted_string(board, "%dA%d", BOARD_DIM / 2,
+                                          BOARD_DIM / 2);
+    } else {
+      string_builder_add_int(board, BOARD_DIM);
+    }
+  }
+  char *text = get_formatted_string("%s#cgp %s AEINRST/BCDFGHJ 100/80 1\n",
+                                    EMPTY_GAME, string_builder_peek(board));
+  char *loaded = browser_game_import_gcg(text, "CSW24");
+  assert(has_substring(loaded, "100/80 1"));
+  assert(has_substring(loaded, "\"index\":0"));
+  assert(has_substring(loaded, "#cgp "));
+  assert_success(loaded);
+  char *move = get_formatted_string("%d%c .T", (BOARD_DIM / 2) + 1,
+                                    'A' + (BOARD_DIM / 2));
+  char *played = browser_game_action(text, "CSW24", 0, "AEINRST", move, "",
+                                     BROWSER_GAME_COMMIT, "", 0, 0, 0);
+  assert(has_substring(played, "+2 102"));
+  assert(has_substring(played, "\"index\":1"));
+  assert_success(played);
+  char *record = get_formatted_string(
+      "%s>A: AEINRST %s +2 102\n>B: BCDFGHJ - +0 80\n", text, move);
+  char *reloaded = browser_game_import_gcg(record, "CSW24");
+  assert(has_substring(reloaded, "\"index\":0"));
+  assert(has_substring(reloaded, "100/80 1"));
+  assert(has_substring(reloaded, "102/80 1"));
+  assert_success(reloaded);
+  // Replacing the first move must branch from the CGP, not an empty board.
+  assert_success(browser_game_action(record, "CSW24", 0, "AEINRST", move, "",
+                                     BROWSER_GAME_COMMIT, "", 0, 0, 0));
+  char *invalid = get_formatted_string("%s#cgp bad\n", EMPTY_GAME);
+  char *failure = browser_game_import_gcg(invalid, "CSW24");
+  assert(has_substring(failure, "\"error\":"));
+  free(failure);
+  free(invalid);
+  // A normal import after a CGP/error must not inherit its starting board.
+  assert_success(browser_game_import_gcg(EMPTY_GAME, "CSW24"));
+  free(record);
+  free(move);
+  free(text);
+  string_builder_destroy(board);
+}
+
 void test_browser_game(void) {
-  const int center_row = BOARD_DIM / 2 + 1;
-  const char center_col = 'A' + BOARD_DIM / 2;
+  test_cgp_start();
+  const int center_row = (BOARD_DIM / 2) + 1;
+  const char center_col = 'A' + (BOARD_DIM / 2);
   char *opening_move =
       get_formatted_string("%d%c TRAIN", center_row, center_col);
   char *opening_game = get_formatted_string(

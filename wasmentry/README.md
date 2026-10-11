@@ -416,3 +416,9 @@ use a watchdog that terminates an unresponsive worker; they do not yet support
 cooperative cancellation. Starting another live game requires confirmation.
 Computer simulations pool partial results from the same position after pause and
 resume, just as manual Continue sim does.
+
+New Game can start play, selfplay, or review from a pasted CGP. Its first rack
+and score belong to Player 1, who is on turn. Missing live-game rack tiles are
+drawn from the remaining bag. History begins at the supplied position; existing
+tiles have unknown ownership. Saved games retain the position in a MAGPIE
+`#cgp` GCG extension (other GCG readers need support for that extension).

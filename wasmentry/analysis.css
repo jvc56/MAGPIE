@@ -1805,3 +1805,9 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #new-game-form .auto-time-option input { width: auto; margin: 0; padding: 0; flex-shrink: 0; }
 .auto-time-option:has(:disabled),
 .advanced-game-options label:has(#bot-seconds:disabled) { opacity: 0.5; }
+
+#new-game-position { margin: 12px 0; }
+#new-game-position > summary { color: var(--muted); cursor: pointer; }
+#new-game-cgp { width: 100%; }
+#new-game-error:empty { display: none; }
+#new-game-error { color: var(--danger); }

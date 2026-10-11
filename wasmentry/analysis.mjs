@@ -1642,7 +1642,7 @@ function renderHistoryOptions() {
     .split(/\r?\n/)
     .filter((line) => line.startsWith(">"));
   $("history-position").replaceChildren(
-    new Option("Start of game", "0"),
+    new Option(/^#cgp /m.test(recordedGame.gcg) ? "Starting position" : "Start of game", "0"),
     ...events.map((line, index) => {
       const colon = line.indexOf(":");
       const player = line.slice(1, colon);
@@ -2077,6 +2077,19 @@ $("new-game-form").addEventListener("submit", async (event) => {
     $("player-two-name").value,
   ].map((name) => name.replace(/[\r\n\0]/g, " ").trim());
   if (players.some((name) => !name)) return;
+  let startingPosition = null;
+  $("new-game-error").textContent = "";
+  try {
+    const cgp = $("new-game-cgp").value.trim();
+    if (cgp) {
+      startingPosition = parseCGP(cgp, position.lexicon);
+      if (startingPosition.zeros >= 6) throw new Error("This position has already ended.");
+    }
+  } catch (failure) {
+    $("new-game-error").textContent = failure.message;
+    return;
+  }
+  const lexicon = startingPosition?.lexicon || position.lexicon;
   if (isLive() && !(await confirmGame("Start a new game?", "The current game will end and be replaced.", "New game"))) return;
   $("new-game-dialog").close();
   let focusRack = false;
@@ -2086,42 +2099,46 @@ $("new-game-form").addEventListener("submit", async (event) => {
     error("");
     message("Starting game…");
     await previewPromise;
-    await engine.prepare(position.lexicon);
+    await engine.prepare(lexicon);
     const kind = $("game-kind").value;
     const first =
-      kind === "record"
+      kind === "record" || startingPosition
         ? 0
         : $("first-player").value === "random"
           ? randomSeed() % 2
           : +$("first-player").value;
     if (first) players.reverse();
-    const text = `#character-encoding UTF-8\n#lexicon ${position.lexicon}\n#player1 p1 ${players[0]}\n#player2 p2 ${players[1]}\n`;
-    let { game } = await engine.importGCG(text, position.lexicon);
-    saveGameUndo();
-    session = null;
+    const text = `#character-encoding UTF-8\n#lexicon ${lexicon}\n#player1 p1 ${players[0]}\n#player2 p2 ${players[1]}\n`;
+    const gameText = text + (startingPosition ? `#cgp ${toCGP(startingPosition)}\n` : "");
+    let { game } = await engine.importGCG(gameText, lexicon);
+    if (game.ended) throw new Error("This position has already ended.");
+    let nextSession = null;
     if (kind !== "record") {
       const response = await engine.gameAction({
-        text,
-        lexicon: position.lexicon,
+        text: gameText,
+        lexicon,
         index: 0,
         action: GameAction.DEAL,
         seed: randomSeed(),
         onTurn: 0,
       });
       game = response.game;
-      session = sessionOptions(kind);
-      if (first) session.human = 1 - session.human;
-      game.positions[0].clocks = [...session.remaining];
+      nextSession = sessionOptions(kind);
+      if (first) nextSession.human = 1 - nextSession.human;
+      game.positions[0].clocks = [...nextSession.remaining];
     }
+    saveGameUndo();
+    session = nextSession;
     game.filename = "magpie-game.gcg";
-    adoptGame(game, position.lexicon, 0);
-    message(session ? "Game ready" : "Game ready · enter the first rack");
-    if (!session) {
+    adoptGame(game, lexicon, 0);
+    message(session || startingPosition?.racks[0] ? "Game ready" : "Game ready · enter the first rack");
+    if (!session && !startingPosition?.racks[0]) {
       $("position-editor").open = true;
       focusRack = true;
     }
   } catch (failure) {
-    error(failure.message);
+    $("new-game-error").textContent = failure.message;
+    $("new-game-dialog").showModal();
   } finally {
     setBusy(false);
     renderSession();
@@ -2583,6 +2600,10 @@ async function computerTurn(single = false) {
     }
   }
 }
+$("new-game-cgp").addEventListener("input", () => {
+  $("first-player").disabled = Boolean($("new-game-cgp").value.trim());
+  $("new-game-error").textContent = "";
+});
 function updateGameSetup() {
   const kind = $("game-kind").value;
   $("computer-setup").hidden = kind === "record";

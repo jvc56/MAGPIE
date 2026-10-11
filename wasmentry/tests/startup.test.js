@@ -65,3 +65,93 @@ test('engine startup failure is visible in the choice dialog', async ({page}) =>
   await expect(page.locator('#start-game')).toBeDisabled();
   await expect(page.locator('#new-game-dialog')).toBeVisible();
 });
+
+const startingCGP = '15/15/15/15/15/15/15/7A7/15/15/15/15/15/15/15 AEINRST/BCDFGHJ 100/80 1 -lex NWL23';
+
+async function setStartingCGP(page) {
+  await page.locator('#new-game-position > summary').click();
+  await page.locator('#new-game-cgp').fill(startingCGP);
+}
+
+for (const kind of ['play', 'watch', 'record']) test(`start ${kind} from CGP without earlier history`, async ({page}) => {
+  await ready(page);
+  await page.locator(`[data-game-kind=${kind}]`).click();
+  await setStartingCGP(page);
+  if (kind !== 'record') {
+    await page.locator('.game-options > summary').click();
+    await expect(page.locator('#first-player')).toBeDisabled();
+    await page.locator('#bot-analysis').selectOption('kibitz');
+    await page.locator('#game-time').selectOption('0');
+    if (kind === 'watch') await page.locator('#watch-delay').fill('30');
+  }
+  await page.locator('#start-game').click();
+  await expect(page.locator('#history-position option')).toHaveCount(1);
+  await expect(page.locator('#history-position option')).toHaveText('Starting position');
+  await expect(page.locator('#board .played')).toHaveCount(1);
+  await expect(page.locator('#open-lexicon-settings')).toContainText('NWL23');
+  await expect(page.locator('#score')).toHaveValue('100');
+  await expect(page.locator('#opponent-score')).toHaveValue('80');
+  await expect(page.locator('#rack')).toHaveValue('AEINRST');
+  if (kind === 'watch') {
+    await page.locator('#pause-game').click();
+    await page.locator('#step-game').click();
+    await expect(page.locator('#history-position option')).toHaveCount(2);
+  } else {
+    // Play through the initial A. This would fail on an empty starting board.
+    await page.locator('#board [data-row="7"][data-col="8"]').click();
+    await page.keyboard.type('t');
+    await page.locator('#play-move').click();
+    await expect(page.locator('#history-position option').nth(1)).toContainText('(A)T +2 102');
+  }
+  await expect(page.locator('#error')).toBeHidden();
+});
+
+test('CGP review saves and reloads its starting board, scores, racks, and subsequent moves', async ({page}) => {
+  const {readFile} = await import('node:fs/promises');
+  await ready(page);
+  await page.locator('[data-game-kind=record]').click();
+  await setStartingCGP(page);
+  await page.locator('#start-game').click();
+  await expect(page.locator('#history-position option')).toHaveCount(1);
+  await page.locator('#board [data-row="7"][data-col="8"]').click();
+  await page.keyboard.type('t');
+  await page.locator('#play-move').click();
+  await expect(page.locator('#history-position option')).toHaveCount(2);
+  await page.locator('#history-first').click();
+  await expect(page.locator('#board .played')).toHaveCount(1);
+  await expect(page.locator('#score')).toHaveValue('100');
+  await expect(page.locator('#rack')).toHaveValue('AEINRST');
+  await page.locator('#game-menu > summary').click();
+  const download = page.waitForEvent('download');
+  await page.locator('#save-gcg').click();
+  const gcg = await readFile(await (await download).path(), 'utf8');
+  expect(gcg).toContain('#cgp ' + startingCGP);
+  expect(gcg.split('\n').filter(line => line.startsWith('>'))).toHaveLength(1);
+  await page.locator('#game-menu > summary').click();
+  await page.locator('#load-gcg').click();
+  await page.locator('#gcg-text').fill(gcg);
+  await page.locator('#submit-gcg').click();
+  await expect(page.locator('#gcg-dialog')).toBeHidden();
+  await expect(page.locator('#history-position')).toHaveValue('0');
+  await expect(page.locator('#board .played')).toHaveCount(1);
+  await expect(page.locator('#score')).toHaveValue('100');
+  await page.locator('#history-last').click();
+  await expect(page.locator('#board .played')).toHaveCount(2);
+  await expect(page.locator('#opponent-score')).toHaveValue('102');
+});
+
+test('invalid or already finished CGP keeps New Game open and leaves current board alone', async ({page}) => {
+  await ready(page);
+  await setStartingCGP(page);
+  for (const value of ['bad CGP', startingCGP.replace('100/80 1', '100/80 6')]) {
+    await page.locator('#new-game-cgp').fill(value);
+    await page.locator('#start-game').click();
+    await expect(page.locator('#new-game-error')).not.toBeEmpty();
+    await expect(page.locator('#new-game-dialog')).toBeVisible();
+    await expect(page.locator('#board .played')).toHaveCount(0);
+  }
+  await page.locator('#new-game-cgp').fill('');
+  await page.locator('#start-game').click();
+  await expect(page.locator('#play-session')).toBeVisible();
+  await expect(page.locator('#board .played')).toHaveCount(0);
+});

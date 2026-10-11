@@ -659,6 +659,13 @@
             maxlength="80"
             required
         /></label>
+        <details id="new-game-position">
+          <summary>Start from a CGP position</summary>
+          <label for="new-game-cgp">CGP</label>
+          <textarea id="new-game-cgp" rows="3" spellcheck="false" autocomplete="off"></textarea>
+          <p class="hint">Player 1 is on turn. History starts at this position.</p>
+        </details>
+        <p id="new-game-error" role="alert"></p>
         <div id="computer-setup">
           <label
             >Time per player<select id="game-time">
