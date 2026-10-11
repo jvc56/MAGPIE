@@ -75,6 +75,13 @@ void test_word_map_embedding(void) {
   wmp->ld_fingerprint ^= 1;
   assert(!cmd_api_install_wmp(mp, wmp, wit));
   wmp->ld_fingerprint ^= 1;
+  char small_output[32];
+  FILE *limited_stream = fmemopen(small_output, sizeof(small_output), "wb");
+  assert(limited_stream);
+  setvbuf(limited_stream, NULL, _IONBF, 0);
+  const bool serialized = wmp_write_to_stream(wmp, limited_stream);
+  assert(!serialized);
+  fclose(limited_stream);
   const uint64_t hash = wit->kwg_hash;
   wit->kwg_hash ^= 1;
   assert(!cmd_api_install_wmp(mp, wmp, wit));

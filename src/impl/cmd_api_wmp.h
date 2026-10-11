@@ -13,6 +13,9 @@
 WMP *cmd_api_build_wmp(Magpie *mp, int threads, WMPBuildProgress *progress);
 WordInfoTable *cmd_api_build_wit(Magpie *mp);
 // Installs matching WMP/WIT together, transferring both only on success.
+// Installation enables -wmp and -wit. Before switching lexicons without disk
+// tables, issue "set -wit false -wmp false -lex NAME", then build/install the
+// new matching tables. The disabled options release the installed tables.
 bool cmd_api_install_wmp(Magpie *mp, WMP *wmp, WordInfoTable *wit);
 
 #endif

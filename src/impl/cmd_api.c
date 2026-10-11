@@ -1,4 +1,5 @@
 #include "cmd_api.h"
+#include "cmd_api_wmp.h"
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"

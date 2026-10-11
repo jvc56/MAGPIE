@@ -307,7 +307,7 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
   }
   word_info_table_write_to_stream(wit, stream, error_stack);
   bool written = error_stack_is_empty(error_stack);
-  int error_number = written ? 0 : errno;
+  int error_number = 0;
   if (fclose(stream) != 0) {
     if (written) {
       error_number = errno;
@@ -320,11 +320,13 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
   }
   if (!written) {
     (void)remove(temporary_filename);
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
-        get_formatted_string("could not write word info table %s: %s", filename,
-                             error_number != 0 ? strerror(error_number)
-                                               : "unknown I/O failure"));
+    if (error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+          get_formatted_string("could not write word info table %s: %s", filename,
+                               error_number != 0 ? strerror(error_number)
+                                                 : "unknown I/O failure"));
+    }
   }
   free(temporary_filename);
 }
