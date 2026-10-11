@@ -362,7 +362,7 @@ export function analysisCommands(position, mode, settings) {
       ? `snoprune ${prepared.racks[1] || "-"},${settings.playedMove}`
       : "sim";
     commands.push(
-      `set ${common} -plies ${settings.plies} -minplayiterations 500`,
+      `set ${common} -plies ${settings.plies} -minplayiterations 500 -threshold ${settings.useFullBudget ? "none" : "gk16"}`,
     );
     commands.push(simulation);
   }

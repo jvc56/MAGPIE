@@ -1,3 +1,4 @@
+import { computerSearchPlan } from "./computer-time.mjs";
 import { TILE_ORDERS, DEFAULT_TILE_ORDER, tileAlphabet, sortTiles, formatTileGroups } from "./tile-order.mjs";
 import { GameAction } from "./game-actions.mjs";
 import { installTileDrag } from "./tile-drag.mjs";
@@ -243,9 +244,13 @@ $("threads").max = budget.maxThreads;
 $("threads").value = budget.threads;
 $("tt-memory").value = budget.ttMiB;
 function settingsSummary() {
+  const time = isLive()
+    ? session.strategy === "kibitz" ? "Static equity"
+      : session.manageTime && session.time ? "Automatic time" : `${session.seconds}s per turn`
+    : `${$("seconds").value}s`;
   $("settings-summary").textContent = !isLive() && searchMode() !== "sim"
     ? `No time limit · ${$("threads").value} threads`
-    : `${$("seconds").value}s · ${$("plies").value} plies · ${$("threads").value} threads`;
+    : `${time} · ${$("plies").value} plies · ${$("threads").value} threads`;
 }
 for (const id of ["seconds", "candidates", "plies", "threads"])
   $(id).addEventListener("input", settingsSummary);
@@ -1009,6 +1014,7 @@ async function analyze(nextMode, options = {}) {
   try {
     const settings = readSettings();
     if (options.seconds !== undefined) settings.seconds = options.seconds;
+    settings.useFullBudget = !!options.useFullBudget;
     settings.solveToCompletion = !isLive() && ["peg", "endgame"].includes(nextMode);
     const analyzed = analysisPosition();
     if (
@@ -1038,7 +1044,7 @@ async function analyze(nextMode, options = {}) {
           settings.moves.push(settings.playedMove);
       }
     }
-    const commands = analysisCommands(analyzed, nextMode, settings);
+    let commands = analysisCommands(analyzed, nextMode, settings);
     commands[0] += ` -seed ${randomSeed()}`;
     const keepSelection = mode === nextMode && analysisBase?.some(row => row.move === selectedMove);
     mode = nextMode;
@@ -1073,6 +1079,24 @@ async function analyze(nextMode, options = {}) {
     if (canceled) {
       message("Stopped");
       return;
+    }
+    if (options.computerTime) {
+      // Downloads/builds and watch delays count against the clock too.
+      chargeClock();
+      const plan = currentComputerSearchPlan(mode);
+      settings.seconds = plan.seconds;
+      settings.useFullBudget = plan.useFullBudget;
+      if (plan.mode !== mode) {
+        mode = plan.mode;
+        activeAnalysisKey = cacheKey(mode);
+        analysisBase = null;
+        analysisBaseIterations = 0;
+        clearResults();
+        document.querySelectorAll("[data-mode]").forEach(button =>
+          button.classList.toggle("active", button.dataset.mode === mode));
+      }
+      commands = analysisCommands(analyzed, mode, settings);
+      commands[0] += ` -seed ${randomSeed()}`;
     }
     message(
       `${{ kibitz: "Generating moves", sim: "Simulating", peg: "Solving pre-endgame", endgame: "Solving endgame" }[mode]}…`,
@@ -2319,6 +2343,7 @@ function sessionOptions(kind) {
     challenge: $("challenge-rule").value,
     strategy: $("bot-analysis").value,
     seconds: Math.max(1, Math.min(120, +$("bot-seconds").value || 5)),
+    manageTime: $("bot-auto-time").checked,
     delay: Math.max(0, Math.min(30, +$("watch-delay").value || 0)),
     started: performance.now(),
   };
@@ -2521,19 +2546,21 @@ function scheduleComputer() {
     session.kind === "watch" ? session.delay * 1000 : 150,
   );
 }
+function currentComputerSearchPlan(mode) {
+  return computerSearchPlan(
+    {...session, remaining:session.remaining[position.onTurn]},
+    inventory(position).unseenCount + position.racks[0].length,
+    mode,
+  );
+}
 async function computerTurn(single = false) {
   if (!isLive() || busy || botRunning || (!single && session.paused)) return;
   botRunning = true;
   const currentSession = session;
   try {
-    const nextMode = session.strategy === "kibitz" ? "kibitz" : searchMode();
-    const budget = session.time
-      ? Math.min(
-          session.seconds,
-          Math.max(1, session.remaining[position.onTurn] / 20),
-        )
-      : session.seconds;
-    const complete = await analyze(nextMode, { seconds: budget });
+    chargeClock();
+    const plan = currentComputerSearchPlan(session.strategy === "kibitz" ? "kibitz" : searchMode());
+    const complete = await analyze(plan.mode, {...plan, computerTime:true});
     if (
       session !== currentSession ||
       session.finished ||
@@ -2561,6 +2588,10 @@ function updateGameSetup() {
   $("computer-setup").hidden = kind === "record";
   $("human-side").closest("label").hidden = kind !== "play";
   $("watch-delay").closest("label").hidden = kind !== "watch";
+  const staticPlay = $("bot-analysis").value === "kibitz";
+  const timed = Number($("game-time").value) > 0;
+  $("bot-auto-time").disabled = !timed || staticPlay;
+  $("bot-seconds").disabled = staticPlay || (timed && $("bot-auto-time").checked);
   document.querySelectorAll("[data-game-kind]").forEach((button) => {
     button.setAttribute(
       "aria-pressed",
@@ -2588,6 +2619,8 @@ for (const id of ["player-one-name", "player-two-name"]) {
     $(id).dataset.custom = "true";
   });
 }
+for (const id of ["game-time", "bot-analysis", "bot-auto-time"])
+  $(id).addEventListener("change", updateGameSetup);
 $("game-kind").addEventListener("change", updateGameSetup);
 $("human-side").addEventListener("change", updateGameSetup);
 document.querySelectorAll("[data-game-kind]").forEach((button) => {

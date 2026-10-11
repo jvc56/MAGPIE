@@ -1794,3 +1794,14 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 }
 .new-game-actions .primary { margin-top: 0; }
 #new-game-status { color: var(--muted); font-size: 13px; }
+
+#new-game-form .auto-time-option {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+#new-game-form .auto-time-option input { width: auto; margin: 0; padding: 0; flex-shrink: 0; }
+.auto-time-option:has(:disabled),
+.advanced-game-options label:has(#bot-seconds:disabled) { opacity: 0.5; }

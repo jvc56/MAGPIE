@@ -13,6 +13,7 @@ test('settings stay locked between computer searches and unlock after pausing', 
   await page.locator('#new-game').click();
   await page.locator('[data-game-kind="watch"]').click();
   await page.locator('.game-options > summary').click();
+  await page.locator('#bot-auto-time').uncheck();
   await page.locator('#bot-seconds').fill('1');
   await page.locator('#watch-delay').fill('1');
   await page.locator('#new-game-form button.primary').click();
