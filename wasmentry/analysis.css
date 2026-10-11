@@ -94,9 +94,17 @@ button {
   cursor: pointer;
   padding: 7px 11px;
 }
-button:hover:not(:disabled):not(.square):not(.rack-tile) {
-  border-color: var(--accent);
-  background: var(--hover);
+/* Emphasize button edges without changing fills or shifting the layout.
+   Tile and board interactions keep their own cursor/selection treatments. */
+@media (hover: hover) {
+  button:where(:hover:not(:disabled):not(.square):not(.rack-tile)) {
+    outline: 2px solid var(--accent);
+    outline-offset: 0;
+  }
+}
+button:where(:active:not(:disabled):not(.square):not(.rack-tile)) {
+  outline: 3px solid var(--accent);
+  outline-offset: 0;
 }
 button:disabled,
 select:disabled,
@@ -848,10 +856,6 @@ dialog label {
   color: var(--bg);
   font-weight: 600;
   margin-top: 14px;
-}
-.primary:hover:not(:disabled) {
-  background: var(--accent);
-  filter: brightness(0.92);
 }
 body.busy #status:before {
   content: "";
