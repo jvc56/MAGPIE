@@ -47,7 +47,8 @@ void test_embedding_lifecycle(void) {
 void test_fileproxy_cache(void) {
   ErrorStack *path_errors = error_stack_create();
   assert(fileproxy_file_exists(".//test/fixtures/replay.gcg"));
-  FILE *path_stream = stream_from_filename(".//test/fixtures/replay.gcg", path_errors);
+  FILE *path_stream =
+      stream_from_filename(".//test/fixtures/replay.gcg", path_errors);
   assert(path_stream != NULL);
   assert(error_stack_is_empty(path_errors));
   fclose(path_stream);
