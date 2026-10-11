@@ -40,6 +40,7 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
     log_fatal("attempted to get stream for null filename");
     return NULL;
   }
+  const char *original_filename = filename;
   filename = cache_filename(filename);
   cpthread_mutex_lock(&cache_mutex);
   for (int entry_idx = 0; entry_idx < file_cache.num_items; entry_idx++) {
@@ -55,7 +56,7 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
             file_cache.num_items);
   cpthread_mutex_unlock(&cache_mutex);
   FILE *stream;
-  stream = fopen_safe(filename, "r", error_stack);
+  stream = fopen_safe(original_filename, "r", error_stack);
   return stream;
 }
 
@@ -129,6 +130,7 @@ void fileproxy_destroy_cache(void) {
 }
 
 bool fileproxy_file_exists(const char *filename) {
+  const char *original_filename = filename;
   filename = cache_filename(filename);
   cpthread_mutex_lock(&cache_mutex);
   // Check cache first
@@ -140,5 +142,5 @@ bool fileproxy_file_exists(const char *filename) {
   }
   cpthread_mutex_unlock(&cache_mutex);
   // Fall back to filesystem check
-  return access(filename, F_OK | R_OK) == 0;
+  return access(original_filename, F_OK | R_OK) == 0;
 }

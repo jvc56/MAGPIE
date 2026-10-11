@@ -45,6 +45,13 @@ void test_embedding_lifecycle(void) {
 }
 
 void test_fileproxy_cache(void) {
+  ErrorStack *path_errors = error_stack_create();
+  assert(fileproxy_file_exists(".//test/fixtures/replay.gcg"));
+  FILE *path_stream = stream_from_filename(".//test/fixtures/replay.gcg", path_errors);
+  assert(path_stream != NULL);
+  assert(error_stack_is_empty(path_errors));
+  fclose(path_stream);
+  error_stack_destroy(path_errors);
   // Exercise owned filenames/data, replacement during reads, and reuse.
   ErrorStack *error_stack = error_stack_create();
   for (int cycle_idx = 0; cycle_idx < 2; cycle_idx++) {
