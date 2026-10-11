@@ -296,6 +296,18 @@ char *browser_game_action(const char *text, const char *lexicon,
           0) {
         game_history_set_note_for_most_recent_event(
             config_get_game_history(config), note);
+        // Accept a note only if the exported record remains importable. Keep
+        // validation isolated from the live configuration and history cursor.
+        StringBuilder *record = string_builder_create();
+        string_builder_add_gcg(record, config_get_ld(config),
+                               config_get_game_history(config), false);
+        Config *check = config_create(&args, error_stack);
+        if (error_stack_is_empty(error_stack)) {
+          config_parse_gcg_string(check, string_builder_peek(record),
+                                  config_get_game_history(check), error_stack);
+        }
+        config_destroy(check);
+        string_builder_destroy(record);
       } else {
         error_stack_push(
             error_stack, ERROR_STATUS_NOTE_NO_GAME_EVENTS,

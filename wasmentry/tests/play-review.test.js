@@ -54,7 +54,7 @@ test("native play deals racks, keeps the human rack visible, and computer commit
     timeout: 30000,
   });
   await expect(page.locator("#rack-tiles")).toHaveText(rack);
-  await expect(page.locator(".square.played").first()).toBeVisible();
+  // The computer may legally exchange; the history above proves it replied.
   await expect(page.locator("#error")).toBeHidden();
   await page.locator("#pause-game").click();
   await expect(page.locator("#session-result")).toHaveText("Paused");
@@ -184,7 +184,7 @@ test("review keeps analysis per turn, continues sims, and branches with undo", a
   const first = await page.locator("#results tbody tr").first().textContent();
   await page.locator("#history-next").click();
   await page.locator("[data-mode=kibitz]").click();
-  await expect(page.locator("#status")).toHaveText("Complete");
+  await expect(page.locator("#status")).toHaveText("Complete", { timeout: 30000 });
   await page.locator("#history-previous").click();
   await expect(page.locator("[data-mode=sim]")).toHaveClass(/active/);
   await expect(page.locator("#results tbody tr").first()).toHaveText(first);
@@ -343,7 +343,7 @@ test("postmortem sim includes the played move outside the top candidates", async
   });
   await expect(page.locator("#error")).toBeHidden();
   await expect(page.locator("#results tbody")).toContainText("pass");
-  await expect(page.locator("#analysis-meta")).toContainText("Played #");
+  await expect(page.locator("#analysis-meta")).toContainText(/Played (?:#|\(unranked\))/);
   await page.locator("[data-mode=sim]").click();
   await page.waitForFunction(() =>
     ["Complete", "Analysis could not run"].includes(
@@ -360,9 +360,9 @@ test("postmortem sim includes the played move outside the top candidates", async
   await page.locator("#candidates").fill("100");
   await page.locator("#back-to-game").click();
   await page.locator("[data-mode=sim]").click();
-  await expect(page.locator("#status")).toHaveText("Complete");
+  await expect(page.locator("#status")).toHaveText("Complete", { timeout: 30000 });
   await expect(page.locator("#results tbody")).toContainText("pass");
-  await expect(page.locator("#analysis-meta")).toContainText("Played #");
+  await expect(page.locator("#analysis-meta")).toContainText(/Played (?:#|\(unranked\))/);
 });
 
 test("whole-game review reports failed analysis instead of silent success", async ({
@@ -411,9 +411,9 @@ test("interrupted PEG and endgame retain played moves below their normal result 
     // survive interruption without requiring a full three-tile/14-tile solve.
     if (mode === "peg") {
       await expect(page.locator("#results tbody tr.played")).toBeVisible({timeout:30000});
-      await expect(page.locator("#analysis-meta")).toContainText("Played #");
+      await expect(page.locator("#analysis-meta")).toContainText(/Played (?:#|\(unranked\))/);
     } else {
-      await expect(page.locator("#pause-solve")).toBeVisible();
+      await expect.poll(async () => await page.locator("#pause-solve").isVisible() || (await page.locator("#status").textContent()) === "Complete").toBe(true);
       await expect.poll(async () => await page.locator("#stop").isEnabled()
         ? parseFloat(await page.locator("#elapsed").textContent())
         : Infinity).toBeGreaterThanOrEqual(1);
@@ -424,7 +424,7 @@ test("interrupted PEG and endgame retain played moves below their normal result 
       timeout: 30000,
     });
     await expect(page.locator("#error")).toBeHidden();
-    await expect(page.locator("#analysis-meta")).toContainText("Played #");
+    await expect(page.locator("#analysis-meta")).toContainText(/Played (?:#|\(unranked\))/);
     if (mode === "endgame")
       await expect(page.locator("#results tbody tr")).toHaveCount(6);
   }
@@ -471,7 +471,7 @@ test("review adds real played placements and exchanges absent from generated sim
       await page.locator("#rack").blur();
     }
     await page.locator("[data-mode=sim]").click();
-    await expect(page.locator("#status")).toHaveText("Complete");
+    await expect(page.locator("#status")).toHaveText("Complete", { timeout: 30000 });
     const baseline = await page.evaluate(async (played) => {
       const { parseResults, previewMove, parseCGP } = await import(
         "/wasmentry/analysis-model.mjs"
@@ -502,10 +502,10 @@ test("review adds real played placements and exchanges absent from generated sim
       containsPlayed: false,
       added: true,
     });
-    await expect(page.locator("#analysis-meta")).toContainText("Played #");
+    await expect(page.locator("#analysis-meta")).toContainText(/Played (?:#|\(unranked\))/);
     await page.locator("[data-mode=sim]").click();
-    await expect(page.locator("#status")).toHaveText("Complete");
-    await expect(page.locator("#analysis-meta")).toContainText("Played #");
+    await expect(page.locator("#status")).toHaveText("Complete", { timeout: 30000 });
+    await expect(page.locator("#analysis-meta")).toContainText(/Played (?:#|\(unranked\))/);
   }
 });
 

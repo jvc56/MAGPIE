@@ -2,7 +2,8 @@
 Module['warmThreads'] = async function(count) {
   var workers = [];
   while (PThread.unusedWorkers.length < count) {
-    var worker = PThread.allocateUnusedWorker();
+    PThread.allocateUnusedWorker();
+    var worker = PThread.unusedWorkers[PThread.unusedWorkers.length - 1];
     workers.push(worker);
   }
   for (var idle of PThread.unusedWorkers) {

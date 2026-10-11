@@ -58,6 +58,12 @@ static void test_cgp_start(void) {
   assert(has_substring(failure, "\"error\":"));
   free(failure);
   free(invalid);
+  char *pass_start =
+      get_formatted_string("%s#cgp %s AEINRST/BCDFGHJ 100/80 5\n", EMPTY_GAME,
+                           string_builder_peek(board));
+  assert_success(browser_game_action(pass_start, "CSW24", 0, "AEINRST", "pass",
+                                     "", BROWSER_GAME_COMMIT, "", 0, 0, 0));
+  free(pass_start);
   // A normal import after a CGP/error must not inherit its starting board.
   assert_success(browser_game_import_gcg(EMPTY_GAME, "CSW24"));
   free(record);
@@ -97,6 +103,15 @@ void test_browser_game(void) {
                                    "", 0, 0, 0);
   assert(has_substring(note, "quote \\\""));
   assert_success(note);
+  const char *bad_notes[] = {"\nsecond line", "Plan:\n#identify trouble"};
+  for (int index = 0; index < 2; index++) {
+    char *rejected =
+        browser_game_action(opening_game, "CSW24", 1, "", "", bad_notes[index],
+                            BROWSER_GAME_NOTE, "", 0, 0, 0);
+    assert(has_substring(rejected, "\"error\":"));
+    free(rejected);
+    assert_success(browser_game_import_gcg(opening_game, "CSW24"));
+  }
   assert_success(browser_game_action(EMPTY_GAME, "CSW24", 0, "", "", "",
                                      BROWSER_GAME_DEAL, initial_cgp, 42, 0, 0));
   assert_success(browser_game_action(EMPTY_GAME, "CSW24", 0, "AEINRST",

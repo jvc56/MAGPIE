@@ -6,7 +6,7 @@ The existing `test-worker.html` remains available for diagnostics.
 
 ## Build and run
 
-Install Emscripten (tested with 4.0.16) and activate its environment, then:
+Install Emscripten (pinned to 6.0.12 in release-build.json and CI) and activate its environment, then:
 
 ```sh
 ./download_data.sh
@@ -298,44 +298,18 @@ Before release, separately check real iPhone/iPad Safari and a low-memory Androi
 Chrome device, including background/resume and memory pressure. Browser-process
 termination by the OS cannot be caught by the page.
 
-## Playing UI audit games with the native playfinder
+## Game and review regression tests
 
-Build the CLI with `make magpie BUILD=no_pgo_release`, install the browser
-requirements above, and start the localhost preview. In another terminal:
+Run the maintained Playwright suites with `npx playwright test play-review.test.js saved-analysis.test.js review-fixes.test.js` from `wasmentry/`. These exercise
+live games, history, saved analyses, candidate insertion and postmortem solvers.
+The obsolete one-off play-games/review-games scripts were retired because they
+used removed notation controls and bypassed the startup dialog.
+
+The native playfinder remains available:
 
 ```sh
 node wasmentry/qa/playfinder.mjs '15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0 -lex CSW24'
-node wasmentry/qa/play-games.mjs --games 10 --output /tmp/magpie-blitz-qa
 ```
-
-The playfinder returns JSON using the native CLI's best static-equity move.
-The game driver reads the visible board/rack and enters those moves through
-normal browser controls, against the browser's Sim / solve computer. It uses
-real three-minute clocks, no overtime, five seconds per computer move, and
-alternates first player and desktop/phone layouts. It exercises notation,
-tap-to-place, board typing, blanks, exchanges, pause/settings/resume, history,
-and GCG save/reload. It never supplies the hidden opposing rack to the CLI.
-This audits interaction reliability, not playing strength or engine speed.
-
-Each game produces GCG, JSON diagnostics and a final screenshot. On failure it
-saves the partial record and screenshot, then stops for investigation. Use
-`--start N` to resume the numbered series after preserving the failed attempt;
-`--url` selects another locally served build. No clocks are fast-forwarded.
-
-To audit postmortem review of those saved games:
-
-```sh
-node wasmentry/qa/review-games.mjs --input /tmp/magpie-blitz-qa --output /tmp/magpie-review-qa --games 10
-```
-
-This selects every decision in each GCG and runs its bag-appropriate search,
-using one second, ten sim candidates, and four plies. It checks errors, board
-preservation, played-move inclusion in every mode, cached results and mode selection,
-continuing simulations, candidate previews, endgame PV navigation, and one
-whole-game review. Desktop and phone layouts alternate. JSON reports include
-engine commands and displayed results; screenshots cover the first occurrence
-of each phase in each game. `--url` selects another locally served build.
-The short searches exercise the UI and are not a playing-strength evaluation.
 
 Review always requests the played move alongside the search candidates. Sims
 add it beyond the static cutoff and protect it from pruning, including at the

@@ -235,7 +235,9 @@ export function parseResults(text, mode) {
     const pattern = new RegExp(
       `^\\s*(${MOVE})\\s+\\+?(\\d+)(?:\\s+\\([^)]*\\))?\\s+(-?\\d+)\\s+(-?\\d+)(.*)$`,
     );
-    for (const line of text.split("\n")) {
+    for (const rawLine of text.split("\n")) {
+      const appendedPlayed = /^\s*played\s/.test(rawLine);
+      const line = rawLine.replace(/^(\s*)played\s+/, "$1");
       const pass = line.match(
         /^\s*(pass)\s+(?:\([^)]*\)\s+)?(-?\d+)\s+(-?\d+)(.*)$/,
       );
@@ -244,7 +246,8 @@ export function parseResults(text, mode) {
         : line.match(pattern);
       if (m)
         rows.push({
-          rank: rows.length + 1,
+          rank: appendedPlayed ? null : rows.length + 1,
+          appendedPlayed,
           move: m[1],
           score: +m[2],
           value: +m[3],

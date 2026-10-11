@@ -9,7 +9,9 @@ on:
       - wasmentry/package-lock.json
       - wasmentry/fetch_preview_data.py
       - wasmentry/release-build.json
-      - wasmentry/qa/release-smoke.mjs
+      - "wasmentry/**"
+      - Makefile-wasm
+      - "src/**"
   workflow_dispatch:
     inputs:
       version:

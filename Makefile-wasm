@@ -1,3 +1,5 @@
+# Supported Emscripten: 6.0.12 (also pinned in both WASM CI workflows).
+# warm-threads.js accesses PThread internals; validate it when upgrading.
 SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := wasmentry

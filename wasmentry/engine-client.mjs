@@ -16,11 +16,14 @@ export class EngineClient extends EventTarget {
     this.ready.catch(() => {});
     this.worker.onmessage = ({ data }) => {
       if (data.type === "fatal" || data.type === "init_failed") {
-        this.fail(new Error(`The engine stopped. Reload to try again. ${data.text}`));
+        this.fail(new Error(`The engine stopped. Reload to try again. ${this.lastFatalLog || data.text}`));
         return;
       }
       if (data.requestId != null && data.requestId !== this.pending?.id) return;
-      if (data.type === "log") this.lastLog = data.text;
+      if (data.type === "log") {
+        this.lastLog = data.text;
+        if (/FATAL/.test(data.text)) this.lastFatalLog = data.text;
+      }
       this.dispatchEvent(new CustomEvent("message", { detail: data }));
       if (data.type === "ready") this.resolveReady();
       if (data.type === "error" || data.type === "init_failed") {
@@ -49,6 +52,8 @@ export class EngineClient extends EventTarget {
     this.loadedFiles.clear();
     this.initialized = false;
     this.wmpKey = null;
+    this.lastFatalLog = "";
+    this.wmpCacheAttempted = false;
     this.wmpCached = false;
     this.wmpUnavailable = false;
   }
@@ -108,11 +113,13 @@ export class EngineClient extends EventTarget {
   }
   async prepareWMP(lexicon, source, threads, cache = false) {
     const key = `${lexicon}:${source}`;
-    if (this.wmpKey === key && (!cache || this.wmpCached || this.wmpUnavailable || source === "off")) return;
+    if (this.wmpKey === key && (!cache || this.wmpCacheAttempted || this.wmpCached || this.wmpUnavailable || source === "off")) return;
     this.wmpKey = null;
     // Disable the old map before changing lexica so Config never tries to
     // discover an optional WMP on disk. Installing transfers the new map.
-    await this.run([`set -wit false -wmp false -lex ${lexicon}`]);
+    const disabled = await this.run([`set -wit false -wmp false -lex ${lexicon}`]);
+    if (disabled.stopped) return;
+    this.wmpCacheAttempted = false;
     if (source !== "off") {
       const result = await this.request("prepare_wmp", {
         lexicon, source, threads, cache,
@@ -120,6 +127,7 @@ export class EngineClient extends EventTarget {
       }, "wmp_ready");
       if (result.stopped) return;
       this.wmpCached = result.cached;
+      this.wmpCacheAttempted = cache;
       this.wmpUnavailable = !!result.unavailable;
     }
     this.wmpKey = key;

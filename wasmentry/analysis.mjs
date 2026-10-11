@@ -105,6 +105,7 @@ function sortCurrentRack() {
 
 let simSelection = new Set();
 let cacheWrites = Promise.resolve();
+const privateAnalysisKeys = new Set();
 function analysisPosition() {
   const analyzed = structuredClone(position);
   if (isLive() && inventory(position).bagCount > 0) analyzed.racks[1] = "";
@@ -125,6 +126,10 @@ function retainAnalysis(key = cacheKey()) {
     plies: Number($("plies").value), savedAt: Date.now(),
   };
   analysisCache.set(key, saved);
+  if (hiddenLiveGame()) {
+    privateAnalysisKeys.add(key);
+    return; // Keep live-game analysis in memory until game end.
+  }
   cacheWrites = cacheWrites.then(() => saveAnalysis(key, saved)).catch(() => {
     $("analysis-storage-warning").hidden = false;
   });
@@ -386,6 +391,7 @@ function clearResults() {
   renderResults();
 }
 function remember() {
+  if (hiddenLiveGame()) return;
   const cgp = toCGP(position);
   recent = [
     snapshotPosition(position),
@@ -563,8 +569,8 @@ compactPool.addEventListener("change", setPoolExpansion);
 setPoolExpansion();
 
 function renderPosition() {
-  $("rack").value = position.racks[0];
-  $("opponent-rack").value = position.racks[1];
+  $("rack").value = hiddenLiveGame() && !humanTurn() ? "" : position.racks[0];
+  $("opponent-rack").value = hiddenLiveGame() ? "" : position.racks[1];
   $("score").value = position.scores[0];
   $("opponent-score").value = position.scores[1];
   $("lexicon").value = position.lexicon;
@@ -1553,6 +1559,7 @@ async function loadGame(file, pastedText = "") {
     progress("engine.import");
     const { game } = await engine.importGCG(text, lexicon);
     progress("engine.imported", { events: game.positions.length - 1 });
+    for (const saved of game.positions) parseCGP(saved.cgp, lexicon);
     restoreFinishedSession(game, text);
     game.filename = (file?.name || "pasted-game.gcg").replace(/\.gcg$/i, "") + ".gcg";
     gameUndo = [];
@@ -1618,7 +1625,7 @@ document.addEventListener("keydown", (event) => {
     }
     return;
   }
-  if (event.key === "Escape" && busy && !$("stop").disabled) {
+  if (event.key === "Escape" && busy && !botRunning && !$("stop").disabled) {
     event.preventDefault();
     stop();
     return;
@@ -1635,6 +1642,12 @@ function recordedBoardMatches() {
     JSON.stringify(position.scores) === JSON.stringify(saved.scores)
   );
 }
+function privateHistoryLine(line) {
+  if (!hiddenLiveGame()) return line;
+  const nick = recordedGame.gcg.match(new RegExp(`^#player${2 - session.human}\\s+(\\S+)`, "m"))?.[1];
+  if (!line.startsWith(`>${nick}:`)) return line;
+  return line.replace(/(\s)-([A-Z?]+)(?=\s)/, (_, space, tiles) => `${space}-${tiles.length}`);
+}
 function renderHistoryOptions() {
   if (!recordedGame) return;
   const game = recordedGame;
@@ -1647,7 +1660,7 @@ function renderHistoryOptions() {
       const colon = line.indexOf(":");
       const player = line.slice(1, colon);
       const play = displayMove(formatHistoryPlay(
-        line, restorePosition(game.positions[index]),
+        privateHistoryLine(line), restorePosition(game.positions[index]),
       ));
       return new Option(
         `${index + 1}. ${play} · ${player}`,
@@ -1743,7 +1756,7 @@ function scheduleDraftCheck() {
       .then(({ game }) => {
         if (generation !== previewGeneration || busy) return;
         $("move-feedback").textContent =
-          `${game.score} points${game.warning.trim() ? " · Word not in lexicon" : ""}`;
+          `${game.score} points${game.warning.trim() && (!isLive() || session.challenge === "void") ? " · Word not in lexicon" : ""}`;
       })
       .catch((failure) => {
         if (generation === previewGeneration && !busy)
@@ -2063,9 +2076,12 @@ $("sort-rack").addEventListener("click", () => {
   sortCurrentRack();
   renderPosition();
 });
-$("new-game").addEventListener("click", () =>
-  $("new-game-dialog").showModal(),
-);
+$("new-game").addEventListener("click", () => {
+  $("new-game-cgp").value = "";
+  $("new-game-error").textContent = "";
+  validateNewGameCGP();
+  $("new-game-dialog").showModal();
+});
 $("cancel-new-game").addEventListener("click", () =>
   $("new-game-dialog").close(),
 );
@@ -2081,7 +2097,24 @@ $("new-game-form").addEventListener("submit", async (event) => {
   if (!valid) return;
   $("new-game-error").textContent = "";
   const lexicon = startingPosition?.lexicon || position.lexicon;
-  if (isLive() && !(await confirmGame("Start a new game?", "The current game will end and be replaced.", "New game"))) return;
+  const previousSession = session;
+  const resumeSession = isLive() && !session.paused;
+  if (resumeSession) {
+    chargeClock();
+    session.paused = true;
+    clearTimeout(botTimer);
+    renderSession();
+  }
+  if (isLive() && !(await confirmGame("Start a new game?", "The current game will end and be replaced.", "New game"))) {
+    if (resumeSession && session === previousSession) {
+      session.paused = false;
+      session.started = performance.now();
+      renderSession();
+      scheduleComputer();
+    }
+    return;
+  }
+  if (busy) return;
   $("new-game-dialog").close();
   let focusRack = false;
   try {
@@ -2129,6 +2162,7 @@ $("new-game-form").addEventListener("submit", async (event) => {
     }
   } catch (failure) {
     $("new-game-error").textContent = failure.message;
+    message("Game could not be started");
     $("new-game-dialog").showModal();
   } finally {
     setBusy(false);
@@ -2488,6 +2522,13 @@ function finishSession(reason) {
   canceled = true;
   engine?.stop();
   session.finished = true;
+  for (const key of privateAnalysisKeys) {
+    const saved = analysisCache.get(key);
+    if (saved) cacheWrites = cacheWrites.then(() => saveAnalysis(key, saved)).catch(() => {
+      $("analysis-storage-warning").hidden = false;
+    });
+  }
+  privateAnalysisKeys.clear();
   recordedGame.ended = true;
   session.paused = true;
   clearTimeout(botTimer);
@@ -2572,10 +2613,10 @@ async function computerTurn(single = false) {
     if (
       session !== currentSession ||
       session.finished ||
-      (!single && session.paused) ||
-      !complete
+      (!single && session.paused)
     )
       return;
+    if (!complete) throw new Error($("error").textContent || "Computer analysis failed. Resume to retry.");
     const move = results[0]?.move;
     if (!move) throw new Error("The computer did not return a move.");
     await submitMove(move, true);
@@ -2599,6 +2640,14 @@ function validateNewGameCGP() {
   try {
     if (cgp) {
       startingPosition = parseCGP(cgp, position.lexicon);
+      const { unseen, unseenCount } = inventory(startingPosition);
+      if (!startingPosition.racks[1] && unseenCount <= 7) {
+        startingPosition.racks[1] = Object.entries(unseen).map(([tile, count]) => tile.repeat(count)).join("");
+      }
+      const remaining = unseenCount - startingPosition.racks[1].length;
+      if (remaining === 0 && startingPosition.racks.some(rack => !rack)) {
+        throw new Error("This position has already ended.");
+      }
       if (startingPosition.zeros >= 6) throw new Error("This position has already ended.");
     }
   } catch (error) {
@@ -2821,11 +2870,11 @@ function playedAssessment() {
       : mode === "endgame"
         ? "spread"
         : "equity";
-  if (mode === "peg" && busy) return `Played #${row.rank} · protected`;
+  if (mode === "peg" && busy) return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · protected`;
   if (mode === "peg" && row.depth !== results[0].depth)
-    return `Played #${row.rank} · comparison needs equal depth`;
+    return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · comparison needs equal depth`;
   const loss = Math.max(0, results[0][metric] - row[metric]);
-  return `Played #${row.rank} · ${format(loss, mode === "endgame" ? 0 : 2)} ${metric === "win" ? "win %-points" : metric} lost`;
+  return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · ${format(loss, mode === "endgame" ? 0 : 2)} ${metric === "win" ? "win %-points" : metric} lost`;
 }
 function gameEvents() {
   return (
@@ -2850,7 +2899,7 @@ function renderReviewTable() {
     const parsed = line.match(/^>([^:]+):\s+(.*)$/);
     const player =
       parsed[1] === recordedGame.gcg.match(/^#player2\s+(\S+)/m)?.[1] ? 1 : 0;
-    const parts = historyPlayParts(line, restorePosition(recordedGame.positions[index]));
+    const parts = historyPlayParts(privateHistoryLine(line), restorePosition(recordedGame.positions[index]));
     if (!cells || (!parts.adjustment && player <= previousPlayer)) {
       const row = document.createElement("tr");
       const number = document.createElement("td");
@@ -2961,7 +3010,9 @@ async function addSimCandidate() {
       if (detail.type === "output" && detail.command === "shmoves") text = detail.text;
     };
     engine.addEventListener("message", listener);
-    const commands = analysisCommands(analysisPosition(), "kibitz", {...readSettings(), wmp:false}).slice(0, 2);
+    const settings = readSettings();
+    await engine.prepareWMP(position.lexicon, settings.wmpSource, settings.threads, $("wmp-cache-enabled").checked);
+    const commands = analysisCommands(analysisPosition(), "kibitz", settings).slice(0, 2);
     await engine.run([...commands, `addmoves ${move}`, "shmoves"]);
     if (generation !== positionGeneration) return;
     const candidate = parseResults(text, "kibitz")[0];
@@ -3151,7 +3202,7 @@ function renderContextHint() {
 for (const type of ["pointerover", "focusin"]) {
   document.addEventListener(type, (event) => {
     if (event.pointerType === "touch") return;
-    hintTarget = contextTarget(event.target);
+    hintTarget = contextTarget(event.target) || contextTarget(document.activeElement);
     renderContextHint();
   });
 }

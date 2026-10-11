@@ -24,6 +24,7 @@ try {
   await expect(page.locator("#status")).toHaveText("Engine ready", { timeout: 30000 });
   assert.equal(await page.evaluate(() => crossOriginIsolated), true);
   assert.equal(navigations, 1, "Startup must not reload to install a service worker");
+  await page.locator("#cancel-new-game").click();
   await page.locator("#open-analysis-settings").click();
   await expect(page.locator('#wmp-source option[value="download"]')).toHaveCount(0);
   await expect(page.locator("#wmp-cache-enabled")).not.toBeChecked();

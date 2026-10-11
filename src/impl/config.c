@@ -6595,6 +6595,25 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
   return return_str;
 }
 
+char *config_commit_move(Config *config, const char *move_text,
+                         ErrorStack *error_stack) {
+  StringSplitter *parts = split_string_by_whitespace(move_text, true);
+  const int num_parts = string_splitter_get_number_of_items(parts);
+  if (num_parts < 1 || num_parts > 2) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_COMMIT_EXTRANEOUS_ARG,
+        string_duplicate(
+            "expected a move position and tiles, pass, or exchange"));
+    string_splitter_destroy(parts);
+    return empty_string();
+  }
+  char *result = impl_commit_with_pos_args(
+      config, error_stack, string_splitter_get_item(parts, 0),
+      num_parts == 2 ? string_splitter_get_item(parts, 1) : NULL, NULL, false);
+  string_splitter_destroy(parts);
+  return result;
+}
+
 char *impl_commit(Config *config, ErrorStack *error_stack) {
   const char *commit_pos_arg_1 =
       config_get_parg_value(config, ARG_TOKEN_COMMIT, 0);

@@ -666,7 +666,7 @@
             <p>A CGP describes a position in four space-separated fields:</p>
             <code>board rack1/rack2 score1/score2 scoreless-turns</code>
             <p>Board: 15 rows separated by <code>/</code>. Numbers count empty squares; letters are tiles, with lowercase letters for designated blanks. For example, <code>7A7</code> is a row with A in the center.</p>
-            <p>Racks: uppercase letters and <code>?</code> for blanks; either rack can be empty. Scores and racks list Player 1 first. The last field counts consecutive scoreless turns. Optionally append <code>-lex CSW24</code> or <code>-lex NWL23</code>; otherwise the current lexicon is used.</p>
+            <p>Racks: uppercase letters and <code>?</code> for blanks; an empty opponent rack means unknown (in an endgame it is inferred from the unseen tiles). Scores and racks list Player 1 first. The last field counts consecutive scoreless turns. Optionally append <code>-lex CSW24</code> or <code>-lex NWL23</code>; otherwise the current lexicon is used.</p>
             <p>Player 1 is on turn. History starts at this position. Leave empty to start a new board.</p>
           </div>
           <textarea id="new-game-cgp" rows="3" spellcheck="false" autocomplete="off" aria-describedby="new-game-cgp-help new-game-cgp-status"></textarea>

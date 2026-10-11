@@ -238,6 +238,10 @@ void config_convert(const Config *config, ConversionResults *results,
                     ErrorStack *error_stack);
 void config_parse_gcg(Config *config, const char *gcg_filename,
                       GameHistory *game_history, ErrorStack *error_stack);
+// Commit notation directly, without interpreting tokens as configuration flags.
+// Caller owns the returned warning string. Does not autosave.
+char *config_commit_move(Config *config, const char *move_text,
+                         ErrorStack *error_stack);
 void config_parse_gcg_string(Config *config, const char *gcg_string,
                              GameHistory *game_history,
                              ErrorStack *error_stack);

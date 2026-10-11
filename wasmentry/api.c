@@ -201,8 +201,9 @@ static void *prepare_wmp(void *unused) {
     FILE *stream =
         open_memstream(&word_maps.wmp_export, &word_maps.wmp_export_size);
     if (stream) {
-      wmp_write_to_stream(word_maps.prepared_wmp, stream);
-      if (fclose(stream) != 0) {
+      const bool written = wmp_write_to_stream(word_maps.prepared_wmp, stream);
+      const int closed = fclose(stream);
+      if (!written || closed != 0) {
         free(word_maps.wmp_export);
         word_maps.wmp_export = NULL;
         word_maps.wmp_export_size = 0;

@@ -47,6 +47,9 @@ test('sims survive reload, accept a board play, and continue selected or all can
   await page.locator('#new-game-form button.primary').click();
   await page.locator('#rack').fill('AEINRST');
   await page.locator('#rack').dispatchEvent('change');
+  await page.locator('#open-analysis-settings').click();
+  await page.locator('#wmp-source').selectOption('build');
+  await page.locator('#back-to-game').click();
   await page.locator('[data-mode=sim]').click(); await complete(page);
   const original = await rows(page);
   expect(original.length).toBe(3);
