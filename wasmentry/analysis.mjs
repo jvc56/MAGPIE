@@ -33,6 +33,7 @@ import {
   rackSlots,
   reorderRack,
   sortRack,
+  shuffleRack,
   placeTile,
   moveNotation,
   normalizeMove,
@@ -586,7 +587,7 @@ function renderPosition() {
   ]) {
     const tally = document.createElement("span");
     tally.dataset.kind = kind;
-    tally.textContent = `${count} ${kind}`;
+    tally.textContent = `${count} ${count === 1 ? kind.slice(0, -1) : kind}`;
     $("unseen-counts").append(tally, " ");
   }
   $("unseen-tiles").replaceChildren();
@@ -1644,6 +1645,12 @@ function saveGameUndo() {
     });
   if (gameUndo.length > 20) gameUndo.shift();
 }
+function clearFinishedGameResult(game) {
+  // A postmortem branch is a new record, not the finished timed session.
+  // Keep the original result only in the undo snapshot, including on export.
+  session = null;
+  game.gcg = game.gcg.replace(/^#description Magpie finished: [^\n]*\n?/gm, "");
+}
 let resolveGameConfirmation = null;
 function finishGameConfirmation(confirmed) {
   const resolve = resolveGameConfirmation;
@@ -1828,10 +1835,12 @@ function entryKey(event) {
   if (event.key === " ") {
     event.preventDefault();
     vertical = !vertical;
+    let reflowError = "";
     // Like native entry, toggling direction reflows uncommitted tiles from
     // their first square, skipping fixed board tiles.
     if (draftTiles.length) {
       const previous = [...draftTiles];
+      const previousCursor = cursor && {...cursor};
       const first = previous[0];
       cursor = { row: first.row, col: first.col };
       let next = [];
@@ -1856,10 +1865,12 @@ function entryKey(event) {
       } catch (failure) {
         vertical = !vertical;
         draftTiles = previous;
-        error(failure.message);
+        cursor = previousCursor;
+        reflowError = failure.message;
       }
     }
     renderDraft();
+    if (reflowError) error(reflowError);
     focusCursor();
     return;
   }
@@ -1949,7 +1960,7 @@ async function submitMove(value = null, computer = false) {
         game.positions[index] = structuredClone(
           recordedGame.positions[index],
         );
-    }
+    } else clearFinishedGameResult(game);
     adoptGame(game, position.lexicon);
     if (isLive()) {
       session.started = performance.now();
@@ -2008,12 +2019,10 @@ $("confirm-exchange").addEventListener("click", () => {
 });
 $("shuffle-rack").addEventListener("click", () => {
   if (busy || (isLive() && !humanTurn())) return;
-  const rack = [...position.racks[0]];
-  for (let index = rack.length - 1; index > 0; index--) {
-    const other = Math.floor(Math.random() * (index + 1));
-    [rack[index], rack[other]] = [rack[other], rack[index]];
-  }
-  position.racks[0] = rack.join("");
+  const shuffled = shuffleRack(position.racks[0], draftTiles);
+  position.racks[0] = shuffled.rack;
+  draftTiles = shuffled.tiles;
+  rackChoice = null;
   renderPosition();
 });
 $("sort-rack").addEventListener("click", () => {
@@ -2164,6 +2173,7 @@ async function changeRecordedEvent(action) {
     });
     saveGameUndo();
     game.filename = recordedGame.filename;
+    if (action === GameAction.CHALLENGE) clearFinishedGameResult(game);
     adoptGame(game, restorePosition(recordedGame.positions[0]).lexicon);
     message(action === GameAction.NOTE ? "Note saved" : "Challenge recorded");
   } catch (failure) {
@@ -2320,12 +2330,23 @@ function formatClock(seconds) {
 function renderSession() {
   renderSettingsAvailability();
   const live = isLive();
+  for (const id of [
+    "rack", "opponent-rack", "score", "opponent-score", "edit", "clear",
+    "on-turn-player", "sample", "import",
+  ]) $(id).disabled = busy || !!live;
+  const entryLocked = busy || terminalPosition() ||
+    (live && (session.paused || !humanTurn()));
+  for (const id of ["shuffle-rack", "sort-rack", "play-move", "pass-move", "exchange-move", "recall-tiles"])
+    $(id).disabled = !!entryLocked;
   document.body.classList.toggle("playing", !!live);
   document.body.classList.toggle(
     "show-analysis",
     !live || session.kind === "watch" || $("show-live-analysis").checked,
   );
   $("play-session").hidden = !session;
+  $("session-controls").hidden = !live;
+  $("session-result").hidden = !!session?.finished &&
+    $("hide-spoilers").checked && !terminalPosition();
   $("position-editor").hidden = !!live;
   for (const [index, suffix] of ["one", "two"].entries()) {
     $("name-" + suffix).textContent =
@@ -2380,29 +2401,7 @@ function renderSession() {
   if ($("session-result").textContent !== sessionMessage)
     $("session-result").textContent = sessionMessage;
   if (live) {
-    $("shuffle-rack").disabled = busy || !humanTurn();
-    $("sort-rack").disabled = busy || !humanTurn();
-    for (const id of [
-      "rack",
-      "opponent-rack",
-      "score",
-      "opponent-score",
-      "edit",
-      "clear",
-      "on-turn-player",
-      "sample",
-      "lexicon",
-      "edit-history-move",
-    ])
-      $(id).disabled = true;
-    for (const id of [
-      "play-move",
-      "pass-move",
-      "exchange-move",
-      "recall-tiles",
-    ])
-      $(id).disabled = busy || session.paused || !humanTurn();
-    $("import").disabled = true;
+    $("edit-history-move").disabled = true;
     $("copy").hidden =
       session.kind === "play" && !$("show-live-analysis").checked;
   } else $("copy").hidden = false;
@@ -2714,6 +2713,7 @@ $("hide-spoilers").addEventListener("change", () => {
   restoreAnalysis();
   renderHistory();
   renderResults();
+  renderSession();
 });
 function playedMove(index = historyIndex) {
   const line = gameEvents()[index];

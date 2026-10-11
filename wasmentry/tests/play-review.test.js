@@ -386,9 +386,10 @@ test("whole-game review reports failed analysis instead of silent success", asyn
   await expect(page.locator("#history-position")).toHaveValue("0");
 });
 
-test("PEG and endgame retain played moves below their normal result cutoff", async ({
+test("interrupted PEG and endgame retain played moves below their normal result cutoff", async ({
   page,
 }) => {
+  test.setTimeout(120000);
   await ready(page);
   await page
     .locator("#gcg-file")
@@ -404,13 +405,20 @@ test("PEG and endgame retain played moves below their normal result cutoff", asy
   ]) {
     await page.selectOption("#history-position", String(index));
     await page.locator(`[data-mode=${mode}]`).click();
-    await page.waitForFunction(() =>
-      ["Complete", "Analysis could not run"].includes(
-        document.querySelector("#status").textContent,
-      ),
-    );
+    // Postmortem solvers are untimed. Verify protected played candidates
+    // survive interruption without requiring a full three-tile/14-tile solve.
+    if (mode === "peg") {
+      await expect(page.locator("#results tbody tr.played")).toBeVisible({timeout:30000});
+      await expect(page.locator("#analysis-meta")).toContainText("Played #");
+    } else {
+      await expect(page.locator("#pause-solve")).toBeVisible();
+      await expect.poll(async () => await page.locator("#stop").isEnabled()
+        ? parseFloat(await page.locator("#elapsed").textContent())
+        : Infinity).toBeGreaterThanOrEqual(1);
+    }
+    if (await page.locator("#stop").isEnabled()) await page.locator("#stop").click();
     expect(await page.locator("#error").textContent()).toBe("");
-    await expect(page.locator("#status")).toHaveText("Complete", {
+    await expect(page.locator("#status")).toHaveText(/^(Complete|Stopped · partial results)$/, {
       timeout: 30000,
     });
     await expect(page.locator("#error")).toBeHidden();

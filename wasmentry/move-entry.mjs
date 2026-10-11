@@ -131,9 +131,22 @@ export function reorderRack(rack, tiles, sourceIndex, gap) {
 // Sorting must carry reserved rack slots along with their staged board tiles,
 // including duplicate letters and designated blanks.
 export function sortRack(rack, tiles, tileOrder) {
-  const {indexes} = rackSlots(rack, tiles);
   const order = [...rack].map((_, index) => index)
     .sort((a, b) => compareTiles(rack[a], rack[b], tileOrder));
+  return applyRackOrder(rack, tiles, order);
+}
+
+export function shuffleRack(rack, tiles, random = Math.random) {
+  const order = [...rack].map((_, index) => index);
+  for (let index = order.length - 1; index > 0; index--) {
+    const other = Math.floor(random() * (index + 1));
+    [order[index], order[other]] = [order[other], order[index]];
+  }
+  return applyRackOrder(rack, tiles, order);
+}
+
+function applyRackOrder(rack, tiles, order) {
+  const {indexes} = rackSlots(rack, tiles);
   return {
     rack: order.map(index => rack[index]).join(""),
     tiles: tiles.map((tile, index) => ({...tile, rackIndex:order.indexOf(indexes[index])})),

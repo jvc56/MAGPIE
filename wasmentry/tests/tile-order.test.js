@@ -130,3 +130,50 @@ test("changing alphagram order keeps pending tiles and preserves subsequent manu
   await page.locator("#sort-rack").click();
   expect(await rackLetters(page)).toBe("??AAEBB");
 });
+
+test('shuffle preserves staged duplicate and blank slots when changing direction', async ({page}) => {
+  await page.goto('/wasmentry/');
+  await expect(page.locator('#status')).toHaveText('Engine ready');
+  await page.locator('#new-game').click();
+  await page.getByRole('button', {name:'Record a game',exact:true}).click();
+  await page.locator('#new-game-form button.primary').click();
+  await page.locator('#rack').fill('AABCDE?');
+  await page.locator('#rack').dispatchEvent('change');
+  await page.locator('#board [data-row="7"][data-col="7"]').click();
+  await page.keyboard.type('be');
+  await page.keyboard.press('Shift+Z');
+  // Reproducibly move every original slot rather than relying on a random
+  // shuffle to happen to change the slots occupied by pending tiles.
+  await page.evaluate(() => { Math.random = () => 0; });
+  await page.locator('#shuffle-rack').click();
+  await page.locator('#board [data-row="7"][data-col="10"]').focus();
+  await page.keyboard.press('Space');
+  for (const [row, letter] of [[7,'B'],[8,'E'],[9,'Z']])
+    await expect(page.locator(`#board [data-row="${row}"][data-col="7"] .tile-letter`)).toHaveText(letter);
+  await expect(page.locator('#error')).toBeHidden();
+  expect([...(await rackLetters(page))].sort().join('')).toBe('AACD');
+  await page.locator('#recall-tiles').click();
+  expect([...(await rackLetters(page))].sort().join('')).toBe('?AABCDE');
+  await page.getByRole('button',{name:'Tile B',exact:true}).click();
+  await page.locator('#shuffle-rack').click();
+  await expect(page.locator('#rack-tiles .chosen')).toHaveCount(0);
+});
+
+test('a direction change past the board edge keeps the move and explains the failure', async ({page}) => {
+  await page.goto('/wasmentry/');
+  await expect(page.locator('#status')).toHaveText('Engine ready');
+  await page.locator('#new-game').click();
+  await page.getByRole('button', {name:'Record a game',exact:true}).click();
+  await page.locator('#new-game-form button.primary').click();
+  await page.locator('#rack').fill('AEINRST');
+  await page.locator('#rack').dispatchEvent('change');
+  await page.locator('#board [data-row="14"][data-col="13"]').click();
+  await page.keyboard.type('at');
+  await page.locator('#board').focus();
+  await page.keyboard.press('Space');
+  await expect(page.locator('#error')).toBeVisible();
+  await expect(page.locator('#error')).toHaveText('The move runs past the board edge.');
+  await expect(page.locator('#board .pending .tile-letter')).toHaveText(['A','T']);
+  await page.locator('#recall-tiles').click();
+  expect(await rackLetters(page)).toBe('AEINRST');
+});
