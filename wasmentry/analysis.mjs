@@ -334,7 +334,7 @@ function setBusy(value) {
   value = value || Boolean(engine?.fatalError);
   if (value) tileDrag?.cancel();
   busy = value;
-  $("start-game").disabled = value;
+  validateNewGameCGP();
   $("new-game-open").disabled = value;
   if (!value) $("stop-wmp").hidden = true;
   document.body.classList.toggle("busy", value);
@@ -2077,18 +2077,9 @@ $("new-game-form").addEventListener("submit", async (event) => {
     $("player-two-name").value,
   ].map((name) => name.replace(/[\r\n\0]/g, " ").trim());
   if (players.some((name) => !name)) return;
-  let startingPosition = null;
+  const { valid, startingPosition } = validateNewGameCGP();
+  if (!valid) return;
   $("new-game-error").textContent = "";
-  try {
-    const cgp = $("new-game-cgp").value.trim();
-    if (cgp) {
-      startingPosition = parseCGP(cgp, position.lexicon);
-      if (startingPosition.zeros >= 6) throw new Error("This position has already ended.");
-    }
-  } catch (failure) {
-    $("new-game-error").textContent = failure.message;
-    return;
-  }
   const lexicon = startingPosition?.lexicon || position.lexicon;
   if (isLive() && !(await confirmGame("Start a new game?", "The current game will end and be replaced.", "New game"))) return;
   $("new-game-dialog").close();
@@ -2600,9 +2591,31 @@ async function computerTurn(single = false) {
     }
   }
 }
+function validateNewGameCGP() {
+  const input = $("new-game-cgp");
+  const cgp = input.value.trim();
+  let startingPosition = null;
+  let failure = "";
+  try {
+    if (cgp) {
+      startingPosition = parseCGP(cgp, position.lexicon);
+      if (startingPosition.zeros >= 6) throw new Error("This position has already ended.");
+    }
+  } catch (error) {
+    failure = error.message;
+  }
+  input.setAttribute("aria-invalid", String(Boolean(failure)));
+  input.setCustomValidity(failure);
+  const status = $("new-game-cgp-status");
+  status.textContent = failure || (cgp ? `Valid CGP · ${startingPosition.lexicon}` : "");
+  status.classList.toggle("invalid", Boolean(failure));
+  $("first-player").disabled = Boolean(cgp);
+  $("start-game").disabled = busy || Boolean(engine?.fatalError) || Boolean(failure);
+  return { valid: !failure, startingPosition };
+}
 $("new-game-cgp").addEventListener("input", () => {
-  $("first-player").disabled = Boolean($("new-game-cgp").value.trim());
   $("new-game-error").textContent = "";
+  validateNewGameCGP();
 });
 function updateGameSetup() {
   const kind = $("game-kind").value;

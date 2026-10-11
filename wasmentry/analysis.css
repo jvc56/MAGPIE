@@ -1815,3 +1815,10 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #new-game-cgp { width: 100%; }
 #new-game-error:empty { display: none; }
 #new-game-error { color: var(--danger); }
+
+.cgp-help { line-height: 1.45; }
+.cgp-help p { margin: 8px 0; }
+.cgp-help > code { display: block; overflow-wrap: anywhere; }
+#new-game-cgp-status:empty { display: none; }
+#new-game-cgp-status.invalid { color: var(--danger); }
+#new-game-cgp[aria-invalid="true"] { border-color: var(--danger); }

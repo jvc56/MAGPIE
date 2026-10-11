@@ -140,18 +140,52 @@ test('CGP review saves and reloads its starting board, scores, racks, and subseq
   await expect(page.locator('#opponent-score')).toHaveValue('102');
 });
 
-test('invalid or already finished CGP keeps New Game open and leaves current board alone', async ({page}) => {
+test('CGP validates as entered and keeps invalid positions from starting a game', async ({page}) => {
   await ready(page);
   await setStartingCGP(page);
-  for (const value of ['bad CGP', startingCGP.replace('100/80 1', '100/80 6')]) {
+  for (const value of [
+    'bad CGP',
+    startingCGP.replace('7A7', '6A7'),
+    startingCGP.replace('AEINRST', 'QQ'),
+    startingCGP.replace('AEINRST', 'AEINRSTZ'),
+    startingCGP.replace('NWL23', 'unknown'),
+    startingCGP.replace('100/80 1', '100/80 6'),
+  ]) {
     await page.locator('#new-game-cgp').fill(value);
-    await page.locator('#start-game').click();
-    await expect(page.locator('#new-game-error')).not.toBeEmpty();
+    await expect(page.locator('#start-game')).toBeDisabled();
+    await expect(page.locator('#new-game-cgp-status')).not.toBeEmpty();
+    await expect(page.locator('#new-game-cgp')).toHaveAttribute('aria-invalid', 'true');
     await expect(page.locator('#new-game-dialog')).toBeVisible();
     await expect(page.locator('#board .played')).toHaveCount(0);
   }
+  await page.locator('#new-game-cgp').fill(startingCGP);
+  await expect(page.locator('#new-game-cgp-status')).toHaveText('Valid CGP · NWL23');
+  await expect(page.locator('#new-game-cgp')).toHaveAttribute('aria-invalid', 'false');
+  await expect(page.locator('#start-game')).toBeEnabled();
   await page.locator('#new-game-cgp').fill('');
+  await expect(page.locator('#new-game-cgp-status')).toBeEmpty();
+  await expect(page.locator('#start-game')).toBeEnabled();
   await page.locator('#start-game').click();
   await expect(page.locator('#play-session')).toBeVisible();
   await expect(page.locator('#board .played')).toHaveCount(0);
+});
+
+for (const theme of ['light', 'dark']) test(`expanded CGP help and validation fit desktop and mobile in ${theme}`, async ({page}) => {
+  await ready(page);
+  await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+  await expect(page.locator('#new-game-cgp-help')).toBeHidden();
+  await setStartingCGP(page);
+  await expect(page.locator('#new-game-cgp-help')).toContainText('scoreless-turns');
+  await expect(page.locator('#new-game-cgp-help')).toContainText('lowercase letters');
+  await expect(page.locator('#new-game-cgp-status')).toHaveText('Valid CGP · NWL23');
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({width, height:844});
+    await page.locator('#new-game-cgp').scrollIntoViewIfNeeded();
+    await expect(page.locator('#new-game-cgp')).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+    expect(await page.locator('#new-game-dialog').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await page.screenshot({path:test.info().outputPath(`cgp-${theme}-${width}.png`)});
+    await page.locator('#start-game').scrollIntoViewIfNeeded();
+    await expect(page.locator('#start-game')).toBeInViewport();
+  }
 });
