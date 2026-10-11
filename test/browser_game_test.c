@@ -64,6 +64,25 @@ static void test_cgp_start(void) {
   assert_success(browser_game_action(pass_start, "CSW24", 0, "AEINRST", "pass",
                                      "", BROWSER_GAME_COMMIT, "", 0, 0, 0));
   free(pass_start);
+  const char *opponent_racks[] = {"", "BC", "BCDFGHJ"};
+  for (int index = 0; index < 3; index++) {
+    char *cgp =
+        get_formatted_string("%s AEINRST/%s 100/80 5",
+                             string_builder_peek(board), opponent_racks[index]);
+    char *pass_record = get_formatted_string("%s#cgp %s\n", EMPTY_GAME, cgp);
+    char *result =
+        browser_game_action(pass_record, "CSW24", 0, "AEINRST", "pass", "",
+                            BROWSER_GAME_COMMIT, cgp, 42, 0, 0);
+    if (index < 2) {
+      assert(has_substring(result, "previous pass"));
+      free(result);
+    } else {
+      assert(has_substring(result, "54/93"));
+      assert_success(result);
+    }
+    free(pass_record);
+    free(cgp);
+  }
   // A normal import after a CGP/error must not inherit its starting board.
   assert_success(browser_game_import_gcg(EMPTY_GAME, "CSW24"));
   free(record);

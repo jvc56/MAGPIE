@@ -214,3 +214,19 @@ test('a real constrained-heap build failure recovers after reload with WMP off',
   await expect(page.locator('#status')).toHaveText('Complete');
   await expect(page.locator('#results tbody tr').first()).toBeVisible();
 });
+
+
+test('review pass-out rejects unknown racks instead of inventing penalties', async ({page}) => {
+  await ready(page);
+  const report = await actions(page, ['', 'BC', 'BCDFGHJ'].map(opponent => {
+    const cgp = `${empty} AEINRST/${opponent} 100/80 5`;
+    return {text:header+`#cgp ${cgp}\n`,cgp,rack:'AEINRST',move:'pass',action:1,index:0,onTurn:0};
+  }));
+  for (const result of report.slice(0,2)) {
+    expect(result.error).toContain('previous pass');
+    expect(result.game).toBeUndefined();
+  }
+  expect(report[2].error).toBeUndefined();
+  expect(report[2].game.ended).toBe(true);
+  expect(report[2].reloaded.positions.at(-1).cgp).toContain('54/93');
+});

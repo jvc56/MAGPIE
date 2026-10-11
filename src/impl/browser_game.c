@@ -4,6 +4,7 @@
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
 #include "../def/rack_defs.h"
+#include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -286,6 +287,13 @@ char *browser_game_action(const char *text, const char *lexicon,
           for (int player_index = 0; player_index < 2; player_index++) {
             const Rack *actual =
                 player_get_rack(game_get_player(live_game, player_index));
+            // Review CGPs may omit a rack or provide only some of its tiles.
+            // Do not turn incomplete information into a known pass-out rack.
+            if (action == BROWSER_GAME_COMMIT &&
+                rack_get_total_letters(actual) < RACK_SIZE &&
+                !bag_is_empty(game_get_bag(live_game))) {
+              continue;
+            }
             rack_copy(game_history_player_get_last_rack(
                           config_get_game_history(config), player_index),
                       actual);
