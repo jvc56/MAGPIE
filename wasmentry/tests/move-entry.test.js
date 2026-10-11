@@ -5,6 +5,8 @@ import {
   remainingRack,
   moveNotation,
   normalizeMove,
+  rackSlots,
+  reorderRack,
 } from "../move-entry.mjs";
 test("entry consumes real tiles before blanks and never overwrites the board", () => {
   const position = parseCGP(SAMPLES.opening);
@@ -51,7 +53,6 @@ test("notation absorbs existing prefixes and suffixes and rejects gaps and bends
 });
 
 test("duplicate rack tiles keep their slots through placement, movement and rack insertion", async () => {
-  const {rackSlots, reorderRack} = await import('../move-entry.mjs');
   const position = parseCGP(SAMPLES.opening);
   position.racks[0] = 'ABAC?';
   const tiles = placeTile(position, [], 7, 7, 'A', false, 2);

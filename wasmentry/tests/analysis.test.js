@@ -699,6 +699,7 @@ test("desktop context hints follow hover, focus and board mode; mobile keeps con
   await expect(hint).toContainText("leave unknown tiles empty");
   await page.locator("#open-analysis-settings").click();
   await expect(hint).toBeEmpty();
+  await expect(page.locator("#plies")).toBeEnabled();
   await page.locator("#plies").focus();
   await expect(hint).toContainText("turns ahead");
   await page.locator("#back-to-game").click();

@@ -7,7 +7,7 @@ export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
   workers: 1,
   reporter: "html",
   use: {
@@ -19,12 +19,12 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     {
       name: "firefox",
-      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js"],
+      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js", "**/live-import.test.js"],
       use: { ...devices["Desktop Firefox"] },
     },
     ...(process.env.MAGPIE_TEST_EDGE ? [{
       name: "edge",
-      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js"],
+      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js", "**/live-import.test.js"],
       use: {
         ...devices["Desktop Edge"],
         channel: "msedge",
@@ -33,7 +33,7 @@ export default defineConfig({
     }] : []),
     {
       name: "webkit",
-      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js"],
+      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js", "**/live-import.test.js"],
       use: { ...devices["Desktop Safari"] },
     },
     {

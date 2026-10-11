@@ -1,3 +1,4 @@
+import { GameAction } from "./game-actions.mjs";
 import { installTileDrag } from "./tile-drag.mjs";
 import { loadAnalyses, saveAnalysis } from "./analysis-cache.mjs";
 import { deviceBudget } from "./device-budget.mjs";
@@ -1256,7 +1257,7 @@ function renderHistory() {
   $("game-history").hidden = !recordedGame;
   $("copy").disabled = busy || hiddenLiveGame();
   $("save-gcg").disabled = !canExportGame();
-  $("copy-gcg").disabled = !canExportGame();
+  $("copy-gcg").disabled = !canExportGame() || hiddenLiveGame();
   $("save-gcg").title = hiddenLiveGame() ? "Finish the game before exporting hidden racks" : recordedGame
     ? "Save the complete recorded game"
     : "Load a game record first";
@@ -1397,6 +1398,24 @@ async function loadGame(file, pastedText = "") {
     logGCG("load.skipped-busy");
     return;
   }
+  const previousSession = session;
+  const resumeSession = isLive() && !session.paused;
+  if (resumeSession) {
+    chargeClock();
+    session.paused = true;
+    clearTimeout(botTimer);
+    renderSession();
+  }
+  if (isLive() && !(await confirmGame("Open another game?",
+      "The current game will end and be replaced.", "Open game"))) {
+    if (resumeSession && session === previousSession) {
+      session.paused = false;
+      session.started = performance.now();
+      renderSession();
+      scheduleComputer();
+    }
+    return;
+  }
   gcgLoading = true;
   const started = performance.now();
   let stage = "input";
@@ -1446,9 +1465,15 @@ async function loadGame(file, pastedText = "") {
     message("Game could not be loaded");
   } finally {
     gcgLoading = false;
+    setBusy(false);
+    if (resumeSession && session === previousSession) {
+      session.paused = false;
+      session.started = performance.now();
+      renderSession();
+      scheduleComputer();
+    }
     clearInterval(watchdog);
     $("gcg-load-status").textContent = "";
-    setBusy(false);
   }
 }
 $("save-gcg").addEventListener("click", () => {
@@ -1535,27 +1560,29 @@ function saveGameUndo() {
     });
   if (gameUndo.length > 20) gameUndo.shift();
 }
+let resolveGameConfirmation = null;
+function finishGameConfirmation(confirmed) {
+  const resolve = resolveGameConfirmation;
+  resolveGameConfirmation = null;
+  $("game-confirm").close();
+  resolve?.(confirmed);
+}
 function confirmGame(title, text, label = "Continue") {
+  if (resolveGameConfirmation) return Promise.resolve(false);
   $("confirm-title").textContent = title;
   $("confirm-message").textContent = text;
   $("confirm-yes").textContent = label;
-  const dialog = $("game-confirm");
-  dialog.returnValue = "cancel";
-  dialog.showModal();
-  return new Promise((resolve) =>
-    dialog.addEventListener(
-      "close",
-      () => resolve(dialog.returnValue === "yes"),
-      { once: true },
-    ),
-  );
+  return new Promise((resolve) => {
+    resolveGameConfirmation = resolve;
+    $("game-confirm").showModal();
+  });
 }
-$("confirm-yes").addEventListener("click", () =>
-  $("game-confirm").close("yes"),
-);
-$("confirm-no").addEventListener("click", () =>
-  $("game-confirm").close("cancel"),
-);
+$("confirm-yes").addEventListener("click", () => finishGameConfirmation(true));
+$("confirm-no").addEventListener("click", () => finishGameConfirmation(false));
+$("game-confirm").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  finishGameConfirmation(false);
+});
 function recallTiles(render = true) {
   cancelDraftCheck();
   draftTiles = [];
@@ -1587,7 +1614,7 @@ function scheduleDraftCheck() {
         index: historyIndex,
         rack: position.racks[0],
         move,
-        action: 1,
+        action: GameAction.COMMIT,
       })
       .then(({ game }) => {
         if (generation !== previewGeneration || busy) return;
@@ -1804,14 +1831,14 @@ async function submitMove(value = null, computer = false) {
     if (generation !== positionGeneration) return;
     let { game } = await engine.gameAction(
       isLive()
-        ? liveAction(5, move)
+        ? liveAction(GameAction.LIVE_MOVE, move)
         : {
             text: recordedGame.gcg,
             lexicon: position.lexicon,
             index: historyIndex,
             rack: position.racks[0],
             move,
-            action: 1,
+            action: GameAction.COMMIT,
           },
     );
     if (generation !== positionGeneration) return;
@@ -1952,7 +1979,7 @@ $("new-game-form").addEventListener("submit", async (event) => {
         text,
         lexicon: position.lexicon,
         index: 0,
-        action: 4,
+        action: GameAction.DEAL,
         seed: randomSeed(),
         onTurn: 0,
       });
@@ -2031,7 +2058,7 @@ async function changeRecordedEvent(action) {
   if (busy || !recordedGame || !historyIndex) return;
   const note = $("event-note").value;
   if (
-    action === 3 &&
+    action === GameAction.CHALLENGE &&
     historyIndex < recordedGame.positions.length - 1 &&
     !(await confirmGame(
       "Challenge at this position?",
@@ -2056,15 +2083,15 @@ async function changeRecordedEvent(action) {
     saveGameUndo();
     game.filename = recordedGame.filename;
     adoptGame(game, restorePosition(recordedGame.positions[0]).lexicon);
-    message(action === 2 ? "Note saved" : "Challenge recorded");
+    message(action === GameAction.NOTE ? "Note saved" : "Challenge recorded");
   } catch (failure) {
     error(failure.message);
   } finally {
     setBusy(false);
   }
 }
-$("save-note").addEventListener("click", () => changeRecordedEvent(2));
-$("challenge-move").addEventListener("click", () => changeRecordedEvent(3));
+$("save-note").addEventListener("click", () => changeRecordedEvent(GameAction.NOTE));
+$("challenge-move").addEventListener("click", () => changeRecordedEvent(GameAction.CHALLENGE));
 // During play, only draft tiles move. Explicit position editing can also move
 // recorded tiles, preserving ownership and participating in editor undo.
 function canDragTiles() {
@@ -2568,7 +2595,7 @@ async function branchGame(kind) {
     setBusy(true);
     await previewPromise;
     await engine.prepare(position.lexicon);
-    const { game } = await engine.gameAction(liveAction(4));
+    const { game } = await engine.gameAction(liveAction(GameAction.DEAL));
     saveGameUndo();
     session = sessionOptions(kind);
     session.human = position.onTurn;
@@ -2585,7 +2612,7 @@ async function branchGame(kind) {
 $("play-from").addEventListener("click", () => branchGame("play"));
 $("watch-from").addEventListener("click", () => branchGame("watch"));
 $("copy-gcg").addEventListener("click", async () => {
-  if (!canExportGame()) return;
+  if (!canExportGame() || hiddenLiveGame()) return;
   try {
     await navigator.clipboard.writeText(recordedGame.gcg);
     message("GCG copied");

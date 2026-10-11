@@ -1,21 +1,15 @@
 #include "browser_game_test.h"
 
 #include "../src/def/board_defs.h"
+#include "../src/impl/browser_game.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
-#include "../wasmentry/browser_game.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
-static const char *const EMPTY =
+static const char *const EMPTY_GAME =
     "#lexicon CSW24\n#player1 A Alice\n#player2 B Bob\n";
-static const char *const ONE =
-    "#lexicon CSW24\n#player1 A Alice\n#player2 B Bob\n#description Magpie "
-    "finished: resigned\n>A: AEINRST 8H TRAIN +12 12\n";
-static const char *const CGP =
-    "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEINRST/ 0/0 0";
-
 static void assert_success(char *json) {
   assert(!has_substring(json, "\"error\":"));
   assert(has_substring(json, "\"positions\":["));
@@ -23,47 +17,68 @@ static void assert_success(char *json) {
 }
 
 void test_browser_game(void) {
-  if (BOARD_DIM != 15) {
-    return;
+  const int center_row = BOARD_DIM / 2 + 1;
+  const char center_col = 'A' + BOARD_DIM / 2;
+  char *opening_move =
+      get_formatted_string("%d%c TRAIN", center_row, center_col);
+  char *opening_game = get_formatted_string(
+      "%s#description Magpie finished: resigned\n>A: AEINRST %s +12 12\n",
+      EMPTY_GAME, opening_move);
+  StringBuilder *board = string_builder_create();
+  for (int row = 0; row < BOARD_DIM; row++) {
+    string_builder_add_formatted_string(board, "%s%d", row ? "/" : "",
+                                        BOARD_DIM);
   }
-  for (int repeat = 0; repeat < 3; repeat++) {
-    assert_success(wasm_import_gcg(EMPTY, "CSW24"));
-    assert_success(wasm_import_gcg(ONE, "CSW24"));
+  string_builder_add_string(board, " AEINRST/ 0/0 0");
+  const char *initial_cgp = string_builder_peek(board);
+
+  for (int cycle_idx = 0; cycle_idx < 3; cycle_idx++) {
+    assert_success(browser_game_import_gcg(EMPTY_GAME, "CSW24"));
+    assert_success(browser_game_import_gcg(opening_game, "CSW24"));
   }
-  char *changed = wasm_game_action(ONE, "CSW24", 0, "AEINRST", "8H TRAIN", "",
-                                   1, "", 0, 0, 0);
+  char *changed =
+      browser_game_action(opening_game, "CSW24", 0, "AEINRST", opening_move, "",
+                          BROWSER_GAME_COMMIT, "", 0, 0, 0);
   assert(!has_substring(changed, "Magpie finished:"));
   assert_success(changed);
-  char *note = wasm_game_action(ONE, "CSW24", 1, "", "",
-                                "quote \" and newline\n", 2, "", 0, 0, 0);
+  char *note = browser_game_action(opening_game, "CSW24", 1, "", "",
+                                   "quote \" and newline\n", BROWSER_GAME_NOTE,
+                                   "", 0, 0, 0);
   assert(has_substring(note, "quote \\\""));
   assert_success(note);
-  assert_success(
-      wasm_game_action(EMPTY, "CSW24", 0, "", "", "", 4, CGP, 42, 0, 0));
-  assert_success(wasm_game_action(EMPTY, "CSW24", 0, "AEINRST", "8H TRAIN", "",
-                                  5, CGP, 42, 0, 0));
-  const char *phony =
-      "#lexicon CSW24\n#player1 A Alice\n#player2 B Bob\n>A: II 8H II +4 4\n";
-  assert_success(
-      wasm_game_action(phony, "CSW24", 1, "", "", "", 3, "", 0, 0, 0));
+  assert_success(browser_game_action(EMPTY_GAME, "CSW24", 0, "", "", "",
+                                     BROWSER_GAME_DEAL, initial_cgp, 42, 0, 0));
+  assert_success(browser_game_action(EMPTY_GAME, "CSW24", 0, "AEINRST",
+                                     opening_move, "", BROWSER_GAME_LIVE_MOVE,
+                                     initial_cgp, 42, 0, 0));
+  char *phony = get_formatted_string("%s>A: II %d%c II +4 4\n", EMPTY_GAME,
+                                     center_row, center_col);
+  assert_success(browser_game_action(phony, "CSW24", 1, "", "", "",
+                                     BROWSER_GAME_CHALLENGE, "", 0, 0, 0));
   const char *bad_moves[] = {"8H TRAIN -lex NWL23", "pass -threads 32",
                              "ex AE -lex NWL23"};
-  for (int index = 0; index < 3; index++) {
-    char *bad = wasm_game_action(EMPTY, "CSW24", 0, "AEINRST", bad_moves[index],
-                                 "", 1, "", 0, 0, 0);
+  for (int move_idx = 0;
+       move_idx < (int)(sizeof(bad_moves) / sizeof(bad_moves[0])); move_idx++) {
+    char *bad = browser_game_action(EMPTY_GAME, "CSW24", 0, "AEINRST",
+                                    bad_moves[move_idx], "",
+                                    BROWSER_GAME_COMMIT, "", 0, 0, 0);
     assert(has_substring(bad, "\"error\":"));
     free(bad);
   }
-  char *bad = wasm_import_gcg("not a game", "CSW24");
+  char *bad = browser_game_import_gcg("not a game", "CSW24");
   assert(has_substring(bad, "\"error\":"));
   free(bad);
-  assert_success(wasm_import_gcg(ONE, "CSW24"));
+  assert_success(browser_game_import_gcg(opening_game, "CSW24"));
   char *large = malloc_or_die(1024 * 1024 + 2);
   memset(large, 'a', 1024 * 1024 + 1);
   large[1024 * 1024 + 1] = '\0';
-  bad = wasm_import_gcg(large, "CSW24");
+  bad = browser_game_import_gcg(large, "CSW24");
   assert(has_substring(bad, "size limit"));
   free(bad);
   free(large);
-  wasm_game_cache_destroy();
+  free(phony);
+  free(opening_game);
+  free(opening_move);
+  string_builder_destroy(board);
+  browser_game_cache_destroy();
 }

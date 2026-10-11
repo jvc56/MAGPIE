@@ -48,7 +48,7 @@ jobs:
 
       - name: Run WASM unit tests
         run: |
-          node bin/magpie_wasm_test.js tt
+          node bin/magpie_wasm_test.js tt browsergame
           node bin/magpie_wasm_test.js endgame
 
       - name: Install Playwright dependencies

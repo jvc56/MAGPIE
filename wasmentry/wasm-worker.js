@@ -81,7 +81,7 @@ function readString(fn) {
         "number",
       ]),
       init: wrap("wasm_magpie_init", "number", ["number"]),
-      gameAction: wrap("wasm_game_action", "number", [
+      gameAction: wrap("browser_game_action", "number", [
         "number",
         "number",
         "number",
@@ -94,7 +94,7 @@ function readString(fn) {
         "number",
         "number",
       ]),
-      importGCG: wrap("wasm_import_gcg", "number", ["number", "number"]),
+      importGCG: wrap("browser_game_import_gcg", "number", ["number", "number"]),
       destroy: wrap("wasm_magpie_destroy", null),
       run: wrap("wasm_run_command_async", "number", ["number"]),
       output: wrap("wasm_get_output", "number"),
@@ -376,8 +376,8 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
       throw new Error("Could not start WMP preparation.");
     nativeStarted = true;
     let value;
-    while (!fatal && (value = api.wmpProgress()) !== -1) {
-      const stage = Math.floor(value / 10000);
+    while (!fatal && !(value = JSON.parse(readString(api.wmpProgress))).done) {
+      const { stage, total, completed: complete } = value;
       // Once WIT starts, the native reader no longer borrows the WMP input.
       if (stage >= 6 && ptr) { Module._free(ptr); ptr = 0; }
       if (!cache && stage >= 6) bytes = undefined;
@@ -388,8 +388,6 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
       } else if (stage === 8) {
         progress(stopping ? "Stopping after WIT preparation…" : "Preparing WIT cache…");
       } else if (!bytes) {
-        const total = Math.floor(value % 10000 / 100);
-        const complete = value % 100;
         progress(stopping ? "Stopping after WMP preparation…" :
           `Building WMP · ${["reading words", "word entries", "single blanks", "double blanks", "indexes", "saving file"][stage]}${total ? ` · ${complete}/${total} lengths` : ""} · ${count} threads`);
       }
@@ -408,11 +406,12 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
     }
     const result = api.finishWMP(stopping ? 0 : 1);
     nativeFinished = true;
+    const preparationError = readString(api.error);
     if (!stopping && result !== 0) {
       if (fromCache && !skipCache) {
         await removeWMP(lexicon).catch(warning);
         retryBuild = true;
-      } else throw new Error("Could not install WMP.");
+      } else throw new Error(preparationError || "Could not install WMP.");
     }
     if (!stopping && !retryBuild && cache && (!fromCache || !witFromCache) && bytes) {
       progress("Saving WMP and WIT on this device…");
@@ -431,8 +430,9 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
   } finally {
     // Do not release borrowed memory while the native coordinator owns it.
     if (!fatal && nativeStarted && !nativeFinished) {
-      while (api.wmpProgress() !== -1) await pause(100);
+      while (!JSON.parse(readString(api.wmpProgress)).done) await pause(100);
       api.finishWMP(0);
+      readString(api.error);
     }
     Module._free(ptr);
     Module._free(witPtr);

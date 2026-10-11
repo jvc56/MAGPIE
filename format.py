@@ -216,7 +216,7 @@ def main():
     args = parser.parse_args()
 
     # Define the target directories for recursive processing
-    target_directories: List[str] = ['src', 'cmd', 'test', 'tools']
+    target_directories: List[str] = ['src', 'cmd', 'test', 'tools', 'wasmentry']
     files_to_process: List[str] = []
 
     if args.filename:

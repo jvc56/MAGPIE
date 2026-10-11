@@ -89,7 +89,7 @@ echo "Running cppcheck analysis on src/, test/, cmd/, and tools/ directories..."
     -U__APPLE__ \
     -U__EMSCRIPTEN__ \
     -j "${MAX_CORES}" \
-    src/ test/ cmd/ tools/
+    src/ test/ cmd/ tools/ wasmentry/
 
 # --- Check exit code of cppcheck ---
 CPPCHECK_EXIT_CODE=$?

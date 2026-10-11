@@ -71,7 +71,26 @@ test('local and downloaded WMPs persist, match ordinary move generation, and can
 });
 
 test('WMP settings cache and remove both lexica with file sizes', async ({page}) => {
-  test.setTimeout(300000);
+  test.setTimeout(60000);
+  await page.addInitScript(() => {
+    const RealWorker = Worker;
+    window.Worker = class extends RealWorker {
+      set onmessage(handler) { this.reply = handler; super.onmessage = handler; }
+      postMessage(message, ...args) {
+        if (message.type === 'prepare_wmp') {
+          // Install work is covered by the real-engine integration test above.
+          const { lexicon } = message.data;
+          import('/wasmentry/wmp-cache.mjs').then(async ({ saveWMP }) => {
+            await saveWMP(lexicon, 'settings-fixture', 'fixture', 'build',
+              new Uint8Array(1024 * 1024), new Uint8Array(512 * 1024), 'fixture');
+            this.reply({ data: { type: 'wmp_ready', requestId: message.requestId, cached: true } });
+          });
+          return;
+        }
+        return super.postMessage(message, ...args);
+      }
+    };
+  });
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await page.locator('#open-analysis-settings').click();
@@ -79,17 +98,14 @@ test('WMP settings cache and remove both lexica with file sizes', async ({page})
   await expect(page.locator('#wmp-cache-enabled')).not.toBeChecked();
   await page.locator('#wmp-source').selectOption('build');
   await page.getByRole('button', {name:'Cache CSW24 WMP', exact:true}).click();
-  await expect(page.getByRole('button', {name:'Remove CSW24 WMP', exact:true})).toBeEnabled({timeout:120000});
+  await expect(page.getByRole('button', {name:'Remove CSW24 WMP', exact:true})).toBeEnabled({timeout:15000});
   await expect(page.locator('#wmp-source option[value="download"]')).toHaveCount(0);
   await page.getByRole('button', {name:'Cache NWL23 WMP', exact:true}).click();
-  await expect(page.getByRole('button', {name:'Remove NWL23 WMP', exact:true})).toBeEnabled({timeout:120000});
+  await expect(page.getByRole('button', {name:'Remove NWL23 WMP', exact:true})).toBeEnabled({timeout:15000});
   await expect(page.locator('#wmp-files')).toContainText('MiB');
   await expect(page.locator('#wmp-files')).toContainText('WIT');
   await page.screenshot({path:test.info().outputPath('wmp-settings.png'),fullPage:true});
   await page.locator('#back-to-game').click();
-  await page.locator('[data-mode="kibitz"]').click();
-  await expect(page.locator('#status')).toHaveText('Complete', {timeout:30000});
-  await expect(page.locator('#error')).toBeHidden();
   await page.reload();
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await page.locator('#open-analysis-settings').click();

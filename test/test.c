@@ -315,6 +315,7 @@ void run_all_super(void) {
   test_bit_rack();
   test_board_layout_super();
   test_pat_rollout_default_classes();
+  test_browser_game();
 }
 
 int main(int argc, char *argv[]) {

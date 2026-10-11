@@ -189,8 +189,7 @@ test("review keeps analysis per turn, continues sims, and branches with undo", a
   const before = await page
     .locator("#results tbody tr")
     .first()
-    .locator("td")
-    .nth(6)
+    .locator('[data-column="iterations"]')
     .textContent();
   const visibleRows = await page.locator("#results tbody tr").count();
   await page.locator("#results tbody button").first().click();
@@ -215,8 +214,7 @@ test("review keeps analysis per turn, continues sims, and branches with undo", a
   const after = await page
     .locator("#results tbody tr")
     .first()
-    .locator("td")
-    .nth(6)
+    .locator('[data-column="iterations"]')
     .textContent();
   expect(Number(after)).toBeGreaterThan(Number(before));
   const secondTotal = await totalIterations();
