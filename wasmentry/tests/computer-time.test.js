@@ -124,3 +124,14 @@ test('an automatic computer completes a real timed sim and records its move', as
   expect(run.seconds).toBeLessThan(budget + 5);
   await expect(page.locator('#error')).toBeHidden();
 });
+
+test('Pause accepts a click held across live clock refreshes', async ({page}) => {
+  await setup(page);
+  await page.locator('#game-time').selectOption('180');
+  await page.locator('#start-game').click();
+  await expect.poll(() => page.evaluate(() => window.searchCommands.some(command => command.includes('-tlim')))).toBe(true);
+  await page.locator('#pause-game').click({delay:800});
+  await expect(page.locator('#session-result')).toHaveText('Paused');
+  await expect(page.locator('#step-game')).toBeEnabled({timeout:10000});
+  await expect(page.locator('#error')).toBeHidden();
+});

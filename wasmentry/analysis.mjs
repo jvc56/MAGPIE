@@ -2480,12 +2480,17 @@ function renderSession() {
     );
     $(id).classList.toggle("overtime", session.remaining[index] < 0);
   }
-  $("pause-game").textContent = session.paused ? "Resume game" : "Pause";
+  // Clock refreshes must not replace the text node under a pressed mouse.
+  // WebKit otherwise drops the click between pointerdown and pointerup.
+  const pauseLabel = session.paused ? "Resume game" : "Pause";
+  if ($("pause-game").textContent !== pauseLabel)
+    $("pause-game").textContent = pauseLabel;
   $("pause-game").disabled = session.finished;
   $("step-game").hidden = session.kind !== "watch";
   $("step-game").disabled = busy || !session.paused || session.finished;
-  $("finish-game").textContent =
-    session.kind === "play" ? "Resign" : "End game";
+  const finishLabel = session.kind === "play" ? "Resign" : "End game";
+  if ($("finish-game").textContent !== finishLabel)
+    $("finish-game").textContent = finishLabel;
   $("finish-game").disabled = session.finished || busy;
   $("finish-game").title = busy && botRunning ? "Pause the computer before ending the game." : "";
   $("new-game").title = busy && botRunning ? "Pause the computer before starting a new game." : "";

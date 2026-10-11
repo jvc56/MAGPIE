@@ -119,6 +119,14 @@ void test_browser_game(void) {
   string_builder_add_string(board, " AEINRST/ 0/0 0");
   const char *initial_cgp = string_builder_peek(board);
 
+  // A manual review can have no rack for the next player. Do not export an
+  // empty rack pragma, which makes the next edit or import fail.
+  char *manual =
+      browser_game_action(EMPTY_GAME, "CSW24", 0, "AEINRST", opening_move, "",
+                          BROWSER_GAME_COMMIT, initial_cgp, 0, 0, 0);
+  assert(!has_substring(manual, "#rack2"));
+  assert_success(manual);
+
   for (int cycle_idx = 0; cycle_idx < 3; cycle_idx++) {
     assert_success(browser_game_import_gcg(EMPTY_GAME, "CSW24"));
     assert_success(browser_game_import_gcg(opening_game, "CSW24"));

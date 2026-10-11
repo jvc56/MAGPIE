@@ -137,14 +137,16 @@ static void write_game_result(const Config *config, Game *live_game,
   string_builder_add_gcg(gcg, config_get_ld(config), game_history, false);
   if (live_game &&
       game_get_game_end_reason(live_game) == GAME_END_REASON_NONE) {
-    {
-      const int player_index = game_get_player_on_turn_index(live_game);
+    const int player_index = game_get_player_on_turn_index(live_game);
+    const Rack *next_rack =
+        player_get_rack(game_get_player(live_game, player_index));
+    // An unknown rack in manual review is empty. A bare #rack pragma is
+    // invalid GCG; omit it until the user supplies that player's tiles.
+    if (rack_get_total_letters(next_rack) > 0) {
       string_builder_add_formatted_string(gcg, "\n#rack%d ", player_index + 1);
-      string_builder_add_rack(
-          gcg, player_get_rack(game_get_player(live_game, player_index)),
-          config_get_ld(config), true);
+      string_builder_add_rack(gcg, next_rack, config_get_ld(config), true);
+      string_builder_add_char(gcg, '\n');
     }
-    string_builder_add_char(gcg, '\n');
   }
   string_builder_add_formatted_string(
       result, "{\"index\":%d,\"warning\":",
