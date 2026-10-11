@@ -126,6 +126,15 @@ enum {
   BAI_SPECULATIONS_MAX = BAI_SPECULATION_SLOTS,
 };
 
+enum {
+  // When a sim's arms share seeds, the stopping test estimates how each pair
+  // of arms' samples covary from at most this many of the ordinals both
+  // have (see bai_paired_z). Replaying sims at 2 ply, the test stopped just
+  // as early with 128 as with every sample, so this bounds the memory
+  // without costing anything.
+  BAI_PAIRED_MAX_ORDINALS = 1024,
+};
+
 static_assert(BAI_SCHEDULE_ADAPTIVE_LAG < BAI_SCHEDULE_ROUND_ROBIN_LAG,
               "adaptive rounds never run further ahead than round-robin ones");
 static_assert(BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH <= BAI_SCHEDULE_ROUND_SIZE,
@@ -234,6 +243,14 @@ typedef struct BAISyncData {
   // True until the round holding the last initial-phase sample has folded.
   bool initial_phase;
   BAIArmDatum *arm_data;
+  // The stopping test's paired statistics (see bai_paired_z), or NULL when
+  // the sim has no stopping threshold or its arms don't share seeds. Each arm
+  // keeps its first BAI_PAIRED_MAX_ORDINALS committed samples by ordinal,
+  // with their fixed-point prefix sums, and each pair of arms (row the lower
+  // index) the fixed-point sum of their products at the ordinals both have.
+  double *paired_values;
+  int64_t *paired_prefix;
+  int64_t *paired_cross;
   cpthread_mutex_t mutex;
   ThreadControl *thread_control;
   BAIResult *bai_result;
@@ -408,6 +425,10 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->round_size = BAI_SCHEDULE_ROUND_SIZE;
   bai_sync_data->arm_data =
       calloc_or_die(num_initial_arms, sizeof(BAIArmDatum));
+  // bai() allocates them when the stopping test uses them.
+  bai_sync_data->paired_values = NULL;
+  bai_sync_data->paired_prefix = NULL;
+  bai_sync_data->paired_cross = NULL;
   cpthread_mutex_init(&bai_sync_data->mutex);
   cpthread_cond_init(&bai_sync_data->work_available);
   bai_sync_data->thread_control = thread_control;
@@ -470,6 +491,9 @@ static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
   free(bai_sync_data->speculations);
   free(bai_sync_data->speculation_index);
   free(bai_sync_data->speculation_arm_count);
+  free(bai_sync_data->paired_values);
+  free(bai_sync_data->paired_prefix);
+  free(bai_sync_data->paired_cross);
   free(bai_sync_data->arm_data);
   free(bai_sync_data);
 }
@@ -577,6 +601,120 @@ bai_arm_z_with_counts(const BAIArmDatum *astar_arm_data,
   return astar_num_samples * d_astar + challenger_num_samples * d_a;
 }
 
+// Allocates the paired statistics, which makes the stopping test use
+// bai_paired_z. Runs before any sample is committed.
+static inline void bai_sync_data_enable_paired(BAISyncData *bai_sync_data) {
+  const size_t num_arms = (size_t)bai_sync_data->num_arms;
+  bai_sync_data->paired_values =
+      malloc_or_die(sizeof(double) * num_arms * BAI_PAIRED_MAX_ORDINALS);
+  bai_sync_data->paired_prefix =
+      calloc_or_die(num_arms * (BAI_PAIRED_MAX_ORDINALS + 1), sizeof(int64_t));
+  bai_sync_data->paired_cross =
+      calloc_or_die(num_arms * num_arms, sizeof(int64_t));
+}
+
+// Assumes the caller has locked the bai sync data mutex. Records an arm's
+// committed sample at ordinal in the paired statistics, and adds its product
+// with each other arm's sample at the same ordinal, if that one is committed
+// already. A round folds in slot order and an arm's slots in a round have
+// increasing ordinals, so each arm's samples arrive in ordinal order, and
+// each pair's product at an ordinal is added once, by whichever arm commits
+// it second.
+static inline void bai_paired_record_while_locked(BAISyncData *bai_sync_data,
+                                                  const int arm_index,
+                                                  const uint64_t ordinal,
+                                                  const double value) {
+  if (bai_sync_data->paired_values == NULL ||
+      ordinal >= BAI_PAIRED_MAX_ORDINALS) {
+    return;
+  }
+  const int num_arms = bai_sync_data->num_arms;
+  bai_sync_data
+      ->paired_values[(size_t)arm_index * BAI_PAIRED_MAX_ORDINALS + ordinal] =
+      value;
+  int64_t *prefix = bai_sync_data->paired_prefix +
+                    (size_t)arm_index * (BAI_PAIRED_MAX_ORDINALS + 1);
+  prefix[ordinal + 1] = prefix[ordinal] + bai_quantize(value);
+  for (int other_index = 0; other_index < num_arms; other_index++) {
+    if (other_index == arm_index ||
+        bai_sync_data->arm_data[other_index].num_samples <= ordinal) {
+      continue;
+    }
+    const double other_value =
+        bai_sync_data
+            ->paired_values[(size_t)other_index * BAI_PAIRED_MAX_ORDINALS +
+                            ordinal];
+    const int low_index = arm_index < other_index ? arm_index : other_index;
+    const int high_index = arm_index < other_index ? other_index : arm_index;
+    bai_accumulate_checked(
+        &bai_sync_data
+             ->paired_cross[(size_t)low_index * (size_t)num_arms + high_index],
+        bai_quantize(value * other_value));
+  }
+}
+
+// Assumes the caller has locked the bai sync data mutex. The Z statistic for
+// "astar beats arm" when the two arms' samples at each ordinal share a seed,
+// as a sim's do, so that much of their luck is common to both. With n_a and
+// n_b samples, m of them at ordinals both have, and c the covariance of a
+// pair of samples at one ordinal,
+//
+//   Var(mean_a - mean_b) = var_a / n_a + var_b / n_b - 2 c m / (n_a n_b)
+//
+// and Z is the squared gap over twice that. With c = 0 it is the same as
+// bai_arm_z_with_counts. c is estimated from the first ordinals both arms
+// have, at most BAI_PAIRED_MAX_ORDINALS of them.
+static inline double bai_paired_z(const BAISyncData *bai_sync_data,
+                                  const int astar_index, const int arm_index) {
+  const BAIArmDatum *astar_arm_datum = &bai_sync_data->arm_data[astar_index];
+  const BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
+  const uint64_t common_ordinals =
+      astar_arm_datum->num_samples < arm_datum->num_samples
+          ? astar_arm_datum->num_samples
+          : arm_datum->num_samples;
+  const uint64_t num_pairs = common_ordinals < BAI_PAIRED_MAX_ORDINALS
+                                 ? common_ordinals
+                                 : BAI_PAIRED_MAX_ORDINALS;
+  double covariance = 0.0;
+  if (num_pairs > 1) {
+    const double inverse_scale = 1.0 / (double)BAI_FIXED_POINT_SCALE;
+    const int low_index = astar_index < arm_index ? astar_index : arm_index;
+    const int high_index = astar_index < arm_index ? arm_index : astar_index;
+    const double cross_sum =
+        (double)bai_sync_data
+            ->paired_cross[(size_t)low_index * (size_t)bai_sync_data->num_arms +
+                           high_index] *
+        inverse_scale;
+    const double astar_sum =
+        (double)bai_sync_data->paired_prefix[(size_t)astar_index *
+                                                 (BAI_PAIRED_MAX_ORDINALS + 1) +
+                                             num_pairs] *
+        inverse_scale;
+    const double arm_sum =
+        (double)bai_sync_data
+            ->paired_prefix[(size_t)arm_index * (BAI_PAIRED_MAX_ORDINALS + 1) +
+                            num_pairs] *
+        inverse_scale;
+    const double pairs = (double)num_pairs;
+    covariance = cross_sum / pairs - (astar_sum / pairs) * (arm_sum / pairs);
+  }
+  const double astar_num_samples = (double)astar_arm_datum->num_samples;
+  const double arm_num_samples = (double)arm_datum->num_samples;
+  double variance = astar_arm_datum->var / astar_num_samples +
+                    arm_datum->var / arm_num_samples -
+                    2.0 * covariance * (double)common_ordinals /
+                        (astar_num_samples * arm_num_samples);
+  const double variance_floor =
+      MINIMUM_VARIANCE / (astar_num_samples > arm_num_samples
+                              ? astar_num_samples
+                              : arm_num_samples);
+  if (!(variance > variance_floor)) {
+    variance = variance_floor;
+  }
+  const double gap = astar_arm_datum->mean - arm_datum->mean;
+  return gap * gap / (2.0 * variance);
+}
+
 // Assumes the caller has locked the bai sync data mutex. Checks the stopping
 // threshold against the committed statistics: every arm other than astar must
 // either be similar to it or have a Z statistic above the GK16 threshold.
@@ -606,9 +744,12 @@ static inline void bai_update_threshold(BAISyncData *bai_sync_data,
       return;
     }
     const BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
-    const double arm_z = bai_arm_z_with_counts(
-        astar_arm_datum, (double)astar_arm_datum->num_samples, arm_datum,
-        (double)arm_datum->num_samples);
+    const double arm_z =
+        bai_sync_data->paired_values != NULL
+            ? bai_paired_z(bai_sync_data, astar_index, arm_index)
+            : bai_arm_z_with_counts(astar_arm_datum,
+                                    (double)astar_arm_datum->num_samples,
+                                    arm_datum, (double)arm_datum->num_samples);
     if (!(arm_z > bai_threshold)) {
       return;
     }
@@ -1045,7 +1186,11 @@ static inline void bai_commit_round_while_locked_impl(BAISampleArgs *args,
                                                       BAIRound *round) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
   for (int slot = 0; slot < round->num_samples; slot++) {
+    const int arm_index = round->arm_indices[slot];
+    const uint64_t ordinal = bai_sync_data->arm_data[arm_index].num_samples;
     bai_fold_slot_while_locked(args, round, slot);
+    bai_paired_record_while_locked(bai_sync_data, arm_index, ordinal,
+                                   round->values[slot]);
   }
   for (int slot = 0; slot < round->num_samples; slot++) {
     bai_arm_datum_recompute_mean_and_var(
@@ -1789,6 +1934,12 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   sync_data->record_size = rvs_get_sample_record_size(rvs);
   sync_data->num_threads = bai_options->num_threads;
   sync_data->round_size = bai_round_size(bai_options->draws_per_sample);
+  // Only a stopping test reads the paired statistics, and they only mean
+  // something when the arms share seeds.
+  if (bai_options->threshold != BAI_THRESHOLD_NONE &&
+      rvs_arms_share_seeds(rvs) && sync_data->num_arms > 1) {
+    bai_sync_data_enable_paired(sync_data);
+  }
 #ifdef BAI_SCHED_STATS
   sync_data->sched_start_ns = sched_start_ns;
 #endif
