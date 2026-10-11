@@ -1,5 +1,4 @@
 #include "cmd_api.h"
-#include "cmd_api_wmp.h"
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
@@ -13,6 +12,7 @@
 #include "../ent/word_info_table.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "cmd_api_wmp.h"
 #include "config.h"
 #include "exec.h"
 #include "wmp_maker.h"

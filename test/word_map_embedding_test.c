@@ -7,11 +7,31 @@
 #include "../src/impl/cmd_api.h"
 #include "../src/impl/cmd_api_wmp.h"
 #include "../src/impl/wmp_maker.h"
+#include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+static void test_word_map_atomic_write(const WMP *wmp) {
+  char directory[] = "/tmp/magpie-wmp-write-XXXXXX";
+  assert(mkdtemp(directory));
+  char *filename = get_formatted_string("%s/table.wmp", directory);
+  assert(mkdir(filename, 0700) == 0);
+  ErrorStack *errors = error_stack_create();
+  // A directory cannot be replaced by the completed file. Preserve it and
+  // clean up the temporary output on this failure path.
+  wmp_write_to_file(wmp, filename, errors);
+  assert(!error_stack_is_empty(errors));
+  error_stack_destroy(errors);
+  assert(rmdir(filename) == 0);
+  assert(rmdir(directory) == 0);
+  free(filename);
+}
 
 void test_word_map_embedding(void) {
   assert(cmd_api_build_wmp(NULL, 1, NULL) == NULL);
@@ -46,6 +66,7 @@ void test_word_map_embedding(void) {
   progress = wmp_build_progress_create();
   WMP *wmp = cmd_api_build_wmp(mp, 2, progress);
   assert(wmp != NULL);
+  test_word_map_atomic_write(wmp);
   wmp_build_stage_t stage;
   int completed;
   int total;
@@ -78,10 +99,12 @@ void test_word_map_embedding(void) {
   char small_output[32];
   FILE *limited_stream = fmemopen(small_output, sizeof(small_output), "wb");
   assert(limited_stream);
-  setvbuf(limited_stream, NULL, _IONBF, 0);
+  const int unbuffered = setvbuf(limited_stream, NULL, _IONBF, 0);
+  assert(unbuffered == 0);
+  (void)unbuffered;
   const bool serialized = wmp_write_to_stream(wmp, limited_stream);
   assert(!serialized);
-  fclose(limited_stream);
+  (void)fclose(limited_stream);
   const uint64_t hash = wit->kwg_hash;
   wit->kwg_hash ^= 1;
   assert(!cmd_api_install_wmp(mp, wmp, wit));

@@ -14,11 +14,13 @@
 #include "../util/string_util.h"
 #include "data_filepaths.h"
 #include <assert.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 // WordMap binary format:
 // ======================
 // 1 byte: major version number
@@ -959,16 +961,54 @@ static inline bool wmp_write_to_stream(const WMP *wmp, FILE *stream) {
 
 static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
                                      ErrorStack *error_stack) {
-  FILE *stream = fopen_safe(filename, "wb", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  const bool written = wmp_write_to_stream(wmp, stream);
-  const int closed = fclose(stream);
-  if (!written || closed != 0) {
-    error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
-                     string_duplicate("could not write word map stream"));
+  char *temporary_filename = get_formatted_string("%s.tmp.XXXXXX", filename);
+  const int descriptor = mkstemp(temporary_filename);
+  if (descriptor == -1) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
+        get_formatted_string("could not create word map beside %s: %s",
+                             filename, strerror(errno)));
+    free(temporary_filename);
+    return;
   }
+  FILE *stream = fdopen(descriptor, "wb");
+  if (stream == NULL) {
+    const int error_number = errno;
+    (void)close(descriptor);
+    (void)remove(temporary_filename);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
+        get_formatted_string("could not open word map output %s: %s", filename,
+                             strerror(error_number)));
+    free(temporary_filename);
+    return;
+  }
+  bool written = wmp_write_to_stream(wmp, stream);
+  int error_number = 0;
+  if (fclose(stream) != 0) {
+    if (written) {
+      error_number = errno;
+    }
+    written = false;
+  }
+  if (written && rename(temporary_filename, filename) != 0) {
+    error_number = errno;
+    written = false;
+  }
+  if (!written) {
+    (void)remove(temporary_filename);
+    if (error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+          get_formatted_string("could not write word map %s: %s", filename,
+                               error_number != 0 ? strerror(error_number)
+                                                 : "unknown I/O failure"));
+    }
+  }
+  free(temporary_filename);
 }
 
 #endif

@@ -39,7 +39,7 @@
 //    magpie_destroy(mp);
 // clang-format on
 
-typedef struct Magpie Magpie;
+#include "../def/cmd_api_defs.h" // IWYU pragma: export
 #include <stdbool.h>
 
 #ifdef __cplusplus
