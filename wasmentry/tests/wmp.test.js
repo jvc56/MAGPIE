@@ -1,6 +1,26 @@
 import { openSample } from "./helpers/startup.js";
 const { test, expect } = require('@playwright/test');
 
+// Cache I/O runs in a worker in the app. Exercise synthetic cache records in
+// that same context; WebKit's main-world Blob transaction path differs.
+async function inCacheWorker(page, run) {
+  return page.evaluate(source => new Promise((resolve, reject) => {
+    const base = new URL('./', location.href).href;
+    source = source.replaceAll("'./", "'" + base);
+    const url = URL.createObjectURL(new Blob([
+      `(${source})().then(result => postMessage({done:true,result}), error => postMessage({done:true,error:String(error)}));`,
+    ], {type:'text/javascript'}));
+    const worker = new Worker(url, {type:'module'});
+    const cleanup = () => { worker.terminate(); URL.revokeObjectURL(url); };
+    worker.onmessage = ({data}) => {
+      if (!data.done) return;
+      cleanup();
+      if (data.error) reject(new Error(data.error)); else resolve(data.result);
+    };
+    worker.onerror = event => { cleanup(); reject(new Error(event.message)); };
+  }), run.toString());
+}
+
 test('local and downloaded WMPs persist, match ordinary move generation, and can be removed', async ({page}) => {
   test.setTimeout(120000);
   await page.goto('/wasmentry/');
@@ -73,26 +93,7 @@ test('local and downloaded WMPs persist, match ordinary move generation, and can
 });
 
 test('WMP settings cache and remove both lexica with file sizes', async ({page}) => {
-  test.setTimeout(60000);
-  await page.addInitScript(() => {
-    const RealWorker = Worker;
-    window.Worker = class extends RealWorker {
-      set onmessage(handler) { this.reply = handler; super.onmessage = handler; }
-      postMessage(message, ...args) {
-        if (message.type === 'prepare_wmp') {
-          // Install work is covered by the real-engine integration test above.
-          const { lexicon } = message.data;
-          import('/wasmentry/wmp-cache.mjs').then(async ({ saveWMP }) => {
-            await saveWMP(lexicon, 'settings-fixture', 'fixture', 'build',
-              new Uint8Array(1024 * 1024), new Uint8Array(512 * 1024), 'fixture');
-            this.reply({ data: { type: 'wmp_ready', requestId: message.requestId, cached: true } });
-          });
-          return;
-        }
-        return super.postMessage(message, ...args);
-      }
-    };
-  });
+  test.setTimeout(120000);
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await openSample(page);
@@ -101,10 +102,10 @@ test('WMP settings cache and remove both lexica with file sizes', async ({page})
   await expect(page.locator('#wmp-cache-enabled')).not.toBeChecked();
   await page.locator('#wmp-source').selectOption('build');
   await page.getByRole('button', {name:'Cache CSW24 WMP', exact:true}).click();
-  await expect(page.getByRole('button', {name:'Remove CSW24 WMP', exact:true})).toBeEnabled({timeout:15000});
+  await expect(page.getByRole('button', {name:'Remove CSW24 WMP', exact:true})).toBeEnabled({timeout:45000});
   await expect(page.locator('#wmp-source option[value="download"]')).toHaveCount(0);
   await page.getByRole('button', {name:'Cache NWL23 WMP', exact:true}).click();
-  await expect(page.getByRole('button', {name:'Remove NWL23 WMP', exact:true})).toBeEnabled({timeout:15000});
+  await expect(page.getByRole('button', {name:'Remove NWL23 WMP', exact:true})).toBeEnabled({timeout:45000});
   await expect(page.locator('#wmp-files')).toContainText('MiB');
   await expect(page.locator('#wmp-files')).toContainText('WIT');
   await page.screenshot({path:test.info().outputPath('wmp-settings.png'),fullPage:true});
@@ -212,7 +213,7 @@ test('WMP-only and damaged WIT caches are repaired locally', async ({page}) => {
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await openSample(page);
-  const report = await page.evaluate(async () => {
+  const report = await inCacheWorker(page, async () => {
     const { EngineClient } = await import('./engine-client.mjs');
     const { listWMPs, readWMP, saveWMP } = await import('./wmp-cache.mjs');
     const { sha256 } = await import('./wmp-assets.mjs');
@@ -231,7 +232,7 @@ test('WMP-only and damaged WIT caches are repaired locally', async ({page}) => {
             delete read.result.wit_bytes; delete read.result.wit_sha256;
             tx.objectStore('metadata').put(read.result);
           };
-        } else tx.objectStore('files').put(new Blob([new Uint8Array([4,15,0,0])]), 'NWL23:wit');
+        } else tx.objectStore('files').put(new Uint8Array([4,15,0,0]), 'NWL23:wit');
         tx.oncomplete = () => { db.close(); resolve(); };
         tx.onabort = () => { db.close(); reject(tx.error); };
       };
@@ -267,7 +268,7 @@ test('cache provenance and upgrades are independent of the database schema', asy
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await openSample(page);
-  const report = await page.evaluate(async () => {
+  const report = await inCacheWorker(page, async () => {
     const cache = await import('./wmp-cache.mjs');
     const bytes = new Uint8Array([3,15,1,2,3,4]);
     await cache.saveWMP('NWL23','kwg','checksum','build',bytes,new Uint8Array([4,15]),'wit');
@@ -304,7 +305,7 @@ test('Stop during a transient cache read preserves saved files and never starts 
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await openSample(page);
-  const result = await page.evaluate(async () => {
+  const result = await inCacheWorker(page, async () => {
     const {EngineClient} = await import('./engine-client.mjs');
     const {saveWMP, listWMPs} = await import('./wmp-cache.mjs');
     await saveWMP('NWL23', 'saved-hash', 'saved-checksum', 'build', new Uint8Array([3,15]), null, null);
