@@ -327,15 +327,23 @@ export function analysisCommands(position, mode, settings) {
   const ttMiB = settings.ttMiB ?? 32;
   if (![16, 32].includes(ttMiB)) throw new Error("Search memory must be 16 or 32 MiB.");
   const common = `-threads ${settings.threads} -tlim ${settings.seconds}`;
+  const explicitMoves = settings.moves?.map(move => move.replace(/[()]/g, ""));
+  if (explicitMoves && !explicitMoves.length) throw new Error("Select at least one play to simulate.");
+  const displayCount = Math.max(101, explicitMoves?.length || 0);
   const commands = [
-    `set -lex ${position.lexicon} -wmp ${settings.wmp ? "true" : "false"} -wit ${settings.wmp ? "true" : "false"} -numplays ${mode === "kibitz" ? 100 : settings.candidates} -s1 equity -s2 equity -r1 all -r2 all -maxnumdplays ${mode === "sim" && settings.playedMove ? 101 : 100} -shplies ${settings.plies} -ttfraction ${ttMiB / 256} -showbu false -shwithmoves false`,
+    `set -lex ${position.lexicon} -wmp ${settings.wmp ? "true" : "false"} -wit ${settings.wmp ? "true" : "false"} -numplays ${explicitMoves?.length || (mode === "kibitz" ? 100 : settings.candidates)} -s1 equity -s2 equity -r1 all -r2 all -maxnumdplays ${mode === "sim" ? displayCount : 100} -shplies ${settings.plies} -ttfraction ${ttMiB / 256} -showbu false -shwithmoves false`,
     `cgp ${toCGP(prepared)}`,
   ];
   if (mode === "kibitz") commands.push("generate");
   if (mode === "sim") {
-    commands.push("generate");
-    if (settings.playedMove) commands.push(`addmoves ${settings.playedMove}`);
-    const simulation = settings.playedMove
+    if (explicitMoves) commands.push(`addmoves ${explicitMoves.join(",")}`);
+    else {
+      commands.push("generate");
+      if (settings.playedMove) commands.push(`addmoves ${settings.playedMove}`);
+    }
+    const simulation = explicitMoves
+      ? `snoprune ${prepared.racks[1] || "-"},${explicitMoves.join(",")}`
+      : settings.playedMove
       ? `snoprune ${prepared.racks[1] || "-"},${settings.playedMove}`
       : "sim";
     commands.push(
@@ -378,17 +386,41 @@ export function analysisCommands(position, mode, settings) {
   return commands;
 }
 
-export function combineSim(previous, next) {
-  const saved = new Map(previous.map((row) => [row.move, row]));
+export function simulationMoveKey(position, move) {
+  const tiles = previewMove(position, move);
+  if (tiles.length) return JSON.stringify(tiles.sort((a, b) => a.row - b.row || a.col - b.col));
+  return move.replace(/[()]/g, "").trim().replace(/^(?:ex|exch) (.+)$/, (_, letters) => `ex ${[...letters].sort().join("")}`);
+}
+
+export function endgameSummary(text) {
+  const info = text.match(/depth:\s*(\d+).*?status:\s*([^\)\n]+)/);
+  if (!info) return "Solving…";
+  const status = info[2].trim();
+  if (Number(info[1]) >= 25 && status === "finished") return "Fully searched";
+  return `${info[1]} plies · ${status}`;
+}
+
+export function principalVariation(row) {
+  const steps = [{move:row.move, score:row.score}];
+  const pattern = new RegExp(`(${MOVE})(?:\\s+([+-]?\\d+)(?=\\s|$))?`, "g");
+  for (const match of (row.continuation || "").matchAll(pattern)) {
+    steps.push({move:match[1], score:match[2] === undefined ? (match[1] === "pass" ? 0 : null) : Number(match[2])});
+  }
+  return steps;
+}
+
+export function combineSim(previous, next, position = null) {
+  const key = row => position ? simulationMoveKey(position, row.move) : row.move;
+  const saved = new Map(previous.map((row) => [key(row), row]));
   const combined = new Map(saved);
   for (const row of next) {
-    const old = saved.get(row.move);
+    const old = saved.get(key(row));
     if (!row.iterations && old?.iterations) continue;
-    combined.set(row.move, row);
+    combined.set(key(row), row);
   }
   return [...combined.values()]
     .map((row) => {
-      const old = saved.get(row.move);
+      const old = saved.get(key(row));
       if (row === old || !old?.iterations || !row.iterations) return row;
       const total = old.iterations + row.iterations;
       const weighted = (a, b) =>
@@ -412,7 +444,7 @@ export function combineSim(previous, next) {
         ),
       };
     })
-    .sort((a, b) => b.win - a.win || b.equity - a.equity)
+    .sort((a, b) => (Number.isFinite(b.win) ? b.win : -Infinity) - (Number.isFinite(a.win) ? a.win : -Infinity) || b.equity - a.equity)
     .map((row, index) => ({ ...row, rank: index + 1 }));
 }
 

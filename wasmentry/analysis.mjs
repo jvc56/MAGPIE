@@ -1,4 +1,5 @@
 import { installTileDrag } from "./tile-drag.mjs";
+import { loadAnalyses, saveAnalysis } from "./analysis-cache.mjs";
 import { deviceBudget } from "./device-budget.mjs";
 import { listWMPs } from "./wmp-cache.mjs";
 import { parsePegProgress, mergePegRows } from "./peg-review.mjs";
@@ -20,6 +21,9 @@ import {
   analysisCommands,
   combineSim,
   analysisPositionKey,
+  simulationMoveKey,
+  endgameSummary,
+  principalVariation,
 } from "./analysis-model.mjs";
 import {
   remainingRack,
@@ -55,6 +59,8 @@ let historyIndex = 0;
 let recent = [];
 let hintTarget = null;
 let continuationPosition = null;
+let continuationTiles = new Set();
+let continuationSteps = 0;
 let session = null,
   botRunning = false,
   botTimer,
@@ -66,13 +72,32 @@ let analysisCache = new Map(),
   activeAnalysisKey = "",
   analysisMeta = "";
 let pegProgress = null;
+let simSelection = new Set();
+let cacheWrites = Promise.resolve();
+function analysisPosition() {
+  const analyzed = structuredClone(position);
+  if (isLive() && inventory(position).bagCount > 0) analyzed.racks[1] = "";
+  return analyzed;
+}
 const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
 const searchMode = () => {
   const { bagCount } = inventory(position);
   return bagCount === 0 ? "endgame" : bagCount <= 4 ? "peg" : "sim";
 };
 const cacheKey = (kind = mode) =>
-  `${analysisPositionKey(position)}|${kind}|${$("plies").value}|${$("candidates").value}|${$("hide-spoilers").checked ? "hidden" : recordedGame && !isLive() ? playedMove() : ""}`;
+  `${analysisPositionKey(analysisPosition())}|${kind}|${$("plies").value}|${$("hide-spoilers").checked ? "hidden" : ""}`;
+function retainAnalysis(key = cacheKey()) {
+  const saved = {
+    mode, results: structuredClone(results), raw: $("raw").textContent,
+    meta: analysisMeta, iterations: analysisIterations,
+    pegProgress: structuredClone(pegProgress),
+    plies: Number($("plies").value), savedAt: Date.now(),
+  };
+  analysisCache.set(key, saved);
+  cacheWrites = cacheWrites.then(() => saveAnalysis(key, saved)).catch(() => {
+    $("analysis-storage-warning").hidden = false;
+  });
+}
 function physicalCGP() {
   const physical = structuredClone(position);
   if (position.onTurn === 1) {
@@ -289,6 +314,7 @@ function updateActionAvailability() {
   document.querySelector('[data-mode="endgame"]').disabled = bagCount !== 0;
 }
 function clearResults() {
+  simSelection.clear();
   pegProgress = null;
   continuationPosition = null;
   analysisMeta = "";
@@ -336,7 +362,6 @@ function setPosition(next, rememberPosition = false, fromHistory = false) {
     recordedGame = null;
     session = null;
     clearTimeout(botTimer);
-    analysisCache.clear();
   }
   cancelDraftCheck();
   draftTiles = [];
@@ -410,6 +435,8 @@ function renderBoard() {
         cell.classList.add("pending");
       if (letter)
         cell.classList.add(owner === -1 ? "owner-unknown" : `owner-${owner}`);
+      if (continuationPosition && continuationTiles.has(`${row},${col}`))
+        cell.classList.add("pv-preview");
       const coord = `${String.fromCharCode(65 + col)}${row + 1}`;
       cell.dataset.row = row;
       cell.dataset.col = col;
@@ -564,6 +591,20 @@ function renderPosition() {
 }
 const format = (n, decimals = 2) =>
   Number.isFinite(n) ? n.toFixed(decimals) : "—";
+function updateSimSelection() {
+  const count = results.filter(row => simSelection.has(moveIdentity(row.move))).length;
+  $("continue-selected").hidden = mode !== "sim" || !count;
+  $("continue-selected").textContent = `Continue selected (${count})`;
+  $("continue-selected").disabled = busy;
+  const all = $("select-sim-all");
+  if (all) {
+    all.checked = count === results.length;
+    all.indeterminate = count > 0 && count < results.length;
+  }
+  document.querySelectorAll("[data-sim-move]").forEach(checkbox => {
+    checkbox.checked = simSelection.has(checkbox.dataset.simMove);
+  });
+}
 function renderResults() {
   document
     .querySelectorAll("[data-mode]")
@@ -578,6 +619,7 @@ function renderResults() {
     ["rank", "#"],
     ["move", "Play"],
   ];
+  if (mode === "sim" && results.length) columns.unshift(["simulate", ""]);
   if (mode === "kibitz")
     columns.push(
       ["leave", "Leave"],
@@ -604,7 +646,6 @@ function renderResults() {
     columns.push(
       ["score", "Score"],
       ["outcome", "Result"],
-      ["spread", "Spread"],
       ["value", "Gain"],
     );
   if (mode === "sim") {
@@ -626,11 +667,30 @@ function renderResults() {
     : simButton.title;
   $("fresh-analysis").hidden = !results.length || mode === "kibitz";
   $("fresh-analysis").disabled = busy;
+  const checkedMoves = results.filter(row => simSelection.has(moveIdentity(row.move)));
+  updateSimSelection();
+  $("add-sim").hidden = searchMode() !== "sim" || (!draftTiles.length && !selectedMove) || botRunning;
+  $("add-sim").disabled = busy || (isLive() && (!humanTurn() || session.paused));
   const header = document.createElement("tr");
-  for (const [, label] of columns) {
+  for (const [key, label] of columns) {
     const th = document.createElement("th");
+    th.dataset.column = key;
     th.scope = "col";
     th.textContent = label;
+    if (key === "simulate") {
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.id = "select-sim-all";
+      checkbox.setAttribute("aria-label", "Select all simulation plays");
+      checkbox.checked = checkedMoves.length === results.length;
+      checkbox.indeterminate = checkedMoves.length > 0 && checkedMoves.length < results.length;
+      checkbox.disabled = busy;
+      checkbox.addEventListener("change", () => {
+        simSelection = new Set(checkbox.checked ? results.map(row => moveIdentity(row.move)) : []);
+        updateSimSelection();
+      });
+      th.append(checkbox);
+    }
     header.append(th);
   }
   $("results").tHead.replaceChildren(header);
@@ -653,7 +713,22 @@ function renderResults() {
     );
     for (const [key] of columns) {
       const td = document.createElement("td");
-      if (key === "move") {
+      td.dataset.column = key;
+      if (key === "simulate") {
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.dataset.simMove = moveIdentity(row.move);
+        checkbox.setAttribute("aria-label", `Continue ${row.move}`);
+        checkbox.checked = simSelection.has(moveIdentity(row.move));
+        checkbox.disabled = busy;
+        checkbox.addEventListener("change", () => {
+          const identity = moveIdentity(row.move);
+          if (checkbox.checked) simSelection.add(identity);
+          else simSelection.delete(identity);
+          updateSimSelection();
+        });
+        td.append(checkbox);
+      } else if (key === "move") {
         const button = document.createElement("button");
         button.textContent = row.move;
         button.type = "button";
@@ -661,6 +736,11 @@ function renderResults() {
           "aria-pressed",
           String(row.move === selectedMove),
         );
+        if (mode === "endgame") {
+          button.classList.add("endgame-expand");
+          button.setAttribute("aria-expanded", String(row.move === selectedMove));
+          button.setAttribute("aria-controls", `endgame-pv-${row.rank}`);
+        }
         button.addEventListener("click", () => selectMove(row.move));
         td.append(button);
       } else if (key === "outcomes")
@@ -669,7 +749,7 @@ function renderResults() {
           : "—";
       else if (key === "outcome")
         td.textContent =
-          row.spread > 0 ? "Win" : row.spread < 0 ? "Loss" : "Tie";
+          row.spread === 0 ? "Tie" : `${row.spread > 0 ? "Win" : "Loss"} by ${Math.abs(row.spread)}`;
       else if (key.startsWith("ply")) {
         const index = +key.slice(3);
         td.textContent = format(row.plyAverages?.[index], 1);
@@ -691,7 +771,7 @@ function renderResults() {
         td.classList.toggle(
           "best",
           row[key] ===
-            Math.max(...results.map((value) => value[key] ?? -Infinity)),
+            Math.max(...results.map((value) => Number.isFinite(value[key]) ? value[key] : -Infinity)),
         );
       if (["spread", "outcome"].includes(key))
         td.classList.add(
@@ -700,12 +780,53 @@ function renderResults() {
       tr.append(td);
     }
     body.append(tr);
+    if (mode === "endgame" && row.move === selectedMove) {
+      const details = document.createElement("tr");
+      details.className = "endgame-details";
+      details.id = `endgame-pv-${row.rank}`;
+      const cell = document.createElement("td");
+      cell.colSpan = columns.length;
+      const title = document.createElement("strong");
+      title.textContent = "Principal variation";
+      const line = document.createElement("div");
+      line.className = "pv-line";
+      const steps = principalVariation(row);
+      steps.forEach((step, index) => {
+        const player = (position.onTurn + index) % 2;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `pv-player-${player}`;
+        button.dataset.pvStep = index + 1;
+        button.setAttribute("aria-pressed", String(continuationSteps === index + 1));
+        button.textContent = `${index + 1}. ${step.move}${step.score === null ? "" : ` · ${step.score}`}`;
+        button.setAttribute("aria-label", `${recordedGame?.players[player] || `Player ${player + 1}`}: ${step.move}${step.score === null ? "" : `, ${step.score} points`}`);
+        button.dataset.contextHint = "Preview the principal variation through this move.";
+        button.addEventListener("click", () => previewContinuation(steps.slice(0, index + 1).map(step => step.move)));
+        line.append(button);
+      });
+      cell.append(title, line);
+      if (recordedGame && !terminalPosition()) {
+        const play = document.createElement("button");
+        play.type = "button";
+        play.textContent = "Play selected move";
+        play.disabled = busy || (isLive() && (!humanTurn() || session.paused));
+        play.addEventListener("click", () => submitMove(row.move));
+        cell.append(play);
+      }
+      if (row.continuation?.includes("Search in progress")) {
+        const pending = document.createElement("p");
+        pending.textContent = "Searching for the continuation…";
+        cell.append(pending);
+      }
+      details.append(cell);
+      body.append(details);
+    }
   });
   $("results").tBodies[0].replaceChildren(body);
   $("empty").hidden = results.length > 0;
   $("result-note").textContent = note[mode];
   const row = results.find((r) => r.move === selectedMove);
-  $("selection").hidden = !row;
+  $("selection").hidden = !row || mode === "endgame";
   $("selection").replaceChildren();
   if (row) {
     const title = document.createElement("strong");
@@ -726,7 +847,7 @@ function renderResults() {
         document.createElement("br"),
         `Win ${format(row.win)}% ±${format(row.winSE)} · Equity ${format(row.equity)} ±${format(row.equitySE)} · ${row.iterations.toLocaleString()} iterations`,
       );
-    if (row.continuation) {
+    if (row.continuation && mode !== "endgame") {
       const line = document.createElement("div");
       line.className = "pv-line";
       const steps = [
@@ -783,6 +904,10 @@ function selectMove(move) {
   continuationPosition = null;
   recallTiles(false);
   selectedMove = selectedMove === move ? "" : move;
+  if (mode === "endgame" && selectedMove) {
+    const row = results.find(row => row.move === selectedMove);
+    if (row) previewContinuation(principalVariation(row).map(step => step.move));
+  }
   renderResults();
   renderBoard();
 }
@@ -805,7 +930,7 @@ function acceptOutput(text, command) {
   }
   if (next.length) {
     results =
-      analysisBase && mode === "sim" ? combineSim(analysisBase, next) : next;
+      analysisBase && mode === "sim" ? combineSim(analysisBase, next, position) : next;
     if (mode === "sim") {
       const batchIterations = [...text.matchAll(/Iters:\s+(\d+)/g)].at(-1)?.[1];
       analysisIterations = analysisBaseIterations + (batchIterations !== undefined
@@ -828,8 +953,7 @@ async function analyze(nextMode, options = {}) {
   try {
     const settings = readSettings();
     if (options.seconds) settings.seconds = options.seconds;
-    const analyzed = structuredClone(position);
-    if (isLive() && inventory(position).bagCount > 0) analyzed.racks[1] = "";
+    const analyzed = analysisPosition();
     if (
       recordedGame &&
       !isLive() &&
@@ -841,8 +965,6 @@ async function analyze(nextMode, options = {}) {
           .join("")
     )
       settings.playedMove = playedMove();
-    const commands = analysisCommands(analyzed, nextMode, settings);
-    commands[0] += ` -seed ${randomSeed()}`;
     activeAnalysisKey = cacheKey(nextMode);
     const resuming = options.resume ?? nextMode === "sim";
     analysisBase = resuming
@@ -851,6 +973,16 @@ async function analyze(nextMode, options = {}) {
     analysisBaseIterations = resuming
       ? analysisCache.get(activeAnalysisKey)?.iterations || 0
       : 0;
+    if (nextMode === "sim") {
+      if (options.moves) settings.moves = options.moves.map(normalizeMove);
+      else if (analysisBase?.length) {
+        settings.moves = analysisBase.map(row => normalizeMove(row.move));
+        if (settings.playedMove && !settings.moves.some(move => moveIdentity(move) === moveIdentity(settings.playedMove)))
+          settings.moves.push(settings.playedMove);
+      }
+    }
+    const commands = analysisCommands(analyzed, nextMode, settings);
+    commands[0] += ` -seed ${randomSeed()}`;
     const keepSelection = mode === nextMode && analysisBase?.some(row => row.move === selectedMove);
     mode = nextMode;
     error("");
@@ -897,15 +1029,7 @@ async function analyze(nextMode, options = {}) {
     if (generation !== positionGeneration) return false;
     message(response.stopped ? "Stopped · partial results" : "Complete");
     succeeded = !response.stopped && results.length > 0;
-    if (results.length)
-      analysisCache.set(activeAnalysisKey, {
-        mode,
-        results: structuredClone(results),
-        raw: $("raw").textContent,
-        meta: analysisMeta,
-        iterations: analysisIterations,
-        pegProgress: structuredClone(pegProgress),
-      });
+    if (results.length) retainAnalysis(activeAnalysisKey);
   } catch (e) {
     if (generation !== positionGeneration) return false;
     error(e.message);
@@ -1308,7 +1432,6 @@ async function loadGame(file, pastedText = "") {
     gameUndo = [];
     session = null;
     clearTimeout(botTimer);
-    analysisCache.clear();
     progress("board.render");
     adoptGame(game, lexicon, 0);
     progress("load.complete");
@@ -1823,7 +1946,6 @@ $("new-game-form").addEventListener("submit", async (event) => {
     const text = `#character-encoding UTF-8\n#lexicon ${position.lexicon}\n#player1 p1 ${players[0]}\n#player2 p2 ${players[1]}\n`;
     let { game } = await engine.importGCG(text, position.lexicon);
     saveGameUndo();
-    analysisCache.clear();
     session = null;
     if (kind !== "record") {
       const response = await engine.gameAction({
@@ -2041,9 +2163,13 @@ $("rack-tiles").addEventListener("keydown", (event) => {
 
 function previewContinuation(steps) {
   continuationPosition = structuredClone(position);
+  continuationTiles = new Set();
+  continuationSteps = steps.length;
+  document.querySelectorAll("[data-pv-step]").forEach(button => button.setAttribute("aria-pressed", String(Number(button.dataset.pvStep) === steps.length)));
   steps.forEach((move, index) => {
     for (const tile of previewMove(continuationPosition, move)) {
       continuationPosition.board[tile.row][tile.col] = tile.letter;
+      continuationTiles.add(`${tile.row},${tile.col}`);
       continuationPosition.owners[tile.row][tile.col] =
         (position.onTurn + index) % 2;
     }
@@ -2490,10 +2616,7 @@ function playedMove(index = historyIndex) {
     : "";
 }
 function moveIdentity(move) {
-  const tiles = previewMove(position, move);
-  return tiles.length
-    ? JSON.stringify(tiles.sort((a, b) => a.row - b.row || a.col - b.col))
-    : normalizeMove(move).replace(/^ex (.+)$/, (_, letters) => `ex ${[...letters].sort().join("")}`);
+  return simulationMoveKey(position, move);
 }
 function playedAssessment() {
   if (!recordedGame || $("hide-spoilers").checked || !results.length)
@@ -2594,9 +2717,21 @@ function renderReviewTable() {
   $("watch-from").disabled = busy || !!isLive() || terminal;
 }
 function restoreAnalysis() {
-  const saved =
+  let saved =
     analysisCache.get(cacheKey(searchMode())) ||
     analysisCache.get(cacheKey("kibitz"));
+  if (!saved) {
+    const prefix = `${analysisPositionKey(analysisPosition())}|${searchMode()}|`;
+    const suffix = `|${$("hide-spoilers").checked ? "hidden" : ""}`;
+    saved = [...analysisCache.entries()]
+      .filter(([key]) => key.startsWith(prefix) && key.endsWith(suffix))
+      .map(([, value]) => value)
+      .sort((a, b) => b.savedAt - a.savedAt)[0];
+    if (saved) {
+      $("plies").value = saved.plies;
+      settingsSummary();
+    }
+  }
   if (!saved) return;
   mode = saved.mode;
   results = structuredClone(saved.results);
@@ -2606,6 +2741,61 @@ function restoreAnalysis() {
   $("raw").textContent = saved.raw;
   renderResults();
 }
+async function addSimCandidate() {
+  if (busy || searchMode() !== "sim" || (isLive() && (!humanTurn() || session.paused))) return;
+  const generation = positionGeneration;
+  let listener;
+  try {
+    const move = normalizeMove(draftTiles.length ? moveNotation(position, draftTiles, vertical) : selectedMove);
+    const key = cacheKey("sim");
+    const saved = analysisCache.get(key);
+    if (saved?.results.some(row => moveIdentity(row.move) === moveIdentity(move))) {
+      message("That play is already in the simulation");
+      return;
+    }
+    cancelDraftCheck();
+    setBusy(true);
+    $("stop").disabled = true;
+    error("");
+    message("Adding play…");
+    await previewPromise;
+    await engine.prepare(position.lexicon);
+    let text = "";
+    listener = ({detail}) => {
+      if (detail.type === "output" && detail.command === "shmoves") text = detail.text;
+    };
+    engine.addEventListener("message", listener);
+    const commands = analysisCommands(analysisPosition(), "kibitz", {...readSettings(), wmp:false}).slice(0, 2);
+    await engine.run([...commands, `addmoves ${move}`, "shmoves"]);
+    if (generation !== positionGeneration) return;
+    const candidate = parseResults(text, "kibitz")[0];
+    if (!candidate) throw new Error("Could not add this play to the simulation.");
+    mode = "sim";
+    results = structuredClone(saved?.results || []);
+    results.push({...candidate, rank:results.length + 1, iterations:0, win:NaN, winSE:NaN, equity:NaN, equitySE:NaN, plyAverages:[]});
+    analysisIterations = saved?.iterations || 0;
+    analysisMeta = analysisSummary("", "sim");
+    $("raw").textContent = saved?.raw || "";
+    pegProgress = null;
+    simSelection.add(moveIdentity(candidate.move));
+    recallTiles(false);
+    selectedMove = candidate.move;
+    retainAnalysis(key);
+    message("Play added");
+  } catch (failure) {
+    if (generation === positionGeneration) error(failure.message);
+  } finally {
+    if (listener) engine.removeEventListener("message", listener);
+    setBusy(false);
+    renderResults();
+    renderPosition();
+  }
+}
+$("add-sim").addEventListener("click", addSimCandidate);
+$("continue-selected").addEventListener("click", () => {
+  const moves = results.filter(row => simSelection.has(moveIdentity(row.move))).map(row => row.move);
+  if (moves.length) analyze("sim", {resume:true, moves});
+});
 $("fresh-analysis").addEventListener("click", () => analyze(mode, {resume:false}));
 $("review-game").addEventListener("click", async () => {
   if (busy || !recordedGame || isLive()) return;
@@ -2647,8 +2837,7 @@ function analysisSummary(text, kind) {
     return `${$("plies").value} plies · ${analysisIterations.toLocaleString()} total iterations`;
   }
   if (kind === "endgame") {
-    const info = text.match(/depth:\s*(\d+).*?status:\s*([^\)\n]+)/);
-    return info ? `${info[1]} plies · ${info[2]}` : "Solving…";
+    return endgameSummary(text);
   }
   if (kind === "peg")
     return `${inventory(position).bagCount} in bag · ${results[0]?.depth || "Solving"}`;
@@ -2672,6 +2861,8 @@ const controlHints = {
   "stop-review": "Stop the review and keep completed analysis.",
   "fresh-analysis":
     "Discard this position’s previous results and start a new search.",
+  "add-sim": "Add the board play or selected candidate to this position’s simulation without changing the game.",
+  "continue-selected": "Add iterations only to the checked plays; keep the other results.",
   "auto-analyze": "Analyze automatically when you select a turn in history.",
   "new-game":
     "Start a game with named players and enter each rack as you go.",
@@ -2808,6 +2999,12 @@ async function startEngine() {
   try {
     if (!(await ensureIsolation())) return;
     engine = new EngineClient();
+    try {
+      analysisCache = await loadAnalyses();
+      restoreAnalysis();
+    } catch {
+      $("analysis-storage-warning").hidden = false;
+    }
     engine.addEventListener("message", ({ detail }) => {
       if (detail.type === "fatal") {
         positionGeneration++;

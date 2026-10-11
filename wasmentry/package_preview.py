@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = [
     'wasmentry/index.html', 'wasmentry/analysis.css', 'wasmentry/theme.js',
     'wasmentry/peg-review.mjs', 'wasmentry/analysis.mjs', 'wasmentry/analysis-model.mjs', 'wasmentry/move-entry.mjs', 'wasmentry/tile-drag.mjs',
-    'wasmentry/device-budget.mjs', 'wasmentry/wmp-assets.mjs', 'wasmentry/wmp-cache.mjs',
+    'wasmentry/device-budget.mjs', 'wasmentry/wmp-assets.mjs', 'wasmentry/wmp-cache.mjs', 'wasmentry/analysis-cache.mjs',
     'wasmentry/engine-client.mjs', 'wasmentry/wasm-worker.js',
     'wasmentry/gcg-loader.mjs', 'wasmentry/gcg-loader-worker.js', 'wasmentry/gcg-diagnostics.mjs',
     'wasmentry/isolation.mjs', 'wasmentry/isolation-worker.js',

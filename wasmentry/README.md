@@ -62,6 +62,19 @@ previews must be opened in their own tab to enable cross-origin isolation.
   Sims have a 500-iteration minimum before statistical stopping; time limits and manual
   stops can end them earlier. Time-limited PEG/endgame results can be incomplete;
   **Details** exposes search notes, depth, status and engine diagnostics.
+- Sims from Play, Watch, and review are saved in this browser (IndexedDB),
+  keyed by position, known opponent tiles, lexicon, and lookahead. Return to a
+  position or reopen its GCG to restore them, including after a page reload.
+  These results are local to this browser/origin and are not embedded in GCGs.
+  **Continue sim** adds iterations to the whole saved candidate set; check
+  individual rows for **Continue selected**. Arrange a play on the board or
+  select a kibitz candidate, then **Add to sim** to add it without changing the
+  game. New candidates start at zero iterations. Results remain usable in the
+  current tab if browser storage is unavailable.
+- Select an endgame result to expand its principal variation directly below
+  the row. Its playout appears on the board at 50% opacity in player colors;
+  click a PV step to preview just that prefix. Completed full-depth searches
+  say **Fully searched**; interrupted searches retain their depth/status.
 
 **New game** defaults to **Play Magpie**, with **Record a game** and
 **Watch computers** alongside it. Player names default to **You** and **Magpie**.

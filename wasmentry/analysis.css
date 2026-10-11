@@ -723,6 +723,10 @@ th:nth-child(2),
 td:nth-child(2) {
   text-align: left;
 }
+#results [data-column="move"] { text-align: left; }
+#results [data-column="rank"] { text-align: right; }
+#results [data-column="simulate"] { width: 24px; text-align: center; }
+#results input[type="checkbox"] { width: 14px; height: 14px; margin: 0; vertical-align: middle; }
 td button {
   border: 0;
   background: none;
@@ -1199,6 +1203,14 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 .pv-line button {
   font-size: 12px;
 }
+.square.pv-preview { opacity: 0.5; }
+.endgame-expand::before { content: "▸ "; }
+.endgame-expand[aria-expanded="true"]::before { content: "▾ "; }
+#results .endgame-details td { text-align: left; white-space: normal; padding: 12px; }
+#results .pv-line button { padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; }
+#results .pv-line button[aria-pressed="true"] { background: var(--selected-row); border-color: var(--accent); }
+#results .pv-player-0 { color: var(--gold-text); }
+#results .pv-player-1 { color: var(--positive); }
 .playing .position-tools,
 .playing .board-tools,
 .playing .ownership-tools,
