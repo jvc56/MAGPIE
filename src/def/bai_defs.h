@@ -52,6 +52,11 @@ typedef struct BAIOptions {
   // being preserved after bai() returns.
   int *arm_avoid_prune;
   int num_arm_avoid_prune;
+  // The draws one sample averages, such as a bag-cycled sim sample's
+  // rotations; 0 or 1 when each sample is a single draw. Rounds are sized in
+  // draws (see BAI_SCHEDULE_ROUND_SIZE), so samples that average many draws
+  // still get an adaptive schedule at small budgets.
+  uint64_t draws_per_sample;
 } BAIOptions;
 
 #endif

@@ -506,6 +506,7 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   sim_args.pat_rollout_disabled = strategy->pat_rollout_disabled;
   sim_args.pat_rollout_disabled_classes_mask =
       strategy->pat_rollout_disabled_classes_mask;
+  sim_args.bag_cycle = strategy->sim_bag_cycle;
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).

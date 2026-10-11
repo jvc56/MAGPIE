@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/game_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/equity.h"
@@ -433,6 +434,8 @@ typedef struct Simmer {
   double utility_w_spread;
   double utility_spread_scale;
   bool use_margin_forecast;
+  // SimArgs.bag_cycle.
+  bool bag_cycle;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -473,38 +476,17 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   free(simmer_worker);
 }
 
-// When record is non-NULL, the sample's contributions to its SimmedPlay are
-// written there instead of applied; rv_sim_apply_record applies them.
-static double rv_sim_sample_impl(RandomVariables *rvs,
-                                 const uint64_t play_index,
-                                 const uint64_t reserved_seed,
-                                 const int thread_index,
-                                 const uint64_t sample_count,
-                                 SimmedPlaySampleRecord *record) {
-  Simmer *simmer = (Simmer *)rvs->data;
+// One rollout of simmed_play from seed's shuffled bag, rotated left by
+// rotation * RACK_SIZE letters (see bag_rotate) before the opponent's rack is
+// drawn. When record is non-NULL, the rollout's contributions to its
+// SimmedPlay are written there instead of applied. Returns its utility.
+static double sim_rollout(const Simmer *simmer, SimmerWorker *simmer_worker,
+                          SimmedPlay *simmed_play, const uint64_t seed,
+                          const int rotation, SimmedPlaySampleRecord *record) {
   SimResults *sim_results = simmer->sim_results;
-  SimmedPlay *simmed_play =
-      sim_results_get_simmed_play(sim_results, (int)play_index);
-  // In PGP mode, rvs_thread_index = parent_worker_thread_index +
-  // bai_thread_index. The local index into the workers array is always
-  // bai_thread_index (0-based), while the global thread_index is used for
-  // movegen to avoid cache conflicts.
-  const int local_worker_index =
-      thread_index - simmer->parent_worker_thread_index;
-  if (local_worker_index < 0 || local_worker_index >= simmer->num_threads) {
-    log_fatal("local worker index (%d) is out of bounds for simmer with "
-              "num_threads %d (thread_index=%d, parent=%d)",
-              local_worker_index, simmer->num_threads, thread_index,
-              simmer->parent_worker_thread_index);
-  }
-  SimmerWorker *simmer_worker = simmer->workers[local_worker_index];
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
   const int plies = sim_results_get_num_plies(sim_results);
-  if (record) {
-    simmed_play_sample_record_clear(record);
-  }
-
   const int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
   // Canonicalize the bag before seeding it. game_seed alphabetizes and
   // reshuffles whatever the bag currently holds, so the shuffle -- and
@@ -521,13 +503,12 @@ static double rv_sim_sample_impl(RandomVariables *rvs,
   return_rack_to_bag(game, player_off_turn_index);
 
   // This will shuffle the bag, so there is no need
-  // to call bag_shuffle explicitly. A caller that scheduled this sample ahead
-  // of time already reserved its seed; only draw one here when it did not.
-  const uint64_t seed = (reserved_seed != RVS_SEED_UNRESERVED)
-                            ? reserved_seed
-                            : simmed_play_get_seed(simmed_play);
+  // to call bag_shuffle explicitly.
   prng_seed(simmer_worker->prng, seed);
   game_seed(game, seed);
+  if (rotation > 0) {
+    bag_rotate(game_get_bag(game), rotation * RACK_SIZE);
+  }
 
   bool set_player_off_turn_rack_with_known_opp_rack = false;
   if (simmer->use_alias_method) {
@@ -632,17 +613,6 @@ static double rv_sim_sample_impl(RandomVariables *rvs,
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
 
-  if (simmer->print_interval > 0 &&
-      sample_count % simmer->print_interval == 0) {
-    sim_results_print(simmer->thread_control, simmer_worker->game,
-                      simmer->sim_results, simmer->max_num_display_plays,
-                      simmer->max_num_display_plies, true, false, NULL);
-  }
-  // A recorded sample is counted when its record is applied.
-  if (!record) {
-    sim_results_increment_iteration_count(sim_results);
-  }
-
   const Equity utility_spread =
       simmer->use_margin_forecast ? spread + projected_leftover : spread;
   const double utility =
@@ -655,6 +625,111 @@ static double rv_sim_sample_impl(RandomVariables *rvs,
   // mutex lock + stat_push on this hot path in that case.
   if (simmer->utility_w_spread > 0.0) {
     simmed_play_add_utility_stat(simmed_play, utility, record);
+  }
+  return utility;
+}
+
+int rv_sim_bag_cycle_rotations(const Game *game) {
+  const int unseen = bag_get_letters(game_get_bag(game)) +
+                     rack_get_total_letters(player_get_rack(game_get_player(
+                         game, 1 - game_get_player_on_turn_index(game))));
+  return unseen > RACK_SIZE ? (unseen + RACK_SIZE - 1) / RACK_SIZE : 1;
+}
+
+// A bag-cycled sample (SimArgs.bag_cycle): one rollout per rotation of
+// seed's shuffled bag by RACK_SIZE letters, until the rotations wrap around,
+// so that every unseen letter starts on the opponent's rack once (once or
+// twice when the letters don't divide evenly). The rotations share one
+// shuffle, so their mean is one sample, with the equity, leftover, win% and
+// utility averaged over them and the per-ply statistics taken from the first
+// rotation. Records into record, or applies under the play's lock once when
+// it is NULL. Returns the mean utility.
+static double sim_cycled_rollouts(const Simmer *simmer,
+                                  SimmerWorker *simmer_worker,
+                                  SimmedPlay *simmed_play, const uint64_t seed,
+                                  SimmedPlaySampleRecord *record) {
+  const int rotations = rv_sim_bag_cycle_rotations(simmer_worker->game);
+  SimmedPlaySampleRecord combined;
+  SimmedPlaySampleRecord *out = record != NULL ? record : &combined;
+  simmed_play_sample_record_clear(out);
+  SimmedPlaySampleRecord rollout;
+  double utility_sum = 0.0;
+  double win_pct_sum = 0.0;
+  double equity_sum = 0.0;
+  double leftover_sum = 0.0;
+  for (int rotation = 0; rotation < rotations; rotation++) {
+    simmed_play_sample_record_clear(&rollout);
+    utility_sum += sim_rollout(simmer, simmer_worker, simmed_play, seed,
+                               rotation, &rollout);
+    if (rotation == 0) {
+      *out = rollout;
+    }
+    equity_sum += (double)rollout.equity_sample;
+    leftover_sum += (double)rollout.leftover;
+    win_pct_sum += rollout.win_pct;
+  }
+  const double scale = 1.0 / (double)rotations;
+  out->equity_sample = (Equity)llround(equity_sum * scale);
+  out->leftover = (Equity)llround(leftover_sum * scale);
+  out->win_pct = win_pct_sum * scale;
+  out->utility = utility_sum * scale;
+  out->num_rollouts = rotations;
+  if (record == NULL) {
+    simmed_play_apply_sample_record(simmed_play, out);
+    sim_results_add_iteration_count(simmer->sim_results, (uint64_t)rotations);
+  }
+  return out->utility;
+}
+
+// When record is non-NULL, the sample's contributions to its SimmedPlay are
+// written there instead of applied; rv_sim_apply_record applies them.
+static double rv_sim_sample_impl(RandomVariables *rvs,
+                                 const uint64_t play_index,
+                                 const uint64_t reserved_seed,
+                                 const int thread_index,
+                                 const uint64_t sample_count,
+                                 SimmedPlaySampleRecord *record) {
+  Simmer *simmer = (Simmer *)rvs->data;
+  SimResults *sim_results = simmer->sim_results;
+  SimmedPlay *simmed_play =
+      sim_results_get_simmed_play(sim_results, (int)play_index);
+  // In PGP mode, rvs_thread_index = parent_worker_thread_index +
+  // bai_thread_index. The local index into the workers array is always
+  // bai_thread_index (0-based), while the global thread_index is used for
+  // movegen to avoid cache conflicts.
+  const int local_worker_index =
+      thread_index - simmer->parent_worker_thread_index;
+  if (local_worker_index < 0 || local_worker_index >= simmer->num_threads) {
+    log_fatal("local worker index (%d) is out of bounds for simmer with "
+              "num_threads %d (thread_index=%d, parent=%d)",
+              local_worker_index, simmer->num_threads, thread_index,
+              simmer->parent_worker_thread_index);
+  }
+  SimmerWorker *simmer_worker = simmer->workers[local_worker_index];
+  if (record) {
+    simmed_play_sample_record_clear(record);
+  }
+  // A caller that scheduled this sample ahead of time already reserved its
+  // seed; only draw one here when it did not.
+  const uint64_t seed = (reserved_seed != RVS_SEED_UNRESERVED)
+                            ? reserved_seed
+                            : simmed_play_get_seed(simmed_play);
+  double utility;
+  if (!simmer->bag_cycle) {
+    utility = sim_rollout(simmer, simmer_worker, simmed_play, seed, 0, record);
+    // A recorded sample is counted when its record is applied.
+    if (!record) {
+      sim_results_increment_iteration_count(sim_results);
+    }
+  } else {
+    utility =
+        sim_cycled_rollouts(simmer, simmer_worker, simmed_play, seed, record);
+  }
+  if (simmer->print_interval > 0 &&
+      sample_count % simmer->print_interval == 0) {
+    sim_results_print(simmer->thread_control, simmer_worker->game,
+                      simmer->sim_results, simmer->max_num_display_plays,
+                      simmer->max_num_display_plies, true, false, NULL);
   }
   return utility;
 }
@@ -683,7 +758,9 @@ static void rv_sim_apply_record(const RandomVariables *rvs,
   simmed_play_apply_sample_record(
       sim_results_get_simmed_play(simmer->sim_results, (int)play_index),
       (const SimmedPlaySampleRecord *)record);
-  sim_results_increment_iteration_count(simmer->sim_results);
+  sim_results_add_iteration_count(
+      simmer->sim_results,
+      (uint64_t)((const SimmedPlaySampleRecord *)record)->num_rollouts);
 }
 
 // Reserves arm k's next rollout seed. All plays' PRNGs are seeded from the
@@ -796,6 +873,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
+  simmer->bag_cycle = sim_args->bag_cycle;
 
   simmer->thread_control = thread_control;
 
@@ -852,6 +930,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
   simmer->use_margin_forecast = sim_args->use_margin_forecast;
+  simmer->bag_cycle = sim_args->bag_cycle;
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

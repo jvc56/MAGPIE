@@ -16,6 +16,11 @@
 
 typedef struct RandomVariables RandomVariables;
 
+// The rotations a bag-cycled sample (SimArgs.bag_cycle) plays from game: the
+// letters unseen by the player on turn (the bag and the opponent's rack)
+// divided by RACK_SIZE, rounded up, and at least 1.
+int rv_sim_bag_cycle_rotations(const Game *game);
+
 typedef enum {
   RANDOM_VARIABLES_UNIFORM,
   RANDOM_VARIABLES_UNIFORM_PREDETERMINED,

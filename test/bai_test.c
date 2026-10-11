@@ -613,6 +613,18 @@ void test_bai_from_seed(const char *bai_seed) {
   free(means_and_vars);
 }
 
+// A round holds BAI_SCHEDULE_ROUND_SIZE draws' worth of samples, to the
+// nearest sample and at least one.
+void test_bai_round_size(void) {
+  assert(bai_round_size(0) == BAI_SCHEDULE_ROUND_SIZE);
+  assert(bai_round_size(1) == BAI_SCHEDULE_ROUND_SIZE);
+  assert(bai_round_size(2) == BAI_SCHEDULE_ROUND_SIZE / 2);
+  assert(bai_round_size(12) == 3);
+  assert(bai_round_size(14) == 2);
+  assert(bai_round_size((uint64_t)2 * BAI_SCHEDULE_ROUND_SIZE) == 1);
+  assert(bai_round_size(1000) == 1);
+}
+
 void test_bai(void) {
   const char *bai_seed = getenv("BAI_SEED");
   if (bai_seed) {
@@ -620,6 +632,7 @@ void test_bai(void) {
   } else {
     test_bai_abandon_folds_finished_samples();
     test_bai_claim_stops_within_one_sample();
+    test_bai_round_size();
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {

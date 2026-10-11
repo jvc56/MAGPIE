@@ -46,6 +46,31 @@ void bag_shuffle(Bag *bag) {
   }
 }
 
+// Reverses letters[first, last).
+static void bag_reverse(Bag *bag, int first, int last) {
+  for (last--; first < last; first++, last--) {
+    const MachineLetter letter = bag->letters[first];
+    bag->letters[first] = bag->letters[last];
+    bag->letters[last] = letter;
+  }
+}
+
+void bag_rotate(Bag *bag, int shift) {
+  const int num_letters = bag_get_letters(bag);
+  if (num_letters < 2) {
+    return;
+  }
+  shift %= num_letters;
+  if (shift == 0) {
+    return;
+  }
+  const int start = bag->start_tile_index;
+  const int end = bag->end_tile_index;
+  bag_reverse(bag, start, start + shift);
+  bag_reverse(bag, start + shift, end);
+  bag_reverse(bag, start, end);
+}
+
 // Resets the bag to all of the letters in ld
 // and shuffles.
 void bag_reset(const LetterDistribution *ld, Bag *bag) {
