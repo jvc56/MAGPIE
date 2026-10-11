@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { sortTiles, formatTileGroups } from "../tile-order.mjs";
 import { sortRack, remainingRack } from "../move-entry.mjs";
@@ -57,6 +58,7 @@ const leaves = page => page.locator('#results tbody [data-column="leave"]').allT
 test("independent alphagram and pool preferences update existing results and persist on mobile", async ({page}) => {
   await page.goto("/wasmentry/");
   await expect(page.locator("#status")).toHaveText("Engine ready", { timeout: 30000 });
+  await openSample(page);
   expect(await poolLetters(page)).toBe("AEIOUBCDFGHJKLMNPQRSTVWXYZ?");
   await page.locator("#position-editor > summary").click();
   await page.locator("#rack").fill("B?EA?YC");
@@ -91,6 +93,7 @@ test("independent alphagram and pool preferences update existing results and per
   await page.screenshot({path:test.info().outputPath("tile-order-settings-mobile.png"),fullPage:true});
   await page.reload();
   await expect(page.locator("#status")).toHaveText("Engine ready", { timeout: 30000 });
+  await openSample(page);
   await page.locator("#open-settings").click();
   await expect(page.locator("#tile-order")).toHaveValue("blanks-vowels");
   await expect(page.locator("#unseen-order")).toHaveValue("alphabetical");
@@ -100,6 +103,7 @@ test("independent alphagram and pool preferences update existing results and per
 test("changing alphagram order keeps pending tiles and preserves subsequent manual rack ordering", async ({page}) => {
   await page.goto("/wasmentry/");
   await expect(page.locator("#status")).toHaveText("Engine ready", { timeout: 30000 });
+  await openSample(page);
   await page.locator("#new-game").click();
   await page.getByRole("button", {name:"Record a game",exact:true}).click();
   await page.locator("#new-game-form button.primary").click();
@@ -134,6 +138,7 @@ test("changing alphagram order keeps pending tiles and preserves subsequent manu
 test('shuffle preserves staged duplicate and blank slots when changing direction', async ({page}) => {
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   await page.locator('#new-game').click();
   await page.getByRole('button', {name:'Record a game',exact:true}).click();
   await page.locator('#new-game-form button.primary').click();
@@ -162,6 +167,7 @@ test('shuffle preserves staged duplicate and blank slots when changing direction
 test('a direction change past the board edge keeps the move and explains the failure', async ({page}) => {
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   await page.locator('#new-game').click();
   await page.getByRole('button', {name:'Record a game',exact:true}).click();
   await page.locator('#new-game-form button.primary').click();

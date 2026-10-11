@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { formatHistoryPlay, historyPlayParts, parseCGP, SAMPLES } from "../analysis-model.mjs";
 
@@ -34,6 +35,7 @@ async function ready(page) {
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
 }
 
 test("history pairs players and shows playthrough notation in rows and navigation", async ({

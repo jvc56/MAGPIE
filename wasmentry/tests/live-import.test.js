@@ -1,9 +1,11 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
 async function startGame(page) {
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   await page.locator('#new-game').click();
   await page.locator('[data-game-kind=play]').click();
   await page.locator('.game-options > summary').click();

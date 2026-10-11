@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { mergePegRows, parsePegProgress } from "../peg-review.mjs";
 
@@ -64,6 +65,7 @@ test("PEG streams stages and candidates before completion and preserves them in 
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   await page
     .locator("#gcg-file")
     .setInputFiles("tests/fixtures/review-candidates.gcg");

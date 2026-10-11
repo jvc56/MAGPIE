@@ -127,6 +127,7 @@
               <label
                 >Example
                 <select id="sample">
+                  <option value="" disabled selected>Choose example…</option>
                   <option value="opening">Opening</option>
                   <option value="midgame">Midgame</option>
                   <option value="peg">Pre-endgame</option>
@@ -198,7 +199,7 @@
                   maxlength="7"
                   spellcheck="false"
                   autocomplete="off"
-                  value="AEINRST"
+                  value=""
                   aria-label="On-turn rack" /></label
               ><label
                 >Known opponent tiles
@@ -597,10 +598,10 @@
         ><button id="confirm-no">Cancel</button>
       </div>
     </dialog>
-    <dialog id="new-game-dialog">
+    <dialog id="new-game-dialog" aria-labelledby="new-game-heading">
       <form id="new-game-form">
         <div class="panel-header">
-          <h2>New game</h2>
+          <h2 id="new-game-heading">New game</h2>
           <button
             type="button"
             id="cancel-new-game"
@@ -616,6 +617,7 @@
         >
           <button
             type="button"
+            autofocus
             data-game-kind="play"
             aria-pressed="true"
           >
@@ -729,7 +731,11 @@
             </div>
           </details>
         </div>
-        <button class="primary">Start game</button>
+        <p id="new-game-status" role="status">Preparing browser engine…</p>
+        <div class="new-game-actions">
+          <button id="start-game" class="primary" disabled>Start game</button>
+          <button id="new-game-open" type="button" disabled>Open game…</button>
+        </div>
       </form>
     </dialog>
     <dialog id="gcg-dialog" aria-labelledby="gcg-heading">

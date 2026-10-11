@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { inventory, parseCGP, SAMPLES } from "../analysis-model.mjs";
 
@@ -15,6 +16,7 @@ async function ready(page) {
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   await page.locator("#position-editor > summary").click();
 }
 test("unseen pool includes opposing racks and follows positions and layout", async ({

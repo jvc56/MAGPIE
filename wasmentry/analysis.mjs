@@ -11,6 +11,7 @@ import { readGCG } from "./gcg-loader.mjs?v=2";
 import { logGCG, gcgLogText } from "./gcg-diagnostics.mjs";
 import {
   SAMPLES,
+  emptyPosition,
   VALUES,
   parseCGP,
   toCGP,
@@ -41,7 +42,8 @@ import {
 let cachedWMPFiles = [];
 let positionGeneration = 0, analysisGeneration = -1, historyClickTimer, pendingHistoryIndex = null;
 const $ = (id) => document.getElementById(id);
-let position = parseCGP(SAMPLES.opening);
+let position = emptyPosition();
+let engineInitialized = false;
 let mode = "kibitz",
   results = [],
   selectedMove = "",
@@ -210,6 +212,7 @@ const note = {
 };
 function message(text) {
   $("status").textContent = text;
+  if (!engineInitialized) $("new-game-status").textContent = text;
 }
 function error(text) {
   $("error").hidden = !text;
@@ -326,6 +329,8 @@ function setBusy(value) {
   value = value || Boolean(engine?.fatalError);
   if (value) tileDrag?.cancel();
   busy = value;
+  $("start-game").disabled = value;
+  $("new-game-open").disabled = value;
   if (!value) $("stop-wmp").hidden = true;
   document.body.classList.toggle("busy", value);
   document
@@ -1183,7 +1188,7 @@ $("undo").addEventListener("click", () => {
   }
 });
 $("clear").addEventListener("click", () =>
-  commitEdit(parseCGP(SAMPLES.opening.replace("CSW24", position.lexicon))),
+  commitEdit(emptyPosition(position.lexicon)),
 );
 $("edit").addEventListener("change", () => {
   recallTiles(false);
@@ -1422,6 +1427,10 @@ function openGameImport() {
   $("gcg-dialog").showModal();
 }
 $("load-gcg").addEventListener("click", openGameImport);
+$("new-game-open").addEventListener("click", () => {
+  $("new-game-dialog").close();
+  openGameImport();
+});
 $("close-gcg").addEventListener("click", () => $("gcg-dialog").close());
 $("choose-gcg").addEventListener("click", () => {
   chooserPending = true;
@@ -2046,6 +2055,7 @@ $("new-game-form").addEventListener("submit", async (event) => {
   if (players.some((name) => !name)) return;
   if (isLive() && !(await confirmGame("Start a new game?", "The current game will end and be replaced.", "New game"))) return;
   $("new-game-dialog").close();
+  let focusRack = false;
   try {
     setBusy(true);
     $("stop").disabled = true;
@@ -2084,13 +2094,14 @@ $("new-game-form").addEventListener("submit", async (event) => {
     message(session ? "Game ready" : "Game ready · enter the first rack");
     if (!session) {
       $("position-editor").open = true;
-      $("rack").focus();
+      focusRack = true;
     }
   } catch (failure) {
     error(failure.message);
   } finally {
     setBusy(false);
     renderSession();
+    if (focusRack) $("rack").focus();
     scheduleComputer();
   }
 });
@@ -3112,6 +3123,7 @@ for (const id of ["auto-analyze", "hide-spoilers", "wmp-source", "wmp-cache-enab
 renderRecent();
 renderPosition();
 renderResults();
+$("new-game-dialog").showModal();
 async function startEngine() {
   setBusy(true);
   $("stop").disabled = true;
@@ -3171,6 +3183,8 @@ async function startEngine() {
         acceptOutput(detail.text, detail.command || "");
     });
     await engine.ready;
+    engineInitialized = true;
+    $("new-game-status").hidden = true;
     setBusy(false);
     message("Engine ready");
     refreshWMPCache();

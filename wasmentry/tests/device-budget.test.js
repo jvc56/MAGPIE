@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from '@playwright/test';
 import { deviceBudget } from '../device-budget.mjs';
 import { analysisCommands, parseCGP, SAMPLES } from '../analysis-model.mjs';
@@ -33,6 +34,7 @@ test('mobile settings default conservatively, persist memory choice, and keep WM
   });
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready',{timeout:30000});
+  await openSample(page);
   await expect(page.locator('#threads')).toHaveValue('2');
   await expect(page.locator('#threads')).toHaveAttribute('max','4');
   await expect(page.locator('#tt-memory')).toHaveValue('16');
@@ -48,6 +50,7 @@ for (const mode of ['peg', 'endgame']) {
   test(`${mode} completes with the 16 MiB search budget`, async ({page}) => {
     await page.goto('/wasmentry/');
     await expect(page.locator('#status')).toHaveText('Engine ready',{timeout:30000});
+  await openSample(page);
     await page.locator('#open-analysis-settings').click();
     await page.locator('#tt-memory').selectOption('16');
     await page.locator('#seconds').fill('2');

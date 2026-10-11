@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import {test, expect} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 import {analysisCommands, parseCGP, SAMPLES, combineSim, endgameSummary, principalVariation} from '../analysis-model.mjs';
@@ -5,6 +6,7 @@ import {analysisCommands, parseCGP, SAMPLES, combineSim, endgameSummary, princip
 async function ready(page) {
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready', {timeout:30000});
+  await openSample(page);
   await page.locator('#open-analysis-settings').click();
   await page.locator('#seconds').fill('1');
   await page.locator('#threads').fill('2');
@@ -80,6 +82,9 @@ test('sims survive reload, accept a board play, and continue selected or all can
   })).toBe(true);
   await page.reload();
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await expect(page.locator('#new-game-dialog')).toBeVisible();
+  await expect(page.locator('#rack-tiles .rack-tile')).toHaveCount(0);
+  await openSample(page);
   expect(await rows(page)).toEqual(all);
   await page.screenshot({path:test.info().outputPath('saved-sim.png')});
 });
@@ -120,6 +125,7 @@ for (const kind of ['play','watch']) test(`${kind} computer sims reappear in rev
   const gcg = await readFile(await download.path());
   await page.reload();
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   await page.locator('#gcg-file').setInputFiles({name:'saved.gcg',mimeType:'text/plain',buffer:gcg});
   await expect(page.locator('#game-history')).toBeVisible();
   if (kind === 'play') await page.locator('#history-next').click();

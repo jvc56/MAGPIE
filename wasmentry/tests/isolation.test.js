@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
@@ -119,6 +120,7 @@ test("plain static hosting starts the real engine and never requests WMP or RIT"
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
   await page.locator('[data-mode="kibitz"]').click();
   await expect(page.locator("#status")).toHaveText("Complete");
@@ -133,12 +135,15 @@ test("plain static hosting starts the real engine and never requests WMP or RIT"
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 10000,
   });
+  await openSample(page);
   await devtools.detach();
   const second = await context.newPage();
   await second.goto("/wasmentry/");
   await expect(second.locator("#status")).toHaveText("Engine ready");
+  await openSample(second);
   await second.reload();
   await expect(second.locator("#status")).toHaveText("Engine ready");
+  await openSample(second);
 });
 
  test("blocked storage does not break isolated startup or trap recovery", async () => {

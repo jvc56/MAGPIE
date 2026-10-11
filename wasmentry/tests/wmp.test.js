@@ -1,9 +1,11 @@
+import { openSample } from "./helpers/startup.js";
 const { test, expect } = require('@playwright/test');
 
 test('local and downloaded WMPs persist, match ordinary move generation, and can be removed', async ({page}) => {
   test.setTimeout(120000);
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   const report = await page.evaluate(async () => {
     const { EngineClient } = await import('./engine-client.mjs');
     const { listWMPs } = await import('./wmp-cache.mjs');
@@ -93,6 +95,7 @@ test('WMP settings cache and remove both lexica with file sizes', async ({page})
   });
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   await page.locator('#open-analysis-settings').click();
   await expect(page.getByRole('button', {name:'Cache CSW24 WMP', exact:true})).toBeDisabled();
   await expect(page.locator('#wmp-cache-enabled')).not.toBeChecked();
@@ -108,6 +111,7 @@ test('WMP settings cache and remove both lexica with file sizes', async ({page})
   await page.locator('#back-to-game').click();
   await page.reload();
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   await page.locator('#open-analysis-settings').click();
   await expect(page.getByRole('button', {name:'Remove CSW24 WMP', exact:true})).toBeEnabled();
   await page.getByRole('button', {name:'Remove CSW24 WMP', exact:true}).click();
@@ -120,6 +124,7 @@ test('bad downloads do not poison the engine or cache; native preparation can be
   await page.route('**/wmp/*CSW24*.bin', route => route.fulfill({body:'truncated'}));
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   const report = await page.evaluate(async () => {
     const { EngineClient } = await import('./engine-client.mjs');
     const engine = new EngineClient();
@@ -163,6 +168,7 @@ test('local builds need no hosted tables and caching is opt-in', async ({page}) 
   await page.addInitScript(() => localStorage.setItem('magpie-wmp-source', 'download'));
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   await page.locator('#open-analysis-settings').click();
   await expect(page.locator('#wmp-source')).toHaveValue('build');
   await expect(page.locator('#wmp-cache-enabled')).not.toBeChecked();
@@ -205,6 +211,7 @@ test('WMP-only and damaged WIT caches are repaired locally', async ({page}) => {
   test.setTimeout(90000);
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   const report = await page.evaluate(async () => {
     const { EngineClient } = await import('./engine-client.mjs');
     const { listWMPs, readWMP, saveWMP } = await import('./wmp-cache.mjs');
@@ -259,6 +266,7 @@ test('WMP-only and damaged WIT caches are repaired locally', async ({page}) => {
 test('cache provenance and upgrades are independent of the database schema', async ({page}) => {
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   const report = await page.evaluate(async () => {
     const cache = await import('./wmp-cache.mjs');
     const bytes = new Uint8Array([3,15,1,2,3,4]);
@@ -295,6 +303,7 @@ test('Stop during a transient cache read preserves saved files and never starts 
   });
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
   const result = await page.evaluate(async () => {
     const {EngineClient} = await import('./engine-client.mjs');
     const {saveWMP, listWMPs} = await import('./wmp-cache.mjs');

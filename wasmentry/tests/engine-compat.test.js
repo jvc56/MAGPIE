@@ -1,9 +1,11 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 
 test("shared-memory engine starts and generates moves at a mobile viewport", async ({page}) => {
   await page.setViewportSize({width:390,height:844});
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready',{timeout:30000});
+  await openSample(page);
   await page.locator('[data-mode=kibitz]').click();
   await expect(page.locator('#status')).toHaveText('Complete',{timeout:30000});
   await expect(page.locator('#results tbody tr')).toHaveCount(100);
@@ -28,6 +30,7 @@ test("smaller shared-memory reservations retain baseline move generation", async
   });
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready',{timeout:30000});
+  await openSample(page);
   await page.locator('[data-mode=kibitz]').click();
   await expect(page.locator('#status')).toHaveText('Complete',{timeout:30000});
   await expect(page.locator('#results tbody tr')).toHaveCount(100);
@@ -50,6 +53,7 @@ test("mobile defaults can cancel a word-map build and keep the engine usable", a
   });
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready', {timeout:30000});
+  await openSample(page);
   await expect(page.locator('#tt-memory')).toHaveValue('16');
   const result = await page.evaluate(async () => {
     const {EngineClient} = await import('./engine-client.mjs');
@@ -90,6 +94,7 @@ for (const allocation of ['WMP', 'WIT']) {
     });
     await page.goto('/wasmentry/');
     await expect(page.locator('#status')).toHaveText('Engine ready');
+  await openSample(page);
     const result = await page.evaluate(async () => {
       const {EngineClient} = await import('./engine-client.mjs');
       const {listWMPs} = await import('./wmp-cache.mjs');

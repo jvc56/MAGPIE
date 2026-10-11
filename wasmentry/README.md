@@ -76,6 +76,10 @@ previews must be opened in their own tab to enable cross-origin isolation.
   click a PV step to preview just that prefix. Completed full-depth searches
   say **Fully searched**; interrupted searches retain their depth/status.
 
+The app opens with **New game**, with empty racks until a game is started or
+imported. **Open game…** in that dialog opens a GCG directly. Example positions
+remain available under **Edit position**.
+
 **New game** defaults to **Play Magpie**, with **Record a game** and
 **Watch computers** alongside it. Player names default to **You** and **Magpie**.
 Names and time are immediately available; **Game options** holds first player,

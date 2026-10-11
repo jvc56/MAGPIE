@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import {test, expect} from '@playwright/test';
 
 const cell = (page, row, col) => page.locator(`#board [data-row="${row}"][data-col="${col}"]`);
@@ -19,6 +20,7 @@ async function ready(page, rack = null) {
   await page.setViewportSize({width:1440,height:1100});
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready', {timeout:30000});
+  await openSample(page);
   if (rack == null) return;
   await page.locator('#new-game').click();
   await page.getByRole('button', {name:'Record a game',exact:true}).click();

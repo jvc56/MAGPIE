@@ -1775,3 +1775,12 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 .setting-row :disabled {
   opacity: 1;
 }
+
+.new-game-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+.new-game-actions .primary { margin-top: 0; }
+#new-game-status { color: var(--muted); font-size: 13px; }

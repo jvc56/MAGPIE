@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import {test, expect} from '@playwright/test';
 import {analysisCommands, parseCGP, SAMPLES} from '../analysis-model.mjs';
 
@@ -32,6 +33,7 @@ for (const mode of ['peg', 'endgame']) {
     });
     await page.goto('/wasmentry/');
     await expect(page.locator('#status')).toHaveText('Engine ready', {timeout:30000});
+  await openSample(page);
     await page.locator('#gcg-file').setInputFiles('tests/fixtures/review-candidates.gcg');
     await expect(page.locator('#status')).toContainText('Loaded');
     await page.selectOption('#history-position', mode === 'peg' ? '21' : '22');

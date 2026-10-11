@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
@@ -60,6 +61,7 @@ test("an unresponsive native import times out and terminates the worker", async 
 async function ready(page) {
   await page.goto("/wasmentry/");
   await expect(page.locator("#status")).toHaveText("Engine ready");
+  await openSample(page);
 }
 
 test("real engine can warm sixteen search threads and reinitialize after destroy", async ({page}) => {

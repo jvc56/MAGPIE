@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "@playwright/test";
 
@@ -6,6 +7,7 @@ async function ready(page) {
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   await page.locator("#open-analysis-settings").click();
   await page.locator("#seconds").fill("2");
   await page.locator("#threads").fill("4");
@@ -170,6 +172,7 @@ test("settings replaces the game, preserves results, and saves board preferences
   await expect(page.locator("#board")).toHaveClass(/show-premium-labels/);
   await page.reload();
   await expect(page.locator("#status")).toHaveText("Engine ready");
+  await openSample(page);
   await expect(page.locator("#board")).toHaveClass(/show-premium-labels/);
   await page.locator("#open-settings").click();
   await expect(page.locator("#premium-labels")).toBeChecked();
@@ -211,6 +214,7 @@ test("worker rejects a bad command and can run a new batch", async ({
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   const result = await page.evaluate(async () => {
     const { EngineClient } = await import("/wasmentry/engine-client.mjs");
     const engine = new EngineClient();
@@ -265,6 +269,7 @@ test("Qt blanks and player tile colors survive undo and recent recall", async ({
   await page.selectOption("#on-turn-player", "1");
   await analyze(page, "kibitz");
   await page.reload();
+  await page.locator("#cancel-new-game").click();
   await page.locator("#position-editor > summary").click();
   await page.selectOption("#recent", "0");
   await expect(first).toHaveClass(/owner-0/);
@@ -298,6 +303,7 @@ test("engine bootstrap isolates an ordinary static host and reloads only once", 
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
   expect(navigations).toBe(testInfo.project.name === "static-host" ? 2 : 1);
   const beforeReload = navigations;
@@ -305,6 +311,7 @@ test("engine bootstrap isolates an ordinary static host and reloads only once", 
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   expect(navigations).toBe(beforeReload + 1);
 });
 
@@ -961,6 +968,7 @@ test("GCG diagnostics persist the native chooser request before dispatch", async
   expect(trace).not.toContain("FAULT");
   await page.reload();
   await expect(page.locator("#status")).toHaveText("Engine ready");
+  await openSample(page);
   await openGameDialog(page);
   await page.locator("#gcg-diagnostics > summary").click();
   await expect(page.locator("#gcg-diagnostics-log")).toContainText("load.complete");

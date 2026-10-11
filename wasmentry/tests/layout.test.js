@@ -1,3 +1,4 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 
 test("wide layout keeps rack controls in view and settings between sidebars", async ({
@@ -8,6 +9,7 @@ test("wide layout keeps rack controls in view and settings between sidebars", as
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   const bounds = await page.evaluate(() => {
     const rect = (selector) => {
       const { x, y, right, bottom } = document
@@ -63,6 +65,7 @@ test("letter keys outside tile entry never start analysis", async ({
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   await page.locator("#position-editor > summary").click();
   await expect(page.locator(".analysis-actions kbd")).toHaveCount(0);
   for (const sample of ["opening", "peg", "endgame"]) {

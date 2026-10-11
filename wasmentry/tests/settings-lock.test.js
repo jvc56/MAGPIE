@@ -1,8 +1,10 @@
+import { openSample } from "./helpers/startup.js";
 import {test, expect} from '@playwright/test';
 
 test('settings stay locked between computer searches and unlock after pausing', async ({page}) => {
   await page.goto('/wasmentry/');
   await expect(page.locator('#status')).toHaveText('Engine ready', {timeout:30000});
+  await openSample(page);
   await page.locator('#open-analysis-settings').click();
   await page.locator('#threads').fill('2');
   await page.locator('#plies').fill('1');

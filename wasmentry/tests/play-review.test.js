@@ -1,9 +1,11 @@
+import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 async function ready(page) {
   await page.goto("/wasmentry/");
   await expect(page.locator("#status")).toHaveText("Engine ready", {
     timeout: 30000,
   });
+  await openSample(page);
   await page.locator("#position-editor > summary").click();
 }
 async function setup(
