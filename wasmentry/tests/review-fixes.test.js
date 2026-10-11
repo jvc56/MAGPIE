@@ -85,3 +85,20 @@ test('a failed computer search pauses once instead of retrying every second', as
   await page.waitForTimeout(2200);
   expect(await page.evaluate(() => window.failedSearches)).toBe(1);
 });
+
+
+test('reviewing a CGP endgame keeps the opponent rack after committing the first move', async ({page}) => {
+  await ready(page);
+  await page.locator('[data-game-kind=record]').click();
+  await page.locator('#new-game-position > summary').click();
+  await page.locator('#new-game-cgp').fill(SAMPLES.endgame);
+  await page.locator('#start-game').click();
+  await expect(page.locator('#rack')).toHaveValue('FV');
+  await page.locator('#board [data-row="5"][data-col="2"]').click();
+  await page.keyboard.type('f');
+  await page.locator('#play-move').click();
+  await expect(page.locator('#history-position option')).toHaveCount(2);
+  await expect(page.locator('#rack')).toHaveValue('AADIZ');
+  await expect(page.locator('#opponent-rack')).toHaveValue('V');
+  await expect(page.locator('#error')).toBeHidden();
+});

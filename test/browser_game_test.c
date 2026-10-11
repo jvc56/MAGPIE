@@ -72,8 +72,29 @@ static void test_cgp_start(void) {
   string_builder_destroy(board);
 }
 
+static void test_cgp_endgame_rack_retention(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  const char *record =
+      "#lexicon CSW24\n#player1 A Alice\n#player2 B Bob\n#cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0\n";
+  char *played = browser_game_action(record, "CSW24", 0, "FV", "6B .F", "",
+                                     BROWSER_GAME_COMMIT, "", 0, 0, 0);
+  assert(has_substring(played, " AADIZ/V 388/452 0"));
+  assert_success(played);
+  char *completed = get_formatted_string("%s>A: FV 6B .F +10 452\n", record);
+  char *loaded = browser_game_import_gcg(completed, "CSW24");
+  assert(has_substring(loaded, " AADIZ/V 388/452 0"));
+  assert_success(loaded);
+  free(completed);
+}
+
 void test_browser_game(void) {
   test_cgp_start();
+  test_cgp_endgame_rack_retention();
   const int center_row = (BOARD_DIM / 2) + 1;
   const char center_col = 'A' + (BOARD_DIM / 2);
   char *opening_move =
