@@ -4,6 +4,7 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/validated_move_defs.h"
+#include "../ent/bag.h"
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -1253,7 +1254,8 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
     }
     game_history_set_initial_racks(gcg_parser->game_history,
                                    player_get_rack(game_get_player(game, 0)),
-                                   player_get_rack(game_get_player(game, 1)));
+                                   player_get_rack(game_get_player(game, 1)),
+                                   bag_is_empty(game_get_bag(game)));
   }
 
   // Play through the game to detected errors

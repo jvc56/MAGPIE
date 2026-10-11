@@ -19,6 +19,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
   GameHistory *game_history;
@@ -197,6 +198,22 @@ static void test_initial_rack_after_exchanges(void) {
          int_to_equity(93));
   assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
          int_to_equity(54));
+  // An omitted or partial rack cannot supply a pass-out penalty. No random
+  // tiles may be invented to complete information absent from the record.
+  const char *unknown_racks[] = {"", "BC"};
+  for (int rack_index = 0; rack_index < 2; rack_index++) {
+    history = config_get_game_history(config);
+    string_builder_clear(record);
+    string_builder_add_formatted_string(record, "%s AEINRST/%s 100/80 5\n",
+                                        header, unknown_racks[rack_index]);
+    config_parse_gcg_string(config, string_builder_peek(record), history,
+                            errors);
+    assert(error_stack_is_empty(errors));
+    assert(!game_history_get_unplayed_initial_rack(history, 1, 0));
+    load_and_exec_config_or_die(config, "goto 0");
+    assert_config_exec_status(config, "commit pass",
+                              ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND);
+  }
   free(header);
   string_builder_destroy(record);
   error_stack_destroy(errors);
@@ -228,6 +245,25 @@ static void test_initial_endgame_racks(void) {
     assert_rack_equals_string(
         game_get_ld(game), player_get_rack(game_get_player(game, 1)), "AADIZ");
   }
+  // Short racks are complete when the starting bag is empty, including
+  // after history duplication. They must still support the sixth pass.
+  assert(game_history_get_unplayed_initial_rack(history, 1, 0));
+  GameHistory *copy = game_history_duplicate(history);
+  assert(game_history_get_unplayed_initial_rack(copy, 1, 0));
+  game_history_destroy(copy);
+  const char *zero_count = strstr(record, " 0\n");
+  assert(zero_count);
+  char *pass_record =
+      get_formatted_string("%.*s 5\n", (int)(zero_count - record), record);
+  config_parse_gcg_string(config, pass_record, history, errors);
+  assert(error_stack_is_empty(errors));
+  load_and_exec_config_or_die(config, "goto 0");
+  load_and_exec_config_or_die(config, "commit pass");
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(434));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(373));
+  free(pass_record);
   game_destroy(game);
   error_stack_destroy(errors);
   config_destroy(config);

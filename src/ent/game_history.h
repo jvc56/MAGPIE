@@ -7,7 +7,6 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "endgame_results.h"
-#include "game.h"
 #include "inference_results.h"
 #include "letter_distribution.h"
 #include "move.h"
@@ -79,8 +78,9 @@ void game_history_destroy(GameHistory *game_history);
 void game_history_set_initial_cgp(GameHistory *history, const char *cgp);
 const char *game_history_get_initial_cgp(const GameHistory *history);
 void game_history_set_initial_racks(GameHistory *history, const Rack *first,
-                                    const Rack *second);
-// The starting rack is usable only until this player takes their first turn.
+                                    const Rack *second, bool bag_empty);
+// Only complete, nonempty starting racks can supply final penalties: seven
+// tiles, or fewer with an empty starting bag, before the player takes a turn.
 // num_events selects the replay prefix; later history does not invalidate it.
 const Rack *game_history_get_unplayed_initial_rack(const GameHistory *history,
                                                    int player_index,

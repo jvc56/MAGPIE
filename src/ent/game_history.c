@@ -2,6 +2,7 @@
 
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/rack_defs.h"
 #include "../ent/board_layout.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
@@ -229,6 +230,7 @@ typedef struct GameHistoryPlayer {
 struct GameHistory {
   char *initial_cgp;
   Rack initial_racks[2];
+  bool initial_bag_empty;
   char *title;
   char *description;
   char *id_auth;
@@ -492,6 +494,7 @@ void game_history_set_initial_cgp(GameHistory *history, const char *cgp) {
   free(history->initial_cgp);
   history->initial_cgp = string_duplicate_allow_null(cgp);
   memset(history->initial_racks, 0, sizeof(history->initial_racks));
+  history->initial_bag_empty = false;
 }
 
 const char *game_history_get_initial_cgp(const GameHistory *history) {
@@ -499,7 +502,8 @@ const char *game_history_get_initial_cgp(const GameHistory *history) {
 }
 
 void game_history_set_initial_racks(GameHistory *history, const Rack *first,
-                                    const Rack *second) {
+                                    const Rack *second, bool bag_empty) {
+  history->initial_bag_empty = bag_empty;
   rack_copy(&history->initial_racks[0], first);
   rack_copy(&history->initial_racks[1], second);
 }
@@ -508,7 +512,8 @@ const Rack *game_history_get_unplayed_initial_rack(const GameHistory *history,
                                                    int player_index,
                                                    int num_events) {
   const Rack *rack = &history->initial_racks[player_index];
-  if (!rack_get_dist_size(rack)) {
+  if (rack_is_empty(rack) || (rack_get_total_letters(rack) != RACK_SIZE &&
+                              !history->initial_bag_empty)) {
     return NULL;
   }
   for (int event_index = 0; event_index < num_events; event_index++) {
@@ -566,7 +571,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
   gh_copy->events = malloc_or_die(sizeof(GameEvent) * (MAX_GAME_EVENTS));
   gh_copy->initial_cgp = string_duplicate_allow_null(gh_orig->initial_cgp);
   game_history_set_initial_racks(gh_copy, &gh_orig->initial_racks[0],
-                                 &gh_orig->initial_racks[1]);
+                                 &gh_orig->initial_racks[1],
+                                 gh_orig->initial_bag_empty);
   gh_copy->title = string_duplicate_allow_null(gh_orig->title);
   gh_copy->description = string_duplicate_allow_null(gh_orig->description);
   gh_copy->id_auth = string_duplicate_allow_null(gh_orig->id_auth);
