@@ -70,7 +70,7 @@ static bool check_snapshot(const GameHistory *game_history, const Game *game,
 }
 
 static void test_initial_position(void) {
-  Config *config = config_create_or_die("set -lex CSW24");
+  Config *config = config_create_or_die("set -lex CSW24 -wmp false -wit false");
   ErrorStack *error_stack = error_stack_create();
   GameHistory *history = config_get_game_history(config);
   StringBuilder *cgp = string_builder_create();
@@ -159,7 +159,7 @@ static void test_initial_position(void) {
 }
 
 static void test_initial_rack_after_exchanges(void) {
-  Config *config = config_create_or_die("set -lex CSW24");
+  Config *config = config_create_or_die("set -lex CSW24 -wmp false -wit false");
   ErrorStack *errors = error_stack_create();
   GameHistory *history = config_get_game_history(config);
   StringBuilder *record = string_builder_create();
@@ -224,7 +224,7 @@ static void test_initial_endgame_racks(void) {
   if (BOARD_DIM != 15) {
     return;
   }
-  Config *config = config_create_or_die("set -lex CSW24");
+  Config *config = config_create_or_die("set -lex CSW24 -wmp false -wit false");
   ErrorStack *errors = error_stack_create();
   GameHistory *history = config_get_game_history(config);
   const char *record =
@@ -269,11 +269,55 @@ static void test_initial_endgame_racks(void) {
   config_destroy(config);
 }
 
+static void test_unknown_rack_at_bag_emptying(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  Config *config = config_create_or_die("set -lex CSW24 -wmp false -wit false");
+  ErrorStack *errors = error_stack_create();
+  const char *record =
+      "#lexicon CSW24\n#player1 A Alice\n#player2 B Bob\n#cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "6JURY5/15/15/15 FV/ 442/388 0\n";
+  config_parse_gcg_string(config, record, config_get_game_history(config),
+                          errors);
+  assert(error_stack_is_empty(errors));
+  load_and_exec_config_or_die(config, "goto 0");
+  load_and_exec_config_or_die(config, "commit 6B .F");
+  load_and_exec_config_or_die(config, "rack AADEIPZ");
+  load_and_exec_config_or_die(config, "commit 13F ZAP");
+  const Game *game = config_get_game(config);
+  assert_rack_equals_string(game_get_ld(game),
+                            player_get_rack(game_get_player(game, 0)), "RV");
+  assert_rack_equals_string(game_get_ld(game),
+                            player_get_rack(game_get_player(game, 1)), "ADEI");
+  load_and_exec_config_or_die(config, "commit pass");
+  StringBuilder *exported = string_builder_create();
+  string_builder_add_gcg(exported, game_get_ld(game),
+                         config_get_game_history(config), false);
+  config_parse_gcg_string(config, string_builder_peek(exported),
+                          config_get_game_history(config), errors);
+  assert(error_stack_is_empty(errors));
+  load_and_exec_config_or_die(config, "goto end");
+  assert_rack_equals_string(game_get_ld(game),
+                            player_get_rack(game_get_player(game, 0)), "RV");
+  assert_rack_equals_string(game_get_ld(game),
+                            player_get_rack(game_get_player(game, 1)), "ADEI");
+  string_builder_destroy(exported);
+  error_stack_destroy(errors);
+  config_destroy(config);
+}
+
 void test_history_replay(void) {
+  test_unknown_rack_at_bag_emptying();
   test_initial_position();
   test_initial_rack_after_exchanges();
   test_initial_endgame_racks();
-  Config *config = config_create_or_die("set -lex CSW24");
+  if (BOARD_DIM != 15) {
+    return; // The replay.gcg fixture below uses the standard board.
+  }
+  Config *config = config_create_or_die("set -lex CSW24 -wmp false -wit false");
   ErrorStack *error_stack = error_stack_create();
   GameHistory *game_history = config_get_game_history(config);
   char *gcg = fileproxy_get_string_from_filename("test/fixtures/replay.gcg",

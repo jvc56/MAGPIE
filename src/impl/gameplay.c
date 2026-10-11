@@ -1159,6 +1159,31 @@ void set_after_game_event_racks(const GameHistory *game_history,
     }
   }
 
+  // With an unknown next rack, an empty bag still fixes the mover's leave.
+  // Inferring all unseen tiles as the mover's rack would steal the opponent's
+  // tiles. The pre-move unseen count reserves up to RACK_SIZE for that player.
+  const game_event_t event_type = game_event_get_type(current_game_event);
+  const Rack *before_rack = game_event_get_const_rack(current_game_event);
+  if (rack_is_empty(after_event_player_on_turn_rack) &&
+      (event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+       event_type == GAME_EVENT_PASS)) {
+    Rack played;
+    rack_set_dist_size_and_reset(&played, ld_size);
+    if (event_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      validated_moves_set_rack_to_played_letters(
+          game_event_get_vms(current_game_event), 0, &played);
+    }
+    if (num_letters_in_bag + rack_get_total_letters(&played) -
+            rack_get_total_letters(before_rack) <=
+        RACK_SIZE) {
+      rack_copy(after_event_player_off_turn_rack, before_rack);
+      rack_subtract_using_floor_zero(after_event_player_off_turn_rack, &played);
+      copy_bag_to_rack(bag, after_event_player_off_turn_rack,
+                       after_event_player_on_turn_rack);
+      return;
+    }
+  }
+
   if (num_letters_in_bag -
           rack_get_total_letters(after_event_player_on_turn_rack) <=
       (RACK_SIZE)) {

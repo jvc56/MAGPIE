@@ -1457,7 +1457,7 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
   if (!game_is_over) {
     const Rack *last_rack =
         game_history_player_get_last_rack_const(game_history, player_on_turn);
-    if (rack_get_dist_size(last_rack) != 0) {
+    if (!rack_is_empty(last_rack)) {
       string_builder_add_formatted_string(gcg_sb, "#%s%d ", GCG_RACK_STRING,
                                           player_on_turn + 1);
       string_builder_add_rack(gcg_sb, last_rack, ld, true);
