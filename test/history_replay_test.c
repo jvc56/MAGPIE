@@ -4,14 +4,18 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/gcg.h"
 #include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -64,7 +68,74 @@ static bool check_snapshot(const GameHistory *game_history, const Game *game,
   return check->stop_after != event_index;
 }
 
+static void test_initial_position(void) {
+  Config *config = config_create_or_die("set -lex CSW24");
+  ErrorStack *error_stack = error_stack_create();
+  GameHistory *history = config_get_game_history(config);
+  StringBuilder *cgp = string_builder_create();
+  for (int row = 0; row < BOARD_DIM; row++) {
+    if (row) {
+      string_builder_add_char(cgp, '/');
+    }
+    if (row == BOARD_DIM / 2) {
+      string_builder_add_formatted_string(cgp, "%dA%d", BOARD_DIM / 2,
+                                          BOARD_DIM / 2);
+    } else {
+      string_builder_add_int(cgp, BOARD_DIM);
+    }
+  }
+  string_builder_add_string(cgp, " AEINRST/BCDFGHJ 100/80 1");
+  char *record = get_formatted_string(
+      "#lexicon CSW24\n#player1 A Alice\n#player2 B Bob\n#cgp %s\n",
+      string_builder_peek(cgp));
+  config_parse_gcg_string(config, record, history, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(game_history_get_num_events(history) == 0);
+  GameHistory *copy = game_history_duplicate(history);
+  game_history_reset(history);
+  assert(game_history_get_initial_cgp(history) == NULL);
+  assert(game_history_get_initial_game(history) == NULL);
+  assert_strings_equal(game_history_get_initial_cgp(copy),
+                       string_builder_peek(cgp));
+  Game *game = config_game_create(config);
+  game_play_n_events(copy, game, 0, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  char *actual = game_get_cgp(game, true);
+  assert_strings_equal(actual, string_builder_peek(cgp));
+  free(actual);
+  StringBuilder *saved = string_builder_create();
+  string_builder_add_gcg(saved, game_get_ld(game), copy, false);
+  config_parse_gcg_string(config, string_builder_peek(saved), history,
+                          error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_strings_equal(game_history_get_initial_cgp(history),
+                       string_builder_peek(cgp));
+  char *with_move =
+      get_formatted_string("%s>A: AEINRST %d%c .T +2 102\n", record,
+                           (BOARD_DIM / 2) + 1, 'A' + (BOARD_DIM / 2));
+  config_parse_gcg_string(config, with_move, history, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(game_history_get_num_events(history) == 1);
+  game_play_n_events(history, game, 0, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  actual = game_get_cgp(game, true);
+  assert_strings_equal(actual, string_builder_peek(cgp));
+  free(actual);
+  game_play_n_events(history, game, 1, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(102));
+  free(with_move);
+  string_builder_destroy(saved);
+  string_builder_destroy(cgp);
+  free(record);
+  game_history_destroy(copy);
+  game_destroy(game);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_history_replay(void) {
+  test_initial_position();
   Config *config = config_create_or_die("set -lex CSW24");
   ErrorStack *error_stack = error_stack_create();
   GameHistory *game_history = config_get_game_history(config);

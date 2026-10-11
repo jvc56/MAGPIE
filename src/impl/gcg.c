@@ -18,6 +18,7 @@
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "cgp.h"
 #include <regex.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -50,6 +51,7 @@ typedef enum {
   GCG_MOVE_TOKEN,
   GCG_NOTE_TOKEN,
   GCG_LEXICON_TOKEN,
+  GCG_CGP_TOKEN,
   GCG_PHONY_TILES_RETURNED_TOKEN,
   GCG_PASS_TOKEN,
   GCG_CHALLENGE_BONUS_TOKEN,
@@ -125,6 +127,7 @@ const TokenStringRegexPair token_string_regex_pairs[] = {
                      "]]+([[:alnum:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+"
                      "[+]([[:digit:]]+)[[:space:]]+(-?[[:digit:]]+)"},
     {GCG_NOTE_TOKEN, "#" GCG_NOTE_STRING " (.+)"},
+    {GCG_CGP_TOKEN, "#cgp (.+)"},
     {GCG_LEXICON_TOKEN, "#" GCG_LEXICON_STRING " (.+)"},
     {GCG_PHONY_TILES_RETURNED_TOKEN, ">([^[:space:]]+):[[:space:]]+([^[:space:]"
                                      "]+)[[:space:]]+--[[:space:]]+-([["
@@ -485,6 +488,7 @@ void common_gcg_token_validation(GCGParser *gcg_parser, gcg_token_t token,
     // and must be unique
   case GCG_TITLE_TOKEN:
   case GCG_ID_TOKEN:
+  case GCG_CGP_TOKEN:
   case GCG_LEXICON_TOKEN:
   case GCG_BOARD_LAYOUT_TOKEN:
   case GCG_TILE_DISTRIBUTION_NAME_TOKEN:
@@ -572,6 +576,7 @@ bool token_is_pragma(const gcg_token_t token) {
   case GCG_DESCRIPTION_TOKEN:
   case GCG_ID_TOKEN:
   case GCG_ENCODING_TOKEN:
+  case GCG_CGP_TOKEN:
   case GCG_LEXICON_TOKEN:
   case GCG_GAME_TYPE_TOKEN:
   case GCG_TILE_SET_TOKEN:
@@ -838,6 +843,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     string_builder_add_formatted_string(gcg_parser->note_builder, "%s\n", note);
     free(note);
     break;
+  case GCG_CGP_TOKEN: {
+    char *initial_cgp = get_matching_group_as_string(gcg_parser, gcg_line, 1);
+    game_history_set_initial_cgp(game_history, initial_cgp);
+    free(initial_cgp);
+    break;
+  }
   case GCG_LEXICON_TOKEN: {
     char *lexicon_name = get_matching_group_as_string(gcg_parser, gcg_line, 1);
     game_history_set_lexicon_name(game_history, lexicon_name);
@@ -1232,6 +1243,16 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
   // Remove trailing overtime penalties for incomplete games
   game_history_trim_trailing_overtime_penalties(gcg_parser->game_history);
 
+  const char *initial_cgp =
+      game_history_get_initial_cgp(gcg_parser->game_history);
+  if (initial_cgp) {
+    game_load_cgp(game, initial_cgp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    game_history_set_initial_game(gcg_parser->game_history, game);
+  }
+
   // Play through the game to detected errors
   game_play_n_events(gcg_parser->game_history, game,
                      game_history_get_num_events(gcg_parser->game_history),
@@ -1278,6 +1299,10 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
   if (lexicon) {
     string_builder_add_formatted_string(gcg_sb, "#%s %s\n", GCG_LEXICON_STRING,
                                         lexicon);
+  }
+  const char *initial_cgp = game_history_get_initial_cgp(game_history);
+  if (initial_cgp) {
+    string_builder_add_formatted_string(gcg_sb, "#cgp %s\n", initial_cgp);
   }
   const game_variant_t game_variant =
       game_history_get_game_variant(game_history);

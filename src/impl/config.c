@@ -5286,7 +5286,8 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
       player_get_rack(game_get_player(game, 1 - player_on_turn_index));
   game_history_set_waiting_for_final_pass_or_challenge(
       game_history,
-      game_get_game_end_reason(game) == GAME_END_REASON_STANDARD &&
+      num_played_events > 0 &&
+          game_get_game_end_reason(game) == GAME_END_REASON_STANDARD &&
           game_event_get_type(
               game_history_get_event(game_history, num_played_events - 1)) ==
               GAME_EVENT_TILE_PLACEMENT_MOVE &&

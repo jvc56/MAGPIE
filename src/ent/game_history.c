@@ -8,6 +8,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "endgame_results.h"
+#include "game.h"
 #include "inference_results.h"
 #include "move.h"
 #include "rack.h"
@@ -227,6 +228,8 @@ typedef struct GameHistoryPlayer {
 } GameHistoryPlayer;
 
 struct GameHistory {
+  char *initial_cgp;
+  Game *initial_game;
   char *title;
   char *description;
   char *id_auth;
@@ -486,7 +489,28 @@ const char *game_history_get_gcg_filename(const GameHistory *game_history) {
   return game_history->gcg_filename;
 }
 
+void game_history_set_initial_cgp(GameHistory *history, const char *cgp) {
+  free(history->initial_cgp);
+  history->initial_cgp = string_duplicate_allow_null(cgp);
+  game_destroy(history->initial_game);
+  history->initial_game = NULL;
+}
+
+const char *game_history_get_initial_cgp(const GameHistory *history) {
+  return history->initial_cgp;
+}
+
+void game_history_set_initial_game(GameHistory *history, const Game *game) {
+  game_destroy(history->initial_game);
+  history->initial_game = game ? game_duplicate(game) : NULL;
+}
+
+const Game *game_history_get_initial_game(const GameHistory *history) {
+  return history->initial_game;
+}
+
 void game_history_reset(GameHistory *game_history) {
+  game_history_set_initial_cgp(game_history, NULL);
   free(game_history->title);
   game_history->title = NULL;
   free(game_history->description);
@@ -525,6 +549,9 @@ GameHistory *game_history_create(void) {
 GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
   GameHistory *gh_copy = malloc_or_die(sizeof(GameHistory));
   gh_copy->events = malloc_or_die(sizeof(GameEvent) * (MAX_GAME_EVENTS));
+  gh_copy->initial_cgp = string_duplicate_allow_null(gh_orig->initial_cgp);
+  gh_copy->initial_game =
+      gh_orig->initial_game ? game_duplicate(gh_orig->initial_game) : NULL;
   gh_copy->title = string_duplicate_allow_null(gh_orig->title);
   gh_copy->description = string_duplicate_allow_null(gh_orig->description);
   gh_copy->id_auth = string_duplicate_allow_null(gh_orig->id_auth);
@@ -582,6 +609,8 @@ void game_history_destroy(GameHistory *game_history) {
   if (!game_history) {
     return;
   }
+  free(game_history->initial_cgp);
+  game_destroy(game_history->initial_game);
   free(game_history->title);
   free(game_history->description);
   free(game_history->id_auth);

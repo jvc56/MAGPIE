@@ -7,6 +7,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "endgame_results.h"
+#include "game.h"
 #include "inference_results.h"
 #include "letter_distribution.h"
 #include "move.h"
@@ -74,6 +75,12 @@ typedef struct GameHistory GameHistory;
 GameHistory *game_history_create(void);
 GameHistory *game_history_duplicate(const GameHistory *gh_orig);
 void game_history_destroy(GameHistory *game_history);
+// Initial position is optional; histories without one start on an empty board.
+void game_history_set_initial_cgp(GameHistory *history, const char *cgp);
+const char *game_history_get_initial_cgp(const GameHistory *history);
+void game_history_set_initial_game(GameHistory *history, const Game *game);
+const Game *game_history_get_initial_game(const GameHistory *history);
+
 void game_history_reset(GameHistory *game_history);
 
 void game_history_set_title(GameHistory *history, const char *title);
