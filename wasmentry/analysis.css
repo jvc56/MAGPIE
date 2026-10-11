@@ -81,7 +81,7 @@ button {
   cursor: pointer;
   padding: 7px 11px;
 }
-button:hover:not(:disabled) {
+button:hover:not(:disabled):not(.square) {
   border-color: var(--accent);
   background: var(--hover);
 }
@@ -262,6 +262,12 @@ main {
   color: #17212c;
   min-width: 0;
   line-height: 1;
+}
+@media (hover: hover) {
+  .square:where(:hover:not(:disabled):not(.cursor):not(.drop-target):not(:focus-visible)) {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
 }
 .square.normal {
   color: transparent;
