@@ -10,6 +10,7 @@
 #include "../src/util/string_util.h"
 #include <assert.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

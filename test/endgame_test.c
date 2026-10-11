@@ -28,6 +28,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1896,8 +1897,10 @@ static void pause_after_first_depth(int depth, int32_t value,
 }
 
 static void *resume_endgame_search(void *data) {
-  PauseAfterDepth *pause = data;
+  const PauseAfterDepth *pause = data;
+  const int64_t deadline = ctimer_monotonic_ns() + INT64_C(10000000000);
   while (!atomic_load(&pause->paused)) {
+    assert(ctimer_monotonic_ns() < deadline);
     ctime_nap(0.001);
   }
   ctime_nap(0.05);
