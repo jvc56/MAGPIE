@@ -243,7 +243,8 @@ bool magpie_set_search_paused(Magpie *mp, bool paused) {
     return false;
   }
   const char *command = config_get_current_exec_name(mp->config);
-  if (!command || (!strings_equal(command, "peg") && !strings_equal(command, "endgame"))) {
+  if (!command ||
+      (!strings_equal(command, "peg") && !strings_equal(command, "endgame"))) {
     return false;
   }
   return thread_control_set_paused(config_get_thread_control(mp->config),
