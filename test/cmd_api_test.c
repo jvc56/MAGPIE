@@ -44,6 +44,7 @@ void test_cmd_api_create_failure(void) {
   assert(strings_equal(status_message, ""));
   free(status_message);
 
+  assert(!magpie_set_search_paused(mp, true));
   magpie_stop_current_command(mp);
   magpie_destroy(mp);
 }
@@ -163,6 +164,9 @@ void test_cmd_api_async(void) {
       mp, "simulate -it 100000000 -plies 7 -scond none -threads 1");
   assert(exit_code == MAGPIE_SUCCESS);
   assert(magpie_get_thread_status(mp) == MAGPIE_THREAD_STATUS_STARTED);
+
+  // Simulation has no cooperative solver-pause checkpoints.
+  assert(!magpie_set_search_paused(mp, true));
 
   // Only one command may run at a time.
   assert(magpie_run_async(mp, "generate") == MAGPIE_DID_NOT_RUN);

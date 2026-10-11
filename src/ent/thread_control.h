@@ -15,6 +15,13 @@ void thread_control_destroy(ThreadControl *thread_control);
 thread_control_status_t
 thread_control_get_status(ThreadControl *thread_control);
 void thread_control_stop(ThreadControl *thread_control);
+// Cooperative search pause. Returns false unless a command is running.
+// Stop and terminal status transitions release every paused worker.
+bool thread_control_set_paused(ThreadControl *thread_control, bool paused);
+// Search workers only: waits until resumed, then returns the current status.
+// Never call while holding a lock another search worker or status reader needs.
+thread_control_status_t
+thread_control_search_checkpoint(ThreadControl *thread_control);
 bool thread_control_set_status(ThreadControl *thread_control,
                                thread_control_status_t exit_status);
 void thread_control_wait_for_status_change(ThreadControl *thread_control);

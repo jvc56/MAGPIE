@@ -674,8 +674,9 @@ static bool peg_should_stop(int64_t deadline_ns,
   if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
     return true;
   }
-  return thread_control != NULL && thread_control_get_status(thread_control) ==
-                                       THREAD_CONTROL_STATUS_USER_INTERRUPT;
+  return thread_control != NULL &&
+         thread_control_search_checkpoint(thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT;
 }
 
 // Greedy playout to game end; returns signed mover spread (points), with the
@@ -3013,7 +3014,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
-      if (thread_control_get_status(args->thread_control) ==
+      if (thread_control_search_checkpoint(args->thread_control) ==
           THREAD_CONTROL_STATUS_USER_INTERRUPT) {
         break;
       }
@@ -3072,7 +3073,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
             break;
           }
-          if (thread_control_get_status(args->thread_control) ==
+          if (thread_control_search_checkpoint(args->thread_control) ==
               THREAD_CONTROL_STATUS_USER_INTERRUPT) {
             break;
           }

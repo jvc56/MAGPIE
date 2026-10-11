@@ -1871,6 +1871,87 @@ static void test_endgame_played_move(void) {
   config_destroy(config);
 }
 
+typedef struct PauseAfterDepth {
+  ThreadControl *control;
+  atomic_int depth;
+  atomic_bool paused;
+} PauseAfterDepth;
+
+static void pause_after_first_depth(int depth, int32_t value,
+                                    const PVLine *pv_line, const Game *game,
+                                    const PVLine *ranked_pvs,
+                                    int num_ranked_pvs, void *user_data) {
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  PauseAfterDepth *pause = user_data;
+  assert(depth > atomic_load(&pause->depth));
+  atomic_store(&pause->depth, depth);
+  if (depth == 1) {
+    assert(thread_control_set_paused(pause->control, true));
+    atomic_store(&pause->paused, true);
+  }
+}
+
+static void *resume_endgame_search(void *data) {
+  PauseAfterDepth *pause = data;
+  while (!atomic_load(&pause->paused)) {
+    ctime_nap(0.001);
+  }
+  ctime_nap(0.05);
+  assert(atomic_load(&pause->depth) == 1);
+  assert(thread_control_get_status(pause->control) ==
+         THREAD_CONTROL_STATUS_STARTED);
+  assert(thread_control_set_paused(pause->control, false));
+  return NULL;
+}
+
+void test_endgame_pause(void) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -ttfraction 0.001");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW24");
+  PauseAfterDepth pause = {.control = config_get_thread_control(config)};
+  atomic_init(&pause.depth, 0);
+  atomic_init(&pause.paused, false);
+  thread_control_set_status(pause.control, THREAD_CONTROL_STATUS_STARTED);
+  EndgameArgs args = {0};
+  args.thread_control = pause.control;
+  args.game = config_get_game(config);
+  args.plies = 25;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_pv_display = true;
+  args.num_top_moves = 1;
+  args.per_ply_callback = pause_after_first_depth;
+  args.per_ply_callback_data = &pause;
+  args.seed = 42;
+  cpthread_t controller;
+  cpthread_create(&controller, resume_endgame_search, &pause);
+  EndgameCtx *solver = NULL;
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *errors = error_stack_create();
+  endgame_solve(&solver, &args, results, errors);
+  cpthread_join(controller);
+  assert(error_stack_is_empty(errors));
+  assert(atomic_load(&pause.paused));
+  assert(atomic_load(&pause.depth) > 1);
+  assert(endgame_results_get_depth(results, ENDGAME_RESULT_BEST) == 25);
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_BEST) == -63);
+  endgame_ctx_destroy(solver);
+  error_stack_destroy(errors);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
   test_endgame_played_move();
   test_root_pvs_actual_pass();
