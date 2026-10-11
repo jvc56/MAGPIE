@@ -1582,6 +1582,11 @@ static inline int bai_worker_sample_claim(BAIWorkerSchedStats *worker_stats,
   return num_sampled;
 }
 
+// The worker holds the mutex at the top of each pass: it hands in the samples
+// it finished and claims its next ones under one lock, so a sample costs one
+// acquisition rather than two. The clock and the interrupt are checked
+// outside the lock, after each sample and after each wait, so the worker
+// never claims once the sim has been cut short.
 static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
                                          BAIWorkerSchedStats *worker_stats) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
@@ -1593,17 +1598,13 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
       bai_sample_args_create(sync_data, rvs, bai_worker_args->bai_options);
 
   double sample_values[BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH];
-  bool abandoned = false;
-  while (true) {
-    if (bai_should_abandon_rounds(sync_data->bai_result, thread_control)) {
-      abandoned = true;
-      break;
-    }
+  bool abandoned =
+      bai_should_abandon_rounds(sync_data->bai_result, thread_control);
+  bai_sync_lock(sync_data, worker_stats);
+  while (!abandoned) {
     BAIClaim claim;
-    bai_sync_lock(sync_data, worker_stats);
     if (!bai_schedule_claim_while_locked(sync_data, &claim)) {
       if (sync_data->scheduling_finished) {
-        cpthread_mutex_unlock(&sync_data->mutex);
         break;
       }
       // Every scheduled slot is taken but a round is still in flight, so
@@ -1621,35 +1622,36 @@ static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
         const double sample = rvs_sample_with_seed(
             rvs, (uint64_t)arm_index, seed, rvs_thread_index, NULL, record);
         bai_sched_sample_done(worker_stats, sample_start_ns);
+        abandoned =
+            bai_should_abandon_rounds(sync_data->bai_result, thread_control);
         bai_sync_lock(sync_data, worker_stats);
         bai_speculation_finish_while_locked(&sample_args, spec_idx, sample);
-        cpthread_mutex_unlock(&sync_data->mutex);
         continue;
       }
       // Nothing worth speculating on either. Sleep until a fold (or an
       // abandoning worker) signals, rather than spinning on the mutex.
       bai_sched_idle_begin(worker_stats);
       cpthread_cond_wait(&sync_data->work_available, &sync_data->mutex);
-      cpthread_mutex_unlock(&sync_data->mutex);
+      abandoned =
+          bai_should_abandon_rounds(sync_data->bai_result, thread_control);
       continue;
     }
     cpthread_mutex_unlock(&sync_data->mutex);
     bai_sched_idle_end(worker_stats);
     const int num_sampled = bai_worker_sample_claim(
         worker_stats, bai_worker_args, &claim, sample_values, &abandoned);
+    if (!abandoned) {
+      abandoned =
+          bai_should_abandon_rounds(sync_data->bai_result, thread_control);
+    }
     bai_sync_lock(sync_data, worker_stats);
     for (int claim_idx = 0; claim_idx < num_sampled; claim_idx++) {
       bai_schedule_complete_while_locked(&sample_args, claim.round_number,
                                          claim.first_slot + claim_idx,
                                          sample_values[claim_idx]);
     }
-    cpthread_mutex_unlock(&sync_data->mutex);
-    if (abandoned) {
-      break;
-    }
   }
   bai_sched_idle_end(worker_stats);
-  cpthread_mutex_lock(&sync_data->mutex);
   if (abandoned) {
     bai_abandon_rounds_while_locked(&sample_args);
   }
