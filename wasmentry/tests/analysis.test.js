@@ -14,9 +14,15 @@ async function ready(page) {
 }
 async function analyze(page, mode) {
   await page.locator(`[data-mode="${mode}"]`).click();
+  // Postmortem PEG is now untimed. This smoke test needs streamed results,
+  // not a full solve of its deliberately difficult seven-tile position.
+  if (mode === "peg") {
+    await expect(page.locator("#results tbody tr").first()).toBeVisible({timeout:30000});
+    if (await page.locator("#stop").isEnabled()) await page.locator("#stop").click();
+  }
   await expect(page.locator("#stop")).toBeDisabled({ timeout: 60000 });
   expect(await page.locator("#error").textContent()).toBe("");
-  await expect(page.locator("#status")).toHaveText("Complete");
+  await expect(page.locator("#status")).toHaveText(mode === "peg" ? /^(Complete|Stopped · partial results)$/ : "Complete");
   const raw = await page.locator("#raw").textContent();
   await test
     .info()
