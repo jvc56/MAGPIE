@@ -70,6 +70,7 @@
 #include "move_gen.h"
 #include "peg.h"
 #include "play_chooser.h"
+#include "rack_draw.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -5340,9 +5341,9 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
         break;
       }
     }
-    if (!racks_to_draw[i] && game_history_get_initial_game(game_history)) {
-      racks_to_draw[i] = player_get_rack(game_get_player(
-          game_history_get_initial_game(game_history), player_index));
+    if (!racks_to_draw[i]) {
+      racks_to_draw[i] = game_history_get_unplayed_initial_rack(
+          game_history, player_index, num_events);
     }
     if (!racks_to_draw[i]) {
       error_stack_push(

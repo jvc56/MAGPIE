@@ -8,7 +8,6 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "endgame_results.h"
-#include "game.h"
 #include "inference_results.h"
 #include "move.h"
 #include "rack.h"
@@ -229,7 +228,7 @@ typedef struct GameHistoryPlayer {
 
 struct GameHistory {
   char *initial_cgp;
-  Game *initial_game;
+  Rack initial_racks[2];
   char *title;
   char *description;
   char *id_auth;
@@ -492,21 +491,37 @@ const char *game_history_get_gcg_filename(const GameHistory *game_history) {
 void game_history_set_initial_cgp(GameHistory *history, const char *cgp) {
   free(history->initial_cgp);
   history->initial_cgp = string_duplicate_allow_null(cgp);
-  game_destroy(history->initial_game);
-  history->initial_game = NULL;
+  memset(history->initial_racks, 0, sizeof(history->initial_racks));
 }
 
 const char *game_history_get_initial_cgp(const GameHistory *history) {
   return history->initial_cgp;
 }
 
-void game_history_set_initial_game(GameHistory *history, const Game *game) {
-  game_destroy(history->initial_game);
-  history->initial_game = game ? game_duplicate(game) : NULL;
+void game_history_set_initial_racks(GameHistory *history, const Rack *first,
+                                    const Rack *second) {
+  rack_copy(&history->initial_racks[0], first);
+  rack_copy(&history->initial_racks[1], second);
 }
 
-const Game *game_history_get_initial_game(const GameHistory *history) {
-  return history->initial_game;
+const Rack *game_history_get_unplayed_initial_rack(const GameHistory *history,
+                                                   int player_index,
+                                                   int num_events) {
+  const Rack *rack = &history->initial_racks[player_index];
+  if (!rack_get_dist_size(rack)) {
+    return NULL;
+  }
+  for (int event_index = 0; event_index < num_events; event_index++) {
+    const GameEvent *event = game_history_get_event(history, event_index);
+    if (game_event_get_player_index(event) == player_index) {
+      const game_event_t type = game_event_get_type(event);
+      if (type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+          type == GAME_EVENT_EXCHANGE || type == GAME_EVENT_PASS) {
+        return NULL;
+      }
+    }
+  }
+  return rack;
 }
 
 void game_history_reset(GameHistory *game_history) {
@@ -550,8 +565,8 @@ GameHistory *game_history_duplicate(const GameHistory *gh_orig) {
   GameHistory *gh_copy = malloc_or_die(sizeof(GameHistory));
   gh_copy->events = malloc_or_die(sizeof(GameEvent) * (MAX_GAME_EVENTS));
   gh_copy->initial_cgp = string_duplicate_allow_null(gh_orig->initial_cgp);
-  gh_copy->initial_game =
-      gh_orig->initial_game ? game_duplicate(gh_orig->initial_game) : NULL;
+  game_history_set_initial_racks(gh_copy, &gh_orig->initial_racks[0],
+                                 &gh_orig->initial_racks[1]);
   gh_copy->title = string_duplicate_allow_null(gh_orig->title);
   gh_copy->description = string_duplicate_allow_null(gh_orig->description);
   gh_copy->id_auth = string_duplicate_allow_null(gh_orig->id_auth);
@@ -610,7 +625,6 @@ void game_history_destroy(GameHistory *game_history) {
     return;
   }
   free(game_history->initial_cgp);
-  game_destroy(game_history->initial_game);
   free(game_history->title);
   free(game_history->description);
   free(game_history->id_auth);

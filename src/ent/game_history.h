@@ -78,8 +78,13 @@ void game_history_destroy(GameHistory *game_history);
 // Initial position is optional; histories without one start on an empty board.
 void game_history_set_initial_cgp(GameHistory *history, const char *cgp);
 const char *game_history_get_initial_cgp(const GameHistory *history);
-void game_history_set_initial_game(GameHistory *history, const Game *game);
-const Game *game_history_get_initial_game(const GameHistory *history);
+void game_history_set_initial_racks(GameHistory *history, const Rack *first,
+                                    const Rack *second);
+// The starting rack is usable only until this player takes their first turn.
+// num_events selects the replay prefix; later history does not invalidate it.
+const Rack *game_history_get_unplayed_initial_rack(const GameHistory *history,
+                                                   int player_index,
+                                                   int num_events);
 
 void game_history_reset(GameHistory *game_history);
 

@@ -16,11 +16,11 @@
 #include "../ent/player.h"
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
-#include "../impl/gameplay.h"
 #include "../str/game_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "rack_draw.h"
 #include <ctype.h>
 #include <stdlib.h>
 

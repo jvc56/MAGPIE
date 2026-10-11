@@ -10,6 +10,7 @@
 #include "../ent/game_history.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
 #include "../ent/rack.h"
 #include "../ent/validated_move.h"
 #include "../impl/gameplay.h"
@@ -1250,7 +1251,9 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    game_history_set_initial_game(gcg_parser->game_history, game);
+    game_history_set_initial_racks(gcg_parser->game_history,
+                                   player_get_rack(game_get_player(game, 0)),
+                                   player_get_rack(game_get_player(game, 1)));
   }
 
   // Play through the game to detected errors

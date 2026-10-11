@@ -5,7 +5,6 @@
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-#include "../def/gameplay_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -27,6 +26,7 @@
 #include "../util/string_util.h"
 #include "cgp.h"
 #include "move_gen.h"
+#include "rack_draw.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -368,53 +368,6 @@ void draw_to_full_rack(const Game *game, const int player_index) {
   }
 }
 
-// Returns true if there are enough tiles in bag and player_rack
-// to draw rack_to_draw.
-bool rack_is_drawable(const Game *game, const int player_index,
-                      const Rack *rack_to_draw) {
-  const Bag *bag = game_get_bag(game);
-  const Rack *player_rack =
-      player_get_rack(game_get_player(game, player_index));
-  const uint16_t dist_size = rack_get_dist_size(player_rack);
-  for (int i = 0; i < dist_size; i++) {
-    if (bag_get_letter(bag, i) + rack_get_letter(player_rack, i) <
-        rack_get_letter(rack_to_draw, i)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// Draws a nonrandom set of letters specified by rack_to_draw from the
-// bag to the rack. Assumes the rack is empty.
-// Returns true on success.
-// Return false when the rack letters are not in the bag.
-bool draw_rack_from_bag(const Game *game, const int player_index,
-                        const Rack *rack_to_draw) {
-  if (rack_get_dist_size(rack_to_draw) == 0) {
-    // Rack is effectively NULL
-    return true;
-  }
-  // Every path that puts an externally supplied rack on a player (CGP, GCG
-  // replay, known racks) comes through here. The callers validate the size
-  // and report it; this is the backstop for the ones that forget.
-  assert(rack_get_total_letters(rack_to_draw) <= RACK_SIZE);
-  Bag *bag = game_get_bag(game);
-  Rack *player_rack = player_get_rack(game_get_player(game, player_index));
-  int player_draw_index = game_get_player_draw_index(game, player_index);
-  rack_copy(player_rack, rack_to_draw);
-  const uint16_t dist_size = rack_get_dist_size(player_rack);
-  for (int i = 0; i < dist_size; i++) {
-    const uint16_t rack_number_of_letter = rack_get_letter(player_rack, i);
-    for (uint16_t j = 0; j < rack_number_of_letter; j++) {
-      if (!bag_draw_letter(bag, i, player_draw_index)) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 // Draws whatever the tiles in rack_to_draw from the bag to rack_to_update.
 // If there are not enough tiles in the bag, it continues to draw normally
 // and just returns whatever tiles were available.
@@ -430,36 +383,6 @@ void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
       rack_add_letter(rack_to_update, i);
     }
   }
-}
-
-// Draws a nonrandom set of letters specified by rack_string from the
-// bag to the rack. Assumes the rack is empty.
-// Returns the number of letters drawn on success, or one of the
-// DRAW_RACK_STRING_* codes declared in def/gameplay_defs.h.
-int draw_rack_string_from_bag(const Game *game, const int player_index,
-                              const char *rack_string) {
-  const LetterDistribution *ld = game_get_ld(game);
-  Rack player_rack_copy;
-  rack_set_dist_size_and_reset(&player_rack_copy, ld_get_size(ld));
-  const int number_of_letters_set =
-      rack_set_to_string(ld, &player_rack_copy, rack_string);
-  if (number_of_letters_set == -1) {
-    // rack_set_to_string reports a malformed string as -1.
-    return DRAW_RACK_STRING_MALFORMED;
-  }
-  if (number_of_letters_set > RACK_SIZE) {
-    // rack_set_to_string bounds the string by MAX_RACK_SIZE, which is far
-    // larger than RACK_SIZE. Racks wider than RACK_SIZE must be rejected
-    // here: move generation indexes several RACK_SIZE-sized arrays by the
-    // rack size, so drawing one would be memory-unsafe rather than merely
-    // wrong.
-    return DRAW_RACK_STRING_TOO_MANY_LETTERS;
-  }
-  if (!rack_is_drawable(game, player_index, &player_rack_copy)) {
-    return DRAW_RACK_STRING_NOT_IN_BAG;
-  }
-  draw_rack_from_bag(game, player_index, &player_rack_copy);
-  return number_of_letters_set;
 }
 
 void return_rack_to_bag(const Game *game, const int player_index) {
@@ -1226,9 +1149,13 @@ void set_after_game_event_racks(const GameHistory *game_history,
         game_history_player_get_last_rack_const(game_history,
                                                 player_on_turn_index);
     if (rack_get_dist_size(player_on_turn_last_rack) != 0) {
-      rack_copy(after_event_player_on_turn_rack,
-                game_history_player_get_last_rack_const(game_history,
-                                                        player_on_turn_index));
+      rack_copy(after_event_player_on_turn_rack, player_on_turn_last_rack);
+    } else {
+      const Rack *initial_rack = game_history_get_unplayed_initial_rack(
+          game_history, player_on_turn_index, game_event_index + 1);
+      if (initial_rack) {
+        rack_copy(after_event_player_on_turn_rack, initial_rack);
+      }
     }
   }
 

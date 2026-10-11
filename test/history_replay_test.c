@@ -94,7 +94,7 @@ static void test_initial_position(void) {
   GameHistory *copy = game_history_duplicate(history);
   game_history_reset(history);
   assert(game_history_get_initial_cgp(history) == NULL);
-  assert(game_history_get_initial_game(history) == NULL);
+  assert(game_history_get_unplayed_initial_rack(history, 0, 0) == NULL);
   assert_strings_equal(game_history_get_initial_cgp(copy),
                        string_builder_peek(cgp));
   Game *game = config_game_create(config);
@@ -124,12 +124,16 @@ static void test_initial_position(void) {
   game_play_n_events(history, game, 1, true, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(102));
+  assert_rack_equals_string(
+      game_get_ld(game), player_get_rack(game_get_player(game, 1)), "BCDFGHJ");
   load_and_exec_config_or_die(config, "set -lex NWL23");
   game_destroy(game);
   game = config_game_create(config);
   game_play_n_events(history, game, 1, true, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(102));
+  assert_rack_equals_string(
+      game_get_ld(game), player_get_rack(game_get_player(game, 1)), "BCDFGHJ");
   // Both direct CGPs and file-import CGPs must reject oversized gaps.
   char *bad_cgp = string_duplicate(string_builder_peek(cgp));
   bad_cgp[0] = '9';
@@ -153,8 +157,86 @@ static void test_initial_position(void) {
   config_destroy(config);
 }
 
+static void test_initial_rack_after_exchanges(void) {
+  Config *config = config_create_or_die("set -lex CSW24");
+  ErrorStack *errors = error_stack_create();
+  GameHistory *history = config_get_game_history(config);
+  StringBuilder *record = string_builder_create();
+  string_builder_add_string(
+      record, "#lexicon CSW24\n#player1 A Alice\n#player2 B Bob\n#cgp ");
+  for (int row = 0; row < BOARD_DIM; row++) {
+    if (row) {
+      string_builder_add_char(record, '/');
+    }
+    string_builder_add_int(record, BOARD_DIM);
+  }
+  char *header = string_builder_dump(record, NULL);
+  string_builder_add_string(
+      record, " AEINRST/BCDFGHJ 100/80 3\n"
+              ">A: AEINRST -AEI +0 100\n>B: BCDFGHJ -BCD +0 80\n");
+  config_parse_gcg_string(config, string_builder_peek(record), history, errors);
+  assert(error_stack_is_empty(errors));
+  assert(game_history_get_unplayed_initial_rack(history, 1, 1));
+  assert(!game_history_get_unplayed_initial_rack(history, 0, 1));
+  assert(!game_history_get_unplayed_initial_rack(history, 1, 2));
+  load_and_exec_config_or_die(config, "goto 2");
+  load_and_exec_config_or_die(config, "rack NRSTOOO");
+  assert_config_exec_status(config, "commit pass",
+                            ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND);
+  history = config_get_game_history(config);
+  // The untouched opponent rack remains valid when the starting CGP already
+  // has five scoreless turns and the first recorded turn is the final pass.
+  string_builder_clear(record);
+  string_builder_add_string(record, header);
+  string_builder_add_string(record, " AEINRST/BCDFGHJ 100/80 5\n");
+  config_parse_gcg_string(config, string_builder_peek(record), history, errors);
+  assert(error_stack_is_empty(errors));
+  load_and_exec_config_or_die(config, "goto 0");
+  load_and_exec_config_or_die(config, "commit pass");
+  assert(player_get_score(game_get_player(config_get_game(config), 0)) ==
+         int_to_equity(93));
+  assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
+         int_to_equity(54));
+  free(header);
+  string_builder_destroy(record);
+  error_stack_destroy(errors);
+  config_destroy(config);
+}
+
+static void test_initial_endgame_racks(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  Config *config = config_create_or_die("set -lex CSW24");
+  ErrorStack *errors = error_stack_create();
+  GameHistory *history = config_get_game_history(config);
+  const char *record =
+      "#lexicon CSW24\n#player1 A Alice\n#player2 B Bob\n#cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0\n>A: FV 6B .F +10 452\n";
+  config_parse_gcg_string(config, record, history, errors);
+  assert(error_stack_is_empty(errors));
+  Game *game = config_game_create(config);
+  for (int validate = 0; validate < 2; validate++) {
+    game_play_n_events(history, game, 1, validate != 0, errors);
+    assert(error_stack_is_empty(errors));
+    assert(game_get_player_on_turn_index(game) == 1);
+    assert(bag_is_empty(game_get_bag(game)));
+    assert_rack_equals_string(game_get_ld(game),
+                              player_get_rack(game_get_player(game, 0)), "V");
+    assert_rack_equals_string(
+        game_get_ld(game), player_get_rack(game_get_player(game, 1)), "AADIZ");
+  }
+  game_destroy(game);
+  error_stack_destroy(errors);
+  config_destroy(config);
+}
+
 void test_history_replay(void) {
   test_initial_position();
+  test_initial_rack_after_exchanges();
+  test_initial_endgame_racks();
   Config *config = config_create_or_die("set -lex CSW24");
   ErrorStack *error_stack = error_stack_create();
   GameHistory *game_history = config_get_game_history(config);
