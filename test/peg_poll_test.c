@@ -197,6 +197,7 @@ void test_peg_poll(void) {
   if (search_memory_is_bounded()) {
     error_stack_reset(error_stack);
     args.tt_fraction_of_mem = 0.0000001;
+    peg_result_destroy(&result);
     peg_solve(&args, &result, error_stack);
     assert(!error_stack_is_empty(error_stack));
     peg_poll_read(poll, &final);

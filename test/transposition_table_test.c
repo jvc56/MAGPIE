@@ -29,11 +29,15 @@ void test_transposition_table(void) {
       const int capacity = peg_memory_max_tables((double)budget_mb / 256);
       assert(capacity >= 33);
       double worker_fraction = 0;
-      assert(!peg_memory_worker_fraction((double)budget_mb / 256, capacity + 1,
-                                         &worker_fraction));
+      const bool over_budget = peg_memory_worker_fraction(
+          (double)budget_mb / 256, capacity + 1, &worker_fraction);
+      assert(!over_budget);
+      (void)over_budget;
       for (int workers = 1; workers <= capacity; workers++) {
-        assert(peg_memory_worker_fraction((double)budget_mb / 256, workers,
-                                          &worker_fraction));
+        const bool fits = peg_memory_worker_fraction(
+            (double)budget_mb / 256, workers, &worker_fraction);
+        assert(fits);
+        (void)fits;
         TranspositionTable *worker_tt = transposition_table_create_with_minimum(
             worker_fraction, PEG_TT_MIN_SIZE_POWER);
         const uint64_t bytes =
@@ -46,7 +50,7 @@ void test_transposition_table(void) {
       TranspositionTable *endgame_tt =
           transposition_table_create((double)budget_mb / 256);
       assert(((uint64_t)TTENTRY_SIZE_BYTES << endgame_tt->size_power_of_2) ==
-             (uint64_t)32 * 1024 * 1024);
+             (uint64_t)budget_mb * 1024 * 1024);
       transposition_table_destroy(endgame_tt);
     }
   }

@@ -27,7 +27,7 @@
 // increase subsequent search allocations. Native budgets use physical RAM.
 #ifdef __EMSCRIPTEN__
 #define DEFAULT_TT_FRACTION 0.125
-#define TT_MIN_SIZE_POWER 21
+#define TT_MIN_SIZE_POWER 20
 #define PEG_TT_MIN_SIZE_POWER 12
 #else
 #define DEFAULT_TT_FRACTION 0.25
