@@ -338,7 +338,7 @@ export function analysisCommands(position, mode, settings) {
   const ttMiB = settings.ttMiB ?? 32;
   if (![16, 32].includes(ttMiB)) throw new Error("Search memory must be 16 or 32 MiB.");
   const solveSeconds = settings.solveToCompletion ? 0 : settings.seconds;
-  const common = `-threads ${settings.threads} -tlim ${settings.seconds}`;
+  const common = `-threads ${settings.threads} -tlim ${["peg", "endgame"].includes(mode) ? solveSeconds : settings.seconds}`;
   const explicitMoves = settings.moves?.map(move => move.replace(/[()]/g, ""));
   if (explicitMoves && !explicitMoves.length) throw new Error("Select at least one play to simulate.");
   const displayCount = Math.max(101, explicitMoves?.length || 0);
