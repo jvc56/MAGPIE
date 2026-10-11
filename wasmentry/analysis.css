@@ -93,7 +93,7 @@ button {
   cursor: pointer;
   padding: 7px 11px;
 }
-button:hover:not(:disabled):not(.square) {
+button:hover:not(:disabled):not(.square):not(.rack-tile) {
   border-color: var(--accent);
   background: var(--hover);
 }
@@ -1102,13 +1102,6 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 .rack-tile {
   padding: 0;
   border: 0;
-}
-
-.rack-tile:hover:not(:disabled) {
-  background: var(--tile);
-}
-.rack[data-owner="1"] .rack-tile:hover:not(:disabled) {
-  background: var(--green);
 }
 
 #context-status {
