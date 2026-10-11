@@ -32,7 +32,7 @@ static bool check_snapshot(const GameHistory *game_history, const Game *game,
   check->visits++;
   game_reset(check->expected);
   game_seed(check->expected, 42);
-  game_play_n_events(check->game_history, check->expected, event_index, false,
+  game_play_n_events(check->game_history, check->expected, event_index, true,
                      check->error_stack);
   assert(error_stack_is_empty(check->error_stack));
   assert_games_are_equal(game, check->expected, true);

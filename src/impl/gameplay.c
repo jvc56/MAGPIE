@@ -1394,6 +1394,10 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
         return;
       }
 
+    } else {
+      vms = game_event_get_vms(game_event);
+    }
+    {
       Rack *known_rack_from_phonies =
           &play_events_data
                ->known_letters_from_phonies_racks[game_event_player_index];
@@ -1409,8 +1413,6 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
       } else if (game_event_type == GAME_EVENT_EXCHANGE) {
         rack_reset(known_rack_from_phonies);
       }
-    } else {
-      vms = game_event_get_vms(game_event);
     }
 
     const int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -1425,7 +1427,7 @@ void play_game_history_turn(const GameHistory *game_history, Game *game,
                         game_event_get_score_adjustment(game_event));
     break;
   case GAME_EVENT_PHONY_TILES_RETURNED:;
-    if (validate) {
+    {
       const Rack *previously_played_letters =
           &play_events_data
                ->previously_played_letters_racks[game_event_player_index];
