@@ -80,8 +80,8 @@ The app opens with **New game**, with empty racks until a game is started or
 imported. **Open game…** in that dialog opens a GCG directly. Example positions
 remain available under **Edit position**.
 
-**New game** defaults to **Play Magpie**, with **Record a game** and
-**Watch computers** alongside it. Player names default to **You** and **Magpie**.
+**New game** defaults to **Play Against Magpie**, with **Review a game** and
+**Watch Magpie selfplay** alongside it. Player names default to **You** and **Magpie**.
 Names and time are immediately available; **Game options** holds first player,
 human side, thinking time, overtime and challenge rules. Watch delay appears
 only for computer-vs-computer games. The scoreboard keeps each player’s name,

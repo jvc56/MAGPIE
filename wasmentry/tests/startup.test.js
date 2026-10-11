@@ -10,7 +10,7 @@ async function ready(page) {
 
 test('startup offers game choices without dealing an example rack, including on mobile', async ({page}) => {
   await ready(page);
-  for (const name of ['Play Magpie', 'Record a game', 'Watch computers', 'Open game…'])
+  for (const name of ['Play Against Magpie', 'Review a game', 'Watch Magpie selfplay', 'Open game…'])
     await expect(page.getByRole('button', {name,exact:true})).toBeVisible();
   await page.screenshot({path:test.info().outputPath('new-game-desktop.png')});
   await page.setViewportSize({width:390,height:844});

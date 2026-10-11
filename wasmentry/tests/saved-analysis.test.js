@@ -43,7 +43,7 @@ test('sims survive reload, accept a board play, and continue selected or all can
   test.setTimeout(120000);
   await ready(page);
   await page.locator('#new-game').click();
-  await page.getByRole('button',{name:'Record a game',exact:true}).click();
+  await page.getByRole('button',{name:'Review a game',exact:true}).click();
   await page.locator('#new-game-form button.primary').click();
   await page.locator('#rack').fill('AEINRST');
   await page.locator('#rack').dispatchEvent('change');

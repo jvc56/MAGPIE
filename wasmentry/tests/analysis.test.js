@@ -444,7 +444,7 @@ test("GCG full game preserves blanks, both owners, final scores and UTF-8", asyn
 
 async function newGame(page, rack = "AEINRST") {
   await page.locator("#new-game").click();
-  await page.getByRole("button", { name: "Record a game", exact: true }).click();
+  await page.getByRole("button", { name: "Review a game", exact: true }).click();
   await page.locator("#new-game-form button.primary").click();
   await expect(page.locator("#status")).toHaveText(
     "Game ready · enter the first rack",
@@ -767,7 +767,7 @@ test("game setup, stable scoreboard and responsive tracking", async ({
   await expect(page.locator(".badge")).toHaveText("Beta");
   await page.locator("#new-game").click();
   await expect(
-    page.getByRole("button", { name: "Play Magpie", exact: true }),
+    page.getByRole("button", { name: "Play Against Magpie", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("#player-one-name")).toHaveValue("You");
   await expect(page.locator("#player-two-name")).toHaveValue(
@@ -776,12 +776,12 @@ test("game setup, stable scoreboard and responsive tracking", async ({
   await page.locator(".game-options > summary").click();
   await expect(page.locator("#watch-delay")).not.toBeVisible();
   await page
-    .getByRole("button", { name: "Watch computers", exact: true })
+    .getByRole("button", { name: "Watch Magpie selfplay", exact: true })
     .click();
   await expect(page.locator("#human-side")).not.toBeVisible();
   await expect(page.locator("#watch-delay")).toBeVisible();
   await page
-    .getByRole("button", { name: "Play Magpie", exact: true })
+    .getByRole("button", { name: "Play Against Magpie", exact: true })
     .click();
   await page.selectOption("#bot-analysis", "kibitz");
   await page.selectOption("#game-time", "180");

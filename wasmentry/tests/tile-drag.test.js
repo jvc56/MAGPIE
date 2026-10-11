@@ -23,7 +23,7 @@ async function ready(page, rack = null) {
   await openSample(page);
   if (rack == null) return;
   await page.locator('#new-game').click();
-  await page.getByRole('button', {name:'Record a game',exact:true}).click();
+  await page.getByRole('button', {name:'Review a game',exact:true}).click();
   await page.locator('#new-game-form button.primary').click();
   await expect(page.locator('#status')).toHaveText('Game ready · enter the first rack');
   await page.locator('#rack').fill(rack);

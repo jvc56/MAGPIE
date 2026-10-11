@@ -621,27 +621,30 @@
             data-game-kind="play"
             aria-pressed="true"
           >
-            Play Magpie
+            Play Against Magpie
           </button>
           <button
             type="button"
             data-game-kind="record"
+            aria-labelledby="review-game-label"
+            aria-describedby="review-game-description"
             aria-pressed="false"
           >
-            Record a game
+            <span id="review-game-label">Review a game</span>
+            <span id="review-game-description" class="game-kind-description">enter racks and plays from a game to analyze</span>
           </button>
           <button
             type="button"
             data-game-kind="watch"
             aria-pressed="false"
           >
-            Watch computers
+            Watch Magpie selfplay
           </button>
         </div>
         <select id="game-kind" aria-label="Game mode" hidden>
-          <option value="play" selected>Play against computer</option>
-          <option value="record">Record / annotate</option>
-          <option value="watch">Watch computers</option>
+          <option value="play" selected>Play Against Magpie</option>
+          <option value="record">Review a game</option>
+          <option value="watch">Watch Magpie selfplay</option>
         </select>
         <label
           >Player 1<input

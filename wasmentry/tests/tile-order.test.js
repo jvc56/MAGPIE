@@ -105,7 +105,7 @@ test("changing alphagram order keeps pending tiles and preserves subsequent manu
   await expect(page.locator("#status")).toHaveText("Engine ready", { timeout: 30000 });
   await openSample(page);
   await page.locator("#new-game").click();
-  await page.getByRole("button", {name:"Record a game",exact:true}).click();
+  await page.getByRole("button", {name:"Review a game",exact:true}).click();
   await page.locator("#new-game-form button.primary").click();
   await expect(page.locator("#status")).toHaveText("Game ready · enter the first rack");
   await page.locator("#rack").fill("BAB?AE?");
@@ -140,7 +140,7 @@ test('shuffle preserves staged duplicate and blank slots when changing direction
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await openSample(page);
   await page.locator('#new-game').click();
-  await page.getByRole('button', {name:'Record a game',exact:true}).click();
+  await page.getByRole('button', {name:'Review a game',exact:true}).click();
   await page.locator('#new-game-form button.primary').click();
   await page.locator('#rack').fill('AABCDE?');
   await page.locator('#rack').dispatchEvent('change');
@@ -169,7 +169,7 @@ test('a direction change past the board edge keeps the move and explains the fai
   await expect(page.locator('#status')).toHaveText('Engine ready');
   await openSample(page);
   await page.locator('#new-game').click();
-  await page.getByRole('button', {name:'Record a game',exact:true}).click();
+  await page.getByRole('button', {name:'Review a game',exact:true}).click();
   await page.locator('#new-game-form button.primary').click();
   await page.locator('#rack').fill('AEINRST');
   await page.locator('#rack').dispatchEvent('change');

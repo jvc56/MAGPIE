@@ -1665,13 +1665,23 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 }
 .game-kind-options {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   margin-bottom: 18px;
 }
 .game-kind-options button {
   flex: 1;
   background: transparent;
-  padding: 10px 8px;
+  padding: 10px 12px;
+  text-align: left;
+}
+.game-kind-description {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: normal;
 }
 .game-kind-options button[aria-pressed="true"] {
   background: var(--active);
