@@ -52,10 +52,10 @@ static void test_map_permissions(const WMP *wmp, const WordInfoTable *wit) {
   char *filename = get_formatted_string("%s/table", directory);
   char *linkname = get_formatted_string("%s/link", directory);
   ErrorStack *errors = error_stack_create();
-  const mode_t original_mask = umask(0022);
+  const mode_t original_mask = umask(0022); // NOLINT(misc-include-cleaner)
   write_map(wmp, wit, filename, errors);
   assert(error_stack_is_empty(errors));
-  struct stat metadata;
+  struct stat metadata; // NOLINT(misc-include-cleaner)
   assert(stat(filename, &metadata) == 0);
   assert((metadata.st_mode & 0777) == 0644);
   assert(chmod(filename, 0664) == 0);
