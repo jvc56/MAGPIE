@@ -179,6 +179,83 @@ static void write_game_result(const Config *config, Game *live_game,
   string_builder_add_string(result, "]}");
 }
 
+// A review edit may supply racks, but may not silently replace the position.
+static void load_review_position(Game *game, const char *cgp, int on_turn,
+                                 ErrorStack *errors) {
+  Game *supplied = game_duplicate(game);
+  game_load_cgp(supplied, cgp, errors);
+  bool same = error_stack_is_empty(errors) &&
+              game_get_player_on_turn_index(game) == on_turn &&
+              game_get_consecutive_scoreless_turns(game) ==
+                  game_get_consecutive_scoreless_turns(supplied);
+  for (int row = 0; same && row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_get_letter(game_get_board(game), row, col) !=
+          board_get_letter(game_get_board(supplied), row, col)) {
+        same = false;
+      }
+    }
+  }
+  for (int player_idx = 0; same && player_idx < 2; player_idx++) {
+    const Player *known = game_get_player(game, player_idx);
+    const Player *input = game_get_player(supplied, player_idx);
+    same = player_get_score(known) == player_get_score(input);
+    const Rack *known_rack = player_get_rack(known);
+    const Rack *input_rack = player_get_rack(input);
+    if (!rack_is_empty(known_rack) && !rack_is_empty(input_rack) &&
+        !racks_are_equal(known_rack, input_rack)) {
+      same = false;
+    }
+  }
+  if (error_stack_is_empty(errors) && !same) {
+    error_stack_push(errors, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+                     string_duplicate("The position or racks conflict with the "
+                                      "game record. Reload this turn before "
+                                      "entering the move."));
+  }
+  if (error_stack_is_empty(errors)) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      const Rack *known = player_get_rack(game_get_player(game, player_idx));
+      if (rack_is_empty(
+              player_get_rack(game_get_player(supplied, player_idx))) &&
+          !rack_is_empty(known)) {
+        set_rack_from_bag_or_push_to_error_stack(supplied, player_idx, known,
+                                                 errors);
+      }
+    }
+    if (error_stack_is_empty(errors)) {
+      char *normalized = game_get_cgp(supplied, false);
+      game_load_cgp(game, normalized, errors);
+      free(normalized);
+      game_set_player_on_turn_index(game, on_turn);
+    }
+  }
+  game_destroy(supplied);
+}
+
+static char *normalize_note(const char *note) {
+  StringSplitter *lines = split_string_by_newline(note, false);
+  StringBuilder *result = string_builder_create();
+  bool first = true;
+  for (int line_idx = 0; line_idx < string_splitter_get_number_of_items(lines);
+       line_idx++) {
+    char *line = string_duplicate(string_splitter_get_item(lines, line_idx));
+    trim_whitespace(line);
+    if (*line) {
+      if (!first) {
+        string_builder_add_char(result, '\n');
+      }
+      string_builder_add_string(result, line);
+      first = false;
+    }
+    free(line);
+  }
+  string_splitter_destroy(lines);
+  char *text = string_builder_dump(result, NULL);
+  string_builder_destroy(result);
+  return text;
+}
+
 // Each edit is transactional: adopt only after validation/confirmation.
 char *browser_game_action(const char *text, const char *lexicon,
                           const int event_index, const char *rack,
@@ -234,6 +311,7 @@ char *browser_game_action(const char *text, const char *lexicon,
   }
   if (action != BROWSER_GAME_IMPORT && error_stack_is_empty(error_stack)) {
     bool live_phony = false;
+    bool review_known[2] = {false, false};
     // Parsing leaves the board at the end but the game_history cursor at zero.
     // Navigate via the end so Config initializes its commit/challenge writer.
     run_game_command(config, error_stack, "goto end", NULL);
@@ -246,7 +324,11 @@ char *browser_game_action(const char *text, const char *lexicon,
       Game *game = config_get_game(config);
       const int on_turn = current_player == 1 ? 1 : 0;
       if (*current_cgp) {
-        game_load_cgp(game, current_cgp, error_stack);
+        if (action == BROWSER_GAME_COMMIT) {
+          load_review_position(game, current_cgp, on_turn, error_stack);
+        } else {
+          game_load_cgp(game, current_cgp, error_stack);
+        }
       }
       game_set_player_on_turn_index(game, on_turn);
       game_seed(game, seed);
@@ -256,12 +338,28 @@ char *browser_game_action(const char *text, const char *lexicon,
         draw_to_full_rack(game, on_turn);
         live_game = game_duplicate(game);
       } else if (error_stack_is_empty(error_stack)) {
+        if (action == BROWSER_GAME_COMMIT) {
+          const bool empty_bag = bag_is_empty(game_get_bag(game));
+          for (int player_idx = 0; player_idx < 2; player_idx++) {
+            const Rack *known =
+                player_get_rack(game_get_player(game, player_idx));
+            review_known[player_idx] =
+                !rack_is_empty(known) &&
+                (empty_bag || (player_idx != on_turn &&
+                               rack_get_total_letters(known) == RACK_SIZE));
+          }
+        }
         ValidatedMoves *moves = validated_moves_create(
             game, on_turn, move,
             action == BROWSER_GAME_COMMIT || allow_phonies != 0, true,
             error_stack);
         if (error_stack_is_empty(error_stack)) {
           live_game = game_duplicate(game);
+          if (action == BROWSER_GAME_COMMIT) {
+            // Reserve unknown opponent tiles before drawing for the mover.
+            // These sampled tiles are never published in a review record.
+            draw_to_full_rack(live_game, 1 - on_turn);
+          }
           live_phony = validated_moves_is_phony(moves, 0);
           if (live_phony && action == BROWSER_GAME_LIVE_MOVE) {
             Move pass;
@@ -290,8 +388,7 @@ char *browser_game_action(const char *text, const char *lexicon,
             // Review CGPs may omit a rack or provide only some of its tiles.
             // Do not turn incomplete information into a known pass-out rack.
             if (action == BROWSER_GAME_COMMIT &&
-                rack_get_total_letters(actual) < RACK_SIZE &&
-                !bag_is_empty(game_get_bag(live_game))) {
+                (!review_known[player_index] || rack_is_empty(actual))) {
               continue;
             }
             rack_copy(game_history_player_get_last_rack(
@@ -304,9 +401,10 @@ char *browser_game_action(const char *text, const char *lexicon,
           }
         }
         const Rack *exchange_rack =
-            live_game ? player_get_rack(game_get_player(
-                            live_game, current_player == 1 ? 1 : 0))
-                      : NULL;
+            live_game && action == BROWSER_GAME_LIVE_MOVE
+                ? player_get_rack(
+                      game_get_player(live_game, current_player == 1 ? 1 : 0))
+                : NULL;
         char *warning =
             config_commit_move(config, move, exchange_rack, error_stack);
         string_builder_add_string(warnings, warning);
@@ -329,8 +427,9 @@ char *browser_game_action(const char *text, const char *lexicon,
         (action == BROWSER_GAME_NOTE || *note)) {
       if (game_history_get_num_played_events(config_get_game_history(config)) >
           0) {
+        char *normalized_note = normalize_note(note);
         game_history_set_note_for_most_recent_event(
-            config_get_game_history(config), note);
+            config_get_game_history(config), normalized_note);
         // Accept a note only if the exported record remains importable. Keep
         // validation isolated from the live configuration and history cursor.
         StringBuilder *record = string_builder_create();
@@ -345,7 +444,7 @@ char *browser_game_action(const char *text, const char *lexicon,
           const GameHistory *original = config_get_game_history(config);
           const GameHistory *roundtrip = config_get_game_history(check);
           const int count = game_history_get_num_events(original);
-          char *expected = string_duplicate(note);
+          char *expected = string_duplicate(normalized_note);
           trim_whitespace(expected);
           const int target = game_history_get_num_played_events(original) - 1;
           char *actual =
@@ -368,6 +467,7 @@ char *browser_game_action(const char *text, const char *lexicon,
         }
         config_destroy(check);
         string_builder_destroy(record);
+        free(normalized_note);
       } else {
         error_stack_push(
             error_stack, ERROR_STATUS_NOTE_NO_GAME_EVENTS,
@@ -376,8 +476,8 @@ char *browser_game_action(const char *text, const char *lexicon,
     }
   }
   if (error_stack_is_empty(error_stack)) {
-    write_game_result(config, live_game, action, event_index, result, warnings,
-                      error_stack);
+    write_game_result(config, action == BROWSER_GAME_COMMIT ? NULL : live_game,
+                      action, event_index, result, warnings, error_stack);
   }
   const bool failed = !error_stack_is_empty(error_stack);
   if (failed) {

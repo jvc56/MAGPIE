@@ -19,12 +19,10 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     {
       name: "firefox",
-      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js", "**/live-import.test.js", "**/history-layout.test.js", "**/solver-pause.test.js", "**/tile-order.test.js", "**/settings-lock.test.js", "**/session-transitions.test.js", "**/startup.test.js", "**/computer-time.test.js", "**/review-fixes.test.js", "**/move-entry.test.js", "**/play-review.test.js", "**/wmp.test.js", "**/review-round2.test.js", "**/review-regressions.test.js", "**/device-budget.test.js"],
       use: { ...devices["Desktop Firefox"] },
     },
     ...(process.env.MAGPIE_TEST_EDGE ? [{
       name: "edge",
-      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js", "**/live-import.test.js", "**/history-layout.test.js", "**/solver-pause.test.js", "**/tile-order.test.js", "**/settings-lock.test.js", "**/session-transitions.test.js", "**/startup.test.js", "**/computer-time.test.js", "**/review-fixes.test.js", "**/move-entry.test.js", "**/play-review.test.js", "**/wmp.test.js", "**/review-round2.test.js", "**/review-regressions.test.js", "**/device-budget.test.js"],
       use: {
         ...devices["Desktop Edge"],
         channel: "msedge",
@@ -33,7 +31,6 @@ export default defineConfig({
     }] : []),
     {
       name: "webkit",
-      testMatch: ["**/engine-compat.test.js", "**/tile-drag.test.js", "**/saved-analysis.test.js", "**/live-import.test.js", "**/history-layout.test.js", "**/solver-pause.test.js", "**/tile-order.test.js", "**/settings-lock.test.js", "**/session-transitions.test.js", "**/startup.test.js", "**/computer-time.test.js", "**/review-fixes.test.js", "**/move-entry.test.js", "**/play-review.test.js", "**/wmp.test.js", "**/review-round2.test.js", "**/review-regressions.test.js", "**/device-budget.test.js"],
       use: { ...devices["Desktop Safari"] },
     },
     {

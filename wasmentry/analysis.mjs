@@ -679,7 +679,7 @@ function updateSimSelection() {
   });
 }
 function concealComputerAnalysis() {
-  return hiddenLiveGame() && position.onTurn !== session.human;
+  return hiddenLiveGame() && position.onTurn !== session.human && !$("show-live-analysis").checked;
 }
 function renderResults() {
   if (concealComputerAnalysis()) {
@@ -2482,7 +2482,7 @@ function renderSession() {
   }
   // Clock refreshes must not replace the text node under a pressed mouse.
   // WebKit otherwise drops the click between pointerdown and pointerup.
-  const pauseLabel = session.paused ? "Resume game" : "Pause";
+  const pauseLabel = botRunning ? "Pause" : session.paused ? "Resume game" : "Pause";
   if ($("pause-game").textContent !== pauseLabel)
     $("pause-game").textContent = pauseLabel;
   $("pause-game").disabled = session.finished;
@@ -2640,7 +2640,7 @@ async function computerTurn(single = false) {
     if (
       session !== currentSession ||
       session.finished ||
-      (!single && session.paused)
+      canceled || (!single && session.paused)
     )
       return;
     if (!complete) throw new Error($("error").textContent || "Computer analysis failed. Resume to retry.");
@@ -2669,10 +2669,15 @@ function validateNewGameCGP() {
       startingPosition = parseCGP(cgp, position.lexicon);
       const { unseen, unseenCount } = inventory(startingPosition);
       if (unseenCount <= 7 && startingPosition.racks.every(rack => !rack)) throw new Error("Enter at least one rack to start from this position.");
-      if (unseenCount <= 7) {
+      if (!startingPosition.racks[0] && startingPosition.racks[1]) {
+        const pool = {...unseen};
+        for (const tile of startingPosition.racks[1]) pool[tile]--;
+        const remainingTiles = Object.entries(pool).map(([tile, count]) => tile.repeat(count)).join("");
+        if (remainingTiles.length <= 7) startingPosition.racks[0] = remainingTiles;
+      } else if (unseenCount <= 7) {
         startingPosition.racks[1] = Object.entries(unseen).map(([tile, count]) => tile.repeat(count)).join("");
       }
-      const remaining = unseenCount - startingPosition.racks[1].length;
+      const remaining = inventory(startingPosition).unseenCount - startingPosition.racks[1].length;
       if (remaining === 0 && startingPosition.racks.some(rack => !rack)) {
         throw new Error("This position has already ended.");
       }
@@ -2764,7 +2769,7 @@ $("game-menu").addEventListener("keydown", (event) => {
 $("pause-game").addEventListener("click", () => {
   if (!isLive()) return;
   chargeClock();
-  session.paused = !session.paused;
+  session.paused = botRunning || !session.paused;
   if (session.paused) {
     clearTimeout(botTimer);
     if (busy) stop();
@@ -2783,7 +2788,7 @@ $("step-game").addEventListener("click", () => {
     showHistory(recordedGame.positions.length - 1, {auto:false});
   computerTurn(true);
 });
-$("show-live-analysis").addEventListener("change", renderSession);
+$("show-live-analysis").addEventListener("change", () => { renderSession(); renderResults(); });
 $("finish-game").addEventListener("click", async () => {
   if (!isLive()) return;
   if (
@@ -3274,13 +3279,22 @@ for (const id of ["auto-analyze", "hide-spoilers", "wmp-source", "wmp-cache-enab
   });
 }
 try {
-  if (localStorage.getItem("magpie-wmp-building")) {
+  // Older builds used a shared marker, which could belong to another tab.
+  localStorage.removeItem("magpie-wmp-building");
+  const crashed = sessionStorage.getItem("magpie-wmp-aborted") ||
+    (performance.getEntriesByType("navigation")[0]?.type === "reload" && sessionStorage.getItem("magpie-wmp-building"));
+  if (crashed) {
     $("wmp-source").value = "off";
     localStorage.setItem("magpie-wmp-source", "off");
-    localStorage.removeItem("magpie-wmp-building");
-    $("wmp-cache-status").textContent = "A previous word-map build did not finish. Word maps are off; you can enable them again in Settings.";
+    const notice = "A word-map build stopped unexpectedly. Word maps are off; you can enable them again in Settings.";
+    $("wmp-cache-status").textContent = notice;
+    $("wmp-recovery-notice").textContent = notice;
+    $("wmp-recovery-notice").hidden = false;
   }
+  sessionStorage.removeItem("magpie-wmp-aborted");
+  sessionStorage.removeItem("magpie-wmp-building");
 } catch {}
+let wmpWarning = "";
 renderRecent();
 renderPosition();
 renderResults();
@@ -3334,12 +3348,18 @@ async function startEngine() {
       if (detail.type === "wmp_progress") {
         message(detail.text);
         $("wmp-cache-status").textContent = detail.text;
-        $("stop-wmp").hidden = false;
-        $("stop-wmp").disabled = canceled;
+        $("stop-wmp").hidden = botRunning;
+        $("stop-wmp").disabled = canceled || botRunning;
       }
-      if (detail.type === "wmp_ready" && !detail.unavailable && !$("wmp-cache-status").textContent.startsWith("WMP cache unavailable"))
-        $("wmp-cache-status").textContent = detail.stopped ? "Stopped" : "WMP ready";
-      if (detail.type === "wmp_cache_warning") $("wmp-cache-status").textContent = detail.text;
+      if (detail.type === "wmp_build_started") wmpWarning = "";
+      if (detail.type === "wmp_ready") {
+        $("stop-wmp").hidden = true;
+        $("wmp-cache-status").textContent = wmpWarning || (detail.stopped ? "Stopped" : detail.unavailable ? "Word maps unavailable" : detail.cached ? "Word maps cached" : "Word maps ready for this session");
+      }
+      if (detail.type === "wmp_cache_warning") {
+        wmpWarning = detail.text;
+        $("wmp-cache-status").textContent = detail.text;
+      }
       if (detail.type === "output" || detail.type === "status")
         acceptOutput(detail.text, detail.command || "");
     });
@@ -3378,6 +3398,7 @@ function renderWMPCache() {
       setBusy(true);
       renderWMPCache();
       $("wmp-cache-status").textContent = "";
+      wmpWarning = "";
       canceled = false;
       try {
         if (file) await engine.wmpCache(lexicon);
@@ -3392,10 +3413,9 @@ function renderWMPCache() {
           await engine.run(["set -wit false -wmp false"]);
           engine.wmpKey = null;
         }
-        const status = canceled ? "Stopped" : file ? `${lexicon} WMP removed` : `${lexicon} WMP ready`;
+        const status = canceled ? "Stopped" : file ? `${lexicon} WMP removed` : wmpWarning || (engine.wmpCached ? `${lexicon} word maps cached` : `${lexicon} word maps were not cached`);
         message(status);
-        if (!$("wmp-cache-status").textContent.startsWith("WMP cache unavailable"))
-          $("wmp-cache-status").textContent = status;
+        $("wmp-cache-status").textContent = status;
       } catch (failure) { $("wmp-cache-status").textContent = failure.message; }
       finally { setBusy(false); await refreshWMPCache(); }
     });
@@ -3411,4 +3431,4 @@ async function refreshWMPCache() {
 }
 $("wmp-source").addEventListener("change", renderWMPCache);
 
-$("stop-wmp").addEventListener("click", stop);
+$("stop-wmp").addEventListener("click", () => { if (!botRunning) stop(); });

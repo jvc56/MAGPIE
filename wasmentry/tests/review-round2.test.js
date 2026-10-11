@@ -86,13 +86,13 @@ test('a failed word-map build does not repeat after reload', async ({page}) => {
   await page.addInitScript(() => {
     if (!sessionStorage.getItem('seeded')) {
       localStorage.setItem('magpie-wmp-source','build');
-      localStorage.setItem('magpie-wmp-building','CSW24');
+      sessionStorage.setItem('magpie-wmp-aborted','true');
       sessionStorage.setItem('seeded','yes');
     }
   });
   await ready(page);
   await expect(page.locator('#wmp-source')).toHaveValue('off');
-  await expect(page.locator('#wmp-cache-status')).toContainText('did not finish');
+  await expect(page.locator('#wmp-cache-status')).toContainText('stopped unexpectedly');
   await page.reload();
   await expect(page.locator('#wmp-source')).toHaveValue('off');
   expect(await page.evaluate(() => localStorage.getItem('magpie-wmp-building'))).toBeNull();
@@ -229,4 +229,94 @@ test('review pass-out rejects unknown racks instead of inventing penalties', asy
   expect(report[2].error).toBeUndefined();
   expect(report[2].game.ended).toBe(true);
   expect(report[2].reloaded.positions.at(-1).cgp).toContain('54/93');
+});
+
+test('review records three turns through an emptying bag without inventing racks', async ({page}) => {
+  await ready(page);
+  const reports = await page.evaluate(async header => {
+    const {EngineClient} = await import('./engine-client.mjs');
+    const {SAMPLES,parseCGP,toCGP} = await import('./analysis-model.mjs');
+    const engine = new EngineClient();
+    try {
+      await engine.prepare('CSW24');
+      const start = SAMPLES.endgame.replace('3PERJURY5','6JURY5').replace('FV/AADIZ','FV/');
+      let text = header + '#cgp ' + start + '\n';
+      let position = parseCGP(start), index = 0, onTurn = 0;
+      const result = [];
+      for (const [rack, move] of [['FV','6B .F'],['AADEIPZ','13F ZAP'],['RV','pass']]) {
+        position.racks = onTurn ? ['',rack] : [rack,''];
+        const {game} = await engine.gameAction({text,index,onTurn,action:1,rack,move,note:'nice play',cgp:toCGP(position),lexicon:'CSW24'});
+        const loaded = (await engine.importGCG(game.gcg,'CSW24')).game;
+        result.push({game,loaded});
+        text = game.gcg; index = game.index;
+        const snapshot = game.positions.at(-1); onTurn = snapshot.onTurn;
+        position = parseCGP(snapshot.cgp);
+        if (onTurn) {position.racks.reverse(); position.scores.reverse();}
+      }
+      return result;
+    } finally {engine.worker.terminate();}
+  },header);
+  for (const {game,loaded} of reports) {
+    expect(game.positions.at(-1).cgp).toBe(loaded.positions.at(-1).cgp);
+    expect(game.ended).toBe(loaded.ended);
+    expect(game.gcg).not.toMatch(/#rack[12] *\n/);
+  }
+  expect(reports[1].game.positions.at(-1).cgp).toContain(' RV/ADEI ');
+  expect(reports[2].game.positions.at(-1).cgp).toContain(' ADEI/RV ');
+});
+
+test('review rejects conflicting physical positions and does not invent exchange penalties', async ({page}) => {
+  await ready(page);
+  const cgp = `${empty} AEINRST/BCDFGHJ 100/80 5`;
+  const report = await actions(page, [
+    ...[cgp.replace('100/80','101/80'),cgp.replace(' 5',' 4'),cgp.replace('BCDFGHJ','QX'),cgp.replace('AEINRST','AEIRST'),cgp.replace(/^15/,'A14')].map(physical => ({text:header+'#cgp '+cgp+'\n',cgp:physical,rack:'AEINRST',move:'pass',index:0,onTurn:0,action:1})),
+    {text:header+'#cgp '+cgp+'\n',cgp,rack:'AEINRST',move:'ex AEI',index:0,onTurn:0,action:1}
+  ]);
+  for(const result of report.slice(0,5)) expect(result.error).toContain('conflict');
+  expect(report[5].error).toContain('previous pass');
+});
+
+test('review notes normalize blank lines and retain paragraphs without raw error codes', async ({page}) => {
+  await ready(page);
+  const report = await actions(page,['para one\n\npara two','\nleading newline','  \n  ', '\nfirst\n#rack2 BCDFGHJ'].map(note => ({text:header+'>A: AEINRST 8H TRAIN +12 12\n',index:1,note,action:2})));
+  for(const result of report.slice(0,3)) expect(result.error).toBeUndefined();
+  expect(report[0].game.gcg).toContain('para one\npara two');
+  expect(report[3].error).not.toMatch(/\(error \d+\)/);
+  expect(report[3].error).toContain('note cannot be saved');
+});
+
+test('CGP accepts only an opponent rack and infers the on-turn endgame rack', async ({page}) => {
+  await ready(page);
+  await page.locator('#new-game-position > summary').click();
+  await page.locator('#new-game-cgp').fill(SAMPLES.endgame.replace('FV/AADIZ','/AADIZ'));
+  await expect(page.locator('#new-game-cgp-status')).toContainText('Valid CGP');
+  await expect(page.locator('#start-game')).toBeEnabled();
+});
+
+test('word-map interruption markers are per-tab and normal reload preserves the preference', async ({page,context}) => {
+  await ready(page);
+  await page.evaluate(() => {localStorage.setItem('magpie-wmp-source','build');sessionStorage.setItem('magpie-wmp-building','CSW24');});
+  const other = await context.newPage();
+  await ready(other);
+  await expect(other.locator('#wmp-source')).toHaveValue('build');
+  await page.reload();
+  await expect(page.locator('#wmp-source')).toHaveValue('build');
+  await other.close();
+});
+
+test('a worker fatal during WMP preparation records an abort for this tab', async ({page}) => {
+  await ready(page);
+  const marker = await page.evaluate(async () => {
+    const {EngineClient} = await import('./engine-client.mjs');
+    const engine = new EngineClient();
+    await engine.ready;
+    engine.pending = {response:'wmp_ready',reject:()=>{}};
+    engine.worker.onmessage({data:{type:'fatal',text:'memory exhausted'}});
+    return sessionStorage.getItem('magpie-wmp-aborted');
+  });
+  expect(marker).toBe('true');
+  await page.reload();
+  await expect(page.locator('#wmp-source')).toHaveValue('off');
+  await page.locator('#cancel-new-game').click();
+  await expect(page.locator('#wmp-recovery-notice')).toBeVisible();
 });

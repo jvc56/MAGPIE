@@ -3,6 +3,9 @@ export class EngineClient extends EventTarget {
     super();
     this.worker = new Worker(new URL("./wasm-worker.js", import.meta.url));
     this.pending = null;
+    addEventListener("pagehide", () => {
+      try { sessionStorage.removeItem("magpie-wmp-building"); } catch {}
+    });
     this.nextRequestId = 0;
     this.fatalError = null;
     this.lastLog = "";
@@ -21,10 +24,10 @@ export class EngineClient extends EventTarget {
       }
       if (data.requestId != null && data.requestId !== this.pending?.id) return;
       if (data.type === "wmp_build_started") {
-        try { localStorage.setItem("magpie-wmp-building", data.lexicon); } catch {}
+        try { sessionStorage.setItem("magpie-wmp-building", data.lexicon); } catch {}
       }
       if (data.type === "wmp_ready" || (data.type === "error" && this.pending?.response === "wmp_ready")) {
-        try { localStorage.removeItem("magpie-wmp-building"); } catch {}
+        try { sessionStorage.removeItem("magpie-wmp-building"); } catch {}
       }
       if (data.type === "log") {
         this.lastLog = data.text;
@@ -65,6 +68,12 @@ export class EngineClient extends EventTarget {
   }
   fail(error) {
     if (this.fatalError) return;
+    if (this.pending?.response === "wmp_ready") {
+      try {
+        sessionStorage.setItem("magpie-wmp-aborted", "true");
+        sessionStorage.removeItem("magpie-wmp-building");
+      } catch {}
+    }
     this.fatalError = error;
     this.worker.terminate();
     clearTimeout(this.pending?.watchdog);

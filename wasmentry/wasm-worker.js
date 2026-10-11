@@ -244,7 +244,7 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
               ),
             ),
           );
-          if (game.error) throw new Error(game.error);
+          if (game.error) throw new Error(game.error.replace(/\(error \d+\)\s*/g, ""));
           send("game_updated", { game });
         } finally {
           strings.forEach((ptr) => Module._free(ptr));
@@ -258,7 +258,7 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
           const game = JSON.parse(
             readString(() => api.importGCG(text, lexicon)),
           );
-          if (game.error) throw new Error(game.error);
+          if (game.error) throw new Error(game.error.replace(/\(error \d+\)\s*/g, ""));
           send("gcg_loaded", { game });
         } finally {
           Module._free(text);
@@ -423,12 +423,12 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
       } else throw new Error(preparationError || "Could not install WMP.");
     }
     if (!stopping && !retryBuild && cache && !fromCache && !bytes) {
-      warning(new Error("Not enough memory to export WMP. It remains available for this session."));
+      warning(new Error("Not enough memory to export WMP for caching."));
     }
     if (!stopping && !retryBuild && cache && (!fromCache || !witFromCache) && bytes) {
       progress("Saving WMP and WIT on this device…");
       try {
-        if (!wit) throw new Error("Could not save WIT.");
+        if (!wit) throw new Error("Not enough memory or an export error prevented WIT caching.");
         await saveWMP(lexicon, kwgHash, await sha256(bytes), source, bytes, wit, await sha256(wit));
         cached = true;
       }

@@ -148,8 +148,9 @@ static WordInfoTable *load_cached_wit(void) {
     wit = calloc_or_die(1, sizeof(WordInfoTable));
     word_info_table_load_from_stream(wit, word_maps.wmp_name, stream,
                                      error_stack);
+    const bool exact = ftell(stream) == (long)word_maps.wit_export_size;
     const bool closed = fclose(stream) == 0;
-    if (!closed || !error_stack_is_empty(error_stack)) {
+    if (!exact || !closed || !error_stack_is_empty(error_stack)) {
       word_info_table_destroy(wit);
       wit = NULL;
     }
@@ -243,22 +244,6 @@ static void *prepare_wmp(void *unused) {
     word_maps.prepared_wmp = cmd_api_build_wmp(
         wasm_magpie, word_maps.wmp_threads, word_maps.wmp_progress);
   }
-  if (word_maps.prepared_wmp && !word_maps.wmp_bytes && word_maps.wmp_save &&
-      !wmp_build_progress_is_cancelled(word_maps.wmp_progress)) {
-    atomic_store(&word_maps.wmp_phase, WORD_MAP_SAVING_WMP);
-    word_maps.wmp_export_size = wmp_export_size(word_maps.prepared_wmp);
-    FILE *stream =
-        export_stream(&word_maps.wmp_export, word_maps.wmp_export_size);
-    if (stream) {
-      const bool written = wmp_write_to_stream(word_maps.prepared_wmp, stream);
-      const int closed = fclose(stream);
-      if (!written || closed != 0) {
-        free(word_maps.wmp_export);
-        word_maps.wmp_export = NULL;
-        word_maps.wmp_export_size = 0;
-      }
-    }
-  }
   if (word_maps.prepared_wmp &&
       !wmp_build_progress_is_cancelled(word_maps.wmp_progress)) {
     if (word_maps.wit_bytes) {
@@ -273,6 +258,23 @@ static void *prepare_wmp(void *unused) {
         !wmp_build_progress_is_cancelled(word_maps.wmp_progress)) {
       atomic_store(&word_maps.wmp_phase, WORD_MAP_SAVING_WIT);
       export_prepared_wit();
+    }
+  }
+  if (word_maps.prepared_wmp && !word_maps.wmp_bytes && word_maps.wmp_save &&
+      !wmp_build_progress_is_cancelled(word_maps.wmp_progress)) {
+    atomic_store(&word_maps.wmp_phase, WORD_MAP_SAVING_WMP);
+    word_maps.wmp_export_size = wmp_export_size(word_maps.prepared_wmp);
+    FILE *stream =
+        export_stream(&word_maps.wmp_export, word_maps.wmp_export_size);
+    if (stream) {
+      const bool written = wmp_write_to_stream(word_maps.prepared_wmp, stream);
+      const bool exact = ftell(stream) == (long)word_maps.wmp_export_size;
+      const int closed = fclose(stream);
+      if (!written || !exact || closed != 0) {
+        free(word_maps.wmp_export);
+        word_maps.wmp_export = NULL;
+        word_maps.wmp_export_size = 0;
+      }
     }
   }
   atomic_store(&word_maps.wmp_done, true);
