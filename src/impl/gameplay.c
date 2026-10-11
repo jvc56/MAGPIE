@@ -26,6 +26,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "move_gen.h"
+#include "cgp.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -1597,11 +1598,14 @@ static void replay_history(GameHistory *game_history, Game *game,
                            GameHistoryCallback callback, void *user_data,
                            ErrorStack *error_stack) {
   game_reset(game);
-  const Game *initial_game = game_history_get_initial_game(game_history);
-  if (initial_game) {
-    const backup_mode_t backup_mode = game_get_backup_mode(game);
-    game_copy(game, initial_game);
-    game_set_backup_mode(game, backup_mode);
+  const char *initial_cgp = game_history_get_initial_cgp(game_history);
+  if (initial_cgp) {
+    // Rebuild position state using the current lexicon and settings. The stored
+    // snapshot may reference lexicon data freed by a later configuration change.
+    game_load_cgp(game, initial_cgp, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
   if (game_history_get_num_events(game_history) == 0) {
     const int player_on_turn_index = game_get_player_on_turn_index(game);

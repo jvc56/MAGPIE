@@ -124,6 +124,25 @@ static void test_initial_position(void) {
   game_play_n_events(history, game, 1, true, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(102));
+  load_and_exec_config_or_die(config, "set -lex NWL23");
+  game_destroy(game);
+  game = config_game_create(config);
+  game_play_n_events(history, game, 1, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(player_get_score(game_get_player(game, 0)) == int_to_equity(102));
+  // Both direct CGPs and file-import CGPs must reject oversized gaps.
+  char *bad_cgp = string_duplicate(string_builder_peek(cgp));
+  bad_cgp[0] = '9';
+  game_load_cgp(game, bad_cgp, error_stack);
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_reset(error_stack);
+  char *bad_record = get_formatted_string(
+      "#lexicon NWL23\n#player1 A Alice\n#player2 B Bob\n#cgp %s\n", bad_cgp);
+  config_parse_gcg_string(config, bad_record, history, error_stack);
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_reset(error_stack);
+  free(bad_record);
+  free(bad_cgp);
   free(with_move);
   string_builder_destroy(saved);
   string_builder_destroy(cgp);

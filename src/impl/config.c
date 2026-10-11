@@ -5158,7 +5158,8 @@ char *impl_export(Config *config, ErrorStack *error_stack) {
                      string_duplicate("cannot export game without lexicon"));
     return empty_string();
   }
-  if (game_history_get_num_events(config->game_history) == 0) {
+  if (game_history_get_num_events(config->game_history) == 0 &&
+      !game_history_get_initial_cgp(config->game_history)) {
     error_stack_push(error_stack, ERROR_STATUS_EXPORT_NO_GAME_EVENTS,
                      string_duplicate("cannot export an empty game history"));
     return empty_string();
@@ -5294,7 +5295,7 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
           rack_is_empty(player_off_turn_rack) &&
           bag_is_empty(game_get_bag(game)));
 
-  if (num_played_events < num_events ||
+  if (num_events == 0 || num_played_events < num_events ||
       !game_reached_max_scoreless_turns(game) ||
       game_history_contains_end_rack_penalty_event(game_history)) {
     // We have either:
@@ -5338,6 +5339,10 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
         racks_to_draw[i] = game_event_get_const_rack(game_event);
         break;
       }
+    }
+    if (!racks_to_draw[i] && game_history_get_initial_game(game_history)) {
+      racks_to_draw[i] = player_get_rack(game_get_player(
+          game_history_get_initial_game(game_history), player_index));
     }
     if (!racks_to_draw[i]) {
       error_stack_push(
