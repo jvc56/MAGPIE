@@ -328,6 +328,9 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
       if (move_idx == pv->negamax_depth && pv->negamax_depth > 0) {
         string_builder_add_string(tmp_sb, "| ");
       }
+      if (move_idx == 0 && pv_idx >= num_pvs) {
+        string_builder_add_string(tmp_sb, "played ");
+      }
       string_builder_add_move(tmp_sb, game_get_board(gc), &move, ld, true);
       play_move(&move, gc, NULL);
 

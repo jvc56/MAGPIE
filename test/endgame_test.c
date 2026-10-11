@@ -1849,7 +1849,7 @@ static void test_endgame_played_move(void) {
          endgame_results_get_value(results, ENDGAME_RESULT_BEST));
   char *output =
       endgame_results_get_string(results, config_get_game(config), NULL);
-  assert(has_substring(output, "\npass"));
+  assert(has_substring(output, "played pass"));
   free(output);
   assert_config_exec_status(config, "endgame 5K DA...", ERROR_STATUS_SUCCESS);
   assert(endgame_results_get_actual_move_found(results));
