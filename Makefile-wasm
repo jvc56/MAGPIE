@@ -27,7 +27,7 @@ lflags.shell := -s EXPORTED_RUNTIME_METHODS=["cwrap","stringToNewUTF8","UTF8ToSt
 	-s EXPORTED_FUNCTIONS=_free,_main,_malloc,_precache_file_data,$\
 	_wasm_magpie_init,_wasm_magpie_destroy,_wasm_run_command,_wasm_run_command_async,$\
 	_wasm_wit_data,_wasm_wit_data_size,_wasm_wmp_data,_wasm_wmp_data_size,_wasm_prepare_wmp,_wasm_wmp_progress,_wasm_cancel_wmp,_wasm_finish_wmp,$\
-	_browser_game_action,_browser_game_import_gcg,_wasm_get_output,_wasm_get_error,_wasm_get_status,_wasm_get_thread_status,_wasm_stop_command\
+	_browser_game_action,_browser_game_import_gcg,_wasm_get_output,_wasm_get_error,_wasm_get_status,_wasm_get_thread_status,_wasm_stop_command,_wasm_set_search_paused\
 	-sPTHREAD_POOL_SIZE="Module['initialThreadPoolSize'] || (Math.min(navigator.hardwareConcurrency || 2, 4) + 3)" \
 	-sPTHREAD_POOL_SIZE_STRICT=0 \
 	-s ALLOW_BLOCKING_ON_MAIN_THREAD=1 \

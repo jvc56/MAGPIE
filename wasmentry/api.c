@@ -95,6 +95,10 @@ void wasm_stop_command(void) {
   }
 }
 
+int wasm_set_search_paused(int paused) {
+  return wasm_magpie && magpie_set_search_paused(wasm_magpie, paused != 0);
+}
+
 int main(void) {
   log_set_level(LOG_INFO);
   return 0;

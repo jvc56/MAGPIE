@@ -101,6 +101,7 @@ function readString(fn) {
       error: wrap("wasm_get_error", "number"),
       status: wrap("wasm_get_status", "number"),
       thread: wrap("wasm_get_thread_status", "number"),
+      setSearchPaused: wrap("wasm_set_search_paused", "number", ["number"]),
       stop: wrap("wasm_stop_command", null),
     };
     send("ready", {memoryLimitMB});
@@ -165,11 +166,12 @@ async function run(commands) {
 
 onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
   if (fatal) return;
-  if (type === "stop" && incomingId != null && incomingId !== requestId) return;
-  if (!running && type !== "stop") requestId = incomingId;
+  const control = type === "stop" || type === "search_pause";
+  if (control && incomingId !== requestId) return;
+  if (!running && !control) requestId = incomingId;
   try {
     if (!api) throw new Error("The engine is still loading.");
-    if (running && type !== "stop")
+    if (running && !control)
       throw new Error("Stop the analysis before changing the engine.");
     switch (type) {
       case "precache": {
@@ -276,6 +278,12 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
       case "run":
         await run(data.commands);
         break;
+      case "search_pause": {
+        const accepted = running && !stopping && /^(peg|endgame)(?: |$)/.test(activeCommand)
+          && !!api.setSearchPaused(data.paused ? 1 : 0);
+        send("search_pause", {accepted, paused:!!data.paused});
+        break;
+      }
       case "stop":
         if (running) {
           stopping = true;

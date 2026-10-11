@@ -144,6 +144,10 @@ export class EngineClient extends EventTarget {
   destroy() {
     return this.request("destroy", {}, "destroyed");
   }
+  setSearchPaused(paused) {
+    if (this.fatalError) return;
+    this.worker.postMessage({ type:"search_pause", data:{paused}, requestId:this.pending?.id });
+  }
   stop() {
     if (this.fatalError) return;
     this.worker.postMessage({ type: "stop", requestId:this.pending?.id });

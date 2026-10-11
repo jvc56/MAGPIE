@@ -74,6 +74,7 @@ let analysisCache = new Map(),
   activeAnalysisKey = "",
   analysisMeta = "";
 let pegProgress = null;
+let activeSolve = null;
 let simSelection = new Set();
 let cacheWrites = Promise.resolve();
 function analysisPosition() {
@@ -214,8 +215,9 @@ $("threads").max = budget.maxThreads;
 $("threads").value = budget.threads;
 $("tt-memory").value = budget.ttMiB;
 function settingsSummary() {
-  $("settings-summary").textContent =
-    `${$("seconds").value}s · ${$("plies").value} plies · ${$("threads").value} threads`;
+  $("settings-summary").textContent = !isLive() && searchMode() !== "sim"
+    ? `No time limit · ${$("threads").value} threads`
+    : `${$("seconds").value}s · ${$("plies").value} plies · ${$("threads").value} threads`;
 }
 for (const id of ["seconds", "candidates", "plies", "threads"])
   $(id).addEventListener("input", settingsSummary);
@@ -304,6 +306,7 @@ function setBusy(value) {
   if (!value) scheduleComputer();
 }
 function updateActionAvailability() {
+  settingsSummary();
   const visibleMode = searchMode();
   document.querySelectorAll("[data-mode]").forEach((button) => {
     button.hidden =
@@ -954,7 +957,8 @@ async function analyze(nextMode, options = {}) {
   analysisGeneration = generation;
   try {
     const settings = readSettings();
-    if (options.seconds) settings.seconds = options.seconds;
+    if (options.seconds !== undefined) settings.seconds = options.seconds;
+    settings.solveToCompletion = !isLive() && ["peg", "endgame"].includes(nextMode);
     const analyzed = analysisPosition();
     if (
       recordedGame &&
@@ -1023,9 +1027,12 @@ async function analyze(nextMode, options = {}) {
       `${{ kibitz: "Generating moves", sim: "Simulating", peg: "Solving pre-endgame", endgame: "Solving endgame" }[mode]}…`,
     );
     const started = performance.now();
+    if (settings.solveToCompletion) {
+      activeSolve = {paused:false, pausedAt:0, pausedDuration:0};
+    }
     timer = setInterval(() => {
       $("elapsed").textContent =
-        `${((performance.now() - started) / 1000).toFixed(1)}s`;
+        `${(((activeSolve?.paused ? activeSolve.pausedAt : performance.now()) - started - (activeSolve?.pausedDuration || 0)) / 1000).toFixed(1)}s`;
     }, 100);
     const response = await engine.run(commands);
     if (generation !== positionGeneration) return false;
@@ -1038,6 +1045,9 @@ async function analyze(nextMode, options = {}) {
     message("Analysis could not run");
   } finally {
     clearInterval(timer);
+    activeSolve = null;
+    $("pause-solve").hidden = true;
+    $("pause-solve").textContent = "Pause";
     setBusy(false);
     analysisBase = null;
     refreshWMPCache();
@@ -1051,6 +1061,7 @@ function stop() {
   canceled = true;
   engine.stop();
   message("Stopping…");
+  $("pause-solve").disabled = true;
   $("stop").disabled = true;
 }
 function commitEdit(next) {
@@ -1488,6 +1499,11 @@ $("save-gcg").addEventListener("click", () => {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   message("GCG saved · complete recorded game");
+});
+$("pause-solve").addEventListener("click", () => {
+  if (!activeSolve || canceled) return;
+  $("pause-solve").disabled = true;
+  engine.setSearchPaused(!activeSolve.paused);
 });
 $("stop").addEventListener("click", stop);
 document
@@ -3054,6 +3070,22 @@ async function startEngine() {
         error(detail.text);
         message("Engine unavailable — reload to restart");
         return;
+      }
+      if (activeSolve && !canceled) {
+        if (detail.type === "command_started" && /^(peg|endgame)(?: |$)/.test(detail.command)) {
+          $("pause-solve").hidden = false;
+          $("pause-solve").disabled = false;
+        }
+        if (detail.type === "search_pause") {
+          if (detail.accepted && detail.paused !== activeSolve.paused) {
+            if (detail.paused) activeSolve.pausedAt = performance.now();
+            else activeSolve.pausedDuration += performance.now() - activeSolve.pausedAt;
+            activeSolve.paused = detail.paused;
+            message(detail.paused ? "Paused" : `Solving ${mode === "peg" ? "preendgame" : "endgame"}…`);
+          }
+          $("pause-solve").textContent = activeSolve.paused ? "Resume" : "Pause";
+          $("pause-solve").disabled = !detail.accepted;
+        }
       }
       if (gcgLoading && !["output", "status", "log"].includes(detail.type)) {
         logGCG("engine.message", { type: detail.type });

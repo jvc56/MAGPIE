@@ -337,6 +337,7 @@ export function analysisCommands(position, mode, settings) {
   }
   const ttMiB = settings.ttMiB ?? 32;
   if (![16, 32].includes(ttMiB)) throw new Error("Search memory must be 16 or 32 MiB.");
+  const solveSeconds = settings.solveToCompletion ? 0 : settings.seconds;
   const common = `-threads ${settings.threads} -tlim ${settings.seconds}`;
   const explicitMoves = settings.moves?.map(move => move.replace(/[()]/g, ""));
   if (explicitMoves && !explicitMoves.length) throw new Error("Select at least one play to simulate.");
@@ -383,12 +384,12 @@ export function analysisCommands(position, mode, settings) {
       protectedMove = `${match[1]}.${word}`;
     }
     commands.push(
-      `peg ${common} -pegtlim ${settings.seconds} -pegoutcomes false -pnoprune ${protectedMove}`,
+      `peg ${common} -pegtlim ${solveSeconds} -pegoutcomes false -pnoprune ${protectedMove}`,
     );
   }
   if (mode === "endgame") {
     commands.push(
-      `set ${common} -etlim ${settings.seconds} -eplies 25 -etopk 5`,
+      `set ${common} -etlim ${solveSeconds} -eplies 25 -etopk 5`,
     );
     commands.push(
       `endgame${settings.playedMove ? ` ${settings.playedMove}` : ""}`,
