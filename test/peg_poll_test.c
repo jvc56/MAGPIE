@@ -15,6 +15,7 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <locale.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -176,6 +177,17 @@ void test_peg_poll(void) {
   assert(has_substring(json, "\"spread\":0.000000"));
   assert(has_substring(json, "\"seconds\":0.000"));
   free(json);
+#ifndef __EMSCRIPTEN__
+  char *saved_locale = string_duplicate(setlocale(LC_NUMERIC, NULL));
+  if (setlocale(LC_NUMERIC, "de_DE.UTF-8")) {
+    json = peg_snapshot_get_json(&synthetic, game);
+    assert(has_substring(json, "\"spread\":0.000000"));
+    assert(has_substring(json, "\"seconds\":0.000"));
+    free(json);
+  }
+  setlocale(LC_NUMERIC, saved_locale);
+  free(saved_locale);
+#endif
 
   string_builder_destroy(poll_best);
   string_builder_destroy(solve_best);
