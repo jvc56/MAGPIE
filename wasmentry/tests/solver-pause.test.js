@@ -47,6 +47,11 @@ for (const mode of ['peg', 'endgame']) {
     await page.locator('#pause-solve').click();
     await expect(page.locator('#status')).toHaveText('Paused');
     await expect(page.locator('#pause-solve')).toHaveText('Resume');
+    await page.locator('#open-analysis-settings').click();
+    await expect(page.locator('#settings-busy')).toBeVisible();
+    await expect(page.locator('#seconds')).toBeDisabled();
+    await expect(page.locator('label[for="seconds"]')).toHaveCSS('opacity', '0.5');
+    await page.locator('#back-to-game').click();
     // Allow in-flight work to reach its checkpoint, then check beyond the
     // old limit. Resume must keep the same native command and candidate set.
     await page.waitForTimeout(500);
@@ -65,6 +70,8 @@ for (const mode of ['peg', 'endgame']) {
     await page.locator('#stop').click();
     await expect(page.locator('#status')).toHaveText('Stopped · partial results', {timeout:15000});
     await expect(page.locator('#pause-solve')).toBeHidden();
+    await expect(page.locator('#seconds')).toBeEnabled();
+    await expect(page.locator('#settings-busy')).toBeHidden();
     const commands = await page.evaluate(() => window.searchCommands);
     expect(commands.filter(command => command.startsWith(`${mode} `) || command === mode)).toHaveLength(1);
     expect(commands.join('\n')).toContain(mode === 'peg' ? '-pegtlim 0' : '-etlim 0');

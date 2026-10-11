@@ -299,6 +299,28 @@ try {
 } catch {
   /* Storage is optional. */
 }
+// Hold the settings lock across the gaps between automated searches and
+// recording a computer move, not just while an individual command is busy.
+function analysisSettingsLocked() {
+  return Boolean(busy || reviewRunning || botRunning ||
+    (isLive() && !session.paused && !humanTurn()));
+}
+function renderSettingsAvailability() {
+  const locked = analysisSettingsLocked();
+  document.querySelectorAll("#analysis-settings input, #analysis-settings select")
+    .forEach(element => { element.disabled = locked; });
+  document.querySelectorAll("#wmp-files button")
+    .forEach(button => { button.disabled = locked || button.dataset.unavailable === "true"; });
+  $("settings-busy").hidden = !locked;
+  $("settings-busy").textContent = isLive() && session.kind === "watch" && !session.paused
+    ? "Pause the game to change these settings."
+    : "Stop analysis to change these settings.";
+  $("lexicon").disabled = locked || Boolean(isLive());
+  $("lexicon-busy").hidden = !$("lexicon").disabled;
+  $("lexicon-busy").textContent = isLive()
+    ? "Finish the game to change the lexicon."
+    : "Stop analysis to change the lexicon.";
+}
 function setBusy(value) {
   value = value || Boolean(engine?.fatalError);
   if (value) tileDrag?.cancel();
@@ -307,15 +329,13 @@ function setBusy(value) {
   document.body.classList.toggle("busy", value);
   document
     .querySelectorAll(
-      "#game-view input, #game-view select, #game-view button, #analysis-settings input, #analysis-settings select, #wmp-files button, #lexicon, #choose-gcg, #submit-gcg, #gcg-text",
+      "#game-view input, #game-view select, #game-view button, #choose-gcg, #submit-gcg, #gcg-text",
     )
     .forEach((element) => {
       element.disabled = value;
     });
   if ($("open-analysis-settings"))
     $("open-analysis-settings").disabled = false;
-  if ($("settings-busy")) $("settings-busy").hidden = !value;
-  if ($("lexicon-busy")) $("lexicon-busy").hidden = !value;
   $("stop").disabled = !value || Boolean(engine?.fatalError);
   if (reviewRunning) $("stop-review").disabled = false;
   renderContextHint();
@@ -2298,6 +2318,7 @@ function formatClock(seconds) {
   return `${seconds < 0 ? "−" : ""}${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
 }
 function renderSession() {
+  renderSettingsAvailability();
   const live = isLive();
   document.body.classList.toggle("playing", !!live);
   document.body.classList.toggle(
@@ -3174,7 +3195,8 @@ function renderWMPCache() {
     if (file) label.title = `${(file.bytes + (file.wit_bytes || 0)).toLocaleString()} bytes total`;
     const button = document.createElement("button");
     button.textContent = file ? "Remove" : "Cache";
-    button.disabled = busy || (!file && $("wmp-source").value === "off");
+    button.dataset.unavailable = String(!file && $("wmp-source").value === "off");
+    button.disabled = analysisSettingsLocked() || button.dataset.unavailable === "true";
     button.setAttribute("aria-label", `${file ? "Remove" : "Cache"} ${lexicon} WMP`);
     button.addEventListener("click", async () => {
       if (busy) return;

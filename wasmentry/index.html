@@ -476,6 +476,9 @@
             aria-labelledby="analysis-settings-heading"
           >
             <h3 id="analysis-settings-heading">Analysis</h3>
+            <p id="settings-busy" class="hint" hidden>
+              Stop analysis to change these settings.
+            </p>
             <label class="setting-row" for="wmp-source">
               <span class="setting-name">Word maps (experimental)</span>
               <select id="wmp-source">
@@ -498,9 +501,6 @@
                 <option value="auto">Sim / solve</option>
               </select></label
             >
-            <p id="settings-busy" class="hint" hidden>
-              Stop analysis to change these settings.
-            </p>
             <label class="setting-row" for="seconds">
               <span class="setting-name">Sim time limit (seconds)</span>
               <input

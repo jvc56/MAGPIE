@@ -1774,3 +1774,10 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   background: transparent;
   border-color: var(--line);
 }
+
+.setting-row:has(:disabled) {
+  opacity: 0.5;
+}
+.setting-row :disabled {
+  opacity: 1;
+}
