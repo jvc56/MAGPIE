@@ -77,6 +77,9 @@ jobs:
       - name: Build shared library
         run: make libmagpie
 
+      - name: Install locale for PEG JSON regression
+        run: sudo locale-gen de_DE.UTF-8
+
       - name: Run no-PGO release tests
         run: ./bin/magpie_test
 
@@ -152,6 +155,10 @@ jobs:
             echo 'Missing conversion arguments unexpectedly succeeded'
             exit 1
           fi
+
+      - name: Install locale for PEG JSON regression
+        if: matrix.shard == 'rest'
+        run: sudo locale-gen de_DE.UTF-8
 
       - name: Run dev tests
         run: ./bin/magpie_test ${{ matrix.tests }}

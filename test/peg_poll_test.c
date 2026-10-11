@@ -185,7 +185,9 @@ void test_peg_poll(void) {
     assert(has_substring(json, "\"seconds\":0.000"));
     free(json);
   }
-  setlocale(LC_NUMERIC, saved_locale);
+  const char *restored_locale = setlocale(LC_NUMERIC, saved_locale);
+  assert(restored_locale);
+  (void)restored_locale;
   free(saved_locale);
 #endif
 
