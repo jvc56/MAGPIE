@@ -15,6 +15,12 @@
   --positive: #a6e3a1;
   --gold-text: #f9e2af;
   --empty-square: #313244;
+  --triple-word: #c4656a;
+  --double-word: #b48ead;
+  --triple-letter: #6b85a3;
+  --double-letter: #7ba7bc;
+  --tile-edge: transparent;
+  --control-line: var(--line);
   --hover: #3a3d55;
   --active: #303c54;
   --row-line: #45475a60;
@@ -40,10 +46,16 @@
   --positive: #286e39;
   --gold-text: #826000;
   --danger: #b3294a;
-  --empty-square: #b6c0ce;
-  --tile: #f2ce82;
-  --green: #98cf95;
-  --unknown-tile: #f5eedf;
+  --empty-square: #b7c3d1;
+  --triple-word: #cf7f86;
+  --double-word: #c8a4bd;
+  --triple-letter: #8ba6c5;
+  --double-letter: #96bfce;
+  --tile: #efc66f;
+  --green: #a0cc85;
+  --unknown-tile: #ece2ca;
+  --tile-edge: #27364a40;
+  --control-line: #a8b2c2;
   --hover: #e2e7ef;
   --active: #e4eefb;
   --row-line: #dfe3eb;
@@ -73,7 +85,7 @@ button,
 select,
 input,
 textarea {
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 6px;
   background: var(--raised);
 }
@@ -273,21 +285,21 @@ main {
   color: transparent;
 }
 .square.tw {
-  background: #c4656a;
+  background: var(--triple-word);
 }
 .square.dw {
-  background: #b48ead;
+  background: var(--double-word);
 }
 .square.tl {
-  background: #6b85a3;
+  background: var(--triple-letter);
 }
 .square.dl {
-  background: #7ba7bc;
+  background: var(--double-letter);
 }
 .square.played {
   background: var(--tile);
   color: var(--tile-ink);
-  box-shadow: 0 1px 1px #0004;
+  box-shadow: inset 0 0 0 1px var(--tile-edge), 0 1px 1px #0004;
 }
 .square,
 .rack-tile {
@@ -415,7 +427,7 @@ main {
   font-size: 25px;
   font-weight: 600;
   border-radius: 4px;
-  box-shadow: 0 2px 1px #0005;
+  box-shadow: inset 0 0 0 1px var(--tile-edge), 0 2px 1px #0005;
 }
 .rack-inputs {
   display: grid;
@@ -1195,6 +1207,19 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #results .played {
   background: var(--played-row);
 }
+/* Selection remains distinct even when this is the recorded move. */
+#results tr.selected {
+  background: var(--selected-row);
+}
+#results tr.selected > td:first-child {
+  box-shadow: inset 3px 0 var(--accent);
+}
+:root[data-theme="light"] #results td:is([data-column="leave"], [data-column="iterations"]) {
+  color: var(--muted);
+}
+:root[data-theme="light"] #results [data-column^="ply"] {
+  border-left: 1px solid var(--row-line);
+}
 #results .ply-even {
   color: var(--gold-text);
 }
@@ -1739,4 +1764,13 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   outline: 3px solid var(--accent);
   outline-offset: 2px;
   transform: translateY(-4px);
+}
+
+:root[data-theme="light"] .analysis-actions button.active {
+  background: var(--active);
+  border-color: var(--accent);
+}
+:root[data-theme="light"] #open-settings {
+  background: transparent;
+  border-color: var(--line);
 }
