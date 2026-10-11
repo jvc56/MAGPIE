@@ -246,10 +246,12 @@ typedef struct BAISyncData {
   // The stopping test's paired statistics (see bai_paired_z), or NULL when
   // the sim has no stopping threshold or its arms don't share seeds. Each arm
   // keeps its first BAI_PAIRED_MAX_ORDINALS committed samples by ordinal,
-  // with their fixed-point prefix sums, and each pair of arms (row the lower
-  // index) the fixed-point sum of their products at the ordinals both have.
+  // with fixed-point prefix sums of them and of their squares, and each pair
+  // of arms (row the lower index) the fixed-point sum of their products at
+  // the ordinals both have.
   double *paired_values;
   int64_t *paired_prefix;
+  int64_t *paired_prefix_squares;
   int64_t *paired_cross;
   cpthread_mutex_t mutex;
   ThreadControl *thread_control;
@@ -428,6 +430,7 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   // bai() allocates them when the stopping test uses them.
   bai_sync_data->paired_values = NULL;
   bai_sync_data->paired_prefix = NULL;
+  bai_sync_data->paired_prefix_squares = NULL;
   bai_sync_data->paired_cross = NULL;
   cpthread_mutex_init(&bai_sync_data->mutex);
   cpthread_cond_init(&bai_sync_data->work_available);
@@ -493,6 +496,7 @@ static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
   free(bai_sync_data->speculation_arm_count);
   free(bai_sync_data->paired_values);
   free(bai_sync_data->paired_prefix);
+  free(bai_sync_data->paired_prefix_squares);
   free(bai_sync_data->paired_cross);
   free(bai_sync_data->arm_data);
   free(bai_sync_data);
@@ -609,6 +613,8 @@ static inline void bai_sync_data_enable_paired(BAISyncData *bai_sync_data) {
       malloc_or_die(sizeof(double) * num_arms * BAI_PAIRED_MAX_ORDINALS);
   bai_sync_data->paired_prefix =
       calloc_or_die(num_arms * (BAI_PAIRED_MAX_ORDINALS + 1), sizeof(int64_t));
+  bai_sync_data->paired_prefix_squares =
+      calloc_or_die(num_arms * (BAI_PAIRED_MAX_ORDINALS + 1), sizeof(int64_t));
   bai_sync_data->paired_cross =
       calloc_or_die(num_arms * num_arms, sizeof(int64_t));
 }
@@ -635,6 +641,10 @@ static inline void bai_paired_record_while_locked(BAISyncData *bai_sync_data,
   int64_t *prefix = bai_sync_data->paired_prefix +
                     (size_t)arm_index * (BAI_PAIRED_MAX_ORDINALS + 1);
   prefix[ordinal + 1] = prefix[ordinal] + bai_quantize(value);
+  int64_t *prefix_squares = bai_sync_data->paired_prefix_squares +
+                            (size_t)arm_index * (BAI_PAIRED_MAX_ORDINALS + 1);
+  prefix_squares[ordinal + 1] =
+      prefix_squares[ordinal] + bai_quantize(value * value);
   for (int other_index = 0; other_index < num_arms; other_index++) {
     if (other_index == arm_index ||
         bai_sync_data->arm_data[other_index].num_samples <= ordinal) {
@@ -653,21 +663,39 @@ static inline void bai_paired_record_while_locked(BAISyncData *bai_sync_data,
   }
 }
 
+// The paired statistics' sum for arm_index over its first num_pairs ordinals,
+// from one of the per-arm prefix arrays, unscaled.
+static inline double bai_paired_prefix_sum(const int64_t *prefix_array,
+                                           const int arm_index,
+                                           const uint64_t num_pairs) {
+  return (double)
+             prefix_array[(size_t)arm_index * (BAI_PAIRED_MAX_ORDINALS + 1) +
+                          num_pairs] /
+         (double)BAI_FIXED_POINT_SCALE;
+}
+
 // Assumes the caller has locked the bai sync data mutex. The Z statistic for
 // "astar beats arm" when the two arms' samples at each ordinal share a seed,
 // as a sim's do, so that much of their luck is common to both. With n_a and
-// n_b samples, m of them at ordinals both have, and c the covariance of a
-// pair of samples at one ordinal,
+// n_b samples, m of them at ordinals both have, variances v_a and v_b, and c
+// the covariance of a pair of samples at one ordinal,
 //
-//   Var(mean_a - mean_b) = var_a / n_a + var_b / n_b - 2 c m / (n_a n_b)
+//   Var(mean_a - mean_b) = v_a / n_a + v_b / n_b - 2 c m / (n_a n_b)
 //
-// and Z is the squared gap over twice that. With c = 0 it is the same as
-// bai_arm_z_with_counts. c is estimated from the first ordinals both arms
-// have, at most BAI_PAIRED_MAX_ORDINALS of them.
+// and Z is the squared gap over twice that. v_a, v_b and c all come from the
+// same ordinals, the first m (at most BAI_PAIRED_MAX_ORDINALS), so together
+// they are a valid covariance, and since m is at most n_a and n_b, the
+// variance above can't be negative. Mixing in variances from more samples
+// than the covariance saw could make it negative for strongly correlated
+// arms. If the estimate still isn't positive (too few pairs, or a difference
+// that never varied), this falls back to bai_arm_z_with_counts, which
+// ignores the shared luck and so never overstates the evidence.
 static inline double bai_paired_z(const BAISyncData *bai_sync_data,
                                   const int astar_index, const int arm_index) {
   const BAIArmDatum *astar_arm_datum = &bai_sync_data->arm_data[astar_index];
   const BAIArmDatum *arm_datum = &bai_sync_data->arm_data[arm_index];
+  const double astar_num_samples = (double)astar_arm_datum->num_samples;
+  const double arm_num_samples = (double)arm_datum->num_samples;
   const uint64_t common_ordinals =
       astar_arm_datum->num_samples < arm_datum->num_samples
           ? astar_arm_datum->num_samples
@@ -675,41 +703,41 @@ static inline double bai_paired_z(const BAISyncData *bai_sync_data,
   const uint64_t num_pairs = common_ordinals < BAI_PAIRED_MAX_ORDINALS
                                  ? common_ordinals
                                  : BAI_PAIRED_MAX_ORDINALS;
-  double covariance = 0.0;
+  double variance = 0.0;
   if (num_pairs > 1) {
-    const double inverse_scale = 1.0 / (double)BAI_FIXED_POINT_SCALE;
+    const double pairs = (double)num_pairs;
+    const double astar_mean =
+        bai_paired_prefix_sum(bai_sync_data->paired_prefix, astar_index,
+                              num_pairs) /
+        pairs;
+    const double arm_mean = bai_paired_prefix_sum(bai_sync_data->paired_prefix,
+                                                  arm_index, num_pairs) /
+                            pairs;
+    const double astar_var =
+        bai_paired_prefix_sum(bai_sync_data->paired_prefix_squares, astar_index,
+                              num_pairs) /
+            pairs -
+        astar_mean * astar_mean;
+    const double arm_var =
+        bai_paired_prefix_sum(bai_sync_data->paired_prefix_squares, arm_index,
+                              num_pairs) /
+            pairs -
+        arm_mean * arm_mean;
     const int low_index = astar_index < arm_index ? astar_index : arm_index;
     const int high_index = astar_index < arm_index ? arm_index : astar_index;
     const double cross_sum =
         (double)bai_sync_data
             ->paired_cross[(size_t)low_index * (size_t)bai_sync_data->num_arms +
-                           high_index] *
-        inverse_scale;
-    const double astar_sum =
-        (double)bai_sync_data->paired_prefix[(size_t)astar_index *
-                                                 (BAI_PAIRED_MAX_ORDINALS + 1) +
-                                             num_pairs] *
-        inverse_scale;
-    const double arm_sum =
-        (double)bai_sync_data
-            ->paired_prefix[(size_t)arm_index * (BAI_PAIRED_MAX_ORDINALS + 1) +
-                            num_pairs] *
-        inverse_scale;
-    const double pairs = (double)num_pairs;
-    covariance = cross_sum / pairs - (astar_sum / pairs) * (arm_sum / pairs);
+                           high_index] /
+        (double)BAI_FIXED_POINT_SCALE;
+    const double covariance = cross_sum / pairs - astar_mean * arm_mean;
+    variance = astar_var / astar_num_samples + arm_var / arm_num_samples -
+               2.0 * covariance * (double)common_ordinals /
+                   (astar_num_samples * arm_num_samples);
   }
-  const double astar_num_samples = (double)astar_arm_datum->num_samples;
-  const double arm_num_samples = (double)arm_datum->num_samples;
-  double variance = astar_arm_datum->var / astar_num_samples +
-                    arm_datum->var / arm_num_samples -
-                    2.0 * covariance * (double)common_ordinals /
-                        (astar_num_samples * arm_num_samples);
-  const double variance_floor =
-      MINIMUM_VARIANCE / (astar_num_samples > arm_num_samples
-                              ? astar_num_samples
-                              : arm_num_samples);
-  if (!(variance > variance_floor)) {
-    variance = variance_floor;
+  if (!(variance > 0.0)) {
+    return bai_arm_z_with_counts(astar_arm_datum, astar_num_samples, arm_datum,
+                                 arm_num_samples);
   }
   const double gap = astar_arm_datum->mean - arm_datum->mean;
   return gap * gap / (2.0 * variance);

@@ -30,6 +30,11 @@ enum {
   PAIRED_TEST_ARMS = 3,
   PAIRED_TEST_LONG = BAI_PAIRED_MAX_ORDINALS + 100,
   PAIRED_TEST_SHORT = 600,
+  // test_bai_paired_z_correlated: two arms sharing nearly all their luck,
+  // with more samples each than the paired statistics keep, and the seeds it
+  // searches for data that makes a mixed estimate negative.
+  PAIRED_CORRELATED_SAMPLES = BAI_PAIRED_MAX_ORDINALS + 608,
+  PAIRED_CORRELATED_MAX_SEEDS = 64,
 };
 
 static const int sampling_rules[3] = {
@@ -500,18 +505,28 @@ static double paired_test_expected_z(const BAISyncData *sync_data,
       common < BAI_PAIRED_MAX_ORDINALS ? common : BAI_PAIRED_MAX_ORDINALS;
   double astar_sum = 0.0;
   double arm_sum = 0.0;
+  double astar_squares = 0.0;
+  double arm_squares = 0.0;
   double cross_sum = 0.0;
   for (uint64_t ordinal = 0; ordinal < num_pairs; ordinal++) {
-    astar_sum += values[astar_index][ordinal];
-    arm_sum += values[arm_index][ordinal];
-    cross_sum += values[astar_index][ordinal] * values[arm_index][ordinal];
+    const double astar_value = values[astar_index][ordinal];
+    const double arm_value = values[arm_index][ordinal];
+    astar_sum += astar_value;
+    arm_sum += arm_value;
+    astar_squares += astar_value * astar_value;
+    arm_squares += arm_value * arm_value;
+    cross_sum += astar_value * arm_value;
   }
+  // Every moment comes from the same ordinals.
   const double pairs = (double)num_pairs;
-  const double covariance =
-      cross_sum / pairs - (astar_sum / pairs) * (arm_sum / pairs);
+  const double astar_mean = astar_sum / pairs;
+  const double arm_mean = arm_sum / pairs;
+  const double astar_var = astar_squares / pairs - astar_mean * astar_mean;
+  const double arm_var = arm_squares / pairs - arm_mean * arm_mean;
+  const double covariance = cross_sum / pairs - astar_mean * arm_mean;
   const double astar_n = (double)astar_datum->num_samples;
   const double arm_n = (double)arm_datum->num_samples;
-  const double variance = astar_datum->var / astar_n + arm_datum->var / arm_n -
+  const double variance = astar_var / astar_n + arm_var / arm_n -
                           2.0 * covariance * (double)common / (astar_n * arm_n);
   const double gap = astar_datum->mean - arm_datum->mean;
   return gap * gap / (2.0 * variance);
@@ -573,6 +588,98 @@ void test_bai_paired_z(void) {
   free(common_luck);
   prng_destroy(prng);
   bai_sync_data_destroy(sync_data);
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+}
+
+// Two arms that share nearly all of their luck, with more samples each than
+// the paired statistics keep, and a true gap of 0.00002, far too small to
+// resolve. Taking the variances from every sample and the covariance from
+// only the first BAI_PAIRED_MAX_ORDINALS can make the variance of the
+// difference negative here, which once read as near certainty and stopped
+// the sim on whichever arm happened to lead. The seeds are searched for data
+// that does that, so the test is known to exercise it; on that data the
+// paired statistic must match the direct computation and stay below the
+// stopping threshold. Then, with too few pairs to estimate anything, it must
+// fall back to the independent statistic.
+void test_bai_paired_z_correlated(void) {
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  double *values[2];
+  for (int arm_index = 0; arm_index < 2; arm_index++) {
+    values[arm_index] =
+        malloc_or_die(sizeof(double) * PAIRED_CORRELATED_SAMPLES);
+  }
+  bool found = false;
+  for (uint64_t seed = 1; seed <= PAIRED_CORRELATED_MAX_SEEDS && !found;
+       seed++) {
+    BAISyncData *sync_data =
+        bai_sync_data_create(bai_result, thread_control, 2);
+    bai_sync_data_enable_paired(sync_data);
+    XoshiroPRNG *prng = prng_create(seed);
+    for (int ordinal = 0; ordinal < PAIRED_CORRELATED_SAMPLES; ordinal++) {
+      const double shared_luck = (double)prng_next(prng) / (double)UINT64_MAX;
+      for (int arm_index = 0; arm_index < 2; arm_index++) {
+        const double own_noise = (double)prng_next(prng) / (double)UINT64_MAX;
+        const double value = 0.2 + 0.3 * shared_luck + 0.01 * own_noise +
+                             (arm_index == 0 ? 0.00002 : 0.0);
+        paired_test_fold(sync_data, arm_index, value, values[arm_index]);
+      }
+    }
+    prng_destroy(prng);
+    // The mixed estimate: variances from every sample, the covariance from
+    // the ordinals the paired statistics keep.
+    double sums[2] = {0.0, 0.0};
+    double cross_sum = 0.0;
+    for (int ordinal = 0; ordinal < BAI_PAIRED_MAX_ORDINALS; ordinal++) {
+      sums[0] += values[0][ordinal];
+      sums[1] += values[1][ordinal];
+      cross_sum += values[0][ordinal] * values[1][ordinal];
+    }
+    const double pairs = (double)BAI_PAIRED_MAX_ORDINALS;
+    const double prefix_covariance =
+        cross_sum / pairs - (sums[0] / pairs) * (sums[1] / pairs);
+    const double num_samples = (double)PAIRED_CORRELATED_SAMPLES;
+    const double mixed_variance =
+        (sync_data->arm_data[0].var + sync_data->arm_data[1].var -
+         2.0 * prefix_covariance) /
+        num_samples;
+    if (mixed_variance < 0.0) {
+      found = true;
+      const int astar_index =
+          sync_data->arm_data[0].mean >= sync_data->arm_data[1].mean ? 0 : 1;
+      const int arm_index = 1 - astar_index;
+      const double paired_z = bai_paired_z(sync_data, astar_index, arm_index);
+      const double expected_z = paired_test_expected_z(
+          sync_data, (const double *const *)values, astar_index, arm_index);
+      const double stopping_threshold =
+          log((log(2.0 * num_samples) + 1.0) / 0.01);
+      assert(fabs(paired_z - expected_z) <= 1e-6 * expected_z + 1e-9);
+      assert(paired_z < stopping_threshold);
+      (void)paired_z;
+      (void)expected_z;
+      (void)stopping_threshold;
+    }
+    bai_sync_data_destroy(sync_data);
+  }
+  assert(found);
+  (void)found;
+
+  BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control, 2);
+  bai_sync_data_enable_paired(sync_data);
+  paired_test_fold(sync_data, 0, 0.6, values[0]);
+  paired_test_fold(sync_data, 1, 0.4, values[1]);
+  const BAIArmDatum *astar_datum = &sync_data->arm_data[0];
+  const BAIArmDatum *arm_datum = &sync_data->arm_data[1];
+  assert(bai_paired_z(sync_data, 0, 1) ==
+         bai_arm_z_with_counts(astar_datum, 1.0, arm_datum, 1.0));
+  (void)astar_datum;
+  (void)arm_datum;
+  bai_sync_data_destroy(sync_data);
+
+  for (int arm_index = 0; arm_index < 2; arm_index++) {
+    free(values[arm_index]);
+  }
   bai_result_destroy(bai_result);
   thread_control_destroy(thread_control);
 }
@@ -753,6 +860,7 @@ void test_bai(void) {
     test_bai_claim_stops_within_one_sample();
     test_bai_round_size();
     test_bai_paired_z();
+    test_bai_paired_z_correlated();
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {
