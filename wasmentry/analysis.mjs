@@ -1,3 +1,4 @@
+import { TILE_ORDERS, DEFAULT_TILE_ORDER, tileAlphabet, sortTiles, formatTileGroups } from "./tile-order.mjs";
 import { GameAction } from "./game-actions.mjs";
 import { installTileDrag } from "./tile-drag.mjs";
 import { loadAnalyses, saveAnalysis } from "./analysis-cache.mjs";
@@ -31,6 +32,7 @@ import {
   remainingRack,
   rackSlots,
   reorderRack,
+  sortRack,
   placeTile,
   moveNotation,
   normalizeMove,
@@ -75,6 +77,28 @@ let analysisCache = new Map(),
   analysisMeta = "";
 let pegProgress = null;
 let activeSolve = null;
+let tileOrder = DEFAULT_TILE_ORDER;
+try {
+  const saved = localStorage.getItem("magpie-tile-order");
+  if (Object.hasOwn(TILE_ORDERS, saved)) tileOrder = saved;
+} catch { /* Storage is optional. */ }
+$("tile-order").value = tileOrder;
+let unseenOrder = "vowels";
+try {
+  const saved = localStorage.getItem("magpie-unseen-order");
+  if (saved === "alphabetical" || saved === "vowels") unseenOrder = saved;
+} catch {}
+$("unseen-order").value = unseenOrder;
+const displayTiles = tiles => sortTiles(tiles, tileOrder);
+const displayMove = move => formatTileGroups(move, tileOrder);
+position.racks = position.racks.map(displayTiles);
+function sortCurrentRack() {
+  const sorted = sortRack(position.racks[0], draftTiles, tileOrder);
+  position.racks[0] = sorted.rack;
+  draftTiles = sorted.tiles;
+  rackChoice = null;
+}
+
 let simSelection = new Set();
 let cacheWrites = Promise.resolve();
 function analysisPosition() {
@@ -350,7 +374,7 @@ function renderRecent() {
       const p = restorePosition(cgp);
       $("recent").add(
         new Option(
-          `${p.lexicon} · ${p.racks[0] || "empty"} · ${p.scores.join("–")}`,
+          `${p.lexicon} · ${displayTiles(p.racks[0]) || "empty"} · ${p.scores.join("–")}`,
           String(index),
         ),
       );
@@ -372,7 +396,7 @@ function setPosition(next, rememberPosition = false, fromHistory = false) {
   draftTiles = [];
   rackChoice = null;
   $("move-feedback").textContent = "";
-  position = next;
+  position = {...next, racks:next.racks.map(displayTiles)};
   // A just-finished live game retains both dealt racks; normal review must
   // use the information available to the mover, like a reloaded GCG does.
   if (fromHistory && !isLive() && inventory(position).bagCount > 0)
@@ -546,7 +570,7 @@ function renderPosition() {
     $("unseen-counts").append(tally, " ");
   }
   $("unseen-tiles").replaceChildren();
-  for (const letter of "AEIOUBCDFGHJKLMNPQRSTVWXYZ?") {
+  for (const letter of tileAlphabet(unseenOrder)) {
     const count = unseen[letter];
     if (count) {
       const tile = document.createElement("span");
@@ -723,7 +747,7 @@ function renderResults() {
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.dataset.simMove = moveIdentity(row.move);
-        checkbox.setAttribute("aria-label", `Continue ${row.move}`);
+        checkbox.setAttribute("aria-label", `Continue ${displayMove(row.move)}`);
         checkbox.checked = simSelection.has(moveIdentity(row.move));
         checkbox.disabled = busy;
         checkbox.addEventListener("change", () => {
@@ -735,7 +759,7 @@ function renderResults() {
         td.append(checkbox);
       } else if (key === "move") {
         const button = document.createElement("button");
-        button.textContent = row.move;
+        button.textContent = displayMove(row.move);
         button.type = "button";
         button.setAttribute(
           "aria-pressed",
@@ -748,7 +772,8 @@ function renderResults() {
         }
         button.addEventListener("click", () => selectMove(row.move));
         td.append(button);
-      } else if (key === "outcomes")
+      } else if (key === "leave") td.textContent = displayTiles(row.leave || "");
+      else if (key === "outcomes")
         td.textContent = Number.isFinite(row.wins)
           ? `${row.wins} / ${row.ties} / ${row.losses}`
           : "—";
@@ -803,8 +828,8 @@ function renderResults() {
         button.className = `pv-player-${player}`;
         button.dataset.pvStep = index + 1;
         button.setAttribute("aria-pressed", String(continuationSteps === index + 1));
-        button.textContent = `${index + 1}. ${step.move}${step.score === null ? "" : ` · ${step.score}`}`;
-        button.setAttribute("aria-label", `${recordedGame?.players[player] || `Player ${player + 1}`}: ${step.move}${step.score === null ? "" : `, ${step.score} points`}`);
+        button.textContent = `${index + 1}. ${displayMove(step.move)}${step.score === null ? "" : ` · ${step.score}`}`;
+        button.setAttribute("aria-label", `${recordedGame?.players[player] || `Player ${player + 1}`}: ${displayMove(step.move)}${step.score === null ? "" : `, ${step.score} points`}`);
         button.dataset.contextHint = "Preview the principal variation through this move.";
         button.addEventListener("click", () => previewContinuation(steps.slice(0, index + 1).map(step => step.move)));
         line.append(button);
@@ -835,10 +860,10 @@ function renderResults() {
   $("selection").replaceChildren();
   if (row) {
     const title = document.createElement("strong");
-    title.textContent = row.move;
+    title.textContent = displayMove(row.move);
     $("selection").append(
       title,
-      ` · ${row.leave ? `Leave ${row.leave}` : "Board preview"}`,
+      ` · ${row.leave ? `Leave ${displayTiles(row.leave)}` : "Board preview"}`,
     );
     if (recordedGame && !terminalPosition()) {
       const play = document.createElement("button");
@@ -863,7 +888,7 @@ function renderResults() {
       ];
       steps.forEach((move, index) => {
         const button = document.createElement("button");
-        button.textContent = `${index + 1}. ${move}`;
+        button.textContent = `${index + 1}. ${displayMove(move)}`;
         button.dataset.contextHint =
           "Preview the continuation through this move.";
         button.addEventListener("click", () =>
@@ -1143,6 +1168,22 @@ $("edit").addEventListener("change", () => {
   recallTiles(false);
   selectedMove = "";
   renderResults();
+  renderPosition();
+});
+$("tile-order").addEventListener("change", () => {
+  tileOrder = $("tile-order").value;
+  try { localStorage.setItem("magpie-tile-order", tileOrder); } catch {}
+  sortCurrentRack();
+  position.racks[1] = displayTiles(position.racks[1]);
+  renderPosition();
+  renderResults();
+  renderRecent();
+  renderHistoryOptions();
+  renderHistory();
+});
+$("unseen-order").addEventListener("change", () => {
+  unseenOrder = $("unseen-order").value;
+  try { localStorage.setItem("magpie-unseen-order", unseenOrder); } catch {}
   renderPosition();
 });
 $("premium-labels")?.addEventListener("change", () => {
@@ -1540,14 +1581,9 @@ function recordedBoardMatches() {
     JSON.stringify(position.scores) === JSON.stringify(saved.scores)
   );
 }
-function adoptGame(game, lexicon, index = game.index || 0) {
-  for (const saved of game.positions) {
-    if (!saved.cgp.includes(" -lex ")) saved.cgp += ` -lex ${lexicon}`;
-    restorePosition(saved);
-  }
-  recordedGame = game;
-  historyIndex = Math.min(index, game.positions.length - 1);
-  $("game-players").textContent = game.players.join(" vs ");
+function renderHistoryOptions() {
+  if (!recordedGame) return;
+  const game = recordedGame;
   const events = game.gcg
     .split(/\r?\n/)
     .filter((line) => line.startsWith(">"));
@@ -1556,15 +1592,26 @@ function adoptGame(game, lexicon, index = game.index || 0) {
     ...events.map((line, index) => {
       const colon = line.indexOf(":");
       const player = line.slice(1, colon);
-      const play = formatHistoryPlay(
+      const play = displayMove(formatHistoryPlay(
         line, restorePosition(game.positions[index]),
-      );
+      ));
       return new Option(
         `${index + 1}. ${play} · ${player}`,
         String(index + 1),
       );
     }),
   );
+  $("history-position").value = String(historyIndex);
+}
+function adoptGame(game, lexicon, index = game.index || 0) {
+  for (const saved of game.positions) {
+    if (!saved.cgp.includes(" -lex ")) saved.cgp += ` -lex ${lexicon}`;
+    restorePosition(saved);
+  }
+  recordedGame = game;
+  historyIndex = Math.min(index, game.positions.length - 1);
+  $("game-players").textContent = game.players.join(" vs ");
+  renderHistoryOptions();
   setPosition(restorePosition(game.positions[historyIndex]), false, true);
 }
 function saveGameUndo() {
@@ -1951,9 +1998,7 @@ $("shuffle-rack").addEventListener("click", () => {
 });
 $("sort-rack").addEventListener("click", () => {
   if (busy || (isLive() && !humanTurn())) return;
-  position.racks[0] = [...position.racks[0]]
-    .sort((a, b) => (a === "?" ? 1 : b === "?" ? -1 : a.localeCompare(b)))
-    .join("");
+  sortCurrentRack();
   renderPosition();
 });
 $("new-game").addEventListener("click", () =>
@@ -2056,7 +2101,7 @@ function editHistoryMove() {
     return;
   }
   showHistory(historyIndex - 1, {auto:false});
-  position.racks[0] = match[1];
+  position.racks[0] = displayTiles(match[1]);
   renderPosition();
   if (move.startsWith("ex ")) {
     openExchange(move.slice(3));
@@ -2724,7 +2769,7 @@ function renderReviewTable() {
     if (hidden && index >= historyIndex) {
       button.textContent = "•••";
     } else {
-      for (const [key, value] of [["play", parts.move], ["score", parts.score], ["cumulative", parts.cumulative]]) {
+      for (const [key, value] of [["play", displayMove(parts.move)], ["score", parts.score], ["cumulative", parts.cumulative]]) {
         const span = document.createElement("span");
         span.className = `history-${key}`;
         span.textContent = value;
@@ -2938,7 +2983,7 @@ const controlHints = {
   "pass-move": "Pass the turn without playing tiles.",
   "exchange-move": "Choose rack tiles to exchange.",
   "shuffle-rack": "Shuffle the tiles in your rack.",
-  "sort-rack": "Sort the tiles in your rack alphabetically.",
+  "sort-rack": "Sort your rack using the tile order chosen in Appearance settings.",
   edit: "Edit board tiles directly. Shift + letter: blank · Space: direction · Delete: remove",
   undo: "Undo the last board edit.",
   clear: "Clear the board.",
@@ -2957,6 +3002,8 @@ const controlHints = {
   "back-to-game": "Return to the current game and analysis.",
   lexicon:
     "Changing the word list keeps the position and clears the analysis.",
+  "tile-order": "Order racks, leaves and exchanges throughout Magpie.",
+  "unseen-order": "Order the unseen tile pool independently of racks and leaves.",
   "premium-labels": "Show 2L, 3L, 2W and 3W on empty premium squares.",
   seconds: "Maximum seconds for a simulation or solve.",
   candidates: "Number of candidate moves compared in a simulation.",

@@ -1,3 +1,4 @@
+import { compareTiles } from "./tile-order.mjs";
 // Pending tiles never mutate the recorded board. Both typing and pointer input
 // use the same rack accounting and notation builder.
 export const tileKey = (row, col) => `${row},${col}`;
@@ -121,6 +122,18 @@ export function reorderRack(rack, tiles, sourceIndex, gap) {
   const destination = remaining[gap]?.index ?? rack.length;
   order.splice(sourceIndex, 1);
   order.splice(destination - (sourceIndex < destination ? 1 : 0), 0, sourceIndex);
+  return {
+    rack: order.map(index => rack[index]).join(""),
+    tiles: tiles.map((tile, index) => ({...tile, rackIndex:order.indexOf(indexes[index])})),
+  };
+}
+
+// Sorting must carry reserved rack slots along with their staged board tiles,
+// including duplicate letters and designated blanks.
+export function sortRack(rack, tiles, tileOrder) {
+  const {indexes} = rackSlots(rack, tiles);
+  const order = [...rack].map((_, index) => index)
+    .sort((a, b) => compareTiles(rack[a], rack[b], tileOrder));
   return {
     rack: order.map(index => rack[index]).join(""),
     tiles: tiles.map((tile, index) => ({...tile, rackIndex:order.indexOf(indexes[index])})),
