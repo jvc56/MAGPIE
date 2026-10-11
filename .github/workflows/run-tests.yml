@@ -81,7 +81,9 @@ jobs:
         run: sudo locale-gen de_DE.UTF-8
 
       - name: Run no-PGO release tests
-        run: ./bin/magpie_test
+        run: |
+          ./bin/magpie_test
+          ./bin/magpie_test pegpoll
 
   unit-tests-dev:
     name: unit-tests-dev (${{ matrix.shard }})
