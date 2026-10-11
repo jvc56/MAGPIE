@@ -1,6 +1,7 @@
 #ifndef WMP_H
 #define WMP_H
 
+#include "../compat/atomic_file.h"
 #include "../compat/endian_conv.h"
 #include "../compat/endian_io.h"
 #include "../compat/malloc.h"
@@ -964,13 +965,16 @@ static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *temporary_filename = get_formatted_string("%s.tmp.XXXXXX", filename);
-  const int descriptor = mkstemp(temporary_filename);
+  char *destination = NULL;
+  char *temporary_filename = NULL;
+  const int descriptor =
+      atomic_file_create(filename, &destination, &temporary_filename);
   if (descriptor == -1) {
     error_stack_push(
         error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
         get_formatted_string("could not create word map beside %s: %s",
                              filename, strerror(errno)));
+    free(destination);
     free(temporary_filename);
     return;
   }
@@ -983,18 +987,20 @@ static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
         error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
         get_formatted_string("could not open word map output %s: %s", filename,
                              strerror(error_number)));
+    free(destination);
     free(temporary_filename);
     return;
   }
+  errno = 0;
   bool written = wmp_write_to_stream(wmp, stream);
-  int error_number = 0;
+  int error_number = written ? 0 : errno;
   if (fclose(stream) != 0) {
     if (written) {
       error_number = errno;
     }
     written = false;
   }
-  if (written && rename(temporary_filename, filename) != 0) {
+  if (written && rename(temporary_filename, destination) != 0) {
     error_number = errno;
     written = false;
   }
@@ -1008,6 +1014,7 @@ static inline void wmp_write_to_file(const WMP *wmp, const char *filename,
                                                  : "unknown I/O failure"));
     }
   }
+  free(destination);
   free(temporary_filename);
 }
 

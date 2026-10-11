@@ -11,9 +11,13 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <errno.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -32,6 +36,84 @@ static void test_word_map_atomic_write(const WMP *wmp) {
   assert(rmdir(directory) == 0);
   free(filename);
 }
+
+static void write_map(const WMP *wmp, const WordInfoTable *wit,
+                      const char *filename, ErrorStack *errors) {
+  if (wit) {
+    word_info_table_write_to_file(wit, filename, errors);
+  } else {
+    wmp_write_to_file(wmp, filename, errors);
+  }
+}
+
+static void test_map_permissions(const WMP *wmp, const WordInfoTable *wit) {
+  char directory[] = "/tmp/magpie-map-mode-XXXXXX";
+  assert(mkdtemp(directory));
+  char *filename = get_formatted_string("%s/table", directory);
+  char *linkname = get_formatted_string("%s/link", directory);
+  ErrorStack *errors = error_stack_create();
+  const mode_t original_mask = umask(0022);
+  write_map(wmp, wit, filename, errors);
+  assert(error_stack_is_empty(errors));
+  struct stat metadata;
+  assert(stat(filename, &metadata) == 0);
+  assert((metadata.st_mode & 0777) == 0644);
+  assert(chmod(filename, 0664) == 0);
+  write_map(wmp, wit, filename, errors);
+  assert(error_stack_is_empty(errors));
+  assert(stat(filename, &metadata) == 0);
+  assert((metadata.st_mode & 0777) == 0664);
+  // A relative symlink must survive and update the actual target.
+  assert(symlink("table", linkname) == 0);
+  write_string_to_file(filename, "w", "stale", errors);
+  write_map(wmp, wit, linkname, errors);
+  assert(error_stack_is_empty(errors));
+  assert(lstat(linkname, &metadata) == 0);
+  assert(S_ISLNK(metadata.st_mode));
+  assert(stat(filename, &metadata) == 0);
+  assert(metadata.st_size > 5);
+  assert((metadata.st_mode & 0777) == 0664);
+  assert(unlink(linkname) == 0);
+  assert(unlink(filename) == 0);
+  assert(rmdir(directory) == 0);
+  (void)umask(original_mask);
+  error_stack_destroy(errors);
+  free(linkname);
+  free(filename);
+}
+
+#ifndef __EMSCRIPTEN__
+static void test_word_map_write_errno(const WMP *wmp) {
+  char directory[] = "/tmp/magpie-map-error-XXXXXX";
+  assert(mkdtemp(directory));
+  char *filename = get_formatted_string("%s/table", directory);
+  ErrorStack *errors = error_stack_create();
+  write_string_to_file(filename, "w", "preserved", errors);
+  assert(error_stack_is_empty(errors));
+  struct rlimit original;
+  assert(getrlimit(RLIMIT_FSIZE, &original) == 0);
+  struct rlimit limited = original;
+  limited.rlim_cur = 1024;
+  void (*original_handler)(int) = signal(SIGXFSZ, SIG_IGN);
+  assert(original_handler != SIG_ERR);
+  assert(setrlimit(RLIMIT_FSIZE, &limited) == 0);
+  wmp_write_to_file(wmp, filename, errors);
+  assert(setrlimit(RLIMIT_FSIZE, &original) == 0);
+  void (*restored_handler)(int) = signal(SIGXFSZ, original_handler);
+  assert(restored_handler != SIG_ERR);
+  char *message = error_stack_get_string_and_reset(errors);
+  const char *expected_error = strerror(EFBIG);
+  assert(strstr(message, expected_error));
+  free(message);
+  char *contents = get_string_from_file(filename, errors);
+  assert(strings_equal(contents, "preserved"));
+  free(contents);
+  assert(unlink(filename) == 0);
+  assert(rmdir(directory) == 0);
+  error_stack_destroy(errors);
+  free(filename);
+}
+#endif
 
 void test_word_map_embedding(void) {
   assert(cmd_api_build_wmp(NULL, 1, NULL) == NULL);
@@ -67,6 +149,10 @@ void test_word_map_embedding(void) {
   WMP *wmp = cmd_api_build_wmp(mp, 2, progress);
   assert(wmp != NULL);
   test_word_map_atomic_write(wmp);
+  test_map_permissions(wmp, NULL);
+#ifndef __EMSCRIPTEN__
+  test_word_map_write_errno(wmp);
+#endif
   wmp_build_stage_t stage;
   int completed;
   int total;
@@ -76,6 +162,7 @@ void test_word_map_embedding(void) {
   assert(total == BOARD_DIM - 1);
   WordInfoTable *wit = cmd_api_build_wit(mp);
   assert(wit != NULL);
+  test_map_permissions(wmp, wit);
   // Failed installation leaves ownership with the caller and the engine usable.
   char *name = wmp->name;
   wmp->name = string_duplicate("wrong-lexicon");
