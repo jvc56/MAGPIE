@@ -233,7 +233,8 @@ test('a native WASM abort rejects requests and ends the worker', async ({page}) 
     const rejected = await engine.run(['generate']).catch(error => error.message);
     return {text,rejected};
   });
-  expect(result.text).toMatch(/Aborted|abort/i);
+  expect(result.text).toMatch(/invalid file cache input/);
+  expect(result.text).not.toMatch(/fileproxy\.c|FATAL/);
   expect(result.rejected).toMatch(/Reload/);
 });
 

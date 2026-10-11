@@ -1,4 +1,5 @@
 #include "../src/compat/cpthread.h"
+#include "../src/def/board_defs.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/wmp_defs.h"
 #include "../src/ent/wmp.h"
@@ -157,10 +158,57 @@ static WordInfoTable *load_cached_wit(void) {
   return wit;
 }
 
+// Allocate the final serialized size once. open_memstream's geometric growth
+// can temporarily require both the old and the new buffer near the heap cap.
+static size_t wmp_export_size(const WMP *wmp) {
+  size_t size = 6;
+  for (int length = 2; length <= BOARD_DIM; length++) {
+    const WMPForLength *wfl = &wmp->wfls[length];
+    size += 4 * (10 + (size_t)wfl->num_word_buckets + wfl->num_blank_buckets +
+                 wfl->num_double_blank_buckets);
+    size += sizeof(WMPEntry) *
+            ((size_t)wfl->num_word_entries + wfl->num_blank_entries +
+             wfl->num_double_blank_entries);
+    size += (size_t)wfl->num_uninlined_words * length;
+  }
+  return size;
+}
+
+static size_t wit_export_size(const WordInfoTable *wit) {
+  size_t size = 12;
+  for (int length = 1; length <= BOARD_DIM; length++) {
+    const WitTrie *trie = &wit->tries[length];
+    size += 12 + (size_t)trie->num_nodes * 10 +
+            (size_t)trie->num_values * wit_stride_for_len(length) * 4;
+  }
+  for (int length = WPF_MIN_BLOCK_LENGTH; length <= WPF_MAX_BLOCK_LENGTH;
+       length++) {
+    if (wit->word_plus_floater[length]) {
+      size += (size_t)wit->tries[length].num_values *
+              word_plus_floater_cells_per_key(length) * 4;
+    }
+  }
+  return size;
+}
+
+static FILE *export_stream(char **buffer, size_t size) {
+  *buffer = malloc(size + 1); // fmemopen reserves a trailing NUL on close.
+  if (!*buffer) {
+    return NULL;
+  }
+  FILE *stream = fmemopen(*buffer, size + 1, "wb");
+  if (!stream) {
+    free(*buffer);
+    *buffer = NULL;
+  }
+  return stream;
+}
+
 static void export_prepared_wit(void) {
   ErrorStack *error_stack = error_stack_create();
+  word_maps.wit_export_size = wit_export_size(word_maps.prepared_wit);
   FILE *stream =
-      open_memstream(&word_maps.wit_export, &word_maps.wit_export_size);
+      export_stream(&word_maps.wit_export, word_maps.wit_export_size);
   if (stream) {
     word_info_table_write_to_stream(word_maps.prepared_wit, stream,
                                     error_stack);
@@ -198,8 +246,9 @@ static void *prepare_wmp(void *unused) {
   if (word_maps.prepared_wmp && !word_maps.wmp_bytes && word_maps.wmp_save &&
       !wmp_build_progress_is_cancelled(word_maps.wmp_progress)) {
     atomic_store(&word_maps.wmp_phase, WORD_MAP_SAVING_WMP);
+    word_maps.wmp_export_size = wmp_export_size(word_maps.prepared_wmp);
     FILE *stream =
-        open_memstream(&word_maps.wmp_export, &word_maps.wmp_export_size);
+        export_stream(&word_maps.wmp_export, word_maps.wmp_export_size);
     if (stream) {
       const bool written = wmp_write_to_stream(word_maps.prepared_wmp, stream);
       const int closed = fclose(stream);

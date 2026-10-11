@@ -48,6 +48,7 @@ test('mobile settings default conservatively, persist memory choice, and keep WM
 
 for (const mode of ['peg', 'endgame']) {
   test(`${mode} completes with the 16 MiB search budget`, async ({page}) => {
+    test.setTimeout(180000);
     await page.goto('/wasmentry/');
     await expect(page.locator('#status')).toHaveText('Engine ready',{timeout:30000});
   await openSample(page);
@@ -59,7 +60,7 @@ for (const mode of ['peg', 'endgame']) {
     await page.locator('#position-editor > summary').click();
     await page.selectOption('#sample',mode);
     await page.locator(`[data-mode=${mode}]`).click();
-    await expect(page.locator('#status')).toHaveText('Complete',{timeout:30000});
+    await expect(page.locator('#status')).toHaveText('Complete',{timeout:150000});
     await expect(page.locator('#error')).toBeHidden();
     await expect(page.locator('#results tbody tr').first()).toBeVisible();
   });

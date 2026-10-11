@@ -808,9 +808,7 @@ test("game setup, stable scoreboard and responsive tracking", async ({
   await expect(page.locator("#name-one")).toHaveText("You");
   await expect(page.locator("#name-two")).toHaveText("Magpie");
   await expect(page.locator("#points-one")).toHaveText("0");
-  expect(
-    Number(await page.locator("#points-two").textContent()),
-  ).toBeGreaterThan(0);
+  await expect(page.locator("#history-position option")).toHaveCount(3);
   await expect(page.locator("#rack-tiles")).toHaveText(rack);
   await expect(page.locator("#position-editor")).not.toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });

@@ -90,6 +90,15 @@ static void test_cgp_endgame_rack_retention(void) {
   assert(has_substring(loaded, " AADIZ/V 388/452 0"));
   assert_success(loaded);
   free(completed);
+  const char *start = strstr(record, "#cgp ") + 5;
+  char *unknown = string_duplicate(start);
+  char *rack_start = strstr(unknown, "FV/AADIZ");
+  memmove(rack_start + 3, rack_start + 8, strlen(rack_start + 8) + 1);
+  char *dealt = browser_game_action(record, "CSW24", 0, "FV", "", "",
+                                    BROWSER_GAME_DEAL, unknown, 42, 0, 0);
+  assert(has_substring(dealt, " FV/AADIZ 442/388 0"));
+  assert_success(dealt);
+  free(unknown);
 }
 
 void test_browser_game(void) {
@@ -124,8 +133,9 @@ void test_browser_game(void) {
                                    "", 0, 0, 0);
   assert(has_substring(note, "quote \\\""));
   assert_success(note);
-  const char *bad_notes[] = {"\nsecond line", "Plan:\n#identify trouble"};
-  for (int index = 0; index < 2; index++) {
+  const char *bad_notes[] = {"\nsecond line", "Plan:\n#identify trouble",
+                             "a\n>B: BCDFGHJ - +0 0", "a\n#rack2 BCDFGHJ"};
+  for (int index = 0; index < 4; index++) {
     char *rejected =
         browser_game_action(opening_game, "CSW24", 1, "", "", bad_notes[index],
                             BROWSER_GAME_NOTE, "", 0, 0, 0);

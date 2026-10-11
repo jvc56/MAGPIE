@@ -20,9 +20,15 @@ export class EngineClient extends EventTarget {
         return;
       }
       if (data.requestId != null && data.requestId !== this.pending?.id) return;
+      if (data.type === "wmp_build_started") {
+        try { localStorage.setItem("magpie-wmp-building", data.lexicon); } catch {}
+      }
+      if (data.type === "wmp_ready" || (data.type === "error" && this.pending?.response === "wmp_ready")) {
+        try { localStorage.removeItem("magpie-wmp-building"); } catch {}
+      }
       if (data.type === "log") {
         this.lastLog = data.text;
-        if (/FATAL/.test(data.text)) this.lastFatalLog = data.text;
+        if (/FATAL/.test(data.text)) this.lastFatalLog = data.text.replace(/^.*?FATAL\s+[^:]+:\d+:\s*/, "");
       }
       this.dispatchEvent(new CustomEvent("message", { detail: data }));
       if (data.type === "ready") this.resolveReady();

@@ -6596,7 +6596,7 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
 }
 
 char *config_commit_move(Config *config, const char *move_text,
-                         ErrorStack *error_stack) {
+                         const Rack *exchange_rack, ErrorStack *error_stack) {
   StringSplitter *parts = split_string_by_whitespace(move_text, true);
   const int num_parts = string_splitter_get_number_of_items(parts);
   if (num_parts < 1 || num_parts > 2) {
@@ -6607,9 +6607,19 @@ char *config_commit_move(Config *config, const char *move_text,
     string_splitter_destroy(parts);
     return empty_string();
   }
+  const bool exchange =
+      strings_iequal(string_splitter_get_item(parts, 0), UCGI_EXCHANGE_MOVE);
+  StringBuilder *ending = string_builder_create();
+  if (exchange && exchange_rack) {
+    string_builder_add_rack(ending, exchange_rack, config->ld, true);
+  }
+  const char *ending_rack =
+      exchange && exchange_rack ? string_builder_peek(ending) : NULL;
   char *result = impl_commit_with_pos_args(
       config, error_stack, string_splitter_get_item(parts, 0),
-      num_parts == 2 ? string_splitter_get_item(parts, 1) : NULL, NULL, false);
+      num_parts == 2 ? string_splitter_get_item(parts, 1) : NULL, ending_rack,
+      false);
+  string_builder_destroy(ending);
   string_splitter_destroy(parts);
   return result;
 }

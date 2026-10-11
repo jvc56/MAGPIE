@@ -47,6 +47,7 @@ let position = emptyPosition();
 let engineInitialized = false;
 let mode = "kibitz",
   results = [],
+  rawAnalysis = "",
   selectedMove = "",
   busy = false,
   canceled = false;
@@ -120,7 +121,7 @@ const cacheKey = (kind = mode) =>
   `${analysisPositionKey(analysisPosition())}|${kind}|${$("plies").value}|${$("hide-spoilers").checked ? "hidden" : ""}`;
 function retainAnalysis(key = cacheKey()) {
   const saved = {
-    mode, results: structuredClone(results), raw: $("raw").textContent,
+    mode, results: structuredClone(results), raw: rawAnalysis,
     meta: analysisMeta, iterations: analysisIterations,
     pegProgress: structuredClone(pegProgress),
     plies: Number($("plies").value), savedAt: Date.now(),
@@ -221,6 +222,7 @@ function message(text) {
   if (!engineInitialized) $("new-game-status").textContent = text;
 }
 function error(text) {
+  if (/\(error 149\).*phony/i.test(text)) text = `This play contains a word outside ${position.lexicon}.`;
   $("error").hidden = !text;
   $("error").textContent = text;
 }
@@ -353,6 +355,7 @@ function setBusy(value) {
   if ($("open-analysis-settings"))
     $("open-analysis-settings").disabled = false;
   $("stop").disabled = !value || Boolean(engine?.fatalError);
+  $("stop").hidden = botRunning;
   if (reviewRunning) $("stop-review").disabled = false;
   renderContextHint();
   if (!value) {
@@ -378,6 +381,10 @@ function updateActionAvailability() {
     bagCount < 1 || bagCount > 4;
   document.querySelector('[data-mode="endgame"]').disabled = bagCount !== 0;
 }
+function setRawAnalysis(text) {
+  rawAnalysis = text;
+  $("raw").textContent = concealComputerAnalysis() ? "" : text;
+}
 function clearResults() {
   simSelection.clear();
   pegProgress = null;
@@ -386,7 +393,7 @@ function clearResults() {
   analysisIterations = 0;
   results = [];
   selectedMove = "";
-  $("raw").textContent = "";
+  setRawAnalysis("");
   $("elapsed").textContent = "";
   renderResults();
 }
@@ -671,7 +678,18 @@ function updateSimSelection() {
     checkbox.checked = simSelection.has(checkbox.dataset.simMove);
   });
 }
+function concealComputerAnalysis() {
+  return hiddenLiveGame() && position.onTurn !== session.human;
+}
 function renderResults() {
+  if (concealComputerAnalysis()) {
+    $("results").tBodies[0].replaceChildren();
+    $("raw").textContent = "";
+    $("analysis-meta").textContent = "";
+    $("selection").replaceChildren();
+    renderPegProgress();
+    return;
+  }
   document
     .querySelectorAll("[data-mode]")
     .forEach((button) =>
@@ -939,7 +957,7 @@ function renderResults() {
 }
 function renderPegProgress() {
   const panel = $("peg-progress");
-  panel.hidden = mode !== "peg" || !pegProgress?.stages.length;
+  panel.hidden = concealComputerAnalysis() || mode !== "peg" || !pegProgress?.stages.length;
   panel.replaceChildren();
   if (panel.hidden) return;
   pegProgress.stages.forEach((stage, index) => {
@@ -988,7 +1006,7 @@ function acceptOutput(text, command) {
         ? /^(sim|snoprune)(?: |$)/.test(command)
         : command.startsWith(mode);
   if (!relevant) return;
-  $("raw").textContent = text;
+  setRawAnalysis(text);
   let next = parseResults(text, mode);
   if (mode === "peg") {
     pegProgress = parsePegProgress(text);
@@ -1063,7 +1081,7 @@ async function analyze(nextMode, options = {}) {
       results = structuredClone(analysisBase);
       analysisIterations = analysisBaseIterations;
       analysisMeta = saved.meta;
-      $("raw").textContent = saved.raw;
+      setRawAnalysis(saved.raw);
       renderResults();
       $("elapsed").textContent = "";
     } else {
@@ -1105,7 +1123,7 @@ async function analyze(nextMode, options = {}) {
       commands[0] += ` -seed ${randomSeed()}`;
     }
     message(
-      `${{ kibitz: "Generating moves", sim: "Simulating", peg: "Solving pre-endgame", endgame: "Solving endgame" }[mode]}…`,
+      `${{ kibitz: "Generating moves", sim: "Simulating", peg: "Solving preendgame", endgame: "Solving endgame" }[mode]}…`,
     );
     const started = performance.now();
     if (settings.solveToCompletion) {
@@ -1400,7 +1418,7 @@ function showHistory(index, {auto = true} = {}) {
     false,
     true,
   );
-  if (auto && $("auto-analyze").value !== "off" && !reviewRunning)
+  if (auto && !concealComputerAnalysis() && $("auto-analyze").value !== "off" && !reviewRunning)
     analyze($("auto-analyze").value === "kibitz" ? "kibitz" : searchMode());
 }
 $("history-previous").addEventListener("click", () =>
@@ -1980,6 +1998,8 @@ async function submitMove(value = null, computer = false) {
             rack: position.racks[0],
             move,
             action: GameAction.COMMIT,
+            cgp: physicalCGP(),
+            onTurn: position.onTurn,
           },
     );
     if (generation !== positionGeneration) return;
@@ -2467,6 +2487,8 @@ function renderSession() {
   $("finish-game").textContent =
     session.kind === "play" ? "Resign" : "End game";
   $("finish-game").disabled = session.finished || busy;
+  $("finish-game").title = busy && botRunning ? "Pause the computer before ending the game." : "";
+  $("new-game").title = busy && botRunning ? "Pause the computer before starting a new game." : "";
   const sessionMessage =
     session.result ||
     (session.paused
@@ -2641,7 +2663,8 @@ function validateNewGameCGP() {
     if (cgp) {
       startingPosition = parseCGP(cgp, position.lexicon);
       const { unseen, unseenCount } = inventory(startingPosition);
-      if (!startingPosition.racks[1] && unseenCount <= 7) {
+      if (unseenCount <= 7 && startingPosition.racks.every(rack => !rack)) throw new Error("Enter at least one rack to start from this position.");
+      if (unseenCount <= 7) {
         startingPosition.racks[1] = Object.entries(unseen).map(([tile, count]) => tile.repeat(count)).join("");
       }
       const remaining = unseenCount - startingPosition.racks[1].length;
@@ -2962,6 +2985,7 @@ function renderReviewTable() {
   $("watch-from").disabled = busy || !!isLive() || terminal;
 }
 function restoreAnalysis() {
+  if (concealComputerAnalysis()) { clearResults(); return; }
   let saved =
     analysisCache.get(cacheKey(searchMode())) ||
     analysisCache.get(cacheKey("kibitz"));
@@ -2983,7 +3007,7 @@ function restoreAnalysis() {
   analysisMeta = saved.meta;
   analysisIterations = saved.iterations || 0;
   pegProgress = structuredClone(saved.pegProgress || null);
-  $("raw").textContent = saved.raw;
+  setRawAnalysis(saved.raw);
   renderResults();
 }
 async function addSimCandidate() {
@@ -3011,7 +3035,13 @@ async function addSimCandidate() {
     };
     engine.addEventListener("message", listener);
     const settings = readSettings();
-    await engine.prepareWMP(position.lexicon, settings.wmpSource, settings.threads, $("wmp-cache-enabled").checked);
+    // Adding one candidate needs no expensive map preparation. Reuse an
+    // installed map; otherwise use the ordinary generator until the next sim.
+    if (engine.wmpKey !== `${position.lexicon}:${settings.wmpSource}`) {
+      settings.wmpSource = "off";
+      settings.wmp = false;
+      engine.wmpKey = null;
+    }
     const commands = analysisCommands(analysisPosition(), "kibitz", settings).slice(0, 2);
     await engine.run([...commands, `addmoves ${move}`, "shmoves"]);
     if (generation !== positionGeneration) return;
@@ -3022,7 +3052,7 @@ async function addSimCandidate() {
     results.push({...candidate, rank:results.length + 1, iterations:0, win:NaN, winSE:NaN, equity:NaN, equitySE:NaN, plyAverages:[]});
     analysisIterations = saved?.iterations || 0;
     analysisMeta = analysisSummary("", "sim");
-    $("raw").textContent = saved?.raw || "";
+    setRawAnalysis(saved?.raw || "");
     pegProgress = null;
     simSelection.add(moveIdentity(candidate.move));
     recallTiles(false);
@@ -3238,6 +3268,14 @@ for (const id of ["auto-analyze", "hide-spoilers", "wmp-source", "wmp-cache-enab
     } catch {}
   });
 }
+try {
+  if (localStorage.getItem("magpie-wmp-building")) {
+    $("wmp-source").value = "off";
+    localStorage.setItem("magpie-wmp-source", "off");
+    localStorage.removeItem("magpie-wmp-building");
+    $("wmp-cache-status").textContent = "A previous word-map build did not finish. Word maps are off; you can enable them again in Settings.";
+  }
+} catch {}
 renderRecent();
 renderPosition();
 renderResults();

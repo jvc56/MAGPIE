@@ -10,6 +10,7 @@
 #include "../ent/game_history.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
+#include "../ent/rack.h"
 #include "../ent/validated_move.h"
 #include "../impl/cgp.h"
 #include "../impl/config.h"
@@ -19,7 +20,6 @@
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include <ctype.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -237,7 +237,8 @@ char *browser_game_action(const char *text, const char *lexicon,
     char *command = get_formatted_string("goto %d", event_index);
     run_game_command(config, error_stack, command, NULL);
     free(command);
-    if ((action == BROWSER_GAME_DEAL || action == BROWSER_GAME_LIVE_MOVE) &&
+    if ((action == BROWSER_GAME_DEAL || action == BROWSER_GAME_LIVE_MOVE ||
+         (action == BROWSER_GAME_COMMIT && *current_cgp)) &&
         error_stack_is_empty(error_stack)) {
       Game *game = config_get_game(config);
       const int on_turn = current_player == 1 ? 1 : 0;
@@ -248,16 +249,18 @@ char *browser_game_action(const char *text, const char *lexicon,
       game_seed(game, seed);
       if (action == BROWSER_GAME_DEAL && error_stack_is_empty(error_stack)) {
         game_history_truncate_to_played_events(config_get_game_history(config));
-        draw_to_full_rack(game, on_turn);
         draw_to_full_rack(game, 1 - on_turn);
+        draw_to_full_rack(game, on_turn);
         live_game = game_duplicate(game);
       } else if (error_stack_is_empty(error_stack)) {
         ValidatedMoves *moves = validated_moves_create(
-            game, on_turn, move, allow_phonies != 0, true, error_stack);
+            game, on_turn, move,
+            action == BROWSER_GAME_COMMIT || allow_phonies != 0, true,
+            error_stack);
         if (error_stack_is_empty(error_stack)) {
           live_game = game_duplicate(game);
           live_phony = validated_moves_is_phony(moves, 0);
-          if (live_phony) {
+          if (live_phony && action == BROWSER_GAME_LIVE_MOVE) {
             Move pass;
             move_set_as_pass(&pass);
             play_move(&pass, live_game, NULL);
@@ -269,11 +272,33 @@ char *browser_game_action(const char *text, const char *lexicon,
       }
     }
     if (action == BROWSER_GAME_COMMIT || action == BROWSER_GAME_LIVE_MOVE) {
-      command = get_formatted_string("rack %s", *rack ? rack : "-");
-      run_game_command(config, error_stack, command, NULL);
-      free(command);
+      if (!*current_cgp) {
+        command = get_formatted_string("rack %s", *rack ? rack : "-");
+        run_game_command(config, error_stack, command, NULL);
+        free(command);
+      }
       if (error_stack_is_empty(error_stack)) {
-        char *warning = config_commit_move(config, move, error_stack);
+        // Replay must use the actual ending racks, not a random draw from
+        // tiles whose owner was omitted from the public game record.
+        if (live_game) {
+          for (int player_index = 0; player_index < 2; player_index++) {
+            const Rack *actual =
+                player_get_rack(game_get_player(live_game, player_index));
+            rack_copy(game_history_player_get_last_rack(
+                          config_get_game_history(config), player_index),
+                      actual);
+            rack_copy(
+                game_history_player_get_rack_to_draw_before_pass_out_game_end(
+                    config_get_game_history(config), player_index),
+                actual);
+          }
+        }
+        const Rack *exchange_rack =
+            live_game ? player_get_rack(game_get_player(
+                            live_game, current_player == 1 ? 1 : 0))
+                      : NULL;
+        char *warning =
+            config_commit_move(config, move, exchange_rack, error_stack);
         string_builder_add_string(warnings, warning);
         free(warning);
       }
@@ -305,6 +330,31 @@ char *browser_game_action(const char *text, const char *lexicon,
         if (error_stack_is_empty(error_stack)) {
           config_parse_gcg_string(check, string_builder_peek(record),
                                   config_get_game_history(check), error_stack);
+        }
+        if (error_stack_is_empty(error_stack)) {
+          const GameHistory *original = config_get_game_history(config);
+          const GameHistory *roundtrip = config_get_game_history(check);
+          const int count = game_history_get_num_events(original);
+          char *expected = string_duplicate(note);
+          trim_whitespace(expected);
+          const int target = game_history_get_num_played_events(original) - 1;
+          char *actual =
+              string_duplicate(target < game_history_get_num_events(roundtrip)
+                                   ? game_event_get_note(game_history_get_event(
+                                         roundtrip, target))
+                                   : "");
+          trim_whitespace(actual);
+          const bool same = count == game_history_get_num_events(roundtrip) &&
+                            strings_equal(expected, actual);
+          free(actual);
+          free(expected);
+          if (!same) {
+            error_stack_push(
+                error_stack, ERROR_STATUS_NOTE_NO_GAME_EVENTS,
+                string_duplicate("This note cannot be saved without changing "
+                                 "the game record. Remove lines beginning with "
+                                 "GCG commands or moves."));
+          }
         }
         config_destroy(check);
         string_builder_destroy(record);

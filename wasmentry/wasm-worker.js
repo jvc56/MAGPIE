@@ -380,6 +380,7 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
     await Module.warmThreads(count + 3);
     checkEngine();
     if (stopping) return send("wmp_ready", { stopped: true });
+    if (!bytes) send("wmp_build_started", {lexicon});
     if (api.prepareWMP(name, ptr, bytes?.length || 0, count, cache && (!fromCache || !witFromCache) ? 1 : 0, witPtr, wit?.length || 0) !== 0)
       throw new Error("Could not start WMP preparation.");
     nativeStarted = true;
@@ -420,6 +421,9 @@ async function prepareWMP({ source, lexicon, threads, manifestURL, cache = false
         await removeWMP(lexicon).catch(warning);
         retryBuild = true;
       } else throw new Error(preparationError || "Could not install WMP.");
+    }
+    if (!stopping && !retryBuild && cache && !fromCache && !bytes) {
+      warning(new Error("Not enough memory to export WMP. It remains available for this session."));
     }
     if (!stopping && !retryBuild && cache && (!fromCache || !witFromCache) && bytes) {
       progress("Saving WMP and WIT on this device…");
