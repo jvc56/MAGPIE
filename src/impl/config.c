@@ -528,6 +528,9 @@ const char *config_get_parg_name(const Config *config, arg_token_t arg_token) {
 }
 
 const char *config_get_current_exec_name(const Config *config) {
+  if (config->exec_parg_token == NUMBER_OF_ARG_TOKENS) {
+    return NULL;
+  }
   return config_get_parg_name(config, config->exec_parg_token);
 }
 

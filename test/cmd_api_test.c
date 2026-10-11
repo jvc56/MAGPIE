@@ -212,7 +212,23 @@ void test_cmd_api_destroy_while_running(void) {
   magpie_destroy(mp);
 }
 
+static void test_idle_pause(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  bool paused = magpie_set_search_paused(mp, true);
+  assert(!paused);
+  const char *commands[] = {"notacommand", ""};
+  for (int index = 0; index < 2; index++) {
+    magpie_run_sync(mp, commands[index]);
+    paused = magpie_set_search_paused(mp, true);
+    assert(!paused);
+    free(magpie_get_and_clear_error(mp));
+  }
+  magpie_destroy(mp);
+}
+
 void test_cmd_api(void) {
+  test_idle_pause();
   test_cmd_api_create_failure();
   test_cmd_api_run_commands();
   test_cmd_api_errors();
