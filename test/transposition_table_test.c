@@ -34,8 +34,8 @@ void test_transposition_table(void) {
       assert(!over_budget);
       (void)over_budget;
       for (int workers = 1; workers <= capacity; workers++) {
-        const bool fits = peg_memory_worker_fraction(
-            (double)budget_mb / 256, workers, &worker_fraction);
+        const bool fits = peg_memory_worker_fraction((double)budget_mb / 256,
+                                                     workers, &worker_fraction);
         assert(fits);
         (void)fits;
         TranspositionTable *worker_tt = transposition_table_create_with_minimum(
