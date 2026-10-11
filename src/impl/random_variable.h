@@ -58,6 +58,10 @@ size_t rvs_get_sample_record_size(const RandomVariables *rvs);
 void rvs_apply_sample_record(const RandomVariables *rvs, uint64_t k,
                              const void *record);
 uint64_t rvs_next_seed(RandomVariables *rvs, uint64_t k);
+// True when every arm's n-th sample uses the same seed, so that samples of
+// different arms at one ordinal share their luck (common random numbers).
+// Sims' samples do; the test distributions' don't.
+bool rvs_arms_share_seeds(const RandomVariables *rvs);
 // The seed rvs_next_seed would return for arm k after `ahead` more calls,
 // without advancing it, or RVS_SEED_UNRESERVED when this kind of random
 // variable does not draw from seeds. A sample drawn with a peeked seed is the

@@ -68,6 +68,9 @@ struct RandomVariables {
   rvs_sample_into_record_func_t sample_into_record_func;
   rvs_apply_record_func_t apply_record_func;
   size_t sample_record_size;
+  // Whether every arm's n-th sample uses the same seed (see
+  // rvs_arms_share_seeds).
+  bool arms_share_seeds;
   void *data;
 };
 
@@ -821,6 +824,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   rvs->get_best_arm_index_func = rv_sim_get_best_arm_index;
   rvs->next_seed_func = rv_sim_next_seed;
   rvs->peek_seed_func = rv_sim_peek_seed;
+  rvs->arms_share_seeds = true;
   rvs->sample_into_record_func = rv_sim_sample_into_record;
   rvs->apply_record_func = rv_sim_apply_record;
   rvs->sample_record_size = sizeof(SimmedPlaySampleRecord);
@@ -943,6 +947,7 @@ RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   RandomVariables *rvs = malloc_or_die(sizeof(RandomVariables));
   rvs->next_seed_func = NULL;
   rvs->peek_seed_func = NULL;
+  rvs->arms_share_seeds = false;
   rvs->sample_into_record_func = NULL;
   rvs->apply_record_func = NULL;
   rvs->sample_record_size = 0;
@@ -1048,6 +1053,10 @@ void rvs_apply_sample_record(const RandomVariables *rvs, const uint64_t k,
   if (rvs->apply_record_func != NULL) {
     rvs->apply_record_func(rvs, k, record);
   }
+}
+
+bool rvs_arms_share_seeds(const RandomVariables *rvs) {
+  return rvs->arms_share_seeds;
 }
 
 uint64_t rvs_next_seed(RandomVariables *rvs, const uint64_t k) {
