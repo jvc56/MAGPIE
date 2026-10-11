@@ -82,7 +82,8 @@ void parse_cgp_board_row(const Game *game, const char *cgp_board_row,
     if (isdigit(current_char)) {
       // Bound every digit before multiplication, not just the final run.
       if (current_row_number_of_spaces > BOARD_DIM / 10 ||
-          current_row_number_of_spaces * 10 + (current_char - '0') > BOARD_DIM) {
+          current_row_number_of_spaces * 10 + (current_char - '0') >
+              BOARD_DIM) {
         error_stack_push(error_stack,
                          ERROR_STATUS_CGP_PARSE_INVALID_NUMBER_OF_BOARD_COLUMNS,
                          string_duplicate("cgp board row exceeds board width"));

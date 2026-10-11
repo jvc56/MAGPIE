@@ -25,8 +25,8 @@
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
-#include "move_gen.h"
 #include "cgp.h"
+#include "move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -1601,7 +1601,8 @@ static void replay_history(GameHistory *game_history, Game *game,
   const char *initial_cgp = game_history_get_initial_cgp(game_history);
   if (initial_cgp) {
     // Rebuild position state using the current lexicon and settings. The stored
-    // snapshot may reference lexicon data freed by a later configuration change.
+    // snapshot may reference lexicon data freed by a later configuration
+    // change.
     game_load_cgp(game, initial_cgp, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
