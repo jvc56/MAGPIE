@@ -107,3 +107,14 @@ test("move errors and history share playthrough notation, including designated b
   expect(formatBoardPlay("8H TRAIN", position)).toBe("8H TRAIN");
   expect(formatBoardPlay("pass", position)).toBe("pass");
 });
+
+
+test("PEG protects the union of manual plays and the recorded play", () => {
+  const position = parseCGP(SAMPLES.peg);
+  const commands = analysisCommands(position, "peg", {
+    seconds: 10, threads: 4, candidates: 50, plies: 4,
+    protectedMoves: ["D1 A.", "pass", "D1 A."],
+    playedMove: "pass",
+  });
+  expect(commands.at(-1)).toContain("-pnoprune D1.AQ,pass");
+});

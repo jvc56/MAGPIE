@@ -136,3 +136,43 @@ test("completed full-depth PEG results precede unfinished shallower candidates",
     state: "Not deepened",
   });
 });
+
+
+test("manually adding an existing candidate keeps it through PEG stages", async ({page}) => {
+  test.setTimeout(60000);
+  await page.addInitScript(() => {
+    const post = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function(message, ...args) {
+      if (message.type === "run") {
+        message.data.commands = message.data.commands.map(command => {
+          if (!command.startsWith("peg ")) return command;
+          window.pegCommand = command;
+          const protectedMoves = command.match(/-pnoprune (\S+)/)[1];
+          return command.replace(/^peg /, `peg ${protectedMoves},pass `)
+            .replace(/-pegtlim \S+/, "-pegtlim 2") + " -pegtopk 2 -pegstride 8";
+        });
+      }
+      return post.call(this, message, ...args);
+    };
+  });
+  await page.goto("/wasmentry/");
+  await expect(page.locator("#status")).toHaveText("Engine ready", {timeout:30000});
+  await openSample(page);
+  await page.locator("#gcg-file").setInputFiles("tests/fixtures/review-candidates.gcg");
+  await expect(page.locator("#status")).toContainText("Loaded");
+  await page.selectOption("#history-position", "21");
+  await page.locator("[data-mode=kibitz]").click();
+  await expect(page.locator("#stop")).toBeDisabled();
+  const candidate = page.locator("#results tbody button").nth(2);
+  const label = await candidate.textContent();
+  await candidate.click();
+  await page.locator("#analyze-move").click();
+  await expect(page.locator("#status")).toHaveText("Play added");
+  await page.locator("[data-mode=peg]").click();
+  await expect(page.locator("#stop")).toBeDisabled({timeout:45000});
+  expect(await page.evaluate(() => window.pegCommand)).toMatch(/-pnoprune [^ ]+,[^ ]+/);
+  const row = page.locator("#results tbody tr").filter({has:page.locator("button").filter({hasText:label})});
+  await expect(row).toHaveCount(1);
+  await expect(row).not.toHaveClass(/peg-pruned/);
+  await expect(page.locator("#analysis-meta")).not.toContainText("protected");
+});

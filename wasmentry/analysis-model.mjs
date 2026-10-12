@@ -377,25 +377,31 @@ export function analysisCommands(position, mode, settings) {
   if (mode === "peg") {
     // PEG's space-free move syntax uses a period between coordinate and word.
     // Expand GCG play-through dots before encoding that separator.
-    let protectedMove = settings.playedMove || "-";
-    const match = protectedMove.match(/^([A-O]\d+|\d+[A-O]) ([A-Za-z.]+)$/);
-    if (match) {
-      const vertical = /^[A-O]/.test(match[1]);
-      const row = Number(match[1].match(/\d+/)[0]) - 1;
-      const col = match[1].match(/[A-O]/)[0].charCodeAt(0) - 65;
-      const word = [...match[2]]
-        .map((tile, index) =>
-          tile === "."
-            ? prepared.board[row + (vertical ? index : 0)][
-                col + (vertical ? 0 : index)
-              ]
-            : tile,
-        )
-        .join("");
-      protectedMove = `${match[1]}.${word}`;
-    }
+    const protectedMoves = [...new Set([
+      ...(settings.protectedMoves || []),
+      ...(settings.playedMove ? [settings.playedMove] : []),
+    ])].map(move => {
+      let protectedMove = move;
+      const match = protectedMove.match(/^([A-O]\d+|\d+[A-O]) ([A-Za-z.]+)$/);
+      if (match) {
+        const vertical = /^[A-O]/.test(match[1]);
+        const row = Number(match[1].match(/\d+/)[0]) - 1;
+        const col = match[1].match(/[A-O]/)[0].charCodeAt(0) - 65;
+        const word = [...match[2]]
+          .map((tile, index) =>
+            tile === "."
+              ? prepared.board[row + (vertical ? index : 0)][
+                  col + (vertical ? 0 : index)
+                ]
+              : tile,
+          )
+          .join("");
+        protectedMove = `${match[1]}.${word}`;
+      }
+      return protectedMove;
+    }).join(",") || "-";
     commands.push(
-      `peg ${common} -pegtlim ${solveSeconds} -pegoutcomes false -pnoprune ${protectedMove}`,
+      `peg ${common} -pegtlim ${solveSeconds} -pegoutcomes false -pnoprune ${protectedMoves}`,
     );
   }
   if (mode === "endgame") {

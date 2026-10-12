@@ -848,8 +848,6 @@ function renderResults() {
         );
       } else if (mode === "sim" && (key === "win" || key === "equity")) {
         td.textContent = format(row[key], 1);
-        td.title = `Standard error ±${format(key === "win" ? row.winSE : row.equitySE)}`;
-        td.dataset.contextHint = `${key === "win" ? "Win probability" : "Mean equity"} · standard error ±${format(key === "win" ? row.winSE : row.equitySE)}`;
       } else
         td.textContent = ["equity", "win", "spread"].includes(key)
           ? format(row[key], mode === "endgame" ? 0 : 2)
@@ -1077,9 +1075,10 @@ async function analyze(nextMode, options = {}) {
       ? analysisCache.get(activeAnalysisKey)?.iterations || 0
       : 0;
     if (nextMode === "sim" && options.moves) settings.moves = options.moves.map(normalizeMove);
-    let commands = analysisCommands(analyzed, nextMode, settings);
     const manual = ["kibitz", "sim"].flatMap(kind =>
       analysisCache.get(cacheKey(kind))?.results.filter(row => row.manual) || []);
+    settings.protectedMoves = manual.map(row => normalizeMove(row.move));
+    let commands = analysisCommands(analyzed, nextMode, settings);
     const extra = new Map([...manual, ...(nextMode === "sim" ? analysisBase || [] : [])]
       .map(row => [moveIdentity(row.move), normalizeMove(row.move)]));
     if (extra.size && ["kibitz", "sim"].includes(nextMode) && !settings.moves) {
@@ -3051,7 +3050,7 @@ function playedAssessment() {
       : mode === "endgame"
         ? "spread"
         : "equity";
-  if (mode === "peg" && busy) return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · protected`;
+  if (mode === "peg" && busy) return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`}`;
   if (mode === "peg" && row.depth !== results[0].depth)
     return `Played ${row.rank == null ? "(unranked)" : `#${row.rank}`} · comparison needs equal depth`;
   const loss = Math.max(0, results[0][metric] - row[metric]);
@@ -3192,8 +3191,12 @@ async function analyzeDraft() {
     const targetMode = mode === "sim" ? "sim" : "kibitz";
     const key = cacheKey(targetMode);
     const saved = analysisCache.get(key);
-    if (saved?.results.some(row => moveIdentity(row.move) === moveIdentity(move))) {
-      message("That play is already in the analysis");
+    const existing = saved?.results.find(row => moveIdentity(row.move) === moveIdentity(move));
+    if (existing) {
+      existing.manual = true;
+      const visible = results.find(row => moveIdentity(row.move) === moveIdentity(move));
+      if (visible) visible.manual = true;
+      message("Play added");
       return;
     }
     cancelDraftCheck();
