@@ -642,61 +642,6 @@ test("mobile tile selection places tiles and recall returns them to the rack", a
   await page.locator("#recall-tiles").click();
   await expect(page.locator(".square.pending")).toHaveCount(0);
 });
-test("mobile touch drag places tiles and returns them to the rack", async ({ page, browserName }) => {
-  test.skip(browserName !== "chromium", "Real touch injection requires Chromium CDP; physical Safari/Firefox touch needs device testing.");
-  await page.setViewportSize({ width: 375, height: 844 });
-  await ready(page);
-  await newGame(page, "AEINRST");
-  // Use real touch events through Chromium's device input, not synthetic DOM
-  // handlers, to exercise pointer capture and touch-action behavior.
-  const client = await page.context().newCDPSession(page);
-  await page
-    .locator('#rack-tiles [data-letter="A"]')
-    .scrollIntoViewIfNeeded();
-  const from = await page
-    .locator('#rack-tiles [data-letter="A"]')
-    .boundingBox();
-  const to = await page
-    .locator('[data-row="14"][data-col="7"]')
-    .boundingBox();
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [
-      { x: from.x + from.width / 2, y: from.y + from.height / 2 },
-    ],
-  });
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchMove",
-    touchPoints: [{ x: to.x + to.width / 2, y: to.y + to.height / 2 }],
-  });
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchEnd",
-    touchPoints: [],
-  });
-  await expect(page.locator(".square.pending")).toHaveCount(1);
-  const back = await page.locator("#rack-tiles").boundingBox();
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x: to.x + to.width / 2, y: to.y + to.height / 2 }],
-  });
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchMove",
-    touchPoints: [
-      { x: back.x + back.width / 2, y: back.y + back.height / 2 },
-    ],
-  });
-  await client.send("Input.dispatchTouchEvent", {
-    type: "touchEnd",
-    touchPoints: [],
-  });
-  await expect(page.locator(".square.pending")).toHaveCount(0);
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-});
-
 test("live preview stays separate and direct keyboard blanks survive saving", async ({
   page,
 }) => {

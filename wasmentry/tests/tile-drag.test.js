@@ -6,7 +6,9 @@ const rackTile = (page, index) => page.locator('#rack-tiles .rack-tile').nth(ind
 const rackLetters = page => page.locator('#rack-tiles .rack-tile').evaluateAll(tiles => tiles.map(tile => tile.dataset.letter).join(''));
 async function point(locator, side = 'center') {
   const rect = await locator.boundingBox();
-  return {x:side === 'before' ? rect.x + 1 : side === 'after' ? rect.x + rect.width - 1 : rect.x + rect.width / 2, y:rect.y + rect.height / 2};
+  // Stay inside the target's leading/trailing half, clear of overlay scrollbars.
+  const inset = Math.min(20, rect.width / 4);
+  return {x:side === 'before' ? rect.x + inset : side === 'after' ? rect.x + rect.width - inset : rect.x + rect.width / 2, y:rect.y + rect.height / 2};
 }
 async function drag(page, from, to, side = 'center', release = true) {
   await from.scrollIntoViewIfNeeded();
@@ -28,6 +30,10 @@ async function ready(page, rack = null) {
   await expect(page.locator('#status')).toHaveText('Game ready · enter the first rack');
   await page.locator('#rack').fill(rack);
   await page.locator('#rack').dispatchEvent('change');
+  // Finish editing before dragging; otherwise focus scrolls the board panel
+  // back to the off-screen rack input during a pointer gesture.
+  await page.locator('#position-editor > summary').click();
+  await page.locator('.position').evaluate(panel => { panel.scrollTop = 0; });
   await page.evaluate(() => window.scrollTo(0,0));
 }
 
@@ -57,7 +63,11 @@ test('duplicate tiles retain rack order through all four drag paths; invalid dro
   await expect(cell(page, 7, 7)).not.toHaveClass(/played/);
   await expect(cell(page, 7, 8)).toHaveClass(/pending/);
   expect(await rackLetters(page)).toBe('ABC?');
-  await drag(page, rackTile(page, 1), cell(page, 7, 8));
+  await drag(page, rackTile(page, 1), cell(page, 7, 8), 'center', false);
+  // Invalid-move feedback arrives asynchronously while the pointer is held.
+  // It must not resize the board and turn an occupied-square drop into a play.
+  await expect(page.locator('#move-feedback')).not.toBeEmpty();
+  await page.mouse.up();
   expect(await rackLetters(page)).toBe('ABC?');
   await expect(page.locator('#board .pending')).toHaveCount(1);
   await drag(page, cell(page, 7, 8), page.locator('#rack-tiles'), 'after');
@@ -125,6 +135,7 @@ test('committed tiles stay fixed in games; editor drags preserve ownership and u
   await drag(page, cell(page, 7, 7), cell(page, 6, 7));
   await expect(cell(page, 7, 7)).toHaveClass(/played/);
   await expect(cell(page, 6, 7)).not.toHaveClass(/played/);
+  await page.locator('#position-editor > summary').click();
   await page.locator('#edit').check();
   await cell(page,7,7).click();
   await page.locator('#tile-owner').selectOption('1');
@@ -187,6 +198,7 @@ test('history move editing can rearrange tiles without changing the recorded gam
 
 test('editor moves to and from the rack conserve tiles and undo; full racks reject returns', async ({page}) => {
   await ready(page, 'AT?');
+  await page.locator('#position-editor > summary').click();
   await page.locator('#edit').check();
   await page.evaluate(() => window.scrollTo(0,0));
   await drag(page, rackTile(page,0), cell(page,7,7));
@@ -200,6 +212,10 @@ test('editor moves to and from the rack conserve tiles and undo; full racks reje
   expect(await rackLetters(page)).toBe('T?');
   await page.locator('#rack').fill('AEINRST');
   await page.locator('#rack').dispatchEvent('change');
+  // Finish editing before dragging; otherwise focus scrolls the board panel
+  // back to the off-screen rack input during a pointer gesture.
+  await page.locator('#position-editor > summary').click();
+  await page.locator('.position').evaluate(panel => { panel.scrollTop = 0; });
   await page.evaluate(() => window.scrollTo(0,0));
   await drag(page, cell(page,7,7), page.locator('#rack-tiles'));
   expect(await rackLetters(page)).toBe('AEINRST');
@@ -221,14 +237,16 @@ test('starting analysis mid-drag cancels the gesture and leaves the rack intact'
 test('touch dragging scrolls a short screen to reach the top of the board', async ({page, browserName}) => {
   test.skip(browserName !== 'chromium', 'Real touch movement requires CDP.');
   await ready(page, 'AT?');
-  await page.setViewportSize({width:390,height:600});
+  await page.setViewportSize({width:390,height:400});
   await rackTile(page,0).scrollIntoViewIfNeeded();
   const start = await point(rackTile(page,0));
   const initialScroll = await page.evaluate(() => scrollY);
+  expect(initialScroll).toBeGreaterThan(0);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[start]});
   await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:start.x,y:8}]});
-  await expect.poll(async () => (await cell(page,0,7).boundingBox()).y).toBeGreaterThan(55);
+  // Let edge scrolling finish before taking the destination coordinates.
+  await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
   const end = await point(cell(page,0,7));
   await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[end]});
   await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
@@ -286,6 +304,7 @@ test('typing at a hovered square starts there without a click and then advances 
 
 test('hover typing leaves text fields and open dialogs alone', async ({page}) => {
   await ready(page, 'AEINRST');
+  await page.locator('#position-editor > summary').click();
   await page.locator('#rack').focus();
   await cell(page, 7, 7).hover();
   await page.keyboard.press('ControlOrMeta+A');

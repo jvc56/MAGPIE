@@ -157,7 +157,7 @@ test('bad downloads do not poison the engine or cache; native preparation can be
   expect(report.files).toEqual([]);
 });
 
-test('WMP format rejects truncated and mismatched assets before entering native code', async () => {
+test('WMP format rejects truncated and mismatched assets before entering native code', { tag: "@unit" }, async () => {
   const {validateWMP, wmpAsset} = await import('../wmp-assets.mjs');
   expect(() => validateWMP(new Uint8Array([3,15]))).toThrow('incomplete');
   expect(() => wmpAsset({schema:1,wmp_version:3,board_dim:15,lexica:{}}, 'CSW24','a'.repeat(64), 'https://example.com/data/wmp-manifest.json')).toThrow('does not match');

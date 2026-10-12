@@ -10,7 +10,7 @@ const orders = {
   "blanks-vowels": "??AEBCY",
 };
 
-test("alphagrams preserve inventory and only reorder unordered move groups", () => {
+test("alphagrams preserve inventory and only reorder unordered move groups", { tag: "@unit" }, () => {
   expect(sortTiles("B?EA?YC")).toBe("ABCEY??");
   expect(sortTiles("B?EA?YC", "invalid")).toBe("ABCEY??");
   expect(sortTiles("", "vowels")).toBe("");
@@ -27,7 +27,7 @@ test("alphagrams preserve inventory and only reorder unordered move groups", () 
   }
 });
 
-test("sorting with staged duplicate tiles and a designated blank preserves rack ownership", () => {
+test("sorting with staged duplicate tiles and a designated blank preserves rack ownership", { tag: "@unit" }, () => {
   const rack = "BAB?AE?";
   const tiles = [
     { row: 7, col: 7, letter: "B", rackIndex: 2 },

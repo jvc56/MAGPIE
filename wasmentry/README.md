@@ -265,32 +265,45 @@ This is a browser adaptation of existing Magpie UI work, using the engine on
 
 ```sh
 cd wasmentry
-npm install
+npm ci
 npx playwright install chromium firefox webkit
 npm test
 ```
 
-Browser tests run the actual WASM engine for all four modes, verify cancellation
-and reuse, CGP validation, board editing/undo, stale-result clearing, candidate
-previews and mobile layout. The UI suite also runs against an ordinary static
-server without isolation headers, checks the single startup reload and real
-WASM calculations, and uses no browser flags that relax SharedArrayBuffer
-requirements. Diagnostic-page simulation tests remain in the suite.
+Browser tests run the actual WASM engine for all four modes, cancellation and
+reuse, CGP validation, board editing/undo, stale-result clearing, candidate
+previews, live games, history, and responsive layout. Pure model/client tests are
+tagged `@unit` and run once in the `unit` project without launching a browser.
 
-The full UI suite runs in Chromium, Firefox, Playwright WebKit and branded Edge,
-including startup, move generation, constrained heap reservations,
-WMP cancellation, and cached WMP/WIT allocation failure followed by baseline
-move generation and simulation. These tests use real WASM with injected failures;
-a mobile viewport and user-agent override do not reproduce a phone's RAM pressure.
-Playwright WebKit is not the shipping Safari application. The tile-drag suite runs
-in Chromium, Firefox, WebKit and branded Edge: rack insertion, duplicate tiles,
-board placement/movement/return, blank designation, canceled gestures, occupied
-squares, history replacement, editor undo and busy-state changes. Real touch
-movement and edge scrolling are tested via CDP in Chromium and Edge; shipping
-iOS Safari still needs physical-device touch testing.
+The interaction suite runs in Chromium, Firefox and Playwright WebKit. CI builds
+the engine, dictionaries and optional WMP fixtures once, then distributes each
+browser's cases across three shards (one worker per shard to bound WASM memory).
+The aggregate `test-wasm` check requires the build and every shard to pass before
+publishing the beta artifact. Each browser job has a 15-minute timeout and its
+own failure report. To reproduce one shard locally:
 
-CI installs Microsoft Edge and runs the full suite with its `msedge`
-channel. To include branded Edge locally, install it with
+```sh
+npx playwright test --project=chromium --shard=2/3
+npx playwright test --project=unit
+```
+
+Edge shares Chromium's engine, so its project checks startup and all four search
+modes instead of repeating the interaction suite. The `static-host` project
+checks those searches plus service-worker isolation and the single startup
+reload against an ordinary server without isolation headers. Neither project
+uses flags that relax SharedArrayBuffer requirements. Redundant diagnostic-page
+simulation and mobile drag cases are covered by the application tests.
+
+The browser suite retains constrained heap reservations, WMP cancellation, and
+cached WMP/WIT allocation failure followed by baseline move generation and
+simulation. These use real WASM with injected failures; a mobile viewport and
+user-agent override do not reproduce a phone's RAM pressure. Tile dragging covers
+rack insertion, duplicates, board placement/movement/return, blanks, canceled
+gestures, occupied squares, history replacement, editor undo and busy-state
+changes. Real touch movement and edge scrolling use CDP in Chromium.
+Playwright WebKit is not shipping Safari; iOS touch still needs physical devices.
+
+To run the Edge smoke check locally, install it with
 `npx playwright install msedge`, then run
 `MAGPIE_TEST_EDGE=1 npx playwright test --project=edge`. A temporary Edge copy
 can be selected with `MAGPIE_EDGE_PATH` without installing it system-wide.

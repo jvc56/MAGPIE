@@ -1,11 +1,9 @@
 import { openGameActions } from "./helpers/startup.js";
 import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
-import { readFile } from "node:fs/promises";
-import vm from "node:vm";
 import { combineSim, analysisPositionKey, parseCGP, SAMPLES } from "../analysis-model.mjs";
 
-test("pooling preserves missing and zero-iteration rows; rack order does not split caches", () => {
+test("pooling preserves missing and zero-iteration rows; rack order does not split caches", { tag: "@unit" }, () => {
   const a = {move:"8H TRAIN",iterations:500,win:50,equity:20,winSE:1,equitySE:2};
   const b = {...a,move:"8H RAIN",iterations:700};
   expect(combineSim([a,b],[{...a,iterations:0}]).map(({rank,...row})=>row)).toEqual([a,b]);
@@ -19,19 +17,42 @@ test("pooling preserves missing and zero-iteration rows; rack order does not spl
 });
 
 async function clientHarness() {
-  const source=await readFile("engine-client.mjs","utf8");
+  // Keep this a native ESM import. Playwright compiles static imports in this
+  // CommonJS test package to require(), which breaks import.meta on Node 22.23.
+  const { EngineClient } = await import("../engine-client.mjs");
   class Worker {
     postMessage(message) { this.sent=message; }
     terminate() { this.terminated=true; }
     emit(data) { this.onmessage({data}); }
   }
-  const timers=[];
-  const context={Worker,URL,EventTarget,CustomEvent,addEventListener:()=>{}, setTimeout:(fn)=>{timers.push(fn);return fn},clearTimeout:()=>{}};
-  const EngineClient=vm.runInNewContext(source.replace("export class", "class").replaceAll("import.meta.url",'"http://localhost/wasmentry/engine-client.mjs"')+'\nEngineClient;',context);
-  return {client:new EngineClient(),timers};
+  // Import the real ES module, including its dependencies. Only replace the
+  // browser globals during construction and watchdog creation.
+  const previousWorker = globalThis.Worker;
+  const previousListener = globalThis.addEventListener;
+  let client;
+  try {
+    globalThis.Worker = Worker;
+    globalThis.addEventListener = () => {};
+    client = new EngineClient();
+  } finally {
+    globalThis.Worker = previousWorker;
+    globalThis.addEventListener = previousListener;
+  }
+  const timers = [];
+  const request = client.request.bind(client);
+  client.request = (...args) => {
+    const previousTimeout = globalThis.setTimeout;
+    try {
+      globalThis.setTimeout = (callback) => { timers.push(callback); return 0; };
+      return request(...args);
+    } finally {
+      globalThis.setTimeout = previousTimeout;
+    }
+  };
+  return {client,timers};
 }
 
-test("request IDs reject stale output, destroy resets caches, and fatal abort rejects future requests", async () => {
+test("request IDs reject stale output, destroy resets caches, and fatal abort rejects future requests", { tag: "@unit" }, async () => {
   const {client}=await clientHarness();
   client.worker.emit({type:"ready"});
   await client.ready;
@@ -51,7 +72,7 @@ test("request IDs reject stale output, destroy resets caches, and fatal abort re
   expect(await client.run(["generate"]).catch(e=>e.message)).toMatch(/Reload/);
 });
 
-test("an unresponsive native import times out and terminates the worker", async () => {
+test("an unresponsive native import times out and terminates the worker", { tag: "@unit" }, async () => {
   const {client,timers}=await clientHarness();
   const load=client.importGCG("text","CSW24");
   timers.at(-1)();
@@ -241,7 +262,7 @@ test('a native WASM abort rejects requests and ends the worker', async ({page}) 
   expect(result.rejected).toMatch(/Reload/);
 });
 
-test('a low-memory WMP refusal preserves ordinary analysis', async () => {
+test('a low-memory WMP refusal preserves ordinary analysis', { tag: "@unit" }, async () => {
   const {client} = await clientHarness();
   client.worker.emit({type:'ready'});
   const prepare = client.prepareWMP('CSW24','build',2);

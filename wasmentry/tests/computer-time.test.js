@@ -3,7 +3,7 @@ import {computerSearchPlan} from '../computer-time.mjs';
 import {analysisCommands, parseCGP, SAMPLES} from '../analysis-model.mjs';
 
 const clock = {time:300, remaining:300, overtime:'60', manageTime:true, seconds:5};
-test('automatic budgets use the remaining clock and estimated plays instead of a fixed cap', () => {
+test('automatic budgets use the remaining clock and estimated plays instead of a fixed cap', { tag: "@unit" }, () => {
   const opening = computerSearchPlan(clock, 100, 'sim');
   expect(opening.seconds).toBeGreaterThan(20);
   expect(opening.seconds).toBeLessThan(300 / 13);
@@ -13,7 +13,7 @@ test('automatic budgets use the remaining clock and estimated plays instead of a
   expect(computerSearchPlan({...clock, manageTime:false}, 100, 'sim').seconds).toBe(5);
   expect(computerSearchPlan({...clock, time:0}, 100, 'sim')).toMatchObject({seconds:5,useFullBudget:false});
 });
-test('short clocks and overtime boundaries use static play rather than a zero-second unlimited solve', () => {
+test('short clocks and overtime boundaries use static play rather than a zero-second unlimited solve', { tag: "@unit" }, () => {
   for (const mode of ['sim','peg','endgame']) {
     for (const override of [{remaining:0.1}, {remaining:0,overtime:'0'}, {remaining:-60}, {remaining:-90,overtime:'90'}])
       expect(computerSearchPlan({...clock,...override},20,mode).mode).toBe('kibitz');
@@ -23,7 +23,7 @@ test('short clocks and overtime boundaries use static play rather than a zero-se
     expect(computerSearchPlan({...clock,remaining:-61,overtime:'unlimited'},14,mode).seconds).toBeGreaterThan(overtime.seconds);
   }
 });
-test('automatic sims disable early stopping and review restores its normal policy', () => {
+test('automatic sims disable early stopping and review restores its normal policy', { tag: "@unit" }, () => {
   const position = parseCGP(SAMPLES.opening);
   const settings = {seconds:23,threads:2,plies:1,candidates:3,useFullBudget:true};
   expect(analysisCommands(position,'sim',settings).join('\n')).toContain('-threshold none');

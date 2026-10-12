@@ -8,7 +8,7 @@ import {
   rackSlots,
   reorderRack,
 } from "../move-entry.mjs";
-test("entry consumes real tiles before blanks and never overwrites the board", () => {
+test("entry consumes real tiles before blanks and never overwrites the board", { tag: "@unit" }, () => {
   const position = parseCGP(SAMPLES.opening);
   position.racks[0] = "AAT?";
   let tiles = placeTile(position, [], 7, 7, "a");
@@ -22,7 +22,7 @@ test("entry consumes real tiles before blanks and never overwrites the board", (
   expect(() => placeTile(position, [], 8, 8, "A")).toThrow();
   expect(placeTile(position, [], 7, 7, "a", true)[0].letter).toBe("a");
 });
-test("notation absorbs existing prefixes and suffixes and rejects gaps and bends", () => {
+test("notation absorbs existing prefixes and suffixes and rejects gaps and bends", { tag: "@unit" }, () => {
   const position = parseCGP(SAMPLES.opening);
   position.board[7][7] = "C";
   position.board[7][9] = "T";
@@ -52,7 +52,7 @@ test("notation absorbs existing prefixes and suffixes and rejects gaps and bends
   expect(() => normalizeMove("8H CAT -lex NWL23")).toThrow();
 });
 
-test("duplicate rack tiles keep their slots through placement, movement and rack insertion", async () => {
+test("duplicate rack tiles keep their slots through placement, movement and rack insertion", { tag: "@unit" }, async () => {
   const position = parseCGP(SAMPLES.opening);
   position.racks[0] = 'ABAC?';
   const tiles = placeTile(position, [], 7, 7, 'A', false, 2);

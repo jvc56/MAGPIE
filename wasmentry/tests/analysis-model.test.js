@@ -11,7 +11,7 @@ import {
   analysisCommands,
 } from "../analysis-model.mjs";
 
-test("CGP validates tile inventory and preserves blank tiles", () => {
+test("CGP validates tile inventory and preserves blank tiles", { tag: "@unit" }, () => {
   for (const [name, cgp] of Object.entries(SAMPLES)) {
     const position = parseCGP(cgp);
     expect(parseCGP(toCGP(position))).toEqual(position);
@@ -30,7 +30,7 @@ test("CGP validates tile inventory and preserves blank tiles", () => {
   );
 });
 
-test("candidate preview follows board coordinates and preserves played-through tiles", () => {
+test("candidate preview follows board coordinates and preserves played-through tiles", { tag: "@unit" }, () => {
   const position = parseCGP(SAMPLES.midgame);
   expect(previewMove(position, "14F ZI(N)E")).toEqual([
     { row: 13, col: 5, letter: "Z" },
@@ -44,7 +44,7 @@ test("candidate preview follows board coordinates and preserves played-through t
   expect(previewMove(position, "(exch E)")).toEqual([]);
 });
 
-test("result adapters preserve pass, empty leaves, uncertainty and endgame continuations", () => {
+test("result adapters preserve pass, empty leaves, uncertainty and endgame continuations", { tag: "@unit" }, () => {
   const sim = parseResults(
     "1: 8H RETAINS 66 0 54.2 0.3 42.7 0.2 66.0 512",
     "sim",
@@ -80,7 +80,7 @@ test("result adapters preserve pass, empty leaves, uncertainty and endgame conti
   ).toMatchObject({ depth: "full", win: 90, spread: 12.5 });
 });
 
-test("mode guards reject wrong bag sizes and infer the empty-bag opponent rack", () => {
+test("mode guards reject wrong bag sizes and infer the empty-bag opponent rack", { tag: "@unit" }, () => {
   const settings = { seconds: 10, threads: 4, candidates: 50, plies: 4 };
   expect(() =>
     analysisCommands(parseCGP(SAMPLES.opening), "peg", settings),
@@ -96,7 +96,7 @@ test("mode guards reject wrong bag sizes and infer the empty-bag opponent rack",
 });
 
 
-test("move errors and history share playthrough notation, including designated blanks", () => {
+test("move errors and history share playthrough notation, including designated blanks", { tag: "@unit" }, () => {
   const position = parseCGP(SAMPLES.opening);
   position.board[2][11] = "T";
   expect(formatBoardPlay("3G COVER.ED", position)).toBe("3G COVER(T)ED");
@@ -109,7 +109,7 @@ test("move errors and history share playthrough notation, including designated b
 });
 
 
-test("PEG protects the union of manual plays and the recorded play", () => {
+test("PEG protects the union of manual plays and the recorded play", { tag: "@unit" }, () => {
   const position = parseCGP(SAMPLES.peg);
   const commands = analysisCommands(position, "peg", {
     seconds: 10, threads: 4, candidates: 50, plies: 4,

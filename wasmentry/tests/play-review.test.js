@@ -93,11 +93,13 @@ test("computer can start as player two and watching can run a complete game", as
   await page.locator("#hide-spoilers").check();
   await expect(
     page.locator("#history-table tbody button").first(),
-  ).toHaveText("•••");
+  ).toContainText("•••");
+  await expect(page.locator("#history-table tbody button").first().locator(".history-play")).toHaveCount(0);
+  await expect(page.locator("#history-table tbody button").first().locator(".history-rack")).toHaveText(/[A-Z?]+/);
   await page.locator("#history-next").click();
   await expect(
     page.locator("#history-table tbody button").first(),
-  ).not.toHaveText("•••");
+  ).not.toContainText("•••");
   await page.locator("#hide-spoilers").uncheck();
   await page.screenshot({
     path: test.info().outputPath("game-review-desktop.png"),

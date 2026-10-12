@@ -6,14 +6,15 @@ on:
   pull_request:
 
 jobs:
-  test-wasm:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.x"
 
@@ -25,11 +26,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Get datafile cache
         id: cache-datafiles
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             data/*
@@ -51,15 +52,9 @@ jobs:
           node bin/magpie_wasm_test.js tt browsergame
           node bin/magpie_wasm_test.js endgame
 
-      - name: Install Playwright dependencies
-        working-directory: ./wasmentry
-        run: |
-          npm install
-          npx playwright install --with-deps chromium webkit firefox msedge
-
       - name: Cache optional WMP test downloads
         id: cache-wmp
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             data/wmp/
@@ -72,27 +67,105 @@ jobs:
           make -j2 magpie BUILD=no_pgo_release
           python3 wasmentry/build_wmp_assets.py --threads 2
 
-      - name: Run Playwright tests
+      - name: Package test assets
+        run: |
+          python3 wasmentry/package_preview.py preview-dist --with-wmp
+          tar -czf /tmp/wasm-browser-assets.tgz -C preview-dist data wasmentry/magpie_wasm.mjs wasmentry/magpie_wasm.wasm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-browser-assets
+          path: /tmp/wasm-browser-assets.tgz
+          retention-days: 1
+
+  browser-tests:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit]
+        shard: [1, 2, 3]
+        include:
+          - project: unit
+            shard: 1
+          - project: edge
+            shard: 1
+          - project: static-host
+            shard: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: wasmentry/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-browser-assets
+          path: /tmp/wasm-browser-assets
+      - name: Unpack engine and data
+        run: tar -xzf /tmp/wasm-browser-assets/wasm-browser-assets.tgz
+      - run: npm ci
+        working-directory: wasmentry
+      - name: Install browser
+        if: matrix.project != 'unit'
+        working-directory: wasmentry
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          browser="$PROJECT"
+          if [ "$browser" = edge ]; then browser=msedge; fi
+          if [ "$browser" = static-host ]; then browser=chromium; fi
+          npx playwright install --with-deps "$browser"
+      - name: Run Playwright shard
+        working-directory: wasmentry
         env:
           MAGPIE_TEST_EDGE: "1"
-        working-directory: ./wasmentry
-        run: npm test
+          PROJECT: ${{ matrix.project }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          total=3
+          case "$PROJECT" in unit|edge|static-host) total=1 ;; esac
+          npm test -- --project="$PROJECT" --shard="$SHARD/$total"
+      - name: Upload failure report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.project }}-${{ matrix.shard }}
+          path: |
+            wasmentry/test-results/
+            wasmentry/playwright-report/
+          retention-days: 7
 
+  test-wasm:
+    # Preserve the aggregate check name and only publish a beta when every shard passes.
+    if: always()
+    needs: [build, browser-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all shards to pass
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_RESULT: ${{ needs.browser-tests.result }}
+        run: test "$BUILD_RESULT" = success && test "$TEST_RESULT" = success
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-browser-assets
+          path: /tmp/wasm-browser-assets
+      - run: tar -xzf /tmp/wasm-browser-assets/wasm-browser-assets.tgz
       - name: Package Magpie beta
         run: python3 wasmentry/package_preview.py preview-dist
-
-      - name: Upload Magpie beta
-        uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v4
         with:
           name: magpie-wasm-preview
           path: preview-dist/
           retention-days: 14
-
-      - name: Upload test results
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: playwright-results
-          path: |
-            wasmentry/test-results/
-            wasmentry/playwright-report/
