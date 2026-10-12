@@ -20,6 +20,10 @@
   --triple-letter: #6b85a3;
   --double-letter: #7ba7bc;
   --tile-edge: transparent;
+  --tentative-amber: #f8e8c9;
+  --tentative-amber-edge: #ac8033;
+  --tentative-green: #c3e8bd;
+  --tentative-green-edge: #56844d;
   --control-line: var(--line);
   --hover: #3a3d55;
   --active: #303c54;
@@ -56,6 +60,10 @@
   --green: #acc092;
   --unknown-tile: #d9cfba;
   --tile-edge: #4b494430;
+  --tentative-amber: #ead3a7;
+  --tentative-amber-edge: #97712f;
+  --tentative-green: #c6d3b4;
+  --tentative-green-edge: #617a46;
   --control-line: #b6b0a5;
   --hover: #ccc8bf;
   --active: #cbd7db;
@@ -333,6 +341,15 @@ main {
 .rack[data-owner="1"] .rack-tile {
   background: var(--green);
 }
+/* Draft placements and candidate previews retain the player's hue. */
+.square.played.preview {
+  background: var(--tentative-amber);
+  box-shadow: inset 0 0 0 1.5px var(--tentative-amber-edge), 0 1px 1px #0004;
+}
+.square.played.preview.owner-1 {
+  background: var(--tentative-green);
+  box-shadow: inset 0 0 0 1.5px var(--tentative-green-edge), 0 1px 1px #0004;
+}
 .square sup,
 .rack-tile sup {
   position: absolute;
@@ -356,8 +373,7 @@ main {
 .square.cursor > .premium-label {
   visibility: hidden;
 }
-.square.cursor::after {
-  content: "";
+.square::after {
   position: absolute;
   width: 70%;
   height: 70%;
@@ -367,9 +383,24 @@ main {
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 12h16M12 4l8 8-8 8' fill='none' stroke='%23111' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
   pointer-events: none;
 }
+.square.cursor:not(.played)::after {
+  content: "";
+}
 .square.cursor[data-arrow="↓"]::after {
   transform: translate(-50%, -50%) rotate(90deg);
 }
+@media (hover: hover) {
+  body:not(.tile-dragging) #board.entry-available .square:not(.played):not(:disabled):hover::after {
+    content: "";
+  }
+  body:not(.tile-dragging) #board.entry-available[data-direction="down"] .square:not(.played):not(:disabled):hover::after {
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
+  body:not(.tile-dragging) #board.entry-available .square:not(.played):not(:disabled):hover > span {
+    visibility: hidden;
+  }
+}
+body.tile-dragging #board .square::after { content: none; }
 .square:disabled {
   opacity: 1;
 }
@@ -1481,8 +1512,6 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 }
 .game-toolbar button,
 .game-menu summary,
-.rack-actions button,
-#play-session button,
 #analysis-details,
 #stop,
 #fresh-analysis {

@@ -158,13 +158,13 @@ test("automatic review keeps pooled sims and spoiler hiding omits played-move in
   expect(commands).toContain('sim');expect(commands.some(c=>c.startsWith('addmoves ')||c.startsWith('snoprune '))).toBe(false);
 });
 
-test("watch One turn restores the live position and Resume works with auto-analysis", async ({page})=>{
+test("watch Resume restores the live position with auto-analysis", async ({page})=>{
   await ready(page);await page.locator('#new-game').click();await page.locator('[data-game-kind=watch]').click();await page.locator('.game-options > summary').click();await page.selectOption('#bot-analysis','kibitz');await page.selectOption('#game-time','0');await page.locator('#watch-delay').fill('1');await page.locator('#new-game-form button.primary').click();await expect(page.locator('#play-session')).toBeVisible();
   await page.locator('#pause-game').click();await expect(page.locator('#stop')).toBeDisabled();
-  await page.locator('#step-game').click();await expect(page.locator('#stop')).toBeDisabled();await expect(page.locator('#history-position option')).toHaveCount(2);
+  await page.locator('#pause-game').click();await expect(page.locator('#history-position option')).toHaveCount(2);await page.locator('#pause-game').click();
   await page.locator('#open-analysis-settings').click();await page.selectOption('#auto-analyze','kibitz');await page.locator('#back-to-game').click();
   await page.locator('#history-first').click();await expect(page.locator('#stop')).toBeDisabled();
-  await page.locator('#step-game').click();await expect(page.locator('#stop')).toBeDisabled();await expect(page.locator('#history-position option')).toHaveCount(3);
+  await page.locator('#pause-game').click();await expect(page.locator('#history-position option')).toHaveCount(3);await page.locator('#pause-game').click();
   await page.locator('#history-first').click();await expect(page.locator('#stop')).toBeDisabled();await page.locator('#pause-game').click();
   await expect.poll(()=>page.locator('#history-position option').count()).toBeGreaterThan(3);
   await page.locator('#pause-game').click();

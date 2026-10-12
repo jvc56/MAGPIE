@@ -338,7 +338,7 @@ test('cache failure under a reservation limit stays visible and never claims suc
   await expect(page.locator('#status')).not.toContainText('ready');
 });
 
-test('a single watch turn can be paused without resuming the whole game', async ({page}) => {
+test('a resumed watch search can be paused again', async ({page}) => {
   await ready(page);
   await page.locator('[data-game-kind=watch]').click();
   await page.locator('.game-options > summary').click();
@@ -346,12 +346,12 @@ test('a single watch turn can be paused without resuming the whole game', async 
   await page.locator('#start-game').click();
   await expect(page.locator('#status')).toHaveText('Simulating…',{timeout:30000});
   await page.locator('#pause-game').click();
-  await expect(page.locator('#step-game')).toBeEnabled();
-  await page.locator('#step-game').click();
+  await expect(page.locator('#pause-game')).toHaveText('Resume game');
+  await page.locator('#pause-game').click();
   await expect(page.locator('#status')).toHaveText('Simulating…');
   await expect(page.locator('#pause-game')).toHaveText('Pause');
   await page.locator('#pause-game').click();
-  await expect(page.locator('#step-game')).toBeEnabled();
+  await expect(page.locator('#pause-game')).toHaveText('Resume game');
   await expect(page.locator('#session-result')).toHaveText('Paused');
   await expect(page.locator('#error')).toBeEmpty();
   await expect(page.locator('#history-position option')).toHaveCount(1);
@@ -387,6 +387,6 @@ test('computer word-map preparation cannot be stopped through the settings butto
   await expect(page.locator('#stop-wmp')).toBeHidden();
   await page.locator('#back-to-game').click();
   await page.locator('#pause-game').click();
-  await expect(page.locator('#step-game')).toBeEnabled({timeout:15000});
+  await expect(page.locator('#pause-game')).toHaveText('Resume game',{timeout:15000});
   await expect(page.locator('#error')).toBeEmpty();
 });

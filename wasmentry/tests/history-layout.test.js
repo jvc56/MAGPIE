@@ -53,6 +53,9 @@ test("history pairs players and shows playthrough notation in rows and navigatio
       buffer: Buffer.from(gcg),
     });
   await expect(page.locator("#history-table tbody tr")).toHaveCount(1);
+  await page.selectOption("#history-position", "2");
+  await expect(page.locator("#exchange-move + #challenge-move")).toHaveText("Challenge E7 N(A)RWAL");
+  await expect(page.locator("#challenge-move")).toBeEnabled();
   const cells = page.locator("#history-table tbody tr").first().locator("td");
   await expect(cells.nth(1)).toContainText("8D FAULT");
   await expect(cells.nth(2)).toContainText("E7 N(A)RWAL");
@@ -62,9 +65,12 @@ test("history pairs players and shows playthrough notation in rows and navigatio
   await page.locator('#history-table [data-event-index="1"]').click();
   await expect(page.locator("#history-position")).toHaveValue("1");
   await expect(page.locator(".square.played")).toHaveCount(5);
+  await expect(page.locator("#challenge-move")).toHaveText("Challenge 8D FAULT");
   await page.locator("#hide-spoilers").check();
   await expect(cells.nth(2)).toHaveText("•••");
   await page.locator("#hide-spoilers").uncheck();
+  await page.locator("#history-first").click();
+  await expect(page.locator("#challenge-move")).toBeHidden();
 });
 
 test("computer game history occupies the right panel without overlapping the board", async ({

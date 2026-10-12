@@ -11,12 +11,11 @@ async function startWatch(page) {
   await page.locator('.game-options > summary').click();
   await page.selectOption('#game-time', '0');
   await page.selectOption('#bot-analysis', 'kibitz');
-  await page.locator('#watch-delay').fill('30');
+  await page.locator('#watch-delay').fill('2');
   await page.locator('#new-game-form button.primary').click();
-  await page.locator('#pause-game').click();
-  await page.locator('#step-game').click();
   await expect(page.locator('#history-position option')).toHaveCount(2);
-  await expect(page.locator('#step-game')).toBeEnabled();
+  await page.locator('#pause-game').click();
+  await expect(page.locator('#pause-game')).toHaveText('Resume game');
 }
 
 async function finish(page) {
@@ -43,7 +42,7 @@ test('ending an idle game unlocks review controls without another engine command
   await expect(page.locator('#history-position option').nth(1)).toHaveText('1. •••');
   await page.locator('#hide-spoilers').uncheck();
   await expect(page.locator('#session-result')).toBeVisible();
-  for (const id of ['rack', 'opponent-rack', 'score', 'opponent-score', 'edit', 'clear', 'sample', 'on-turn-player', 'play-move', 'shuffle-rack', 'sort-rack'])
+  for (const id of ['rack', 'opponent-rack', 'score', 'opponent-score', 'edit', 'clear', 'on-turn-player', 'play-move', 'shuffle-rack', 'sort-rack'])
     await expect(page.locator(`#${id}`)).toBeEnabled();
   await page.locator('#pass-move').click();
   await page.locator('#confirm-no').click();

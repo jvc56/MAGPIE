@@ -96,10 +96,16 @@ $("unseen-order").value = unseenOrder;
 const displayTiles = tiles => sortTiles(tiles, tileOrder);
 const displayMove = move => formatTileGroups(move, tileOrder);
 position.racks = position.racks.map(displayTiles);
-function sortCurrentRack() {
-  const sorted = sortRack(position.racks[0], draftTiles, tileOrder);
-  position.racks[0] = sorted.rack;
-  draftTiles = sorted.tiles;
+function displayedRackIndex() {
+  return isLive() && session.kind === "play" && session.human !== position.onTurn ? 1 : 0;
+}
+function canArrangeRack() {
+  return position.racks[displayedRackIndex()].length > 0;
+}
+function sortCurrentRack(index = 0) {
+  const sorted = sortRack(position.racks[index], index ? [] : draftTiles, tileOrder);
+  position.racks[index] = sorted.rack;
+  if (!index) draftTiles = sorted.tiles;
   rackChoice = null;
 }
 
@@ -238,7 +244,7 @@ $("tt-memory").value = budget.ttMiB;
 function settingsSummary() {
   const time = isLive()
     ? session.strategy === "kibitz" ? "Static equity"
-      : session.manageTime && session.time ? "Automatic time" : `${session.seconds}s per turn`
+      : session.manageTime && session.time ? "Automatic time management" : `${session.seconds}s per turn`
     : `${$("seconds").value}s`;
   $("settings-summary").textContent = !isLive() && searchMode() !== "sim"
     ? `No time limit · ${$("threads").value} threads`
@@ -417,6 +423,7 @@ function renderBoard() {
   const drawPosition = continuationPosition || position;
   const board = $("board");
   board.classList.toggle("position-editing", $("edit").checked);
+  board.dataset.direction = vertical ? "down" : "right";
   const preview = new Map(
     previewMove(drawPosition, continuationPosition ? "" : selectedMove).map(
       (t) => [`${t.row},${t.col}`, t.letter],
@@ -540,10 +547,7 @@ function renderPosition() {
   $("on-turn-player").value = position.onTurn;
   $("ownership-tools").hidden = !$("edit").checked;
   $("rack-tiles").dataset.owner = position.onTurn;
-  const rackIndex =
-    isLive() && session.kind === "play" && session.human !== position.onTurn
-      ? 1
-      : 0;
+  const rackIndex = displayedRackIndex();
   const shownRack = position.racks[rackIndex];
   if (isLive() && session.kind === "play")
     $("rack-tiles").dataset.owner = session.human;
@@ -594,10 +598,7 @@ function renderPosition() {
       "aria-label",
       letter === "?" ? "Blank tile" : `Tile ${letter}`,
     );
-    tile.disabled =
-      busy ||
-      terminalPosition() ||
-      (isLive() && (!humanTurn() || session.paused));
+    tile.disabled = !canArrangeRack();
     tile.classList.toggle("chosen", rackChoice?.index === index);
     tile.classList.add("rack-tile");
     const glyph = document.createElement("span");
@@ -1325,7 +1326,19 @@ $("copy").addEventListener("click", async () => {
 function canExportGame() {
   return !!recordedGame && (engine?.fatalError || (!busy && !hiddenLiveGame()));
 }
+function challengeTarget() {
+  if (!recordedGame || !historyIndex || session) return "";
+  const line = recordedGame.gcg.split(/\r?\n/)
+    .filter(line => line.startsWith(">"))[historyIndex - 1];
+  if (!line) return "";
+  const {move} = historyPlayParts(line, restorePosition(recordedGame.positions[historyIndex - 1]));
+  return /^(?:[A-O]\d+|\d+[A-O]) /.test(move) ? displayMove(move) : "";
+}
 function renderHistory() {
+  const target = challengeTarget();
+  $("challenge-move").hidden = !target;
+  $("challenge-move").disabled = busy || !target;
+  $("challenge-move").textContent = target ? `Challenge ${target}` : "Challenge";
   $("game-history").hidden = !recordedGame;
   $("copy").disabled = busy || hiddenLiveGame();
   $("save-gcg").disabled = !canExportGame();
@@ -1344,7 +1357,6 @@ function renderHistory() {
   $("undo-game").disabled = busy || !!isLive() || !gameUndo.length;
   $("edit-history-move").disabled = busy || historyIndex === 0;
   $("save-note").disabled = busy || historyIndex === 0;
-  $("challenge-move").disabled = busy || historyIndex === 0 || !!session;
   renderReviewTable();
 }
 function showHistory(index, {auto = true} = {}) {
@@ -2038,19 +2050,27 @@ $("confirm-exchange").addEventListener("click", () => {
   submitMove(`ex ${letters}`);
 });
 $("shuffle-rack").addEventListener("click", () => {
-  if (busy || (isLive() && !humanTurn())) return;
-  const shuffled = shuffleRack(position.racks[0], draftTiles);
-  position.racks[0] = shuffled.rack;
-  draftTiles = shuffled.tiles;
+  if (!canArrangeRack()) return;
+  const index = displayedRackIndex();
+  const shuffled = shuffleRack(position.racks[index], index ? [] : draftTiles);
+  position.racks[index] = shuffled.rack;
+  if (!index) draftTiles = shuffled.tiles;
   rackChoice = null;
   renderPosition();
 });
 $("sort-rack").addEventListener("click", () => {
-  if (busy || (isLive() && !humanTurn())) return;
-  sortCurrentRack();
+  if (!canArrangeRack()) return;
+  sortCurrentRack(displayedRackIndex());
   renderPosition();
 });
 $("new-game").addEventListener("click", () => {
+  if (isLive()) {
+    chargeClock();
+    session.paused = true;
+    clearTimeout(botTimer);
+    if (busy) stop();
+    renderPosition();
+  }
   $("new-game-cgp").value = "";
   $("new-game-error").textContent = "";
   validateNewGameCGP();
@@ -2198,6 +2218,7 @@ function editHistoryMove() {
 $("edit-history-move").addEventListener("click", editHistoryMove);
 async function changeRecordedEvent(action) {
   if (busy || !recordedGame || !historyIndex) return;
+  if (action === GameAction.CHALLENGE && !challengeTarget()) return;
   const note = $("event-note").value;
   if (
     action === GameAction.CHALLENGE &&
@@ -2241,9 +2262,10 @@ function canDragTiles() {
   return !busy && !terminalPosition() && !(isLive() && (!humanTurn() || session.paused));
 }
 function rackDrop(source, gap) {
-  const next = reorderRack(position.racks[0], draftTiles, source.rackIndex, gap);
-  position.racks[0] = next.rack;
-  draftTiles = next.tiles.filter(tile => !source.square || tile.row !== source.row || tile.col !== source.col);
+  const index = source.playerRack ?? 0;
+  const next = reorderRack(position.racks[index], index ? [] : draftTiles, source.rackIndex, gap);
+  position.racks[index] = next.rack;
+  if (!index) draftTiles = next.tiles.filter(tile => !source.square || tile.row !== source.row || tile.col !== source.col);
   rackChoice = null;
   if (source.square) renderDraft();
   else renderPosition();
@@ -2251,9 +2273,10 @@ function rackDrop(source, gap) {
 tileDrag = installTileDrag({
   board:$("board"), rack:$("rack-tiles"),
   sourceFor(target) {
-    if (!canDragTiles()) return null;
     const rackTile = target.closest("#rack-tiles .rack-tile");
-    if (rackTile) return {element:rackTile, letter:rackTile.dataset.letter, rackIndex:+rackTile.dataset.rackIndex};
+    if (rackTile && canArrangeRack()) return {element:rackTile, letter:rackTile.dataset.letter,
+      rackIndex:+rackTile.dataset.rackIndex, playerRack:displayedRackIndex()};
+    if (!canDragTiles()) return null;
     if (!recordedGame && !$("edit").checked) return null;
     const square = target.closest("#board .square");
     if (!square) return null;
@@ -2267,16 +2290,16 @@ tileDrag = installTileDrag({
       rackIndex:rackSlots(position.racks[0], draftTiles).indexes[index]};
   },
   targetFor(x, y, source) {
-    if (!canDragTiles()) return null;
     const target = document.elementFromPoint(x, y);
     const rack = target?.closest("#rack-tiles");
     if (rack) {
+      if (source.square ? !canDragTiles() : !canArrangeRack()) return null;
       if ($("edit").checked && source.square && position.racks[0].length >= 7) return null;
       const tiles = [...rack.children];
       const before = tiles.findIndex(tile => { const rect = tile.getBoundingClientRect(); return x < rect.left + rect.width / 2; });
       return {rack, gap:before < 0 ? tiles.length : before};
     }
-    if (!recordedGame && !$("edit").checked) return null;
+    if (!canDragTiles() || (!recordedGame && !$("edit").checked)) return null;
     const square = target?.closest("#board .square");
     if (!square) return null;
     const row = +square.dataset.row, col = +square.dataset.col;
@@ -2285,13 +2308,16 @@ tileDrag = installTileDrag({
     return {square, row, col};
   },
   onTap(source) {
-    if (source.square || $("edit").checked || !recordedGame) return;
+    if (!canDragTiles() || source.playerRack || source.square || $("edit").checked || !recordedGame) return;
     rackChoice = rackChoice?.index === source.rackIndex ? null : {letter:source.letter, index:source.rackIndex};
     renderPosition();
   },
   onDrop(source, target) {
+    if (!source.square && target.rack) {
+      if (canArrangeRack() && source.playerRack === displayedRackIndex()) rackDrop(source, target.gap);
+      return;
+    }
     if (!canDragTiles() || source.square === target.square && source.square) return;
-    if (!source.square && target.rack) { rackDrop(source, target.gap); return; }
     if ($("edit").checked) {
       const apply = letter => {
         const next = structuredClone(position);
@@ -2381,7 +2407,9 @@ function formatClock(seconds) {
 }
 function renderSession() {
   renderSettingsAvailability();
+  $("board").classList.toggle("entry-available", canDragTiles() && !!($("edit").checked || recordedGame));
   $("show-live-analysis").disabled = false;
+  $("new-game").disabled = busy && !botRunning;
   const live = isLive();
   for (const id of [
     "rack", "opponent-rack", "score", "opponent-score", "edit", "clear",
@@ -2389,8 +2417,10 @@ function renderSession() {
   ]) $(id).disabled = busy || !!live;
   const entryLocked = busy || terminalPosition() ||
     (live && (session.paused || !humanTurn()));
-  for (const id of ["shuffle-rack", "sort-rack", "play-move", "pass-move", "exchange-move", "recall-tiles"])
+  for (const id of ["play-move", "pass-move", "exchange-move", "recall-tiles"])
     $(id).disabled = !!entryLocked;
+  for (const element of document.querySelectorAll("#shuffle-rack, #sort-rack, #rack-tiles .rack-tile"))
+    element.disabled = !canArrangeRack();
   document.body.classList.toggle("playing", !!live);
   document.body.classList.toggle(
     "show-analysis",
@@ -2441,14 +2471,11 @@ function renderSession() {
   if ($("pause-game").textContent !== pauseLabel)
     $("pause-game").textContent = pauseLabel;
   $("pause-game").disabled = session.finished;
-  $("step-game").hidden = session.kind !== "watch";
-  $("step-game").disabled = busy || !session.paused || session.finished;
   const finishLabel = session.kind === "play" ? "Resign" : "End game";
   if ($("finish-game").textContent !== finishLabel)
     $("finish-game").textContent = finishLabel;
   $("finish-game").disabled = session.finished || busy;
   $("finish-game").title = busy && botRunning ? "Pause the computer before ending the game." : "";
-  $("new-game").title = busy && botRunning ? "Pause the computer before starting a new game." : "";
   const sessionMessage =
     session.result ||
     (session.paused
@@ -2584,8 +2611,8 @@ function currentComputerSearchPlan(mode) {
     mode,
   );
 }
-async function computerTurn(single = false) {
-  if (!isLive() || busy || botRunning || (!single && session.paused)) return;
+async function computerTurn() {
+  if (!isLive() || busy || botRunning || session.paused) return;
   botRunning = true;
   const currentSession = session;
   try {
@@ -2595,7 +2622,7 @@ async function computerTurn(single = false) {
     if (
       session !== currentSession ||
       session.finished ||
-      canceled || (!single && session.paused)
+      canceled || session.paused
     )
       return;
     if (!complete) throw new Error($("error").textContent || "Computer analysis failed. Resume to retry.");
@@ -2736,12 +2763,6 @@ $("pause-game").addEventListener("click", () => {
     scheduleComputer();
   }
   renderPosition();
-});
-$("step-game").addEventListener("click", () => {
-  if (!isLive() || busy || session.kind !== "watch" || !session.paused) return;
-  if (historyIndex !== recordedGame.positions.length - 1)
-    showHistory(recordedGame.positions.length - 1, {auto:false});
-  computerTurn(true);
 });
 $("show-live-analysis").addEventListener("change", () => { renderSession(); renderResults(); });
 $("finish-game").addEventListener("click", async () => {
@@ -3089,7 +3110,6 @@ function analysisSummary(text, kind) {
 const controlHints = {
   "copy-gcg": "Copy the complete game as GCG.",
   "pause-game": "Pause the game clock and computer; resume when ready.",
-  "step-game": "Play one computer turn while watching is paused.",
   "finish-game": "End the game and keep its history for review.",
   "show-live-analysis":
     "Reveal analysis while playing. This can reveal the computer’s rack.",
@@ -3183,9 +3203,11 @@ function renderContextHint() {
             : "Type or drag tiles · Shift + letter: blank · Space: direction · Enter: play · Esc: recall"
           : "Select an analysis move to preview it, or enable Edit board to change tiles.";
   } else if (target?.id === "rack-tiles") {
-    hint = recordedGame
-      ? "Drag to arrange tiles or place them on the board · Alt + arrows: arrange selected tile"
-      : "Drag to arrange tiles · Alt + arrows: arrange selected tile · Edit the Rack field to change tiles";
+    hint = !canDragTiles()
+      ? "Drag to arrange tiles."
+      : recordedGame
+        ? "Drag to arrange tiles or place them on the board."
+        : "Drag to arrange tiles · Edit the Rack field to change tiles";
   } else if (target?.id === "results") {
     hint =
       "Select a move to preview it on the board; select it again to clear the preview.";

@@ -82,7 +82,7 @@ for (const kind of ['play', 'watch', 'record']) test(`start ${kind} from CGP wit
     await expect(page.locator('#first-player')).toBeDisabled();
     await page.locator('#bot-analysis').selectOption('kibitz');
     await page.locator('#game-time').selectOption('0');
-    if (kind === 'watch') await page.locator('#watch-delay').fill('30');
+    if (kind === 'watch') await page.locator('#watch-delay').fill('3');
   }
   await page.locator('#start-game').click();
   await expect(page.locator('#history-position option')).toHaveCount(1);
@@ -93,9 +93,8 @@ for (const kind of ['play', 'watch', 'record']) test(`start ${kind} from CGP wit
   await expect(page.locator('#opponent-score')).toHaveValue('80');
   await expect(page.locator('#rack')).toHaveValue('AEINRST');
   if (kind === 'watch') {
-    await page.locator('#pause-game').click();
-    await page.locator('#step-game').click();
     await expect(page.locator('#history-position option')).toHaveCount(2);
+    await page.locator('#pause-game').click();
   } else {
     // Play through the initial A. This would fail on an empty starting board.
     await page.locator('#board [data-row="7"][data-col="8"]').click();
@@ -188,4 +187,22 @@ for (const theme of ['light', 'dark']) test(`expanded CGP help and validation fi
     await page.locator('#start-game').scrollIntoViewIfNeeded();
     await expect(page.locator('#start-game')).toBeInViewport();
   }
+});
+
+
+test('New game pauses the human clock and cancel leaves it paused', async ({page}) => {
+  await ready(page);
+  await page.locator('#start-game').click();
+  await expect(page.locator('#pause-game')).toHaveText('Pause');
+  await page.locator('#new-game').click();
+  await expect(page.locator('#new-game-dialog')).toBeVisible();
+  await expect(page.locator('#session-result')).toHaveText('Paused');
+  const clock = await page.locator('#clock-one').textContent();
+  await page.waitForTimeout(1100);
+  await expect(page.locator('#clock-one')).toHaveText(clock);
+  await page.locator('#cancel-new-game').click();
+  await expect(page.locator('#pause-game')).toHaveText('Resume game');
+  await expect(page.getByRole('button', {name:'One turn',exact:true})).toHaveCount(0);
+  await page.locator('#pause-game').click();
+  await expect(page.locator('#session-result')).toHaveText('Your turn');
 });

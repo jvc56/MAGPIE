@@ -74,7 +74,6 @@
           <div id="play-session" hidden>
             <div class="toolbar" id="session-controls">
               <button id="pause-game">Pause</button
-              ><button id="step-game">One turn</button
               ><button id="finish-game">Resign</button
               ><label class="check"
                 ><input type="checkbox" id="show-live-analysis" />
@@ -104,7 +103,8 @@
                 Play move <kbd aria-label="Enter">↵</kbd></button
               ><button id="recall-tiles">Recall tiles</button
               ><button id="pass-move">Pass</button
-              ><button id="exchange-move">Exchange</button>
+              ><button id="exchange-move">Exchange</button
+              ><button id="challenge-move" hidden disabled>Challenge</button>
             </div>
             <p id="move-feedback" role="status" class="hint"></p>
           </section>
@@ -339,7 +339,7 @@
           <p id="review-progress" class="hint" role="status"></p>
           <p id="history-note" class="hint"></p>
           <details id="annotation">
-            <summary>Notes &amp; challenge</summary>
+            <summary>Notes</summary>
             <label for="event-note">Note for this event</label>
             <textarea
               id="event-note"
@@ -347,7 +347,6 @@
               maxlength="10000"
             ></textarea>
             <button id="save-note">Save note</button>
-            <button id="challenge-move">Challenge last play</button>
           </details>
           <p id="history-edited" class="hint" hidden>
             Edited position · Return to history to play a move.

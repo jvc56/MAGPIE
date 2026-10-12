@@ -608,8 +608,10 @@ test("phony confirmation, challenge removal and candidate commit use native hist
   await page.locator("#play-move").click();
   await page.locator("#confirm-yes").click();
   await expect(page.locator("#history-position option")).toHaveCount(2);
-  await page.locator("#annotation summary").click();
+  await expect(page.locator("#annotation")).not.toHaveAttribute("open", "");
+  await expect(page.locator("#exchange-move + #challenge-move")).toHaveText("Challenge 8H TSRAIN");
   await page.locator("#challenge-move").click();
+  await expect(page.locator("#challenge-move")).toBeHidden();
   await expect(page.locator("#history-position option")).toHaveCount(3);
   await expect(page.locator(".square.played")).toHaveCount(0);
   await page.locator("#rack").fill("AEINRST");

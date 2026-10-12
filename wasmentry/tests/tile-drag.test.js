@@ -236,3 +236,85 @@ test('touch dragging scrolls a short screen to reach the top of the board', asyn
   expect(await page.evaluate(() => scrollY)).toBeLessThan(initialScroll);
   expect(await rackLetters(page)).toBe('T?');
 });
+
+test('empty-square hover previews direction without moving the cursor or covering a drag', async ({page}) => {
+  await ready(page, 'AEINRST');
+  const center = cell(page, 7, 7), below = cell(page, 8, 7);
+  const arrow = square => square.evaluate(element => {
+    const style = getComputedStyle(element, '::after');
+    return {content:style.content, transform:style.transform};
+  });
+  await center.hover();
+  expect((await arrow(center)).content).toBe('""');
+  await expect(center.locator('.tile-letter')).toHaveCSS('visibility', 'hidden');
+  await expect(page.locator('#board .cursor')).toHaveCount(0);
+  await center.click();
+  await center.click();
+  await below.hover();
+  expect((await arrow(below)).transform).toMatch(/^matrix\(0, 1, -1, 0,/);
+  await expect(center).toBeFocused();
+  await page.keyboard.type('a');
+  await center.hover();
+  expect((await arrow(center)).content).toBe('none');
+  await drag(page, center, cell(page, 8, 8), 'center', false);
+  await expect(page.locator('.drag-tile')).toBeVisible();
+  expect((await arrow(cell(page, 8, 8))).content).toBe('none');
+  expect((await arrow(below)).content).toBe('none');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(page.locator('.square.pending')).toHaveCount(1);
+});
+
+for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arranged while the computer thinks, but cannot be played`, async ({page}) => {
+  await ready(page);
+  // Hold the search at its async boundary so the rack cannot change turns
+  // halfway through a gesture on a fast test machine.
+  await page.evaluate(async () => {
+    const {EngineClient} = await import('/wasmentry/engine-client.mjs');
+    const run = EngineClient.prototype.run;
+    EngineClient.prototype.run = async function (...args) {
+      window.searchHeld = true;
+      await new Promise(resolve => { window.releaseSearch = resolve; });
+      EngineClient.prototype.run = run;
+      return run.apply(this, args);
+    };
+  });
+  await page.locator('#new-game').click();
+  await page.locator(`[data-game-kind="${kind}"]`).click();
+  await page.locator('#new-game-position > summary').click();
+  await page.locator('#new-game-cgp').fill(`${Array(15).fill('15').join('/')} AEINRST/BCDFGHJ 0/0 0 -lex CSW24`);
+  await page.locator('.game-options > summary').click();
+  await page.selectOption('#game-time', '0');
+  await page.selectOption('#bot-analysis', 'kibitz');
+  if (kind === 'play') await page.selectOption('#human-side', '1');
+  else await page.locator('#watch-delay').fill('0');
+  await page.locator('#start-game').click();
+  await expect.poll(() => page.evaluate(() => window.searchHeld)).toBe(true);
+  const letters = kind === 'watch' ? 'AEINRST' : 'BCDFGHJ';
+  expect(await rackLetters(page)).toBe(letters);
+  await expect(page.locator('#play-move')).toBeDisabled();
+  await drag(page, rackTile(page, 0), cell(page, 7, 7));
+  expect(await rackLetters(page)).toBe(letters);
+  await expect(page.locator('#board .pending')).toHaveCount(0);
+  await drag(page, rackTile(page, 0), rackTile(page, 6), 'after');
+  expect(await rackLetters(page)).toBe(letters.slice(1) + letters[0]);
+  await page.locator('#shuffle-rack').click();
+  expect([...(await rackLetters(page))].sort().join('')).toBe(letters);
+  await page.locator('#sort-rack').click();
+  expect(await rackLetters(page)).toBe(letters);
+  await rackTile(page, 0).hover();
+  await expect(page.locator('#context-status')).not.toContainText('Alt');
+  await expect(page.locator('#context-status')).not.toContainText('place');
+  if (kind === 'play') await expect(page.locator('#opponent-rack')).toHaveValue('');
+  await page.locator('#new-game').click();
+  await expect(page.locator('#new-game-dialog')).toBeVisible();
+  await expect(page.locator('#session-result')).toHaveText('Paused');
+  await page.evaluate(() => window.releaseSearch());
+  await expect(page.locator('body')).not.toHaveClass(/busy/);
+  await expect(page.locator('#session-result')).toHaveText('Paused');
+  await expect(page.locator('#start-game')).toBeEnabled();
+  await page.locator('#cancel-new-game').click();
+  await expect(page.locator('#pause-game')).toHaveText('Resume game');
+  await expect(page.locator('#history-position option')).toHaveCount(1);
+  await expect(page.locator('#error')).toBeHidden();
+});
