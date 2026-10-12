@@ -70,6 +70,7 @@
 #include "move_gen.h"
 #include "peg.h"
 #include "play_chooser.h"
+#include "rack_draw.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -2888,6 +2889,25 @@ char *impl_add_moves(Config *config, ErrorStack *error_stack) {
   return phonies_str;
 }
 
+// A known starting rack must agree with the first recorded turn. Enforce the
+// same invariant as GCG import before either rack edits or commits can mutate
+// it.
+static bool initial_rack_matches(const Config *config, int player_index,
+                                 const Rack *rack, ErrorStack *errors) {
+  const Rack *initial = game_history_get_unplayed_initial_rack(
+      config->game_history, player_index,
+      game_history_get_num_played_events(config->game_history));
+  if (initial && !racks_are_equal(initial, rack)) {
+    error_stack_push(
+        errors, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
+        get_formatted_string("The first recorded rack for player %d "
+                             "conflicts with the starting CGP rack.",
+                             player_index + 1));
+    return false;
+  }
+  return true;
+}
+
 // Setting player rack
 
 void impl_set_rack_internal(Config *config, const char *rack_str,
@@ -2911,6 +2931,11 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
                                    ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
                                    &new_rack, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (!initial_rack_matches(config, player_on_turn_index, &new_rack,
+                            error_stack)) {
     return;
   }
 
@@ -5158,7 +5183,8 @@ char *impl_export(Config *config, ErrorStack *error_stack) {
                      string_duplicate("cannot export game without lexicon"));
     return empty_string();
   }
-  if (game_history_get_num_events(config->game_history) == 0) {
+  if (game_history_get_num_events(config->game_history) == 0 &&
+      !game_history_get_initial_cgp(config->game_history)) {
     error_stack_push(error_stack, ERROR_STATUS_EXPORT_NO_GAME_EVENTS,
                      string_duplicate("cannot export an empty game history"));
     return empty_string();
@@ -5286,14 +5312,15 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
       player_get_rack(game_get_player(game, 1 - player_on_turn_index));
   game_history_set_waiting_for_final_pass_or_challenge(
       game_history,
-      game_get_game_end_reason(game) == GAME_END_REASON_STANDARD &&
+      num_played_events > 0 &&
+          game_get_game_end_reason(game) == GAME_END_REASON_STANDARD &&
           game_event_get_type(
               game_history_get_event(game_history, num_played_events - 1)) ==
               GAME_EVENT_TILE_PLACEMENT_MOVE &&
           rack_is_empty(player_off_turn_rack) &&
           bag_is_empty(game_get_bag(game)));
 
-  if (num_played_events < num_events ||
+  if (num_events == 0 || num_played_events < num_events ||
       !game_reached_max_scoreless_turns(game) ||
       game_history_contains_end_rack_penalty_event(game_history)) {
     // We have either:
@@ -5337,6 +5364,10 @@ void config_game_play_events_internal(Config *config, ErrorStack *error_stack) {
         racks_to_draw[i] = game_event_get_const_rack(game_event);
         break;
       }
+    }
+    if (!racks_to_draw[i]) {
+      racks_to_draw[i] = game_history_get_unplayed_initial_rack(
+          game_history, player_index, num_events);
     }
     if (!racks_to_draw[i]) {
       error_stack_push(
@@ -5809,6 +5840,14 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
     error_stack_push(error_stack, ERROR_STATUS_COMMIT_GAME_OVER,
                      string_duplicate("cannot commit a move in a game that has "
                                       "already ended"));
+    return empty_string();
+  }
+
+  const int on_turn = game_get_player_on_turn_index(config->game);
+  if (!initial_rack_matches(
+          config, on_turn,
+          player_get_rack(game_get_player(config->game, on_turn)),
+          error_stack)) {
     return empty_string();
   }
 

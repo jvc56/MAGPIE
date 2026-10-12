@@ -30,18 +30,10 @@ void generate_moves_for_game_override_record_type(
     const MoveGenArgs *args, move_record_t move_record_type);
 void generate_moves_for_game(const MoveGenArgs *args);
 void draw_to_full_rack(const Game *game, int player_index);
-// Returns the number of letters drawn, or a DRAW_RACK_STRING_* code from
-// def/gameplay_defs.h.
-int draw_rack_string_from_bag(const Game *game, int player_index,
-                              const char *rack_string);
-bool draw_rack_from_bag(const Game *game, int player_index,
-                        const Rack *rack_to_draw);
 void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
                          const Rack *rack_to_draw);
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave);
 void return_rack_to_bag(const Game *game, int player_index);
-bool rack_is_drawable(const Game *game, int player_index,
-                      const Rack *rack_to_draw);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
 

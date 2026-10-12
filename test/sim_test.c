@@ -20,6 +20,7 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/rack_draw.h"
 #include "../src/impl/random_variable.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/game_string.h"
