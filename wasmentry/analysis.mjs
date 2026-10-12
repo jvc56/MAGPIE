@@ -583,6 +583,9 @@ let liveBoardFit = null;
 function fitGamePanels() {
   cancelAnimationFrame(panelFitFrame);
   panelFitFrame = requestAnimationFrame(() => {
+    // Validation feedback may arrive mid-gesture. Keep drop targets fixed
+    // until the pointer is released or the drag is canceled.
+    if (tileDrag?.active) return;
     const panel = document.querySelector(".position"), analysis = document.querySelector(".analysis");
     const narrow = innerWidth <= 1000;
     const analysisHeight = analysis.getBoundingClientRect().height;
@@ -2453,6 +2456,7 @@ function rackDrop(source, gap) {
   else renderPosition();
 }
 tileDrag = installTileDrag({
+  onFinish: fitGamePanels,
   board:$("board"), rack:$("rack-tiles"),
   sourceFor(target) {
     const rackTile = target.closest("#rack-tiles .rack-tile");

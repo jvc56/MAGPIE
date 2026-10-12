@@ -2,7 +2,7 @@ import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { formatHistoryPlay, historyPlayParts, parseCGP, SAMPLES } from "../analysis-model.mjs";
 
-test("history notation groups existing tiles and preserves blanks and special events", () => {
+test("history notation groups existing tiles and preserves blanks and special events", { tag: "@unit" }, () => {
   const position = parseCGP(SAMPLES.opening);
   position.board[7][4] = "A";
   expect(formatHistoryPlay(">p2: ABELNRW E7 N.RWAL +18 18", position)).toBe(
@@ -17,7 +17,7 @@ test("history notation groups existing tiles and preserves blanks and special ev
   expect(formatHistoryPlay(">p1: AE -- -24 0", position)).toBe("-- -24 0");
 });
 
-test("history identifies end-rack and time adjustments without grouping passes or challenges", () => {
+test("history identifies end-rack and time adjustments without grouping passes or challenges", { tag: "@unit" }, () => {
   const position = parseCGP(SAMPLES.opening);
   for (const line of [">p1: (I) +2 378", ">p1: I (I) -1 376", ">p1: (time) -20 358"]) {
     expect(historyPlayParts(line, position).adjustment).toBe(true);
@@ -288,6 +288,9 @@ test("board size stays stable through human and computer turn transitions", asyn
   await page.locator('.game-options > summary').click();
   await page.selectOption('#bot-analysis', 'kibitz');
   await page.locator('#new-game-form button.primary').click();
+  // Starting a game loads the rack asynchronously; measure turn transitions
+  // only after the initial human turn has rendered.
+  await expect(page.locator('#session-result')).toHaveText('Your turn');
   for (const width of [900,1440]) {
     await page.setViewportSize({width,height:844});
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));

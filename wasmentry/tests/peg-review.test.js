@@ -2,7 +2,7 @@ import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { mergePegRows, parsePegProgress } from "../peg-review.mjs";
 
-test("live PEG preserves baseline values and prunes only from authoritative stage membership", () => {
+test("live PEG preserves baseline values and prunes only from authoritative stage membership", { tag: "@unit" }, () => {
   const prior = [
     { move: "A1 CAT", win: 80, depth: "greedy" },
     { move: "B1 DOG", win: 70, depth: "greedy" },
@@ -112,7 +112,7 @@ test("PEG streams stages and candidates before completion and preserves them in 
   ).toBe(true);
 });
 
-test("completed full-depth PEG results precede unfinished shallower candidates", () => {
+test("completed full-depth PEG results precede unfinished shallower candidates", { tag: "@unit" }, () => {
   const progress = {
     stage: 5,
     depth: 40,

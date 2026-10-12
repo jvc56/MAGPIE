@@ -1,6 +1,6 @@
 // Pointer events give mouse, pen and touch the same transaction: do not mutate
 // the position until a valid drop. Cancellation needs no rollback.
-export function installTileDrag({board, rack, sourceFor, targetFor, onDrop, onTap}) {
+export function installTileDrag({board, rack, sourceFor, targetFor, onDrop, onTap, onFinish = () => {}}) {
   let drag = null, suppressClick = false, scrollFrame = 0;
   const caret = document.createElement("div");
   caret.className = "rack-drop-caret";
@@ -22,6 +22,7 @@ export function installTileDrag({board, rack, sourceFor, targetFor, onDrop, onTa
     previous?.source.element.classList.remove("drag-source");
     document.body.classList.remove("tile-dragging");
     if (previous?.capture.hasPointerCapture(previous.id)) previous.capture.releasePointerCapture(previous.id);
+    if (previous) onFinish();
     return previous;
   }
   function cancel() {
@@ -130,5 +131,5 @@ export function installTileDrag({board, rack, sourceFor, targetFor, onDrop, onTa
   window.addEventListener("blur", cancel);
   window.addEventListener("resize", cancel);
   document.addEventListener("visibilitychange", () => { if (document.hidden) cancel(); });
-  return {cancel};
+  return {cancel, get active() { return drag !== null; }};
 }

@@ -23,7 +23,7 @@ async function rows(page) {
   return page.locator('#results tbody tr:not(.endgame-details)').evaluateAll(rows => rows.map(row => ({move:row.querySelector('button').textContent, iters:Number(row.querySelector('[data-column=iterations]')?.textContent)})));
 }
 
-test('explicit candidate commands do not regenerate or silently add unselected plays', () => {
+test('explicit candidate commands do not regenerate or silently add unselected plays', { tag: "@unit" }, () => {
   const commands = analysisCommands(parseCGP(SAMPLES.opening), 'sim', {threads:2,seconds:1,plies:2,candidates:3,moves:['8H AT','pass'],playedMove:'8H RETAINS'});
   expect(commands).not.toContain('generate');
   expect(commands).toContain('addmoves 8H AT,pass');

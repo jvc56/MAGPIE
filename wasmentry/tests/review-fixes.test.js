@@ -7,7 +7,7 @@ async function ready(page) {
   await expect(page.locator('#start-game')).toBeEnabled({timeout:30000});
 }
 
-test('appended played endgames are unranked and per-second overtime does not buy another minute', () => {
+test('appended played endgames are unranked and per-second overtime does not buy another minute', { tag: "@unit" }, () => {
   const rows = parseResults('5K DA(WEN) 30 20 10\nplayed 13H (I)D 10 -3 -33', 'endgame');
   expect(rows.map(row => row.rank)).toEqual([1,null]);
   for (const remaining of [-1,-30]) expect(computerSearchPlan({time:180, remaining, overtime:'60', manageTime:true, seconds:10, penalty:'second'}, 20, 'sim').mode).toBe('kibitz');

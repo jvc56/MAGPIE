@@ -67,7 +67,7 @@ async function setupHarness(state = "activated") {
   };
 }
 
-test("an active worker without a controller reloads instead of timing out", async () => {
+test("an active worker without a controller reloads instead of timing out", { tag: "@unit" }, async () => {
   const harness = await setupHarness();
   try {
     expect(
@@ -88,7 +88,7 @@ test("an active worker without a controller reloads instead of timing out", asyn
   }
 });
 
-test("fresh installation waits for activation even without controllerchange", async () => {
+test("fresh installation waits for activation even without controllerchange", { tag: "@unit" }, async () => {
   const harness = await setupHarness("installing");
   try {
     const ready = harness.run();
@@ -153,7 +153,7 @@ test("plain static hosting starts the real engine and never requests WMP or RIT"
   await openSample(second);
 });
 
- test("blocked storage does not break isolated startup or trap recovery", async () => {
+ test("blocked storage does not break isolated startup or trap recovery", { tag: "@unit" }, async () => {
    const h=await setupHarness();
    h.context.sessionStorage={getItem(){throw Error("blocked")},setItem(){throw Error("blocked")},removeItem(){throw Error("blocked")}};
    h.context.history.replaceState=(_a,_b,url)=>{h.context.location.href=String(url)};

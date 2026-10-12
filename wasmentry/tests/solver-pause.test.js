@@ -2,7 +2,7 @@ import { openSample } from "./helpers/startup.js";
 import {test, expect} from '@playwright/test';
 import {analysisCommands, parseCGP, SAMPLES} from '../analysis-model.mjs';
 
-test('postmortem solvers are untimed while computer turns and sims retain budgets', () => {
+test('postmortem solvers are untimed while computer turns and sims retain budgets', { tag: "@unit" }, () => {
   for (const mode of ['peg', 'endgame']) {
     const flag = mode === 'peg' ? '-pegtlim' : '-etlim';
     const settings = {seconds:10, threads:2, plies:4, candidates:10};

@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 import { deviceBudget } from '../device-budget.mjs';
 import { analysisCommands, parseCGP, SAMPLES } from '../analysis-model.mjs';
 
-test('mobile hints choose bounded defaults without classifying narrow desktop windows', () => {
+test('mobile hints choose bounded defaults without classifying narrow desktop windows', { tag: "@unit" }, () => {
   expect(deviceBudget({userAgent:'Android', hardwareConcurrency:8, deviceMemory:4}))
     .toMatchObject({mobile:true, threads:2, maxThreads:4, ttMiB:16});
   expect(deviceBudget({userAgent:'iPhone', hardwareConcurrency:6}))
@@ -16,7 +16,7 @@ test('mobile hints choose bounded defaults without classifying narrow desktop wi
     .toMatchObject({mobile:false, threads:4, maxThreads:16, ttMiB:32});
 });
 
-test('search commands propagate both TT budgets and reject invalid values', () => {
+test('search commands propagate both TT budgets and reject invalid values', { tag: "@unit" }, () => {
   for (const mode of ['peg', 'endgame']) {
     for (const ttMiB of [16,32]) {
       const commands=analysisCommands(parseCGP(SAMPLES[mode]),mode,{ttMiB,threads:4,seconds:1,plies:4,candidates:10});
