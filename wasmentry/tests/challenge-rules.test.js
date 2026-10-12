@@ -1,6 +1,9 @@
 import {test, expect} from '@playwright/test';
 test('challenge settings default to five per play; failed live challenge awards bonus', async ({page}) => {
   await page.goto('/wasmentry/'); await expect(page.locator('#start-game')).toBeEnabled({timeout:30000});
+  // A random opening rack can make the bot exchange, which cannot be challenged.
+  await page.locator('#new-game-position > summary').click();
+  await page.locator('#new-game-cgp').fill(`${Array(15).fill('15').join('/')} AEINRST/BCDFGHJ 0/0 0 -lex CSW24`);
   await page.locator('.game-options > summary').click();
   await expect(page.locator('#challenge-rule option')).toHaveText(['VOID','PENALTY','SINGLE','DOUBLE']);
   await page.locator('#challenge-rule').selectOption('penalty');
