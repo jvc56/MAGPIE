@@ -1704,6 +1704,7 @@ function recallTiles(render = true) {
   cancelDraftCheck();
   draftTiles = [];
   rackChoice = null;
+  error("");
   $("move-feedback").textContent = "";
   if (render) renderPosition();
 }
@@ -1712,8 +1713,10 @@ function cancelDraftCheck() {
   previewGeneration++;
 }
 function moveErrorMessage(text) {
-  return text.replace(/(\bplay:\s*)([A-O]\d+ [A-Za-z.]+|\d+[A-O] [A-Za-z.]+)/g,
+  const formatted = text.replace(/(\bplay:\s*)([A-O]\d+ [A-Za-z.]+|\d+[A-O] [A-Za-z.]+)/g,
     (_, prefix, play) => prefix + formatBoardPlay(play, position));
+  const phony = formatted.trim().match(/expected valid play but detected at least one phony for play:\s*(.+)$/i);
+  return phony ? `Play ${phony[1]} contains at least one phony word` : formatted;
 }
 function scheduleDraftCheck() {
   cancelDraftCheck();

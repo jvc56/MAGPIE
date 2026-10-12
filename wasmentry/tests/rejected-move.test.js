@@ -21,8 +21,8 @@ for (const submit of ['Enter', 'button']) {
       await expect(page.locator('.square.pending')).toHaveCount(7);
       if (submit === 'Enter') await page.keyboard.press('Enter');
       else await page.locator('#play-move').click();
-      await expect(page.locator('#error')).toContainText('phony');
-      if (col === 8) await expect(page.locator('#error')).toContainText('8H (A)TSRAINE');
+      const phonyMessage = `Play 8H ${col === 8 ? '(A)' : ''}TSRAINE contains at least one phony word`;
+      await expect(page.locator('#error')).toHaveText(phonyMessage);
       await expect(page.locator('#play-move')).toBeEnabled();
       await page.keyboard.press('Backspace');
       await expect(page.locator('.square.pending')).toHaveCount(6);
@@ -31,9 +31,14 @@ for (const submit of ['Enter', 'button']) {
       await expect(page.locator('#history-position option')).toHaveCount(1);
       await page.keyboard.type('e');
       await expect(page.locator('.square.pending')).toHaveCount(7);
-      await page.keyboard.press('Escape');
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#error')).toHaveText(phonyMessage);
+      if (submit === 'Enter') await page.keyboard.press('Escape');
+      else await page.locator('#recall-tiles').click();
       await expect(page.locator('.square.pending')).toHaveCount(0);
       await expect(page.locator('#rack-tiles .rack-tile')).toHaveCount(7);
+      await expect(page.locator('#error')).toBeHidden();
+      await expect(page.locator('#move-feedback')).toBeEmpty();
     });
   }
 }
