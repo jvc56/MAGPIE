@@ -385,6 +385,9 @@ main {
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 12h16M12 4l8 8-8 8' fill='none' stroke='%23111' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
   pointer-events: none;
 }
+.square:is(.tw, .dw, .tl, .dl)::after {
+  background-color: currentColor;
+}
 .square.cursor:not(.played)::after {
   content: "";
 }
