@@ -19,7 +19,6 @@ import {
   restorePosition,
   inventory,
   parseResults,
-  formatHistoryPlay,
   formatBoardPlay,
   historyPlayParts,
   previewMove,
@@ -1624,22 +1623,13 @@ function privateHistoryLine(line) {
 }
 function renderHistoryOptions() {
   if (!recordedGame) return;
-  const game = recordedGame;
-  const events = game.gcg
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith(">"));
   $("history-position").replaceChildren(
     new Option(/^#cgp /m.test(recordedGame.gcg) ? "Starting position" : "Start of game", "0"),
-    ...events.map((line, index) => {
-      const colon = line.indexOf(":");
-      const player = line.slice(1, colon);
-      const play = displayMove(formatHistoryPlay(
-        privateHistoryLine(line), restorePosition(game.positions[index]),
-      ));
-      return new Option(
-        `${index + 1}. ${play} · ${player}`,
-        String(index + 1),
-      );
+    ...historyEntries().map(({index, nick, turn, parts}) => {
+      const play = displayMove(`${parts.move} ${parts.score} ${parts.cumulative}`.trim());
+      const option = new Option(`${turn}. ${play} · ${nick}`, String(index + 1));
+      option.dataset.turn = turn;
+      return option;
     }),
   );
   $("history-position").value = String(historyIndex);
@@ -2887,10 +2877,23 @@ function gameEvents() {
     []
   );
 }
+// Both history views share the same paired-turn grouping. Score adjustments
+// belong to the preceding turn, even when they name the other player.
+function historyEntries() {
+  const secondPlayer = recordedGame.gcg.match(/^#player2\s+(\S+)/m)?.[1];
+  let turn = 0, previousPlayer = 1;
+  return gameEvents().map((line, index) => {
+    const nick = line.slice(1, line.indexOf(":"));
+    const player = nick === secondPlayer ? 1 : 0;
+    const parts = historyPlayParts(privateHistoryLine(line), restorePosition(recordedGame.positions[index]));
+    if (!turn || (!parts.adjustment && player <= previousPlayer)) turn++;
+    if (!parts.adjustment) previousPlayer = player;
+    return {index, nick, player, turn, parts};
+  });
+}
 function renderReviewTable() {
   if (!recordedGame) return;
   const hidden = $("hide-spoilers").checked;
-  const events = gameEvents();
   const header = document.createElement("tr");
   for (const name of ["Turn", ...recordedGame.players]) {
     const cell = document.createElement("th");
@@ -2899,13 +2902,9 @@ function renderReviewTable() {
   }
   $("history-table").tHead.replaceChildren(header);
   const rows = [];
-  let cells, previousPlayer = 1;
-  for (const [index, line] of events.entries()) {
-    const parsed = line.match(/^>([^:]+):\s+(.*)$/);
-    const player =
-      parsed[1] === recordedGame.gcg.match(/^#player2\s+(\S+)/m)?.[1] ? 1 : 0;
-    const parts = historyPlayParts(privateHistoryLine(line), restorePosition(recordedGame.positions[index]));
-    if (!cells || (!parts.adjustment && player <= previousPlayer)) {
+  let cells;
+  for (const {index, player, turn, parts} of historyEntries()) {
+    if (turn > rows.length) {
       const row = document.createElement("tr");
       const number = document.createElement("td");
       number.textContent = String(rows.length + 1);
@@ -2914,7 +2913,6 @@ function renderReviewTable() {
       row.append(...cells);
       rows.push(row);
     }
-    if (!parts.adjustment) previousPlayer = player;
     const cell = cells[player];
     if (historyIndex === index) cell.classList.add("current");
     const button = document.createElement("button");
@@ -2954,7 +2952,7 @@ function renderReviewTable() {
       option.dataset.fullLabel = option.textContent;
     option.textContent =
       hidden && index > historyIndex
-        ? `${index}. •••`
+        ? `${option.dataset.turn}. •••`
         : option.dataset.fullLabel;
   }
   $("history-first").disabled = busy || historyIndex === 0;

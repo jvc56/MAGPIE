@@ -44,7 +44,7 @@ test("history pairs players and shows playthrough notation in rows and navigatio
   await page.setViewportSize({ width: 1936, height: 890 });
   await ready(page);
   const gcg =
-    "#character-encoding UTF-8\n#lexicon CSW24\n#player1 p1 Player 1\n#player2 p2 Player 2\n>p1: AEFAULT 8D FAULT +24 24\n>p2: ABELNRW E7 N.RWAL +18 18\n";
+    "#character-encoding UTF-8\n#lexicon CSW24\n#player1 p1 Player 1\n#player2 p2 Player 2\n>p1: AEFAULT 8D FAULT +24 24\n>p2: ABELNRW E7 N.RWAL +18 18\n>p1: AEINRST - +0 24\n";
   await page
     .locator("#gcg-file")
     .setInputFiles({
@@ -52,7 +52,10 @@ test("history pairs players and shows playthrough notation in rows and navigatio
       mimeType: "text/plain",
       buffer: Buffer.from(gcg),
     });
-  await expect(page.locator("#history-table tbody tr")).toHaveCount(1);
+  await expect(page.locator("#history-table tbody tr")).toHaveCount(2);
+  await expect(page.locator('#history-position option[value="1"]')).toHaveText('1. 8D FAULT +24 24 · p1');
+  await expect(page.locator('#history-position option[value="2"]')).toHaveText('1. E7 N(A)RWAL +18 18 · p2');
+  await expect(page.locator('#history-position option[value="3"]')).toHaveText('2. - +0 24 · p1');
   await page.selectOption("#history-position", "2");
   await expect(page.locator("#exchange-move + #challenge-move")).toHaveText("Challenge E7 N(A)RWAL");
   await expect(page.locator("#challenge-move")).toBeEnabled();
@@ -68,6 +71,8 @@ test("history pairs players and shows playthrough notation in rows and navigatio
   await expect(page.locator("#challenge-move")).toHaveText("Challenge 8D FAULT");
   await page.locator("#hide-spoilers").check();
   await expect(cells.nth(2)).toHaveText("•••");
+  await expect(page.locator('#history-position option[value="2"]')).toHaveText('1. •••');
+  await expect(page.locator('#history-position option[value="3"]')).toHaveText('2. •••');
   await page.locator("#hide-spoilers").uncheck();
   await page.locator("#history-first").click();
   await expect(page.locator("#challenge-move")).toBeHidden();
@@ -129,6 +134,13 @@ test("final adjustments stay in the last turn and scores align in both player co
   await expect(finalRow.locator(`button[data-event-index="${events - 1}"] .history-cumulative`)).toHaveText('358');
   await expect(finalRow.locator('button')).toHaveCount(4);
   const count = await rows.count();
+  for (const row of await rows.all()) {
+    const turn = await row.locator('td').first().textContent();
+    for (const event of await row.locator('[data-event-index]').all()) {
+      const index = Number(await event.getAttribute('data-event-index')) + 1;
+      await expect(page.locator(`#history-position option[value="${index}"]`)).toHaveText(new RegExp(`^${turn}\\. `));
+    }
+  }
   for (const width of [1440, 390]) {
     await page.setViewportSize({width, height:900});
     const alignment = await rows.first().locator('.history-score, .history-cumulative').evaluateAll(cells =>
