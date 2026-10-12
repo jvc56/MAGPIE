@@ -290,6 +290,15 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
   else await page.locator('#watch-delay').fill('0');
   await page.locator('#start-game').click();
   await expect.poll(() => page.evaluate(() => window.searchHeld)).toBe(true);
+  await expect(page.locator('#session-result')).toHaveClass('thinking');
+  await expect(page.locator('#session-result')).toContainText('is thinking…');
+  await expect(page.locator('#name-one')).toHaveCSS('font-weight', '700');
+  await expect(page.locator('#clock-one')).toHaveCSS('font-weight', '700');
+  await expect(page.locator('#name-two')).toHaveCSS('font-weight', '400');
+  await expect(page.locator('#clock-two')).toHaveCSS('font-weight', '400');
+  await expect(page.locator('#points-one')).toHaveCSS('font-weight', '400');
+  await expect(page.locator('#points-two')).toHaveCSS('font-weight', '400');
+  await expect(page.locator('.player-scoreboard')).not.toContainText('On turn');
   const letters = kind === 'watch' ? 'AEINRST' : 'BCDFGHJ';
   expect(await rackLetters(page)).toBe(letters);
   await expect(page.locator('#play-move')).toBeDisabled();
@@ -308,6 +317,7 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
   if (kind === 'play') await expect(page.locator('#opponent-rack')).toHaveValue('');
   await page.locator('#new-game').click();
   await expect(page.locator('#new-game-dialog')).toBeVisible();
+  await expect(page.locator('#session-result')).not.toHaveClass('thinking');
   await expect(page.locator('#session-result')).toHaveText('Paused');
   await page.evaluate(() => window.releaseSearch());
   await expect(page.locator('body')).not.toHaveClass(/busy/);

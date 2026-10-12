@@ -2427,6 +2427,7 @@ function renderSession() {
     !live || session.kind === "watch" || $("show-live-analysis").checked,
   );
   $("play-session").hidden = !session;
+  $("session-result").classList.toggle("thinking", !!(live && botRunning && !session.paused));
   $("session-controls").hidden = !live;
   $("session-result").hidden = !!session?.finished &&
     $("hide-spoilers").checked && !terminalPosition();
@@ -2436,15 +2437,10 @@ function renderSession() {
       recordedGame?.players[index] || `Player ${index + 1}`;
     $("points-" + suffix).textContent =
       position.scores[index === position.onTurn ? 0 : 1];
-    $("turn-" + suffix).textContent =
-      index === position.onTurn &&
-      !terminalPosition() &&
-      !session?.finished
-        ? "On turn"
-        : "";
     $("player-" + suffix).classList.toggle(
       "on-turn",
-      index === position.onTurn,
+      !!recordedGame && index === position.onTurn && !terminalPosition() &&
+        !(session?.finished && historyIndex === recordedGame.positions.length - 1),
     );
     $("clock-" + suffix).hidden = !session;
   }
