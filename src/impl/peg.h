@@ -105,6 +105,10 @@ typedef void (*PegOnScenarioDone)(int stage_idx, int cand_rank,
 
 // Thread-safe, caller-owned live view of the in-progress ranking (see below).
 typedef struct PegPoll PegPoll;
+typedef struct PegCheckpoint PegCheckpoint;
+
+PegCheckpoint *peg_checkpoint_create(void);
+void peg_checkpoint_destroy(PegCheckpoint *checkpoint);
 
 typedef struct PegArgs {
   // Required: PEG position to analyze. Must have bag size in [PEG_MIN_BAG,
@@ -275,6 +279,11 @@ typedef struct PegArgs {
   // table for the whole run, so concurrent games each solving a pre-endgame do
   // not each claim a share of RAM. NULL = allocate per worker (default).
   TranspositionTable *shared_endgame_tt;
+  // Optional caller-owned session checkpoint. Reuses complete candidate
+  // evaluations only when position and search settings match. Time budget and
+  // thread count may change. NULL keeps the non-interactive path unchanged.
+  PegCheckpoint *checkpoint;
+  bool resume;
 } PegArgs;
 
 // Fills every PegArgs field from an explicit argument, so that adding a field
@@ -299,7 +308,7 @@ static inline void peg_args_fill(
     const bool include_per_scenario, PegOnStageStart on_stage_start,
     PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
     void *user_data, PegPoll *poll, TranspositionTable *shared_endgame_tt,
-    PegArgs *peg_args) {
+    PegCheckpoint *checkpoint, bool resume, PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
@@ -334,6 +343,8 @@ static inline void peg_args_fill(
   peg_args->user_data = user_data;
   peg_args->poll = poll;
   peg_args->shared_endgame_tt = shared_endgame_tt;
+  peg_args->checkpoint = checkpoint;
+  peg_args->resume = resume;
 }
 
 // ----- Stage progress snapshot ------------------------------------------
@@ -380,6 +391,7 @@ typedef struct PegResult {
   // scoring only some of its candidates (a partial tier), so it was reached but
   // not completed. False when every stage shown ran to completion.
   bool last_stage_partial;
+  bool can_resume;
 
   // Wall-clock timer: started at the top of peg_solve (is_running == true
   // while solving, false once done). ctimer_elapsed_seconds reads the live
@@ -430,7 +442,11 @@ typedef struct PegPerScenario {
   char remaining[16]; // bag-remaining letters
   int64_t weight;
   int32_t mover_total;
+  // Endgame continuation for bag emptiers; NULL for non-emptiers/greedy.
+  char *pv;
 } PegPerScenario;
+
+void peg_scenario_rows_destroy(PegPerScenario *rows, int count);
 
 // Per-candidate per-ordering outcomes (see PegResult.cand_outcomes). rows is a
 // PegPerScenario list for the single candidate `move`, captured at `fidelity`
@@ -469,6 +485,7 @@ typedef struct PegPollSnapshot {
   int stage;          // current stage (0 = greedy seed); -1 before stage 0
   int fidelity_plies; // current stage's fidelity
   int field_size;     // candidates being evaluated in the current stage
+  bool can_resume;    // stopped with reusable candidate evaluations
   bool done;          // solve finished
   uint64_t version;   // bumped on every update (skip redundant redraws)
   int n_entries;      // populated leaderboard rows below

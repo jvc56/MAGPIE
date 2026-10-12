@@ -6,6 +6,7 @@ let initialized = false;
 let running = false;
 let stopping = false;
 let activeCommand = "";
+let pegReadable = false;
 let wmpAbort;
 let requestId;
 let fatal = false;
@@ -100,6 +101,7 @@ function readString(fn) {
       output: wrap("wasm_get_output", "number"),
       error: wrap("wasm_get_error", "number"),
       status: wrap("wasm_get_status", "number"),
+      pegOutcomes: wrap("wasm_get_peg_outcomes", "number", ["number"]),
       thread: wrap("wasm_get_thread_status", "number"),
       setSearchPaused: wrap("wasm_set_search_paused", "number", ["number"]),
       stop: wrap("wasm_stop_command", null),
@@ -123,6 +125,7 @@ async function run(commands) {
       checkEngine();
       if (stopping) break;
       activeCommand = command;
+      if (/^peg(?: |$)/.test(command)) pegReadable = false;
       send("command_started", { command });
       const ptr = Module.stringToNewUTF8(command);
       let result;
@@ -142,6 +145,7 @@ async function run(commands) {
         if (stopping) api.stop();
         if (++polls % 5 === 0 && api.thread() === 1) {
           const text = readString(api.status);
+          if (text?.includes("peginfo ")) pegReadable = true;
           if (text && text !== previousStatus) {
             send("status", { text, command });
             previousStatus = text;
@@ -153,6 +157,7 @@ async function run(commands) {
       // wasm_get_output joins the worker, including after USER_INTERRUPT.
       // Keep the batch locked until that join completes.
       const text = readString(api.output);
+      if (text?.includes("peginfo ")) pegReadable = true;
       const error = readString(api.error);
       if (error.trim()) throw new Error(error);
       if (text.trim()) send("output", { text, command });
@@ -166,8 +171,8 @@ async function run(commands) {
 
 onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
   if (fatal) return;
-  const control = type === "stop" || type === "search_pause";
-  if (control && incomingId !== requestId) return;
+  const control = type === "stop" || type === "search_pause" || type === "peg_outcomes";
+  if (control && running && incomingId !== requestId) return;
   if (!running && !control) requestId = incomingId;
   try {
     if (!api) throw new Error("The engine is still loading.");
@@ -278,6 +283,17 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
       case "run":
         await run(data.commands);
         break;
+      case "peg_outcomes": {
+        const readable = pegReadable && (!running || /^peg(?: |$)/.test(activeCommand));
+        const name = Module.stringToNewUTF8(data.move);
+        try {
+          const outcomes = readable ? JSON.parse(readString(() => api.pegOutcomes(name)) || "null") : null;
+          self.postMessage({type:"peg_outcomes", move:data.move, key:data.key, sessionId:data.sessionId, outcomes});
+        } finally {
+          Module._free(name);
+        }
+        break;
+      }
       case "search_pause": {
         const accepted = running && !stopping && /^(peg|endgame)(?: |$)/.test(activeCommand)
           && !!api.setSearchPaused(data.paused ? 1 : 0);
@@ -294,6 +310,7 @@ onmessage = async ({ data: { type, data = {}, requestId: incomingId } }) => {
         }
         break;
       case "destroy":
+        pegReadable = false;
         api.destroy();
         initialized = false;
         cachedFiles.clear();

@@ -405,6 +405,9 @@ struct Config {
   GameStringOptions *game_string_options;
   GetGCGResult gcg_result;
   PegResult peg_result;
+  PegCheckpoint *peg_checkpoint;
+  Board *peg_outcomes_board;
+  LetterDistribution *peg_outcomes_ld;
   ParsedArg *pargs[NUMBER_OF_ARG_TOKENS];
   arg_token_t exec_parg_token;
   exec_mode_t exec_mode;
@@ -4581,7 +4584,8 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
       /*on_scenario_done=*/NULL, /*user_data=*/NULL, /*poll=*/NULL,
-      /*shared_endgame_tt=*/NULL, peg_args);
+      /*shared_endgame_tt=*/NULL, /*checkpoint=*/NULL, /*resume=*/false,
+      peg_args);
   peg_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
 }
 
@@ -4691,6 +4695,17 @@ void config_peg(Config *config, ErrorStack *error_stack) {
   // Fresh poll for this solve; destroy the previous one if it exists.
   peg_poll_destroy(config->peg_poll);
   config->peg_poll = peg_poll_create();
+  board_destroy(config->peg_outcomes_board);
+  ld_destroy(config->peg_outcomes_ld);
+  config->peg_outcomes_board = NULL;
+  config->peg_outcomes_ld = NULL;
+  if (config->peg_json) {
+    config->peg_outcomes_board = board_duplicate(game_get_board(config->game));
+    config->peg_outcomes_ld = malloc_or_die(sizeof(*config->peg_outcomes_ld));
+    *config->peg_outcomes_ld = *game_get_ld(config->game);
+    config->peg_outcomes_ld->name =
+        string_duplicate(ld_get_name(game_get_ld(config->game)));
+  }
   PegArgs peg_args;
   config_fill_peg_args(config, &peg_args);
   peg_args.poll = config->peg_poll;
@@ -4705,7 +4720,15 @@ void config_peg(Config *config, ErrorStack *error_stack) {
   MoveList *only_ml = NULL;
   const Move **only_moves = NULL;
   const char *peg_only_str = config_get_parg_value(config, ARG_TOKEN_PEG, 0);
-  if (peg_only_str && !is_string_empty_or_whitespace(peg_only_str) &&
+  const bool resume = peg_only_str && strings_equal(peg_only_str, "resume");
+  if (config->peg_json && config->peg_show_outcomes) {
+    if (!config->peg_checkpoint) {
+      config->peg_checkpoint = peg_checkpoint_create();
+    }
+    peg_args.checkpoint = config->peg_checkpoint;
+    peg_args.resume = resume;
+  }
+  if (!resume && peg_only_str && !is_string_empty_or_whitespace(peg_only_str) &&
       !strings_equal(peg_only_str, "-")) {
     if (strings_iequal(peg_only_str, "empty")) {
       only_ml = config_generate_peg_bag_emptying_moves(
@@ -4803,26 +4826,28 @@ static char *config_peg_display_table(const Config *config, PegPoll *poll) {
   const int width = config->peg_out_width;
   const int lines = config->peg_out_lines;
   bool truncated = false;
-  char *display = peg_result_get_string(&config->peg_result, config->game,
-                                        config->peg_show_outcomes, poll, width,
-                                        lines, /*trunc_note=*/NULL, &truncated);
+  char *display = peg_result_get_string(
+      &config->peg_result, config->game,
+      config->peg_show_outcomes && !config->peg_json, poll, width, lines,
+      /*trunc_note=*/NULL, &truncated);
   if (!truncated) {
     return display;
   }
   free(display);
-  char *full = peg_result_get_string(&config->peg_result, config->game,
-                                     config->peg_show_outcomes, poll, width,
-                                     /*out_max_lines=*/0, NULL, NULL);
+  char *full = peg_result_get_string(
+      &config->peg_result, config->game,
+      config->peg_show_outcomes && !config->peg_json, poll, width,
+      /*out_max_lines=*/0, NULL, NULL);
   char *path = config_write_peg_chart_file(full);
   free(full);
   char *note =
       path != NULL
           ? get_formatted_string("untruncated chart written to: %s", path)
           : NULL;
-  char *out =
-      peg_result_get_string(&config->peg_result, config->game,
-                            config->peg_show_outcomes, poll, width, lines, note,
-                            /*out_truncated=*/NULL);
+  char *out = peg_result_get_string(
+      &config->peg_result, config->game,
+      config->peg_show_outcomes && !config->peg_json, poll, width, lines, note,
+      /*out_truncated=*/NULL);
   free(note);
   free(path);
   return out;
@@ -4838,6 +4863,14 @@ static char *config_peg_display(const Config *config, PegPoll *poll) {
   free(json);
   free(table);
   return output;
+}
+
+char *config_get_peg_outcomes(Config *config, const char *move) {
+  return config->peg_outcomes_board
+             ? peg_poll_outcomes_json(config->peg_poll,
+                                      config->peg_outcomes_board,
+                                      config->peg_outcomes_ld, move)
+             : string_duplicate("null");
 }
 
 char *status_peg(Config *config) {
@@ -13696,6 +13729,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_small_plays = false;
   config->human_readable = true;
   config->peg_json = false;
+  config->peg_checkpoint = NULL;
+  config->peg_outcomes_board = NULL;
+  config->peg_outcomes_ld = NULL;
   config->show_mistakes = false;
   config->sim_with_inference = true;
   config->pat_label_plies = 1;
@@ -13793,6 +13829,9 @@ void config_destroy(Config *config) {
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);
   endgame_results_destroy(config->endgame_results);
+  peg_checkpoint_destroy(config->peg_checkpoint);
+  board_destroy(config->peg_outcomes_board);
+  ld_destroy(config->peg_outcomes_ld);
   peg_result_destroy(&config->peg_result);
   peg_poll_destroy(config->peg_poll);
   free(config->peg_noprune_str);

@@ -1414,7 +1414,8 @@ char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game) {
         3);
     string_builder_add_char(sb, '}');
   }
-  string_builder_add_string(sb, "],\"moves\":[");
+  string_builder_add_formatted_string(sb, "],\"canResume\":%s,\"moves\":[",
+                                      snapshot->can_resume ? "true" : "false");
   for (int entry_idx = 0; entry_idx < snapshot->n_stage_moves; entry_idx++) {
     if (entry_idx > 0) {
       string_builder_add_string(sb, ",");
@@ -1448,4 +1449,43 @@ char *peg_poll_get_json(PegPoll *poll, const Game *game) {
   PegPollSnapshot snapshot = {0};
   peg_poll_read(poll, &snapshot);
   return peg_snapshot_get_json(&snapshot, game);
+}
+
+char *peg_poll_outcomes_json(PegPoll *poll, const Board *board,
+                             const LetterDistribution *ld,
+                             const char *move_text) {
+  PegCandOutcomes *outcomes = NULL;
+  int count = 0;
+  peg_poll_copy_outcomes(poll, &outcomes, &count);
+  StringBuilder *json = string_builder_create();
+  string_builder_add_string(json, "null");
+  for (int index = 0; index < count; index++) {
+    const PegCandOutcomes *one = &outcomes[index];
+    StringBuilder *name = string_builder_create();
+    string_builder_add_move(name, board, &one->move, ld, false);
+    const bool matches = strings_equal(string_builder_peek(name), move_text);
+    string_builder_destroy(name);
+    if (!matches) {
+      continue;
+    }
+    string_builder_clear(json);
+    string_builder_add_formatted_string(json, "{\"depth\":%d,\"rows\":[",
+                                        one->fidelity);
+    for (int row_idx = 0; row_idx < one->n_rows; row_idx++) {
+      const PegPerScenario *row = &one->rows[row_idx];
+      string_builder_add_string(json, row_idx ? ",{\"drawn\":" : "{\"drawn\":");
+      string_builder_add_json_string(json, row->drawn);
+      string_builder_add_string(json, ",\"remaining\":");
+      string_builder_add_json_string(json, row->remaining);
+      string_builder_add_formatted_string(
+          json, ",\"weight\":%" PRId64 ",\"margin\":%d,\"pv\":", row->weight,
+          row->mover_total);
+      string_builder_add_json_string(json, row->pv ? row->pv : "");
+      string_builder_add_char(json, '}');
+    }
+    string_builder_add_string(json, "]}");
+    break;
+  }
+  peg_cand_outcomes_destroy_array(outcomes, count);
+  return string_builder_dump_and_destroy(json, NULL);
 }

@@ -169,6 +169,10 @@ export class EngineClient extends EventTarget {
   destroy() {
     return this.request("destroy", {}, "destroyed");
   }
+  pegOutcomes(move, key, sessionId) {
+    if (this.fatalError) return;
+    this.worker.postMessage({type:"peg_outcomes", data:{move, key, sessionId}, requestId:this.pending?.id});
+  }
   setSearchPaused(paused) {
     if (this.fatalError) return;
     this.worker.postMessage({ type:"search_pause", data:{paused}, requestId:this.pending?.id });

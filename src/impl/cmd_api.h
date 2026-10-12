@@ -107,6 +107,11 @@ char *magpie_get_and_clear_error(Magpie *mp);
 
 // Returns the status of the currently executing or most recently finished
 // command; returns an empty string if no command has been loaded.
+// JSON details for one displayed PEG move, or "null" if unavailable. Caller
+// frees. Query while idle or after PEG has begun publishing status; do not
+// race command initialization or engine destruction.
+char *magpie_get_peg_outcomes(Magpie *mp, const char *move);
+
 char *magpie_get_last_command_status_message(Magpie *mp);
 
 char *magpie_get_last_command_output(const Magpie *mp);

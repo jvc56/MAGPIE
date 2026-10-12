@@ -357,7 +357,8 @@ static const Move *autoplay_solver_solve_peg(
       /*n_only_moves=*/0, /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
       /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL, /*user_data=*/NULL,
-      /*poll=*/NULL, shared_tt, &peg_args);
+      /*poll=*/NULL, shared_tt, /*checkpoint=*/NULL, /*resume=*/false,
+      &peg_args);
   PegResult result = {0};
   peg_solve(&peg_args, &result, error_stack);
   thread_control_destroy(thread_control);
