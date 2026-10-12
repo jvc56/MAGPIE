@@ -478,22 +478,62 @@ test('passing requires confirmation and Cancel or Escape preserve tentative tile
 });
 
 
+test('single clicks continue tile-first and board-first entry, including blanks', async ({page}) => {
+  await ready(page, 'AT?');
+  await rackTile(page, 0).click();
+  await expect(page.locator('#board .pending')).toHaveCount(0);
+  await cell(page, 7, 7).click();
+  await expect(cell(page, 7, 7).locator('.tile-letter')).toHaveText('A');
+  await rackTile(page, 0).click();
+  await expect(cell(page, 7, 8).locator('.tile-letter')).toHaveText('T');
+  await rackTile(page, 0).click();
+  await expect(page.locator('#blank-dialog')).toBeVisible();
+  await page.getByRole('button', {name:'Blank as E',exact:true}).click();
+  await expect(cell(page, 7, 9)).toHaveClass(/blank/);
+  await expect(cell(page, 7, 10)).toHaveClass(/cursor/);
+  await page.locator('#recall-tiles').click();
+  await cell(page, 5, 5).click();
+  await rackTile(page, 0).click();
+  await rackTile(page, 0).click();
+  await expect(cell(page, 5, 6).locator('.tile-letter')).toHaveText('T');
+  await expect(cell(page, 5, 7)).toHaveClass(/cursor/);
+});
+
+test('two dragged tiles infer direction and continuation skips already placed tiles', async ({page}) => {
+  await ready(page, 'ATE');
+  // Place the lower tile first, then fill above it. The cursor must skip it.
+  await drag(page, rackTile(page, 1), cell(page, 8, 7));
+  await drag(page, rackTile(page, 0), cell(page, 7, 7));
+  await expect(page.locator('#board')).toHaveAttribute('data-direction', 'down');
+  await expect(cell(page, 9, 7)).toHaveClass(/cursor/);
+  await rackTile(page, 0).click();
+  await expect(cell(page, 9, 7).locator('.tile-letter')).toHaveText('E');
+  await expect(cell(page, 10, 7)).toHaveClass(/cursor/);
+  await expect(page.locator('#board .pending')).toHaveCount(3);
+  await page.locator('#recall-tiles').click();
+  await drag(page, rackTile(page, 0), cell(page, 7, 7));
+  await drag(page, rackTile(page, 0), cell(page, 7, 8));
+  await expect(page.locator('#board')).toHaveAttribute('data-direction', 'right');
+  await rackTile(page, 0).click();
+  await expect(cell(page, 7, 9).locator('.tile-letter')).toHaveText('E');
+});
+
 test.describe('mobile board entry', () => {
   test.use({hasTouch:true});
 
-  test('double-tap requires a chosen start and advances through letters and a blank', async ({page}) => {
+  test('single tap requires a chosen start and advances through letters and a blank', async ({page}) => {
     await ready(page, 'AT?');
     await page.setViewportSize({width:390, height:844});
-    const tapTwice = async tile => { await tile.tap(); await tile.tap(); };
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
+    await rackTile(page, 0).tap();
     await expect(page.locator('#board .pending')).toHaveCount(0);
     await cell(page, 7, 7).tap();
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(cell(page, 7, 7).locator('.tile-letter')).toHaveText('A');
     await expect(cell(page, 7, 8)).toHaveClass(/cursor/);
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(cell(page, 7, 8).locator('.tile-letter')).toHaveText('T');
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(page.locator('#blank-dialog')).toBeVisible();
     await page.getByRole('button', {name:'Blank as E',exact:true}).tap();
     await expect(cell(page, 7, 9)).toHaveClass(/blank/);
@@ -501,10 +541,10 @@ test.describe('mobile board entry', () => {
     expect(await rackLetters(page)).toBe('');
     await page.locator('#recall-tiles').tap();
     await cell(page, 14, 14).tap(); await cell(page, 14, 14).tap();
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(cell(page, 14, 14)).toHaveClass(/pending/);
     await expect(page.locator('#board .edge-cursor')).toBeVisible();
-    await tapTwice(rackTile(page, 0));
+    await rackTile(page, 0).tap();
     await expect(page.locator('#board .pending')).toHaveCount(1);
     expect(await rackLetters(page)).toBe('T?');
   });
@@ -541,7 +581,7 @@ test.describe('mobile board entry', () => {
       await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBeGreaterThan(beforeScroll + 20);
       await cdp.detach();
     }
-    await rackTile(page, 0).tap(); await rackTile(page, 0).tap();
+    await rackTile(page, 0).tap();
     await expect(cell(page, 7, 7)).toHaveClass(/pending/);
     await page.screenshot({path:test.info().outputPath('mobile-zoom.png')});
     expect(await page.locator('#rack-tiles').evaluate(el => el.closest('#board-viewport') === null)).toBe(true);

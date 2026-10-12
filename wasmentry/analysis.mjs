@@ -58,7 +58,7 @@ let cursor = null,
   timer;
 let tileDrag = null;
 let hoveredEntry = null, hoverEntryReady = false;
-let entryAnchored = false, lastRackTap = null;
+let entryAnchored = false;
 let draftTiles = [],
   rackChoice = null,
   gameUndo = [];
@@ -426,7 +426,6 @@ function setPosition(next, fromHistory = false) {
   clearComputerMove();
   tileDrag?.cancel();
   entryAnchored = false;
-  lastRackTap = null;
   hoveredEntry = null;
   hoverEntryReady = false;
   positionGeneration++;
@@ -684,9 +683,6 @@ $("board-zoom").addEventListener("click", () => {
 mobileBoard.addEventListener("change", () => {
   if (!mobileBoard.matches) setBoardZoom(false);
   fitGamePanels();
-});
-document.addEventListener("pointerdown", event => {
-  if (!event.target.closest("#rack-tiles")) lastRackTap = null;
 });
 $("game-overflow").addEventListener("click", () => {
   const button = $("game-overflow");
@@ -1968,7 +1964,8 @@ function advanceCursor() {
   } while (
     cursor.row < 15 &&
     cursor.col < 15 &&
-    position.board[cursor.row][cursor.col]
+    (position.board[cursor.row][cursor.col] ||
+      draftTiles.some(tile => tile.row === cursor.row && tile.col === cursor.col))
   );
   if (cursor.row >= 15 || cursor.col >= 15) cursor = null;
 }
@@ -1980,6 +1977,11 @@ function addEntryTile(row, col, letter, blank = false, source = null, rackIndex 
         )
       : draftTiles;
     draftTiles = placeTile(position, rest, row, col, letter, blank, rackIndex);
+    if (draftTiles.length > 1) {
+      if (draftTiles.every(tile => tile.col === col)) vertical = true;
+      else if (draftTiles.every(tile => tile.row === row)) vertical = false;
+    }
+    if (rackIndex !== null) entryAnchored = true;
     cursor = { row, col };
     advanceCursor();
     rackChoice = null;
@@ -2020,7 +2022,6 @@ function entryClick(event) {
   const row = +cell.dataset.row,
     col = +cell.dataset.col;
   entryAnchored = true;
-  lastRackTap = null;
   if (rackChoice) {
     if (rackChoice.letter === "?") chooseBlank(row, col, null, rackChoice.index);
     else addEntryTile(row, col, rackChoice.letter, false, null, rackChoice.index);
@@ -2598,15 +2599,9 @@ tileDrag = installTileDrag({
     if (position.board[row][col] || draftTiles.some(tile => tile.row === row && tile.col === col)) return null;
     return {square, row, col};
   },
-  onTap(source, pointerType) {
+  onTap(source) {
     if (!canDragTiles() || source.playerRack || source.square || $("edit").checked || !recordedGame) return;
-    const now = performance.now();
-    const doubleTap = pointerType === "touch" && lastRackTap?.index === source.rackIndex &&
-      lastRackTap.letter === source.letter && lastRackTap.generation === positionGeneration &&
-      now - lastRackTap.time < 400;
-    lastRackTap = pointerType === "touch" && !doubleTap
-      ? {index:source.rackIndex, letter:source.letter, generation:positionGeneration, time:now} : null;
-    if (doubleTap && entryAnchored && cursor) {
+    if (entryAnchored && cursor) {
       const {row, col} = cursor;
       rackChoice = null;
       if (source.letter === "?") chooseBlank(row, col, null, source.rackIndex);
@@ -2617,7 +2612,6 @@ tileDrag = installTileDrag({
     renderPosition();
   },
   onDrop(source, target) {
-    lastRackTap = null;
     if (!source.square && target.rack) {
       if (canArrangeRack() && source.playerRack === displayedRackIndex()) rackDrop(source, target.gap);
       return;
@@ -3559,8 +3553,8 @@ function renderContextHint() {
       ? "Drag to arrange tiles."
       : recordedGame
         ? mobileBoard.matches
-          ? "Tap a starting square, then double-tap rack tiles to place them · Drag to arrange tiles"
-          : "Drag to arrange tiles or place them on the board."
+          ? "Tap a starting square, then tap rack tiles to place them · Drag to arrange tiles"
+          : "Click a starting square, then click rack tiles to place them · Drag to arrange tiles"
         : "Drag to arrange tiles · Edit the Rack field to change tiles";
   } else if (target?.id === "results") {
     hint =
