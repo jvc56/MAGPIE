@@ -63,6 +63,7 @@ let draftTiles = [],
   rackChoice = null,
   gameUndo = [];
 let draftScore = null;
+let deferredDraftFeedback = null;
 let previewTimer,
   previewGeneration = 0,
   previewPromise = Promise.resolve();
@@ -1890,6 +1891,7 @@ function recallTiles(render = true) {
 }
 function cancelDraftCheck() {
   clearTimeout(previewTimer);
+  deferredDraftFeedback = null;
   previewGeneration++;
   draftScore = null;
   renderMoveScore();
@@ -1899,6 +1901,20 @@ function moveErrorMessage(text) {
     (_, prefix, play) => prefix + formatBoardPlay(play, position));
   const phony = formatted.trim().match(/expected valid play but detected at least one phony for play:\s*(.+)$/i);
   return phony ? `Play ${phony[1]} contains at least one phony word` : formatted;
+}
+function applyDraftFeedback(generation, text, score = null) {
+  if (generation !== previewGeneration || busy) {
+    return;
+  }
+  if (tileDrag?.active) {
+    // Even with fitting suspended, adding a toolbar row shifts every square.
+    // Keep asynchronous feedback out of layout until the drop is committed.
+    deferredDraftFeedback = {generation, text, score};
+    return;
+  }
+  draftScore = score;
+  $("move-feedback").textContent = text;
+  renderMoveScore();
 }
 function scheduleDraftCheck() {
   cancelDraftCheck();
@@ -1923,14 +1939,10 @@ function scheduleDraftCheck() {
         action: GameAction.COMMIT,
       })
       .then(({ game }) => {
-        if (generation !== previewGeneration || busy) return;
-        draftScore = game.score;
-        $("move-feedback").textContent = "";
-        renderMoveScore();
+        applyDraftFeedback(generation, "", game.score);
       })
       .catch((failure) => {
-        if (generation === previewGeneration && !busy)
-          $("move-feedback").textContent = moveErrorMessage(failure.message);
+        applyDraftFeedback(generation, moveErrorMessage(failure.message));
       });
   }, 220);
 }
@@ -2539,7 +2551,17 @@ function rackDrop(source, gap) {
   else renderPosition();
 }
 tileDrag = installTileDrag({
-  onFinish: fitGamePanels,
+  onFinish() {
+    // cleanup runs before onDrop; a valid drop invalidates the old preview.
+    queueMicrotask(() => {
+      const feedback = deferredDraftFeedback;
+      deferredDraftFeedback = null;
+      if (feedback) {
+        applyDraftFeedback(feedback.generation, feedback.text, feedback.score);
+      }
+      fitGamePanels();
+    });
+  },
   board:$("board"), rack:$("rack-tiles"),
   sourceFor(target) {
     const rackTile = target.closest("#rack-tiles .rack-tile");

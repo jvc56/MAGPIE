@@ -56,6 +56,23 @@ test('rack insertion works before starting a game, with keyboard reordering too'
 
 test('duplicate tiles retain rack order through all four drag paths; invalid drops are harmless', async ({page}) => {
   await ready(page, 'ABAC?');
+  // Deliver the real engine preview while the next tile is held, independent
+  // of machine speed. The off-center A should produce validation feedback.
+  await page.evaluate(async () => {
+    const {EngineClient} = await import('/wasmentry/engine-client.mjs');
+    const action = EngineClient.prototype.gameAction;
+    window.heldPreviews = [];
+    window.releasePreviews = () => {
+      EngineClient.prototype.gameAction = action;
+      for (const preview of window.heldPreviews) preview.resolve();
+    };
+    EngineClient.prototype.gameAction = async function (request) {
+      try { return await action.call(this, request); }
+      finally {
+        await new Promise(resolve => window.heldPreviews.push({move:request.move, resolve}));
+      }
+    };
+  });
   await drag(page, rackTile(page, 2), cell(page, 7, 7));
   expect(await rackLetters(page)).toBe('ABC?');
   await expect(cell(page, 7, 7)).toHaveClass(/pending/);
@@ -66,8 +83,16 @@ test('duplicate tiles retain rack order through all four drag paths; invalid dro
   await drag(page, rackTile(page, 1), cell(page, 7, 8), 'center', false);
   // Invalid-move feedback arrives asynchronously while the pointer is held.
   // It must not resize the board and turn an occupied-square drop into a play.
-  await expect(page.locator('#move-feedback')).not.toBeEmpty();
+  await expect.poll(() => page.evaluate(() => window.heldPreviews.some(preview => preview.move === '8I A'))).toBe(true);
+  const heldSquare = await cell(page, 7, 8).boundingBox();
+  await page.evaluate(async () => {
+    window.releasePreviews();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  expect(await cell(page, 7, 8).boundingBox()).toEqual(heldSquare);
+  await expect(page.locator('#move-feedback')).toBeEmpty();
   await page.mouse.up();
+  await expect(page.locator('#move-feedback')).not.toBeEmpty();
   expect(await rackLetters(page)).toBe('ABC?');
   await expect(page.locator('#board .pending')).toHaveCount(1);
   await drag(page, cell(page, 7, 8), page.locator('#rack-tiles'), 'after');
