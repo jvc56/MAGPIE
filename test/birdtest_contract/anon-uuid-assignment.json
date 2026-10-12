@@ -1,7 +1,7 @@
 {
-  "claim_token": "456ef2ec-b26d-4dfc-9e34-f2114e48ee4c",
-  "job_id": "4043fda1-5385-4b73-8b8d-b72a44bb4a47",
-  "job_name": "tier 6 games",
+  "claim_token": "11cf9800-08c1-43ab-aa33-a41e6a2efc9c",
+  "job_id": "d797f1a3-a00f-4e57-a7f8-153ef3f2f430",
+  "job_name": "tier 6 games: e2e-solving vs e2e-solving",
   "max_task_seconds": 3600,
   "task_request": {
     "job_type": "games",
@@ -131,5 +131,5 @@
     ],
     "derived": []
   },
-  "worker_uuid": "07747000-494e-409c-be57-378cf9be99bc"
+  "worker_uuid": "5442f856-4759-4692-a79a-f2bf4bf2b456"
 }

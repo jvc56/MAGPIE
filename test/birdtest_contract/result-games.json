@@ -1,5 +1,5 @@
 {
-  "claim_token": "456ef2ec-b26d-4dfc-9e34-f2114e48ee4c",
+  "claim_token": "11cf9800-08c1-43ab-aa33-a41e6a2efc9c",
   "result": {
     "all_games": {
       "games": 2,
@@ -2010,5 +2010,5 @@
       }
     ]
   },
-  "movegens": 623321
+  "movegens": 611833
 }
