@@ -862,6 +862,7 @@ function renderResults() {
     );
   if (mode === "peg")
     columns.push(
+      ["score", "Score"],
       ["state", "Status"],
       ["win", "Win %"],
       ["spread", "Spread"],

@@ -4,7 +4,7 @@ import { mergePegRows, parsePegProgress } from "../peg-review.mjs";
 
 test("live PEG preserves baseline values and prunes only from authoritative stage membership", { tag: "@unit" }, () => {
   const prior = [
-    { move: "A1 CAT", win: 80, depth: "greedy" },
+    { move: "A1 CAT", score: 12, win: 80, depth: "greedy" },
     { move: "B1 DOG", win: 70, depth: "greedy" },
     { move: "C1 HEN", win: 60, depth: "greedy" },
   ];
@@ -29,6 +29,7 @@ test("live PEG preserves baseline values and prunes only from authoritative stag
     state: "Evaluating",
   });
   expect(rows.find((r) => r.move === "A1 CAT")).toMatchObject({
+    score: 12,
     win: 65,
     depth: "2-ply",
     state: "Evaluated",
@@ -80,6 +81,8 @@ test("PEG streams stages and candidates before completion and preserves them in 
     timeout: 15000,
   });
   await expect(page.locator("#results tbody tr")).not.toHaveCount(0);
+  await expect(page.locator('#results thead [data-column=score]')).toHaveText('Score');
+  await expect(page.locator('#results tbody tr [data-column=score]').first()).toHaveText(/^\d+$/);
   await page.screenshot({
     path: test.info().outputPath("peg-live-desktop.png"),
     fullPage: true,
