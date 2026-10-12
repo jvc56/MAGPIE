@@ -68,6 +68,9 @@ void test_cmd_api_run_commands(void) {
   assert_run_sync_success(mp, "generate");
   assert(magpie_get_thread_status(mp) == MAGPIE_THREAD_STATUS_FINISHED);
 
+  magpie_stop_current_command(mp);
+  assert(magpie_get_thread_status(mp) == MAGPIE_THREAD_STATUS_FINISHED);
+
   // The default output is machine readable and has no display header.
   char *machine_output = magpie_get_last_command_output(mp);
   assert(!strings_equal(machine_output, ""));
