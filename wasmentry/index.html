@@ -66,17 +66,20 @@
               <span class="player-clock" id="clock-two"></span>
             </div>
           </div>
-          <div id="error" role="alert" hidden></div>
-          <div id="play-session" hidden>
-            <div class="toolbar" id="session-controls">
-              <button id="pause-game">Pause</button
-              ><button id="finish-game">Resign</button
-              ><label class="check"
-                ><input type="checkbox" id="show-live-analysis" />
-                Show analysis</label
-              >
+          <div class="position-toolbar">
+            <div id="play-session" hidden>
+              <div class="toolbar" id="session-controls">
+                <button id="pause-game">Pause</button
+                ><button id="finish-game">Resign</button
+                ><label class="check"
+                  ><input type="checkbox" id="show-live-analysis" />
+                  Show analysis</label
+                >
+              </div>
+              <p id="session-result" role="status"></p>
             </div>
-            <p id="session-result" role="status"></p>
+            <div id="error" role="alert" hidden></div>
+            <p id="move-feedback" role="status" class="hint"></p>
           </div>
 
           <div id="board-viewport">
@@ -92,22 +95,21 @@
             aria-label="On-turn tiles"
           ></div>
           <div class="rack-actions">
-            <button id="board-zoom" aria-pressed="false" aria-controls="board-viewport">Zoom board</button>
+            <section id="move-entry" aria-label="Move entry">
+              <div class="move-actions">
+                <button id="play-move" class="primary">
+                  Play move <kbd aria-label="Enter">↵</kbd></button
+                ><button id="analyze-move" hidden>Analyze Move</button
+                ><button id="recall-tiles">Recall tiles</button
+                ><button id="pass-move">Pass</button
+                ><button id="exchange-move">Exchange</button
+                ><button id="challenge-move" hidden disabled>Challenge</button>
+              </div>
+            </section>
             <button id="shuffle-rack">Shuffle rack</button
             ><button id="sort-rack">Sort rack</button>
+            <button id="board-zoom" aria-pressed="false" aria-controls="board-viewport">Zoom board</button>
           </div>
-          <section id="move-entry" aria-label="Move entry">
-            <div class="move-actions">
-              <button id="play-move" class="primary">
-                Play move <kbd aria-label="Enter">↵</kbd></button
-              ><button id="analyze-move" hidden>Analyze Move</button
-              ><button id="recall-tiles">Recall tiles</button
-              ><button id="pass-move">Pass</button
-              ><button id="exchange-move">Exchange</button
-              ><button id="challenge-move" hidden disabled>Challenge</button>
-            </div>
-            <p id="move-feedback" role="status" class="hint"></p>
-          </section>
           <div id="unseen-home">
             <div id="tile-pool">
               <p id="bag-count">93 in bag</p>

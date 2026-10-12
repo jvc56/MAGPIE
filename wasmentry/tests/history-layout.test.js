@@ -263,7 +263,7 @@ test("single column fits the board and rack above the bottom of the viewport", a
   await expect(page.locator('#pause-game')).toBeVisible();
   for (const width of [900, 700, 390]) {
     await page.setViewportSize({width,height:844});
-    await expect.poll(() => page.locator('#move-entry').evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThan(815);
+    await expect.poll(() => page.locator('.rack-actions').evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThan(815);
     await expect(page.locator('#rack-tiles')).toBeInViewport();
     await expect(page.locator('#board')).toBeInViewport();
   }
@@ -291,6 +291,20 @@ test("board size stays stable through human and computer turn transitions", asyn
   // Starting a game loads the rack asynchronously; measure turn transitions
   // only after the initial human turn has rendered.
   await expect(page.locator('#session-result')).toHaveText('Your turn');
+  await expect(page.locator('#session-result')).toBeHidden();
+  await expect(page.locator('#name-one')).toHaveText('You · Your turn');
+  // Invalid play feedback shares the controls row, and rack actions share the
+  // move row when the single-column panel has room for all of the buttons.
+  await page.locator('#play-move').click();
+  await expect(page.locator('#error')).toBeVisible();
+  const controls = await page.locator('#session-controls').boundingBox();
+  const error = await page.locator('#error').boundingBox();
+  expect(error.x).toBeGreaterThanOrEqual(controls.x + controls.width);
+  expect(Math.abs((error.y + error.height / 2) - (controls.y + controls.height / 2))).toBeLessThan(2);
+  const play = await page.locator('#play-move').boundingBox();
+  const shuffle = await page.locator('#shuffle-rack').boundingBox();
+  expect(Math.abs(play.y - shuffle.y)).toBeLessThan(2);
+  await page.screenshot({path:test.info().outputPath('compact-game-controls.png')});
   for (const width of [900,1440]) {
     await page.setViewportSize({width,height:844});
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));

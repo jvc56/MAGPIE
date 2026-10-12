@@ -502,6 +502,7 @@ test.describe('mobile board entry', () => {
     expect(after.width).toBeGreaterThan(before.width * 1.8);
     expect(await viewport.evaluate(el => el.scrollWidth > el.clientWidth && el.scrollHeight > el.clientHeight)).toBe(true);
     if (browserName === 'chromium') {
+      await viewport.scrollIntoViewIfNeeded();
       const cdp = await page.context().newCDPSession(page);
       const bounds = await viewport.boundingBox();
       const beforeScroll = await viewport.evaluate(el => el.scrollLeft);

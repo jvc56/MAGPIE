@@ -761,12 +761,12 @@ test("game setup, stable scoreboard and responsive tracking", async ({
   await expect(page.locator("#session-result")).toHaveText(
     "Your turn",
   );
-  await expect(page.locator("#name-one")).toHaveText("You");
+  await expect(page.locator("#name-one")).toHaveText("You · Your turn");
   await expect(page.locator("#name-two")).toHaveText("Magpie");
   const rack = await page.locator("#rack-tiles").textContent();
   expect(
     await page
-      .locator("#move-entry")
+      .locator(".rack-actions")
       .evaluate(
         (el) => el.getBoundingClientRect().bottom < innerHeight - 32,
       ),

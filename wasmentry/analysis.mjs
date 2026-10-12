@@ -2688,16 +2688,19 @@ function renderSession() {
   $("play-session").hidden = !session;
   $("session-result").classList.toggle("thinking", !!(live && botRunning && !session.paused));
   $("session-controls").hidden = !live;
-  $("session-result").hidden = !!session?.finished &&
-    $("hide-spoilers").checked && !terminalPosition();
+  const headerTurnStatus = !!(live && !session.paused && !session.result);
+  $("session-result").hidden = headerTurnStatus || (!!session?.finished &&
+    $("hide-spoilers").checked && !terminalPosition());
   $("position-editor").hidden = !!live;
   for (const [index, suffix] of ["one", "two"].entries()) {
     const playerName = recordedGame?.players[index] || `Player ${index + 1}`;
     const thinking = !!(live && botRunning && !session.paused && index === position.onTurn);
+    const yourTurn = headerTurnStatus && humanTurn() && index === position.onTurn;
     const name = $("name-" + suffix);
-    const label = thinking ? `${playerName} is thinking…` : playerName;
+    const label = thinking ? `${playerName} is thinking…` : yourTurn ? `${playerName} · Your turn` : playerName;
     if (name.textContent !== label) name.textContent = label;
     name.classList.toggle("thinking", thinking);
+    name.classList.toggle("your-turn", yourTurn);
     name.title = label;
     $("points-" + suffix).textContent =
       position.scores[index === position.onTurn ? 0 : 1];
