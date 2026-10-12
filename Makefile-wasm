@@ -5,7 +5,10 @@ OBJ_DIR := obj
 BIN_DIR := wasmentry
 TEST_BIN_DIR := bin
 
-SRC := $(wildcard $(SRC_DIR)/**/*.c)
+# find, not a wildcard: `**` is not recursive in make, and vendored code sits
+# two levels down (src/compat/sha256/sha256.c), which the Makefile already
+# finds this way.
+SRC := $(shell find $(SRC_DIR) -name '*.c')
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
 CMD := $(wildcard $(CMD_DIR)/*.c)

@@ -18,6 +18,7 @@
 #include "../ent/pat_eval.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
+#include "../ent/thread_control.h"
 #include "../ent/word_info_table.h"
 #include "wmp_move_gen.h"
 #include <stdbool.h>
@@ -76,7 +77,34 @@ typedef struct UnrestrictedMultiplier {
   uint8_t column;
 } UnrestrictedMultiplier;
 
+// A player's movegen budget for one move (-movebudget, -mb1, -mb2): the move
+// generations it may spend choosing it -- its inference, simulation and
+// solving together. Set on the thread that chooses the move
+// (gen_set_movegen_budget), and by each thread that thread starts for the
+// move's search, so every generation any of them makes is charged to it.
+// Charged a batch at a time, so a move may run a batch per thread past its
+// limit before its search sees it spent; a limit of 0 is never spent.
+typedef struct MovegenBudget {
+  uint64_t limit;
+  _Atomic uint64_t spent;
+} MovegenBudget;
+
+void movegen_budget_init(MovegenBudget *budget, uint64_t limit);
+uint64_t movegen_budget_get_spent(const MovegenBudget *budget);
+
 typedef struct MoveGen {
+  // Move generations made on this MoveGen: generate_moves and
+  // generate_small_moves_in_lanes calls, by whichever thread holds it. Never
+  // reset; see gen_get_movegen_count.
+  uint64_t movegen_count;
+  // Generations not yet charged to the running command's movegen limit
+  // (gen_start_movegen_limit): charged a batch at a time, so the hot path
+  // stays a local increment.
+  uint64_t limit_uncharged;
+  // The move this thread is searching for, if it has a movegen budget, and
+  // generations not yet charged to it.
+  MovegenBudget *movegen_budget;
+  uint64_t budget_uncharged;
   // Owned by this MoveGen struct
   int current_row_index;
   int current_anchor_col;
@@ -322,6 +350,56 @@ typedef struct MoveGenArgs {
 } MoveGenArgs;
 
 void gen_destroy_cache(void);
+
+// The move generations made in this process so far, on every thread: each
+// generate_moves call, and each generate_small_moves_in_lanes call (the
+// endgame's incremental move list for a node, which stands in for a
+// generate_moves call), whoever made it -- autoplay, a simulation, an
+// inference, an endgame or pre-endgame solve. The difference between two
+// readings is what was made in between.
+//
+// Each thread counts on its own MoveGen, unsynchronized, so nothing is shared
+// in the hot path; this sums them, and so is only exact while no thread is
+// generating moves: read it before and after a command, not during one.
+//
+// Only generations made while something accounts for them are counted: a
+// movegen limit, a movegen budget on any thread, or a counting session. A
+// caller that wants the count of some work starts a session around it.
+uint64_t gen_get_movegen_count(void);
+// A counting session: generations on every thread are counted from start to
+// stop. Sessions nest. Started and stopped with no thread generating moves.
+void gen_start_counting_movegens(void);
+void gen_stop_counting_movegens(void);
+
+// A command's movegen limit (-movegenlimit): a work budget that, unlike a
+// time limit, is the same on any machine. Started before a command runs and
+// stopped after it, on one thread, with no thread generating moves. While it
+// runs, every generation on any thread counts against `limit`, and the one
+// that reaches it stops the command as a user interrupt would, through
+// `thread_control`. A command stops where it next checks for an interrupt --
+// after a game, a simulation's iteration -- and generations are charged in
+// batches, so it runs somewhat past the limit, never short of it: further
+// for a player that generates many times a turn. A limit of 0 is none.
+void gen_start_movegen_limit(uint64_t limit, ThreadControl *thread_control);
+// Ends the running command's limit, and says whether it was reached.
+bool gen_stop_movegen_limit(void);
+
+// Makes `budget` the calling thread's move budget (NULL for none), charging
+// the old one what this thread has not yet; returns the old one, for the
+// caller to restore. A thread a search starts for a move takes the starting
+// thread's budget (gen_get_movegen_budget) and clears it before it exits.
+MovegenBudget *gen_set_movegen_budget(MovegenBudget *budget);
+MovegenBudget *gen_get_movegen_budget(void);
+// Whether the calling thread's move budget, if any, is spent: what a search
+// checks wherever it checks its deadline.
+bool gen_movegen_budget_spent(void);
+
+// The most pool slots (see MAX_THREADS) live threads have held at once since
+// the last gen_reset_slots_high_water, which starts the count again from the
+// slots held now. A thread takes its slot on its first move generation and
+// gives it back when it exits; past MAX_THREADS at once, magpie exits.
+int gen_get_slots_high_water(void);
+void gen_reset_slots_high_water(void);
 
 // If override_kwg is NULL, the full KWG for the on-turn player is used,
 // but if it is nonnull, override_kwg is used. The only use case for this

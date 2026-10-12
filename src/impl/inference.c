@@ -31,6 +31,7 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "move_gen.h"
 #include "rack_draw.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -44,6 +45,9 @@ typedef struct Inference {
   // the KLV of the target.
   const KLV *klv;
   ThreadControl *thread_control;
+  // The move's budget, from the thread that started the inference: the
+  // worker charges it and stops when it is spent (gen_set_movegen_budget).
+  MovegenBudget *movegen_budget;
 
   // The following fields are owned by this struct.
 
@@ -288,8 +292,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
     string_builder_add_string(sb, ") and inferred player known rack (");
     string_builder_add_rack(sb, args->target_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
-    char *err_msg = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *err_msg = string_builder_dump_and_destroy(sb, NULL);
     log_fatal(err_msg);
     free(err_msg);
   }
@@ -303,8 +306,7 @@ void complete_inference_setup(Inference *inference, const InferenceArgs *args) {
     string_builder_add_string(sb, "failed to draw nontarget player rack (");
     string_builder_add_rack(sb, args->nontarget_known_rack, ld, false);
     string_builder_add_string(sb, ") from the bag");
-    char *err_msg = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
+    char *err_msg = string_builder_dump_and_destroy(sb, NULL);
     log_fatal(err_msg);
     free(err_msg);
   }
@@ -428,7 +430,8 @@ bool should_print_info(const Inference *inference) {
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
   if (thread_control_get_status(inference->thread_control) ==
-      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+          THREAD_CONTROL_STATUS_USER_INTERRUPT ||
+      gen_movegen_budget_spent()) {
     return;
   }
   if (tiles_to_infer == 0) {
@@ -465,10 +468,12 @@ void iterate_through_all_possible_leaves(Inference *inference,
 
 void *infer_worker(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
+  (void)gen_set_movegen_budget(inference->movegen_budget);
   iterate_through_all_possible_leaves(
       inference,
       (RACK_SIZE)-rack_get_total_letters(inference->current_target_rack),
       BLANK_MACHINE_LETTER);
+  (void)gen_set_movegen_budget(NULL);
   return NULL;
 }
 
@@ -481,6 +486,8 @@ void set_shared_variables_for_inference(
 
 void infer_manager(InferenceCtx *ctx, InferenceResults *results) {
   for (int thread_index = 0; thread_index < ctx->num_workers; thread_index++) {
+    ctx->worker_inferences[thread_index]->movegen_budget =
+        gen_get_movegen_budget();
     cpthread_create(&ctx->worker_inferences[thread_index]->cpthread_id,
                     infer_worker, ctx->worker_inferences[thread_index]);
   }
@@ -553,8 +560,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
                               ") is greater than the maximum rack size of ");
     string_builder_add_int(sb, RACK_SIZE);
     error_stack_push(error_stack, ERROR_STATUS_INFERENCE_RACK_OVERFLOW,
-                     string_builder_dump(sb, NULL));
-    string_builder_destroy(sb);
+                     string_builder_dump_and_destroy(sb, NULL));
     return;
   }
 
@@ -568,8 +574,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
       string_builder_add_string(sb, ") not available in the bag");
       error_stack_push(error_stack,
                        ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG,
-                       string_builder_dump(sb, NULL));
-      string_builder_destroy(sb);
+                       string_builder_dump_and_destroy(sb, NULL));
       return;
     }
   }
@@ -592,8 +597,7 @@ void verify_inference_args(const InferenceArgs *args, const Game *game_dup,
       string_builder_add_rack(sb, args->nontarget_known_rack,
                               game_get_ld(game_dup), false);
       string_builder_add_string(sb, ") not available in the bag");
-      char *err_msg = string_builder_dump(sb, NULL);
-      string_builder_destroy(sb);
+      char *err_msg = string_builder_dump_and_destroy(sb, NULL);
       log_fatal(err_msg);
       free(err_msg);
       return;

@@ -111,6 +111,15 @@ bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
   return status;
 }
 
+void bai_result_set_status_if_none(BAIResult *bai_result,
+                                   const bai_result_status_t status) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  if (bai_result_get_status(bai_result) == BAI_RESULT_STATUS_NONE) {
+    atomic_store(&bai_result->status, status);
+  }
+  cpthread_mutex_unlock(&bai_result->mutex);
+}
+
 void bai_result_set_status(BAIResult *bai_result,
                            const bai_result_status_t status) {
   cpthread_mutex_lock(&bai_result->mutex);

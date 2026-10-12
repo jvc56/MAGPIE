@@ -181,6 +181,9 @@ struct EndgameCtx {
   // check_depth_deadline takes min(this, depth_deadline_ns) so a caller's
   // wall-clock budget always wins over the EBF-projected per-depth budget.
   int64_t external_deadline_ns;
+  // The move's budget, from the thread that started the solve: every worker,
+  // the late ones too, charges it, and check_depth_deadline stops on it.
+  MovegenBudget *movegen_budget;
   // Flag: stuck-tile mode has been logged (0=not yet, 1=logged)
   atomic_int stuck_tile_logged;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
@@ -2458,6 +2461,12 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
 // overflow the stack under ASAN's enlarged frames.
 __attribute__((noinline)) static bool
 check_depth_deadline(EndgameCtxWorker *worker) {
+  // A spent movegen budget ends the solve as a deadline would: the last
+  // completed depth stands.
+  if (gen_movegen_budget_spent()) {
+    atomic_store(&worker->solver->search_complete, 1);
+    return true;
+  }
   int64_t deadline_ns = atomic_load_explicit(&worker->solver->depth_deadline_ns,
                                              memory_order_relaxed);
   // External deadline (e.g. PEG's wall-clock cap) takes precedence if it
@@ -3820,7 +3829,9 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 void *solver_worker_start(void *uncasted_solver_worker) {
   EndgameCtxWorker *solver_worker = (EndgameCtxWorker *)uncasted_solver_worker;
   const EndgameCtx *solver = solver_worker->solver;
+  (void)gen_set_movegen_budget(solver->movegen_budget);
   iterative_deepening(solver_worker, solver->requested_plies);
+  (void)gen_set_movegen_budget(NULL);
   return NULL;
 }
 
@@ -4222,6 +4233,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   }
   EndgameCtx *solver = *ctx;
   endgame_ctx_reset(solver, results, endgame_args);
+  solver->movegen_budget = gen_get_movegen_budget();
 
   // Set base seed for ABDADA jitter
   endgame_ctx_prepare_workers(solver, endgame_args->seed);

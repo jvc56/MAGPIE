@@ -728,6 +728,8 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 strategy->peg_scenario_stride, /*nested_enabled=*/false,
                 /*nested_cand_cap=*/0, /*nested_cand_caps=*/NULL,
                 /*nested_n_cand_caps=*/0, /*nested_stride=*/0,
+                /*nested_strides_by_bag=*/NULL,
+                /*nested_n_strides_by_bag=*/0,
                 /*nested_emptier_ply_cap=*/0, /*nested_max_depth=*/0,
                 /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0,
                 /*only_moves=*/NULL, /*n_only_moves=*/0,
@@ -737,7 +739,7 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 benchmarking ? play_chooser_benchmark_peg_candidate_done : NULL,
                 /*on_scenario_done=*/NULL,
                 /*user_data=*/benchmarking ? &benchmark_context : NULL,
-                /*poll=*/NULL, &peg_args);
+                /*poll=*/NULL, /*shared_endgame_tt=*/NULL, &peg_args);
   PegResult peg_result = {0};
   peg_solve(&peg_args, &peg_result, error_stack);
   if (benchmarking) {
@@ -990,6 +992,8 @@ typedef struct PlayChooserEndgameBranch {
   // False when the solve produced no value at all (never completed even one
   // ply within the budget), so the decision can fall back to challenging.
   bool valid;
+  // The move's budget, from the thread that started the branch.
+  MovegenBudget *movegen_budget;
 } PlayChooserEndgameBranch;
 
 static void
@@ -1020,7 +1024,10 @@ play_chooser_solve_endgame_branch(PlayChooserEndgameBranch *branch) {
 }
 
 static void *play_chooser_endgame_branch_thread(void *arg) {
-  play_chooser_solve_endgame_branch((PlayChooserEndgameBranch *)arg);
+  PlayChooserEndgameBranch *branch = (PlayChooserEndgameBranch *)arg;
+  (void)gen_set_movegen_budget(branch->movegen_budget);
+  play_chooser_solve_endgame_branch(branch);
+  (void)gen_set_movegen_budget(NULL);
   return NULL;
 }
 
@@ -1112,6 +1119,7 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     };
     if (run_concurrent) {
       cpthread_t keep_thread;
+      keep_branch.movegen_budget = gen_get_movegen_budget();
       cpthread_create(&keep_thread, play_chooser_endgame_branch_thread,
                       &keep_branch);
       play_chooser_solve_endgame_branch(&challenge_branch);

@@ -33,11 +33,13 @@
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
+#include "../ent/thread_control.h"
 #include "../ent/wmp.h"
 #include "../ent/word_info_table.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -62,6 +64,25 @@ const WMPEntry wmp_entry_unresolved_sentinel = {0};
 static MoveGen *cached_gens[MAX_THREADS];
 static bool slot_in_use[MAX_THREADS];
 static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
+// The move generations counted on gens gen_destroy_cache has freed, so the
+// process's count never goes back (gen_get_movegen_count). Under cache_mutex.
+static uint64_t freed_gens_movegen_count = 0;
+// The slots live threads hold now, and the most they have held at once since
+// gen_reset_slots_high_water (gen_get_slots_high_water). Under cache_mutex.
+static int slots_in_use_count = 0;
+static int slots_in_use_high_water = 0;
+// How many things want generations accounted for: a running movegen limit,
+// each thread with a movegen budget set, each counting session
+// (gen_start_counting_movegens). While it is 0 a generation is not counted,
+// so a run that uses none of them pays nothing for them.
+static _Atomic int movegen_accounting_users = 0;
+
+static void gen_add_accounting_users(int delta) {
+  if (delta != 0) {
+    atomic_fetch_add_explicit(&movegen_accounting_users, delta,
+                              memory_order_relaxed);
+  }
+}
 
 void generator_destroy(MoveGen *gen) {
   if (!gen) {
@@ -94,10 +115,18 @@ static void gen_release_slot(void *ptr) {
   if (ptr == NULL) {
     return;
   }
+  // The next thread to take this gen must not inherit a budget that belonged
+  // to a move this thread was searching for, and may since be gone.
+  if (((MoveGen *)ptr)->movegen_budget != NULL) {
+    gen_add_accounting_users(-1);
+  }
+  ((MoveGen *)ptr)->movegen_budget = NULL;
+  ((MoveGen *)ptr)->budget_uncharged = 0;
   cpthread_mutex_lock(&cache_mutex);
   for (int i = 0; i < MAX_THREADS; i++) {
     if (cached_gens[i] == ptr) {
       slot_in_use[i] = false;
+      slots_in_use_count--;
       break;
     }
   }
@@ -130,8 +159,10 @@ MoveGen *get_movegen(void) {
     log_fatal("movegen pool exhausted: more than %d concurrent threads",
               MAX_THREADS);
   }
-  // cppcheck-suppress negativeIndex ; slot >= 0 here (log_fatal above is
-  // noreturn)
+  slots_in_use_count++;
+  if (slots_in_use_count > slots_in_use_high_water) {
+    slots_in_use_high_water = slots_in_use_count;
+  }
   gen = cached_gens[slot];
   if (gen == NULL) {
     gen = calloc_or_die(1, sizeof(MoveGen));
@@ -149,10 +180,14 @@ void gen_destroy_cache(void) {
   // can race it.
   cpthread_mutex_lock(&cache_mutex);
   for (int i = 0; i < (MAX_THREADS); i++) {
+    if (cached_gens[i]) {
+      freed_gens_movegen_count += cached_gens[i]->movegen_count;
+    }
     generator_destroy(cached_gens[i]);
     cached_gens[i] = NULL;
     slot_in_use[i] = false;
   }
+  slots_in_use_count = 0;
   cpthread_mutex_unlock(&cache_mutex);
   // The calling thread's key still points at the gen we just freed (key
   // destructors don't fire for a thread that keeps running), so clear it.
@@ -160,6 +195,146 @@ void gen_destroy_cache(void) {
   // returns that dangling pointer instead of acquiring a fresh slot/gen.
   cpthread_once(&gen_key_once, gen_key_init);
   cpthread_setspecific(gen_key, NULL);
+}
+
+// The running command's movegen limit: set and cleared with no thread
+// generating moves, so plain variables, read by the threads the command
+// starts after it is set. The count and whether it was reached are shared
+// while the command runs.
+#define MOVEGEN_LIMIT_BATCH 64
+static uint64_t movegen_limit = 0;
+static ThreadControl *movegen_limit_thread_control = NULL;
+static _Atomic uint64_t movegen_limit_charged = 0;
+static atomic_bool movegen_limit_reached = false;
+
+void gen_start_movegen_limit(uint64_t limit, ThreadControl *thread_control) {
+  // A generator's uncharged count from an earlier command is not this one's.
+  cpthread_mutex_lock(&cache_mutex);
+  for (int i = 0; i < MAX_THREADS; i++) {
+    if (cached_gens[i]) {
+      cached_gens[i]->limit_uncharged = 0;
+    }
+  }
+  cpthread_mutex_unlock(&cache_mutex);
+  atomic_store(&movegen_limit_charged, 0);
+  atomic_store(&movegen_limit_reached, false);
+  movegen_limit_thread_control = thread_control;
+  movegen_limit = limit;
+  if (limit > 0) {
+    gen_add_accounting_users(1);
+  }
+}
+
+bool gen_stop_movegen_limit(void) {
+  if (movegen_limit > 0) {
+    gen_add_accounting_users(-1);
+  }
+  movegen_limit = 0;
+  movegen_limit_thread_control = NULL;
+  return atomic_load(&movegen_limit_reached);
+}
+
+void gen_start_counting_movegens(void) { gen_add_accounting_users(1); }
+
+void gen_stop_counting_movegens(void) { gen_add_accounting_users(-1); }
+
+void movegen_budget_init(MovegenBudget *budget, uint64_t limit) {
+  budget->limit = limit;
+  atomic_store(&budget->spent, 0);
+}
+
+uint64_t movegen_budget_get_spent(const MovegenBudget *budget) {
+  return atomic_load(&budget->spent);
+}
+
+// Generations a thread charges its move budget at a time: small, since a
+// budget may be a few thousand generations, but enough that the shared count
+// is not touched on every one.
+#define MOVEGEN_BUDGET_BATCH 16
+
+static void gen_charge_movegen_budget(MoveGen *gen) {
+  if (gen->movegen_budget && gen->budget_uncharged > 0) {
+    atomic_fetch_add(&gen->movegen_budget->spent, gen->budget_uncharged);
+  }
+  gen->budget_uncharged = 0;
+}
+
+MovegenBudget *gen_set_movegen_budget(MovegenBudget *budget) {
+  MoveGen *gen = get_movegen();
+  gen_charge_movegen_budget(gen);
+  MovegenBudget *previous = gen->movegen_budget;
+  gen->movegen_budget = budget;
+  gen_add_accounting_users((budget != NULL) - (previous != NULL));
+  return previous;
+}
+
+MovegenBudget *gen_get_movegen_budget(void) {
+  return get_movegen()->movegen_budget;
+}
+
+bool gen_movegen_budget_spent(void) {
+  const MovegenBudget *budget = get_movegen()->movegen_budget;
+  return budget && budget->limit > 0 &&
+         atomic_load(&budget->spent) >= budget->limit;
+}
+
+// Counts one generation, and against the running command's limit and the
+// move's budget, if any. Off the hot path: see gen_count_movegen.
+__attribute__((noinline)) static void gen_account_movegen(MoveGen *gen) {
+  gen->movegen_count++;
+  if (gen->movegen_budget && ++gen->budget_uncharged >= MOVEGEN_BUDGET_BATCH) {
+    gen_charge_movegen_budget(gen);
+  }
+  if (movegen_limit == 0 || ++gen->limit_uncharged < MOVEGEN_LIMIT_BATCH) {
+    return;
+  }
+  const uint64_t charged =
+      atomic_fetch_add(&movegen_limit_charged, gen->limit_uncharged) +
+      gen->limit_uncharged;
+  gen->limit_uncharged = 0;
+  if (charged >= movegen_limit &&
+      !atomic_exchange(&movegen_limit_reached, true) &&
+      movegen_limit_thread_control) {
+    thread_control_set_status(movegen_limit_thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+}
+
+// The one check every generation pays: with no limit, budget or count
+// running, a relaxed load and a branch never taken.
+static inline void gen_count_movegen(MoveGen *gen) {
+  if (atomic_load_explicit(&movegen_accounting_users, memory_order_relaxed) !=
+      0) {
+    gen_account_movegen(gen);
+  }
+}
+
+uint64_t gen_get_movegen_count(void) {
+  // A gen's slot is released when its thread exits, but the gen and its count
+  // stay in cached_gens for the next thread, so summing every allocated gen
+  // counts the work of threads that have come and gone as well.
+  cpthread_mutex_lock(&cache_mutex);
+  uint64_t total = freed_gens_movegen_count;
+  for (int i = 0; i < MAX_THREADS; i++) {
+    if (cached_gens[i]) {
+      total += cached_gens[i]->movegen_count;
+    }
+  }
+  cpthread_mutex_unlock(&cache_mutex);
+  return total;
+}
+
+int gen_get_slots_high_water(void) {
+  cpthread_mutex_lock(&cache_mutex);
+  const int high_water = slots_in_use_high_water;
+  cpthread_mutex_unlock(&cache_mutex);
+  return high_water;
+}
+
+void gen_reset_slots_high_water(void) {
+  cpthread_mutex_lock(&cache_mutex);
+  slots_in_use_high_water = slots_in_use_count;
+  cpthread_mutex_unlock(&cache_mutex);
 }
 
 // Cache getter functions
@@ -3953,6 +4128,7 @@ void gen_record_pass(MoveGen *gen) {
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
                                    int *lane_end) {
   MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
   gen_load_position(gen, args);
   assert(gen->move_record_type == MOVE_RECORD_ALL_SMALL);
   gen->tiles_played = 0;
@@ -3972,6 +4148,7 @@ void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
 
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
+  gen_count_movegen(gen);
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {

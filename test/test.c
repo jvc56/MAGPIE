@@ -5,6 +5,7 @@
 #include "alias_method_test.h"
 #include "alphabet_test.h"
 #include "analyze_test.h"
+#include "autoplay_solvers_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
 #include "bai_sched_test.h"
@@ -16,11 +17,13 @@
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
 #include "board_test.h"
+#include "builder_hash_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
 #include "cmd_api_test.h"
 #include "command_test.h"
 #include "config_test.h"
+#include "contribute_test.h"
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
@@ -46,6 +49,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "movegen_budget_test.h"
 #include "pat_eval_test.h"
 #include "pat_features_test.h"
 #include "pat_file_test.h"
@@ -103,6 +107,7 @@ typedef struct {
 
 static TestEntry test_table[] = {
     {"config", test_config},
+    {"movebudget", test_movegen_budget},
     {"players", test_players_data},
     {"string", test_string_util},
     {"alpha", test_alphabet},
@@ -149,6 +154,8 @@ static TestEntry test_table[] = {
     {"gcg", test_gcg},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},
+    {"apsolvers", test_autoplay_solvers},
+    {"contribute", test_contribute},
     {"words", test_words},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
@@ -158,6 +165,7 @@ static TestEntry test_table[] = {
     {"ch", test_checkpoint},
     {"klv", test_klv},
     {"cv", test_convert},
+    {"builderhash", test_builder_hash},
     {"cd", test_create_data},
     {"wmp", test_wmp},
     {"wmpmaker", test_wmp_maker},
@@ -208,6 +216,7 @@ static TestEntry on_demand_test_table[] = {
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},
+    {"ap_pent", test_autoplay_pentanomial},
     {"endgame_wasm", test_endgame_wasm},
     {"endgameinject", test_endgame_dynamic_worker_injection},
     {"egttpvbound", test_endgame_tt_pv_bound_repeat},
