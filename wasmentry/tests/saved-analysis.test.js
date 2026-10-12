@@ -95,6 +95,15 @@ test('sims survive reload, accept a board play, and continue selected or all can
 
 for (const kind of ['play','watch']) test(`${kind} computer sims reappear in review and after GCG reimport`, async ({page}) => {
   test.setTimeout(120000);
+  await page.addInitScript(() => {
+    window.simRuns = 0;
+    const post = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function(message, ...args) {
+      if (message.type === 'run' && message.data.commands.some(command => /^(sim|snoprune)(?: |$)/.test(command)))
+        window.simRuns++;
+      return post.call(this, message, ...args);
+    };
+  });
   await ready(page);
   await page.locator('#new-game').click();
   await page.locator(`[data-game-kind="${kind}"]`).click();
@@ -118,6 +127,19 @@ for (const kind of ['play','watch']) test(`${kind} computer sims reappear in rev
   await expect(page.locator('#results tbody tr').first()).toBeVisible();
   const saved = await rows(page);
   expect(saved.every(row => row.iters > 0)).toBe(true);
+  const priorRuns = await page.evaluate(() => window.simRuns);
+  await page.locator('#open-analysis-settings').click();
+  await page.locator('#auto-analyze').selectOption('auto');
+  await page.locator('#back-to-game').click();
+  await page.locator('#history-last').click();
+  await page.selectOption('#history-position',kind === 'play' ? '1' : '0');
+  expect(await page.evaluate(() => window.simRuns)).toBe(priorRuns);
+  expect(await rows(page)).toEqual(saved);
+  await page.locator('#review-game').click();
+  await expect(page.locator('#review-progress')).toHaveText('Review complete', {timeout:60000});
+  // Only the human's pass lacks cached analysis; computer turns are reused.
+  expect(await page.evaluate(() => window.simRuns)).toBe(priorRuns + (kind === 'play' ? 1 : 0));
+  expect(await rows(page)).toEqual(saved);
   await expect(page.locator('[data-mode=sim]')).toHaveText('Continue sim');
   await page.locator('[data-mode=sim]').click(); await complete(page);
   const continued = await rows(page);
