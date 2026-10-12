@@ -10071,10 +10071,9 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   config->max_num_display_plays =
       json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, 10);
   config->position_play_caps[0] = config->max_num_display_plays;
-  config->position_play_caps[1] =
-      json_get_int_or(json_object_get(request, CONTRIBUTE_KEY_PLAYER2),
-                      CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,
-                      config->max_num_display_plays);
+  config->position_play_caps[1] = json_get_int_or(
+      json_object_get(request, CONTRIBUTE_KEY_PLAYER2),
+      CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, config->max_num_display_plays);
   // And how many plies to report, the other half of that pair.
   config->shplies =
       json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED,

@@ -1281,8 +1281,8 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
           : NULL,
       (int)game_runner->game_number, game_runner->pair_game_number,
       game_runner->turn_number,
-      autoplay_worker->args
-          .position_play_caps[game_get_player_on_turn_index(game_runner->game)]);
+      autoplay_worker->args.position_play_caps[game_get_player_on_turn_index(
+          game_runner->game)]);
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {
