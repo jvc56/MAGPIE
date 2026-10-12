@@ -4826,28 +4826,27 @@ static char *config_peg_display_table(const Config *config, PegPoll *poll) {
   const int width = config->peg_out_width;
   const int lines = config->peg_out_lines;
   bool truncated = false;
-  char *display = peg_result_get_string(
-      &config->peg_result, config->game,
-      config->peg_show_outcomes && !config->peg_json, poll, width, lines,
-      /*trunc_note=*/NULL, &truncated);
+  char *display =
+      peg_result_get_string(&config->peg_result, config->game,
+                            config->peg_show_outcomes, poll, width, lines,
+                            /*trunc_note=*/NULL, &truncated);
   if (!truncated) {
     return display;
   }
   free(display);
-  char *full = peg_result_get_string(
-      &config->peg_result, config->game,
-      config->peg_show_outcomes && !config->peg_json, poll, width,
-      /*out_max_lines=*/0, NULL, NULL);
+  char *full = peg_result_get_string(&config->peg_result, config->game,
+                                     config->peg_show_outcomes, poll, width,
+                                     /*out_max_lines=*/0, NULL, NULL);
   char *path = config_write_peg_chart_file(full);
   free(full);
   char *note =
       path != NULL
           ? get_formatted_string("untruncated chart written to: %s", path)
           : NULL;
-  char *out = peg_result_get_string(
-      &config->peg_result, config->game,
-      config->peg_show_outcomes && !config->peg_json, poll, width, lines, note,
-      /*out_truncated=*/NULL);
+  char *out =
+      peg_result_get_string(&config->peg_result, config->game,
+                            config->peg_show_outcomes, poll, width, lines, note,
+                            /*out_truncated=*/NULL);
   free(note);
   free(path);
   return out;
