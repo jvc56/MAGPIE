@@ -38,6 +38,7 @@
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -176,6 +177,55 @@ void gen_destroy_cache(void) {
   // returns that dangling pointer instead of acquiring a fresh slot/gen.
   cpthread_once(&gen_key_once, gen_key_init);
   cpthread_setspecific(gen_key, NULL);
+}
+
+// The running command's movegen limit: set and cleared with no thread
+// generating moves, so plain variables, read by the threads the command
+// starts after it is set. The count and whether it was reached are shared
+// while the command runs.
+#define MOVEGEN_LIMIT_BATCH 64
+static uint64_t movegen_limit = 0;
+static ThreadControl *movegen_limit_thread_control = NULL;
+static _Atomic uint64_t movegen_limit_charged = 0;
+static atomic_bool movegen_limit_reached = false;
+
+void gen_start_movegen_limit(uint64_t limit, ThreadControl *thread_control) {
+  // A generator's uncharged count from an earlier command is not this one's.
+  cpthread_mutex_lock(&cache_mutex);
+  for (int i = 0; i < MAX_THREADS; i++) {
+    if (cached_gens[i]) {
+      cached_gens[i]->limit_uncharged = 0;
+    }
+  }
+  cpthread_mutex_unlock(&cache_mutex);
+  atomic_store(&movegen_limit_charged, 0);
+  atomic_store(&movegen_limit_reached, false);
+  movegen_limit_thread_control = thread_control;
+  movegen_limit = limit;
+}
+
+bool gen_stop_movegen_limit(void) {
+  movegen_limit = 0;
+  movegen_limit_thread_control = NULL;
+  return atomic_load(&movegen_limit_reached);
+}
+
+// Counts one generation, and against the running command's limit, if any.
+static inline void gen_count_movegen(MoveGen *gen) {
+  gen->movegen_count++;
+  if (movegen_limit == 0 || ++gen->limit_uncharged < MOVEGEN_LIMIT_BATCH) {
+    return;
+  }
+  const uint64_t charged =
+      atomic_fetch_add(&movegen_limit_charged, gen->limit_uncharged) +
+      gen->limit_uncharged;
+  gen->limit_uncharged = 0;
+  if (charged >= movegen_limit &&
+      !atomic_exchange(&movegen_limit_reached, true) &&
+      movegen_limit_thread_control) {
+    thread_control_set_status(movegen_limit_thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
 }
 
 uint64_t gen_get_movegen_count(void) {
@@ -3997,7 +4047,7 @@ void gen_record_pass(MoveGen *gen) {
 void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
                                    int *lane_end) {
   MoveGen *gen = get_movegen();
-  gen->movegen_count++;
+  gen_count_movegen(gen);
   gen_load_position(gen, args);
   assert(gen->move_record_type == MOVE_RECORD_ALL_SMALL);
   gen->tiles_played = 0;
@@ -4017,7 +4067,7 @@ void generate_small_moves_in_lanes(const MoveGenArgs *args, uint64_t lane_mask,
 
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
-  gen->movegen_count++;
+  gen_count_movegen(gen);
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {

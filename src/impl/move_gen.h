@@ -18,6 +18,7 @@
 #include "../ent/pat_eval.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
+#include "../ent/thread_control.h"
 #include "../ent/word_info_table.h"
 #include "wmp_move_gen.h"
 #include <stdbool.h>
@@ -81,6 +82,10 @@ typedef struct MoveGen {
   // generate_small_moves_in_lanes calls, by whichever thread holds it. Never
   // reset; see gen_get_movegen_count.
   uint64_t movegen_count;
+  // Generations not yet charged to the running command's movegen limit
+  // (gen_start_movegen_limit): charged a batch at a time, so the hot path
+  // stays a local increment.
+  uint64_t limit_uncharged;
   // Owned by this MoveGen struct
   int current_row_index;
   int current_anchor_col;
@@ -338,6 +343,19 @@ void gen_destroy_cache(void);
 // in the hot path; this sums them, and so is only exact while no thread is
 // generating moves: read it before and after a command, not during one.
 uint64_t gen_get_movegen_count(void);
+
+// A command's movegen limit (-movegenlimit): a work budget that, unlike a
+// time limit, is the same on any machine. Started before a command runs and
+// stopped after it, on one thread, with no thread generating moves. While it
+// runs, every generation on any thread counts against `limit`, and the one
+// that reaches it stops the command as a user interrupt would, through
+// `thread_control`. A command stops where it next checks for an interrupt --
+// after a game, a simulation's iteration -- and generations are charged in
+// batches, so it runs somewhat past the limit, never short of it: further
+// for a player that generates many times a turn. A limit of 0 is none.
+void gen_start_movegen_limit(uint64_t limit, ThreadControl *thread_control);
+// Ends the running command's limit, and says whether it was reached.
+bool gen_stop_movegen_limit(void);
 
 // The most pool slots (see MAX_THREADS) live threads have held at once since
 // the last gen_reset_slots_high_water, which starts the count again from the

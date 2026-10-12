@@ -14,6 +14,7 @@
 #include "../src/ent/players_data.h"
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "../src/util/json.h"
 #include "../src/util/math_util.h"
@@ -760,7 +761,37 @@ void test_autoplay_remaining(void) {
   test_autoplay_play_chooser();
 }
 
+// -movegenlimit stops a command once its move generations, across its
+// threads, reach the limit: at the limit or a little past it (a batch per
+// thread, and a game in progress), never short of it. A limit of 0 is none,
+// and each command has its own budget.
+static void test_autoplay_stops_at_its_movegen_limit(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "-numplays 1 -gp false -threads 2");
+  // 200 static games make some 5,000 generations: the limit stops them.
+  const uint64_t limit = 1000;
+  uint64_t before = gen_get_movegen_count();
+  load_and_exec_config_or_die(config,
+                              "autoplay games 200 -seed 9 -movegenlimit 1000");
+  const uint64_t limited = gen_get_movegen_count() - before;
+  printf("autoplay at a movegen limit of %" PRIu64 " made %" PRIu64
+         " generations\n",
+         limit, limited);
+  assert(limited >= limit);
+  assert(limited < 2 * limit);
+  assert(config_get_movegen_limit(config) == limit);
+
+  // A limit of 0 is none: 20 games play out, some 20 generations each.
+  before = gen_get_movegen_count();
+  load_and_exec_config_or_die(config,
+                              "autoplay games 20 -seed 9 -movegenlimit 0");
+  assert(gen_get_movegen_count() - before >= 200);
+  config_destroy(config);
+}
+
 void test_autoplay(void) {
+  test_autoplay_stops_at_its_movegen_limit();
   test_autoplay_remaining();
   test_autoplay_default();
   test_autoplay_wmp_correctness();
