@@ -670,7 +670,8 @@ const mobileBoard = matchMedia("(pointer: coarse)");
 function setBoardZoom(zoomed) {
   $("board-viewport").classList.toggle("zoomed", zoomed);
   $("board-zoom").setAttribute("aria-pressed", String(zoomed));
-  $("board-zoom").textContent = zoomed ? "Fit board" : "Zoom board";
+  $("board-zoom").setAttribute("aria-label", zoomed ? "Fit board" : "Zoom board");
+  $("board-zoom").title = zoomed ? "Fit board" : "Zoom board";
   if (zoomed) {
     requestAnimationFrame(() => focusCursor());
   } else {
@@ -2279,7 +2280,6 @@ async function submitMove(value = null, computer = false) {
 }
 $("play-move").addEventListener("click", () => submitMove());
 $("pass-move").addEventListener("click", () => submitMove("pass"));
-$("recall-tiles").addEventListener("click", () => recallTiles());
 function openExchange(selected = "") {
   if (busy || terminalPosition() || (isLive() && (!humanTurn() || session.paused))) return;
   recallTiles();
@@ -2326,7 +2326,9 @@ $("shuffle-rack").addEventListener("click", () => {
 });
 $("sort-rack").addEventListener("click", () => {
   if (!canArrangeRack()) return;
-  sortCurrentRack(displayedRackIndex());
+  const index = displayedRackIndex();
+  if (!index) recallTiles(false);
+  sortCurrentRack(index);
   renderPosition();
 });
 $("new-game").addEventListener("click", () => {
@@ -2719,7 +2721,7 @@ function renderSession() {
   ]) $(id).disabled = busy || !!live;
   const entryLocked = busy || terminalPosition() ||
     (live && (session.paused || !humanTurn()));
-  for (const id of ["play-move", "pass-move", "exchange-move", "recall-tiles"])
+  for (const id of ["play-move", "pass-move", "exchange-move"])
     $(id).disabled = !!entryLocked;
   for (const element of document.querySelectorAll("#shuffle-rack, #sort-rack, #rack-tiles .rack-tile"))
     element.disabled = !canArrangeRack();
@@ -3488,11 +3490,10 @@ const controlHints = {
   "save-note": "Save this note without changing later moves.",
   "challenge-move": "Challenge the last play using the current lexicon.",
   "play-move": "Enter: play the pending move.",
-  "recall-tiles": "Esc: return unplayed tiles to the rack.",
   "pass-move": "Pass the turn without playing tiles.",
   "exchange-move": "Choose rack tiles to exchange.",
   "shuffle-rack": "Shuffle the tiles in your rack.",
-  "sort-rack": "Sort your rack using the tile order chosen in Appearance settings.",
+  "sort-rack": "Recall unplayed tiles and sort your rack using the order chosen in Appearance settings.",
   edit: "Edit board tiles directly. Shift + letter: blank · Space: direction · Delete: remove",
   undo: "Undo the last board edit.",
   clear: "Clear the board.",

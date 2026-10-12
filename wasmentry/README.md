@@ -417,3 +417,5 @@ and score belong to Player 1, who is on turn. Missing live-game rack tiles are
 drawn from the remaining bag. History begins at the supplied position; existing
 tiles have unknown ownership. Saved games retain the position in a MAGPIE
 `#cgp` GCG extension (other GCG readers need support for that extension).
+
+Shuffle, recall/sort, and mobile board zoom use labeled icon buttons. Recall/sort returns all unplayed tiles before sorting; Escape still recalls without sorting.

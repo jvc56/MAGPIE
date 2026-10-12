@@ -534,7 +534,6 @@ test("move entry: drag, tap, blank, recall, direction, playthrough and validatio
   await page.mouse.up();
   await expect(page.locator(".square.pending")).toHaveCount(1);
   await page.locator('#rack-tiles [data-letter="?"]').click();
-  await page.locator('[data-row="7"][data-col="8"]').click();
   await page.getByRole("button", { name: "Blank as O", exact: true }).click();
   await expect(page.locator(".square.pending.blank")).toHaveCount(1);
   await page.locator("#play-move").click();
@@ -560,7 +559,7 @@ test("move entry: drag, tap, blank, recall, direction, playthrough and validatio
   await expect(page.locator("#error")).toBeVisible();
   await expect(page.locator(".square.pending")).toHaveCount(3);
   await expect(page.locator("#history-position option")).toHaveCount(3);
-  await page.locator("#recall-tiles").click();
+  await page.locator("#sort-rack").click();
   await expect(page.locator(".square.pending")).toHaveCount(0);
 });
 test("history replacement confirms, cancels and undoes without losing later moves", async ({
@@ -577,7 +576,7 @@ test("history replacement confirms, cancels and undoes without losing later move
   await page.selectOption("#history-position", "1");
   await page.locator("#edit-history-move").click();
   await expect(page.locator(".square.pending")).toHaveCount(5);
-  await page.locator("#recall-tiles").click();
+  await page.locator("#sort-rack").click();
   await page.locator('[data-row="7"][data-col="7"]').click();
   await page.keyboard.type("rain");
   await page.locator("#play-move").click();
@@ -639,7 +638,7 @@ test("mobile tile selection places tiles and recall returns them to the rack", a
   await page.locator('[data-row="7"][data-col="7"]').click();
   await expect(page.locator(".square.pending")).toHaveCount(1);
   await expect(page.locator('#rack-tiles [data-letter="A"]')).toHaveCount(0);
-  await page.locator("#recall-tiles").click();
+  await page.locator("#sort-rack").click();
   await expect(page.locator(".square.pending")).toHaveCount(0);
 });
 test("live preview stays separate and direct keyboard blanks survive saving", async ({

@@ -491,7 +491,7 @@ test('single clicks continue tile-first and board-first entry, including blanks'
   await page.getByRole('button', {name:'Blank as E',exact:true}).click();
   await expect(cell(page, 7, 9)).toHaveClass(/blank/);
   await expect(cell(page, 7, 10)).toHaveClass(/cursor/);
-  await page.locator('#recall-tiles').click();
+  await page.locator('#sort-rack').click();
   await cell(page, 5, 5).click();
   await rackTile(page, 0).click();
   await rackTile(page, 0).click();
@@ -510,12 +510,12 @@ test('two dragged tiles infer direction and continuation skips already placed ti
   await expect(cell(page, 9, 7).locator('.tile-letter')).toHaveText('E');
   await expect(cell(page, 10, 7)).toHaveClass(/cursor/);
   await expect(page.locator('#board .pending')).toHaveCount(3);
-  await page.locator('#recall-tiles').click();
+  await page.locator('#sort-rack').click();
   await drag(page, rackTile(page, 0), cell(page, 7, 7));
   await drag(page, rackTile(page, 0), cell(page, 7, 8));
   await expect(page.locator('#board')).toHaveAttribute('data-direction', 'right');
   await rackTile(page, 0).click();
-  await expect(cell(page, 7, 9).locator('.tile-letter')).toHaveText('E');
+  await expect(cell(page, 7, 9).locator('.tile-letter')).toHaveText('T');
 });
 
 test.describe('mobile board entry', () => {
@@ -539,7 +539,7 @@ test.describe('mobile board entry', () => {
     await expect(cell(page, 7, 9)).toHaveClass(/blank/);
     await expect(cell(page, 7, 10)).toHaveClass(/cursor/);
     expect(await rackLetters(page)).toBe('');
-    await page.locator('#recall-tiles').tap();
+    await page.locator('#sort-rack').tap();
     await cell(page, 14, 14).tap(); await cell(page, 14, 14).tap();
     await rackTile(page, 0).tap();
     await expect(cell(page, 14, 14)).toHaveClass(/pending/);

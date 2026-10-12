@@ -43,7 +43,7 @@ for (const submit of ['Enter', 'button']) {
       await page.keyboard.press('Enter');
       await expect(page.locator('#error')).toHaveText(phonyMessage);
       if (submit === 'Enter') await page.keyboard.press('Escape');
-      else await page.locator('#recall-tiles').click();
+      else await page.locator('#sort-rack').click();
       await expect(page.locator('.square.pending')).toHaveCount(0);
       await expect(page.locator('#rack-tiles .rack-tile')).toHaveCount(7);
       await expect(page.locator('#error')).toBeHidden();

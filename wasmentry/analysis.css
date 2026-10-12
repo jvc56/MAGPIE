@@ -2000,3 +2000,15 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
     max-width: none;
   }
 }
+
+.rack-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#board-zoom[aria-pressed="true"] .zoom-plus { display: none; }
