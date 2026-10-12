@@ -3,6 +3,7 @@
 #include "../def/board_defs.h"
 #include "../def/config_defs.h"
 #include "../def/game_defs.h"
+#include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -169,12 +170,23 @@ static void write_game_result(const Config *config, Game *live_game,
   string_builder_add_char(result, ',');
   string_builder_add_json_string(result,
                                  game_history_player_get_name(game_history, 1));
-  string_builder_add_formatted_string(
-      result, "],\"ended\":%s,\"positions\":[",
-      game_get_game_end_reason(live_game ? live_game : game) !=
-              GAME_END_REASON_NONE
-          ? "true"
-          : "false");
+  const game_end_reason_t end_reason =
+      game_get_game_end_reason(live_game ? live_game : game);
+  bool final_points_recorded = false;
+  for (int index = 0; index < game_history_get_num_events(game_history);
+       index++) {
+    if (game_event_get_type(game_history_get_event(game_history, index)) ==
+        GAME_EVENT_END_RACK_POINTS) {
+      final_points_recorded = true;
+    }
+  }
+  // Imports do not initialize Config's pending-final-pass flag. An outplay is
+  // not finalized until the rack-points event is in the exported history.
+  const bool ended =
+      end_reason != GAME_END_REASON_NONE &&
+      (end_reason != GAME_END_REASON_STANDARD || final_points_recorded);
+  string_builder_add_formatted_string(result, "],\"ended\":%s,\"positions\":[",
+                                      ended ? "true" : "false");
   SnapshotWriter writer = {.result = result, .live_game = live_game};
   game_replay_history(game_history, game, write_snapshot, &writer, error_stack);
   string_builder_add_string(result, "]}");
@@ -360,17 +372,17 @@ char *browser_game_action(const char *text, const char *lexicon,
                                rack_get_total_letters(known) == RACK_SIZE));
           }
         }
+        live_game = game_duplicate(game);
+        if (action == BROWSER_GAME_COMMIT) {
+          // Validation must see the real bag size, excluding any unknown
+          // opponent tiles. Sampled opponent tiles never enter the record.
+          draw_to_full_rack(live_game, 1 - on_turn);
+        }
         ValidatedMoves *moves = validated_moves_create(
-            game, on_turn, move,
+            live_game, on_turn, move,
             action == BROWSER_GAME_COMMIT || allow_phonies != 0, true,
             error_stack);
         if (error_stack_is_empty(error_stack)) {
-          live_game = game_duplicate(game);
-          if (action == BROWSER_GAME_COMMIT) {
-            // Reserve unknown opponent tiles before drawing for the mover.
-            // These sampled tiles are never published in a review record.
-            draw_to_full_rack(live_game, 1 - on_turn);
-          }
           live_phony = validated_moves_is_phony(moves, 0);
           if (live_phony && action == BROWSER_GAME_LIVE_MOVE) {
             Move pass;
@@ -384,12 +396,42 @@ char *browser_game_action(const char *text, const char *lexicon,
       }
     }
     if (action == BROWSER_GAME_COMMIT || action == BROWSER_GAME_LIVE_MOVE) {
+      if (action == BROWSER_GAME_COMMIT && error_stack_is_empty(error_stack) &&
+          !game_history_get_waiting_for_final_pass_or_challenge(
+              config_get_game_history(config))) {
+        char *trimmed_move = string_duplicate(move);
+        trim_whitespace(trimmed_move);
+        const int on_turn =
+            game_get_player_on_turn_index(config_get_game(config));
+        const bool missing_rack =
+            !*current_cgp ? !*rack
+                          : rack_is_empty(player_get_rack(game_get_player(
+                                config_get_game(config), on_turn)));
+        if (missing_rack && strings_iequal(trimmed_move, "pass")) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+              string_duplicate(
+                  "Enter the player's rack before recording a pass."));
+        }
+        free(trimmed_move);
+      }
       if (!*current_cgp) {
         command = get_formatted_string("rack %s", *rack ? rack : "-");
         run_game_command(config, error_stack, command, NULL);
         free(command);
       }
       if (error_stack_is_empty(error_stack)) {
+        if (action == BROWSER_GAME_COMMIT) {
+          // Final racks belong to the discarded continuation, not this branch.
+          // Re-seed only racks actually known at the turn being recorded.
+          for (int player_index = 0; player_index < 2; player_index++) {
+            game_history_player_reset_last_rack(config_get_game_history(config),
+                                                player_index);
+            rack_reset(
+                game_history_player_get_rack_to_draw_before_pass_out_game_end(
+                    config_get_game_history(config), player_index));
+          }
+        }
         // Replay must use the actual ending racks, not a random draw from
         // tiles whose owner was omitted from the public game record.
         if (live_game) {

@@ -996,11 +996,23 @@ body.busy #status:before {
   gap: 8px;
   margin-top: 10px;
 }
-.history-navigation select {
-  overflow: hidden;
+.history-position-control {
   flex: 1;
   min-width: 0;
-  width: 0;
+  /* WebKit's native select can contribute invisible option overflow even
+     when the select itself clips. Constrain it with a non-native wrapper. */
+  overflow: hidden;
+  border-radius: 5px;
+}
+.history-navigation select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.history-navigation select:focus-visible {
+  outline-offset: -2px;
 }
 #history-note {
   white-space: pre-wrap;

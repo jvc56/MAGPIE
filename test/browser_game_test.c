@@ -53,6 +53,10 @@ static void test_cgp_start(void) {
   // Replacing the first move must branch from the CGP, not an empty board.
   assert_success(browser_game_action(record, "CSW24", 0, "AEINRST", move, "",
                                      BROWSER_GAME_COMMIT, "", 0, 0, 0));
+  char *conflicting = browser_game_action(text, "CSW24", 0, "EILNOTU", "pass",
+                                          "", BROWSER_GAME_COMMIT, "", 0, 0, 0);
+  assert(has_substring(conflicting, "conflicts with the starting CGP rack"));
+  free(conflicting);
   char *invalid = get_formatted_string("%s#cgp bad\n", EMPTY_GAME);
   char *failure = browser_game_import_gcg(invalid, "CSW24");
   assert(has_substring(failure, "\"error\":"));
@@ -137,6 +141,13 @@ void test_browser_game(void) {
   }
   string_builder_add_string(board, " AEINRST/ 0/0 0");
   const char *initial_cgp = string_builder_peek(board);
+
+  char *unknown_pass = browser_game_action(
+      EMPTY_GAME, "CSW24", 0, "", "pass", "", BROWSER_GAME_COMMIT, "", 0, 0, 0);
+  assert(has_substring(unknown_pass, "rack before recording a pass"));
+  free(unknown_pass);
+  assert_success(browser_game_action(EMPTY_GAME, "CSW24", 0, "AEINRST", "pass",
+                                     "", BROWSER_GAME_COMMIT, "", 0, 0, 0));
 
   // A manual review can have no rack for the next player. Do not export an
   // empty rack pragma, which makes the next edit or import fail.

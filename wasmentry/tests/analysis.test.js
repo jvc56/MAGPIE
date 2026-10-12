@@ -435,11 +435,22 @@ test("GCG full game preserves blanks, both owners, final scores and UTF-8", asyn
     path: test.info().outputPath("gcg-mobile.png"),
     fullPage: true,
   });
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
+  const overflow = await page.evaluate(() => ({
+    viewport: innerWidth,
+    document: document.documentElement.scrollWidth,
+    elements: [...document.querySelectorAll('body *')].flatMap(element => {
+      const rect = element.getBoundingClientRect();
+      if (!rect.width || (rect.right <= innerWidth && element.scrollWidth <= element.clientWidth + 1)) return [];
+      const style = getComputedStyle(element);
+      return [{tag:element.tagName,id:element.id,className:element.className,
+        left:rect.left,right:rect.right,width:rect.width,
+        clientWidth:element.clientWidth,scrollWidth:element.scrollWidth,
+        overflowX:style.overflowX,display:style.display,position:style.position,
+        minWidth:style.minWidth,maxWidth:style.maxWidth}];
+    }),
+  }));
+  await test.info().attach('mobile-overflow', {body:JSON.stringify(overflow,null,2),contentType:'application/json'});
+  expect(overflow.document, JSON.stringify(overflow)).toBeLessThanOrEqual(overflow.viewport);
 });
 
 async function newGame(page, rack = "AEINRST") {
