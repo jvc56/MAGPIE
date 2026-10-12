@@ -233,11 +233,17 @@ static void test_initial_rack_after_exchanges(void) {
   // An embedding caller can change the rack directly; committing still rejects
   // it without appending an unreimportable event.
   Rack *rack = player_get_rack(game_get_player(config_get_game(config), 1));
-  assert(rack_set_to_string(config_get_ld(config), rack, "EILNOTU") == 7);
+  const int bad_rack_size =
+      rack_set_to_string(config_get_ld(config), rack, "EILNOTU");
+  assert(bad_rack_size == 7);
+  (void)bad_rack_size;
   assert_config_exec_status(config, "commit pass",
                             ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
   assert(game_history_get_num_events(config_get_game_history(config)) == 1);
-  assert(rack_set_to_string(config_get_ld(config), rack, "BCDFGHJ") == 7);
+  const int restored_rack_size =
+      rack_set_to_string(config_get_ld(config), rack, "BCDFGHJ");
+  assert(restored_rack_size == 7);
+  (void)restored_rack_size;
   load_and_exec_config_or_die(config, "commit pass");
   string_builder_clear(record);
   string_builder_add_gcg(record, config_get_ld(config),
