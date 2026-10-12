@@ -117,8 +117,6 @@ void config_infer(const Config *config, bool use_game_history, int target_index,
                   Rack *nontarget_known_rack,
                   bool use_inference_cutoff_optimization,
                   InferenceResults *results, ErrorStack *error_stack);
-void config_endgame(Config *config, EndgameResults *endgame_results,
-                    ErrorStack *error_stack);
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,

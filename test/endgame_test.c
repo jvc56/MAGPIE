@@ -1835,7 +1835,44 @@ static void test_time_limited_leaf_playout(void) {
   config_destroy(config);
 }
 
+static void test_endgame_played_move(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -threads 1 -ttfraction 0.0001 -eplies 10 -etopk 1");
+  load_and_exec_config_or_die(
+      config, "cgp 2ABERRaNT4G/5HE6FE/5OS5CUR/5DI5OMA/1HARPIST4WEN/"
+              "5ET2Q3TI/6E1VIVO2A/4JUDY2ABOIL/4I2ERASERS1/1DOWLY8M/"
+              "4TaLEGGIO2I/7Z6C/7I3PUNK/7NONTONAL/7E2AX2E AD/EFU 467/497 0");
+  assert_config_exec_status(config, "endgame pass", ERROR_STATUS_SUCCESS);
+  EndgameResults *results = config_get_endgame_results(config);
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL) <
+         endgame_results_get_value(results, ENDGAME_RESULT_BEST));
+  char *output =
+      endgame_results_get_string(results, config_get_game(config), NULL);
+  assert(has_substring(output, "played pass"));
+  free(output);
+  assert_config_exec_status(config, "endgame 5K DA...", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  assert_config_exec_status(config, "endgame 13H .D", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  const int horizontal_value =
+      endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL);
+  assert_config_exec_status(config, "endgame I13 D.", ERROR_STATUS_SUCCESS);
+  assert(endgame_results_get_actual_move_found(results));
+  assert(endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL) ==
+         horizontal_value);
+  // The requested move belongs to this invocation, not subsequent searches.
+  assert_config_exec_status(config, "endgame", ERROR_STATUS_SUCCESS);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert_config_exec_status(config, "endgame pass,pass",
+                            ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE);
+  assert(!endgame_results_get_actual_move_found(results));
+  assert(!endgame_results_get_valid_for_current_game_state(results));
+  config_destroy(config);
+}
+
 void test_endgame(void) {
+  test_endgame_played_move();
   test_root_pvs_actual_pass();
   test_before_search_callback();
   test_single_pv_display();
@@ -2002,6 +2039,7 @@ void test_multi_pv(void) {
 }
 
 void test_endgame_wasm(void) {
+  test_endgame_played_move();
   test_solve_standard();
   test_small_arena_realloc();
   test_pass_first();

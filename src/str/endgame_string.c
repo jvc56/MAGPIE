@@ -16,6 +16,7 @@
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -194,6 +195,53 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
   endgame_results_unlock(endgame_results, ENDGAME_RESULT_DISPLAY);
 }
 
+static const PVLine **build_display_pvs(EndgameResults *endgame_results,
+                                        const Game *source_game, int num_pvs,
+                                        PVLine *actual_copy,
+                                        int *num_display_pvs) {
+  // Keep the caller's played move visible even when it is below the top-K.
+  // The solver evaluates it with a full root window and stores its own PV.
+  const PVLine **display_pvs =
+      malloc_or_die((size_t)(num_pvs + 1) * sizeof(const PVLine *));
+  *num_display_pvs = num_pvs;
+  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+    display_pvs[pv_idx] =
+        endgame_results_get_multi_pvline(endgame_results, pv_idx);
+  }
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_ACTUAL);
+  const bool actual_found =
+      endgame_results_get_actual_move_found(endgame_results);
+  if (actual_found) {
+    *actual_copy =
+        *endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_ACTUAL);
+  }
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_ACTUAL);
+  if (actual_found) {
+    const PVLine *actual = actual_copy;
+    if (actual->num_moves > 0) {
+      Move actual_move;
+      small_move_to_move(&actual_move, &actual->moves[0],
+                         game_get_board(source_game));
+      bool present = false;
+      for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+        Move candidate;
+        small_move_to_move(&candidate, &display_pvs[pv_idx]->moves[0],
+                           game_get_board(source_game));
+        if (compare_moves_without_equity(&candidate, &actual_move, true) ==
+            -1) {
+          present = true;
+          break;
+        }
+      }
+      if (!present) {
+        display_pvs[(*num_display_pvs)++] = actual;
+      }
+    }
+  }
+
+  return display_pvs;
+}
+
 static void string_builder_endgame_results(StringBuilder *pv_description,
                                            EndgameResults *endgame_results,
                                            const Game *game,
@@ -224,6 +272,11 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
     return;
   }
 
+  PVLine actual_copy;
+  int num_display_pvs;
+  const PVLine **display_pvs = build_display_pvs(
+      endgame_results, source_game, num_pvs, &actual_copy, &num_display_pvs);
+
   // num_pvs > 0: solve is complete; multi_pvs are already fully extended by
   // endgame_solve, so display them directly in a StringGrid without
   // re-extending.
@@ -241,9 +294,8 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
 
   // Find the maximum sequence length across all PVs.
   int max_seq_len = 0;
-  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-    const PVLine *pv =
-        endgame_results_get_multi_pvline(endgame_results, pv_idx);
+  for (int pv_idx = 0; pv_idx < num_display_pvs; pv_idx++) {
+    const PVLine *pv = display_pvs[pv_idx];
     if (pv->num_moves > max_seq_len) {
       max_seq_len = pv->num_moves;
     }
@@ -253,7 +305,7 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
   // Col 0 = Play (first move), cols 1-2 = Value/Spread,
   // col (turn_idx + 1) = Turn turn_idx for turn_idx in [2..max_seq_len].
   const int num_cols = 3 + (max_seq_len > 1 ? max_seq_len - 1 : 0);
-  StringGrid *sg = string_grid_create(num_pvs + 1, num_cols, 1);
+  StringGrid *sg = string_grid_create(num_display_pvs + 1, num_cols, 1);
   string_grid_set_cell(sg, 0, 0, string_duplicate("Play"));
   string_grid_set_cell(sg, 0, 1, string_duplicate("V"));
   string_grid_set_cell(sg, 0, 2, string_duplicate("S"));
@@ -263,9 +315,8 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
   }
 
   StringBuilder *tmp_sb = string_builder_create();
-  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-    const PVLine *pv =
-        endgame_results_get_multi_pvline(endgame_results, pv_idx);
+  for (int pv_idx = 0; pv_idx < num_display_pvs; pv_idx++) {
+    const PVLine *pv = display_pvs[pv_idx];
 
     Game *gc = game_duplicate(source_game);
     for (int move_idx = 0; move_idx < pv->num_moves; move_idx++) {
@@ -276,6 +327,9 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
       // boundary.
       if (move_idx == pv->negamax_depth && pv->negamax_depth > 0) {
         string_builder_add_string(tmp_sb, "| ");
+      }
+      if (move_idx == 0 && pv_idx >= num_pvs) {
+        string_builder_add_string(tmp_sb, "played ");
       }
       string_builder_add_move(tmp_sb, game_get_board(gc), &move, ld, true);
       play_move(&move, gc, NULL);
@@ -315,6 +369,7 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
   string_builder_destroy(tmp_sb);
   string_builder_add_string_grid(pv_description, sg, false);
   string_grid_destroy(sg);
+  free(display_pvs);
 }
 
 char *endgame_results_get_string(EndgameResults *endgame_results,
