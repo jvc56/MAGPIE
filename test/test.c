@@ -28,6 +28,7 @@
 #include "create_data_test.h"
 #include "cross_set_test.h"
 #include "dawg_packed_test.h"
+#include "embedding_lifecycle_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
@@ -35,6 +36,7 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "heat_map_test.h"
+#include "history_replay_test.h"
 #include "infer_cmp_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
@@ -56,6 +58,7 @@
 #include "pat_test.h"
 #include "pat_utility_test.h"
 #include "path_move_lists_test.h"
+#include "peg_embedding_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -86,6 +89,7 @@
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
 #include "word_info_table_test.h"
+#include "word_map_embedding_test.h"
 #include "word_plus_floater_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
@@ -141,6 +145,11 @@ static TestEntry test_table[] = {
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},
+    {"embedding", test_embedding_lifecycle},
+    {"fileproxy", test_fileproxy_cache},
+    {"historyreplay", test_history_replay},
+    {"peg_embedding", test_peg_embedding},
+    {"wordmapapi", test_word_map_embedding},
     {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
@@ -173,6 +182,7 @@ static TestEntry test_table[] = {
     {"winpctstate", test_win_pct_state},
     {"winpctrecord", test_win_pct_record},
     {"endgame", test_endgame},
+    {"endgamepause", test_endgame_pause},
     {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},
     {"eldar_v", test_eldar_v_stick},
@@ -240,6 +250,7 @@ static TestEntry on_demand_test_table[] = {
     {"simbench", test_sim_benchmark},
     {"baisched", test_bai_sched},
     {"simquality", test_sim_quality},
+    {"simregretref", test_sim_regret_reference},
     {"simregret", test_sim_regret},
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},

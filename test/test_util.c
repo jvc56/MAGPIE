@@ -33,6 +33,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/rack_draw.h"
 #include "../src/impl/simmer.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "../src/str/game_string.h"

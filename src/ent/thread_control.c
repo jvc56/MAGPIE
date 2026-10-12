@@ -11,6 +11,7 @@
 #include <stdlib.h>
 
 struct ThreadControl {
+  _Atomic bool paused;
   _Atomic int status; // atomic for lock-free reads on the hot search path
   cpthread_mutex_t status_mutex; // protects cond var signaling only
   cpthread_cond_t status_cond;
@@ -22,6 +23,7 @@ struct ThreadControl {
 
 ThreadControl *thread_control_create(void) {
   ThreadControl *thread_control = malloc_or_die(sizeof(ThreadControl));
+  atomic_init(&thread_control->paused, false);
   atomic_init(&thread_control->status, THREAD_CONTROL_STATUS_UNINITIALIZED);
   cpthread_mutex_init(&thread_control->status_mutex);
   cpthread_mutex_init(&thread_control->print_mutex);
@@ -73,6 +75,7 @@ bool thread_control_set_status(ThreadControl *thread_control,
     // release ordering so search threads' acquire-load sees the update.
     atomic_store_explicit(&thread_control->status, new_status,
                           memory_order_release);
+    atomic_store_explicit(&thread_control->paused, false, memory_order_release);
     success = true;
     if (new_status != THREAD_CONTROL_STATUS_STARTED) {
       cpthread_cond_broadcast(&thread_control->status_cond);
@@ -80,6 +83,53 @@ bool thread_control_set_status(ThreadControl *thread_control,
   }
   cpthread_mutex_unlock(&thread_control->status_mutex);
   return success;
+}
+
+void thread_control_stop(ThreadControl *thread_control) {
+  cpthread_mutex_lock(&thread_control->status_mutex);
+  int expected = THREAD_CONTROL_STATUS_STARTED;
+  // Publish cancellation to search threads that acquire-load the status.
+  if (atomic_compare_exchange_strong_explicit(
+          &thread_control->status, &expected,
+          THREAD_CONTROL_STATUS_USER_INTERRUPT, memory_order_release,
+          memory_order_relaxed)) {
+    atomic_store_explicit(&thread_control->paused, false, memory_order_release);
+    cpthread_cond_broadcast(&thread_control->status_cond);
+  }
+  cpthread_mutex_unlock(&thread_control->status_mutex);
+}
+
+bool thread_control_set_paused(ThreadControl *thread_control, bool paused) {
+  cpthread_mutex_lock(&thread_control->status_mutex);
+  const bool running = thread_control_get_status(thread_control) ==
+                       THREAD_CONTROL_STATUS_STARTED;
+  if (running) {
+    atomic_store_explicit(&thread_control->paused, paused,
+                          memory_order_release);
+    if (!paused) {
+      cpthread_cond_broadcast(&thread_control->status_cond);
+    }
+  }
+  cpthread_mutex_unlock(&thread_control->status_mutex);
+  return running;
+}
+
+thread_control_status_t
+thread_control_search_checkpoint(ThreadControl *thread_control) {
+  // Only search workers may wait here. Status polling must remain nonblocking
+  // so an embedding can receive Resume/Stop while all search workers sleep.
+  if (atomic_load_explicit(&thread_control->paused, memory_order_acquire)) {
+    cpthread_mutex_lock(&thread_control->status_mutex);
+    while (
+        atomic_load_explicit(&thread_control->paused, memory_order_relaxed) &&
+        thread_control_get_status(thread_control) ==
+            THREAD_CONTROL_STATUS_STARTED) {
+      cpthread_cond_wait(&thread_control->status_cond,
+                         &thread_control->status_mutex);
+    }
+    cpthread_mutex_unlock(&thread_control->status_mutex);
+  }
+  return thread_control_get_status(thread_control);
 }
 
 void thread_control_wait_for_status_change(ThreadControl *thread_control) {

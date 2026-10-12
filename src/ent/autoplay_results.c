@@ -1697,8 +1697,9 @@ static void captured_play_fill_from_simmed_play(CapturedPlay *play,
                                                 const LetterDistribution *ld,
                                                 int num_plies) {
   captured_play_fill_common(play, simmed_play_get_move(simmed_play), game, ld);
-  play->iterations =
-      stat_get_num_samples(simmed_play_get_win_pct_stat(simmed_play));
+  // Rollouts, as the sim table counts iterations: a bag-cycled sample is
+  // several.
+  play->iterations = simmed_play_get_num_rollouts(simmed_play);
   play->has_win_percentage = true;
   play->win_percentage =
       stat_get_mean(simmed_play_get_win_pct_stat(simmed_play)) * 100.0;

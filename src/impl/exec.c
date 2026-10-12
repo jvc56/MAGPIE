@@ -39,8 +39,7 @@ char *command_search_status(Config *config, bool should_exit) {
   ThreadControl *thread_control = config_get_thread_control(config);
 
   if (should_exit) {
-    thread_control_set_status(thread_control,
-                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+    thread_control_stop(thread_control);
   }
 
   return config_get_execute_status(config);
@@ -171,8 +170,7 @@ void *execute_async_input_worker(void *uncasted_args) {
     } else {
       switch (input_token) {
       case ASYNC_STOP_COMMAND_TOKEN:
-        thread_control_set_status(thread_control,
-                                  THREAD_CONTROL_STATUS_USER_INTERRUPT);
+        thread_control_stop(thread_control);
         break;
       case ASYNC_STATUS_COMMAND_TOKEN:;
         char *status_str = config_get_execute_status(config);

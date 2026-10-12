@@ -306,6 +306,9 @@ typedef enum {
   // A player's endgame / pre-endgame settings are out of range.
   ERROR_STATUS_AUTOPLAY_INVALID_SOLVER_SETTINGS,
   ERROR_STATUS_PAT_UTILITY_WIN_PCT,
+  ERROR_STATUS_ENDGAME_INVALID_ACTUAL_MOVE,
+  ERROR_STATUS_CMD_API_WORD_MAP,
+  ERROR_STATUS_PEG_MEMORY_BUDGET_TOO_SMALL,
 } error_code_t;
 
 typedef enum {

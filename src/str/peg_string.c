@@ -12,6 +12,7 @@
 #include "move_string.h"
 #include <inttypes.h>
 #include <limits.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -1333,4 +1334,118 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
 
   char *out = string_builder_dump_and_destroy(sb, NULL);
   return out;
+}
+
+static void peg_json_move(StringBuilder *sb, const Move *move,
+                          const Game *game) {
+  StringBuilder *text = string_builder_create();
+  string_builder_add_move(text, game_get_board(game), move, game_get_ld(game),
+                          false);
+  string_builder_add_json_string(sb, string_builder_peek(text));
+  string_builder_destroy(text);
+}
+
+// %f may use a multi-byte decimal separator in the embedding process locale.
+// Fixed-point formatting has no grouping; copy digits/sign and normalize the
+// sole separator without changing the process-global locale.
+static void peg_json_decimal(StringBuilder *sb, double value, int precision) {
+  char *formatted = get_formatted_string("%.*f", precision, value);
+  bool separator_written = false;
+  for (const char *cursor = formatted; *cursor; cursor++) {
+    if ((*cursor >= '0' && *cursor <= '9') || *cursor == '-') {
+      string_builder_add_char(sb, *cursor);
+    } else if (!separator_written) {
+      string_builder_add_char(sb, '.');
+      separator_written = true;
+    }
+  }
+  free(formatted);
+}
+
+static void peg_json_candidates(StringBuilder *sb, const PegRankedCand *rows,
+                                int count, int depth, const Game *game) {
+  string_builder_add_string(sb, "[");
+  for (int entry_idx = 0; entry_idx < count; entry_idx++) {
+    const PegRankedCand *row = &rows[entry_idx];
+    string_builder_add_string(sb, entry_idx > 0 ? ",{\"move\":" : "{\"move\":");
+    peg_json_move(sb, &row->move, game);
+    string_builder_add_string(sb, ",\"win\":");
+    if (row->weight_sum > 0 && isfinite(row->win_pct) && row->win_pct >= 0) {
+      peg_json_decimal(sb, 100.0 * row->win_pct, 6);
+    } else {
+      string_builder_add_string(sb, "null");
+    }
+    string_builder_add_string(sb, ",\"spread\":");
+    peg_json_decimal(sb, isfinite(row->mean_spread) ? row->mean_spread : 0.0,
+                     6);
+    string_builder_add_formatted_string(
+        sb,
+        ",\"wins\":%" PRId64 ",\"ties\":%" PRId64 ",\"losses\":%" PRId64
+        ",\"depth\":%d}",
+        row->win_count, row->tie_count,
+        row->weight_sum - row->win_count - row->tie_count, depth);
+  }
+  string_builder_add_string(sb, "]");
+}
+
+char *peg_snapshot_get_json(const PegPollSnapshot *snapshot, const Game *game) {
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(
+      sb,
+      "{\"stage\":%d,\"depth\":%d,\"done\":%s,\"fieldSize\":%d,\"stages\":[",
+      snapshot->stage, snapshot->fidelity_plies,
+      snapshot->done ? "true" : "false", snapshot->field_size);
+  const int64_t now = ctimer_monotonic_ns();
+  for (int entry_idx = 0; entry_idx < snapshot->n_stage_history; entry_idx++) {
+    const PegStageSnapshot *stage = &snapshot->stage_history[entry_idx];
+    string_builder_add_formatted_string(
+        sb,
+        "%s{\"depth\":%d,\"completed\":%d,\"total\":%d,\"closed\":%s,"
+        "\"seconds\":",
+        entry_idx > 0 ? "," : "", stage->fidelity_plies, stage->cands_done,
+        stage->field_size, stage->end_ns ? "true" : "false");
+    peg_json_decimal(
+        sb,
+        stage->start_ns > 0
+            ? fmax(0.0, (double)((stage->end_ns ? stage->end_ns : now) -
+                                 stage->start_ns) /
+                            1e9)
+            : 0.0,
+        3);
+    string_builder_add_char(sb, '}');
+  }
+  string_builder_add_string(sb, "],\"moves\":[");
+  for (int entry_idx = 0; entry_idx < snapshot->n_stage_moves; entry_idx++) {
+    if (entry_idx > 0) {
+      string_builder_add_string(sb, ",");
+    }
+    peg_json_move(sb, &snapshot->stage_moves[entry_idx], game);
+  }
+  string_builder_add_string(sb, "],\"evaluating\":");
+  const int active = snapshot->currently_evaluating_move_idx;
+  if (!snapshot->done && active >= 0 && active < snapshot->n_stage_moves) {
+    peg_json_move(sb, &snapshot->stage_moves[active], game);
+  } else {
+    string_builder_add_string(sb, "null");
+  }
+  string_builder_add_string(sb, ",\"entries\":");
+  peg_json_candidates(sb, snapshot->entries, snapshot->n_entries,
+                      snapshot->fidelity_plies, game);
+  string_builder_add_string(sb, ",\"baseline\":");
+  peg_json_candidates(sb, snapshot->baseline_entries,
+                      snapshot->n_baseline_entries, snapshot->baseline_fidelity,
+                      game);
+  string_builder_add_string(sb, "}");
+  char *json = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return json;
+}
+
+char *peg_poll_get_json(PegPoll *poll, const Game *game) {
+  if (!poll) {
+    return string_duplicate("null");
+  }
+  PegPollSnapshot snapshot = {0};
+  peg_poll_read(poll, &snapshot);
+  return peg_snapshot_get_json(&snapshot, game);
 }

@@ -69,7 +69,23 @@ void test_whitespace_string_splitter(const char *input, bool ignore_empty,
   string_splitter_destroy(string_splitter);
 }
 
+static void test_json_string_builder(void) {
+  const char input[] =
+      "quote\" slash\\ line\n tab\t return\r back\b form\f \x01 caf\xc3\xa9";
+  StringBuilder *builder = string_builder_create();
+  string_builder_add_json_string(builder, input);
+  assert_strings_equal(
+      string_builder_peek(builder),
+      "\"quote\\\" slash\\\\ line\\u000a tab\\u0009 return\\u000d back\\u0008 "
+      "form\\u000c \\u0001 caf\xc3\xa9\"");
+  string_builder_clear(builder);
+  string_builder_add_json_string(builder, NULL);
+  assert_strings_equal(string_builder_peek(builder), "\"\"");
+  string_builder_destroy(builder);
+}
+
 void test_string_util(void) {
+  test_json_string_builder();
   // One char string splitter
   test_string_splitter("", ',', false, 1, (const char *[]){""});
   test_string_splitter("", ',', true, 0, (const char *[]){});

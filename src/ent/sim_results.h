@@ -42,6 +42,8 @@ typedef struct SimmedPlaySampleRecord {
   double win_pct;
   double utility;
   bool has_utility;
+  // Rollouts the sample stands for: 1, or a bag-cycled sample's rotations.
+  int num_rollouts;
   int num_plies;
   SimmedPlayPlyRecord plies[MAX_PLIES];
 } SimmedPlaySampleRecord;
@@ -57,6 +59,9 @@ uint64_t simmed_play_get_ply_info_count(const SimmedPlay *simmed_play,
                                         ply_info_count_t count_type);
 const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
+// The rollouts behind the play's samples: a bag-cycled sample stands for its
+// rotations' rollouts, so this can exceed the stats' sample counts.
+uint64_t simmed_play_get_num_rollouts(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play);
 // The exactly order-independent means compare_simmed_plays ranks by. They are
 // bit-reproducible for a given sample multiset, unlike the Stat means above.
@@ -109,6 +114,7 @@ uint64_t sim_results_get_node_count(const SimResults *sim_results);
 void sim_results_increment_node_count(SimResults *sim_results);
 uint64_t sim_results_get_iteration_count(const SimResults *sim_results);
 void sim_results_increment_iteration_count(SimResults *sim_results);
+void sim_results_add_iteration_count(SimResults *sim_results, uint64_t count);
 SimmedPlay *sim_results_get_simmed_play(const SimResults *sim_results,
                                         int index);
 const Rack *sim_results_get_rack(const SimResults *sim_results);

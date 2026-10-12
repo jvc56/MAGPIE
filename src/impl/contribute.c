@@ -32,6 +32,7 @@ enum {
   // A task that fails does not count toward maxtasks, so without this a job
   // this build cannot execute would spin forever, claiming and abandoning.
   MAX_CONSECUTIVE_FAILURES = 5,
+  MAX_PRINTED_JOB_NAME = 200,
 };
 
 // ---------------------------------------------------------------------------
@@ -967,12 +968,15 @@ static void release_claim(ContributeState *state) {
 // escape, a newline that would forge a line of output) become '?', and a name
 // past the server's own limit is cut short.
 static char *printable_job_name(const char *name) {
-  enum { MAX_PRINTED_JOB_NAME = 200 };
   StringBuilder *sb = string_builder_create();
-  for (int i = 0; name[i] && i < MAX_PRINTED_JOB_NAME; i++) {
-    const unsigned char c = (unsigned char)name[i];
-    const char printed[2] = {(c < 0x20 || c == 0x7f) ? '?' : (char)c, '\0'};
-    string_builder_add_string(sb, printed);
+  for (int char_idx = 0; char_idx < MAX_PRINTED_JOB_NAME && name[char_idx];
+       char_idx++) {
+    const unsigned char byte = (unsigned char)name[char_idx];
+    if (byte < 0x20 || byte == 0x7f) {
+      string_builder_add_char(sb, '?');
+    } else {
+      string_builder_add_char(sb, name[char_idx]);
+    }
   }
   return string_builder_dump_and_destroy(sb, NULL);
 }

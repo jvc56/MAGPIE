@@ -1,21 +1,28 @@
 #include "peg_poll_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/memory_info.h"
 #include "../src/def/cpthread_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/impl/config.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
+#include "../src/str/peg_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <locale.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -121,6 +128,14 @@ void test_peg_poll(void) {
   peg_poll_read(poll, &final);
   assert(final.done);
   assert(final.n_entries >= 1);
+  char *json = peg_poll_get_json(poll, game);
+  assert(has_substring(json, "\"done\":true"));
+  assert(has_substring(json, "\"stages\":[{"));
+  assert(has_substring(json, "\"entries\":[{"));
+  assert(!has_substring(json, "nan"));
+  assert(!has_substring(json, "inf"));
+  assert(!has_substring(json, "\"seconds\":-"));
+  free(json);
 
   const Board *board = game_get_board(game);
   const LetterDistribution *ld = game_get_ld(game);
@@ -137,8 +152,58 @@ void test_peg_poll(void) {
          (unsigned long long) final.version, string_builder_peek(poll_best),
          100.0 * final.entries[0].win_pct);
 
+  // Synthetic display snapshot: non-finite values and unusual distribution
+  // glyphs must still serialize as valid JSON; malformed timing stays zero.
+  PegPollSnapshot synthetic = {0};
+  synthetic.n_entries = 1;
+  synthetic.n_stage_history = 1;
+  synthetic.entries[0].win_pct = NAN;
+  synthetic.entries[0].mean_spread = INFINITY;
+  synthetic.entries[0].move.move_type = GAME_EVENT_EXCHANGE;
+  synthetic.entries[0].move.tiles_played = 1;
+  synthetic.entries[0].move.tiles_length = 1;
+  synthetic.entries[0].move.tiles[0] = 1;
+  synthetic.stage_history[0].start_ns = 10;
+  synthetic.stage_history[0].end_ns = 5;
+  LetterDistribution *mutable_ld = config_get_ld(config);
+  char original[MAX_LETTER_BYTE_LENGTH];
+  memcpy(original, mutable_ld->ld_ml_to_hl[1], sizeof(original));
+  memcpy(mutable_ld->ld_ml_to_hl[1], "\"\\\n", sizeof("\"\\\n"));
+  json = peg_snapshot_get_json(&synthetic, game);
+  memcpy(mutable_ld->ld_ml_to_hl[1], original, sizeof(original));
+  assert(has_substring(json, "\\\""));
+  assert(has_substring(json, "\\\\"));
+  assert(has_substring(json, "\\u000a"));
+  assert(has_substring(json, "\"win\":null"));
+  assert(has_substring(json, "\"spread\":0.000000"));
+  assert(has_substring(json, "\"seconds\":0.000"));
+  free(json);
+#ifndef __EMSCRIPTEN__
+  char *saved_locale = string_duplicate(setlocale(LC_NUMERIC, NULL));
+  if (setlocale(LC_NUMERIC, "de_DE.UTF-8")) {
+    json = peg_snapshot_get_json(&synthetic, game);
+    assert(has_substring(json, "\"spread\":0.000000"));
+    assert(has_substring(json, "\"seconds\":0.000"));
+    free(json);
+  }
+  const char *restored_locale = setlocale(LC_NUMERIC, saved_locale);
+  assert(restored_locale);
+  (void)restored_locale;
+  free(saved_locale);
+#endif
+
   string_builder_destroy(poll_best);
   string_builder_destroy(solve_best);
+  if (search_memory_is_bounded()) {
+    error_stack_reset(error_stack);
+    args.tt_fraction_of_mem = 0.0000001;
+    peg_result_destroy(&result);
+    peg_solve(&args, &result, error_stack);
+    assert(!error_stack_is_empty(error_stack));
+    peg_poll_read(poll, &final);
+    assert(final.done);
+    error_stack_reset(error_stack);
+  }
   error_stack_destroy(error_stack);
   peg_result_destroy(&result);
   peg_poll_destroy(poll);

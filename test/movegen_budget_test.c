@@ -16,7 +16,7 @@
 // by at most what its threads had in hand when it was spent.
 
 // The status a simulation finished on.
-static bai_result_status_t sim_status(Config *config) {
+static bai_result_status_t sim_status(const Config *config) {
   return bai_result_get_status(
       sim_results_get_bai_result(config_get_sim_results(config)));
 }

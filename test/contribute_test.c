@@ -1,10 +1,13 @@
 #include "contribute_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/compat/endian_conv.h"
+#include "../src/def/autoplay_defs.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/config_defs.h"
 #include "../src/def/contribute_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/peg_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
@@ -1515,7 +1518,7 @@ static void test_every_job_type_counts_its_move_generations(void) {
                                          CONTRIBUTE_KEY_COUNT, error_stack);
   }
   assert(error_stack_is_empty(error_stack));
-  assert(rack_turns >= 2 * 3);
+  assert(rack_turns >= (uint64_t)2 * 3);
   assert(movegens >= rack_turns);
   json_destroy(parsed);
   autoplay_results_destroy(autoplay_results);
@@ -1638,21 +1641,21 @@ static void test_the_assignment_names_its_job_and_limit(void) {
   ErrorStack *error_stack = error_stack_create();
   struct {
     const char *assignment;
-    bool accepted;
     const char *name;
     int seconds;
+    bool accepted;
   } cases[] = {
-      {"{\"job_name\": \"nwl23 sims\", \"max_task_seconds\": 3600}", true,
-       "nwl23 sims", 3600},
-      {"{\"job_name\": \"a\\nb\\u001b[2Jc\", \"max_task_seconds\": 60}", true,
-       "a?b?[2Jc", 60},
-      {"{\"max_task_seconds\": 3600}", false, NULL, 0},
-      {"{\"job_name\": \"x\"}", false, NULL, 0},
-      {"{\"job_name\": \"x\", \"max_task_seconds\": null}", false, NULL, 0},
-      {"{\"job_name\": \"x\", \"max_task_seconds\": 0}", false, NULL, 0},
-      {"{\"job_name\": \"x\", \"max_task_seconds\": -5}", false, NULL, 0},
-      {"{\"job_name\": \"x\", \"max_task_seconds\": \"3600\"}", false, NULL, 0},
-      {"{\"job_name\": 7, \"max_task_seconds\": 3600}", false, NULL, 0},
+      {"{\"job_name\": \"nwl23 sims\", \"max_task_seconds\": 3600}",
+       "nwl23 sims", 3600, true},
+      {"{\"job_name\": \"a\\nb\\u001b[2Jc\", \"max_task_seconds\": 60}",
+       "a?b?[2Jc", 60, true},
+      {"{\"max_task_seconds\": 3600}", NULL, 0, false},
+      {"{\"job_name\": \"x\"}", NULL, 0, false},
+      {"{\"job_name\": \"x\", \"max_task_seconds\": null}", NULL, 0, false},
+      {"{\"job_name\": \"x\", \"max_task_seconds\": 0}", NULL, 0, false},
+      {"{\"job_name\": \"x\", \"max_task_seconds\": -5}", NULL, 0, false},
+      {"{\"job_name\": \"x\", \"max_task_seconds\": \"3600\"}", NULL, 0, false},
+      {"{\"job_name\": 7, \"max_task_seconds\": 3600}", NULL, 0, false},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
     const JsonValue *assignment = json_parse(cases[i].assignment, error_stack);
@@ -1740,6 +1743,7 @@ static void test_a_task_is_stopped_at_its_time_limit(void) {
   assert(thread_control_get_status(run_control) ==
          THREAD_CONTROL_STATUS_STARTED);
   free(result);
+  result = NULL;
   error_stack_reset(error_stack);
   json_destroy(request);
 
@@ -1764,6 +1768,7 @@ static void test_a_task_is_stopped_at_its_time_limit(void) {
   assert(thread_control_get_status(run_control) ==
          THREAD_CONTROL_STATUS_STARTED);
   free(result);
+  result = NULL;
   error_stack_reset(error_stack);
   json_destroy(request);
 
@@ -2095,7 +2100,7 @@ static void test_a_player_must_state_every_setting(void) {
   };
   for (size_t i = 0; i < sizeof(budget_cases) / sizeof(budget_cases[0]); i++) {
     char *text = get_formatted_string(budget_player, budget_cases[i].budget);
-    JsonValue *player = json_parse(text, error_stack);
+    const JsonValue *player = json_parse(text, error_stack);
     assert(error_stack_is_empty(error_stack));
     config_contribute_apply_player_settings(config, player, 1, error_stack);
     if (error_stack_is_empty(error_stack) != budget_cases[i].accepted) {
@@ -2584,8 +2589,8 @@ static void printed_at_start(const char *path, const char *contents, char **out,
   if (path) {
     (void)remove(path);
   }
-  rewind(captured_out);
-  rewind(captured_err);
+  fseek_or_die(captured_out, 0, SEEK_SET);
+  fseek_or_die(captured_err, 0, SEEK_SET);
   *out = get_string_from_file_handle(captured_out, "(stdout)", error_stack);
   *err = get_string_from_file_handle(captured_err, "(stderr)", error_stack);
   assert(error_stack_is_empty(error_stack));

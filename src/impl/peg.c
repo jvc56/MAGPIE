@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
+#include "../compat/memory_info.h"
 #include "../def/board_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
@@ -29,11 +30,13 @@
 #include "../ent/transposition_table.h"
 #include "../util/fnv.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "endgame.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
 #include "peg_combinatorics.h"
+#include "peg_memory.h"
 #include "peg_pool.h"
 #include "word_prune.h"
 #include <assert.h>
@@ -138,7 +141,8 @@ typedef struct PegWorker {
 static TranspositionTable *peg_worker_get_endgame_tt(PegWorker *worker) {
   if (worker->eg_tt == NULL) {
     assert(worker->eg_tt_fraction > 0.0);
-    worker->eg_tt = transposition_table_create(worker->eg_tt_fraction);
+    worker->eg_tt = transposition_table_create_with_minimum(
+        worker->eg_tt_fraction, PEG_TT_MIN_SIZE_POWER);
   }
   return worker->eg_tt;
 }
@@ -679,8 +683,9 @@ static bool peg_should_stop(int64_t deadline_ns,
   if (gen_movegen_budget_spent()) {
     return true;
   }
-  return thread_control != NULL && thread_control_get_status(thread_control) ==
-                                       THREAD_CONTROL_STATUS_USER_INTERRUPT;
+  return thread_control != NULL &&
+         thread_control_search_checkpoint(thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT;
 }
 
 // Greedy playout to game end; returns signed mover spread (points), with the
@@ -2719,6 +2724,24 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     }
   }
 
+  int n_threads = args->num_threads > 1 ? args->num_threads : 1;
+  const double total_fraction = args->tt_fraction_of_mem > 0
+                                    ? args->tt_fraction_of_mem
+                                    : DEFAULT_TT_FRACTION;
+  if (search_memory_is_bounded()) {
+    const int max_tables = peg_memory_max_tables(total_fraction);
+    if (max_tables < 1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_MEMORY_BUDGET_TOO_SMALL,
+          string_duplicate("PEG memory budget is too small for one table"));
+      peg_poll_finish(args->poll);
+      return;
+    }
+    if (n_threads > 1 && n_threads + 1 > max_tables) {
+      n_threads = max_tables > 2 ? max_tables - 1 : 1;
+    }
+  }
+
   // Validation passed: start the result timer here, after the early-return
   // error checks above, so an invalid-args return leaves it stopped (is_running
   // stays false) rather than running forever. The deadline (above) still
@@ -2792,7 +2815,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
 
   // Per-worker scratch. One extra slot for the main thread when it helps the
   // pool drain the queue (helper index == num_workers).
-  const int n_threads = args->num_threads > 1 ? args->num_threads : 1;
   PegPool *pool = n_threads > 1 ? peg_pool_create(n_threads, 0) : NULL;
   if (pool) {
     // Leaf endgames at the deep stages legitimately run for minutes; the
@@ -2806,6 +2828,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   double tt_fraction = 0.25 / (double)n_scratch;
   if (tt_fraction > 0.05) {
     tt_fraction = 0.05;
+  }
+  if (search_memory_is_bounded()) {
+    const bool fits =
+        peg_memory_worker_fraction(total_fraction, n_scratch, &tt_fraction);
+    assert(fits); // Worker count was bounded before allocating search state.
+    (void)fits;
   }
   // One prune cache shared by every worker (cross-worker board reuse).
   PegPruneCache *prune_cache = peg_prune_cache_create();
@@ -3003,7 +3031,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
-      if (thread_control_get_status(args->thread_control) ==
+      if (thread_control_search_checkpoint(args->thread_control) ==
           THREAD_CONTROL_STATUS_USER_INTERRUPT) {
         break;
       }
@@ -3062,7 +3090,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
             break;
           }
-          if (thread_control_get_status(args->thread_control) ==
+          if (thread_control_search_checkpoint(args->thread_control) ==
               THREAD_CONTROL_STATUS_USER_INTERRUPT) {
             break;
           }

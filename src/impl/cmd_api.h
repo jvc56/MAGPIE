@@ -39,14 +39,12 @@
 //    magpie_destroy(mp);
 // clang-format on
 
+#include "../def/cmd_api_defs.h" // IWYU pragma: export
 #include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Opaque struct of magpie internal state
-typedef struct Magpie Magpie;
 
 typedef enum {
   MAGPIE_SUCCESS = 0,
@@ -88,7 +86,8 @@ cmd_exit_code magpie_run_sync_human_readable(Magpie *mp, const char *command);
 // not (parse and data-loading errors are reported synchronously, and only
 // one command may run at a time). While a command is running, only
 // magpie_get_thread_status, magpie_get_last_command_status_message, and
-// magpie_stop_current_command may be called on this handle; call
+// magpie_stop_current_command, and magpie_set_search_paused may be called on
+// this handle; call
 // magpie_await before using any other function.
 cmd_exit_code magpie_run_async(Magpie *mp, const char *command);
 
@@ -114,6 +113,13 @@ char *magpie_get_last_command_output(const Magpie *mp);
 
 // Signals the currently running command to stop.
 void magpie_stop_current_command(Magpie *mp);
+
+// Cooperatively pause/resume an active PEG or endgame command, preserving its
+// search state. Returns false for other commands or when no command is running.
+// Polling remains nonblocking; await still waits for completion. Stop also
+// wakes paused workers. Intended for untimed analysis: existing deadlines are
+// wall clock deadlines and are not extended by a pause.
+bool magpie_set_search_paused(Magpie *mp, bool paused);
 
 magpie_thread_status magpie_get_thread_status(const Magpie *mp);
 

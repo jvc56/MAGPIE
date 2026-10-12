@@ -4,7 +4,6 @@
 #include "../src/compat/ctime.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/thread_control_defs.h"
-#include "../src/ent/autoplay_results.h"
 #include "../src/ent/autoplay_solver_settings.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
@@ -14,7 +13,6 @@
 #include "../src/impl/config.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdatomic.h>

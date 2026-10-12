@@ -1,5 +1,6 @@
 #include "word_info_table.h"
 
+#include "../compat/atomic_file.h"
 #include "../compat/endian_io.h"
 #include "../def/board_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -241,9 +242,8 @@ static bool wit_write_stream(const WordInfoTable *wit, bool positional,
   return true;
 }
 
-void word_info_table_write_to_file(const WordInfoTable *wit,
-                                   const char *filename,
-                                   ErrorStack *error_stack) {
+void word_info_table_write_to_stream(const WordInfoTable *wit, FILE *stream,
+                                     ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -271,13 +271,29 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
                      string_duplicate("cannot write invalid word info table"));
     return;
   }
-  char *temporary_filename = get_formatted_string("%s.tmp.XXXXXX", filename);
-  const int descriptor = mkstemp(temporary_filename);
+  if (!wit_write_stream(wit, positional, stream)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+        string_duplicate("could not write word info table stream"));
+  }
+}
+
+void word_info_table_write_to_file(const WordInfoTable *wit,
+                                   const char *filename,
+                                   ErrorStack *error_stack) {
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  char *destination = NULL;
+  char *temporary_filename = NULL;
+  const int descriptor =
+      atomic_file_create(filename, &destination, &temporary_filename);
   if (descriptor == -1) {
     error_stack_push(
         error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
         get_formatted_string("could not create word info table beside %s: %s",
                              filename, strerror(errno)));
+    free(destination);
     free(temporary_filename);
     return;
   }
@@ -290,29 +306,34 @@ void word_info_table_write_to_file(const WordInfoTable *wit,
         error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
         get_formatted_string("could not open word info table output %s: %s",
                              filename, strerror(error_number)));
+    free(destination);
     free(temporary_filename);
     return;
   }
-  bool written = wit_write_stream(wit, positional, stream);
-  int error_number = written ? 0 : errno;
+  word_info_table_write_to_stream(wit, stream, error_stack);
+  bool written = error_stack_is_empty(error_stack);
+  int error_number = 0;
   if (fclose(stream) != 0) {
     if (written) {
       error_number = errno;
     }
     written = false;
   }
-  if (written && rename(temporary_filename, filename) != 0) {
+  if (written && rename(temporary_filename, destination) != 0) {
     error_number = errno;
     written = false;
   }
   if (!written) {
     (void)remove(temporary_filename);
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
-        get_formatted_string("could not write word info table %s: %s", filename,
-                             error_number != 0 ? strerror(error_number)
-                                               : "unknown I/O failure"));
+    if (error_stack_is_empty(error_stack)) {
+      error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+                       get_formatted_string(
+                           "could not write word info table %s: %s", filename,
+                           error_number != 0 ? strerror(error_number)
+                                             : "unknown I/O failure"));
+    }
   }
+  free(destination);
   free(temporary_filename);
 }
 
@@ -418,20 +439,15 @@ static bool wit_read_stream(WordInfoTable *wit, FILE *stream,
   return true;
 }
 
-void word_info_table_load(WordInfoTable *wit, const char *name,
-                          const char *filename, ErrorStack *error_stack) {
+void word_info_table_load_from_stream(WordInfoTable *wit, const char *name,
+                                      FILE *stream, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
   wit_clear(wit);
-  FILE *stream = stream_from_filename(filename, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
   const char *message = "invalid or truncated word info table";
   error_code_t status = ERROR_STATUS_RW_READ_ERROR;
   const bool valid = wit_read_stream(wit, stream, &message, &status);
-  fclose_or_die(stream);
   if (!valid) {
     wit_clear(wit);
     error_stack_push(error_stack, status, string_duplicate(message));
@@ -439,6 +455,18 @@ void word_info_table_load(WordInfoTable *wit, const char *name,
   }
   wit->name = string_duplicate(name);
   word_info_table_build_position_lengths(wit);
+}
+void word_info_table_load(WordInfoTable *wit, const char *name,
+                          const char *filename, ErrorStack *error_stack) {
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  FILE *stream = stream_from_filename(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  word_info_table_load_from_stream(wit, name, stream, error_stack);
+  fclose_or_die(stream);
 }
 
 WordInfoTable *word_info_table_create(const char *data_paths,

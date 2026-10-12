@@ -15,12 +15,27 @@
 #include "../src/util/string_util.h"
 #include <assert.h>
 #include <inttypes.h>
+#include <math.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-enum { NUM_UNIQUE_MEANS = 10000 };
+enum {
+  NUM_UNIQUE_MEANS = 10000,
+  // test_bai_paired_z: three arms, two with more common ordinals than the
+  // paired statistics keep and one with fewer.
+  PAIRED_TEST_ARMS = 3,
+  PAIRED_TEST_LONG = BAI_PAIRED_MAX_ORDINALS + 100,
+  PAIRED_TEST_SHORT = 600,
+  // test_bai_paired_z_correlated: two arms sharing nearly all their luck,
+  // with more samples each than the paired statistics keep, and the seeds it
+  // searches for data that makes a mixed estimate negative.
+  PAIRED_CORRELATED_SAMPLES = BAI_PAIRED_MAX_ORDINALS + 608,
+  PAIRED_CORRELATED_MAX_SEEDS = 64,
+};
 
 static const int sampling_rules[3] = {
     BAI_SAMPLING_RULE_ROUND_ROBIN,
@@ -259,6 +274,77 @@ void test_bai_time_limit(int num_threads) {
   rvs_destroy(rvs);
 }
 
+// A round-robin claim holds a batch of slots. Once the clock has run out, a
+// worker stops after the slot it is on instead of running the rest of the
+// batch past the deadline. Drives the scheduler single-threaded, so it does
+// not depend on timing.
+void test_bai_claim_stops_within_one_sample(void) {
+  const double means_and_vars[] = {0.1, 1, 0.5, 1, 0.2, 1};
+  const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_ROUND_ROBIN,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.01,
+      .sample_minimum = 50,
+      .sample_limit = 1000,
+      .num_threads = 1,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  bai_result_reset(bai_result, 0);
+  BAISyncData *sync_data =
+      bai_sync_data_create(bai_result, thread_control, num_rvs);
+  sync_data->record_size = rvs_get_sample_record_size(rvs);
+  BAISampleArgs sample_args =
+      bai_sample_args_create(sync_data, rvs, &bai_options);
+  bai_sync_data_start_schedule(&sample_args, bai_options.sample_minimum);
+  const BAIWorkerArgs worker_args = {
+      .sync_data = sync_data,
+      .rvs = rvs,
+      .bai_options = &bai_options,
+      .thread_index = 0,
+  };
+  BAIWorkerSchedStats worker_stats;
+  memset(&worker_stats, 0, sizeof(worker_stats));
+  double sample_values[BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH];
+
+  // With no time limit the whole claim is sampled.
+  BAIClaim claim;
+  bool claimed = bai_schedule_claim_while_locked(sync_data, &claim);
+  assert(claimed);
+  assert(claim.num_slots == BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH);
+  bool abandoned = false;
+  int num_sampled = bai_worker_sample_claim(&worker_stats, &worker_args, &claim,
+                                            sample_values, &abandoned);
+  assert(num_sampled == claim.num_slots);
+  assert(!abandoned);
+
+  // Once the clock has run out, only the slot already started is sampled.
+  bai_result_reset(bai_result, 1e-9);
+  ctime_nap(0.01);
+  claimed = bai_schedule_claim_while_locked(sync_data, &claim);
+  assert(claimed);
+  assert(claim.num_slots == BAI_SCHEDULE_ROUND_ROBIN_CLAIM_BATCH);
+  (void)claimed;
+  num_sampled = bai_worker_sample_claim(&worker_stats, &worker_args, &claim,
+                                        sample_values, &abandoned);
+  assert(num_sampled == 1);
+  assert(abandoned);
+  (void)num_sampled;
+
+  bai_sync_data_destroy(sync_data);
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+  rvs_destroy(rvs);
+}
+
 void test_bai_interrupt(int num_threads) {
   const double means_and_vars[] = {0.1, 1, 0.5, 1, 0.2, 1, 0.25, 1};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
@@ -383,6 +469,219 @@ void test_bai_abandon_folds_finished_samples(void) {
   bai_result_destroy(bai_result);
   thread_control_destroy(thread_control);
   rvs_destroy(rvs);
+}
+
+// A sample of arm_index at ordinal: a share of luck common to every arm at
+// that ordinal, as a sim's shared seed gives, plus the arm's own noise.
+static double paired_test_sample(const double *common_luck, XoshiroPRNG *prng,
+                                 const int arm_index, const uint64_t ordinal) {
+  const double own_noise = (double)prng_next(prng) / (double)UINT64_MAX;
+  return 0.4 + 0.05 * arm_index + 0.3 * common_luck[ordinal] + 0.1 * own_noise;
+}
+
+// Folds arm_index's next sample as a round fold would: into the arm's
+// accumulators, then into the paired statistics at its ordinal.
+static void paired_test_fold(BAISyncData *sync_data, const int arm_index,
+                             const double value, double *values_by_ordinal) {
+  BAIArmDatum *arm_datum = &sync_data->arm_data[arm_index];
+  const uint64_t ordinal = arm_datum->num_samples;
+  values_by_ordinal[ordinal] = value;
+  bai_accumulate_sample(arm_datum, value);
+  bai_arm_datum_recompute_mean_and_var(arm_datum);
+  bai_paired_record_while_locked(sync_data, arm_index, ordinal, value);
+}
+
+// The paired Z computed directly from the samples, for comparison.
+static double paired_test_expected_z(const BAISyncData *sync_data,
+                                     const double *const *values,
+                                     const int astar_index,
+                                     const int arm_index) {
+  const BAIArmDatum *astar_datum = &sync_data->arm_data[astar_index];
+  const BAIArmDatum *arm_datum = &sync_data->arm_data[arm_index];
+  const uint64_t common = astar_datum->num_samples < arm_datum->num_samples
+                              ? astar_datum->num_samples
+                              : arm_datum->num_samples;
+  const uint64_t num_pairs =
+      common < BAI_PAIRED_MAX_ORDINALS ? common : BAI_PAIRED_MAX_ORDINALS;
+  double astar_sum = 0.0;
+  double arm_sum = 0.0;
+  double astar_squares = 0.0;
+  double arm_squares = 0.0;
+  double cross_sum = 0.0;
+  for (uint64_t ordinal = 0; ordinal < num_pairs; ordinal++) {
+    const double astar_value = values[astar_index][ordinal];
+    const double arm_value = values[arm_index][ordinal];
+    astar_sum += astar_value;
+    arm_sum += arm_value;
+    astar_squares += astar_value * astar_value;
+    arm_squares += arm_value * arm_value;
+    cross_sum += astar_value * arm_value;
+  }
+  // Every moment comes from the same ordinals.
+  const double pairs = (double)num_pairs;
+  const double astar_mean = astar_sum / pairs;
+  const double arm_mean = arm_sum / pairs;
+  const double astar_var = astar_squares / pairs - astar_mean * astar_mean;
+  const double arm_var = arm_squares / pairs - arm_mean * arm_mean;
+  const double covariance = cross_sum / pairs - astar_mean * arm_mean;
+  const double astar_n = (double)astar_datum->num_samples;
+  const double arm_n = (double)arm_datum->num_samples;
+  const double variance = astar_var / astar_n + arm_var / arm_n -
+                          2.0 * covariance * (double)common / (astar_n * arm_n);
+  const double gap = astar_datum->mean - arm_datum->mean;
+  return gap * gap / (2.0 * variance);
+}
+
+// bai_paired_z against a direct computation, for arms whose samples share
+// luck at each ordinal. Arm 1 commits all of its samples after the others,
+// so its products are added when it commits second, and arms 0 and 2 have
+// more common ordinals than the statistics keep.
+void test_bai_paired_z(void) {
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  BAISyncData *sync_data =
+      bai_sync_data_create(bai_result, thread_control, PAIRED_TEST_ARMS);
+  bai_sync_data_enable_paired(sync_data);
+  XoshiroPRNG *prng = prng_create(42);
+  double *common_luck = malloc_or_die(sizeof(double) * PAIRED_TEST_LONG);
+  for (int ordinal = 0; ordinal < PAIRED_TEST_LONG; ordinal++) {
+    common_luck[ordinal] = (double)prng_next(prng) / (double)UINT64_MAX;
+  }
+  double *values[PAIRED_TEST_ARMS];
+  for (int arm_index = 0; arm_index < PAIRED_TEST_ARMS; arm_index++) {
+    values[arm_index] = malloc_or_die(sizeof(double) * PAIRED_TEST_LONG);
+  }
+  for (uint64_t ordinal = 0; ordinal < PAIRED_TEST_LONG; ordinal++) {
+    for (int arm_index = 0; arm_index < PAIRED_TEST_ARMS; arm_index += 2) {
+      paired_test_fold(
+          sync_data, arm_index,
+          paired_test_sample(common_luck, prng, arm_index, ordinal),
+          values[arm_index]);
+    }
+  }
+  for (uint64_t ordinal = 0; ordinal < PAIRED_TEST_SHORT; ordinal++) {
+    paired_test_fold(sync_data, 1,
+                     paired_test_sample(common_luck, prng, 1, ordinal),
+                     values[1]);
+  }
+  const int pairs[][2] = {{2, 0}, {2, 1}, {1, 0}};
+  for (int pair_idx = 0; pair_idx < 3; pair_idx++) {
+    const int astar_index = pairs[pair_idx][0];
+    const int arm_index = pairs[pair_idx][1];
+    const double paired_z = bai_paired_z(sync_data, astar_index, arm_index);
+    const double expected_z = paired_test_expected_z(
+        sync_data, (const double *const *)values, astar_index, arm_index);
+    assert(fabs(paired_z - expected_z) <= 1e-6 * expected_z);
+    // The shared luck cancels from the difference, so the paired statistic
+    // separates the arms more than the independent one does.
+    const BAIArmDatum *astar_datum = &sync_data->arm_data[astar_index];
+    const BAIArmDatum *arm_datum = &sync_data->arm_data[arm_index];
+    assert(paired_z > 2.0 * bai_arm_z_with_counts(
+                                astar_datum, (double)astar_datum->num_samples,
+                                arm_datum, (double)arm_datum->num_samples));
+    (void)paired_z;
+    (void)expected_z;
+  }
+  for (int arm_index = 0; arm_index < PAIRED_TEST_ARMS; arm_index++) {
+    free(values[arm_index]);
+  }
+  free(common_luck);
+  prng_destroy(prng);
+  bai_sync_data_destroy(sync_data);
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+}
+
+// Two arms that share nearly all of their luck, with more samples each than
+// the paired statistics keep, and a true gap of 0.00002, far too small to
+// resolve. Taking the variances from every sample and the covariance from
+// only the first BAI_PAIRED_MAX_ORDINALS can make the variance of the
+// difference negative here, which once read as near certainty and stopped
+// the sim on whichever arm happened to lead. The seeds are searched for data
+// that does that, so the test is known to exercise it; on that data the
+// paired statistic must match the direct computation and stay below the
+// stopping threshold. Then, with too few pairs to estimate anything, it must
+// fall back to the independent statistic.
+void test_bai_paired_z_correlated(void) {
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  double *values[2];
+  for (int arm_index = 0; arm_index < 2; arm_index++) {
+    values[arm_index] =
+        malloc_or_die(sizeof(double) * PAIRED_CORRELATED_SAMPLES);
+  }
+  bool found = false;
+  for (uint64_t seed = 1; seed <= PAIRED_CORRELATED_MAX_SEEDS && !found;
+       seed++) {
+    BAISyncData *sync_data =
+        bai_sync_data_create(bai_result, thread_control, 2);
+    bai_sync_data_enable_paired(sync_data);
+    XoshiroPRNG *prng = prng_create(seed);
+    for (int ordinal = 0; ordinal < PAIRED_CORRELATED_SAMPLES; ordinal++) {
+      const double shared_luck = (double)prng_next(prng) / (double)UINT64_MAX;
+      for (int arm_index = 0; arm_index < 2; arm_index++) {
+        const double own_noise = (double)prng_next(prng) / (double)UINT64_MAX;
+        const double value = 0.2 + 0.3 * shared_luck + 0.01 * own_noise +
+                             (arm_index == 0 ? 0.00002 : 0.0);
+        paired_test_fold(sync_data, arm_index, value, values[arm_index]);
+      }
+    }
+    prng_destroy(prng);
+    // The mixed estimate: variances from every sample, the covariance from
+    // the ordinals the paired statistics keep.
+    double sums[2] = {0.0, 0.0};
+    double cross_sum = 0.0;
+    for (int ordinal = 0; ordinal < BAI_PAIRED_MAX_ORDINALS; ordinal++) {
+      sums[0] += values[0][ordinal];
+      sums[1] += values[1][ordinal];
+      cross_sum += values[0][ordinal] * values[1][ordinal];
+    }
+    const double pairs = (double)BAI_PAIRED_MAX_ORDINALS;
+    const double prefix_covariance =
+        cross_sum / pairs - (sums[0] / pairs) * (sums[1] / pairs);
+    const double num_samples = (double)PAIRED_CORRELATED_SAMPLES;
+    const double mixed_variance =
+        (sync_data->arm_data[0].var + sync_data->arm_data[1].var -
+         2.0 * prefix_covariance) /
+        num_samples;
+    if (mixed_variance < 0.0) {
+      found = true;
+      const int astar_index =
+          sync_data->arm_data[0].mean >= sync_data->arm_data[1].mean ? 0 : 1;
+      const int arm_index = 1 - astar_index;
+      const double paired_z = bai_paired_z(sync_data, astar_index, arm_index);
+      const double expected_z = paired_test_expected_z(
+          sync_data, (const double *const *)values, astar_index, arm_index);
+      const double stopping_threshold =
+          log((log(2.0 * num_samples) + 1.0) / 0.01);
+      assert(fabs(paired_z - expected_z) <= 1e-6 * expected_z + 1e-9);
+      assert(paired_z < stopping_threshold);
+      (void)paired_z;
+      (void)expected_z;
+      (void)stopping_threshold;
+    }
+    bai_sync_data_destroy(sync_data);
+  }
+  assert(found);
+  (void)found;
+
+  BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control, 2);
+  bai_sync_data_enable_paired(sync_data);
+  paired_test_fold(sync_data, 0, 0.6, values[0]);
+  paired_test_fold(sync_data, 1, 0.4, values[1]);
+  const BAIArmDatum *astar_datum = &sync_data->arm_data[0];
+  const BAIArmDatum *arm_datum = &sync_data->arm_data[1];
+  assert(bai_paired_z(sync_data, 0, 1) ==
+         bai_arm_z_with_counts(astar_datum, 1.0, arm_datum, 1.0));
+  (void)astar_datum;
+  (void)arm_datum;
+  bai_sync_data_destroy(sync_data);
+
+  for (int arm_index = 0; arm_index < 2; arm_index++) {
+    free(values[arm_index]);
+  }
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
 }
 
 // Assumes rv_args are normal predetermined
@@ -540,12 +839,28 @@ void test_bai_from_seed(const char *bai_seed) {
   free(means_and_vars);
 }
 
+// A round holds BAI_SCHEDULE_ROUND_SIZE draws' worth of samples, to the
+// nearest sample and at least one.
+void test_bai_round_size(void) {
+  assert(bai_round_size(0) == BAI_SCHEDULE_ROUND_SIZE);
+  assert(bai_round_size(1) == BAI_SCHEDULE_ROUND_SIZE);
+  assert(bai_round_size(2) == BAI_SCHEDULE_ROUND_SIZE / 2);
+  assert(bai_round_size(12) == 3);
+  assert(bai_round_size(14) == 2);
+  assert(bai_round_size((uint64_t)2 * BAI_SCHEDULE_ROUND_SIZE) == 1);
+  assert(bai_round_size(1000) == 1);
+}
+
 void test_bai(void) {
   const char *bai_seed = getenv("BAI_SEED");
   if (bai_seed) {
     test_bai_from_seed(bai_seed);
   } else {
     test_bai_abandon_folds_finished_samples();
+    test_bai_claim_stops_within_one_sample();
+    test_bai_round_size();
+    test_bai_paired_z();
+    test_bai_paired_z_correlated();
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {

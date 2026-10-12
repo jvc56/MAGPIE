@@ -16,6 +16,11 @@
 
 typedef struct RandomVariables RandomVariables;
 
+// The rotations a bag-cycled sample (SimArgs.bag_cycle) plays from game: the
+// letters unseen by the player on turn (the bag and the opponent's rack)
+// divided by RACK_SIZE, rounded up, and at least 1.
+int rv_sim_bag_cycle_rotations(const Game *game);
+
 typedef enum {
   RANDOM_VARIABLES_UNIFORM,
   RANDOM_VARIABLES_UNIFORM_PREDETERMINED,
@@ -53,6 +58,10 @@ size_t rvs_get_sample_record_size(const RandomVariables *rvs);
 void rvs_apply_sample_record(const RandomVariables *rvs, uint64_t k,
                              const void *record);
 uint64_t rvs_next_seed(RandomVariables *rvs, uint64_t k);
+// True when every arm's n-th sample uses the same seed, so that samples of
+// different arms at one ordinal share their luck (common random numbers).
+// Sims' samples do; the test distributions' don't.
+bool rvs_arms_share_seeds(const RandomVariables *rvs);
 // The seed rvs_next_seed would return for arm k after `ahead` more calls,
 // without advancing it, or RVS_SEED_UNRESERVED when this kind of random
 // variable does not draw from seeds. A sample drawn with a peeked seed is the

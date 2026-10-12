@@ -32,18 +32,10 @@ void generate_moves_for_game_override_record_type(
     const MoveGenArgs *args, move_record_t move_record_type);
 void generate_moves_for_game(const MoveGenArgs *args);
 void draw_to_full_rack(const Game *game, int player_index);
-// Returns the number of letters drawn, or a DRAW_RACK_STRING_* code from
-// def/gameplay_defs.h.
-int draw_rack_string_from_bag(const Game *game, int player_index,
-                              const char *rack_string);
-bool draw_rack_from_bag(const Game *game, int player_index,
-                        const Rack *rack_to_draw);
 void draw_leave_from_bag(Bag *bag, int player_draw_index, Rack *rack_to_update,
                          const Rack *rack_to_draw);
 void get_leave_for_move(const Move *move, const Game *game, Rack *leave);
 void return_rack_to_bag(const Game *game, int player_index);
-bool rack_is_drawable(const Game *game, int player_index,
-                      const Rack *rack_to_draw);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
 
@@ -63,6 +55,17 @@ void update_cross_sets_after_unplay(const Move *move, const Game *game);
 // parallel WIT block caches; unplay invalidates those derived entries.
 void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game);
 
+// Called at the initial position and after each event. Borrowed game/history
+// are valid only during the callback. Return false to stop normally; errors
+// from replay itself are reported through error_stack.
+// Callback snapshots include tile ownership for recorded placements.
+typedef bool (*GameHistoryCallback)(const GameHistory *game_history,
+                                    const Game *game, int event_index,
+                                    void *user_data);
+void game_replay_history(GameHistory *game_history, Game *game,
+                         GameHistoryCallback callback, void *user_data,
+                         ErrorStack *error_stack);
+// Event index 0 selects the start; N selects the position after event N.
 void game_play_n_events(GameHistory *game_history, Game *game,
                         int num_events_to_play, bool validate,
                         ErrorStack *error_stack);

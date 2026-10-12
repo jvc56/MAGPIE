@@ -33,6 +33,7 @@
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
+#include "../ent/thread_control.h"
 #include "../ent/wmp.h"
 #include "../ent/word_info_table.h"
 #include "../util/io_util.h"
@@ -147,8 +148,6 @@ MoveGen *get_movegen(void) {
   if (slots_in_use_count > slots_in_use_high_water) {
     slots_in_use_high_water = slots_in_use_count;
   }
-  // cppcheck-suppress negativeIndex ; slot >= 0 here (log_fatal above is
-  // noreturn)
   gen = cached_gens[slot];
   if (gen == NULL) {
     gen = calloc_or_die(1, sizeof(MoveGen));
