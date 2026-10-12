@@ -11,6 +11,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = [
+    'wasmentry/favicon.svg', 'wasmentry/favicon-32.png',
     'wasmentry/index.html', 'wasmentry/analysis.css', 'wasmentry/theme.js',
     'wasmentry/peg-review.mjs', 'wasmentry/analysis.mjs', 'wasmentry/analysis-model.mjs', 'wasmentry/move-entry.mjs', 'wasmentry/tile-drag.mjs', 'wasmentry/tile-order.mjs',
     'wasmentry/computer-time.mjs', 'wasmentry/device-budget.mjs', 'wasmentry/wmp-assets.mjs', 'wasmentry/wmp-cache.mjs', 'wasmentry/analysis-cache.mjs', 'wasmentry/game-actions.mjs',
