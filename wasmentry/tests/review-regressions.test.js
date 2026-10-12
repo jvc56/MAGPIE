@@ -25,7 +25,7 @@ async function clientHarness() {
     emit(data) { this.onmessage({data}); }
   }
   const timers=[];
-  const context={Worker,URL,EventTarget,CustomEvent, setTimeout:(fn)=>{timers.push(fn);return fn},clearTimeout:()=>{}};
+  const context={Worker,URL,EventTarget,CustomEvent,addEventListener:()=>{}, setTimeout:(fn)=>{timers.push(fn);return fn},clearTimeout:()=>{}};
   const EngineClient=vm.runInNewContext(source.replace("export class", "class").replaceAll("import.meta.url",'"http://localhost/wasmentry/engine-client.mjs"')+'\nEngineClient;',context);
   return {client:new EngineClient(),timers};
 }

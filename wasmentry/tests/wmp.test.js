@@ -59,9 +59,12 @@ test('local and downloaded WMPs persist, match ordinary move generation, and can
     const hashesMatch = files.every(file => file.sha256 === manifest.lexica[file.lexicon].sha256);
     engine.worker.terminate();
     create();
+    const cachedStages = [];
     for (const lexicon of ['CSW24','NWL23']) {
       await engine.prepare(lexicon);
+      const messageStart = messages.length;
       await engine.prepareWMP(lexicon, 'build', 4, true);
+      cachedStages.push(...messages.slice(messageStart).filter(m => m.type === 'wmp_progress').map(m => m.text));
       output[lexicon].cached = await generate(lexicon, true, SAMPLES.peg.replace(/ -lex .*/, ''));
       await engine.prepareWMP(lexicon, 'off', 4);
       output[lexicon].disabled = await generate(lexicon, false, SAMPLES.peg.replace(/ -lex .*/, ''));
@@ -72,7 +75,7 @@ test('local and downloaded WMPs persist, match ordinary move generation, and can
     await engine.wmpCache('NWL23');
     const empty = await listWMPs();
     engine.worker.terminate();
-    return {timings, output, files, remaining, empty, cachedLoads, hashesMatch,
+    return {timings, output, files, remaining, empty, cachedLoads, cachedStages, hashesMatch,
       warnings: messages.filter(m => m.type === 'wmp_cache_warning'),
       stages: messages.filter(m => m.type === 'wmp_progress').map(m => m.text)};
   });
@@ -80,6 +83,7 @@ test('local and downloaded WMPs persist, match ordinary move generation, and can
   expect(report.warnings).toEqual([]);
   expect(report.files.map(f=>f.lexicon).sort()).toEqual(['CSW24','NWL23']);
   expect(report.cachedLoads).toBe(2);
+  expect(report.cachedStages).not.toContain('Building WIT indexes…');
   expect(report.files.every(file => file.wit_bytes > 0 && file.wit_sha256.length === 64)).toBe(true);
   expect(report.hashesMatch).toBe(true);
   expect(report.stages).toContain('Building WIT indexes…');

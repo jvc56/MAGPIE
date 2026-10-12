@@ -148,9 +148,8 @@ static WordInfoTable *load_cached_wit(void) {
     wit = calloc_or_die(1, sizeof(WordInfoTable));
     word_info_table_load_from_stream(wit, word_maps.wmp_name, stream,
                                      error_stack);
-    const bool exact = ftell(stream) == (long)word_maps.wit_export_size;
     const bool closed = fclose(stream) == 0;
-    if (!exact || !closed || !error_stack_is_empty(error_stack)) {
+    if (!closed || !error_stack_is_empty(error_stack)) {
       word_info_table_destroy(wit);
       wit = NULL;
     }
@@ -213,8 +212,9 @@ static void export_prepared_wit(void) {
   if (stream) {
     word_info_table_write_to_stream(word_maps.prepared_wit, stream,
                                     error_stack);
+    const bool exact = ftell(stream) == (long)word_maps.wit_export_size;
     const bool closed = fclose(stream) == 0;
-    if (!closed || !error_stack_is_empty(error_stack)) {
+    if (!exact || !closed || !error_stack_is_empty(error_stack)) {
       free(word_maps.wit_export);
       word_maps.wit_export = NULL;
       word_maps.wit_export_size = 0;

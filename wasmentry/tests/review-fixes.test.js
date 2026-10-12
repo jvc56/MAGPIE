@@ -48,7 +48,7 @@ test('cache write failures do not rebuild installed maps and a stopped setup doe
   await ready(page);
   const report = await page.evaluate(async () => {
     const {EngineClient} = await import('./engine-client.mjs');
-    const client = Object.create(EngineClient.prototype);
+    const client = Object.setPrototypeOf(new EventTarget(), EngineClient.prototype);
     let builds = 0;
     client.run = async () => ({stopped:false});
     client.request = async () => { builds++; return {cached:false}; };
