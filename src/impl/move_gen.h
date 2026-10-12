@@ -256,6 +256,12 @@ typedef struct MoveGen {
   uint64_t klv_instance_fp_at_load;
   uint64_t wmp_instance_fp_at_load;
   const RackInfoTable *rack_info_table;
+  // The rack_info_table's instance id when it was loaded here, for the same
+  // ABA: rit_cache_entries point into the table's entries, and a task that
+  // loads another lexicon's table at the freed one's struct address read the
+  // old table's entries -- unmapped, a crash; still mapped, the wrong
+  // lexicon's bingos and leaves.
+  uint64_t rit_instance_id_at_load;
   // Optional precomputed word info table (loaded with -wit). When non-NULL,
   // wmp_move_gen prunes subracks whose letters cannot appear in any word
   // containing the playthrough blocks. NULL disables the optimization.

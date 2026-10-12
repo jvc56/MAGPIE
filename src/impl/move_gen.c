@@ -3633,7 +3633,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // alphabet; treat it as absent (the WMP is gated the same way below).
   const RackInfoTable *new_rit =
       gen->bit_rack_compatible ? player_get_rack_info_table(player) : NULL;
-  if (new_rit != gen->rack_info_table) {
+  const uint64_t new_rit_instance_id =
+      (new_rit != NULL) ? rack_info_table_get_instance_id(new_rit) : 0;
+  if (new_rit != gen->rack_info_table ||
+      new_rit_instance_id != gen->rit_instance_id_at_load) {
     memset(gen->rit_cache_valid, 0, sizeof(gen->rit_cache_valid));
     // Leave values are stored in the subrack cache; they depend on the
     // RIT (via the leave_map), so invalidate when the RIT changes.
@@ -3642,6 +3645,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     }
   }
   gen->rack_info_table = new_rit;
+  gen->rit_instance_id_at_load = new_rit_instance_id;
   gen->word_info_table = player_get_word_info_table(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
