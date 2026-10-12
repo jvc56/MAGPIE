@@ -1033,6 +1033,9 @@ body.busy #status:before {
   align-items: center;
   margin: 10px 0;
 }
+.move-actions .primary {
+  margin-top: 0;
+}
 #move-entry {
   margin: 12px 0;
   padding: 12px 0;
@@ -1778,7 +1781,6 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #gcg-diagnostics-log { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 
 #exchange-dialog .move-actions { justify-content: flex-end; }
-#exchange-dialog .primary { margin-top: 0; }
 #exchange-tiles { padding: 12px 4px; }
 #exchange-tiles .rack-tile { cursor: pointer; }
 #exchange-tiles [aria-pressed="true"] {
