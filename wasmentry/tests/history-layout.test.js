@@ -174,7 +174,7 @@ test("narrow desktop stacks panels and keeps history tile words on one line", as
   await ready(page);
   await page.locator('#gcg-file').setInputFiles('tests/fixtures/standard.gcg');
   await expect(page.locator('#status')).toContainText('Loaded');
-  for (const width of [1200, 1072, 900, 390]) {
+  for (const width of [1000, 900, 390]) {
     await page.setViewportSize({width, height:900});
     await expect.poll(() => page.evaluate(() => {
       const board = document.querySelector('.position').getBoundingClientRect();
@@ -191,4 +191,118 @@ test("narrow desktop stacks panels and keeps history tile words on one line", as
   }
   await page.setViewportSize({width:1072, height:900});
   await page.locator('#game-history').screenshot({path:test.info().outputPath('unwrapped-history.png')});
+});
+
+test("history words use the full cell width and shrink long words without wrapping", async ({page}) => {
+  await ready(page);
+  await page.locator('#gcg-file').setInputFiles('tests/fixtures/standard.gcg');
+  await expect(page.locator('#status')).toContainText('Loaded');
+  await page.evaluate(async () => {
+    const {moveTiles} = await import('/wasmentry/move-tiles.mjs');
+    const play = document.querySelector('#history-table .history-play');
+    play.classList.add('history-tile-play');
+    play.querySelector('.move-tiles').replaceWith(moveTiles('8A ABCDEFGHIJKLMNO'));
+  });
+  for (const width of [1440, 1072, 900, 390]) {
+    await page.setViewportSize({width, height:900});
+    const metrics = await page.locator('#history-table button').first().evaluate(button => {
+      const tiles = [...button.querySelectorAll('.move-tile')].map(tile => tile.getBoundingClientRect());
+      const score = button.querySelector('.history-score').getBoundingClientRect();
+      const cell = button.getBoundingClientRect();
+      return {fits: tiles.at(-1).right <= cell.right, beneath:tiles[0].top >= score.bottom,
+        square:Math.abs(tiles[0].width - tiles[0].height) < 1,
+        single:tiles.every(tile => Math.abs(tile.top - tiles[0].top) < 1),
+        width:tiles[0].width};
+    });
+    expect(metrics.fits).toBe(true);
+    expect(metrics.beneath).toBe(true);
+    expect(metrics.square).toBe(true);
+    expect(metrics.single).toBe(true);
+    if (width === 390) expect(metrics.width).toBeLessThan(18);
+  }
+});
+
+test("time expiration keeps the next turn number in history navigation", async ({page}) => {
+  await page.clock.install();
+  await ready(page);
+  await page.locator('#new-game').click();
+  await page.locator('.game-options > summary').click();
+  await page.selectOption('#game-time', '300');
+  await page.selectOption('#overtime', '60');
+  await page.locator('#new-game-form button.primary').click();
+  const opening = await page.locator('#history-position option[value="0"]').textContent();
+  await page.clock.fastForward(361000);
+  await expect(page.locator('#session-result')).toContainText('lost on time');
+  await expect(page.locator('#history-position option[value="0"]')).toHaveText(opening);
+  await expect(page.locator('#history-position option[value="0"]')).toContainText('1. You ·');
+});
+
+test("compact header offers grouped file actions in Game overflow", async ({page}) => {
+  await ready(page);
+  await page.setViewportSize({width:1072,height:900});
+  await expect(page.locator('#game-overflow')).toBeVisible();
+  await expect(page.locator('#load-gcg')).toBeHidden();
+  await page.locator('#game-overflow').click();
+  await expect(page.locator('#game-file-actions [aria-label="GCG"]')).toBeVisible();
+  await expect(page.locator('#game-file-actions [aria-label="CGP"]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#load-gcg')).toBeHidden();
+  await page.setViewportSize({width:1440,height:900});
+  await expect(page.locator('#game-overflow')).toBeHidden();
+  await expect(page.locator('#load-gcg')).toBeVisible();
+  const board = await page.locator('.position').boundingBox();
+  const analysis = await page.locator('.analysis').boundingBox();
+  expect(analysis.x).toBeGreaterThanOrEqual(board.x + board.width);
+});
+
+test("single column fits the board and rack above the bottom of the viewport", async ({page}) => {
+  await page.setViewportSize({width:900,height:844});
+  await ready(page);
+  await page.locator('#new-game').click();
+  await page.locator('#new-game-form button.primary').click();
+  await expect(page.locator('#pause-game')).toBeVisible();
+  for (const width of [900, 700, 390]) {
+    await page.setViewportSize({width,height:844});
+    await expect.poll(() => page.locator('#move-entry').evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThan(815);
+    await expect(page.locator('#rack-tiles')).toBeInViewport();
+    await expect(page.locator('#board')).toBeInViewport();
+  }
+  await page.setViewportSize({width:900,height:844});
+  await page.locator('#unseen-pool').evaluate(el => el.open = true);
+  const tracker = await page.locator('#unseen-tiles').evaluate(el => {
+    const groups = [...el.children];
+    return {horizontal: groups[0].getBoundingClientRect().top === groups[1].getBoundingClientRect().top,
+      intact: groups.every(group => getComputedStyle(group).whiteSpace === 'nowrap'),
+      fits: el.scrollWidth <= el.clientWidth};
+  });
+  expect(tracker).toEqual({horizontal:true, intact:true, fits:true});
+  const countTops = await page.locator('#bag-count, #unseen-label, #unseen-counts span').evaluateAll(elements => elements.map(el => el.getBoundingClientRect().top));
+  expect(Math.max(...countTops) - Math.min(...countTops)).toBeLessThan(3);
+  await page.screenshot({path:test.info().outputPath('board-rack-fit.png')});
+});
+
+test("board size stays stable through human and computer turn transitions", async ({page}) => {
+  await page.setViewportSize({width:900,height:844});
+  await ready(page);
+  await page.locator('#new-game').click();
+  await page.locator('.game-options > summary').click();
+  await page.selectOption('#bot-analysis', 'kibitz');
+  await page.locator('#new-game-form button.primary').click();
+  for (const width of [900,1440]) {
+    await page.setViewportSize({width,height:844});
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.evaluate(() => {
+      window.boardSizes = [];
+      window.boardSizeObserver = new ResizeObserver(entries => window.boardSizes.push(entries[0].contentRect.width));
+      window.boardSizeObserver.observe(document.querySelector('#board'));
+    });
+    const count = await page.locator('#history-position option').count();
+    await page.locator('#pass-move').click();
+    await page.locator('#confirm-yes').click();
+    await expect(page.locator('#history-position option')).toHaveCount(count + 2);
+    await expect(page.locator('#pass-move')).toBeEnabled();
+    const sizes = await page.evaluate(() => {window.boardSizeObserver.disconnect(); return window.boardSizes;});
+    expect(sizes.length).toBeGreaterThan(0);
+    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThan(1);
+  }
 });

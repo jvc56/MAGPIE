@@ -1,3 +1,4 @@
+import { openGameActions } from "./helpers/startup.js";
 import { openSample, loadSample } from "./helpers/startup.js";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "@playwright/test";
@@ -90,6 +91,7 @@ test("stop permits another analysis, invalid CGP preserves position, edits undo"
   test.setTimeout(90000);
   await ready(page);
 
+  await openGameActions(page);
   await page.locator("#import").click();
   await page.locator("#cgp").fill("not a position");
   await page.getByRole("button", { name: "Load position" }).click();
@@ -360,6 +362,7 @@ test("GCG native round trip, history, notes, errors and analysis isolation", asy
   await expect(page.locator("#history-edited")).toBeVisible();
   const downloadEvent = page.waitForEvent("download");
 
+  await openGameActions(page);
   await page.locator("#save-gcg").click();
   const download = await downloadEvent;
   expect(download.suggestedFilename()).toBe("record.gcg");
@@ -413,6 +416,7 @@ test("GCG full game preserves blanks, both owners, final scores and UTF-8", asyn
   ];
   const downloadEvent = page.waitForEvent("download");
 
+  await openGameActions(page);
   await page.locator("#save-gcg").click();
   const saved = await readFile(await (await downloadEvent).path(), "utf8");
   await loadGCG(page, saved);
@@ -502,6 +506,7 @@ test("game entry: typing, live rack, scoring, pass, exchange, notes and saved hi
   );
   const downloaded = page.waitForEvent("download");
 
+  await openGameActions(page);
   await page.locator("#save-gcg").click();
   const saved = await readFile(await (await downloaded).path(), "utf8");
   expect(saved).toContain("TRAIN");
@@ -852,6 +857,7 @@ test("game setup, stable scoreboard and responsive tracking", async ({
 const chooserFreeGame = "#character-encoding UTF-8\n#lexicon CSW24\n#player1 p1 Alice\n#player2 p2 Bob\n>p1: AEFAULT 8D FAULT +24 24\n>p2: ABELNRW E7 N.RWAL +18 18\n";
 async function openGameDialog(page) {
 
+  await openGameActions(page);
   await page.locator("#load-gcg").click();
   await expect(page.locator("#gcg-dialog")).toBeVisible();
 }

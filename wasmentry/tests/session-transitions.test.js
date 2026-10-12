@@ -1,3 +1,4 @@
+import { openGameActions } from "./helpers/startup.js";
 import { openSample } from "./helpers/startup.js";
 import {test, expect} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
@@ -27,6 +28,7 @@ async function finish(page) {
 async function exportedGame(page) {
 
   const pending = page.waitForEvent('download');
+  await openGameActions(page);
   await page.locator('#save-gcg').click();
   return readFile(await (await pending).path(), 'utf8');
 }

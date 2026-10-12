@@ -47,9 +47,7 @@ test("wide layout keeps rack controls in view and settings between sidebars", as
   ).toBeLessThan(734);
   for (const width of [1280, 850, 390, 375]) {
     await page.setViewportSize({ width, height: 844 });
-    expect(
-      await page.evaluate(() => document.documentElement.scrollWidth),
-    ).toBe(width);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
     await expect(page.locator("#open-settings")).toBeVisible();
   }
   await page.screenshot({

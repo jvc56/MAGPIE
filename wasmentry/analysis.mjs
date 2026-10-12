@@ -579,16 +579,15 @@ function terminalPosition() {
   );
 }
 let panelFitFrame;
+let liveBoardFit = null;
 function fitGamePanels() {
   cancelAnimationFrame(panelFitFrame);
   panelFitFrame = requestAnimationFrame(() => {
     const panel = document.querySelector(".position"), analysis = document.querySelector(".analysis");
-    if (innerWidth <= 1200 || !analysis.getBoundingClientRect().height) {
-      panel.style.removeProperty("--analysis-panel-height");
-      panel.style.removeProperty("--fitted-board-width");
-      return;
-    }
-    const height = analysis.getBoundingClientRect().height;
+    const narrow = innerWidth <= 1000;
+    const analysisHeight = analysis.getBoundingClientRect().height;
+    const viewportHeight = innerHeight - document.querySelector(".app-header").getBoundingClientRect().height - 60;
+    const height = narrow || !analysisHeight ? viewportHeight : analysisHeight;
     const style = getComputedStyle(panel);
     let occupied = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + 2;
     for (const child of panel.children) {
@@ -600,17 +599,45 @@ function fitGamePanels() {
         : child.getBoundingClientRect().height;
       occupied += childHeight + parseFloat(childStyle.marginTop) + parseFloat(childStyle.marginBottom);
     }
-    panel.style.setProperty("--analysis-panel-height", `${height}px`);
-    panel.style.setProperty("--fitted-board-width", `${Math.max(260, height - occupied)}px`);
+    if (narrow || !analysisHeight) panel.style.removeProperty("--analysis-panel-height");
+    else panel.style.setProperty("--analysis-panel-height", `${height}px`);
+    let boardWidth = Math.max(260, height - occupied);
+    if (isLive()) {
+      const layout = `${innerWidth}:${innerHeight}:${document.body.classList.contains("show-analysis")}`;
+      if (liveBoardFit?.session === session && liveBoardFit.layout === layout) {
+        // Turn transitions briefly remove controls or status text. Keep their space
+        // reserved instead of growing the board for those intermediate renders.
+        boardWidth = Math.min(boardWidth, liveBoardFit.width);
+      }
+      liveBoardFit = {session, layout, width: boardWidth};
+    } else liveBoardFit = null;
+    panel.style.setProperty("--fitted-board-width", `${boardWidth}px`);
   });
 }
 const panelResize = new ResizeObserver(fitGamePanels);
 panelResize.observe(document.querySelector(".analysis"));
+panelResize.observe(document.querySelector(".app-header"));
 for (const child of document.querySelector(".position").children) {
   if (child.id !== "board") panelResize.observe(child);
 }
 window.addEventListener("resize", fitGamePanels);
-const wideLayout = matchMedia("(min-width: 1500px)");
+$("game-overflow").addEventListener("click", () => {
+  const button = $("game-overflow");
+  button.setAttribute("aria-expanded", String(button.getAttribute("aria-expanded") !== "true"));
+});
+$("game-file-actions").addEventListener("click", (event) => {
+  if (event.target.closest("button")) $("game-overflow").setAttribute("aria-expanded", "false");
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#game-actions")) $("game-overflow").setAttribute("aria-expanded", "false");
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && $("game-overflow").getAttribute("aria-expanded") === "true") {
+    $("game-overflow").setAttribute("aria-expanded", "false");
+    $("game-overflow").focus();
+  }
+});
+const wideLayout = matchMedia("(min-width: 1360px)");
 function placeUnseenPool() {
   $(wideLayout.matches ? "brand-rail" : "unseen-home").append(
     $("tile-pool"),
@@ -1711,9 +1738,10 @@ function renderHistoryOptions() {
       const last = index === recordedGame.positions.length - 1;
       const finished = last && (recordedGame.ended || session?.finished) &&
         !($("hide-spoilers").checked && index > historyIndex);
-      const turn = entries[index]?.turn ?? (entries.at(-1)?.turn ?? 0) + 1;
+      const timeoutTurn = entries[index]?.parts.move === "(time)" && !entries[index - 1]?.parts.adjustment;
+      const turn = timeoutTurn ? (entries[index - 1]?.turn ?? 0) + 1 : entries[index]?.turn ?? (entries.at(-1)?.turn ?? 0) + 1;
       const rack = historyRackLabel(next.onTurn, next.racks[0], index, entries[index]?.bingo);
-      const prefix = entries[index]?.parts.challenge ? `Challenge result · ${turn}.` : entries[index]?.parts.adjustment ? "Final scoring" : `${turn}.`;
+      const prefix = entries[index]?.parts.challenge ? `Challenge result · ${turn}.` : entries[index]?.parts.adjustment && !timeoutTurn ? "Final scoring" : `${turn}.`;
       const label = finished ? "Game over" : `${prefix} ${recordedGame.players[next.onTurn]} · ${rack}`;
       return new Option(label, String(index));
     }),
@@ -3102,8 +3130,13 @@ function renderReviewTable() {
         const span = document.createElement("span");
         span.className = `history-${key}`;
         if (key === "play") {
-          if (!parts.adjustment) span.append(`${turn}. `);
+          if (!parts.adjustment) {
+            const number = document.createElement("span");
+            number.textContent = `${turn}.`;
+            span.append(number, " ");
+          }
           span.append(moveTiles(displayMove(parts.move), player, restorePosition(recordedGame.positions[index])));
+          if (span.querySelector(".move-word")) span.classList.add("history-tile-play");
         } else span.textContent = value;
         if (button.childNodes.length) button.append(" ");
         button.append(span);

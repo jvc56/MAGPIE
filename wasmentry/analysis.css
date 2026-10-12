@@ -32,7 +32,7 @@
   --hover-row: #89b4fa12;
   --played-row: #a6e3a112;
   font:
-    14px/1.45 system-ui,
+    13px/1.4 system-ui,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
@@ -159,7 +159,7 @@ h3 {
 .app-header {
   max-width: 1320px;
   margin: auto;
-  padding: 22px 24px;
+  padding: 14px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1148,7 +1148,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #context-status {
   display: none;
 }
-@media (min-width: 1201px) {
+@media (min-width: 1001px) {
   body {
     padding-bottom: 48px;
   }
@@ -1345,7 +1345,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 .rack-tile:disabled {
   opacity: 1;
 }
-@media (max-width: 1200px) {
+@media (max-width: 1000px) {
   #game-view {
     grid-template-columns: minmax(0, 1fr);
     max-width: 900px;
@@ -1397,7 +1397,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 }
 
 /* Wide screens put global navigation beside the two game panels. */
-@media (min-width: 1500px) {
+@media (min-width: 1360px) {
   .app-shell {
     display: grid;
     grid-template-columns:
@@ -1461,7 +1461,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   }
 }
 
-@media (min-width: 1500px) {
+@media (min-width: 1360px) {
   .brand-rail #tile-pool {
     margin-top: 24px;
   }
@@ -1471,7 +1471,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 }
 
 /* History shares the analysis column, never the board column. */
-@media (min-width: 1500px) {
+@media (min-width: 1360px) {
   #game-history {
     grid-column: 3;
     grid-row: 2;
@@ -1482,7 +1482,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   }
 }
 #history-table {
-  table-layout: auto;
+  table-layout: fixed;
 }
 #history-table th {
   width: 50%;
@@ -1491,13 +1491,25 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 }
 #history-table button {
   display: grid;
-  grid-template-columns: minmax(max-content, 1fr) 4ch 4ch;
+  grid-template-columns: minmax(0, 1fr) 4ch 4ch;
   align-items: baseline;
   column-gap: 0.6ch;
   white-space: normal;
   overflow-wrap: anywhere;
 }
+#history-table .history-play {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6ch;
+  min-width: 0;
+}
+#history-table .history-tile-play { grid-column: 1 / -1; grid-row: 2; }
+#history-table .history-score { grid-column: 2; grid-row: 1; }
+#history-table .history-cumulative { grid-column: 3; grid-row: 1; }
 #history-table .history-rack {
+  grid-row: 3;
   grid-column: 1 / -1;
   color: var(--muted);
   font-size: 11px;
@@ -1532,18 +1544,32 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   gap: 6px;
   width: 100%;
 }
-@media (max-width: 1499px) {
-  .header-actions {
+#game-actions, #game-file-actions { display: contents; }
+#game-overflow { display: none; }
+@media (max-width: 1359px) {
+  .header-actions { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  #game-actions { display: block; position: relative; }
+  #game-overflow { display: block; }
+  #game-file-actions { display: none; }
+  #game-overflow[aria-expanded="true"] + #game-file-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
     gap: 12px;
-    width: min(100%, 380px);
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    width: 280px;
+    padding: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px #0004;
+    z-index: 20;
   }
-  .header-actions #new-game { grid-column: 1 / -1; }
 }
-@media (max-width: 850px) {
-  .header-actions { width: 100%; }
+@media (max-width: 600px) {
+  .header-actions { width: 100%; justify-content: flex-start; }
+  #game-overflow[aria-expanded="true"] + #game-file-actions { right: auto; left: -90px; }
 }
 .player-scoreboard {
   display: grid;
@@ -1768,7 +1794,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #unseen-counts span {
   white-space: nowrap;
 }
-@media (min-width: 1201px) {
+@media (min-width: 1001px) {
   #board {
     width: clamp(300px, calc(100dvh - 385px), 100%);
     margin-inline: auto;
@@ -1777,7 +1803,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
     width: clamp(260px, calc(100dvh - 490px), 100%);
   }
 }
-@media (min-width: 1500px) {
+@media (min-width: 1360px) {
   #settings-view {
     width: 100%;
     justify-self: start;
@@ -1881,8 +1907,10 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 .move-tile.blank .tile-letter { border: 1px solid currentColor; width: 78%; aspect-ratio: 1; display: grid; place-items: center; font-size: 0.85em; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 #history-table .history-play, #history-table .history-rack { white-space: nowrap; }
-#history-table .move-word { flex-wrap: nowrap; }
-#history-table .move-tiles { font-size: 12px; }
+#history-table .move-word { flex-wrap: nowrap; align-items: center; }
+#history-table .move-tiles { font-size: 11px; flex: 1; min-width: 0; }
+#history-table .move-word { flex: 1; min-width: 0; container-type: inline-size; }
+#history-table .move-tile { font-size: min(11px, calc((100cqw - (var(--tile-count) - 1) * 1px) / var(--tile-count) / 1.65)); }
 #challenge-help { grid-column: 1 / -1; margin: 0; }
 .move-score { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: calc(100cqw - 6px); height: calc(100cqw - 6px);
@@ -1912,13 +1940,32 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 .analysis { min-height: 0; }
 .analysis-topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .analysis-topbar > .toolbar { margin-left: auto; }
-.results-scroll { flex: none; height: 575px; min-height: 575px; max-height: 575px; }
-#results thead tr { height: 34px; }
-#results tbody tr { height: 36px; }
+.results-scroll { flex: none; height: 512px; min-height: 512px; max-height: 512px; }
+#results thead tr { height: 30px; }
+#results tbody tr { height: 32px; }
 #results th, #results td { padding-block: 5px; }
 #results .move-word { flex-wrap: nowrap; }
-@media (min-width: 1201px) {
+@media (min-width: 1001px) {
   body:not(.playing) #game-view .position, .show-analysis #game-view .position { grid-row: 1; height: var(--analysis-panel-height, auto); overflow: auto; }
   .analysis { align-self: start; }
   body:not(.playing) #board, .show-analysis #board { width: min(100%, var(--fitted-board-width, 100%)); }
 }
+
+/* Keep the board, rack, and move controls together in the available viewport. */
+#game-view #board { width: min(100%, var(--fitted-board-width, 100%)); margin-inline: auto; }
+@media (max-width: 1359px) {
+  #unseen-tiles { display: flex; flex-wrap: wrap; gap: 3px 1ch; }
+  #unseen-tiles span { flex: none; }
+}
+@media (max-width: 1359px) {
+  #tile-pool { display: flow-root; }
+  #tile-pool #bag-count { float: left; margin-right: 12px; }
+  #tile-pool .unseen { margin-top: 0; }
+  #unseen-pool > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 0; }
+  #unseen-pool > summary::before { content: "▸"; margin-right: -8px; }
+  #unseen-pool[open] > summary::before { content: "▾"; }
+  #unseen-counts { display: inline-flex; gap: 4px 12px; margin-top: 0; }
+  #unseen-counts span { margin-right: 0; }
+  #unseen-tiles { clear: both; }
+}
+#history-position { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }

@@ -1,3 +1,4 @@
+import { openGameActions } from "./helpers/startup.js";
 import { openSample, loadSample } from "./helpers/startup.js";
 import {test, expect} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
@@ -123,6 +124,7 @@ for (const kind of ['play','watch']) test(`${kind} computer sims reappear in rev
   for (const old of saved) expect(continued.find(row => row.move === old.move).iters).toBeGreaterThan(old.iters);
 
   const downloadEvent = page.waitForEvent('download');
+  await openGameActions(page);
   await page.locator('#save-gcg').click();
   const download = await downloadEvent;
   const gcg = await readFile(await download.path());

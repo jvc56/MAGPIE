@@ -1,3 +1,4 @@
+import { openGameActions } from "./helpers/startup.js";
 import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
@@ -192,6 +193,7 @@ test('engine failure leaves the recorded game downloadable', async ({page}) => {
   await expect(page.locator('#copy-gcg')).toBeEnabled();
 
   const download = page.waitForEvent('download');
+  await openGameActions(page);
   await page.locator('#save-gcg').click();
   const stream = await (await download).createReadStream();
   const chunks = []; for await (const chunk of stream) chunks.push(chunk);

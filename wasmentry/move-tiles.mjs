@@ -45,6 +45,7 @@ export function moveTiles(move, player = 0, position = null) {
     if (down) row++;
     else col++;
   }
+  tiles.style.setProperty("--tile-count", description.length);
   element.append(tiles);
   element.setAttribute('aria-label', `${match[1]} ${description.join(' ')}`);
   return element;

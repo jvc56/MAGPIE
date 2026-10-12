@@ -1,3 +1,4 @@
+import { openGameActions } from "./helpers/startup.js";
 import { openSample, loadSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 async function ready(page) {
@@ -280,6 +281,7 @@ test("clock pauses, forfeits on time, and saves a valid GCG", async ({
   await expect(page.locator("#move-entry")).toBeHidden();
   const download = page.waitForEvent("download");
 
+  await openGameActions(page);
   await page.locator("#save-gcg").click();
   const saved = await download;
   await page.locator("#gcg-file").setInputFiles(await saved.path());
@@ -306,6 +308,7 @@ test("overtime penalties agree in the displayed score and saved GCG", async ({
   await expect(page.locator("#score")).toHaveValue("-10");
   const download = page.waitForEvent("download");
 
+  await openGameActions(page);
   await page.locator("#save-gcg").click();
   const saved = await download;
   await page.locator("#gcg-file").setInputFiles(await saved.path());

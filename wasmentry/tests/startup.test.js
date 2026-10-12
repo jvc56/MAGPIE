@@ -1,3 +1,4 @@
+import { openGameActions } from "./helpers/startup.js";
 import { test, expect } from '@playwright/test';
 
 async function ready(page) {
@@ -122,11 +123,13 @@ test('CGP review saves and reloads its starting board, scores, racks, and subseq
   await expect(page.locator('#rack')).toHaveValue('AEINRST');
 
   const download = page.waitForEvent('download');
+  await openGameActions(page);
   await page.locator('#save-gcg').click();
   const gcg = await readFile(await (await download).path(), 'utf8');
   expect(gcg).toContain('#cgp ' + startingCGP);
   expect(gcg.split('\n').filter(line => line.startsWith('>'))).toHaveLength(1);
 
+  await openGameActions(page);
   await page.locator('#load-gcg').click();
   await page.locator('#gcg-text').fill(gcg);
   await page.locator('#submit-gcg').click();
