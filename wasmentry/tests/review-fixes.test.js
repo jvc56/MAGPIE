@@ -23,9 +23,17 @@ test('computer exchange letters and analysis stay private during a live game', a
   await page.locator('#new-game-cgp').fill(`${Array(15).fill('15').join('/')} UUUVVWQ/ 0/0 0`);
   await page.locator('#start-game').click();
   await expect(page.locator('#history-position option')).toHaveCount(2,{timeout:30000});
-  await expect(page.locator('#history-position option').nth(1)).toContainText(/-\d/);
+  await expect(page.locator('#history-table .history-play').first()).toContainText(/-\d/);
   await expect(page.locator('#history-table')).not.toContainText('UUVVW');
+  await expect(page.locator('#history-table .history-rack').first()).toHaveText('Rack hidden');
+  await expect(page.locator('#history-position option').first()).toHaveText('1. Magpie · Rack hidden');
+  await page.locator('#show-live-analysis').check();
+  await expect(page.locator('#history-table .history-rack').first()).toHaveText('Rack hidden');
   await expect(page.locator('#opponent-rack')).toHaveValue('');
+  await page.locator('#finish-game').click();
+  await page.locator('#confirm-yes').click();
+  await expect(page.locator('#history-table .history-rack').first()).toHaveText('QUUUVVW');
+  await expect(page.locator('#history-position option').first()).toHaveText('1. Magpie · QUUUVVW');
   expect(await page.evaluate(() => localStorage.getItem('magpie-preview-recent') || '')).not.toContain('UUUVVWQ');
 });
 

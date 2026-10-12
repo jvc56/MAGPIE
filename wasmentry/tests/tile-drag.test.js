@@ -254,15 +254,49 @@ test('empty-square hover previews direction without moving the cursor or coverin
   expect((await arrow(below)).transform).toMatch(/^matrix\(0, 1, -1, 0,/);
   await expect(center).toBeFocused();
   await page.keyboard.type('a');
-  await center.hover();
-  expect((await arrow(center)).content).toBe('none');
-  await drag(page, center, cell(page, 8, 8), 'center', false);
+  await below.hover();
+  expect((await arrow(below)).content).toBe('none');
+  await drag(page, below, cell(page, 8, 8), 'center', false);
   await expect(page.locator('.drag-tile')).toBeVisible();
   expect((await arrow(cell(page, 8, 8))).content).toBe('none');
   expect((await arrow(below)).content).toBe('none');
   await page.keyboard.press('Escape');
   await page.mouse.up();
   await expect(page.locator('.square.pending')).toHaveCount(1);
+});
+
+test('typing at a hovered square starts there without a click and then advances normally', async ({page}) => {
+  await ready(page, 'AEINRT?');
+  await page.locator('#sort-rack').focus();
+  await cell(page, 7, 4).hover();
+  await page.keyboard.type('at');
+  await expect(cell(page, 7, 4).locator('.tile-letter')).toHaveText('A');
+  await expect(cell(page, 7, 5).locator('.tile-letter')).toHaveText('T');
+  await page.keyboard.press('Shift+Z');
+  await expect(cell(page, 7, 6)).toHaveClass(/blank/);
+  await page.keyboard.press('Backspace');
+  await expect(cell(page, 7, 6)).not.toHaveClass(/pending/);
+  await page.keyboard.press('Space');
+  await expect(cell(page, 8, 4).locator('.tile-letter')).toHaveText('T');
+  await cell(page, 9, 4).hover();
+  await page.keyboard.type('in');
+  await expect(cell(page, 9, 4).locator('.tile-letter')).toHaveText('I');
+  await expect(cell(page, 10, 4).locator('.tile-letter')).toHaveText('N');
+});
+
+test('hover typing leaves text fields and open dialogs alone', async ({page}) => {
+  await ready(page, 'AEINRST');
+  await page.locator('#rack').focus();
+  await cell(page, 7, 7).hover();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('AT');
+  await expect(page.locator('#rack')).toHaveValue('AT');
+  await expect(page.locator('#board .pending')).toHaveCount(0);
+  await page.locator('#pass-move').click();
+  await expect(page.locator('#game-confirm')).toBeVisible();
+  await page.keyboard.type('a');
+  await expect(page.locator('#board .pending')).toHaveCount(0);
+  await page.keyboard.press('Escape');
 });
 
 for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arranged while the computer thinks, but cannot be played`, async ({page}) => {
@@ -302,6 +336,9 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
   const letters = kind === 'watch' ? 'AEINRST' : 'BCDFGHJ';
   expect(await rackLetters(page)).toBe(letters);
   await expect(page.locator('#play-move')).toBeDisabled();
+  await cell(page, 7, 7).hover();
+  await page.keyboard.type('a');
+  await expect(page.locator('#board .pending')).toHaveCount(0);
   await drag(page, rackTile(page, 0), cell(page, 7, 7));
   expect(await rackLetters(page)).toBe(letters);
   await expect(page.locator('#board .pending')).toHaveCount(0);
@@ -325,6 +362,9 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
   await expect(page.locator('#start-game')).toBeEnabled();
   await page.locator('#cancel-new-game').click();
   await expect(page.locator('#pause-game')).toHaveText('Resume game');
+  await cell(page, 7, 7).hover();
+  await page.keyboard.type('a');
+  await expect(page.locator('#board .pending')).toHaveCount(0);
   await expect(page.locator('#history-position option')).toHaveCount(1);
   await expect(page.locator('#error')).toBeHidden();
 });
@@ -349,7 +389,7 @@ test('passing requires confirmation and Cancel or Escape preserve tentative tile
   await page.locator('#pass-move').click();
   await page.locator('#confirm-yes').click();
   await expect(page.locator('#history-position option')).toHaveCount(2);
-  await expect(page.locator('#history-position option').last()).toContainText('- +0 0');
+  await expect(page.locator('#history-table tbody')).toContainText('- +0 0');
   await expect(page.locator('#board .pending')).toHaveCount(0);
   await expect(page.locator('#error')).toBeHidden();
 });

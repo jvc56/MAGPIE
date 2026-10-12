@@ -86,7 +86,7 @@ for (const kind of ['play', 'watch', 'record']) test(`start ${kind} from CGP wit
   }
   await page.locator('#start-game').click();
   await expect(page.locator('#history-position option')).toHaveCount(1);
-  await expect(page.locator('#history-position option')).toHaveText('Starting position');
+  await expect(page.locator('#history-position option')).toHaveText(/^1\. .* · AEINRST$/);
   await expect(page.locator('#board .played')).toHaveCount(1);
   await expect(page.locator('#open-lexicon-settings')).toContainText('NWL23');
   await expect(page.locator('#score')).toHaveValue('100');
@@ -100,7 +100,7 @@ for (const kind of ['play', 'watch', 'record']) test(`start ${kind} from CGP wit
     await page.locator('#board [data-row="7"][data-col="8"]').click();
     await page.keyboard.type('t');
     await page.locator('#play-move').click();
-    await expect(page.locator('#history-position option').nth(1)).toContainText('(A)T +2 102');
+    await expect(page.locator('#history-table tbody')).toContainText('(A)T +2 102');
   }
   await expect(page.locator('#error')).toBeHidden();
 });

@@ -39,7 +39,7 @@ test('ending an idle game unlocks review controls without another engine command
   await page.locator('#history-first').click();
   await page.locator('#hide-spoilers').check();
   await expect(page.locator('#session-result')).toBeHidden();
-  await expect(page.locator('#history-position option').nth(1)).toHaveText('1. •••');
+  await expect(page.locator('#history-position option').nth(1)).toHaveText('2. Magpie 2 · Rack hidden');
   await page.locator('#hide-spoilers').uncheck();
   await expect(page.locator('#session-result')).toBeVisible();
   for (const id of ['rack', 'opponent-rack', 'score', 'opponent-score', 'edit', 'clear', 'on-turn-player', 'play-move', 'shuffle-rack', 'sort-rack'])

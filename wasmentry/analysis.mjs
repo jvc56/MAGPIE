@@ -56,6 +56,7 @@ let cursor = null,
   engine,
   timer;
 let tileDrag = null;
+let hoveredEntry = null, hoverEntryReady = false;
 let draftTiles = [],
   rackChoice = null,
   gameUndo = [];
@@ -1217,6 +1218,7 @@ $("premium-labels")?.addEventListener("change", () => {
   }
 });
 $("board").addEventListener("click", (event) => {
+  hoverEntryReady = false;
   if (busy) return;
   if (!$("edit").checked) {
     if (recordedGame) entryClick(event);
@@ -1240,7 +1242,7 @@ function focusCursor() {
 }
 $("board").addEventListener("keydown", (event) => {
   if (!$("edit").checked && recordedGame) {
-    entryKey(event);
+    if (!hoverEntryKey(event)) entryKey(event);
     return;
   }
   if (
@@ -1603,6 +1605,7 @@ document.addEventListener("keydown", (event) => {
     stop();
     return;
   }
+  hoverEntryKey(event);
 });
 function recordedBoardMatches() {
   if (!recordedGame) return false;
@@ -1621,15 +1624,25 @@ function privateHistoryLine(line) {
   if (!line.startsWith(`>${nick}:`)) return line;
   return line.replace(/(\s)-([A-Z?]+)(?=\s)/, (_, space, tiles) => `${space}-${tiles.length}`);
 }
+function historyRackLabel(player, rack, index) {
+  if ((hiddenLiveGame() && player !== session.human) ||
+      ($("hide-spoilers").checked && index > historyIndex)) return "Rack hidden";
+  return rack ? displayTiles(rack) : "Rack unknown";
+}
 function renderHistoryOptions() {
   if (!recordedGame) return;
+  const entries = historyEntries();
   $("history-position").replaceChildren(
-    new Option(/^#cgp /m.test(recordedGame.gcg) ? "Starting position" : "Start of game", "0"),
-    ...historyEntries().map(({index, nick, turn, parts}) => {
-      const play = displayMove(`${parts.move} ${parts.score} ${parts.cumulative}`.trim());
-      const option = new Option(`${turn}. ${play} · ${nick}`, String(index + 1));
-      option.dataset.turn = turn;
-      return option;
+    ...recordedGame.positions.map((saved, index) => {
+      const next = restorePosition(saved);
+      const last = index === recordedGame.positions.length - 1;
+      const finished = last && (recordedGame.ended || session?.finished) &&
+        !($("hide-spoilers").checked && index > historyIndex);
+      const turn = entries[index]?.turn ?? (entries.at(-1)?.turn ?? 0) + 1;
+      const rack = historyRackLabel(next.onTurn, next.racks[0], index);
+      const prefix = entries[index]?.parts.adjustment ? "Final scoring" : `${turn}.`;
+      const label = finished ? "Game over" : `${prefix} ${recordedGame.players[next.onTurn]} · ${rack}`;
+      return new Option(label, String(index));
     }),
   );
   $("history-position").value = String(historyIndex);
@@ -1818,6 +1831,35 @@ function entryClick(event) {
   while (cursor && position.board[cursor.row][cursor.col]) advanceCursor();
   renderBoard();
   focusCursor();
+}
+$("board").addEventListener("pointermove", (event) => {
+  if (event.pointerType !== "mouse" || event.buttons) return;
+  const square = event.target.closest(".square");
+  if (!square) return;
+  const next = {row:+square.dataset.row, col:+square.dataset.col};
+  if (hoveredEntry?.row !== next.row || hoveredEntry?.col !== next.col) {
+    hoveredEntry = next;
+    hoverEntryReady = true;
+  }
+});
+$("board").addEventListener("pointerleave", () => {
+  hoveredEntry = null;
+  hoverEntryReady = false;
+});
+function hoverEntryKey(event) {
+  if (!hoverEntryReady || !hoveredEntry || !recordedGame || !canDragTiles() ||
+      settingsOpen || $("edit").checked || document.querySelector("dialog[open]") ||
+      document.body.classList.contains("tile-dragging") || event.isComposing ||
+      event.ctrlKey || event.metaKey || event.altKey || !/^[a-zA-Z]$/.test(event.key) ||
+      event.target.closest("input, textarea, select, [contenteditable]")) return false;
+  const {row, col} = hoveredEntry;
+  if (position.board[row][col] || draftTiles.some(tile => tile.row === row && tile.col === col)) return false;
+  // Use the hovered square only to begin typing. Subsequent letters follow
+  // the advancing cursor until the mouse moves to a different square.
+  hoverEntryReady = false;
+  cursor = {row, col};
+  entryKey(event);
+  return true;
 }
 function entryKey(event) {
   if (terminalPosition()) return;
@@ -2895,11 +2937,13 @@ function historyEntries() {
     if (!rowNumber || (!parts.adjustment && player <= previousPlayer)) rowNumber++;
     if (!turn || !parts.adjustment) turn++;
     if (!parts.adjustment) previousPlayer = player;
-    return {index, nick, player, turn, rowNumber, parts};
+    const rack = line.match(/^>[^:]+:\s+([A-Z?]+)\s/)?.[1] || "";
+    return {index, nick, player, turn, rowNumber, parts, rack};
   });
 }
 function renderReviewTable() {
   if (!recordedGame) return;
+  renderHistoryOptions();
   const hidden = $("hide-spoilers").checked;
   const header = document.createElement("tr");
   for (const name of recordedGame.players) {
@@ -2910,7 +2954,7 @@ function renderReviewTable() {
   $("history-table").tHead.replaceChildren(header);
   const rows = [];
   let cells;
-  for (const {index, player, rowNumber, parts} of historyEntries()) {
+  for (const {index, player, turn, rowNumber, parts, rack} of historyEntries()) {
     if (rowNumber > rows.length) {
       const row = document.createElement("tr");
       cells = [document.createElement("td"), document.createElement("td")];
@@ -2924,13 +2968,20 @@ function renderReviewTable() {
     if (hidden && index >= historyIndex) {
       button.textContent = "•••";
     } else {
-      for (const [key, value] of [["play", displayMove(parts.move)], ["score", parts.score], ["cumulative", parts.cumulative]]) {
+      for (const [key, value] of [["play", `${parts.adjustment ? "" : `${turn}. `}${displayMove(parts.move)}`], ["score", parts.score], ["cumulative", parts.cumulative]]) {
         const span = document.createElement("span");
         span.className = `history-${key}`;
         span.textContent = value;
         if (button.childNodes.length) button.append(" ");
         button.append(span);
       }
+    }
+    if (!parts.adjustment && !(hidden && index > historyIndex)) {
+      const rackLine = document.createElement("span");
+      rackLine.className = "history-rack";
+      rackLine.textContent = historyRackLabel(player, rack, index);
+      rackLine.setAttribute("aria-label", `Rack: ${rackLine.textContent}`);
+      button.append(rackLine);
     }
     button.disabled = busy;
     button.addEventListener("click", (event) => {
@@ -2949,16 +3000,6 @@ function renderReviewTable() {
     cell.append(button);
   }
   $("history-table").tBodies[0].replaceChildren(...rows);
-  for (const [index, option] of [
-    ...$("history-position").options,
-  ].entries()) {
-    if (!option.dataset.fullLabel)
-      option.dataset.fullLabel = option.textContent;
-    option.textContent =
-      hidden && index > historyIndex
-        ? `${option.dataset.turn}. •••`
-        : option.dataset.fullLabel;
-  }
   $("history-first").disabled = busy || historyIndex === 0;
   $("history-last").disabled =
     busy || historyIndex === recordedGame.positions.length - 1;
