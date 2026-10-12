@@ -171,6 +171,7 @@ typedef enum {
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_NESTED,
   ARG_TOKEN_PEG_OUTCOMES,
+  ARG_TOKEN_PEG_JSON,
   ARG_TOKEN_PEG_OUT_WIDTH,
   ARG_TOKEN_PEG_OUT_LINES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
@@ -420,6 +421,7 @@ struct Config {
   bool peg_show_outcomes;
   bool use_game_pairs;
   bool human_readable;
+  bool peg_json;
   bool show_mistakes;
   bool use_small_plays;
   bool sim_with_inference;
@@ -1915,6 +1917,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "flat greedy/pessimistic rollout. Nested wins more decisions but "
           "costs more per solve.";
       break;
+    case ARG_TOKEN_PEG_JSON:
+      usages[0] = "<true/false>";
+      examples[0] = "true";
+      text = "Include structured PEG progress before the text table.";
+      break;
     case ARG_TOKEN_PEG_OUTCOMES:
       usages[0] = "<true/false>";
       examples[0] = "true";
@@ -2637,6 +2644,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
+        ARG_TOKEN_PEG_JSON,                /* pegjson */
         ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
         ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
@@ -4074,7 +4082,7 @@ static char *config_write_peg_chart_file(const char *contents) {
 // Renders the peg result for display. When the outcomes column truncates any
 // cell at the configured width/line caps, writes the full (unlimited-lines)
 // chart to a data/pegcharts/ file and embeds its path above the table.
-static char *config_peg_display(const Config *config, PegPoll *poll) {
+static char *config_peg_display_table(const Config *config, PegPoll *poll) {
   const int width = config->peg_out_width;
   const int lines = config->peg_out_lines;
   bool truncated = false;
@@ -4101,6 +4109,18 @@ static char *config_peg_display(const Config *config, PegPoll *poll) {
   free(note);
   free(path);
   return out;
+}
+
+static char *config_peg_display(const Config *config, PegPoll *poll) {
+  char *table = config_peg_display_table(config, poll);
+  if (!config->peg_json || !config->peg_poll) {
+    return table;
+  }
+  char *json = peg_poll_get_json(config->peg_poll, config->game);
+  char *output = get_formatted_string("peginfo %s\n%s", json, table);
+  free(json);
+  free(table);
+  return output;
 }
 
 char *status_peg(Config *config) {
@@ -4942,7 +4962,7 @@ char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
                      string_duplicate("no PEG results to show"));
     return empty_string();
   }
-  return config_peg_display(config, /*poll=*/NULL);
+  return config_peg_display(config, NULL);
 }
 
 void execute_show_peg(Config *config, ErrorStack *error_stack) {
@@ -7822,6 +7842,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_PEG_JSON, &config->peg_json, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_bool(config, ARG_TOKEN_PEG_OUTCOMES, &config->peg_show_outcomes,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -9146,7 +9171,7 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = config_peg_display(config, /*poll=*/NULL);
+  char *result = config_peg_display(config, NULL);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -10107,6 +10132,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
   arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
   arg(ARG_TOKEN_PEG_OUTCOMES, "pegoutcomes", 1, 1);
+  arg(ARG_TOKEN_PEG_JSON, "pegjson", 1, 1);
   arg(ARG_TOKEN_PEG_OUT_WIDTH, "pegoutwidth", 1, 1);
   arg(ARG_TOKEN_PEG_OUT_LINES, "pegoutlines", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
@@ -10259,6 +10285,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = true;
+  config->peg_json = false;
   config->show_mistakes = false;
   config->sim_with_inference = true;
   config->pat_label_plies = 1;
@@ -10433,6 +10460,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME:
     case ARG_TOKEN_PEG:
     case ARG_TOKEN_PEG_NOPRUNE:
+    case ARG_TOKEN_PEG_JSON:
     case ARG_TOKEN_PEG_OUTCOMES:
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:

@@ -901,6 +901,26 @@ double string_to_double_prefix(const char *str, const char **end,
   return result;
 }
 
+void string_builder_add_json_string(StringBuilder *sb, const char *value) {
+  if (!value) {
+    string_builder_add_string(sb, "\"\"");
+    return;
+  }
+  string_builder_add_char(sb, '"');
+  for (const unsigned char *cursor = (const unsigned char *)value; *cursor;
+       cursor++) {
+    if (*cursor == '"' || *cursor == '\\') {
+      string_builder_add_char(sb, '\\');
+      string_builder_add_char(sb, (char)*cursor);
+    } else if (*cursor < 32) {
+      string_builder_add_formatted_string(sb, "\\u%04x", *cursor);
+    } else {
+      string_builder_add_char(sb, (char)*cursor);
+    }
+  }
+  string_builder_add_char(sb, '"');
+}
+
 char *json_unescape_string(const char *json_string) {
   size_t input_len = string_length(json_string);
   char *unescaped = malloc_or_die(input_len + 1);

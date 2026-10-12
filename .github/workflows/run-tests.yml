@@ -77,8 +77,13 @@ jobs:
       - name: Build shared library
         run: make libmagpie
 
+      - name: Install locale for PEG JSON regression
+        run: sudo locale-gen de_DE.UTF-8
+
       - name: Run no-PGO release tests
-        run: ./bin/magpie_test
+        run: |
+          ./bin/magpie_test
+          ./bin/magpie_test pegpoll
 
   unit-tests-dev:
     name: unit-tests-dev (${{ matrix.shard }})
@@ -102,7 +107,7 @@ jobs:
           - shard: config
             tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest
-            tests: "embedding fileproxy historyreplay hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep pat patfile patlexicon patutility patfeatures pateval"
+            tests: "embedding fileproxy historyreplay peg_embedding pegpoll hm math bai command cmdapi gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load wit witcache witsweep pat patfile patlexicon patutility patfeatures pateval"
           - shard: ap_rit
             tests: "ap_rit patwmp"
           - shard: simdet
@@ -152,6 +157,10 @@ jobs:
             echo 'Missing conversion arguments unexpectedly succeeded'
             exit 1
           fi
+
+      - name: Install locale for PEG JSON regression
+        if: matrix.shard == 'rest'
+        run: sudo locale-gen de_DE.UTF-8
 
       - name: Run dev tests
         run: ./bin/magpie_test ${{ matrix.tests }}
@@ -217,7 +226,7 @@ jobs:
         run: make -f Makefile-wasm magpie_wasm_test
 
       - name: Run WASM tests
-        run: node ./bin/magpie_wasm_test.js endgame_wasm tt zobrist embedding fileproxy historyreplay
+        run: node ./bin/magpie_wasm_test.js endgame_wasm tt zobrist embedding fileproxy historyreplay peg_embedding
 
   ci-summary:
     if: always()
