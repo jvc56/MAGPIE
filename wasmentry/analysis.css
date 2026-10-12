@@ -1474,11 +1474,9 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   table-layout: fixed;
 }
 #history-table th {
+  width: 50%;
   text-align: left;
   overflow-wrap: anywhere;
-}
-#history-table th:first-child {
-  width: 38px;
 }
 #history-table button {
   display: grid;

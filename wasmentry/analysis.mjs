@@ -2877,25 +2877,26 @@ function gameEvents() {
     []
   );
 }
-// Both history views share the same paired-turn grouping. Score adjustments
-// belong to the preceding turn, even when they name the other player.
+// Count each play as a turn, while pairing players in the table. Score
+// adjustments belong to the preceding turn and row.
 function historyEntries() {
   const secondPlayer = recordedGame.gcg.match(/^#player2\s+(\S+)/m)?.[1];
-  let turn = 0, previousPlayer = 1;
+  let turn = 0, rowNumber = 0, previousPlayer = 1;
   return gameEvents().map((line, index) => {
     const nick = line.slice(1, line.indexOf(":"));
     const player = nick === secondPlayer ? 1 : 0;
     const parts = historyPlayParts(privateHistoryLine(line), restorePosition(recordedGame.positions[index]));
-    if (!turn || (!parts.adjustment && player <= previousPlayer)) turn++;
+    if (!rowNumber || (!parts.adjustment && player <= previousPlayer)) rowNumber++;
+    if (!turn || !parts.adjustment) turn++;
     if (!parts.adjustment) previousPlayer = player;
-    return {index, nick, player, turn, parts};
+    return {index, nick, player, turn, rowNumber, parts};
   });
 }
 function renderReviewTable() {
   if (!recordedGame) return;
   const hidden = $("hide-spoilers").checked;
   const header = document.createElement("tr");
-  for (const name of ["Turn", ...recordedGame.players]) {
+  for (const name of recordedGame.players) {
     const cell = document.createElement("th");
     cell.textContent = name;
     header.append(cell);
@@ -2903,12 +2904,9 @@ function renderReviewTable() {
   $("history-table").tHead.replaceChildren(header);
   const rows = [];
   let cells;
-  for (const {index, player, turn, parts} of historyEntries()) {
-    if (turn > rows.length) {
+  for (const {index, player, rowNumber, parts} of historyEntries()) {
+    if (rowNumber > rows.length) {
       const row = document.createElement("tr");
-      const number = document.createElement("td");
-      number.textContent = String(rows.length + 1);
-      row.append(number);
       cells = [document.createElement("td"), document.createElement("td")];
       row.append(...cells);
       rows.push(row);
