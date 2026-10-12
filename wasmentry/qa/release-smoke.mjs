@@ -34,7 +34,6 @@ try {
   await page.locator("#threads").fill("2");
   await page.locator("#back-to-game").click();
   for (const [sample, mode] of [["opening", "kibitz"], ["midgame", "sim"], ["peg", "peg"], ["endgame", "endgame"]]) {
-    await page.locator("#game-menu > summary").click();
     await page.locator("#import").click();
     await page.locator("#cgp").fill(SAMPLES[sample]);
     await page.locator('#import-form button[type="submit"]').click();

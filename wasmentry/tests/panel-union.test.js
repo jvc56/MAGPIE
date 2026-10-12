@@ -24,7 +24,8 @@ test('manual plays are unioned with the configured top plays before any kibitz a
 test('sidebars contain game controls and bag count; equal-height panels show exactly fifteen plays',async({page})=>{
  await page.setViewportSize({width:1936,height:1080}); await review(page);
  await expect(page.locator('#game-header-actions #new-game')).toBeVisible();
- await expect(page.locator('#game-header-actions #game-menu')).toBeVisible();
+ await expect(page.locator('#game-header-actions [aria-label=GCG]')).toBeVisible();
+ await expect(page.locator('#game-header-actions [aria-label=CGP]')).toBeVisible();
  await expect(page.locator('#brand-rail #bag-count')).toBeVisible();
  await expect(page.locator('.analysis h2')).toHaveCount(0);
  if (await page.locator('#position-editor').getAttribute('open') !== null) await page.locator('#position-editor summary').click();
@@ -37,6 +38,6 @@ test('sidebars contain game controls and bag count; equal-height panels show exa
    analysis:document.querySelector('.analysis').getBoundingClientRect().height};
  });
  expect(dimensions.visible).toBe(15); expect(Math.abs(dimensions.board-dimensions.analysis)).toBeLessThan(1);
- await page.locator('#game-menu summary').click(); await expect(page.locator('#load-gcg')).toBeVisible();
+ await expect(page.locator('#load-gcg')).toBeVisible();
  await page.screenshot({path:test.info().outputPath('sidebar-panels.png')});
 });

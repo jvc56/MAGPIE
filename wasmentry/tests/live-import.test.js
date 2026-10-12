@@ -19,7 +19,7 @@ for (const source of ['paste', 'file', 'drop']) {
     await startGame(page);
     const before = await page.locator('#rack-tiles').textContent();
     const text = await readFile('tests/fixtures/standard.gcg', 'utf8');
-    await page.locator('#game-menu > summary').click();
+
     await page.locator('#load-gcg').click();
     const load = async () => {
       if (source === 'paste') {
@@ -54,7 +54,7 @@ for (const source of ['paste', 'file', 'drop']) {
 test('a failed confirmed import leaves the live game playable', async ({ page }) => {
   await startGame(page);
   const before = await page.locator('#rack-tiles').textContent();
-  await page.locator('#game-menu > summary').click();
+
   await page.locator('#load-gcg').click();
   await page.locator('#gcg-text').fill('not a game');
   await page.locator('#submit-gcg').click();

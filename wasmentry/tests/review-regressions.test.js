@@ -190,7 +190,7 @@ test('engine failure leaves the recorded game downloadable', async ({page}) => {
   await expect(page.locator('#status')).toContainText('Engine unavailable');
   await expect(page.locator('#save-gcg')).toBeEnabled();
   await expect(page.locator('#copy-gcg')).toBeEnabled();
-  await page.locator('#game-menu > summary').click();
+
   const download = page.waitForEvent('download');
   await page.locator('#save-gcg').click();
   const stream = await (await download).createReadStream();

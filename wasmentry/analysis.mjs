@@ -583,7 +583,7 @@ function fitGamePanels() {
   cancelAnimationFrame(panelFitFrame);
   panelFitFrame = requestAnimationFrame(() => {
     const panel = document.querySelector(".position"), analysis = document.querySelector(".analysis");
-    if (innerWidth <= 850 || !analysis.getBoundingClientRect().height) {
+    if (innerWidth <= 1200 || !analysis.getBoundingClientRect().height) {
       panel.style.removeProperty("--analysis-panel-height");
       panel.style.removeProperty("--fitted-board-width");
       return;
@@ -2905,20 +2905,6 @@ $("analysis-details").addEventListener("click", () =>
 $("close-analysis-details").addEventListener("click", () =>
   $("analysis-details-dialog").close(),
 );
-$("game-menu").addEventListener("click", (event) => {
-  if (event.target.closest("button")) $("game-menu").open = false;
-});
-document.addEventListener("click", (event) => {
-  if (!$("game-menu").contains(event.target))
-    $("game-menu").open = false;
-});
-$("game-menu").addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    $("game-menu").open = false;
-    $("game-menu").querySelector("summary").focus();
-    event.stopPropagation();
-  }
-});
 $("pause-game").addEventListener("click", () => {
   if (!isLive()) return;
   chargeClock();

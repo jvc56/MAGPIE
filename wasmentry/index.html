@@ -26,17 +26,15 @@
         </div>
         <div class="header-actions" id="game-header-actions">
             <button id="new-game">New game</button>
-            <details class="game-menu" id="game-menu">
-              <summary>Game</summary>
-              <div class="menu-content">
-                <button id="load-gcg">Open GCG…</button>
-                <button id="save-gcg" disabled>Save GCG</button>
-                <button id="copy-gcg" disabled>Copy GCG</button>
-                <hr />
-                <button id="import">Paste CGP…</button>
-                <button id="copy">Copy CGP</button>
-              </div>
-            </details>
+            <div class="game-action-group" role="group" aria-label="GCG">
+              <button id="load-gcg">Open GCG…</button>
+              <button id="save-gcg" disabled>Save GCG</button>
+              <button id="copy-gcg" disabled>Copy GCG</button>
+            </div>
+            <div class="game-action-group" role="group" aria-label="CGP">
+              <button id="import">Paste CGP…</button>
+              <button id="copy">Copy CGP</button>
+            </div>
 
           <button
             id="open-lexicon-settings"

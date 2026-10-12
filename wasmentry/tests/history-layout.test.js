@@ -167,3 +167,28 @@ test("final adjustments stay in the last turn and scores align in both player co
   await finalRow.scrollIntoViewIfNeeded();
   await page.locator('#game-history').screenshot({path:test.info().outputPath('history-aligned-scores.png')});
 });
+
+
+test("narrow desktop stacks panels and keeps history tile words on one line", async ({page}) => {
+  await page.setViewportSize({width:1072, height:900});
+  await ready(page);
+  await page.locator('#gcg-file').setInputFiles('tests/fixtures/standard.gcg');
+  await expect(page.locator('#status')).toContainText('Loaded');
+  for (const width of [1200, 1072, 900, 390]) {
+    await page.setViewportSize({width, height:900});
+    await expect.poll(() => page.evaluate(() => {
+      const board = document.querySelector('.position').getBoundingClientRect();
+      const analysis = document.querySelector('.analysis').getBoundingClientRect();
+      const history = document.querySelector('#game-history').getBoundingClientRect();
+      return analysis.top >= board.bottom && history.top >= analysis.bottom && Math.abs(history.left - board.left) < 1;
+    })).toBe(true);
+    const wraps = await page.locator('#history-table .move-word').evaluateAll(words => words.some(word => {
+      const tiles = [...word.querySelectorAll('.move-tile')];
+      return tiles.some(tile => Math.abs(tile.getBoundingClientRect().top - tiles[0].getBoundingClientRect().top) > 1);
+    }));
+    expect(wraps).toBe(false);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await page.setViewportSize({width:1072, height:900});
+  await page.locator('#game-history').screenshot({path:test.info().outputPath('unwrapped-history.png')});
+});

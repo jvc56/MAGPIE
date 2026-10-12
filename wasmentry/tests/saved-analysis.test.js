@@ -121,7 +121,7 @@ for (const kind of ['play','watch']) test(`${kind} computer sims reappear in rev
   await page.locator('[data-mode=sim]').click(); await complete(page);
   const continued = await rows(page);
   for (const old of saved) expect(continued.find(row => row.move === old.move).iters).toBeGreaterThan(old.iters);
-  await page.locator('.game-menu > summary').click();
+
   const downloadEvent = page.waitForEvent('download');
   await page.locator('#save-gcg').click();
   const download = await downloadEvent;

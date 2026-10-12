@@ -25,7 +25,7 @@ async function finish(page) {
 }
 
 async function exportedGame(page) {
-  await page.locator('#game-menu > summary').click();
+
   const pending = page.waitForEvent('download');
   await page.locator('#save-gcg').click();
   return readFile(await (await pending).path(), 'utf8');
