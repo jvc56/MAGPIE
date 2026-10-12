@@ -173,18 +173,24 @@ static void write_game_result(const Config *config, Game *live_game,
   const game_end_reason_t end_reason =
       game_get_game_end_reason(live_game ? live_game : game);
   bool final_points_recorded = false;
+  bool any_tile_placement = false;
   for (int index = 0; index < game_history_get_num_events(game_history);
        index++) {
-    if (game_event_get_type(game_history_get_event(game_history, index)) ==
-        GAME_EVENT_END_RACK_POINTS) {
+    const game_event_t type =
+        game_event_get_type(game_history_get_event(game_history, index));
+    if (type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      any_tile_placement = true;
+    }
+    if (type == GAME_EVENT_END_RACK_POINTS) {
       final_points_recorded = true;
     }
   }
   // Imports do not initialize Config's pending-final-pass flag. An outplay is
   // not finalized until the rack-points event is in the exported history.
-  const bool ended =
-      end_reason != GAME_END_REASON_NONE &&
-      (end_reason != GAME_END_REASON_STANDARD || final_points_recorded);
+  // A finished starting CGP has no recorded outplay awaiting those points.
+  const bool ended = end_reason != GAME_END_REASON_NONE &&
+                     (end_reason != GAME_END_REASON_STANDARD ||
+                      final_points_recorded || !any_tile_placement);
   string_builder_add_formatted_string(result, "],\"ended\":%s,\"positions\":[",
                                       ended ? "true" : "false");
   SnapshotWriter writer = {.result = result, .live_game = live_game};

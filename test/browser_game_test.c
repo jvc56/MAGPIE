@@ -124,7 +124,27 @@ static void test_cgp_endgame_rack_retention(void) {
   free(unknown);
 }
 
+static void test_finished_cgp_import(void) {
+  if (BOARD_DIM != 15) {
+    return;
+  }
+  const char *board = "2CHIGOE3T2P/3O6NAE1E/3M6END1R/2AY6UG1GI/2B2QUIT1MO1L1/"
+                      "1VODKA5i1OD/2R2TANNERS1RE/OUTA2ZA3T1IF/2I1CRoWDIE2A1/"
+                      "2V6FEEBS1/1NEWISHLY1LEA2/3O8N2/3T8JEU/3S8A2/7PROLIX2";
+  const char *racks[] = {"I/", "/I"};
+  for (int rack_idx = 0; rack_idx < 2; rack_idx++) {
+    char *record = get_formatted_string("%s#cgp %s %s 516/376 0\n", EMPTY_GAME,
+                                        board, racks[rack_idx]);
+    char *loaded = browser_game_import_gcg(record, "CSW24");
+    assert(has_substring(loaded, "\"ended\":true"));
+    assert(has_substring(loaded, "\"index\":0"));
+    assert_success(loaded);
+    free(record);
+  }
+}
+
 void test_browser_game(void) {
+  test_finished_cgp_import();
   test_cgp_start();
   test_cgp_endgame_rack_retention();
   const int center_row = (BOARD_DIM / 2) + 1;

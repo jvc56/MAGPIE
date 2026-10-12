@@ -30,6 +30,8 @@ test('review edits preserve importable records and leave the engine usable after
         exchanges.push(await commit(standard,22,move));
       }
       const outplay = await commit(standard,26,'D11 .OTS');
+      const finishedText = header + `#cgp ${outplay.game.positions.at(-1).cgp}\n`;
+      const finished = await engine.importGCG(finishedText, 'CSW24');
       const finalPass = outplay.game && await commit(outplay.game.gcg,outplay.game.index,'pass');
       const challenge = outplay.game && await engine.gameAction({text:outplay.game.gcg,lexicon:'CSW24',action:3,index:outplay.game.index});
       const branch = outplay.game && await commit(outplay.game.gcg,22,'pass');
@@ -44,7 +46,7 @@ test('review edits preserve importable records and leave the engine usable after
       const opening = await commit(header + `#cgp ${empty} AEINRST/ 0/0 0\n`,0,'8H TRAIN');
       const unknownPass = await commit(opening.game.gcg,1,'pass');
       const suppliedPass = await commit(opening.game.gcg,1,'pass','BCDFGHJ');
-      return {exchanges,outplay,finalPass,challenge,branch,later,replaced,corrected,conflict,valid,unknownPass,suppliedPass};
+      return {exchanges,outplay,finishedText,finished,finalPass,challenge,branch,later,replaced,corrected,conflict,valid,unknownPass,suppliedPass};
     } finally {engine.worker.terminate();}
   });
   await test.info().attach('review-records', {body:JSON.stringify(report,null,2),contentType:'application/json'});
@@ -52,6 +54,8 @@ test('review edits preserve importable records and leave the engine usable after
   expect(report.outplay.error).toBeUndefined();
   expect(report.outplay.game.ended).toBe(false);
   expect(report.outplay.reloaded.ended).toBe(false);
+  expect(report.finished.game.ended).toBe(true);
+  expect(report.finished.game.positions).toHaveLength(1);
   expect(report.finalPass.error).toBeUndefined();
   expect(report.finalPass.game.ended).toBe(true);
   expect(report.finalPass.game.gcg).toContain('+2 378');
@@ -70,4 +74,14 @@ test('review edits preserve importable records and leave the engine usable after
   for (const result of [report.outplay,report.finalPass,report.branch,report.later,report.valid,report.suppliedPass]) {
     expect(result.reloaded.positions.at(-1).cgp).toBe(result.game.positions.at(-1).cgp);
   }
+  // Loading a terminal starting position must not offer unusable move actions.
+  await page.locator('#cancel-new-game').click();
+  await page.locator('#gcg-file').setInputFiles({
+    name:'finished.gcg',mimeType:'text/plain',buffer:Buffer.from(report.finishedText),
+  });
+  await expect(page.locator('#load-gcg')).toBeEnabled({timeout:30000});
+  await expect(page.locator('#score')).toHaveValue('516');
+  await expect(page.locator('#opponent-score')).toHaveValue('376');
+  await expect(page.locator('#move-entry')).toBeHidden();
+  await expect(page.locator('#error')).toBeHidden();
 });
