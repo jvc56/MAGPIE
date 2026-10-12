@@ -17,6 +17,7 @@
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
 #include "board_test.h"
+#include "browser_game_test.h"
 #include "builder_hash_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
@@ -151,6 +152,7 @@ static TestEntry test_table[] = {
     {"peg_embedding", test_peg_embedding},
     {"wordmapapi", test_word_map_embedding},
     {"cmdapi", test_cmd_api},
+    {"browsergame", test_browser_game},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},
@@ -313,6 +315,7 @@ void run_all_super(void) {
   test_bit_rack();
   test_board_layout_super();
   test_pat_rollout_default_classes();
+  test_browser_game();
 }
 
 int main(int argc, char *argv[]) {
