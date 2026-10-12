@@ -6,7 +6,7 @@ import { installTileDrag } from "./tile-drag.mjs";
 import { loadAnalyses, saveAnalysis } from "./analysis-cache.mjs";
 import { deviceBudget } from "./device-budget.mjs";
 import { listWMPs } from "./wmp-cache.mjs";
-import { parsePegProgress, mergePegRows } from "./peg-review.mjs";
+import { renderPegOutcomes, parsePegProgress, mergePegRows } from "./peg-review.mjs";
 import { ensureIsolation } from "./isolation.mjs";
 import { EngineClient } from "./engine-client.mjs";
 import { readGCG } from "./gcg-loader.mjs?v=2";
@@ -809,6 +809,21 @@ function updateSimSelection() {
 function concealComputerAnalysis() {
   return hiddenLiveGame() && position.onTurn !== session.human && !$("show-live-analysis").checked;
 }
+let resumablePegKey = null;
+let pegSessionKey = null;
+let pegSessionId = 0;
+let expandedPegView = null;
+const pegOutcomes = new Map();
+const pegOutcomeViews = new Map();
+const pendingPegOutcomes = new Set();
+function requestPegOutcomes(move) {
+  const key = cacheKey("peg");
+  const requestKey = `${key}:${move}`;
+  if (key !== pegSessionKey || pendingPegOutcomes.has(requestKey)) return;
+  pendingPegOutcomes.add(requestKey);
+  engine.pegOutcomes(move, key, pegSessionId);
+}
+
 function renderResults() {
   if (concealComputerAnalysis()) {
     $("results").tBodies[0].replaceChildren();
@@ -872,6 +887,8 @@ function renderResults() {
     : "";
   const simButton = document.querySelector('[data-mode="sim"]');
   const canContinueSim = (mode === "sim" && results.length > 0) || analysisCache.has(cacheKey("sim"));
+  const pegButton = document.querySelector('[data-mode="peg"]');
+  pegButton.textContent = resumablePegKey === cacheKey("peg") ? "Resume preendgame" : "Solve Preendgame";
   simButton.textContent = canContinueSim ? "Continue sim" : "Run sim";
   simButton.dataset.contextHint = canContinueSim
     ? "Add iterations to this position’s simulation."
@@ -918,10 +935,10 @@ function renderResults() {
           "aria-pressed",
           String(row.move === selectedMove),
         );
-        if (mode === "endgame") {
+        if (mode === "endgame" || mode === "peg") {
           button.classList.add("endgame-expand");
           button.setAttribute("aria-expanded", String(row.move === selectedMove));
-          button.setAttribute("aria-controls", `endgame-pv-${row.rank}`);
+          button.setAttribute("aria-controls", `${mode}-pv-${row.rank}`);
         }
         button.addEventListener("click", () => selectMove(row.move));
         td.append(button);
@@ -961,6 +978,25 @@ function renderResults() {
       tr.append(td);
     }
     body.append(tr);
+    if (mode === "peg" && row.move === selectedMove) {
+      const details = document.createElement("tr");
+      details.className = "peg-details";
+      details.id = `peg-pv-${row.rank}`;
+      const key = `${cacheKey("peg")}:${row.move}`;
+      const data = pegOutcomes.get(key);
+      const cell = expandedPegView?.key === key && expandedPegView.data === data
+        ? expandedPegView.cell : document.createElement("td");
+      cell.colSpan = columns.length;
+      if (data && cell !== expandedPegView?.cell) {
+        if (!pegOutcomeViews.has(key)) pegOutcomeViews.set(key, {page:0, sort:"result"});
+        renderPegOutcomes(cell, data, pegOutcomeViews.get(key));
+      } else if (!data) {
+        cell.textContent = "Per-draw outcomes are recorded after a play completes a stage beyond greedy.";
+      }
+      expandedPegView = {key, data, cell};
+      details.append(cell);
+      body.append(details);
+    }
     if (mode === "endgame" && row.move === selectedMove) {
       const details = document.createElement("tr");
       details.className = "endgame-details";
@@ -1085,6 +1121,7 @@ function selectMove(move) {
   continuationPosition = null;
   recallTiles(false);
   selectedMove = selectedMove === move ? "" : move;
+  if (mode === "peg" && selectedMove) requestPegOutcomes(selectedMove);
   if (mode === "endgame" && selectedMove) {
     const row = results.find(row => row.move === selectedMove);
     if (row) previewContinuation(principalVariation(row).map(step => step.move));
@@ -1112,6 +1149,8 @@ function acceptOutput(text, command) {
   }
   if (mode === "peg") {
     pegProgress = parsePegProgress(text);
+    if (pegProgress?.canResume) resumablePegKey = activeAnalysisKey;
+    if (selectedMove && pegSessionKey === cacheKey("peg")) requestPegOutcomes(selectedMove);
     next = mergePegRows(results, next, pegProgress);
     renderPegProgress();
   }
@@ -1161,7 +1200,7 @@ async function analyze(nextMode, options = {}) {
     )
       settings.playedMove = playedMove();
     activeAnalysisKey = cacheKey(nextMode);
-    const resuming = options.resume ?? nextMode === "sim";
+    const resuming = options.resume ?? (nextMode === "sim" || (nextMode === "peg" && resumablePegKey === activeAnalysisKey));
     analysisBase = resuming
       ? analysisCache.get(activeAnalysisKey)?.results
       : null;
@@ -1172,6 +1211,22 @@ async function analyze(nextMode, options = {}) {
     const manual = ["kibitz", "sim"].flatMap(kind =>
       analysisCache.get(cacheKey(kind))?.results.filter(row => row.manual) || []);
     settings.protectedMoves = manual.map(row => normalizeMove(row.move));
+    settings.resumePeg = nextMode === "peg" && resuming && resumablePegKey === activeAnalysisKey;
+    settings.capturePegOutcomes = !options.computerTime;
+    if (nextMode === "peg") {
+      pegSessionKey = activeAnalysisKey;
+      pegSessionId++;
+      pendingPegOutcomes.clear();
+      resumablePegKey = null;
+      if (!settings.resumePeg) {
+        for (const key of pegOutcomes.keys()) {
+          if (key.startsWith(`${activeAnalysisKey}:`)) {
+            pegOutcomes.delete(key);
+            pegOutcomeViews.delete(key);
+          }
+        }
+      }
+    }
     let commands = analysisCommands(analyzed, nextMode, settings);
     const extra = new Map([...manual, ...(nextMode === "sim" ? analysisBase || [] : [])]
       .map(row => [moveIdentity(row.move), normalizeMove(row.move)]));
@@ -1764,7 +1819,7 @@ document
   .querySelectorAll("[data-mode]")
   .forEach((button) =>
     button.addEventListener("click", () => analyze(button.dataset.mode, {
-      resume: button.dataset.mode === "sim",
+      resume: button.dataset.mode === "sim" || (button.dataset.mode === "peg" && resumablePegKey === cacheKey("peg")),
     })),
   );
 document.addEventListener("keydown", (event) => {
@@ -3636,6 +3691,15 @@ async function startEngine() {
       $("analysis-storage-warning").hidden = false;
     }
     engine.addEventListener("message", ({ detail }) => {
+      if (detail.type === "peg_outcomes") {
+        const key = `${detail.key}:${detail.move}`;
+        if (detail.key !== pegSessionKey || detail.sessionId !== pegSessionId) return;
+        pendingPegOutcomes.delete(key);
+        if (!detail.outcomes || pegOutcomes.get(key)?.depth === detail.outcomes.depth) return;
+        pegOutcomes.set(key, detail.outcomes);
+        if (mode === "peg" && detail.key === cacheKey("peg") && selectedMove === detail.move) renderResults();
+        return;
+      }
       if (detail.type === "fatal") {
         positionGeneration++;
         canceled = true;

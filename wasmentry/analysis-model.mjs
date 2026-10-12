@@ -401,7 +401,7 @@ export function analysisCommands(position, mode, settings) {
       return protectedMove;
     }).join(",") || "-";
     commands.push(
-      `peg ${common} -pegtlim ${solveSeconds} -pegoutcomes false -pnoprune ${protectedMoves}`,
+      `peg ${settings.resumePeg ? "resume " : ""}${common} -pegtlim ${solveSeconds} -pegoutcomes ${settings.capturePegOutcomes === false ? "false" : "true"} -pnoprune ${protectedMoves}`,
     );
   }
   if (mode === "endgame") {

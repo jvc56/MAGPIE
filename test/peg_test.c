@@ -1442,6 +1442,17 @@ static void peg_test_interrupt_partial_candidate(int stage_idx, int cand_rank,
 // Complete one 3-ply candidate, then interrupt the second after its first
 // scenario. A partial candidate must not make the stage look accepted; both
 // rankings and captured outcomes must remain at the completed 2-ply stage.
+static void peg_test_count_scenarios(int stage_idx, int cand_rank,
+                                     int scenario_idx, int32_t value,
+                                     int64_t weight, void *user_data) {
+  (void)cand_rank;
+  (void)scenario_idx;
+  (void)value;
+  (void)weight;
+  int *counts = user_data;
+  counts[stage_idx]++;
+}
+
 void test_peg_interrupted_candidate_outcomes(void) {
   Config *config = config_create_or_die("set -threads 1 -s1 score -s2 score");
   load_and_exec_config_or_die(
@@ -1478,6 +1489,7 @@ void test_peg_interrupted_candidate_outcomes(void) {
   args.on_cand_done = peg_test_count_completed_candidates;
   args.on_scenario_done = peg_test_interrupt_partial_candidate;
   args.user_data = &context;
+  args.checkpoint = peg_checkpoint_create();
   PegResult result = {0};
   peg_solve(&args, &result, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -1497,7 +1509,57 @@ void test_peg_interrupted_candidate_outcomes(void) {
     }
     assert(captured_weight == 8);
   }
+  assert(result.can_resume);
   peg_result_destroy(&result);
+  peg_poll_reset(poll);
+  int scenario_counts[3] = {0};
+  args.resume = true;
+  args.on_cand_done = NULL;
+  args.on_scenario_done = peg_test_count_scenarios;
+  args.user_data = scenario_counts;
+  thread_control_set_status(context.thread_control,
+                            THREAD_CONTROL_STATUS_STARTED);
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(!result.can_resume);
+  assert(result.last_completed_stage == 2);
+  // Stage 0, stage 1, and the completed stage-2 candidate are all reused.
+  assert(scenario_counts[0] == 0);
+  assert(scenario_counts[1] == 0);
+  assert(scenario_counts[2] == 7);
+  assert(result.n_cand_outcomes == 2);
+  for (int index = 0; index < result.n_cand_outcomes; index++) {
+    assert(result.cand_outcomes[index].fidelity == 3);
+    assert(result.cand_outcomes[index].rows[0].pv != NULL);
+    assert(strlen(result.cand_outcomes[index].rows[0].pv) > 0);
+  }
+  PegResult fresh = {0};
+  args.resume = false;
+  memset(scenario_counts, 0, sizeof(scenario_counts));
+  peg_poll_reset(poll);
+  peg_solve(&args, &fresh, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(scenario_counts[0] > 0 && scenario_counts[1] == 14 &&
+         scenario_counts[2] == 14);
+  assert(result.n_top_cands == fresh.n_top_cands);
+  for (int index = 0; index < result.n_top_cands; index++) {
+    assert(result.top_cands[index].win_pct == fresh.top_cands[index].win_pct);
+    assert(result.top_cands[index].mean_spread ==
+           fresh.top_cands[index].mean_spread);
+    assert(result.top_cands[index].weight_sum ==
+           fresh.top_cands[index].weight_sum);
+  }
+  peg_result_destroy(&fresh);
+  // A changed search setting invalidates the checkpoint even with resume set.
+  args.resume = true;
+  args.num_stages = 1;
+  memset(scenario_counts, 0, sizeof(scenario_counts));
+  peg_poll_reset(poll);
+  peg_solve(&args, &fresh, error_stack);
+  assert(scenario_counts[0] > 0 && scenario_counts[1] == 14);
+  peg_result_destroy(&fresh);
+  peg_result_destroy(&result);
+  peg_checkpoint_destroy(args.checkpoint);
   peg_poll_destroy(poll);
   validated_moves_destroy(moves);
   error_stack_destroy(error_stack);

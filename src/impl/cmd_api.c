@@ -210,6 +210,11 @@ char *magpie_get_and_clear_error(Magpie *mp) {
   return error_string;
 }
 
+char *magpie_get_peg_outcomes(Magpie *mp, const char *move) {
+  return mp->config ? config_get_peg_outcomes(mp->config, move)
+                    : string_duplicate("null");
+}
+
 char *magpie_get_last_command_status_message(Magpie *mp) {
   if (!mp->config) {
     return empty_string();

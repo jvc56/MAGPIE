@@ -412,6 +412,26 @@ cooperative cancellation. Starting another live game requires confirmation.
 Computer simulations pool partial results from the same position after pause and
 resume, just as manual Continue sim does.
 
+Manual preendgame searches offer **Resume preendgame** after Stop or a time limit.
+The current engine session keeps completed candidate evaluations at each depth,
+including completed candidates from an interrupted stage. Resuming reconstructs
+the stage cuts from those evaluations and restarts only unfinished candidates.
+**Start fresh**, a changed position, or changed search semantics starts over;
+thread count and time budget may change without losing completed evaluations.
+Checkpoints are not saved across page reloads, and a new preendgame search replaces
+the previous checkpoint.
+
+Expand a preendgame play to see captured draw outcomes, eight groups per page,
+sorted by result/margin or draw weight. Letters within each block are unordered;
+slashes retain order-sensitive boundaries. Groups combine only equal margins,
+and weights count the underlying labeled draws (not distinct letter strings).
+Details are fetched on demand as candidates finish. Bag emptiers include their
+endgame principal variation, beginning with the opponent's reply, at the displayed
+search depth. Non-emptiers expose weighted outcomes but not a PV: the nested
+preendgame search does not retain a single continuation across subsequent draws.
+Greedy-only/pruned candidates have no captured detail, and automatic computer
+searches leave capture disabled.
+
 New Game can start play, selfplay, or review from a pasted CGP. Its first rack
 and score belong to Player 1, who is on turn. Missing live-game rack tiles are
 drawn from the remaining bag. History begins at the supplied position; existing

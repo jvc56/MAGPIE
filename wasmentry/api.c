@@ -74,6 +74,10 @@ char *wasm_get_error(void) {
   return magpie_get_and_clear_error(wasm_magpie);
 }
 
+char *wasm_get_peg_outcomes(const char *move) {
+  return wasm_magpie ? magpie_get_peg_outcomes(wasm_magpie, move) : NULL;
+}
+
 char *wasm_get_status(void) {
   if (!wasm_magpie) {
     return NULL;
