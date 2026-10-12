@@ -25,19 +25,6 @@
           </div>
         </div>
         <div class="header-actions" id="game-header-actions">
-          <button
-            id="open-lexicon-settings"
-            aria-controls="settings-view"
-          >
-            Lexicon: <span id="current-lexicon">CSW24</span></button
-          ><button id="open-settings" aria-controls="settings-view">
-            Settings</button>
-        </div>
-      </header>
-      <main id="game-view">
-        <section class="position panel" aria-label="Position">
-          <p id="wmp-recovery-notice" class="hint" role="status" hidden></p>
-          <div class="game-toolbar">
             <button id="new-game">New game</button>
             <details class="game-menu" id="game-menu">
               <summary>Game</summary>
@@ -50,14 +37,20 @@
                 <button id="copy">Copy CGP</button>
               </div>
             </details>
-            <span id="bag-count">93 in bag</span>
-            <input
-              id="gcg-file"
-              type="file"
-              accept=".gcg,text/plain"
-              hidden
-            />
-          </div>
+
+          <button
+            id="open-lexicon-settings"
+            aria-controls="settings-view"
+          >
+            Lexicon: <span id="current-lexicon">CSW24</span></button
+          ><button id="open-settings" aria-controls="settings-view">
+            Settings</button>
+          <input id="gcg-file" type="file" accept=".gcg,text/plain" hidden />
+        </div>
+      </header>
+      <main id="game-view">
+        <section class="position panel" aria-label="Position">
+          <p id="wmp-recovery-notice" class="hint" role="status" hidden></p>
           <div class="player-scoreboard" aria-label="Scoreboard">
             <div class="player-block player-one" id="player-one">
               <span class="player-name" id="name-one">Player 1</span>
@@ -110,6 +103,8 @@
             <p id="move-feedback" role="status" class="hint"></p>
           </section>
           <div id="unseen-home">
+            <div id="tile-pool">
+              <p id="bag-count">93 in bag</p>
             <details
               open
               class="unseen"
@@ -122,6 +117,7 @@
               </summary>
               <div id="unseen-tiles"></div>
             </details>
+            </div>
           </div>
           <details class="position-editor" id="position-editor">
             <summary>Edit position</summary>
@@ -216,19 +212,7 @@
           </details>
         </section>
         <section class="analysis panel" aria-label="Analysis">
-          <div class="panel-header">
-            <h2>Analysis</h2>
-            <div class="toolbar">
-              <button
-                id="analysis-details"
-                aria-label="Analysis details"
-              >
-                Details
-              </button>
-              <button id="pause-solve" hidden>Pause</button>
-              <button id="stop" disabled>Stop <kbd>Esc</kbd></button>
-            </div>
-          </div>
+          <div class="analysis-topbar">
           <div class="analysis-actions" aria-label="Analysis actions">
             <button
               data-mode="kibitz"
@@ -254,6 +238,17 @@
             >
               Solve endgame
             </button>
+          </div>
+            <div class="toolbar">
+              <button
+                id="analysis-details"
+                aria-label="Analysis details"
+              >
+                Details
+              </button>
+              <button id="pause-solve" hidden>Pause</button>
+              <button id="stop" disabled>Stop <kbd>Esc</kbd></button>
+            </div>
           </div>
           <button
             id="open-analysis-settings"

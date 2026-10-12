@@ -17,8 +17,8 @@ test('adjacent draft score; Analyze Move adds and deduplicates; Play move accept
   await expect(page.locator('#add-sim')).toHaveCount(0);
   await page.locator('#analyze-move').click();
   await expect(page.locator('#status')).toHaveText('Play added');
-  await expect(page.locator('#results tbody tr')).toHaveCount(1);
-  await expect(page.locator('#results .move-tile')).toHaveCount(7);
+  expect(await page.locator('#results tbody tr').count()).toBeGreaterThanOrEqual(50);
+  await expect(page.locator('#results tbody button').filter({hasText:'8H RETAINS'})).toHaveCount(1);
   await page.locator('[data-mode=kibitz]').click();
   await expect(page.locator('#stop')).toBeDisabled();
   const candidate=page.locator('#results tbody button').filter({hasText:'8H RETAINS'});

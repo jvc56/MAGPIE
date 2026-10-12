@@ -96,7 +96,7 @@ try {
 } catch {}
 $("unseen-order").value = unseenOrder;
 const displayTiles = tiles => sortTiles(tiles, tileOrder);
-const displayMove = move => formatTileGroups(move, tileOrder);
+const displayMove = move => formatTileGroups(move, tileOrder).replace(/^\(exch ([A-Z?]+)\)$/i, "-$1").replace(/^ex(?:ch)? ([A-Z?]+)$/i, "-$1");
 position.racks = position.racks.map(displayTiles);
 function displayedRackIndex() {
   return isLive() && session.kind === "play" && session.human !== position.onTurn ? 1 : 0;
@@ -281,7 +281,7 @@ function openSettings(section = "appearance", opener = document.activeElement) {
   settingsOpen = true;
   $("game-view").hidden = true;
   $("game-header-actions").hidden = true;
-  $("unseen-pool").hidden = true;
+  $("tile-pool").hidden = true;
   $("settings-view").hidden = false;
   selectSettingsSection(section);
   window.scrollTo(0, 0);
@@ -292,7 +292,7 @@ function closeSettings() {
   $("settings-view").hidden = true;
   $("game-view").hidden = false;
   $("game-header-actions").hidden = false;
-  $("unseen-pool").hidden = false;
+  $("tile-pool").hidden = false;
   settingsReturnFocus?.focus({ preventScroll: true });
   window.scrollTo(0, gameScrollY);
 }
@@ -452,6 +452,16 @@ function renderMoveScore() {
   badge.setAttribute("aria-label", `${score} points`);
   square.append(badge);
 }
+function offBoardCursor() {
+  if (cursor || !draftTiles.length) return null;
+  const last = draftTiles.at(-1);
+  let row = last.row + (vertical ? 1 : 0), col = last.col + (vertical ? 0 : 1);
+  while (row < 15 && col < 15 && position.board[row][col]) {
+    row += vertical ? 1 : 0;
+    col += vertical ? 0 : 1;
+  }
+  return row === 15 || col === 15 ? {row, col} : null;
+}
 function renderBoard() {
   tileDrag?.cancel();
   const drawPosition = continuationPosition || position;
@@ -550,6 +560,16 @@ function renderBoard() {
     fragment.append(rowElement);
   }
   board.replaceChildren(fragment);
+  const edge = offBoardCursor();
+  if (edge) {
+    const marker = document.createElement("span");
+    marker.className = `edge-cursor${vertical ? " down" : ""}`;
+    marker.tabIndex = 0;
+    marker.setAttribute("aria-label", `End of board, typing ${vertical ? "down" : "right"}`);
+    marker.dataset.row = edge.row;
+    marker.dataset.col = edge.col;
+    board.querySelector(`[data-row="${Math.min(edge.row,14)}"][data-col="${Math.min(edge.col,14)}"]`).append(marker);
+  }
   renderMoveScore();
   renderContextHint();
 }
@@ -558,10 +578,42 @@ function terminalPosition() {
     recordedGame?.ended && historyIndex === recordedGame.positions.length - 1
   );
 }
+let panelFitFrame;
+function fitGamePanels() {
+  cancelAnimationFrame(panelFitFrame);
+  panelFitFrame = requestAnimationFrame(() => {
+    const panel = document.querySelector(".position"), analysis = document.querySelector(".analysis");
+    if (innerWidth <= 850 || !analysis.getBoundingClientRect().height) {
+      panel.style.removeProperty("--analysis-panel-height");
+      panel.style.removeProperty("--fitted-board-width");
+      return;
+    }
+    const height = analysis.getBoundingClientRect().height;
+    const style = getComputedStyle(panel);
+    let occupied = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + 2;
+    for (const child of panel.children) {
+      if (["board", "unseen-home"].includes(child.id) || !child.getBoundingClientRect().height) continue;
+      const childStyle = getComputedStyle(child);
+      // Expanded editing fields can scroll below the playing area without shrinking the board.
+      const childHeight = child.id === "position-editor"
+        ? child.querySelector("summary").getBoundingClientRect().height
+        : child.getBoundingClientRect().height;
+      occupied += childHeight + parseFloat(childStyle.marginTop) + parseFloat(childStyle.marginBottom);
+    }
+    panel.style.setProperty("--analysis-panel-height", `${height}px`);
+    panel.style.setProperty("--fitted-board-width", `${Math.max(260, height - occupied)}px`);
+  });
+}
+const panelResize = new ResizeObserver(fitGamePanels);
+panelResize.observe(document.querySelector(".analysis"));
+for (const child of document.querySelector(".position").children) {
+  if (child.id !== "board") panelResize.observe(child);
+}
+window.addEventListener("resize", fitGamePanels);
 const wideLayout = matchMedia("(min-width: 1500px)");
 function placeUnseenPool() {
   $(wideLayout.matches ? "brand-rail" : "unseen-home").append(
-    $("unseen-pool"),
+    $("tile-pool"),
   );
 }
 wideLayout.addEventListener("change", placeUnseenPool);
@@ -976,6 +1028,11 @@ function acceptOutput(text, command) {
     results =
       analysisBase && mode === "sim" ? combineSim(analysisBase, next, position) : next;
     if (mode === "sim") {
+      const manual = new Set(["sim", "kibitz"].flatMap(kind => analysisCache.get(cacheKey(kind))?.results
+        .filter(row => row.manual).map(row => moveIdentity(row.move)) || []));
+      results = results.map(row => ({...row, manual:manual.has(moveIdentity(row.move))}));
+    }
+    if (mode === "sim") {
       const batchIterations = [...text.matchAll(/Iters:\s+(\d+)/g)].at(-1)?.[1];
       analysisIterations = analysisBaseIterations + (batchIterations !== undefined
         ? Number(batchIterations)
@@ -1019,21 +1076,23 @@ async function analyze(nextMode, options = {}) {
     analysisBaseIterations = resuming
       ? analysisCache.get(activeAnalysisKey)?.iterations || 0
       : 0;
-    if (nextMode === "sim") {
-      if (options.moves) settings.moves = options.moves.map(normalizeMove);
-      else if (analysisBase?.length) {
-        settings.moves = analysisBase.map(row => normalizeMove(row.move));
-        if (settings.playedMove && !settings.moves.some(move => moveIdentity(move) === moveIdentity(settings.playedMove)))
-          settings.moves.push(settings.playedMove);
-      }
-    }
+    if (nextMode === "sim" && options.moves) settings.moves = options.moves.map(normalizeMove);
     let commands = analysisCommands(analyzed, nextMode, settings);
-    const manual = analysisCache.get(cacheKey("kibitz"))?.results.filter(row => row.manual) || [];
-    if (manual.length && ["kibitz", "sim"].includes(nextMode) && !settings.moves) {
+    const manual = ["kibitz", "sim"].flatMap(kind =>
+      analysisCache.get(cacheKey(kind))?.results.filter(row => row.manual) || []);
+    const extra = new Map([...manual, ...(nextMode === "sim" ? analysisBase || [] : [])]
+      .map(row => [moveIdentity(row.move), normalizeMove(row.move)]));
+    if (extra.size && ["kibitz", "sim"].includes(nextMode) && !settings.moves) {
       const generate = commands.indexOf("generate");
       if (generate >= 0) commands.splice(generate + 1, 0,
-        `addmoves ${manual.map(row => normalizeMove(row.move)).join(",")}`,
+        `addmoves ${[...extra.values()].join(",")}`,
         ...(nextMode === "kibitz" ? ["shmoves"] : []));
+      commands[0] = commands[0].replace(/-maxnumdplays \d+/, `-maxnumdplays ${100 + extra.size}`);
+    }
+    if (nextMode === "sim" && manual.length && !settings.moves) {
+      const protectedMoves = [...new Set([...manual.map(row => normalizeMove(row.move)),
+        ...(settings.playedMove ? [normalizeMove(settings.playedMove)] : [])])];
+      commands[commands.length - 1] = `snoprune ${analyzed.racks[1] || "-"},${protectedMoves.join(",")}`;
     }
     commands[0] += ` -seed ${randomSeed()}`;
     const keepSelection = mode === nextMode && analysisBase?.some(row => row.move === selectedMove);
@@ -1245,7 +1304,7 @@ $("board").addEventListener("click", (event) => {
   focusCursor();
 });
 function focusCursor() {
-  if (!cursor) $("board").querySelector('[tabindex="0"]')?.focus();
+  if (!cursor) ($("board").querySelector(".edge-cursor") || $("board").querySelector('[tabindex="0"]'))?.focus();
   if (cursor)
     $("board")
       .querySelector(`[data-row="${cursor.row}"][data-col="${cursor.col}"]`)
@@ -1975,7 +2034,7 @@ function entryKey(event) {
   }
   if (arrows[event.key]) {
     event.preventDefault();
-    cursor ||= { row: 7, col: 7 };
+    cursor ||= offBoardCursor() || { row: 7, col: 7 };
     cursor = {
       row: Math.max(0, Math.min(14, cursor.row + arrows[event.key][0])),
       col: Math.max(0, Math.min(14, cursor.col + arrows[event.key][1])),
@@ -1986,7 +2045,7 @@ function entryKey(event) {
   }
   if (/^[a-zA-Z]$/.test(event.key)) {
     event.preventDefault();
-    if (!hasTypedTile(event)) return;
+    if (!hasTypedTile(event) || offBoardCursor()) return;
     cursor ||= { row: 7, col: 7 };
     while (cursor && position.board[cursor.row][cursor.col]) advanceCursor();
     if (cursor)
@@ -3158,14 +3217,24 @@ async function analyzeDraft() {
       engine.wmpKey = null;
     }
     const commands = analysisCommands(analysisPosition(), "kibitz", settings).slice(0, 2);
-    await engine.run([...commands, `addmoves ${move}`, "shmoves"]);
+    const extras = new Map([...(saved?.results || []),
+      ...(analysisCache.get(cacheKey("kibitz"))?.results.filter(row => row.manual) || []),
+      {move}].map(row => [moveIdentity(row.move), normalizeMove(row.move)]));
+    commands[0] = commands[0].replace(/-numplays \d+/, `-numplays ${settings.candidates}`)
+      .replace(/-maxnumdplays \d+/, `-maxnumdplays ${settings.candidates + extras.size}`);
+    await engine.run([...commands, "generate", `addmoves ${[...extras.values()].join(",")}`, "shmoves"]);
     if (generation !== positionGeneration) return;
-    const candidate = parseResults(text, "kibitz")[0];
+    const generated = parseResults(text, "kibitz");
+    const candidate = generated.find(row => moveIdentity(row.move) === moveIdentity(move));
     if (!candidate) throw new Error("Could not analyze this play.");
     mode = targetMode;
-    results = structuredClone(saved?.results || []);
-    results.push({...candidate, manual:true, rank:results.length + 1,
-      ...(mode === "sim" ? {iterations:0, win:NaN, winSE:NaN, equity:NaN, equitySE:NaN, plyAverages:[]} : {})});
+    const previous = new Map((saved?.results || []).map(row => [moveIdentity(row.move), row]));
+    results = generated.map((row, index) => {
+      const old = previous.get(moveIdentity(row.move));
+      return {...row,
+        ...(mode === "sim" ? {iterations:0, win:NaN, winSE:NaN, equity:NaN, equitySE:NaN, plyAverages:[]} : {}),
+        ...old, manual:!!old?.manual || moveIdentity(row.move) === moveIdentity(move), rank:index + 1};
+    });
     analysisIterations = saved?.iterations || 0;
     analysisMeta = mode === "sim" ? analysisSummary("", "sim") : "Static equity";
     setRawAnalysis(saved?.raw || "");
