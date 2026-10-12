@@ -1613,6 +1613,23 @@ static void test_a_games_task_takes_its_threading_mode(void) {
 // cannot write lines of its own into a contributor's terminal. The server
 // sends limits of 600 to 86,400 seconds; the 60 below is under that floor on
 // purpose, as magpie takes any positive limit.
+// A task's finished, stopped and failed lines say how long it took, in
+// birdtest's units, each zero unit left out.
+static void test_a_task_line_says_how_long_it_took(void) {
+  const struct {
+    int64_t seconds;
+    const char *text;
+  } cases[] = {{0, "0s"},       {45, "45s"},        {59, "59s"},
+               {60, "1m"},      {133, "2m 13s"},    {3600, "1h"},
+               {3602, "1h 2s"}, {3661, "1h 1m 1s"}, {97200, "1d 3h"},
+               {-5, "0s"}};
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    char *text = contribute_elapsed_text(cases[i].seconds);
+    assert_strings_equal(text, cases[i].text);
+    free(text);
+  }
+}
+
 static void test_the_assignment_names_its_job_and_limit(void) {
   ErrorStack *error_stack = error_stack_create();
   struct {
@@ -3512,6 +3529,7 @@ void test_contribute(void) {
   test_every_job_type_counts_its_move_generations();
   test_a_games_task_takes_its_threading_mode();
   test_the_assignment_names_its_job_and_limit();
+  test_a_task_line_says_how_long_it_took();
   test_a_task_is_stopped_at_its_time_limit();
   test_an_unverifiable_assignment_is_refused();
 }

@@ -331,6 +331,9 @@ struct ContributeState {
   int task_number;
   int max_task_seconds;
   ContributeDeadline *deadline;
+  // When the task's time started, on the monotonic clock: what its finished,
+  // stopped or failed line says it took.
+  int64_t task_started_ns;
 };
 
 // ---------------------------------------------------------------------------
@@ -997,6 +1000,34 @@ void contribute_read_job_name_and_limit(const JsonValue *assignment,
   *max_task_seconds = (int)seconds;
 }
 
+char *contribute_elapsed_text(int64_t seconds) {
+  if (seconds < 0) {
+    seconds = 0;
+  }
+  const int64_t units[] = {86400, 3600, 60, 1};
+  const char *names[] = {"d", "h", "m", "s"};
+  StringBuilder *sb = string_builder_create();
+  for (int i = 0; i < 4; i++) {
+    const int64_t count = seconds / units[i];
+    seconds %= units[i];
+    if (count > 0) {
+      string_builder_add_formatted_string(sb, "%s%" PRId64 "%s",
+                                          string_builder_length(sb) ? " " : "",
+                                          count, names[i]);
+    }
+  }
+  if (string_builder_length(sb) == 0) {
+    string_builder_add_string(sb, "0s");
+  }
+  return string_builder_dump_and_destroy(sb, NULL);
+}
+
+// The claimed task's time so far, as contribute_elapsed_text prints it.
+static char *task_elapsed_text(const ContributeState *state) {
+  return contribute_elapsed_text((now_ns() - state->task_started_ns) /
+                                 1000000000);
+}
+
 // "[14:03:07] started task #3: <job name><suffix>", in local time.
 static void print_task_line(ThreadControl *thread_control, const char *what,
                             int task_number, const char *job_name,
@@ -1291,6 +1322,7 @@ contribute_claim_task(ContributeState **state_ptr, const char *settings_path,
                   state->job_name, "");
   // From here, the task's time is running: the derived files it builds count
   // against it as well as the run itself.
+  state->task_started_ns = now_ns();
   state->deadline =
       contribute_deadline_start(thread_control, state->max_task_seconds);
 
@@ -1313,9 +1345,12 @@ void contribute_hand_back_timed_out_task(ContributeState *state,
   if (!state || !state->claim_token) {
     return;
   }
+  char *elapsed = task_elapsed_text(state);
   char *counts = get_formatted_string(
-      " at its %d-second limit, handed back (%d started, %d completed)",
-      state->max_task_seconds, state->started, state->completed);
+      " at its %d-second limit after %s, handed back (%d started, %d "
+      "completed)",
+      state->max_task_seconds, elapsed, state->started, state->completed);
+  free(elapsed);
   print_task_line(thread_control, "stopped", state->task_number,
                   state->job_name, counts);
   free(counts);
@@ -1506,8 +1541,10 @@ void contribute_submit_result(ContributeState *state,
   bool hand_back = error_message && !result_json;
 
   if (error_message) {
-    thread_control_print_formatted_err(thread_control, "task failed: %s\n",
-                                       error_message);
+    char *elapsed = task_elapsed_text(state);
+    thread_control_print_formatted_err(
+        thread_control, "task failed after %s: %s\n", elapsed, error_message);
+    free(elapsed);
     state->consecutive_failures++;
     free(state->last_failure);
     state->last_failure = string_duplicate(error_message);
@@ -1525,8 +1562,11 @@ void contribute_submit_result(ContributeState *state,
       }
       // Whatever the server made of it, the task ran to its end; why a
       // result did not count follows on the error stream.
-      char *counts = get_formatted_string(" (%d started, %d completed)",
-                                          state->started, state->completed);
+      char *elapsed = task_elapsed_text(state);
+      char *counts =
+          get_formatted_string(" in %s (%d started, %d completed)", elapsed,
+                               state->started, state->completed);
+      free(elapsed);
       print_task_line(thread_control, "finished", state->task_number,
                       state->job_name, counts);
       free(counts);

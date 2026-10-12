@@ -269,6 +269,11 @@ void contribute_decline_derived_mismatch(ContributeState *state,
 // result (`result_json`, an object, as is), and `movegens`, the move
 // generations this machine made computing it -- what the server credits the
 // contributor with. The caller frees. Exposed for tests.
+// A task's elapsed time as the finished, stopped and failed lines print it,
+// in birdtest's units with each zero unit left out: "45s", "2m 13s",
+// "1h 2s", "1d 3h". Negative counts as 0, "0s".
+char *contribute_elapsed_text(int64_t seconds);
+
 char *contribute_result_body(const char *claim_token, const char *result_json,
                              uint64_t movegens);
 
