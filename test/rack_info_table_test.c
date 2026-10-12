@@ -4,6 +4,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/data_filepaths.h"
@@ -284,9 +285,26 @@ test_move_gen_reads_a_table_loaded_at_a_replaced_tables_address(void) {
   const Player *player = game_get_player(game, 0);
   const LetterDistribution *ld = config_get_ld(config);
   ErrorStack *error_stack = error_stack_create();
+  // Another copy of the same leaves, with the leaves of the rack below worth
+  // 40 points: the two tables then rank its plays differently. Up to two Bs:
+  // CSW21's leaves are english's, which has two, so it has no leave with three.
   KLV *other_leaves =
-      klv_create(config_get_data_paths(config), "CSW21_gen_1", error_stack);
+      klv_create(config_get_data_paths(config), "CSW21", error_stack);
   assert(error_stack_is_empty(error_stack));
+  for (int num_a = 0; num_a <= 4; num_a++) {
+    for (int num_b = 0; num_b <= 2; num_b++) {
+      const int size = num_a + num_b;
+      if (size == 0 || size == RACK_SIZE) {
+        continue;
+      }
+      char leave[RACK_SIZE + 1];
+      for (int i = 0; i < size; i++) {
+        leave[i] = i < num_a ? 'A' : 'B';
+      }
+      leave[size] = '\0';
+      set_klv_leave_value(other_leaves, ld, leave, int_to_equity(40));
+    }
+  }
   RackInfoTable *first = make_rack_info_table(player_get_klv(player),
                                               player_get_wmp(player), ld, 1, 1);
   RackInfoTable *second =
