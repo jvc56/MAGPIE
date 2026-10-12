@@ -299,6 +299,31 @@ test('hover typing leaves text fields and open dialogs alone', async ({page}) =>
   await page.keyboard.press('Escape');
 });
 
+test('unavailable typed tiles are silent and leave the draft and cursor unchanged', async ({page}) => {
+  await ready(page, 'AT?');
+  await cell(page, 7, 7).click();
+  await page.keyboard.type('aq'); // Q uses the available blank.
+  await expect(cell(page, 7, 8)).toHaveClass(/blank/);
+  await expect(cell(page, 7, 9)).toHaveClass(/cursor/);
+  await page.keyboard.type('x');
+  await page.keyboard.press('Shift+T'); // An actual T cannot replace a requested blank.
+  await expect(page.locator('#error')).toBeHidden();
+  await expect(page.locator('#board .pending')).toHaveCount(2);
+  await expect(cell(page, 7, 9)).toHaveClass(/cursor/);
+  expect(await rackLetters(page)).toBe('T');
+  await cell(page, 9, 9).hover();
+  await page.keyboard.type('x');
+  await expect(cell(page, 7, 9)).toHaveClass(/cursor/);
+  await expect(page.locator('#error')).toBeHidden();
+  // The ignored key doesn't consume the hover start for the next valid tile.
+  await page.keyboard.type('t');
+  await expect(cell(page, 9, 9).locator('.tile-letter')).toHaveText('T');
+  await page.keyboard.type('az');
+  await expect(page.locator('#board .pending')).toHaveCount(3);
+  await expect(cell(page, 9, 10)).toHaveClass(/cursor/);
+  await expect(page.locator('#error')).toBeHidden();
+});
+
 for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arranged while the computer thinks, but cannot be played`, async ({page}) => {
   await ready(page);
   // Hold the search at its async boundary so the rack cannot change turns

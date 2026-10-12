@@ -1854,12 +1854,20 @@ function hoverEntryKey(event) {
       event.target.closest("input, textarea, select, [contenteditable]")) return false;
   const {row, col} = hoveredEntry;
   if (position.board[row][col] || draftTiles.some(tile => tile.row === row && tile.col === col)) return false;
+  if (!hasTypedTile(event)) {
+    event.preventDefault();
+    return true;
+  }
   // Use the hovered square only to begin typing. Subsequent letters follow
   // the advancing cursor until the mouse moves to a different square.
   hoverEntryReady = false;
   cursor = {row, col};
   entryKey(event);
   return true;
+}
+function hasTypedTile(event) {
+  const rack = remainingRack(position.racks[0], draftTiles);
+  return rack.includes("?") || (!event.shiftKey && rack.includes(event.key.toUpperCase()));
 }
 function entryKey(event) {
   if (terminalPosition()) return;
@@ -1944,6 +1952,7 @@ function entryKey(event) {
   }
   if (/^[a-zA-Z]$/.test(event.key)) {
     event.preventDefault();
+    if (!hasTypedTile(event)) return;
     cursor ||= { row: 7, col: 7 };
     while (cursor && position.board[cursor.row][cursor.col]) advanceCursor();
     if (cursor)
