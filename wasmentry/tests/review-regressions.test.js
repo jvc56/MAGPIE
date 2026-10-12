@@ -1,7 +1,6 @@
 import { openGameActions } from "./helpers/startup.js";
 import { openSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
-import { EngineClient } from "../engine-client.mjs";
 import { combineSim, analysisPositionKey, parseCGP, SAMPLES } from "../analysis-model.mjs";
 
 test("pooling preserves missing and zero-iteration rows; rack order does not split caches", { tag: "@unit" }, () => {
@@ -18,6 +17,9 @@ test("pooling preserves missing and zero-iteration rows; rack order does not spl
 });
 
 async function clientHarness() {
+  // Keep this a native ESM import. Playwright compiles static imports in this
+  // CommonJS test package to require(), which breaks import.meta on Node 22.23.
+  const { EngineClient } = await import("../engine-client.mjs");
   class Worker {
     postMessage(message) { this.sent=message; }
     terminate() { this.terminated=true; }
