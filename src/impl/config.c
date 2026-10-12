@@ -2889,6 +2889,25 @@ char *impl_add_moves(Config *config, ErrorStack *error_stack) {
   return phonies_str;
 }
 
+// A known starting rack must agree with the first recorded turn. Enforce the
+// same invariant as GCG import before either rack edits or commits can mutate
+// it.
+static bool initial_rack_matches(const Config *config, int player_index,
+                                 const Rack *rack, ErrorStack *errors) {
+  const Rack *initial = game_history_get_unplayed_initial_rack(
+      config->game_history, player_index,
+      game_history_get_num_played_events(config->game_history));
+  if (initial && !racks_are_equal(initial, rack)) {
+    error_stack_push(
+        errors, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
+        get_formatted_string("The first recorded rack for player %d "
+                             "conflicts with the starting CGP rack.",
+                             player_index + 1));
+    return false;
+  }
+  return true;
+}
+
 // Setting player rack
 
 void impl_set_rack_internal(Config *config, const char *rack_str,
@@ -2912,6 +2931,11 @@ void impl_set_rack_internal(Config *config, const char *rack_str,
                                    ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
                                    &new_rack, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (!initial_rack_matches(config, player_on_turn_index, &new_rack,
+                            error_stack)) {
     return;
   }
 
@@ -5816,6 +5840,14 @@ char *impl_commit_with_pos_args(Config *config, ErrorStack *error_stack,
     error_stack_push(error_stack, ERROR_STATUS_COMMIT_GAME_OVER,
                      string_duplicate("cannot commit a move in a game that has "
                                       "already ended"));
+    return empty_string();
+  }
+
+  const int on_turn = game_get_player_on_turn_index(config->game);
+  if (!initial_rack_matches(
+          config, on_turn,
+          player_get_rack(game_get_player(config->game, on_turn)),
+          error_stack)) {
     return empty_string();
   }
 

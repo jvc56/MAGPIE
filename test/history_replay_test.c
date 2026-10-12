@@ -214,6 +214,38 @@ static void test_initial_rack_after_exchanges(void) {
     assert_config_exec_status(config, "commit pass",
                               ERROR_STATUS_COMMIT_PREVIOUS_PASS_NOT_FOUND);
   }
+  // Runtime rack edits and the commit boundary enforce the import invariant.
+  string_builder_clear(record);
+  string_builder_add_formatted_string(record, "%s AEINRST/BCDFGHJ 0/0 0\n",
+                                      header);
+  history = config_get_game_history(config);
+  config_parse_gcg_string(config, string_builder_peek(record), history, errors);
+  assert(error_stack_is_empty(errors));
+  load_and_exec_config_or_die(config, "goto 0");
+  load_and_exec_config_or_die(config, "commit pass");
+  char *before = game_get_cgp(config_get_game(config), true);
+  assert_config_exec_status(config, "rack EILNOTU",
+                            ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
+  char *after = game_get_cgp(config_get_game(config), true);
+  assert_strings_equal(before, after);
+  free(before);
+  free(after);
+  // An embedding caller can change the rack directly; committing still rejects
+  // it without appending an unreimportable event.
+  Rack *rack = player_get_rack(game_get_player(config_get_game(config), 1));
+  assert(rack_set_to_string(config_get_ld(config), rack, "EILNOTU") == 7);
+  assert_config_exec_status(config, "commit pass",
+                            ERROR_STATUS_GCG_PARSE_RACK_MALFORMED);
+  assert(game_history_get_num_events(config_get_game_history(config)) == 1);
+  assert(rack_set_to_string(config_get_ld(config), rack, "BCDFGHJ") == 7);
+  load_and_exec_config_or_die(config, "commit pass");
+  string_builder_clear(record);
+  string_builder_add_gcg(record, config_get_ld(config),
+                         config_get_game_history(config), false);
+  config_parse_gcg_string(config, string_builder_peek(record),
+                          config_get_game_history(config), errors);
+  assert(error_stack_is_empty(errors));
+  assert(game_history_get_num_events(config_get_game_history(config)) == 2);
   free(header);
   string_builder_destroy(record);
   error_stack_destroy(errors);
