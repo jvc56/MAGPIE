@@ -187,6 +187,13 @@ ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
 ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.profile := -pthread
 ldflags.cov := -pthread
+# The test builds link as the builds they test: without -pthread, a test that
+# starts a thread itself failed to link under test_no_pgo_release.
+ldflags.test_no_pgo_release := $(ldflags.no_pgo_release)
+ldflags.test_portable_release := $(ldflags.portable_release)
+ldflags.test_bai_stats := $(ldflags.bai_stats)
+ldflags.test_pgo_generate := $(ldflags.pgo_generate)
+ldflags.test_pgo_use := $(ldflags.pgo_use)
 
 CFLAGS := ${cflags.${BUILD}}
 
