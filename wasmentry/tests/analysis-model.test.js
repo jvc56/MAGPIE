@@ -6,6 +6,8 @@ import {
   inventory,
   previewMove,
   parseResults,
+  formatBoardPlay,
+  formatHistoryPlay,
   analysisCommands,
 } from "../analysis-model.mjs";
 
@@ -91,4 +93,17 @@ test("mode guards reject wrong bag sizes and infer the empty-bag opponent rack",
     "FV/AADIZ",
   );
   expect(position.racks[1]).toBe("");
+});
+
+
+test("move errors and history share playthrough notation, including designated blanks", () => {
+  const position = parseCGP(SAMPLES.opening);
+  position.board[2][11] = "T";
+  expect(formatBoardPlay("3G COVER.ED", position)).toBe("3G COVER(T)ED");
+  expect(formatHistoryPlay(">p1: CDEEORV 3G COVER.ED +92 286", position))
+    .toBe("3G COVER(T)ED +92 286");
+  position.board[3][11] = "a";
+  expect(formatBoardPlay("L2 A..S", position)).toBe("L2 A(Ta)S");
+  expect(formatBoardPlay("8H TRAIN", position)).toBe("8H TRAIN");
+  expect(formatBoardPlay("pass", position)).toBe("pass");
 });

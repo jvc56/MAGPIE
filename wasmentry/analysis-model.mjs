@@ -277,6 +277,11 @@ export function parseResults(text, mode) {
 // Display a GCG event using the board before that event, preserving scores.
 export function formatHistoryPlay(line, position) {
   const play = line.replace(/^>[^:]+:\s+/, "").replace(/^(?!\()\S+\s+/, "");
+  return formatBoardPlay(play, position);
+}
+
+// Render raw coordinate/word notation with the existing board letters grouped.
+export function formatBoardPlay(play, position) {
   return play.replace(/^([A-O]\d+|\d+[A-O]) ([A-Za-z.]+)/, (_, coordinate, word) => {
     const vertical = /^[A-O]/.test(coordinate);
     let row = Number(coordinate.match(/\d+/)[0]) - 1;

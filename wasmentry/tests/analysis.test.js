@@ -605,6 +605,10 @@ test("phony confirmation, challenge removal and candidate commit use native hist
   await page.keyboard.press("Escape");
   await expect(page.locator("#game-confirm")).toBeHidden();
   await expect(page.locator("#history-position option")).toHaveCount(1);
+  await page.keyboard.press("Backspace");
+  await expect(page.locator(".square.pending")).toHaveCount(5);
+  await page.keyboard.type("n");
+  await expect(page.locator(".square.pending")).toHaveCount(6);
   await page.locator("#play-move").click();
   await page.locator("#confirm-yes").click();
   await expect(page.locator("#history-position option")).toHaveCount(2);

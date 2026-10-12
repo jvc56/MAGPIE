@@ -21,6 +21,7 @@ import {
   inventory,
   parseResults,
   formatHistoryPlay,
+  formatBoardPlay,
   historyPlayParts,
   previewMove,
   analysisCommands,
@@ -1749,6 +1750,10 @@ function cancelDraftCheck() {
   clearTimeout(previewTimer);
   previewGeneration++;
 }
+function moveErrorMessage(text) {
+  return text.replace(/(\bplay:\s*)([A-O]\d+ [A-Za-z.]+|\d+[A-O] [A-Za-z.]+)/g,
+    (_, prefix, play) => prefix + formatBoardPlay(play, position));
+}
 function scheduleDraftCheck() {
   cancelDraftCheck();
   if (!recordedGame || !recordedBoardMatches()) return;
@@ -1778,7 +1783,7 @@ function scheduleDraftCheck() {
       })
       .catch((failure) => {
         if (generation === previewGeneration && !busy)
-          $("move-feedback").textContent = failure.message;
+          $("move-feedback").textContent = moveErrorMessage(failure.message);
       });
   }, 220);
 }
@@ -2035,13 +2040,19 @@ async function submitMove(value = null, computer = false) {
     message("Move recorded");
   } catch (failure) {
     if (generation !== positionGeneration) return;
-    error(failure.message);
+    error(moveErrorMessage(failure.message));
     message("Move could not be recorded");
   } finally {
     setBusy(false);
     if ($("status").textContent === "Move recorded" && !session)
       $("rack").focus();
     renderSession();
+    // Disabling the board during validation can blur it. A rejected or
+    // canceled submission leaves a draft that should remain keyboard editable.
+    if (!computer && generation === positionGeneration && draftTiles.length &&
+        !busy && !settingsOpen && !document.querySelector("dialog[open]")) {
+      focusCursor();
+    }
     scheduleComputer();
   }
 }
