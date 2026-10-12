@@ -2133,23 +2133,35 @@ static bool peg_move_protected(const Move *move,
 }
 
 // In-place select of the candidates that advance from a sorted ranked[0..
-// live_count): the top `keep` entries plus any protected move below the cut,
-// compacted into [0, return) with descending order preserved. Returns the new
-// live count. With no protected stragglers this is just the plain top-`keep`.
+// live_count): the top `keep` unprotected entries plus every protected move,
+// compacted into [0, return) with descending order preserved. A protected move
+// never takes one of the `keep` slots. Returns the new live count. With no
+// protected moves this is just the plain top-`keep`. Each survivor is rotated
+// forward past the dropped candidates rather than copied over one, so every
+// dropped candidate stays in [return, live_count), still in rank order, for
+// the graded ranking.
 static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
                                 const Move *const *protect_moves,
                                 int n_protect) {
-  if (keep >= live_count) {
-    return live_count;
+  if (n_protect <= 0) {
+    return keep < live_count ? keep : live_count;
   }
-  int write_idx = keep;
-  for (int read_idx = keep; read_idx < live_count; read_idx++) {
-    if (peg_move_protected(&ranked[read_idx].move, protect_moves, n_protect)) {
-      if (read_idx != write_idx) {
-        ranked[write_idx] = ranked[read_idx];
+  int write_idx = 0;
+  int unprotected_kept = 0;
+  for (int read_idx = 0; read_idx < live_count; read_idx++) {
+    if (!peg_move_protected(&ranked[read_idx].move, protect_moves, n_protect)) {
+      if (unprotected_kept >= keep) {
+        continue;
       }
-      write_idx++;
+      unprotected_kept++;
     }
+    if (read_idx != write_idx) {
+      const PegRankedCand survivor = ranked[read_idx];
+      memmove(&ranked[write_idx + 1], &ranked[write_idx],
+              (size_t)(read_idx - write_idx) * sizeof(PegRankedCand));
+      ranked[write_idx] = survivor;
+    }
+    write_idx++;
   }
   return write_idx;
 }
@@ -2974,9 +2986,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       n_real = n_cands; // nothing finished in budget; keep what we have
     }
     const int num_kept_after_stage0 = n_real < counts[0] ? n_real : counts[0];
-    // Survivors carried forward = top-K plus any protected straggler. Tracked
-    // as a shrinking live_count so protected moves never leave a stale copy in
-    // the unscanned tail.
+    // Survivors carried forward = top-K unprotected plus every protected move.
+    // Tracked as a shrinking live_count so protected moves never leave a stale
+    // copy in the unscanned tail.
     int live_count = peg_select_survivors(ranked, n_real, num_kept_after_stage0,
                                           protect_moves, n_protect);
     peg_publish(out, ranked, live_count, /*stage=*/0);
