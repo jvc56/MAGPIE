@@ -75,6 +75,35 @@ static void test_map_permissions(const WMP *wmp, const WordInfoTable *wit) {
   assert((metadata.st_mode & 0777) == 0664);
   assert(unlink(linkname) == 0);
   assert(unlink(filename) == 0);
+  // Both relative and absolute dangling targets are created through the link.
+  const char *targets[] = {"table", filename};
+  for (int index = 0; index < 2; index++) {
+    assert(symlink(targets[index], linkname) == 0);
+    write_map(wmp, wit, linkname, errors);
+    assert(error_stack_is_empty(errors));
+    assert(lstat(linkname, &metadata) == 0);
+    assert(S_ISLNK(metadata.st_mode));
+    assert(stat(filename, &metadata) == 0);
+    assert(metadata.st_size > 5);
+    assert((metadata.st_mode & 0777) == 0644);
+    assert(unlink(linkname) == 0);
+    assert(unlink(filename) == 0);
+  }
+  char *chain = get_formatted_string("%s/chain", directory);
+  assert(symlink("link", chain) == 0);
+  assert(symlink("table", linkname) == 0);
+  write_map(wmp, wit, chain, errors);
+  assert(error_stack_is_empty(errors));
+  assert(stat(filename, &metadata) == 0);
+  assert(metadata.st_size > 5);
+  assert(unlink(filename) == 0);
+  assert(unlink(linkname) == 0);
+  assert(symlink("chain", linkname) == 0);
+  write_map(wmp, wit, chain, errors);
+  assert(!error_stack_is_empty(errors));
+  assert(unlink(chain) == 0);
+  assert(unlink(linkname) == 0);
+  free(chain);
   assert(rmdir(directory) == 0);
   (void)umask(original_mask);
   error_stack_destroy(errors);

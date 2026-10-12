@@ -5,6 +5,8 @@
 #include "../util/string_util.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -16,17 +18,41 @@ static inline int atomic_file_create(const char *filename, char **destination,
   *destination = NULL;
   *temporary = NULL;
   struct stat metadata;
-  const int found = lstat(filename, &metadata);
-  if (found != 0 && errno != ENOENT) {
-    return -1;
-  }
-  if (found == 0 && S_ISLNK(metadata.st_mode)) {
-    *destination = realpath(filename, NULL);
-    if (!*destination || stat(*destination, &metadata) != 0) {
+  *destination = string_duplicate(filename);
+  int found;
+  for (int links = 0;; links++) {
+    found = lstat(*destination, &metadata);
+    if (found != 0) {
+      if (errno != ENOENT) {
+        return -1;
+      }
+      break;
+    }
+    if (!S_ISLNK(metadata.st_mode)) {
+      break;
+    }
+    if (links == 40) {
+      errno = ELOOP;
       return -1;
     }
-  } else {
-    *destination = string_duplicate(filename);
+    char target[PATH_MAX + 1];
+    const ssize_t length = readlink(*destination, target, PATH_MAX);
+    if (length < 0) {
+      return -1;
+    }
+    if (length == PATH_MAX) {
+      errno = ENAMETOOLONG;
+      return -1;
+    }
+    target[length] = '\0';
+    const char *slash = strrchr(*destination, '/');
+    char *resolved = target[0] == '/' || !slash
+                         ? string_duplicate(target)
+                         : get_formatted_string("%.*s/%s",
+                                                (int)(slash - *destination),
+                                                *destination, target);
+    free(*destination);
+    *destination = resolved;
   }
   *temporary = get_formatted_string("%s.tmp.XXXXXX", *destination);
   int descriptor = mkstemp(*temporary);
