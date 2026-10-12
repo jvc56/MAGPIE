@@ -1,4 +1,4 @@
-import { openSample } from "./helpers/startup.js";
+import { openSample, loadSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 
 test("wide layout keeps rack controls in view and settings between sidebars", async ({
@@ -69,7 +69,7 @@ test("letter keys outside tile entry never start analysis", async ({
   await page.locator("#position-editor > summary").click();
   await expect(page.locator(".analysis-actions kbd")).toHaveCount(0);
   for (const sample of ["opening", "peg", "endgame"]) {
-    await page.selectOption("#sample", sample);
+    await loadSample(page, sample);
     await page.locator('[data-mode="kibitz"]').focus();
     await page.keyboard.type("kspeKSPE");
     await expect(page.locator("#stop")).toBeDisabled();

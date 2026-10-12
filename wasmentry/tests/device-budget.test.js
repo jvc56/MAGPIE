@@ -1,4 +1,4 @@
-import { openSample } from "./helpers/startup.js";
+import { openSample, loadSample } from "./helpers/startup.js";
 import { test, expect } from '@playwright/test';
 import { deviceBudget } from '../device-budget.mjs';
 import { analysisCommands, parseCGP, SAMPLES } from '../analysis-model.mjs';
@@ -58,7 +58,7 @@ for (const mode of ['peg', 'endgame']) {
     await page.locator('#threads').fill('4');
     await page.locator('#back-to-game').click();
     await page.locator('#position-editor > summary').click();
-    await page.selectOption('#sample',mode);
+    await loadSample(page, mode);
     await page.locator(`[data-mode=${mode}]`).click();
     await expect(page.locator('#status')).toHaveText('Complete',{timeout:150000});
     await expect(page.locator('#error')).toBeHidden();

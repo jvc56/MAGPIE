@@ -220,21 +220,6 @@ main {
   font-size: 12px;
   padding: 5px 8px;
 }
-.position-tools {
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  font-size: 12px;
-}
-.position-tools label {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  min-width: 0;
-}
-.position-tools select {
-  max-width: 170px;
-}
 .scoreboard {
   display: flex;
   align-items: center;
@@ -917,9 +902,6 @@ body.busy #status:before {
   .header-actions {
     font-size: 12px;
   }
-  .position-tools select {
-    max-width: 125px;
-  }
   .scoreboard label {
     gap: 4px;
   }
@@ -1257,7 +1239,6 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
 #results .pv-line button[aria-pressed="true"] { background: var(--selected-row); border-color: var(--accent); }
 #results .pv-player-0 { color: var(--gold-text); }
 #results .pv-player-1 { color: var(--positive); }
-.playing .position-tools,
 .playing .board-tools,
 .playing .ownership-tools,
 .playing .tile-legend,

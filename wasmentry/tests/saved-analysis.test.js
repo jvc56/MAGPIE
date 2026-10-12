@@ -1,4 +1,4 @@
-import { openSample } from "./helpers/startup.js";
+import { openSample, loadSample } from "./helpers/startup.js";
 import {test, expect} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
 import {analysisCommands, parseCGP, SAMPLES, combineSim, endgameSummary, principalVariation} from '../analysis-model.mjs';
@@ -139,7 +139,7 @@ test('endgame rows expand in place, preview the colored PV at half opacity, and 
   test.setTimeout(90000);
   await ready(page);
   await page.locator('#position-editor > summary').click();
-  await page.selectOption('#sample','endgame');
+  await loadSample(page, 'endgame');
   await page.locator('[data-mode=endgame]').click(); await complete(page);
   // A time-limited search can finish at a shallower depth on CI.
   // The exact full-search label is covered by the model tests.

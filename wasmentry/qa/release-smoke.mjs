@@ -1,6 +1,7 @@
 // Run against an unpacked release or its deployed URL, never a source checkout.
 // Service workers are blocked to prove the server itself enables WASM threads.
 import assert from "node:assert/strict";
+import { SAMPLES } from "../analysis-model.mjs";
 import { chromium, expect } from "@playwright/test";
 
 const url = process.argv[2];
@@ -33,9 +34,11 @@ try {
   await page.locator("#threads").fill("2");
   await page.locator("#back-to-game").click();
   for (const [sample, mode] of [["opening", "kibitz"], ["midgame", "sim"], ["peg", "peg"], ["endgame", "endgame"]]) {
-    if (!(await page.locator("#sample").isVisible()))
-      await page.locator("#position-editor > summary").click();
-    await page.selectOption("#sample", sample);
+    await page.locator("#game-menu > summary").click();
+    await page.locator("#import").click();
+    await page.locator("#cgp").fill(SAMPLES[sample]);
+    await page.locator('#import-form button[type="submit"]').click();
+    await expect(page.locator("#import-dialog")).toBeHidden();
     await page.locator(`[data-mode="${mode}"]`).click();
     await expect(page.locator("#status")).toHaveText("Complete", { timeout: 60000 });
     await expect(page.locator("#results tbody tr").first()).toBeVisible();

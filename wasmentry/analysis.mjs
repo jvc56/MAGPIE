@@ -11,7 +11,6 @@ import { EngineClient } from "./engine-client.mjs";
 import { readGCG } from "./gcg-loader.mjs?v=2";
 import { logGCG, gcgLogText } from "./gcg-diagnostics.mjs";
 import {
-  SAMPLES,
   emptyPosition,
   VALUES,
   parseCGP,
@@ -66,7 +65,6 @@ let previewTimer,
   previewPromise = Promise.resolve();
 let recordedGame = null;
 let historyIndex = 0;
-let recent = [];
 let hintTarget = null;
 let continuationPosition = null;
 let continuationTiles = new Set();
@@ -173,20 +171,6 @@ function humanTurn() {
   );
 }
 
-try {
-  recent = JSON.parse(localStorage.getItem("magpie-preview-recent") || "[]")
-    .filter((x) => {
-      try {
-        restorePosition(x);
-        return true;
-      } catch {
-        return false;
-      }
-    })
-    .slice(0, 5);
-} catch {
-  /* Storage is optional. */
-}
 const premiums = [
   "=  '   =   '  =",
   ' -   "   "   - ',
@@ -398,37 +382,7 @@ function clearResults() {
   $("elapsed").textContent = "";
   renderResults();
 }
-function remember() {
-  if (hiddenLiveGame()) return;
-  const cgp = toCGP(position);
-  recent = [
-    snapshotPosition(position),
-    ...recent.filter((saved) => toCGP(restorePosition(saved)) !== cgp),
-  ].slice(0, 5);
-  try {
-    localStorage.setItem("magpie-preview-recent", JSON.stringify(recent));
-  } catch {
-    /* Optional. */
-  }
-  renderRecent();
-}
-function renderRecent() {
-  $("recent").replaceChildren(new Option("Select position…", ""));
-  recent.forEach((cgp, index) => {
-    try {
-      const p = restorePosition(cgp);
-      $("recent").add(
-        new Option(
-          `${p.lexicon} · ${displayTiles(p.racks[0]) || "empty"} · ${p.scores.join("–")}`,
-          String(index),
-        ),
-      );
-    } catch {
-      /* Ignore an outdated or invalid saved position. */
-    }
-  });
-}
-function setPosition(next, rememberPosition = false, fromHistory = false) {
+function setPosition(next, fromHistory = false) {
   positionGeneration++;
   clearTimeout(historyClickTimer);
   pendingHistoryIndex = null;
@@ -454,7 +408,6 @@ function setPosition(next, rememberPosition = false, fromHistory = false) {
   error("");
   clearResults();
   renderPosition();
-  if (rememberPosition) remember();
   message("Position ready");
   restoreAnalysis();
   renderSession();
@@ -1095,7 +1048,6 @@ async function analyze(nextMode, options = {}) {
         button.classList.toggle("active", button.dataset.mode === mode),
       );
     setBusy(true);
-    remember();
     message(`Loading ${position.lexicon}…`);
     await previewPromise;
     await engine.prepare(position.lexicon);
@@ -1221,13 +1173,6 @@ $("lexicon").addEventListener("change", () => {
   next.lexicon = $("lexicon").value;
   commitEdit(next);
 });
-$("sample").addEventListener("change", () =>
-  setPosition(parseCGP(SAMPLES[$("sample").value]), true),
-);
-$("recent").addEventListener("change", () => {
-  if ($("recent").value !== "")
-    setPosition(restorePosition(recent[Number($("recent").value)]), true);
-});
 $("undo").addEventListener("click", () => {
   if (undo.length) {
     position = restorePosition(undo.pop());
@@ -1252,7 +1197,6 @@ $("tile-order").addEventListener("change", () => {
   position.racks[1] = displayTiles(position.racks[1]);
   renderPosition();
   renderResults();
-  renderRecent();
   renderHistoryOptions();
   renderHistory();
 });
@@ -1360,7 +1304,7 @@ $("close-import").addEventListener("click", () => $("import-dialog").close());
 $("import-form").addEventListener("submit", (event) => {
   event.preventDefault();
   try {
-    setPosition(parseCGP($("cgp").value, position.lexicon), true);
+    setPosition(parseCGP($("cgp").value, position.lexicon));
     $("import-dialog").close();
   } catch (e) {
     $("import-error").textContent = e.message;
@@ -1416,7 +1360,6 @@ function showHistory(index, {auto = true} = {}) {
   );
   setPosition(
     restorePosition(recordedGame.positions[historyIndex]),
-    false,
     true,
   );
   if (auto && !concealComputerAnalysis() && $("auto-analyze").value !== "off" && !reviewRunning)
@@ -1698,7 +1641,7 @@ function adoptGame(game, lexicon, index = game.index || 0) {
   historyIndex = Math.min(index, game.positions.length - 1);
   $("game-players").textContent = game.players.join(" vs ");
   renderHistoryOptions();
-  setPosition(restorePosition(game.positions[historyIndex]), false, true);
+  setPosition(restorePosition(game.positions[historyIndex]), true);
 }
 function saveGameUndo() {
   if (recordedGame && !isLive())
@@ -2442,7 +2385,7 @@ function renderSession() {
   const live = isLive();
   for (const id of [
     "rack", "opponent-rack", "score", "opponent-score", "edit", "clear",
-    "on-turn-player", "sample", "import",
+    "on-turn-player", "import",
   ]) $(id).disabled = busy || !!live;
   const entryLocked = busy || terminalPosition() ||
     (live && (session.paused || !humanTurn()));
@@ -3169,8 +3112,6 @@ const controlHints = {
   "save-gcg": "Save the complete game, including moves and notes.",
   import: "Paste a CGP position. Lowercase letters are blanks.",
   copy: "Copy this position as CGP. Tile ownership is not included.",
-  sample: "Load an example position.",
-  recent: "Return to a recent position.",
   "history-position": "Choose a position in the game history.",
   "history-previous": "Go back one event.",
   "history-next": "Go forward one event.",
@@ -3307,7 +3248,6 @@ try {
   sessionStorage.removeItem("magpie-wmp-building");
 } catch {}
 let wmpWarning = "";
-renderRecent();
 renderPosition();
 renderResults();
 $("new-game-dialog").showModal();

@@ -1,4 +1,4 @@
-import { openSample } from "./helpers/startup.js";
+import { openSample, loadSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 import { inventory, parseCGP, SAMPLES } from "../analysis-model.mjs";
 
@@ -40,7 +40,7 @@ test("unseen pool includes opposing racks and follows positions and layout", asy
   await page.locator("#opponent-rack").blur();
   expect(await readPool(page)).toEqual(opening);
   for (const sample of ["midgame", "peg", "endgame"]) {
-    await page.selectOption("#sample", sample);
+    await loadSample(page, sample);
     const { unseen, unseenCount } = inventory(parseCGP(SAMPLES[sample]));
     expect(await readPool(page)).toEqual(
       Object.fromEntries(Object.entries(unseen).filter(([, count]) => count)),
@@ -49,7 +49,7 @@ test("unseen pool includes opposing racks and follows positions and layout", asy
       `Unseen tiles · ${unseenCount}`,
     );
   }
-  await page.selectOption("#sample", "opening");
+  await loadSample(page, "opening");
   await expect(
     page.locator('#unseen-tiles [data-letter="?"]'),
   ).toBeInViewport();
@@ -113,7 +113,7 @@ test("unassigned blanks use question marks and zero scores; designated blanks ke
     );
   }
   await expect(page.locator('#unseen-tiles [data-letter="?"]')).toHaveCount(0);
-  await page.selectOption("#sample", "midgame");
+  await loadSample(page, "midgame");
   const designated = page.locator(".square.blank .tile-letter").first();
   await expect(designated).toHaveText("M");
   expect(

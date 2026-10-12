@@ -1,4 +1,4 @@
-import { openSample } from "./helpers/startup.js";
+import { openSample, loadSample } from "./helpers/startup.js";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "@playwright/test";
 
@@ -42,7 +42,7 @@ test("all four modes use the real WASM engine and clear stale results", async ({
   await expect(page.locator("#results tbody tr")).toHaveCount(100);
   await page.locator("#results tbody button").first().click();
   await expect(page.locator(".square.preview").first()).toBeVisible();
-  await page.selectOption("#sample", "midgame");
+  await loadSample(page, "midgame");
   await expect(page.locator("#results tbody tr")).toHaveCount(0);
   await expect(page.locator(".square.preview")).toHaveCount(0);
   await analyze(page, "sim");
@@ -52,14 +52,14 @@ test("all four modes use the real WASM engine and clear stale results", async ({
     fullPage: true,
   });
   await expect(page.locator("#results")).toContainText("14F ZI(N)E");
-  await page.selectOption("#sample", "peg");
+  await loadSample(page, "peg");
   await analyze(page, "peg");
   await expect(page.locator("#results thead")).toContainText("W / T / L");
   await page.screenshot({
     path: test.info().outputPath("analysis-peg.png"),
     fullPage: true,
   });
-  await page.selectOption("#sample", "endgame");
+  await loadSample(page, "endgame");
   await analyze(page, "endgame");
   await expect(page.locator("#results tbody tr")).toHaveCount(5);
   await page.locator("#results tbody button").first().click();
@@ -107,7 +107,7 @@ test("stop permits another analysis, invalid CGP preserves position, edits undo"
   await expect(page.locator('[data-row="7"][data-col="9"]')).not.toHaveClass(
     /played/,
   );
-  await page.selectOption("#sample", "midgame");
+  await loadSample(page, "midgame");
   await page.locator("#open-analysis-settings").click();
   await page.locator("#seconds").fill("120");
   await page.locator("#back-to-game").click();
@@ -236,7 +236,7 @@ test("worker rejects a bad command and can run a new batch", async ({
   expect(result.completed.type).toBe("complete");
 });
 
-test("Qt blanks and player tile colors survive undo and recent recall", async ({
+test("Qt blanks and player tile colors survive undo", async ({
   page,
 }) => {
   await ready(page);
@@ -268,10 +268,6 @@ test("Qt blanks and player tile colors survive undo and recent recall", async ({
   await expect(first).toHaveClass(/owner-0/);
   await page.selectOption("#on-turn-player", "1");
   await analyze(page, "kibitz");
-  await page.reload();
-  await page.locator("#cancel-new-game").click();
-  await page.locator("#position-editor > summary").click();
-  await page.selectOption("#recent", "0");
   await expect(first).toHaveClass(/owner-0/);
   await expect(second).toHaveClass(/owner-1/);
   await expect(page.locator("#on-turn-player")).toHaveValue("1");
@@ -279,7 +275,7 @@ test("Qt blanks and player tile colors survive undo and recent recall", async ({
     path: "test-results/analysis-player-colors.png",
     fullPage: true,
   });
-  await page.selectOption("#sample", "midgame");
+  await loadSample(page, "midgame");
   await expect(page.locator(".square.owner-0,.square.owner-1")).toHaveCount(
     0,
   );
@@ -388,7 +384,7 @@ test("GCG native round trip, history, notes, errors and analysis isolation", asy
   await loadGCG(page, gameFixture.replace("CSW24", "CSW21"));
   await expect(page.locator("#error")).toContainText("CSW21");
   await expect(page.locator("#save-gcg")).toBeEnabled();
-  await page.selectOption("#sample", "opening");
+  await loadSample(page, "opening");
   await expect(page.locator("#game-history")).toBeHidden();
   await expect(page.locator("#save-gcg")).toBeDisabled();
 });

@@ -1,4 +1,4 @@
-import { openSample } from "./helpers/startup.js";
+import { openSample, loadSample } from "./helpers/startup.js";
 import { test, expect } from "@playwright/test";
 async function ready(page) {
   await page.goto("/wasmentry/");
@@ -35,7 +35,7 @@ test("only the bag-appropriate search is visible, including while busy", async (
     ["peg", "peg"],
     ["endgame", "endgame"],
   ]) {
-    await page.selectOption("#sample", sample);
+    await loadSample(page, sample);
     await expect(page.locator("[data-mode]:visible")).toHaveCount(2);
     await expect(page.locator(`[data-mode=${mode}]`)).toBeVisible();
   }
