@@ -14,6 +14,9 @@ StringBuilder *string_builder_create(void);
 void string_builder_destroy(StringBuilder *string_builder);
 void string_builder_add_string(StringBuilder *string_builder,
                                const char *string);
+// Appends the first `len` bytes of `bytes`, which need not be terminated.
+void string_builder_add_bytes(StringBuilder *string_builder, const char *bytes,
+                              size_t len);
 void string_builder_add_formatted_string(StringBuilder *string_builder,
                                          const char *format, ...);
 void string_builder_add_table_row(StringBuilder *string_builder,

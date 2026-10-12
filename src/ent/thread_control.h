@@ -12,19 +12,25 @@ typedef struct ThreadControl ThreadControl;
 ThreadControl *thread_control_create(void);
 void thread_control_destroy(ThreadControl *thread_control);
 
-// The status, or USER_INTERRUPT whenever the parent's (see
-// thread_control_set_parent) is USER_INTERRUPT.
 thread_control_status_t
 thread_control_get_status(ThreadControl *thread_control);
 // Links `thread_control` to `parent` (NULL for none), so a stop requested on
 // the parent -- the user's, or a contribute task's time limit -- stops whatever
-// runs on `thread_control` too: thread_control_get_status reads it as
-// USER_INTERRUPT. Only reads look through: setting the status, or waiting on
-// it, is this thread control's own and never touches the parent's. Set it
-// before anything reads the status, and keep the parent alive while it does.
+// runs on `thread_control` too: the parent's USER_INTERRUPT, whenever it is
+// set, and at linking if it is set already, becomes the child's own, and
+// stays when the parent's is lifted. Nothing passes the other way: the
+// child's status is its own. Link after setting the child's status STARTED,
+// keep the parent alive while the child is linked, and destroy (or unlink)
+// the child before the parent.
 void thread_control_set_parent(ThreadControl *thread_control,
                                ThreadControl *parent);
 void thread_control_stop(ThreadControl *thread_control);
+// Puts back `status` after an interrupt that was not the user's (a contribute
+// task's time limit), unless thread_control_stop was called since the status
+// last became STARTED: a stop that came while the interrupt was in place
+// changed nothing, and must still stand. Returns whether it restored.
+bool thread_control_restore_unless_stopped(ThreadControl *thread_control,
+                                           thread_control_status_t status);
 // Cooperative search pause. Returns false unless a command is running.
 // Stop and terminal status transitions release every paused worker.
 bool thread_control_set_paused(ThreadControl *thread_control, bool paused);

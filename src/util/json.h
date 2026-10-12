@@ -51,7 +51,12 @@ uint64_t json_get_uint64_string(const JsonValue *object, const char *key,
                                 ErrorStack *error_stack);
 
 // Absent or null yields the fallback rather than an error, for optional fields.
+// Integers are truncated toward zero and saturate at their type's range (as
+// json_get_int does at int64's), so an out-of-range number is caught by the
+// caller's own bounds check rather than wrapping.
 bool json_get_bool_or(const JsonValue *object, const char *key, bool fallback);
+int64_t json_get_int64_or(const JsonValue *object, const char *key,
+                          int64_t fallback);
 int json_get_int_or(const JsonValue *object, const char *key, int fallback);
 double json_get_double_or(const JsonValue *object, const char *key,
                           double fallback);

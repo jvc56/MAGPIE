@@ -1,5 +1,6 @@
 #include "client_state.h"
 
+#include "../compat/cfile.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include <errno.h>
@@ -7,7 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 enum {
   DEFAULT_IDLE_WAIT_SECONDS = 5,
@@ -58,10 +58,10 @@ static int parse_setting_int(const char *value, const char *key,
 // header and that line alone. The create is exclusive, so a file that appears
 // in between is appended to rather than replaced.
 static bool append_uuid_line(const char *path, const char *uuid) {
-  FILE *stream = fopen(path, "wxe");
+  FILE *stream = cfile_open(path, "w", true);
   const char *format = CONTRIBUTE_SETTINGS_HEADER "\nuuid %s\n";
   if (!stream && errno == EEXIST) {
-    stream = fopen(path, "ae");
+    stream = cfile_open(path, "a", false);
     // The leading newline ends a last line that had none.
     format = "\nuuid %s\n";
   }
@@ -101,7 +101,7 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   // meant, perhaps an API key. So is one that is there but cannot be read
   // (its permissions, a directory of that name), whichever it is.
   char *contents = NULL;
-  FILE *stream = fopen(settings_path, "re");
+  FILE *stream = cfile_open(settings_path, "r", false);
   if (!stream && errno == ENOENT && path) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,
@@ -122,9 +122,7 @@ ClientState *client_state_load(const char *path, ErrorStack *error_stack) {
   }
   // A directory opens, and its size reads as 2^63: the read that followed
   // ended the process.
-  struct stat stream_stat;
-  if (stream && (fstat(fileno(stream), &stream_stat) != 0 ||
-                 !S_ISREG(stream_stat.st_mode))) {
+  if (stream && !cfile_is_regular_file(stream)) {
     (void)fclose(stream);
     error_stack_push(
         error_stack, ERROR_STATUS_CONTRIBUTE_SETTINGS_MISSING,

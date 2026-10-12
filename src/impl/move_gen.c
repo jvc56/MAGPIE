@@ -71,6 +71,18 @@ static uint64_t freed_gens_movegen_count = 0;
 // gen_reset_slots_high_water (gen_get_slots_high_water). Under cache_mutex.
 static int slots_in_use_count = 0;
 static int slots_in_use_high_water = 0;
+// How many things want generations accounted for: a running movegen limit,
+// each thread with a movegen budget set, each counting session
+// (gen_start_counting_movegens). While it is 0 a generation is not counted,
+// so a run that uses none of them pays nothing for them.
+static _Atomic int movegen_accounting_users = 0;
+
+static void gen_add_accounting_users(int delta) {
+  if (delta != 0) {
+    atomic_fetch_add_explicit(&movegen_accounting_users, delta,
+                              memory_order_relaxed);
+  }
+}
 
 void generator_destroy(MoveGen *gen) {
   if (!gen) {
@@ -105,6 +117,9 @@ static void gen_release_slot(void *ptr) {
   }
   // The next thread to take this gen must not inherit a budget that belonged
   // to a move this thread was searching for, and may since be gone.
+  if (((MoveGen *)ptr)->movegen_budget != NULL) {
+    gen_add_accounting_users(-1);
+  }
   ((MoveGen *)ptr)->movegen_budget = NULL;
   ((MoveGen *)ptr)->budget_uncharged = 0;
   cpthread_mutex_lock(&cache_mutex);
@@ -205,13 +220,23 @@ void gen_start_movegen_limit(uint64_t limit, ThreadControl *thread_control) {
   atomic_store(&movegen_limit_reached, false);
   movegen_limit_thread_control = thread_control;
   movegen_limit = limit;
+  if (limit > 0) {
+    gen_add_accounting_users(1);
+  }
 }
 
 bool gen_stop_movegen_limit(void) {
+  if (movegen_limit > 0) {
+    gen_add_accounting_users(-1);
+  }
   movegen_limit = 0;
   movegen_limit_thread_control = NULL;
   return atomic_load(&movegen_limit_reached);
 }
+
+void gen_start_counting_movegens(void) { gen_add_accounting_users(1); }
+
+void gen_stop_counting_movegens(void) { gen_add_accounting_users(-1); }
 
 void movegen_budget_init(MovegenBudget *budget, uint64_t limit) {
   budget->limit = limit;
@@ -239,6 +264,7 @@ MovegenBudget *gen_set_movegen_budget(MovegenBudget *budget) {
   gen_charge_movegen_budget(gen);
   MovegenBudget *previous = gen->movegen_budget;
   gen->movegen_budget = budget;
+  gen_add_accounting_users((budget != NULL) - (previous != NULL));
   return previous;
 }
 
@@ -253,8 +279,8 @@ bool gen_movegen_budget_spent(void) {
 }
 
 // Counts one generation, and against the running command's limit and the
-// move's budget, if any.
-static inline void gen_count_movegen(MoveGen *gen) {
+// move's budget, if any. Off the hot path: see gen_count_movegen.
+__attribute__((noinline)) static void gen_account_movegen(MoveGen *gen) {
   gen->movegen_count++;
   if (gen->movegen_budget && ++gen->budget_uncharged >= MOVEGEN_BUDGET_BATCH) {
     gen_charge_movegen_budget(gen);
@@ -271,6 +297,15 @@ static inline void gen_count_movegen(MoveGen *gen) {
       movegen_limit_thread_control) {
     thread_control_set_status(movegen_limit_thread_control,
                               THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+}
+
+// The one check every generation pays: with no limit, budget or count
+// running, a relaxed load and a branch never taken.
+static inline void gen_count_movegen(MoveGen *gen) {
+  if (atomic_load_explicit(&movegen_accounting_users, memory_order_relaxed) !=
+      0) {
+    gen_account_movegen(gen);
   }
 }
 

@@ -224,37 +224,101 @@ static void test_a_stop_ends_a_running_solve(void) {
   config_destroy(config);
 }
 
-// A child thread control reads its parent's stop as its own, and keeps its own
-// status to itself: setting it never touches the parent's.
-static void test_a_thread_control_sees_its_parents_stop(void) {
+// A solve whose movegen budget for the move is spent before it chooses
+// anything comes back without a move and without an error: the budget ran
+// out, nothing failed, and the player plays its static move.
+static void test_a_spent_budget_is_not_a_failed_solve(void) {
+  Config *config = config_create_or_die(
+      "set -s1 equity -s2 equity -r1 best -r2 best -threads 2");
+  ThreadControl *run_thread_control = thread_control_create();
+  thread_control_set_status(run_thread_control, THREAD_CONTROL_STATUS_STARTED);
+  AutoplaySolverCtx *ctx = autoplay_solver_ctx_create();
+  ErrorStack *error_stack = error_stack_create();
+  MovegenBudget budget;
+  movegen_budget_init(&budget, 1);
+  atomic_store(&budget.spent, 1);
+  MovegenBudget *previous = gen_set_movegen_budget(&budget);
+
+  AutoplaySolverSettings endgame_settings;
+  autoplay_solver_settings_set_defaults(&endgame_settings);
+  endgame_settings.endgame_plies = 2;
+  load_and_exec_config_or_die(
+      config, "cgp 7F3QINS/7E3E2H/6ORBITED1O/3JAMBU2OM2R/1ROATE1L2FAV1T/"
+              "GI5ED1T1OPE/OD6R3WEN/EL5RUNTY2S/1E6N2U3/1Y5AKA1C3/ES1VAgUIsH1C3/"
+              "X2I7A3/I2G11/LOOING9/E2A11 ADLRSTZ/EIINPW 451/296 0 -lex CSW24");
+  const Move *move =
+      autoplay_solver_solve(ctx, &endgame_settings, config_get_game(config),
+                            NULL, 2, 7, run_thread_control, false, error_stack);
+  assert(!move && error_stack_is_empty(error_stack));
+
+  AutoplaySolverSettings peg_settings;
+  autoplay_solver_settings_set_defaults(&peg_settings);
+  peg_settings.endgame_plies = 2;
+  peg_settings.peg_max_bag = 4;
+  peg_settings.peg_nested = false;
+  load_and_exec_config_or_die(
+      config, "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+              "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/"
+              "4S8U1/12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex "
+              "CSW24");
+  (void)autoplay_solver_solve(ctx, &peg_settings, config_get_game(config), NULL,
+                              2, 7, run_thread_control, false, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  (void)gen_set_movegen_budget(previous);
+  error_stack_destroy(error_stack);
+  autoplay_solver_ctx_destroy(ctx);
+  thread_control_destroy(run_thread_control);
+  config_destroy(config);
+}
+
+// A child thread control takes its parent's stop as its own -- one already
+// in place when it is linked, or one that comes later -- and keeps it when
+// the parent's is lifted. Its own status never touches the parent's.
+static void test_a_thread_control_takes_its_parents_stop(void) {
   ThreadControl *parent = thread_control_create();
   ThreadControl *child = thread_control_create();
+  ThreadControl *sibling = thread_control_create();
   thread_control_set_status(parent, THREAD_CONTROL_STATUS_STARTED);
-  thread_control_set_parent(child, parent);
   thread_control_set_status(child, THREAD_CONTROL_STATUS_STARTED);
+  thread_control_set_status(sibling, THREAD_CONTROL_STATUS_STARTED);
+  thread_control_set_parent(child, parent);
+  thread_control_set_parent(sibling, parent);
   assert(thread_control_get_status(child) == THREAD_CONTROL_STATUS_STARTED);
   thread_control_set_status(child, THREAD_CONTROL_STATUS_FINISHED);
   assert(thread_control_get_status(parent) == THREAD_CONTROL_STATUS_STARTED);
   thread_control_set_status(child, THREAD_CONTROL_STATUS_STARTED);
-  thread_control_set_status(parent, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  thread_control_stop(parent);
   assert(thread_control_get_status(child) ==
+         THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  assert(thread_control_get_status(sibling) ==
          THREAD_CONTROL_STATUS_USER_INTERRUPT);
   // The parent's stop lifted (a task's time limit puts the run's status
-  // back), the child runs again.
+  // back), the child's stays: the solve it ran was abandoned.
   thread_control_set_status(parent, THREAD_CONTROL_STATUS_STARTED);
-  assert(thread_control_get_status(child) == THREAD_CONTROL_STATUS_STARTED);
-  // A child stopped itself stays stopped whatever the parent says.
-  thread_control_set_status(child, THREAD_CONTROL_STATUS_USER_INTERRUPT);
   assert(thread_control_get_status(child) ==
          THREAD_CONTROL_STATUS_USER_INTERRUPT);
-  assert(thread_control_get_status(parent) == THREAD_CONTROL_STATUS_STARTED);
+  // An unlinked child no longer hears its parent.
+  thread_control_set_parent(sibling, NULL);
+  thread_control_set_status(sibling, THREAD_CONTROL_STATUS_STARTED);
+  thread_control_set_status(parent, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  assert(thread_control_get_status(sibling) == THREAD_CONTROL_STATUS_STARTED);
+  // A child linked to a parent already stopped is stopped.
+  ThreadControl *late = thread_control_create();
+  thread_control_set_status(late, THREAD_CONTROL_STATUS_STARTED);
+  thread_control_set_parent(late, parent);
+  assert(thread_control_get_status(late) ==
+         THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  thread_control_destroy(late);
+  thread_control_destroy(sibling);
   thread_control_destroy(child);
   thread_control_destroy(parent);
 }
 
 void test_autoplay_solvers(void) {
   test_the_solve_share();
-  test_a_thread_control_sees_its_parents_stop();
+  test_a_thread_control_takes_its_parents_stop();
   test_concurrent_games_share_their_threads();
   test_a_stop_ends_a_running_solve();
+  test_a_spent_budget_is_not_a_failed_solve();
 }

@@ -3,6 +3,7 @@
 #include "../compat/cjson.h"
 #include "io_util.h"
 #include "string_util.h"
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -125,6 +126,23 @@ const char *json_get_string(const JsonValue *object, const char *key,
   return as_cjson(field)->valuestring;
 }
 
+// A JSON number as an integer, truncated toward zero, and saturated at the
+// int64 range: converting a double outside it is undefined. NaN, which JSON
+// cannot carry, is 0.
+static int64_t number_to_int64(double value) {
+  if (value != value) {
+    return 0;
+  }
+  // 2^63: INT64_MAX is not representable as a double.
+  if (value >= 9223372036854775808.0) {
+    return INT64_MAX;
+  }
+  if (value <= -9223372036854775808.0) {
+    return INT64_MIN;
+  }
+  return (int64_t)value;
+}
+
 int64_t json_get_int(const JsonValue *object, const char *key,
                      ErrorStack *error_stack) {
   const JsonValue *field = json_object_get(object, key);
@@ -136,7 +154,7 @@ int64_t json_get_int(const JsonValue *object, const char *key,
     push_wrong_type(error_stack, key, "a number");
     return 0;
   }
-  return (int64_t)as_cjson(field)->valuedouble;
+  return number_to_int64(as_cjson(field)->valuedouble);
 }
 
 double json_get_double(const JsonValue *object, const char *key,
@@ -185,12 +203,24 @@ bool json_get_bool_or(const JsonValue *object, const char *key, bool fallback) {
   return cJSON_IsTrue(as_cjson(field));
 }
 
-int json_get_int_or(const JsonValue *object, const char *key, int fallback) {
+int64_t json_get_int64_or(const JsonValue *object, const char *key,
+                          int64_t fallback) {
   const JsonValue *field = json_object_get(object, key);
   if (!field || !cJSON_IsNumber(as_cjson(field))) {
     return fallback;
   }
-  return (int)as_cjson(field)->valuedouble;
+  return number_to_int64(as_cjson(field)->valuedouble);
+}
+
+int json_get_int_or(const JsonValue *object, const char *key, int fallback) {
+  const int64_t value = json_get_int64_or(object, key, fallback);
+  if (value > INT_MAX) {
+    return INT_MAX;
+  }
+  if (value < INT_MIN) {
+    return INT_MIN;
+  }
+  return (int)value;
 }
 
 double json_get_double_or(const JsonValue *object, const char *key,
@@ -220,34 +250,45 @@ static void write_separator(StringBuilder *sb, bool *first) {
   }
 }
 
+// The escape for a byte JSON requires escaped, or NULL for one it does not.
+static const char *json_escape(unsigned char byte) {
+  switch (byte) {
+  case '"':
+    return "\\\"";
+  case '\\':
+    return "\\\\";
+  case '\n':
+    return "\\n";
+  case '\r':
+    return "\\r";
+  case '\t':
+    return "\\t";
+  default:
+    return NULL;
+  }
+}
+
+// Result bodies run to tens of megabytes, so each run of bytes that need no
+// escape goes in with one append.
 void json_write_quoted(StringBuilder *sb, const char *value) {
   string_builder_add_string(sb, "\"");
-  for (const char *c = value; *c; c++) {
-    switch (*c) {
-    case '"':
-      string_builder_add_string(sb, "\\\"");
-      break;
-    case '\\':
-      string_builder_add_string(sb, "\\\\");
-      break;
-    case '\n':
-      string_builder_add_string(sb, "\\n");
-      break;
-    case '\r':
-      string_builder_add_string(sb, "\\r");
-      break;
-    case '\t':
-      string_builder_add_string(sb, "\\t");
-      break;
-    default:
-      if ((unsigned char)*c < 0x20) {
-        string_builder_add_formatted_string(sb, "\\u%04x", (unsigned char)*c);
-      } else {
-        string_builder_add_formatted_string(sb, "%c", *c);
-      }
-      break;
+  const char *run = value;
+  const char *cursor = value;
+  for (; *cursor; cursor++) {
+    const unsigned char byte = (unsigned char)*cursor;
+    const char *escape = json_escape(byte);
+    if (!escape && byte >= 0x20) {
+      continue;
     }
+    string_builder_add_bytes(sb, run, (size_t)(cursor - run));
+    if (escape) {
+      string_builder_add_string(sb, escape);
+    } else {
+      string_builder_add_formatted_string(sb, "\\u%04x", byte);
+    }
+    run = cursor + 1;
   }
+  string_builder_add_bytes(sb, run, (size_t)(cursor - run));
   string_builder_add_string(sb, "\"");
 }
 

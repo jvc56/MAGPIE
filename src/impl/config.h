@@ -165,6 +165,9 @@ bool config_get_use_game_pairs(const Config *config);
 bool config_get_use_small_plays(const Config *config);
 bool config_get_human_readable(const Config *config);
 void config_set_human_readable(Config *config, bool human_readable);
+// See AutoplayArgs.leavegen_write_files: true but for contribute's
+// leave_generation executor, which turns it off for its run.
+void config_set_leavegen_write_files(Config *config, bool write_files);
 bool config_get_show_mistakes(const Config *config);
 bool config_get_show_prompt(const Config *config);
 bool config_get_save_settings(const Config *config);

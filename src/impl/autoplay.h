@@ -42,7 +42,9 @@ typedef struct AutoplayArgs {
   // and report are written into the data directory. The CLI leavegen command
   // writes them. A contribute leave_generation task does not: its results go
   // back in the task response, and a contributor's data directory need not be
-  // writable.
+  // writable. A run that does not write them leaves each generation's rack
+  // equities as JSON in the results instead
+  // (autoplay_results_get_leave_results_json).
   bool leavegen_write_files;
   // Output name for the PAT weights trained by
   // AUTOPLAY_TYPE_PAT_GEN; per-generation snapshots are written as

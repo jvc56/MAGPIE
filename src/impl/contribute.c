@@ -1,5 +1,6 @@
 #include "contribute.h"
 
+#include "../compat/cfile.h"
 #include "../compat/chttp.h"
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
@@ -17,15 +18,11 @@
 #include "../util/io_util.h"
 #include "../util/json.h"
 #include "../util/string_util.h"
-#include <errno.h>
-#include <fcntl.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/file.h>
 #include <time.h>
-#include <unistd.h>
 
 enum {
   HEARTBEAT_INTERVAL_SECONDS = 30,
@@ -238,9 +235,10 @@ bool contribute_deadline_finish(ContributeDeadline *deadline) {
   cpthread_join(deadline->thread);
   const bool fired = deadline->fired;
   if (fired) {
-    // The stop was the deadline's, not the user's: the run goes on.
-    thread_control_set_status(deadline->thread_control,
-                              deadline->status_before);
+    // The stop was the deadline's, not the user's: the run goes on, unless
+    // the user asked to stop while it was in place.
+    (void)thread_control_restore_unless_stopped(deadline->thread_control,
+                                                deadline->status_before);
   }
   free(deadline);
   return fired;
@@ -587,16 +585,17 @@ int contribute_lock_build(const char *output_path, const char *what,
                           ThreadControl *thread_control,
                           ErrorStack *error_stack) {
   char *lock_path = get_formatted_string("%s.lock", output_path);
-  const int lock_fd = open(lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+  const int lock_fd = cfile_lock_open(lock_path);
   free(lock_path);
   if (lock_fd < 0) {
     return -1;
   }
   bool said_waiting = false;
-  while (flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
-    if (errno != EWOULDBLOCK && errno != EINTR) {
+  bool busy = false;
+  while (!cfile_lock_try(lock_fd, &busy)) {
+    if (!busy) {
       // A filesystem without locks: build unserialised, as before.
-      close(lock_fd);
+      cfile_lock_close(lock_fd);
       return -1;
     }
     if (!said_waiting && thread_control) {
@@ -606,7 +605,7 @@ int contribute_lock_build(const char *output_path, const char *what,
       said_waiting = true;
     }
     if (contribute_interrupted(thread_control)) {
-      close(lock_fd);
+      cfile_lock_close(lock_fd);
       error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_INTERRUPTED,
                        get_formatted_string(
                            "stopped while waiting for %s to be built", what));
@@ -618,10 +617,8 @@ int contribute_lock_build(const char *output_path, const char *what,
 }
 
 void contribute_unlock_build(int lock_fd) {
-  if (lock_fd >= 0) {
-    // Closing releases the flock.
-    close(lock_fd);
-  }
+  // Closing releases the lock.
+  cfile_lock_close(lock_fd);
 }
 
 bool contribute_find_derived(const ContributeState *state, const char *role,
@@ -1039,7 +1036,7 @@ static void print_task_line(ThreadControl *thread_control, const char *what,
   const time_t now = time(NULL);
   struct tm local;
   char clock[16] = "??:??:??";
-  if (localtime_r(&now, &local)) {
+  if (cfile_localtime(now, &local)) {
     (void)strftime(clock, sizeof(clock), "%H:%M:%S", &local);
   }
   thread_control_print_formatted(thread_control, "[%s] %s task #%d: %s%s\n",

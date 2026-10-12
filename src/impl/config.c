@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include "../compat/cfile.h"
 #include "../compat/chttp.h"
 #include "../compat/ctime.h"
 #include "../compat/endian_conv.h"
@@ -733,6 +734,10 @@ bool config_get_human_readable(const Config *config) {
 
 void config_set_human_readable(Config *config, bool human_readable) {
   config->human_readable = human_readable;
+}
+
+void config_set_leavegen_write_files(Config *config, bool write_files) {
+  config->leavegen_write_files = write_files;
 }
 
 bool config_get_show_mistakes(const Config *config) {
@@ -9500,7 +9505,7 @@ void config_contribute_apply_player_settings(Config *config,
       json_object_get(player, CONTRIBUTE_KEY_MAX_ITERATIONS);
   if (iterations && !json_is_null(iterations)) {
     const int64_t value =
-        json_get_int_or(player, CONTRIBUTE_KEY_MAX_ITERATIONS, 0);
+        json_get_int64_or(player, CONTRIBUTE_KEY_MAX_ITERATIONS, 0);
     if (value < 1) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -9514,7 +9519,8 @@ void config_contribute_apply_player_settings(Config *config,
   // per player on sim_args->num_plies, so a null here is a static player.
   const JsonValue *plies = json_object_get(player, CONTRIBUTE_KEY_NUM_PLIES);
   if (plies && !json_is_null(plies)) {
-    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLIES, -1);
+    const int64_t value =
+        json_get_int64_or(player, CONTRIBUTE_KEY_NUM_PLIES, -1);
     if (value < 0 || value > MAX_PLIES) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -9526,7 +9532,8 @@ void config_contribute_apply_player_settings(Config *config,
   }
   const JsonValue *plays = json_object_get(player, CONTRIBUTE_KEY_NUM_PLAYS);
   if (plays && !json_is_null(plays)) {
-    const int64_t value = json_get_int_or(player, CONTRIBUTE_KEY_NUM_PLAYS, 0);
+    const int64_t value =
+        json_get_int64_or(player, CONTRIBUTE_KEY_NUM_PLAYS, 0);
     if (value < 1) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
@@ -9597,7 +9604,7 @@ void config_contribute_apply_player_settings(Config *config,
       json_object_get(player, CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS);
   if (min_iterations && !json_is_null(min_iterations)) {
     const int64_t value =
-        json_get_int_or(player, CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS, 0);
+        json_get_int64_or(player, CONTRIBUTE_KEY_MIN_PLAY_ITERATIONS, 0);
     if (value < 0) {
       error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
                        get_formatted_string(
@@ -10556,7 +10563,7 @@ static char *config_contribute_leave_gen(Config *config,
   // Per process: two processes playing the same reissued task would share a
   // name made from the task.
   char *temp_path = temporary_sibling(klv_path);
-  FILE *klv_file = fopen(temp_path, "wbxe");
+  FILE *klv_file = cfile_open(temp_path, "wb", true);
   // Whether this process created the file, kept apart from the stream, which
   // is closed below.
   const bool created = klv_file != NULL;
@@ -10754,7 +10761,8 @@ bool config_contribute_execute(Config *task_config, const char *job_type,
   task_config->num_threads = threads;
   // Read on this thread with every thread the executor started joined: each
   // thread counts on its own move generator, unsynchronized
-  // (gen_get_movegen_count).
+  // (gen_get_movegen_count), and only inside a counting session.
+  gen_start_counting_movegens();
   const uint64_t movegens_before = gen_get_movegen_count();
   if (strings_equal(job_type, "games")) {
     *result_json = config_contribute_games(task_config, request, false, threads,
@@ -10769,9 +10777,11 @@ bool config_contribute_execute(Config *task_config, const char *job_type,
     *result_json = config_contribute_leave_gen(task_config, request, threads,
                                                state, error_stack);
   } else {
+    gen_stop_counting_movegens();
     return false;
   }
   *movegens = gen_get_movegen_count() - movegens_before;
+  gen_stop_counting_movegens();
   return true;
 }
 

@@ -61,17 +61,22 @@ static void string_builder_ensure_space(StringBuilder *string_builder,
       realloc_or_die(string_builder->string, string_builder->alloced);
 }
 
-void string_builder_add_string(StringBuilder *string_builder, const char *str) {
-  if (!string_builder || !str || *str == '\0') {
+void string_builder_add_bytes(StringBuilder *string_builder, const char *bytes,
+                              size_t len) {
+  if (!string_builder || !bytes || len == 0) {
     return;
   }
-
-  size_t len = string_length(str);
-
   string_builder_ensure_space(string_builder, len);
-  memmove(string_builder->string + string_builder->len, str, len);
+  memmove(string_builder->string + string_builder->len, bytes, len);
   string_builder->len += len;
   string_builder->string[string_builder->len] = '\0';
+}
+
+void string_builder_add_string(StringBuilder *string_builder, const char *str) {
+  if (!str) {
+    return;
+  }
+  string_builder_add_bytes(string_builder, str, string_length(str));
 }
 
 void string_builder_add_formatted_string(StringBuilder *string_builder,
@@ -123,7 +128,10 @@ void string_builder_add_int(StringBuilder *string_builder, int64_t n) {
 }
 
 void string_builder_add_char(StringBuilder *string_builder, char c) {
-  string_builder_add_formatted_string(string_builder, "%c", c);
+  // A NUL adds nothing, as "%c" formatting of it did.
+  if (c != '\0') {
+    string_builder_add_bytes(string_builder, &c, 1);
+  }
 }
 
 void string_builder_truncate(StringBuilder *string_builder, size_t len) {

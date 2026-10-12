@@ -361,7 +361,15 @@ void gen_destroy_cache(void);
 // Each thread counts on its own MoveGen, unsynchronized, so nothing is shared
 // in the hot path; this sums them, and so is only exact while no thread is
 // generating moves: read it before and after a command, not during one.
+//
+// Only generations made while something accounts for them are counted: a
+// movegen limit, a movegen budget on any thread, or a counting session. A
+// caller that wants the count of some work starts a session around it.
 uint64_t gen_get_movegen_count(void);
+// A counting session: generations on every thread are counted from start to
+// stop. Sessions nest. Started and stopped with no thread generating moves.
+void gen_start_counting_movegens(void);
+void gen_stop_counting_movegens(void);
 
 // A command's movegen limit (-movegenlimit): a work budget that, unlike a
 // time limit, is the same on any machine. Started before a command runs and

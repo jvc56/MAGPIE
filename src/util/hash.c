@@ -1,5 +1,6 @@
 #include "hash.h"
 
+#include "../compat/cfile.h"
 #include "../compat/sha256/sha256.h"
 #include "io_util.h"
 #include <stdbool.h>
@@ -35,7 +36,7 @@ char *sha256_hash_bytes(const void *data, size_t length) {
 }
 
 char *sha256_hash_file(const char *path, ErrorStack *error_stack) {
-  FILE *file = fopen(path, "rbe");
+  FILE *file = cfile_open(path, "rb", false);
   if (!file) {
     error_stack_push(
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,

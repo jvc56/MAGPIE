@@ -39,14 +39,15 @@ bool autoplay_solver_applies(const AutoplaySolverSettings *settings,
 // the user's, or a contribute task's time limit -- stops the solve, which then
 // returns NULL without an error, as it does when the run was stopped before
 // the solve began. The caller is abandoning the run, and plays on without the
-// solver.
+// solver. So does a solve that chose nothing because the calling thread's
+// movegen budget for the move (gen_set_movegen_budget) ran out first.
 //
 // With `record` set, the solve's ranking is kept for the positions recorder
 // (autoplay_solver_get_analysis), each play with its static equity.
 //
-// Pushes an error, and returns NULL, if a solve that was not stopped produced
-// no move: with no time limit that is a bug, and the run should fail rather
-// than fall back.
+// Pushes an error, and returns NULL, if a solve that was not stopped, and had
+// budget left, produced no move: with no time limit that is a bug, and the run
+// should fail rather than fall back.
 const Move *autoplay_solver_solve(AutoplaySolverCtx *ctx,
                                   const AutoplaySolverSettings *settings,
                                   Game *game, TranspositionTable *shared_tt,

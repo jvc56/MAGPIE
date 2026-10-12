@@ -44,6 +44,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -98,6 +99,20 @@ static void test_json_wrapper(void) {
   assert(error_stack_is_empty(error_stack));
   assert(seed == UINT64_MAX);
 
+  // Integers past int's range are read whole as int64, and saturate rather
+  // than wrap where they do not fit.
+  const JsonValue *large = json_parse(
+      "{\"big\":3000000000,\"huge\":1e30,\"tiny\":-1e30}", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(json_get_int64_or(large, "big", 0) == 3000000000LL);
+  assert(json_get_int(large, "big", error_stack) == 3000000000LL);
+  assert(json_get_int64_or(large, "huge", 0) == INT64_MAX);
+  assert(json_get_int64_or(large, "tiny", 0) == INT64_MIN);
+  assert(json_get_int_or(large, "big", 0) == INT_MAX);
+  assert(json_get_int_or(large, "tiny", 0) == INT_MIN);
+  assert(error_stack_is_empty(error_stack));
+  json_destroy(large);
+
   // A missing field is an error rather than a silent zero.
   json_get_int(value, "nope", error_stack);
   assert(!error_stack_is_empty(error_stack));
@@ -113,6 +128,28 @@ static void test_json_wrapper(void) {
   assert(!json_parse("{not json", error_stack));
   assert(!error_stack_is_empty(error_stack));
   error_stack_reset(error_stack);
+
+  // Quoting escapes what JSON requires, between and at the ends of runs of
+  // bytes it leaves alone, and the result parses back to the original.
+  const char *texts[] = {"",        "plain",      "\"", "a\"b\\c\nd\re\tf\001g",
+                         "\037end", "caf\xc3\xa9"};
+  const char *quoted[] = {
+      "\"\"",           "\"plain\"",
+      "\"\\\"\"",       "\"a\\\"b\\\\c\\nd\\re\\tf\\u0001g\"",
+      "\"\\u001fend\"", "\"caf\xc3\xa9\""};
+  for (size_t text_idx = 0; text_idx < sizeof(texts) / sizeof(texts[0]);
+       text_idx++) {
+    StringBuilder *sb = string_builder_create();
+    json_write_quoted(sb, texts[text_idx]);
+    assert_strings_equal(string_builder_peek(sb), quoted[text_idx]);
+    char *array = get_formatted_string("[%s]", string_builder_peek(sb));
+    const JsonValue *parsed = json_parse(array, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert_strings_equal(json_array_get_string(parsed, 0), texts[text_idx]);
+    json_destroy(parsed);
+    free(array);
+    string_builder_destroy(sb);
+  }
 
   error_stack_destroy(error_stack);
 }
@@ -1499,14 +1536,17 @@ static void test_every_job_type_counts_its_move_generations(void) {
       config_create_or_die("set -lex CSW21_ab -ld english_ab -wmp false -s1 "
                            "equity -s2 equity -r1 best -r2 best -numplays 1 "
                            "-threads 2 -seed 3");
+  config_set_leavegen_write_files(ab_config, false);
   AutoplayResults *autoplay_results = autoplay_results_create();
   autoplay_results_set_options(autoplay_results, "games", error_stack);
   assert(error_stack_is_empty(error_stack));
   const char *forced_racks[] = {"AAAAAAB", "ABBBBBB"};
+  gen_start_counting_movegens();
   const uint64_t before = gen_get_movegen_count();
   config_autoplay(ab_config, autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN, "3", 0,
                   forced_racks, 2, NULL, error_stack);
   movegens = gen_get_movegen_count() - before;
+  gen_stop_counting_movegens();
   assert(error_stack_is_empty(error_stack));
   parsed = json_parse(autoplay_results_get_leave_results_json(autoplay_results),
                       error_stack);
@@ -1713,6 +1753,16 @@ static void test_a_task_is_stopped_at_its_time_limit(void) {
                             THREAD_CONTROL_STATUS_USER_INTERRUPT);
   ctime_nap(0.8);
   assert(!contribute_deadline_finish(deadline));
+  assert(contribute_interrupted(thread_control));
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+
+  // Stopped by the user after the limit fired, while the task winds down:
+  // the stop changes nothing then, but it stands, and the run ends.
+  deadline = contribute_deadline_start(thread_control, 0.1);
+  ctime_nap(0.5);
+  assert(contribute_interrupted(thread_control));
+  thread_control_stop(thread_control);
+  assert(contribute_deadline_finish(deadline));
   assert(contribute_interrupted(thread_control));
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
 

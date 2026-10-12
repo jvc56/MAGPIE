@@ -353,10 +353,14 @@ void postgen_prebroadcast_func(void *data) {
   // The direct RackList read that contribute's leave_generation executor
   // needs (birdtest's PLAN.md, "Leave generation on the client"): the
   // results go back in the task's JSON response rather than through a file.
-  autoplay_results_set_leave_results_json(
-      lg_shared_data->primary_autoplay_results,
-      rack_list_get_rack_equity_json(lg_shared_data->rack_list,
-                                     lg_shared_data->ld));
+  // Only that run reads it, and on a full rack list it is hundreds of
+  // megabytes, so a run that writes its files skips it.
+  if (!lg_shared_data->write_files) {
+    autoplay_results_set_leave_results_json(
+        lg_shared_data->primary_autoplay_results,
+        rack_list_get_rack_equity_json(lg_shared_data->rack_list,
+                                       lg_shared_data->ld));
+  }
   lg_shared_data->gens_completed++;
 
   // Get total game data.
@@ -1090,7 +1094,9 @@ static const Move *game_runner_choose_best_move(AutoplayWorker *autoplay_worker,
       // -- before or during the solve, which chose nothing. The run is being
       // abandoned (a task's results are discarded), so the game plays out on
       // static plays, as a stopped simulation's turn does: every later solve
-      // and simulation returns at once.
+      // and simulation returns at once. Or the player's movegen budget for
+      // the move ran out before the solve chose anything, and its best move
+      // so far is the static one.
       return get_top_move_for_player_on_turn(
           game_runner->game, autoplay_worker->move_lists[player_on_turn_index],
           autoplay_worker->captures_positions);

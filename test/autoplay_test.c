@@ -783,10 +783,17 @@ static void test_autoplay_stops_at_its_movegen_limit(void) {
   assert(config_get_movegen_limit(config) == limit);
 
   // A limit of 0 is none: 20 games play out, some 20 generations each.
+  gen_start_counting_movegens();
   before = gen_get_movegen_count();
   load_and_exec_config_or_die(config,
                               "autoplay games 20 -seed 9 -movegenlimit 0");
   assert(gen_get_movegen_count() - before >= 200);
+  gen_stop_counting_movegens();
+
+  // With no limit, budget or counting session, nothing is counted.
+  before = gen_get_movegen_count();
+  load_and_exec_config_or_die(config, "autoplay games 5 -seed 9");
+  assert(gen_get_movegen_count() == before);
   config_destroy(config);
 }
 

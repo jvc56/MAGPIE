@@ -387,6 +387,10 @@ void write_string_to_file(const char *filename, const char *mode,
 void append_string_to_file(const char *filename, const char *string,
                            ErrorStack *error_stack);
 FILE *fopen_or_die(const char *filename, const char *mode);
+// Creates `filename` with `mode` ("w" or "wb"), failing with an error if it
+// already exists: C11's "x" mode, which C99 lacks (see cfile_open).
+FILE *fopen_exclusive_safe(const char *filename, const char *mode,
+                           ErrorStack *error_stack);
 FILE *fopen_safe(const char *filename, const char *mode,
                  ErrorStack *error_stack);
 DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack);
@@ -409,7 +413,8 @@ char *get_file_identity(const char *path);
 // A name beside `filename` for writing it in full before renaming it into
 // place -- `<filename>.<pid>-<n>-<ns>.tmp` -- so that no reader, and no other
 // process writing the same file, ever sees half of it. Open it exclusively
-// ("wbx"): two containers sharing a volume can both be PID 1. Removes the
+// (fopen_exclusive_safe): two containers sharing a volume can both be PID 1.
+// Removes the
 // temporaries of earlier writes of `filename` left untouched for an hour -- a
 // killed writer's. The caller frees.
 char *temporary_sibling(const char *filename);

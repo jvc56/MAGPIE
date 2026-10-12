@@ -65,8 +65,8 @@ static bool autoplay_solver_stopped(ThreadControl *run_thread_control) {
 static ThreadControl *
 autoplay_solver_thread_control_create(ThreadControl *run_thread_control) {
   ThreadControl *thread_control = thread_control_create();
-  thread_control_set_parent(thread_control, run_thread_control);
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  thread_control_set_parent(thread_control, run_thread_control);
   return thread_control;
 }
 
@@ -235,6 +235,12 @@ static const Move *autoplay_solver_solve_endgame(
   const PVLine *pv_line =
       endgame_results_get_pvline(ctx->endgame_results, ENDGAME_RESULT_BEST);
   if (pv_line->num_moves == 0) {
+    // A movegen budget spent before the first depth finished chose nothing,
+    // and that is the budget's doing, not a failure: see
+    // autoplay_solver_solve.
+    if (gen_movegen_budget_spent()) {
+      return NULL;
+    }
     error_stack_push(error_stack, ERROR_STATUS_AUTOPLAY_SOLVER_NO_MOVE,
                      string_duplicate("the endgame solve chose no move"));
     return NULL;
@@ -362,6 +368,11 @@ static const Move *autoplay_solver_solve_peg(
   }
   if (error_stack_is_empty(error_stack) &&
       (result.n_top_cands == 0 || result.best_win < 0.0)) {
+    // As for the endgame: a spent movegen budget chose nothing.
+    if (gen_movegen_budget_spent()) {
+      peg_result_destroy(&result);
+      return NULL;
+    }
     error_stack_push(error_stack, ERROR_STATUS_AUTOPLAY_SOLVER_NO_MOVE,
                      string_duplicate("the pre-endgame solve chose no move"));
   }

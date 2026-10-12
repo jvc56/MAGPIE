@@ -1,5 +1,6 @@
 #include "io_util.h"
 
+#include "../compat/cfile.h"
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include <assert.h>
@@ -15,7 +16,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
 
 enum { ERROR_STACK_CAPACITY = 100 };
 
@@ -509,6 +509,19 @@ FILE *fopen_or_die(const char *filename, const char *mode) {
   return stream;
 }
 
+FILE *fopen_exclusive_safe(const char *filename, const char *mode,
+                           ErrorStack *error_stack) {
+  FILE *stream = cfile_open(filename, mode, true);
+  if (!stream) {
+    const int error_number = errno;
+    error_stack_push(error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
+                     get_formatted_string("failed to create file '%s': %s (%d)",
+                                          filename, strerror(error_number),
+                                          error_number));
+  }
+  return stream;
+}
+
 FILE *fopen_safe(const char *filename, const char *mode,
                  ErrorStack *error_stack) {
   FILE *stream = fopen(filename, mode);
@@ -587,24 +600,16 @@ bool path_is_directory(const char *path) {
 // read at: whole seconds is not enough, because the whole problem is two
 // writes inside one tick. So the identity carries nanoseconds where the
 // filesystem records them.
-#if defined(__APPLE__)
-#define STAT_MTIM(info) ((info).st_mtimespec)
-#define STAT_CTIM(info) ((info).st_ctimespec)
-#else
-#define STAT_MTIM(info) ((info).st_mtim)
-#define STAT_CTIM(info) ((info).st_ctim)
-#endif
-
 char *get_file_identity(const char *path) {
-  struct stat info;
-  if (!path || stat(path, &info) != 0) {
+  CFileIdentity identity;
+  if (!cfile_identity(path, &identity)) {
     return NULL;
   }
   return get_formatted_string(
-      "%lld|%lld.%09ld|%llu|%lld.%09ld", (long long)info.st_size,
-      (long long)STAT_MTIM(info).tv_sec, (long)STAT_MTIM(info).tv_nsec,
-      (unsigned long long)info.st_ino, (long long)STAT_CTIM(info).tv_sec,
-      (long)STAT_CTIM(info).tv_nsec);
+      "%lld|%lld.%09ld|%llu|%lld.%09ld", (long long)identity.size,
+      (long long)identity.mtime_seconds, identity.mtime_nanoseconds,
+      (unsigned long long)identity.inode, (long long)identity.ctime_seconds,
+      identity.ctime_nanoseconds);
 }
 
 enum {
@@ -667,8 +672,8 @@ char *temporary_sibling(const char *filename) {
   // The first two alone are unique within one PID space, but two containers
   // sharing a data volume can both be PID 1 with their counters in step (the
   // same generation's KLV, fetched at the same point in two runs). Writers
-  // still open the name exclusively ("wbx"), so a clash fails rather than
-  // truncating the other's file.
+  // still open the name exclusively (fopen_exclusive_safe), so a clash fails
+  // rather than truncating the other's file.
   static atomic_uint_least64_t counter = 0;
   const unsigned long long sequence =
       (unsigned long long)atomic_fetch_add(&counter, 1);
@@ -677,8 +682,8 @@ char *temporary_sibling(const char *filename) {
   const unsigned long long nonce =
       (unsigned long long)now.tv_sec * 1000000000ULL +
       (unsigned long long)now.tv_nsec;
-  return get_formatted_string("%s.%ld-%llu-%llu.tmp", filename, (long)getpid(),
-                              sequence, nonce);
+  return get_formatted_string("%s.%ld-%llu-%llu.tmp", filename,
+                              cfile_process_id(), sequence, nonce);
 }
 
 void rename_into_place(const char *temporary, const char *filename,

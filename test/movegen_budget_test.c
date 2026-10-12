@@ -30,9 +30,11 @@ static void test_a_simulation_stops_at_its_budget(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   load_and_exec_config_or_die(config, "rack ACEIRST");
   load_and_exec_config_or_die(config, "gen");
+  gen_start_counting_movegens();
   const uint64_t before = gen_get_movegen_count();
   load_and_exec_config_or_die(config, "sim");
   const uint64_t spent = gen_get_movegen_count() - before;
+  gen_stop_counting_movegens();
   printf("a simulation with a budget of 20000 made %" PRIu64 " generations\n",
          spent);
   assert(sim_status(config) == BAI_RESULT_STATUS_MOVEGEN_BUDGET);
@@ -66,9 +68,11 @@ static void test_autoplay_spends_each_move_within_its_budget(void) {
       "-sc1 none -si1 false -mb1 2000");
   assert(config_get_player_movegen_budget(config, 0) == 2000);
   assert(config_get_player_movegen_budget(config, 1) == 0);
+  gen_start_counting_movegens();
   const uint64_t before = gen_get_movegen_count();
   load_and_exec_config_or_die(config, "autoplay games 2 -seed 3");
   const uint64_t spent = gen_get_movegen_count() - before;
+  gen_stop_counting_movegens();
   printf("two games with a budget of 2000 a move made %" PRIu64
          " generations\n",
          spent);
