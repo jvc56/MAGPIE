@@ -412,6 +412,10 @@ struct Config {
   int challenge_bonus;
   int num_plays;
   int max_num_display_plays;
+  // Each seat's cap on the ranked plays a captured position keeps, set by a
+  // contribute task from each player's num_plays_recorded; 0 is
+  // max_num_display_plays.
+  int position_play_caps[2];
   int num_small_plays;
   int plies;
   int shplies;
@@ -1090,8 +1094,12 @@ char *str_api_fatal(Config *config,
 // computes or submits, and the floor moves with it. 0.1.1: a capturing static
 // player no longer plays its worst move (dfc79f1a); a leave task plays the KLV
 // it fetched rather than the one before it, verified against the server's
-// hash; a 429 no longer sleeps for hours, nor ends a run.
-#define MAGPIE_VERSION "0.1.1"
+// hash; a 429 no longer sleeps for hours, nor ends a run. 0.1.2: a task on a
+// second lexicon no longer reads the first's rack info table through the move
+// generator's cache (a crash, or the wrong lexicon's leaves); each captured
+// position names its mover and keeps that player's num_plays_recorded; a
+// simming player's candidates follow its sort type.
+#define MAGPIE_VERSION "0.1.2"
 
 const char *config_get_magpie_version(void) { return MAGPIE_VERSION; }
 
@@ -4855,7 +4863,13 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->num_forced_racks = num_forced_racks;
   autoplay_args->leavegen_max_games = config->leavegen_max_games;
   autoplay_args->leavegen_write_files = config->leavegen_write_files;
-  autoplay_args->position_play_cap = config->max_num_display_plays;
+  // A seat with no cap of its own keeps -numplays' display count.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    autoplay_args->position_play_caps[player_index] =
+        config->position_play_caps[player_index] > 0
+            ? config->position_play_caps[player_index]
+            : config->max_num_display_plays;
+  }
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
@@ -10049,12 +10063,18 @@ static char *config_contribute_games(Config *config, const JsonValue *request,
   // whether those analyses are kept rather than discarded.
   const bool capture_positions =
       json_get_bool_or(request, CONTRIBUTE_KEY_CAPTURE_POSITIONS, false);
-  // How many ranked plays to report per position: the player config's
-  // num_plays_recorded, which is not how many were simulated.
+  // How many ranked plays to report per position: each player's own
+  // num_plays_recorded, which is not how many were simulated, for the
+  // positions that player moved from.
   const JsonValue *capture_player =
       json_object_get(request, CONTRIBUTE_KEY_PLAYER1);
   config->max_num_display_plays =
       json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLAYS_RECORDED, 10);
+  config->position_play_caps[0] = config->max_num_display_plays;
+  config->position_play_caps[1] =
+      json_get_int_or(json_object_get(request, CONTRIBUTE_KEY_PLAYER2),
+                      CONTRIBUTE_KEY_NUM_PLAYS_RECORDED,
+                      config->max_num_display_plays);
   // And how many plies to report, the other half of that pair.
   config->shplies =
       json_get_int_or(capture_player, CONTRIBUTE_KEY_NUM_PLIES_RECORDED,
@@ -13602,6 +13622,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->challenge_bonus = DEFAULT_CHALLENGE_BONUS;
   config->num_plays = CONFIG_DEFAULT_NUM_PLAYS;
   config->max_num_display_plays = 15;
+  config->position_play_caps[0] = 0;
+  config->position_play_caps[1] = 0;
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 5;
   config->shplies = CONFIG_DEFAULT_SHPLIES;

@@ -1,5 +1,5 @@
 {
-  "claim_token": "a89471ba-364c-45c6-b7ec-6c700969e985",
+  "claim_token": "0c8fb94c-7dcb-4468-935c-58e2edd01eb0",
   "result": {
     "all_games": {
       "games": 4,
@@ -32,6 +32,7 @@
       {
         "game_index": 0,
         "turn_number": 0,
+        "player": 1,
         "rack": "HHIRRUV",
         "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 HHIRRUV/AEFLMST 0/0 0",
         "analysis": "static",
@@ -74,6 +75,7 @@
       {
         "game_index": 1,
         "turn_number": 0,
+        "player": 2,
         "rack": "HHIRRUV",
         "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AEFLMST/HHIRRUV 0/0 0",
         "analysis": "static",
@@ -116,6 +118,7 @@
       {
         "game_index": 2,
         "turn_number": 1,
+        "player": 1,
         "rack": "GGOSSV?",
         "position": "15/15/15/15/15/15/15/3FARING6/15/15/15/15/15/15/15 GGOSSV?/AEEEHNR 0/28 0",
         "analysis": "static",
@@ -160,6 +163,7 @@
       {
         "game_index": 3,
         "turn_number": 1,
+        "player": 2,
         "rack": "GGOSSV?",
         "position": "15/15/15/15/15/15/15/3FARING6/15/15/15/15/15/15/15 AEEEHNR/GGOSSV? 28/0 0",
         "analysis": "static",

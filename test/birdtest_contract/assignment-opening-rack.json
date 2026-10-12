@@ -3,7 +3,7 @@
   "job_id": "9a2f61c4-5e07-4b13-8d6a-c31f70b2ae58",
   "job_name": "NWL23 opening racks, 4-ply simmer",
   "max_task_seconds": 3600,
-  "min_magpie_version": "0.1.1",
+  "min_magpie_version": "0.1.2",
   "expected_data": {
     "algorithm": "sha256",
     "files": [

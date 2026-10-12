@@ -1,5 +1,5 @@
 {
-  "claim_token": "11cf9800-08c1-43ab-aa33-a41e6a2efc9c",
+  "claim_token": "299b0bcd-3c8c-4e6d-9055-9d6927e3b912",
   "result": {
     "all_games": {
       "games": 2,
@@ -15,6 +15,7 @@
       {
         "game_index": 0,
         "turn_number": 0,
+        "player": 1,
         "rack": "HHIRRUV",
         "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 HHIRRUV/AEFLMST 0/0 0",
         "analysis": "static",
@@ -57,6 +58,7 @@
       {
         "game_index": 0,
         "turn_number": 1,
+        "player": 2,
         "rack": "AEFLMST",
         "position": "15/15/15/15/15/15/15/6HUH6/15/15/15/15/15/15/15 IMRRRUV/AEFLMST 18/0 0",
         "analysis": "static",
@@ -101,6 +103,7 @@
       {
         "game_index": 0,
         "turn_number": 2,
+        "player": 1,
         "rack": "IMRRRUV",
         "position": "15/15/15/15/15/15/15/6HUH6/4FAM8/15/15/15/15/15/15 IMRRRUV/BEGLSTX 18/21 0",
         "analysis": "static",
@@ -145,6 +148,7 @@
       {
         "game_index": 0,
         "turn_number": 3,
+        "player": 2,
         "rack": "BEGLSTX",
         "position": "15/15/15/15/15/15/15/6HUH6/4FAM1MURR3/15/15/15/15/15/15 AIORRVY/BEGLSTX 37/21 0",
         "analysis": "static",
@@ -189,6 +193,7 @@
       {
         "game_index": 0,
         "turn_number": 4,
+        "player": 1,
         "rack": "AIORRVY",
         "position": "15/15/15/15/15/15/15/6HUH6/4FAM1MURR3/3LEX9/15/15/15/15/15 AIORRVY/BGLOSTT 37/77 0",
         "analysis": "static",
@@ -233,6 +238,7 @@
       {
         "game_index": 0,
         "turn_number": 5,
+        "player": 2,
         "rack": "BGLOSTT",
         "position": "15/15/15/15/15/15/15/6HUH6/4FAM1MURR3/2ILEX9/2V12/2O12/2R12/2Y12/15 AENORTY/BGLOSTT 70/77 0",
         "analysis": "static",
@@ -277,6 +283,7 @@
       {
         "game_index": 0,
         "turn_number": 6,
+        "player": 1,
         "rack": "AENORTY",
         "position": "15/15/15/15/15/15/15/6HUH6/4FAM1MURR3/2ILEX9/2V12/1GO12/1OR12/1BY12/15 AENORTY/ELOSTTZ 70/108 0",
         "analysis": "static",
@@ -321,6 +328,7 @@
       {
         "game_index": 0,
         "turn_number": 7,
+        "player": 2,
         "rack": "ELOSTTZ",
         "position": "15/15/15/15/15/15/15/6HUH6/4FAM1MURR3/2ILEX9/2V1YE9/1GO12/1OR12/1BY12/15 AIINORT/ELOSTTZ 108/108 0",
         "analysis": "static",
@@ -365,6 +373,7 @@
       {
         "game_index": 0,
         "turn_number": 8,
+        "player": 1,
         "rack": "AIINORT",
         "position": "15/15/15/15/15/15/15/Z5HUH6/L3FAM1MURR3/O1ILEX9/T1V1YE9/EGO12/1OR12/1BY12/15 AIINORT/ENQSTU? 108/158 0",
         "analysis": "static",
@@ -409,6 +418,7 @@
       {
         "game_index": 0,
         "turn_number": 9,
+        "player": 2,
         "rack": "ENQSTU?",
         "position": "15/15/15/15/15/15/8OI5/Z5HUH6/L3FAM1MURR3/O1ILEX9/T1V1YE9/EGO12/1OR12/1BY12/15 AGIINRT/ENQSTU? 120/158 0",
         "analysis": "static",
@@ -453,6 +463,7 @@
       {
         "game_index": 0,
         "turn_number": 10,
+        "player": 1,
         "rack": "AGIINRT",
         "position": "15/15/15/15/15/15/8OI5/Z5HUH6/L3FAM1MURR3/O1ILEX9/T1V1YE9/EGO2SEQUeNT3/1OR12/1BY12/15 AGIINRT/AAACDTT 120/269 0",
         "analysis": "static",
@@ -497,6 +508,7 @@
       {
         "game_index": 0,
         "turn_number": 11,
+        "player": 2,
         "rack": "AAACDTT",
         "position": "15/15/15/15/15/15/8OI5/Z5HUH6/L3FAM1MURR3/O1ILEX9/T1V1YE9/EGO2SEQUeNT3/1OR4I7/1BY12/15 AGINRTT/AAACDTT 131/269 0",
         "analysis": "static",
@@ -541,6 +553,7 @@
       {
         "game_index": 0,
         "turn_number": 12,
+        "player": 1,
         "rack": "AGINRTT",
         "position": "15/15/15/15/15/15/8OI5/Z5HUH2ACTA/L3FAM1MURR3/O1ILEX9/T1V1YE9/EGO2SEQUeNT3/1OR4I7/1BY12/15 AGINRTT/ADEETWW 131/293 0",
         "analysis": "static",
@@ -585,6 +598,7 @@
       {
         "game_index": 0,
         "turn_number": 13,
+        "player": 2,
         "rack": "ADEETWW",
         "position": "15/15/15/15/15/15/8OI5/Z5HUH2ACTA/L3FAM1MURR3/O1ILEX9/T1V1YET8/EGO2SEQUeNT3/1OR4I7/1BY12/15 AGINORT/ADEETWW 139/293 0",
         "analysis": "static",
@@ -629,6 +643,7 @@
       {
         "game_index": 0,
         "turn_number": 14,
+        "player": 1,
         "rack": "AGINORT",
         "position": "15/15/15/11W3/11E3/11T3/8OI1W3/Z5HUH2ACTA/L3FAM1MURR3/O1ILEX5E3/T1V1YET8/EGO2SEQUeNT3/1OR4I7/1BY12/15 AGINORT/AADDELS 139/319 0",
         "analysis": "static",
@@ -673,6 +688,7 @@
       {
         "game_index": 0,
         "turn_number": 15,
+        "player": 2,
         "rack": "AADDELS",
         "position": "15/15/15/11W1R1/11E1O1/11T1T1/8OI1W1A1/Z5HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY12/15 BCDIORS/AADDELS 202/319 0",
         "analysis": "static",
@@ -717,6 +733,7 @@
       {
         "game_index": 0,
         "turn_number": 16,
+        "player": 1,
         "rack": "BCDIORS",
         "position": "14L/14A/14D/11W1RE/11E1OD/11T1T1/8OI1W1A1/Z5HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY12/15 BCDIORS/AADNOPS 202/349 0",
         "analysis": "static",
@@ -761,6 +778,7 @@
       {
         "game_index": 0,
         "turn_number": 17,
+        "player": 2,
         "rack": "AADNOPS",
         "position": "14L/14A/10C3D/10OW1RE/10BE1OD/11T1T1/8OI1W1A1/Z5HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY12/15 DEIIJRS/AADNOPS 229/349 0",
         "analysis": "static",
@@ -805,6 +823,7 @@
       {
         "game_index": 0,
         "turn_number": 18,
+        "player": 1,
         "rack": "DEIIJRS",
         "position": "14L/14A/10C3D/10OW1RE/10BE1OD/11T1T1/8OI1W1A1/Z5HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY2POSADA4/15 DEIIJRS/ELNPRV? 229/380 0",
         "analysis": "static",
@@ -849,6 +868,7 @@
       {
         "game_index": 0,
         "turn_number": 19,
+        "player": 2,
         "rack": "ELNPRV?",
         "position": "14L/14A/10C3D/10OW1RE/8JIBE1OD/11T1T1/8OI1W1A1/Z5HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY2POSADA4/15 ADEEIRS/ELNPRV? 242/380 0",
         "analysis": "static",
@@ -893,6 +913,7 @@
       {
         "game_index": 0,
         "turn_number": 20,
+        "player": 1,
         "rack": "ADEEIRS",
         "position": "14L/14A/10C3D/9POW1RE/8JIBE1OD/9L1T1T1/8OI1W1A1/Z5HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY2POSADA4/15 ADEEIRS/EINNRV? 242/396 0",
         "analysis": "static",
@@ -937,6 +958,7 @@
       {
         "game_index": 0,
         "turn_number": 21,
+        "player": 2,
         "rack": "EINNRV?",
         "position": "14L/14A/10C3D/9POW1RE/8JIBE1OD/9L1T1T1/8OI1W1A1/Z5HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY2POSADA4/8READIES AEGINOU/EINNRV? 329/396 0",
         "analysis": "static",
@@ -981,6 +1003,7 @@
       {
         "game_index": 0,
         "turn_number": 22,
+        "player": 1,
         "rack": "AEGINOU",
         "position": "14L/11VINA/10C3D/9POW1RE/8JIBE1OD/9L1T1T1/8OI1W1A1/Z5HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY2POSADA4/8READIES AEGINOU/EKNNRS? 329/410 0",
         "analysis": "static",
@@ -1025,6 +1048,7 @@
       {
         "game_index": 0,
         "turn_number": 23,
+        "player": 2,
         "rack": "EKNNRS?",
         "position": "14L/11VINA/1G8C3D/1U7POW1RE/1I6JIBE1OD/1N7L1T1T1/1E6OI1W1A1/ZA4HUH2ACTA/L3FAM1MURR1I1/O1ILEX5E1N1/T1V1YET6G1/EGO2SEQUeNT3/1OR4I7/1BY2POSADA4/8READIES EFIO/EKNNRS? 349/410 0",
         "analysis": "endgame",
@@ -1047,6 +1071,7 @@
       {
         "game_index": 1,
         "turn_number": 0,
+        "player": 2,
         "rack": "AFGHINR",
         "position": "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 GGOSSV?/AFGHINR 0/0 0",
         "analysis": "static",
@@ -1089,6 +1114,7 @@
       {
         "game_index": 1,
         "turn_number": 1,
+        "player": 1,
         "rack": "GGOSSV?",
         "position": "15/15/15/15/15/15/15/3FARING6/15/15/15/15/15/15/15 GGOSSV?/AEEEHNR 0/28 0",
         "analysis": "static",
@@ -1133,6 +1159,7 @@
       {
         "game_index": 1,
         "turn_number": 2,
+        "player": 2,
         "rack": "AEEEHNR",
         "position": "15/15/15/15/15/15/6V8/3FARING6/6G8/6S8/15/15/15/15/15 DGIOQS?/AEEEHNR 14/28 0",
         "analysis": "static",
@@ -1177,6 +1204,7 @@
       {
         "game_index": 1,
         "turn_number": 3,
+        "player": 1,
         "rack": "DGIOQS?",
         "position": "15/15/15/15/15/15/4HEVEA6/3FARING6/6G8/6S8/15/15/15/15/15 DGIOQS?/EEEFNOR 14/53 0",
         "analysis": "static",
@@ -1221,6 +1249,7 @@
       {
         "game_index": 1,
         "turn_number": 4,
+        "player": 2,
         "rack": "EEEFNOR",
         "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/6G8/6S8/15/15/15/15/15 ADEEGO?/EEEFNOR 40/53 0",
         "analysis": "static",
@@ -1265,6 +1294,7 @@
       {
         "game_index": 1,
         "turn_number": 5,
+        "player": 1,
         "rack": "ADEEGO?",
         "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/6G8/2FORESEEN5/15/15/15/15/15 ADEEGO?/AEITWWY 40/118 0",
         "analysis": "static",
@@ -1309,6 +1339,7 @@
       {
         "game_index": 1,
         "turn_number": 6,
+        "player": 2,
         "rack": "AEITWWY",
         "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/3FARING6/4G1G8/2FORESEEN5/4O10/4D10/4E10/15/15 AEILOU?/AEITWWY 64/118 0",
         "analysis": "static",
@@ -1353,6 +1384,7 @@
       {
         "game_index": 1,
         "turn_number": 7,
+        "player": 1,
         "rack": "AEILOU?",
         "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4D10/4E10/15/15 AEILOU?/DEIIOTW 64/175 0",
         "analysis": "static",
@@ -1397,6 +1429,7 @@
       {
         "game_index": 1,
         "turn_number": 8,
+        "player": 2,
         "rack": "DEIIOTW",
         "position": "15/15/15/15/9Q5/9I5/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E10/15/15 ABIOPRT/DEIIOTW 132/175 0",
         "analysis": "static",
@@ -1441,6 +1474,7 @@
       {
         "game_index": 1,
         "turn_number": 9,
+        "player": 1,
         "rack": "ABIOPRT",
         "position": "15/15/15/10W4/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E10/15/15 ABIOPRT/DEILORY 132/211 0",
         "analysis": "static",
@@ -1485,6 +1519,7 @@
       {
         "game_index": 1,
         "turn_number": 10,
+        "player": 2,
         "rack": "DEILORY",
         "position": "15/15/15/10W4/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/15/15 AACINRT/DEILORY 161/211 0",
         "analysis": "static",
@@ -1529,6 +1564,7 @@
       {
         "game_index": 1,
         "turn_number": 11,
+        "player": 1,
         "rack": "AACINRT",
         "position": "15/15/15/10WORDY/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/15/15 AACINRT/ADEIIIL 161/243 0",
         "analysis": "static",
@@ -1573,6 +1609,7 @@
       {
         "game_index": 1,
         "turn_number": 12,
+        "player": 2,
         "rack": "ADEIIIL",
         "position": "15/15/15/10WORDY/9QI4/9IT4/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/8ANTICAR/15 AEEOOTX/ADEIIIL 238/243 0",
         "analysis": "static",
@@ -1617,6 +1654,7 @@
       {
         "game_index": 1,
         "turn_number": 13,
+        "player": 1,
         "rack": "AEEOOTX",
         "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O10/4DIALOgUE3/4E1BOP6/8ANTICAR/15 AEEOOTX/AAILMUU 238/261 0",
         "analysis": "static",
@@ -1661,6 +1699,7 @@
       {
         "game_index": 1,
         "turn_number": 14,
+        "player": 2,
         "rack": "AAILMUU",
         "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O9E/4DIALOgUE2X/4E1BOP5T/8ANTICAR/14A EELOOTT/AAILMUU 298/261 0",
         "analysis": "static",
@@ -1705,6 +1744,7 @@
       {
         "game_index": 1,
         "turn_number": 15,
+        "player": 1,
         "rack": "EELOOTT",
         "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/4O9E/4DIALOgUE2X/4E1BOP5T/8ANTICAR/4MIAUL5A EELOOTT/ADHKNPU 298/288 0",
         "analysis": "static",
@@ -1749,6 +1789,7 @@
       {
         "game_index": 1,
         "turn_number": 16,
+        "player": 2,
         "rack": "ADHKNPU",
         "position": "15/13D1/13I1/10WORDY/9QI2I1/9IT2E1/4HEVEAS5/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/2O1DIALOgUE2X/2T1E1BOP5T/2L5ANTICAR/2E1MIAUL5A EEJMRTZ/ADHKNPU 316/288 0",
         "analysis": "static",
@@ -1793,6 +1834,7 @@
       {
         "game_index": 1,
         "turn_number": 17,
+        "player": 1,
         "rack": "EEJMRTZ",
         "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NE1/4HEVEAS2K2/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/2O1DIALOgUE2X/2T1E1BOP5T/2L5ANTICAR/2E1MIAUL5A EEJMRTZ/BDHNTU? 316/332 0",
         "analysis": "static",
@@ -1837,6 +1879,7 @@
       {
         "game_index": 1,
         "turn_number": 18,
+        "player": 2,
         "rack": "BDHNTU?",
         "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NE1/4HEVEAS2K2/WAYFARING6/4G1G8/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A ILMNRTZ/BDHNTU? 355/332 0",
         "analysis": "static",
@@ -1881,6 +1924,7 @@
       {
         "game_index": 1,
         "turn_number": 19,
+        "player": 1,
         "rack": "ILMNRTZ",
         "position": "15/13D1/12PI1/10WORDY/9QI1AI1/9IT1NEB/4HEVEAS2K1H/WAYFARING5U/4G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A ILMNRTZ/DNOSSV? 355/364 0",
         "analysis": "peg",
@@ -1913,6 +1957,7 @@
       {
         "game_index": 1,
         "turn_number": 20,
+        "player": 2,
         "rack": "DNOSSV?",
         "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/4HEVEAS2K1H/WAYFARING5U/4G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A CILMNRT/DNOSSV? 380/364 0",
         "analysis": "peg",
@@ -1945,6 +1990,7 @@
       {
         "game_index": 1,
         "turn_number": 21,
+        "player": 1,
         "rack": "CILMNRT",
         "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING5U/1N2G1G7T/2FORESEEN5/2O1O9E/1JO1DIALOgUE2X/1ET1E1BOP5T/1EL5ANTICAR/1RE1MIAUL5A CILMNRT/DOSSU? 380/370 0",
         "analysis": "endgame",
@@ -1967,6 +2013,7 @@
       {
         "game_index": 1,
         "turn_number": 22,
+        "player": 2,
         "rack": "DOSSU?",
         "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING2L2U/1N2G1G4I2T/2FORESEEN1M3/2O1O6N2E/1JO1DIALOgUE2X/1ET1E1BOP2T2T/1EL5ANTICAR/1RE1MIAUL2C2A R/DOSSU? 396/370 0",
         "analysis": "endgame",
@@ -1989,6 +2036,7 @@
       {
         "game_index": 1,
         "turn_number": 23,
+        "player": 1,
         "rack": "R",
         "position": "15/13D1/12PI1/10WORDY/9QI1AI1/8ZIT1NEB/1V2HEVEAS2K1H/WAYFARING2L2U/1N2G1G4ID1T/2FORESEEN1MU2/2O1O6NO1E/1JO1DIALOgUES1X/1ET1E1BOP2T2T/1EL5ANTICAR/1RE1MIAUL2C2A R/S? 396/397 0",
         "analysis": "endgame",

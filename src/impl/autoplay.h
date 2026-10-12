@@ -26,7 +26,9 @@ typedef struct AutoplayArgs {
   // position, when active. Sizes each static player's move list up front
   // (see autoplay_worker_create) and is threaded through to
   // positions_data_add_move via RecorderArgs.play_cap.
-  int position_play_cap;
+  // How many ranked plays the positions recorder keeps per captured
+  // position, by seat: each player's own num_plays_recorded.
+  int position_play_caps[2];
   // AUTOPLAY_TYPE_LEAVE_GEN only: a hard cap on games played across the whole
   // run, independent of whether the generations' rack targets are ever
   // reached. Leavegen otherwise stops only on its targets -- there is no

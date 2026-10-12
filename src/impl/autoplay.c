@@ -575,19 +575,22 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   // indicates static equity), but position capture wants the whole ranked
   // list up to the job's reporting cap, the same as a simming player's
   // num_plays already provides.
-  const int position_play_cap =
-      autoplay_worker->captures_positions ? args->position_play_cap : 0;
+  // Each seat to its own cap: the players may report different numbers.
+  const int p1_play_cap =
+      autoplay_worker->captures_positions ? args->position_play_caps[0] : 0;
+  const int p2_play_cap =
+      autoplay_worker->captures_positions ? args->position_play_caps[1] : 0;
   if (autoplay_worker->args.p1_sim_args.num_plays == 0) {
     autoplay_worker->args.p1_sim_args.num_plays = 1;
   }
   if (autoplay_worker->args.p2_sim_args.num_plays == 0) {
     autoplay_worker->args.p2_sim_args.num_plays = 1;
   }
-  if (autoplay_worker->args.p1_sim_args.num_plays < position_play_cap) {
-    autoplay_worker->args.p1_sim_args.num_plays = position_play_cap;
+  if (autoplay_worker->args.p1_sim_args.num_plays < p1_play_cap) {
+    autoplay_worker->args.p1_sim_args.num_plays = p1_play_cap;
   }
-  if (autoplay_worker->args.p2_sim_args.num_plays < position_play_cap) {
-    autoplay_worker->args.p2_sim_args.num_plays = position_play_cap;
+  if (autoplay_worker->args.p2_sim_args.num_plays < p2_play_cap) {
+    autoplay_worker->args.p2_sim_args.num_plays = p2_play_cap;
   }
   // A captured position keeps the opponent's most drawn inferred leaves,
   // which inference lists only when asked to keep a list of them; nothing
@@ -1277,7 +1280,9 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
           ? autoplay_solver_get_analysis(autoplay_worker->solver_ctx)
           : NULL,
       (int)game_runner->game_number, game_runner->pair_game_number,
-      game_runner->turn_number, autoplay_worker->args.position_play_cap);
+      game_runner->turn_number,
+      autoplay_worker->args
+          .position_play_caps[game_get_player_on_turn_index(game_runner->game)]);
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {
