@@ -69,6 +69,7 @@
       "stopping_pct": null,
       "use_inference": null,
       "time_limit_secs": null,
+      "movegens_per_move": null,
       "use_wordmap": true,
       "use_rit": false,
       "rit_name": null,

@@ -265,6 +265,9 @@ typedef enum {
   ARG_TOKEN_P2_SIM_MARGIN_FORECAST,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
+  ARG_TOKEN_MOVE_BUDGET,
+  ARG_TOKEN_P1_MOVE_BUDGET,
+  ARG_TOKEN_P2_MOVE_BUDGET,
   ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
   ARG_TOKEN_P2_PLAY_CHOOSER_TIME,
   ARG_TOKEN_OVERTIME_PENALTY_POINTS,
@@ -355,6 +358,11 @@ struct Config {
   uint64_t p2_min_play_iterations;
   double p1_time_limit_seconds;
   double p2_time_limit_seconds;
+  // Each player's movegen budget for one move (-movebudget, -mb1, -mb2), and
+  // the one a single player's analysis uses; 0 is none.
+  uint64_t movegen_budget;
+  uint64_t p1_movegen_budget;
+  uint64_t p2_movegen_budget;
   // Milliseconds per game. Negative disables PlayChooser; zero enables it
   // without a clock.
   double p1_play_chooser_time_ms;
@@ -631,6 +639,12 @@ bool config_get_show_bu(const Config *config) { return config->show_bu; }
 
 int config_get_endgame_plies(const Config *config) {
   return config->endgame_plies;
+}
+
+uint64_t config_get_player_movegen_budget(const Config *config,
+                                          int player_index) {
+  return player_index == 0 ? config->p1_movegen_budget
+                           : config->p2_movegen_budget;
 }
 
 uint64_t config_get_movegen_limit(const Config *config) {
@@ -2518,6 +2532,21 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether simulation projects the final margin (see "
              "smargin) for player 1 or 2 during autoplay.";
       break;
+    case ARG_TOKEN_MOVE_BUDGET:
+    case ARG_TOKEN_P1_MOVE_BUDGET:
+    case ARG_TOKEN_P2_MOVE_BUDGET:
+      usages[0] = "<movegens>";
+      examples[0] = "50000";
+      examples[1] = "0";
+      text = "Specifies the move generations a player may spend choosing one "
+             "move: its inference, simulation and solving together "
+             "(movebudget for both players, mb1 or mb2 for one). When it is "
+             "spent the player plays its best move so far, even short of the "
+             "simulation's minimum iterations. Unlike a time limit, a budget "
+             "is the same work on any machine; it does not make games repeat "
+             "exactly on several threads, and a move may run a little past "
+             "it. 0, the default, is no budget.";
+      break;
     case ARG_TOKEN_P1_TIME_LIMIT:
     case ARG_TOKEN_P2_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
@@ -2860,7 +2889,10 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
         ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
         ARG_TOKEN_SHOW_MISTAKES,           /* mistakes */
+        ARG_TOKEN_P1_MOVE_BUDGET,          /* mb1 */
+        ARG_TOKEN_P2_MOVE_BUDGET,          /* mb2 */
         ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
+        ARG_TOKEN_MOVE_BUDGET,             /* movebudget */
         ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
         ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
@@ -3675,8 +3707,10 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
   }
 }
 
-void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
-              const int known_opp_rack_str_index, ErrorStack *error_stack) {
+static void impl_sim_searching(Config *config,
+                               const arg_token_t known_opp_rack_arg_token,
+                               const int known_opp_rack_str_index,
+                               ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot simulate without lexicon"));
@@ -3742,6 +3776,24 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
       use_inference_for_this_run && sim_results_valid;
   sim_results_set_valid_for_current_game_state(config->sim_results,
                                                sim_results_valid);
+}
+
+// Simulates within the player's movegen budget for the move (-movebudget),
+// unless the caller is already searching within one -- an opening-rack task
+// analysing a rack -- whose budget then covers this as well.
+void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
+              const int known_opp_rack_str_index, ErrorStack *error_stack) {
+  if (config->movegen_budget == 0 || gen_get_movegen_budget() != NULL) {
+    impl_sim_searching(config, known_opp_rack_arg_token,
+                       known_opp_rack_str_index, error_stack);
+    return;
+  }
+  MovegenBudget budget;
+  movegen_budget_init(&budget, config->movegen_budget);
+  MovegenBudget *previous = gen_set_movegen_budget(&budget);
+  impl_sim_searching(config, known_opp_rack_arg_token, known_opp_rack_str_index,
+                     error_stack);
+  (void)gen_set_movegen_budget(previous);
 }
 
 void impl_snoprune(Config *config, ErrorStack *error_stack) {
@@ -4539,6 +4591,8 @@ void config_fill_autoplay_args(const Config *config,
   // multi-threading mode below decides.
   autoplay_args->solver_settings[0] = config->solver_settings[0];
   autoplay_args->solver_settings[1] = config->solver_settings[1];
+  autoplay_args->movegen_budget[0] = config->p1_movegen_budget;
+  autoplay_args->movegen_budget[1] = config->p2_movegen_budget;
   autoplay_args->total_num_threads = config->num_threads;
   autoplay_args->solver_tt_fraction_of_mem = config->tt_fraction_of_mem;
 
@@ -8783,6 +8837,7 @@ static void config_contribute_reset_player_settings(Config *config,
       true;
   *(p1 ? &config->p1_time_limit_seconds : &config->p2_time_limit_seconds) =
       CONFIG_DEFAULT_TIME_LIMIT_SECONDS;
+  *(p1 ? &config->p1_movegen_budget : &config->p2_movegen_budget) = 0;
   *(p1 ? &config->p1_min_play_iterations : &config->p2_min_play_iterations) =
       CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
   *(p1 ? &config->p1_threshold : &config->p2_threshold) = BAI_THRESHOLD_GK16;
@@ -9087,6 +9142,8 @@ void config_contribute_apply_player_settings(Config *config,
   double *time_limit_seconds = player_index == 0
                                    ? &config->p1_time_limit_seconds
                                    : &config->p2_time_limit_seconds;
+  uint64_t *movegen_budget = player_index == 0 ? &config->p1_movegen_budget
+                                               : &config->p2_movegen_budget;
   uint64_t *min_play_iterations = player_index == 0
                                       ? &config->p1_min_play_iterations
                                       : &config->p2_min_play_iterations;
@@ -9212,6 +9269,29 @@ void config_contribute_apply_player_settings(Config *config,
       return;
     }
     *time_limit_seconds = value;
+  }
+  // The movegen budget is stated by every player, null for none: absent, the
+  // server and this build disagree about what a player is, and a budget the
+  // job asked for would silently not apply.
+  const JsonValue *budget =
+      json_object_get(player, CONTRIBUTE_KEY_MOVEGENS_PER_MOVE);
+  if (!budget) {
+    error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                     get_formatted_string("server sent a player without %s",
+                                          CONTRIBUTE_KEY_MOVEGENS_PER_MOVE));
+    return;
+  }
+  if (!json_is_null(budget)) {
+    const int64_t value =
+        json_get_int(player, CONTRIBUTE_KEY_MOVEGENS_PER_MOVE, error_stack);
+    if (!error_stack_is_empty(error_stack) || value < 1) {
+      error_stack_reset(error_stack);
+      error_stack_push(error_stack, ERROR_STATUS_CONTRIBUTE_SERVER_ERROR,
+                       get_formatted_string("server sent an invalid %s",
+                                            CONTRIBUTE_KEY_MOVEGENS_PER_MOVE));
+      return;
+    }
+    *movegen_budget = (uint64_t)value;
   }
 
   const JsonValue *min_iterations =
@@ -9418,6 +9498,8 @@ void config_contribute_use_player_settings_for_analysis(Config *config,
       p1 ? config->p1_stop_cond_pct : config->p2_stop_cond_pct;
   config->time_limit_seconds =
       p1 ? config->p1_time_limit_seconds : config->p2_time_limit_seconds;
+  config->movegen_budget =
+      p1 ? config->p1_movegen_budget : config->p2_movegen_budget;
   config->threshold = p1 ? config->p1_threshold : config->p2_threshold;
   config->sampling_rule =
       p1 ? config->p1_sampling_rule : config->p2_sampling_rule;
@@ -9763,11 +9845,11 @@ bool config_contribute_generate_for_rack(Config *config, const char *rack_str,
 // executor used to derive one from the rack's letters, which was the same on
 // every machine but not the server's to choose; every task now states a seed,
 // this one included, so what a simulation samples is a function of the task.
-static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
-                                           uint64_t seed,
-                                           const JsonValue *player,
-                                           bool simming, StringBuilder *sb,
-                                           ErrorStack *error_stack) {
+static bool
+config_contribute_analyze_rack_searching(Config *config, const char *rack_str,
+                                         uint64_t seed, const JsonValue *player,
+                                         bool simming, StringBuilder *sb,
+                                         ErrorStack *error_stack) {
   if (!config_contribute_generate_for_rack(config, rack_str, seed, simming,
                                            error_stack)) {
     return false;
@@ -9813,6 +9895,26 @@ static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
   json_write_int_field(sb, CONTRIBUTE_KEY_NUM_MOVES, num_moves, &rack_first);
   json_write_object_end(sb);
   return true;
+}
+
+// One rack's analysis, within the player's movegen budget for it if it has
+// one: the rack is the opening-rack job's move.
+static bool config_contribute_analyze_rack(Config *config, const char *rack_str,
+                                           uint64_t seed,
+                                           const JsonValue *player,
+                                           bool simming, StringBuilder *sb,
+                                           ErrorStack *error_stack) {
+  if (config->movegen_budget == 0) {
+    return config_contribute_analyze_rack_searching(
+        config, rack_str, seed, player, simming, sb, error_stack);
+  }
+  MovegenBudget budget;
+  movegen_budget_init(&budget, config->movegen_budget);
+  MovegenBudget *previous = gen_set_movegen_budget(&budget);
+  const bool ok = config_contribute_analyze_rack_searching(
+      config, rack_str, seed, player, simming, sb, error_stack);
+  (void)gen_set_movegen_budget(previous);
+  return ok;
 }
 
 // A task covers a *batch* of racks. One rack per task would spend a
@@ -11488,6 +11590,26 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_uint64(config, ARG_TOKEN_MOVE_BUDGET, 0, &config->movegen_budget,
+                     error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_MOVE_BUDGET, 0) != NULL) {
+    config->p1_movegen_budget = config->movegen_budget;
+    config->p2_movegen_budget = config->movegen_budget;
+  }
+  config_load_uint64(config, ARG_TOKEN_P1_MOVE_BUDGET, 0,
+                     &config->p1_movegen_budget, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_uint64(config, ARG_TOKEN_P2_MOVE_BUDGET, 0,
+                     &config->p2_movegen_budget, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_double(config, ARG_TOKEN_P1_PLAY_CHOOSER_TIME, -1, 1e12,
                      &config->p1_play_chooser_time_ms, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -13156,6 +13278,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_MARGIN_FORECAST, "sm2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
+  arg(ARG_TOKEN_MOVE_BUDGET, "movebudget", 1, 1);
+  arg(ARG_TOKEN_P1_MOVE_BUDGET, "mb1", 1, 1);
+  arg(ARG_TOKEN_P2_MOVE_BUDGET, "mb2", 1, 1);
   arg(ARG_TOKEN_P1_PLAY_CHOOSER_TIME, "pc1", 1, 1);
   arg(ARG_TOKEN_P2_PLAY_CHOOSER_TIME, "pc2", 1, 1);
   arg(ARG_TOKEN_OVERTIME_PENALTY_POINTS, "otpenalty", 1, 1);
@@ -13253,6 +13378,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->min_play_iterations = CONFIG_DEFAULT_MIN_PLAY_ITERATIONS;
   config->max_iterations = CONFIG_DEFAULT_MAX_ITERATIONS;
   config->movegen_limit = 0;
+  config->movegen_budget = 0;
+  config->p1_movegen_budget = 0;
+  config->p2_movegen_budget = 0;
   config->stop_cond_pct = CONFIG_DEFAULT_STOP_COND_PCT;
   config->cutoff = convert_user_cutoff_to_cutoff(CONFIG_DEFAULT_USER_CUTOFF);
   config->utility_w_winpct = CONFIG_DEFAULT_UTILITY_W_WINPCT;
@@ -14038,6 +14166,18 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->p2_time_limit_seconds);
+      break;
+    case ARG_TOKEN_MOVE_BUDGET:
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->movegen_budget);
+      break;
+    case ARG_TOKEN_P1_MOVE_BUDGET:
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p1_movegen_budget);
+      break;
+    case ARG_TOKEN_P2_MOVE_BUDGET:
+      config_add_uint64_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p2_movegen_budget);
       break;
     case ARG_TOKEN_P1_PLAY_CHOOSER_TIME:
       config_add_double_setting_to_string_builder(

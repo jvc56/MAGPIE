@@ -81,6 +81,8 @@ typedef struct AutoplayArgs {
   // AutoplaySolverSettings). Only AUTOPLAY_TYPE_DEFAULT reads them: a leavegen
   // game ends before the bag is small enough for either solver.
   AutoplaySolverSettings solver_settings[2];
+  // Each player's movegen budget for one move (-mb1, -mb2); 0 is none.
+  uint64_t movegen_budget[2];
   // The run's whole thread count. num_threads above is how many autoplay
   // workers it runs, a game at a time each: all of them under pgp, or one
   // simulating on every thread under igp. Autoplay divides this between the

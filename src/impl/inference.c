@@ -31,6 +31,7 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "move_gen.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -43,6 +44,9 @@ typedef struct Inference {
   // the KLV of the target.
   const KLV *klv;
   ThreadControl *thread_control;
+  // The move's budget, from the thread that started the inference: the
+  // worker charges it and stops when it is spent (gen_set_movegen_budget).
+  MovegenBudget *movegen_budget;
 
   // The following fields are owned by this struct.
 
@@ -425,7 +429,8 @@ bool should_print_info(const Inference *inference) {
 void iterate_through_all_possible_leaves(Inference *inference,
                                          int tiles_to_infer, int start_letter) {
   if (thread_control_get_status(inference->thread_control) ==
-      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+          THREAD_CONTROL_STATUS_USER_INTERRUPT ||
+      gen_movegen_budget_spent()) {
     return;
   }
   if (tiles_to_infer == 0) {
@@ -462,10 +467,12 @@ void iterate_through_all_possible_leaves(Inference *inference,
 
 void *infer_worker(void *uncasted_inference) {
   Inference *inference = (Inference *)uncasted_inference;
+  (void)gen_set_movegen_budget(inference->movegen_budget);
   iterate_through_all_possible_leaves(
       inference,
       (RACK_SIZE)-rack_get_total_letters(inference->current_target_rack),
       BLANK_MACHINE_LETTER);
+  (void)gen_set_movegen_budget(NULL);
   return NULL;
 }
 
@@ -478,6 +485,8 @@ void set_shared_variables_for_inference(
 
 void infer_manager(InferenceCtx *ctx, InferenceResults *results) {
   for (int thread_index = 0; thread_index < ctx->num_workers; thread_index++) {
+    ctx->worker_inferences[thread_index]->movegen_budget =
+        gen_get_movegen_budget();
     cpthread_create(&ctx->worker_inferences[thread_index]->cpthread_id,
                     infer_worker, ctx->worker_inferences[thread_index]);
   }

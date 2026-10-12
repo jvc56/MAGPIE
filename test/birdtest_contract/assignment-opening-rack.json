@@ -81,6 +81,7 @@
       "stopping_pct": 99.0,
       "use_inference": false,
       "time_limit_secs": 0,
+      "movegens_per_move": null,
       "use_wordmap": true,
       "use_rit": false,
       "rit_name": null,

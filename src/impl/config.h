@@ -155,6 +155,10 @@ int config_get_endgame_plies(const Config *config);
 uint64_t config_get_max_iterations(const Config *config);
 // Each command's movegen budget (-movegenlimit); 0 is none.
 uint64_t config_get_movegen_limit(const Config *config);
+// A player's movegen budget for one move (-mb1, -mb2, or a task's
+// movegens_per_move); 0 is none.
+uint64_t config_get_player_movegen_budget(const Config *config,
+                                          int player_index);
 uint64_t config_get_seed(const Config *config);
 double config_get_stop_cond_pct(const Config *config);
 bool config_get_use_game_pairs(const Config *config);

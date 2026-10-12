@@ -47,6 +47,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "movegen_budget_test.h"
 #include "pat_eval_test.h"
 #include "pat_features_test.h"
 #include "pat_file_test.h"
@@ -102,6 +103,7 @@ typedef struct {
 
 static TestEntry test_table[] = {
     {"config", test_config},
+    {"movebudget", test_movegen_budget},
     {"players", test_players_data},
     {"string", test_string_util},
     {"alpha", test_alphabet},

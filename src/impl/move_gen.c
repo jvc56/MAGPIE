@@ -102,6 +102,10 @@ static void gen_release_slot(void *ptr) {
   if (ptr == NULL) {
     return;
   }
+  // The next thread to take this gen must not inherit a budget that belonged
+  // to a move this thread was searching for, and may since be gone.
+  ((MoveGen *)ptr)->movegen_budget = NULL;
+  ((MoveGen *)ptr)->budget_uncharged = 0;
   cpthread_mutex_lock(&cache_mutex);
   for (int i = 0; i < MAX_THREADS; i++) {
     if (cached_gens[i] == ptr) {
@@ -210,9 +214,52 @@ bool gen_stop_movegen_limit(void) {
   return atomic_load(&movegen_limit_reached);
 }
 
-// Counts one generation, and against the running command's limit, if any.
+void movegen_budget_init(MovegenBudget *budget, uint64_t limit) {
+  budget->limit = limit;
+  atomic_store(&budget->spent, 0);
+}
+
+uint64_t movegen_budget_get_spent(const MovegenBudget *budget) {
+  return atomic_load(&budget->spent);
+}
+
+// Generations a thread charges its move budget at a time: small, since a
+// budget may be a few thousand generations, but enough that the shared count
+// is not touched on every one.
+#define MOVEGEN_BUDGET_BATCH 16
+
+static void gen_charge_movegen_budget(MoveGen *gen) {
+  if (gen->movegen_budget && gen->budget_uncharged > 0) {
+    atomic_fetch_add(&gen->movegen_budget->spent, gen->budget_uncharged);
+  }
+  gen->budget_uncharged = 0;
+}
+
+MovegenBudget *gen_set_movegen_budget(MovegenBudget *budget) {
+  MoveGen *gen = get_movegen();
+  gen_charge_movegen_budget(gen);
+  MovegenBudget *previous = gen->movegen_budget;
+  gen->movegen_budget = budget;
+  return previous;
+}
+
+MovegenBudget *gen_get_movegen_budget(void) {
+  return get_movegen()->movegen_budget;
+}
+
+bool gen_movegen_budget_spent(void) {
+  const MovegenBudget *budget = get_movegen()->movegen_budget;
+  return budget && budget->limit > 0 &&
+         atomic_load(&budget->spent) >= budget->limit;
+}
+
+// Counts one generation, and against the running command's limit and the
+// move's budget, if any.
 static inline void gen_count_movegen(MoveGen *gen) {
   gen->movegen_count++;
+  if (gen->movegen_budget && ++gen->budget_uncharged >= MOVEGEN_BUDGET_BATCH) {
+    gen_charge_movegen_budget(gen);
+  }
   if (movegen_limit == 0 || ++gen->limit_uncharged < MOVEGEN_LIMIT_BATCH) {
     return;
   }

@@ -675,6 +675,10 @@ static bool peg_should_stop(int64_t deadline_ns,
   if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
     return true;
   }
+  // A spent movegen budget stops it as its deadline would.
+  if (gen_movegen_budget_spent()) {
+    return true;
+  }
   return thread_control != NULL && thread_control_get_status(thread_control) ==
                                        THREAD_CONTROL_STATUS_USER_INTERRUPT;
 }

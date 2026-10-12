@@ -336,6 +336,9 @@ bool string_builder_add_sim_stats_with_display_lock(
   case BAI_RESULT_STATUS_USER_INTERRUPT:
     status_str = get_formatted_string("Finished (user interrupt)\n");
     break;
+  case BAI_RESULT_STATUS_MOVEGEN_BUDGET:
+    status_str = get_formatted_string("Finished (movegen budget spent)\n");
+    break;
   case BAI_RESULT_STATUS_NONE:
     status_str = get_formatted_string("Running\n");
     break;

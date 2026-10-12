@@ -1128,7 +1128,8 @@ static void test_the_result_body_carries_movegens(void) {
   "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "                           \
   "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "               \
   "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "          \
-  "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "                      \
+  "\"num_plays_recorded\": 10, \"movegens_per_move\": null, "                  \
+  "\"movegen_margin\": 5.0, "                                                  \
   "\"use_wordmap\": false, \"use_rit\": false, \"use_wit\": false, "           \
   "\"endgame_plies\": 0, \"peg_max_bag\": 0}"
 
@@ -1244,7 +1245,8 @@ static char *simming_csw21_player(bool infer) {
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"win_pct_model\": \"winpct_english\", \"max_iterations\": 30, "
       "\"num_plies\": 2, \"num_plies_recorded\": 2, \"num_plays\": 3, "
-      "\"num_plays_recorded\": 3, \"stopping_pct\": 99.0, "
+      "\"num_plays_recorded\": 3, \"movegens_per_move\": null, "
+      "\"stopping_pct\": 99.0, "
       "\"use_inference\": %s, \"time_limit_secs\": 0, "
       "\"use_wordmap\": false, \"use_rit\": false, \"rit_name\": null, "
       "\"use_wit\": false, \"min_play_iterations\": 10, "
@@ -1261,7 +1263,8 @@ static char *simming_csw21_player(bool infer) {
   "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "                           \
   "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "               \
   "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "          \
-  "\"num_plays_recorded\": 5, \"movegen_margin\": 5.0, "                       \
+  "\"num_plays_recorded\": 5, \"movegens_per_move\": null, "                   \
+  "\"movegen_margin\": 5.0, "                                                  \
   "\"use_wordmap\": false, \"use_rit\": false, \"use_wit\": false, "           \
   "\"endgame_plies\": 2, \"peg_max_bag\": 2, \"peg_stage_top_k\": [2], "       \
   "\"peg_scenario_stride\": 1, \"peg_opp_model\": \"rational\", "              \
@@ -1273,7 +1276,8 @@ static char *simming_csw21_player(bool infer) {
   "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "                           \
   "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "               \
   "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "          \
-  "\"num_plays_recorded\": 5, \"movegen_margin\": 5.0, "                       \
+  "\"num_plays_recorded\": 5, \"movegens_per_move\": null, "                   \
+  "\"movegen_margin\": 5.0, "                                                  \
   "\"use_wordmap\": false, \"use_rit\": false, \"use_wit\": false, "           \
   "\"endgame_plies\": 20, \"peg_max_bag\": 2, "                                \
   "\"peg_stage_top_k\": [32, 16, 8, 4, 2], \"peg_scenario_stride\": 1, "       \
@@ -2059,7 +2063,8 @@ static void test_a_player_must_state_every_setting(void) {
       "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "
+      "\"num_plays_recorded\": 10, \"movegens_per_move\": null, "
+      "\"movegen_margin\": 5.0, "
       "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
       error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -2067,12 +2072,52 @@ static void test_a_player_must_state_every_setting(void) {
                                           error_stack);
   assert(error_stack_is_empty(error_stack));
 
+  // Every player states its movegen budget for a move, null for none: one
+  // that leaves it out is refused, as is a budget that is not positive, and
+  // one that states a budget has it.
+  const char *const budget_player =
+      "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
+      "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
+      "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
+      "\"num_plays_recorded\": 10, %s\"movegen_margin\": 5.0, "
+      "\"endgame_plies\": 0, \"peg_max_bag\": 0}";
+  const struct {
+    const char *budget;
+    bool accepted;
+    uint64_t applied;
+  } budget_cases[] = {
+      {"", false, 0},
+      {"\"movegens_per_move\": 0, ", false, 0},
+      {"\"movegens_per_move\": -5, ", false, 0},
+      {"\"movegens_per_move\": \"many\", ", false, 0},
+      {"\"movegens_per_move\": null, ", true, 0},
+      {"\"movegens_per_move\": 5000, ", true, 5000},
+  };
+  for (size_t i = 0; i < sizeof(budget_cases) / sizeof(budget_cases[0]); i++) {
+    char *text = get_formatted_string(budget_player, budget_cases[i].budget);
+    JsonValue *player = json_parse(text, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    config_contribute_apply_player_settings(config, player, 1, error_stack);
+    if (error_stack_is_empty(error_stack) != budget_cases[i].accepted) {
+      log_fatal("movegen budget case %d: expected %s: %s", (int)i,
+                budget_cases[i].accepted ? "accepted" : "refused", text);
+    }
+    if (budget_cases[i].accepted) {
+      assert(config_get_player_movegen_budget(config, 1) ==
+             budget_cases[i].applied);
+    }
+    error_stack_reset(error_stack);
+    json_destroy(player);
+    free(text);
+  }
+
   // One that leaves its play count to this build is refused.
   const JsonValue *no_plays = json_parse(
       "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": null, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "
+      "\"num_plays_recorded\": 10, \"movegens_per_move\": null, "
+      "\"movegen_margin\": 5.0, "
       "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
       error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -2085,7 +2130,8 @@ static void test_a_player_must_state_every_setting(void) {
       "{\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 2, \"num_plays\": 100, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "
+      "\"num_plays_recorded\": 10, \"movegens_per_move\": null, "
+      "\"movegen_margin\": 5.0, "
       "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
       error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -2099,7 +2145,8 @@ static void test_a_player_must_state_every_setting(void) {
       "{\"lexicon\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0, "
+      "\"num_plays_recorded\": 10, \"movegens_per_move\": null, "
+      "\"movegen_margin\": 5.0, "
       "\"endgame_plies\": 0, \"peg_max_bag\": 0}",
       error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -3032,7 +3079,8 @@ static void test_a_player_states_its_solving(void) {
       "\"lexicon\": \"CSW21\", \"leaves\": \"CSW21\", "
       "\"recorder_type\": \"best\", \"sort_strategy\": \"equity\", "
       "\"num_plies\": 0, \"num_plays\": 100, \"num_plies_recorded\": 2, "
-      "\"num_plays_recorded\": 10, \"movegen_margin\": 5.0";
+      "\"num_plays_recorded\": 10, \"movegens_per_move\": null, "
+      "\"movegen_margin\": 5.0";
   const char *const peg =
       "\"peg_stage_top_k\": [8, 4, 2], \"peg_scenario_stride\": 3, "
       "\"peg_opp_model\": \"pessimistic\"";

@@ -45,6 +45,7 @@
 #include "../util/string_util.h"
 #include "autoplay_solvers.h"
 #include "gameplay.h"
+#include "move_gen.h"
 #include "pat_gen.h"
 #include "play_chooser.h"
 #include "rack_list.h"
@@ -1042,8 +1043,8 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   return move;
 }
 
-const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
-                                      GameRunner *game_runner) {
+static const Move *game_runner_choose_best_move(AutoplayWorker *autoplay_worker,
+                                                GameRunner *game_runner) {
   autoplay_worker->turn_was_solved = false;
   autoplay_worker->turn_was_simmed = false;
   const int player_on_turn_index =
@@ -1118,6 +1119,27 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
 }
 
 // Returns the played move
+// The move the player on turn plays, within its movegen budget for the move
+// if it has one (-mb1, -mb2): every generation its search makes, on this
+// thread or one the search starts, is charged to that budget, and the search
+// stops when it is spent.
+const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
+                                      GameRunner *game_runner) {
+  const int player_on_turn_index =
+      game_get_player_on_turn_index(game_runner->game);
+  const uint64_t limit =
+      autoplay_worker->args.movegen_budget[player_on_turn_index];
+  if (limit == 0) {
+    return game_runner_choose_best_move(autoplay_worker, game_runner);
+  }
+  MovegenBudget budget;
+  movegen_budget_init(&budget, limit);
+  MovegenBudget *previous = gen_set_movegen_budget(&budget);
+  const Move *move = game_runner_choose_best_move(autoplay_worker, game_runner);
+  (void)gen_set_movegen_budget(previous);
+  return move;
+}
+
 const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                                   GameRunner *game_runner) {
   if (game_runner_is_game_over(game_runner)) {

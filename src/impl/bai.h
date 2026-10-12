@@ -26,6 +26,7 @@
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
 #include "bai_logger.h"
+#include "move_gen.h"
 #include "random_variable.h"
 #include <assert.h>
 #include <limits.h>
@@ -1395,6 +1396,9 @@ typedef struct BAIWorkerArgs {
   const BAIOptions *bai_options;
   BAILogger *bai_logger;
   Checkpoint *avoid_prune_checkpoint;
+  // The move's budget, from the thread that started the simulation: each
+  // worker charges it (gen_set_movegen_budget).
+  MovegenBudget *movegen_budget;
   int thread_index;
 } BAIWorkerArgs;
 
@@ -1491,11 +1495,17 @@ bai_worker_rvs_thread_index(const BAIWorkerArgs *bai_worker_args) {
 // bai_schedule_complete_while_locked).
 static inline bool bai_should_abandon_rounds(BAIResult *bai_result,
                                              ThreadControl *thread_control) {
+  // A spent movegen budget ends the simulation as its clock would: the best
+  // arm so far is the move.
+  if (gen_movegen_budget_spent()) {
+    bai_result_set_status_if_none(bai_result, BAI_RESULT_STATUS_MOVEGEN_BUDGET);
+  }
   const bai_result_status_t status = bai_result_set_and_get_status(
       bai_result, thread_control_get_status(thread_control) ==
                       THREAD_CONTROL_STATUS_USER_INTERRUPT);
   return status == BAI_RESULT_STATUS_USER_INTERRUPT ||
-         status == BAI_RESULT_STATUS_TIMEOUT;
+         status == BAI_RESULT_STATUS_TIMEOUT ||
+         status == BAI_RESULT_STATUS_MOVEGEN_BUDGET;
 }
 
 static inline void bai_worker_round_loop(BAIWorkerArgs *bai_worker_args,
@@ -1651,6 +1661,7 @@ static inline void bai_sched_record(BAISyncData *sync_data,
 
 static inline void *bai_worker(void *args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)args;
+  (void)gen_set_movegen_budget(bai_worker_args->movegen_budget);
   BAIWorkerSchedStats worker_stats;
   memset(&worker_stats, 0, sizeof(worker_stats));
   bai_worker_round_loop(bai_worker_args, &worker_stats);
@@ -1671,6 +1682,7 @@ static inline void *bai_worker(void *args) {
 #ifdef BAI_SCHED_STATS
   bai_sched_worker_merge(bai_worker_args->sync_data, &worker_stats, exit_ns);
 #endif
+  (void)gen_set_movegen_budget(NULL);
   return NULL;
 }
 
@@ -1712,6 +1724,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       .bai_options = bai_options,
       .bai_logger = bai_logger,
       .avoid_prune_checkpoint = avoid_prune_checkpoint,
+      .movegen_budget = gen_get_movegen_budget(),
   };
 
   cpthread_t *worker_ids =

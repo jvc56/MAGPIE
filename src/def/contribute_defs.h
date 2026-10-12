@@ -77,6 +77,9 @@ enum { CONTRIBUTE_MAX_THREADS = (MAX_THREADS - 1) / 2 };
 #define CONTRIBUTE_KEY_STOPPING_PCT "stopping_pct"
 #define CONTRIBUTE_KEY_USE_INFERENCE "use_inference"
 #define CONTRIBUTE_KEY_TIME_LIMIT_SECS "time_limit_secs"
+// A player's movegen budget for one move (-mb1, -mb2): stated by every
+// player, null for none.
+#define CONTRIBUTE_KEY_MOVEGENS_PER_MOVE "movegens_per_move"
 #define CONTRIBUTE_KEY_CAPTURE_POSITIONS "capture_positions"
 // A game_pairs task with capture_positions: keep only each pair's first
 // divergence -- both games' positions at the first turn the two games play

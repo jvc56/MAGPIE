@@ -991,6 +991,8 @@ typedef struct PlayChooserEndgameBranch {
   // False when the solve produced no value at all (never completed even one
   // ply within the budget), so the decision can fall back to challenging.
   bool valid;
+  // The move's budget, from the thread that started the branch.
+  MovegenBudget *movegen_budget;
 } PlayChooserEndgameBranch;
 
 static void
@@ -1021,7 +1023,10 @@ play_chooser_solve_endgame_branch(PlayChooserEndgameBranch *branch) {
 }
 
 static void *play_chooser_endgame_branch_thread(void *arg) {
-  play_chooser_solve_endgame_branch((PlayChooserEndgameBranch *)arg);
+  PlayChooserEndgameBranch *branch = (PlayChooserEndgameBranch *)arg;
+  (void)gen_set_movegen_budget(branch->movegen_budget);
+  play_chooser_solve_endgame_branch(branch);
+  (void)gen_set_movegen_budget(NULL);
   return NULL;
 }
 
@@ -1113,6 +1118,7 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     };
     if (run_concurrent) {
       cpthread_t keep_thread;
+      keep_branch.movegen_budget = gen_get_movegen_budget();
       cpthread_create(&keep_thread, play_chooser_endgame_branch_thread,
                       &keep_branch);
       play_chooser_solve_endgame_branch(&challenge_branch);
