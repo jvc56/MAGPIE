@@ -2136,6 +2136,9 @@ static bool peg_move_protected(const Move *move,
 // live_count): the top `keep` entries plus any protected move below the cut,
 // compacted into [0, return) with descending order preserved. Returns the new
 // live count. With no protected stragglers this is just the plain top-`keep`.
+// Each protected straggler is rotated forward past the dropped candidates
+// rather than copied over one, so every dropped candidate stays in
+// [return, live_count), still in rank order, for the graded ranking.
 static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
                                 const Move *const *protect_moves,
                                 int n_protect) {
@@ -2146,7 +2149,10 @@ static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
   for (int read_idx = keep; read_idx < live_count; read_idx++) {
     if (peg_move_protected(&ranked[read_idx].move, protect_moves, n_protect)) {
       if (read_idx != write_idx) {
-        ranked[write_idx] = ranked[read_idx];
+        const PegRankedCand protected_cand = ranked[read_idx];
+        memmove(&ranked[write_idx + 1], &ranked[write_idx],
+                (size_t)(read_idx - write_idx) * sizeof(PegRankedCand));
+        ranked[write_idx] = protected_cand;
       }
       write_idx++;
     }

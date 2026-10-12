@@ -542,6 +542,39 @@ static bool peg_top_cands_contains(const PegResult *result, const Board *board,
   return found;
 }
 
+// True if no move appears twice in the result's graded ranking.
+static bool peg_graded_cands_are_distinct(const PegResult *result) {
+  for (int cand_idx = 0; cand_idx < result->n_graded; cand_idx++) {
+    for (int other_idx = cand_idx + 1; other_idx < result->n_graded;
+         other_idx++) {
+      if (compare_moves_without_equity(&result->graded_cands[cand_idx].move,
+                                       &result->graded_cands[other_idx].move,
+                                       true) == -1) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// True if each fidelity tier of the graded ranking is in rank order: by
+// descending win% with mean spread as a tiebreak, as peg_solve ranks them.
+static bool peg_graded_tiers_are_ranked(const PegResult *result) {
+  for (int cand_idx = 1; cand_idx < result->n_graded; cand_idx++) {
+    if (result->graded_fidelity[cand_idx] !=
+        result->graded_fidelity[cand_idx - 1]) {
+      continue;
+    }
+    const PegRankedCand *higher = &result->graded_cands[cand_idx - 1];
+    const PegRankedCand *lower = &result->graded_cands[cand_idx];
+    if (higher->win_pct + 1e-4 * higher->mean_spread <
+        lower->win_pct + 1e-4 * lower->mean_spread) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Exercises PegArgs.protect_moves ("pnoprune", like the simmer's snoprune): a
 // candidate the cascade's top-K cut would normally drop is force-carried into
 // the final ranking when listed as protected. Runs the same short {2}-cascade
@@ -625,6 +658,32 @@ static void test_peg_main_pnoprune(void) {
   assert(peg_top_cands_contains(&protected_result, board, ld, weak_text));
   printf("[peg_pnoprune] protected '%s' carried: plain n=%d, protected n=%d\n",
          weak_text, plain.n_top_cands, protected_result.n_top_cands);
+
+  // With two stages the protected move can rank below the second cut by more
+  // than one place. Every candidate that reached the second stage must then be
+  // graded exactly once: the protected move must not leave a stale copy in the
+  // dropped tail, and the candidate it displaces must not be lost.
+  // Protect the lowest-equity play, so it trails the field after both cuts.
+  const Move *weakest = move_list_get_move(gen_ml, n_gen - 1);
+  StringBuilder *weakest_sb = string_builder_create();
+  string_builder_add_move(weakest_sb, board, weakest, ld, false);
+  const Move *protect_weakest[1] = {weakest};
+  static const int two_stage_top_k[] = {4, 2};
+  PegArgs two_stage = prot;
+  two_stage.protect_moves = protect_weakest;
+  two_stage.stage_top_k = two_stage_top_k;
+  two_stage.num_stages = 2;
+  PegResult two_stage_result;
+  memset(&two_stage_result, 0, sizeof(two_stage_result));
+  peg_solve(&two_stage, &two_stage_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(peg_top_cands_contains(&two_stage_result, board, ld,
+                                string_builder_peek(weakest_sb)));
+  assert(peg_graded_cands_are_distinct(&two_stage_result));
+  assert(peg_graded_tiers_are_ranked(&two_stage_result));
+  assert(two_stage_result.n_graded == two_stage_top_k[0] + 1);
+  string_builder_destroy(weakest_sb);
+  peg_result_destroy(&two_stage_result);
 
   peg_result_destroy(&plain);
   peg_result_destroy(&protected_result);
