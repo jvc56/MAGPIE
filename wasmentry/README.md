@@ -121,7 +121,8 @@ Move entry follows the Qt and TUI workflows:
 - Click a square and type. Existing tiles are skipped; Space changes direction,
   Shift+letter forces a blank, Backspace removes the last pending tile, Escape
   recalls tiles, and Enter commits. A blank is used automatically when the
-  natural letter is exhausted.
+  natural letter is exhausted. Once a starting square is clicked, moving the
+  mouse cannot redirect typing.
 - Drag rack tiles onto the board with mouse, pen or touch, or tap a rack tile then
   a square. Dropping a blank opens a letter picker. Pending tiles can move on the
   board or return to the rack. Drag between rack tiles to insert at the caret;
@@ -130,6 +131,11 @@ Move entry follows the Qt and TUI workflows:
   Touch drags scroll near the screen edge. Alt + Left/Right reorders a focused
   rack tile; shuffle and sort remain available. Committed tiles stay fixed
   during play; **Edit board** allows moving them, preserving ownership and undo.
+- On touch devices, choose a starting square, then double-tap a rack tile to
+  place it at the cursor and advance. Blanks open the letter picker. Without a
+  starting square (or after reaching the board edge), double-tapping does not
+  place tiles. **Zoom board** enlarges the board inside a pannable viewport;
+  the rack stays outside it. **Fit board** restores the full board.
 - The Move field accepts `8H TRAIN`, `H8 TRAIN`, `ex AE`, and `pass`. The engine
   previews the score and validates/scores commits. A phony requires explicit
   confirmation to record; the Notes & challenge panel can challenge it off.

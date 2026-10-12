@@ -397,13 +397,13 @@ main {
   transform: translate(-50%, -50%) rotate(90deg);
 }
 @media (hover: hover) {
-  body:not(.tile-dragging) #board.entry-available .square:not(.played):not(:disabled):hover::after {
+  body:not(.tile-dragging) #board.entry-available:not(.entry-anchored) .square:not(.played):not(:disabled):hover::after {
     content: "";
   }
-  body:not(.tile-dragging) #board.entry-available[data-direction="down"] .square:not(.played):not(:disabled):hover::after {
+  body:not(.tile-dragging) #board.entry-available:not(.entry-anchored)[data-direction="down"] .square:not(.played):not(:disabled):hover::after {
     transform: translate(-50%, -50%) rotate(90deg);
   }
-  body:not(.tile-dragging) #board.entry-available .square:not(.played):not(:disabled):hover > span {
+  body:not(.tile-dragging) #board.entry-available:not(.entry-anchored) .square:not(.played):not(:disabled):hover > span {
     visibility: hidden;
   }
 }
@@ -1623,16 +1623,17 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   font-size: 12px;
   min-height: 18px;
 }
-#session-result.thinking {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-#session-result.thinking::before {
+/* Reserve the turn-status line so the board does not move between turns. */
+#session-result.thinking { visibility: hidden; }
+.player-name { position: relative; padding-bottom: 7px; }
+.player-name.thinking { color: var(--green); }
+.player-name.thinking::after {
   content: "";
   width: 48px;
   height: 4px;
-  flex: none;
+  position: absolute;
+  left: 0;
+  bottom: 1px;
   border-radius: 2px;
   background: linear-gradient(90deg, transparent 35%, currentColor 35%, currentColor 65%, transparent 65%) var(--raised);
   background-size: 250% 100%;
@@ -1643,7 +1644,7 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   to { background-position: 0% 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #session-result.thinking::before {
+  .player-name.thinking::after {
     animation: none;
     background-position: 50% 0;
   }
@@ -1969,3 +1970,22 @@ body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; }
   #unseen-tiles { clear: both; }
 }
 #history-position { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+
+/* Touch zoom enlarges only the board; the rack and controls stay in reach. */
+#board-viewport { min-width: 0; }
+#board-zoom { display: none; }
+@media (pointer: coarse) {
+  #board-zoom { display: inline-block; }
+  #board, #rack-tiles { touch-action: manipulation; }
+  #board-viewport.zoomed {
+    width: var(--zoom-base-width);
+    height: var(--zoom-base-width);
+    margin-inline: auto;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+  #game-view #board-viewport.zoomed #board {
+    width: calc(var(--zoom-base-width) * 2);
+    max-width: none;
+  }
+}

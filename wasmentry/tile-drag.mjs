@@ -102,7 +102,12 @@ export function installTileDrag({board, rack, sourceFor, targetFor, onDrop, onTa
     drag.x = event.clientX; drag.y = event.clientY;
     update();
     const previous = cleanup();
-    if (!previous.moved) { onTap(previous.source); return; }
+    if (!previous.moved) {
+      // A handled double-tap may open a dialog. Consume the synthetic click
+      // so WebKit cannot retarget it onto a letter in the newly opened picker.
+      suppressClick = onTap(previous.source, event.pointerType) === true;
+      return;
+    }
     suppressClick = true;
     if (previous.target) onDrop(previous.source, previous.target);
   }

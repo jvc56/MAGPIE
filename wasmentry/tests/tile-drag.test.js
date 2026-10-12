@@ -257,6 +257,7 @@ test('touch dragging scrolls a short screen to reach the top of the board', asyn
 
 test('empty-square hover previews direction without moving the cursor or covering a drag', async ({page}) => {
   await ready(page, 'AEINRST');
+  await expect(page.locator('#board-zoom')).toBeHidden();
   const center = cell(page, 7, 7), below = cell(page, 8, 7);
   const arrow = square => square.evaluate(element => {
     const style = getComputedStyle(element, '::after');
@@ -269,12 +270,12 @@ test('empty-square hover previews direction without moving the cursor or coverin
   await center.click();
   await center.click();
   await below.hover();
-  expect((await arrow(below)).transform).toMatch(/^matrix\(0, 1, -1, 0,/);
+  expect((await arrow(below)).content).toBe('none');
   await expect(center).toBeFocused();
   await page.keyboard.type('a');
-  await below.hover();
-  expect((await arrow(below)).content).toBe('none');
-  await drag(page, below, cell(page, 8, 8), 'center', false);
+  await cell(page, 9, 9).hover();
+  expect((await arrow(cell(page, 9, 9))).content).toBe('none');
+  await drag(page, center, cell(page, 8, 8), 'center', false);
   await expect(page.locator('.drag-tile')).toBeVisible();
   expect((await arrow(cell(page, 8, 8))).content).toBe('none');
   expect((await arrow(below)).content).toBe('none');
@@ -334,12 +335,12 @@ test('unavailable typed tiles are silent and leave the draft and cursor unchange
   await page.keyboard.type('x');
   await expect(cell(page, 7, 9)).toHaveClass(/cursor/);
   await expect(page.locator('#error')).toBeHidden();
-  // The ignored key doesn't consume the hover start for the next valid tile.
+  // Clicking anchors entry; mouse movement cannot redirect a later valid tile.
   await page.keyboard.type('t');
-  await expect(cell(page, 9, 9).locator('.tile-letter')).toHaveText('T');
+  await expect(cell(page, 7, 9).locator('.tile-letter')).toHaveText('T');
   await page.keyboard.type('az');
   await expect(page.locator('#board .pending')).toHaveCount(3);
-  await expect(cell(page, 9, 10)).toHaveClass(/cursor/);
+  await expect(cell(page, 7, 10)).toHaveClass(/cursor/);
   await expect(page.locator('#error')).toBeHidden();
 });
 
@@ -352,6 +353,9 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
     const run = EngineClient.prototype.run;
     EngineClient.prototype.run = async function (...args) {
       window.searchHeld = true;
+      window.emitSearchPreview = () => this.dispatchEvent(new CustomEvent("message", {detail:{
+        type:"output", command:"generate", text:"1: 8H RETAINS 66 54.2"
+      }}));
       await new Promise(resolve => { window.releaseSearch = resolve; });
       EngineClient.prototype.run = run;
       return run.apply(this, args);
@@ -369,7 +373,9 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
   await page.locator('#start-game').click();
   await expect.poll(() => page.evaluate(() => window.searchHeld)).toBe(true);
   await expect(page.locator('#session-result')).toHaveClass('thinking');
-  await expect(page.locator('#session-result')).toContainText('is thinking…');
+  await expect(page.locator('#session-result')).toBeHidden();
+  await expect(page.locator('#name-one')).toContainText('is thinking…');
+  await expect(page.locator('#name-one')).toHaveClass(/thinking/);
   await expect(page.locator('#name-one')).toHaveCSS('font-weight', '700');
   await expect(page.locator('#clock-one')).toHaveCSS('font-weight', '700');
   await expect(page.locator('#name-two')).toHaveCSS('font-weight', '400');
@@ -386,7 +392,14 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
   await drag(page, rackTile(page, 0), cell(page, 7, 7));
   expect(await rackLetters(page)).toBe(letters);
   await expect(page.locator('#board .pending')).toHaveCount(0);
-  await drag(page, rackTile(page, 0), rackTile(page, 6), 'after');
+  await drag(page, rackTile(page, 0), rackTile(page, 6), 'after', false);
+  await page.evaluate(() => {
+    const square = document.querySelector('#board .square');
+    window.emitSearchPreview();
+    if (!square.isConnected) throw new Error('Search output replaced the board');
+  });
+  await expect(page.locator('.drag-tile')).toBeVisible();
+  await page.mouse.up();
   expect(await rackLetters(page)).toBe(letters.slice(1) + letters[0]);
   await page.locator('#shuffle-rack').click();
   expect([...(await rackLetters(page))].sort().join('')).toBe(letters);
@@ -399,6 +412,7 @@ for (const kind of ['watch', 'play']) test(`${kind}: visible rack can be arrange
   await page.locator('#new-game').click();
   await expect(page.locator('#new-game-dialog')).toBeVisible();
   await expect(page.locator('#session-result')).not.toHaveClass('thinking');
+  await expect(page.locator('#name-one')).not.toHaveClass(/thinking/);
   await expect(page.locator('#session-result')).toHaveText('Paused');
   await page.evaluate(() => window.releaseSearch());
   await expect(page.locator('body')).not.toHaveClass(/busy/);
@@ -436,4 +450,73 @@ test('passing requires confirmation and Cancel or Escape preserve tentative tile
   await expect(page.locator('#history-table tbody')).toContainText('- +0 0');
   await expect(page.locator('#board .pending')).toHaveCount(0);
   await expect(page.locator('#error')).toBeHidden();
+});
+
+
+test.describe('mobile board entry', () => {
+  test.use({hasTouch:true});
+
+  test('double-tap requires a chosen start and advances through letters and a blank', async ({page}) => {
+    await ready(page, 'AT?');
+    await page.setViewportSize({width:390, height:844});
+    const tapTwice = async tile => { await tile.tap(); await tile.tap(); };
+    await tapTwice(rackTile(page, 0));
+    await expect(page.locator('#board .pending')).toHaveCount(0);
+    await cell(page, 7, 7).tap();
+    await tapTwice(rackTile(page, 0));
+    await expect(cell(page, 7, 7).locator('.tile-letter')).toHaveText('A');
+    await expect(cell(page, 7, 8)).toHaveClass(/cursor/);
+    await tapTwice(rackTile(page, 0));
+    await expect(cell(page, 7, 8).locator('.tile-letter')).toHaveText('T');
+    await tapTwice(rackTile(page, 0));
+    await expect(page.locator('#blank-dialog')).toBeVisible();
+    await page.getByRole('button', {name:'Blank as E',exact:true}).tap();
+    await expect(cell(page, 7, 9)).toHaveClass(/blank/);
+    await expect(cell(page, 7, 10)).toHaveClass(/cursor/);
+    expect(await rackLetters(page)).toBe('');
+    await page.locator('#recall-tiles').tap();
+    await cell(page, 14, 14).tap(); await cell(page, 14, 14).tap();
+    await tapTwice(rackTile(page, 0));
+    await expect(cell(page, 14, 14)).toHaveClass(/pending/);
+    await expect(page.locator('#board .edge-cursor')).toBeVisible();
+    await tapTwice(rackTile(page, 0));
+    await expect(page.locator('#board .pending')).toHaveCount(1);
+    expect(await rackLetters(page)).toBe('T?');
+  });
+
+  test('zoom keeps rack outside a pannable board and can return to fit', async ({page, browserName}) => {
+    await ready(page, 'AT');
+    await page.setViewportSize({width:390,height:844});
+    const zoom = page.locator('#board-zoom'), viewport = page.locator('#board-viewport');
+    await expect(zoom).toBeVisible();
+    await cell(page, 7, 7).tap();
+    const before = await cell(page, 7, 7).boundingBox();
+    await zoom.tap();
+    await expect(zoom).toHaveAttribute('aria-pressed', 'true');
+    const after = await cell(page, 7, 7).boundingBox();
+    expect(after.width).toBeGreaterThan(before.width * 1.8);
+    expect(await viewport.evaluate(el => el.scrollWidth > el.clientWidth && el.scrollHeight > el.clientHeight)).toBe(true);
+    if (browserName === 'chromium') {
+      const cdp = await page.context().newCDPSession(page);
+      const bounds = await viewport.boundingBox();
+      const beforeScroll = await viewport.evaluate(el => el.scrollLeft);
+      const start = {x:bounds.x + bounds.width * .7, y:bounds.y + bounds.height * .4};
+      await cdp.send('Input.dispatchTouchEvent', {type:'touchStart', touchPoints:[start]});
+      for (let step = 1; step <= 8; step++) {
+        await cdp.send('Input.dispatchTouchEvent', {type:'touchMove', touchPoints:[{x:start.x - step * 10, y:start.y}]});
+        await page.evaluate(() => new Promise(requestAnimationFrame));
+      }
+      await cdp.send('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]});
+      await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBeGreaterThan(beforeScroll + 20);
+      await cdp.detach();
+    }
+    await rackTile(page, 0).tap(); await rackTile(page, 0).tap();
+    await expect(cell(page, 7, 7)).toHaveClass(/pending/);
+    await page.screenshot({path:test.info().outputPath('mobile-zoom.png')});
+    const rack = await page.locator('#rack-tiles').boundingBox();
+    expect(rack.y + rack.height).toBeLessThan(844);
+    await zoom.tap();
+    await expect(zoom).toHaveAttribute('aria-pressed', 'false');
+    expect(await viewport.evaluate(el => el.scrollLeft)).toBe(0);
+  });
 });

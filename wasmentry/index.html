@@ -56,12 +56,12 @@
           <p id="wmp-recovery-notice" class="hint" role="status" hidden></p>
           <div class="player-scoreboard" aria-label="Scoreboard">
             <div class="player-block player-one" id="player-one">
-              <span class="player-name" id="name-one">Player 1</span>
+              <span class="player-name" id="name-one" role="status">Player 1</span>
               <span class="player-score" id="points-one">0</span>
               <span class="player-clock" id="clock-one"></span>
             </div>
             <div class="player-block player-two" id="player-two">
-              <span class="player-name" id="name-two">Player 2</span>
+              <span class="player-name" id="name-two" role="status">Player 2</span>
               <span class="player-score" id="points-two">0</span>
               <span class="player-clock" id="clock-two"></span>
             </div>
@@ -79,17 +79,20 @@
             <p id="session-result" role="status"></p>
           </div>
 
-          <div
-            id="board"
-            role="grid"
-            aria-label="Scrabble board"
-          ></div>
+          <div id="board-viewport">
+            <div
+              id="board"
+              role="grid"
+              aria-label="Scrabble board"
+            ></div>
+          </div>
           <div
             id="rack-tiles"
             class="rack"
             aria-label="On-turn tiles"
           ></div>
           <div class="rack-actions">
+            <button id="board-zoom" aria-pressed="false" aria-controls="board-viewport">Zoom board</button>
             <button id="shuffle-rack">Shuffle rack</button
             ><button id="sort-rack">Sort rack</button>
           </div>
