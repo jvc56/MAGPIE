@@ -39,14 +39,12 @@
 //    magpie_destroy(mp);
 // clang-format on
 
+#include "../def/cmd_api_defs.h" // IWYU pragma: export
 #include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Opaque struct of magpie internal state
-typedef struct Magpie Magpie;
 
 typedef enum {
   MAGPIE_SUCCESS = 0,

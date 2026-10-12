@@ -252,7 +252,7 @@ Programs can embed MAGPIE through a string -> string C API. Build the shared lib
 make libmagpie
 ```
 
-which produces `bin/libmagpie.so` (`bin/libmagpie.dylib` on macOS) exporting only the `magpie_*` functions declared in `src/impl/cmd_api.h` — that header plus the shared library is the entire embedding surface.
+which produces `bin/libmagpie.so` (`bin/libmagpie.dylib` on macOS) exporting only the `magpie_*` functions declared in `src/impl/cmd_api.h` — that header, its dependency `src/def/cmd_api_defs.h`, and the shared library form the embedding surface. When packaging the headers, retain their `impl/` and `def/` sibling directories so the relative include resolves.
 
 The API is command-oriented: callers create an opaque `Magpie` handle, pass it the same command strings the console accepts, and read the resulting output back as a string. Output is machine readable by default; the `*_human_readable` function variants format it for display instead. Commands can run synchronously (`magpie_run_sync`) or on a background thread (`magpie_run_async`), with `magpie_get_last_command_status_message` for mid-run progress, `magpie_stop_current_command` to interrupt, and `magpie_await` to collect the result. All returned strings are owned by the caller and freed with `magpie_free_string`.
 
