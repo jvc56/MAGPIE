@@ -113,6 +113,7 @@ test("fresh installation waits for activation even without controllerchange", as
 test("plain static hosting starts the real engine and never requests WMP or RIT", async ({
   page,
   context,
+  browserName,
 }) => {
   const urls = [];
   context.on("request", (request) => urls.push(request.url()));
@@ -128,15 +129,21 @@ test("plain static hosting starts the real engine and never requests WMP or RIT"
   expect(urls.some((url) => /\.(wmp|rit)(?:\?|$)/.test(url))).toBe(false);
   // Simulate a force reload bypassing an already-installed worker for the
   // initial navigation, then allow the automatic recovery navigation.
-  const devtools = await context.newCDPSession(page);
-  await devtools.send("Network.setBypassServiceWorker", { bypass: true });
-  await page.goto("/wasmentry/", { waitUntil: "commit" });
-  await devtools.send("Network.setBypassServiceWorker", { bypass: false });
-  await expect(page.locator("#status")).toHaveText("Engine ready", {
-    timeout: 10000,
-  });
-  await openSample(page);
-  await devtools.detach();
+  if (browserName === "chromium") {
+    const devtools = await context.newCDPSession(page);
+    await devtools.send("Network.setBypassServiceWorker", { bypass: true });
+    await page.goto("/wasmentry/", { waitUntil: "commit" });
+    await devtools.send("Network.setBypassServiceWorker", { bypass: false });
+    await expect(page.locator("#status")).toHaveText("Engine ready", {
+      timeout: 10000,
+    });
+    await openSample(page);
+    await devtools.detach();
+  } else {
+    await page.reload();
+    await expect(page.locator("#status")).toHaveText("Engine ready");
+    await openSample(page);
+  }
   const second = await context.newPage();
   await second.goto("/wasmentry/");
   await expect(second.locator("#status")).toHaveText("Engine ready");

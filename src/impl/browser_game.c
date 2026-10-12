@@ -18,6 +18,7 @@
 #include "../impl/exec.h"
 #include "../impl/gameplay.h"
 #include "../impl/gcg.h"
+#include "../impl/rack_draw.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -202,9 +203,15 @@ static void load_review_position(Game *game, const char *cgp, int on_turn,
     same = player_get_score(known) == player_get_score(input);
     const Rack *known_rack = player_get_rack(known);
     const Rack *input_rack = player_get_rack(input);
-    if (!rack_is_empty(known_rack) && !rack_is_empty(input_rack) &&
-        !racks_are_equal(known_rack, input_rack)) {
-      same = false;
+    if (!rack_is_empty(known_rack) && !rack_is_empty(input_rack)) {
+      if (bag_is_empty(game_get_bag(game)) ||
+          rack_get_total_letters(known_rack) == RACK_SIZE) {
+        same = same && racks_are_equal(known_rack, input_rack);
+      } else {
+        Rack remaining;
+        rack_copy(&remaining, input_rack);
+        same = same && rack_subtract(&remaining, known_rack);
+      }
     }
   }
   if (error_stack_is_empty(errors) && !same) {
@@ -219,8 +226,12 @@ static void load_review_position(Game *game, const char *cgp, int on_turn,
       if (rack_is_empty(
               player_get_rack(game_get_player(supplied, player_idx))) &&
           !rack_is_empty(known)) {
-        set_rack_from_bag_or_push_to_error_stack(supplied, player_idx, known,
-                                                 errors);
+        return_rack_to_bag(supplied, player_idx);
+        if (!draw_rack_from_bag(supplied, player_idx, known)) {
+          error_stack_push(
+              errors, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+              string_duplicate("The racks conflict with the game record."));
+        }
       }
     }
     if (error_stack_is_empty(errors)) {
@@ -447,11 +458,12 @@ char *browser_game_action(const char *text, const char *lexicon,
           char *expected = string_duplicate(normalized_note);
           trim_whitespace(expected);
           const int target = game_history_get_num_played_events(original) - 1;
-          char *actual =
-              string_duplicate(target < game_history_get_num_events(roundtrip)
-                                   ? game_event_get_note(game_history_get_event(
-                                         roundtrip, target))
-                                   : "");
+          const char *roundtrip_note =
+              target < game_history_get_num_events(roundtrip)
+                  ? game_event_get_note(
+                        game_history_get_event(roundtrip, target))
+                  : NULL;
+          char *actual = string_duplicate(roundtrip_note ? roundtrip_note : "");
           trim_whitespace(actual);
           const bool same = count == game_history_get_num_events(roundtrip) &&
                             strings_equal(expected, actual);

@@ -202,7 +202,7 @@ test('a real constrained-heap build failure recovers after reload with WMP off',
   await page.locator('#wmp-source').selectOption('build');
   await page.getByRole('button',{name:'Cache CSW24 WMP',exact:true}).click();
   await expect(page.locator('#wmp-cache-status')).toContainText(/Reload|stopped/i,{timeout:60000});
-  expect(await page.evaluate(() => localStorage.getItem('magpie-wmp-building'))).toBe('CSW24');
+  expect(await page.evaluate(() => sessionStorage.getItem('magpie-wmp-aborted'))).toBe('true');
   await page.reload();
   await expect(page.locator('#start-game')).toBeEnabled({timeout:30000});
   await expect(page.locator('#wmp-source')).toHaveValue('off');
@@ -319,4 +319,74 @@ test('a worker fatal during WMP preparation records an abort for this tab', asyn
   await expect(page.locator('#wmp-source')).toHaveValue('off');
   await page.locator('#cancel-new-game').click();
   await expect(page.locator('#wmp-recovery-notice')).toBeVisible();
+});
+
+test('cache failure under a reservation limit stays visible and never claims success', async ({page}) => {
+  await page.route('**/wasm-worker.js',async route => {
+    const response=await route.fetch();
+    await route.fulfill({response,body:(await response.text()).replace('[1024, 512, 256]','[512, 256]')});
+  });
+  await ready(page);
+  await page.locator('#cancel-new-game').click();
+  await page.locator('#open-settings').click();
+  await page.locator('[data-settings-section=analysis]').click();
+  await page.locator('#wmp-source').selectOption('build');
+  await page.getByRole('button',{name:'Cache CSW24 WMP',exact:true}).click();
+  await expect(page.locator('#wmp-cache-status')).toContainText('memory limit');
+  await expect(page.locator('#wmp-files')).toContainText('CSW24 · Not cached');
+  await expect(page.getByRole('button',{name:'Cache CSW24 WMP',exact:true})).toBeEnabled();
+  await expect(page.locator('#status')).not.toContainText('ready');
+});
+
+test('a single watch turn can be paused without resuming the whole game', async ({page}) => {
+  await ready(page);
+  await page.locator('[data-game-kind=watch]').click();
+  await page.locator('.game-options > summary').click();
+  await page.locator('#watch-delay').fill('0');
+  await page.locator('#start-game').click();
+  await expect(page.locator('#status')).toHaveText('Simulating…',{timeout:30000});
+  await page.locator('#pause-game').click();
+  await expect(page.locator('#step-game')).toBeEnabled();
+  await page.locator('#step-game').click();
+  await expect(page.locator('#status')).toHaveText('Simulating…');
+  await expect(page.locator('#pause-game')).toHaveText('Pause');
+  await page.locator('#pause-game').click();
+  await expect(page.locator('#step-game')).toBeEnabled();
+  await expect(page.locator('#session-result')).toHaveText('Paused');
+  await expect(page.locator('#error')).toBeEmpty();
+  await expect(page.locator('#history-position option')).toHaveCount(1);
+});
+
+test('Show analysis explicitly reveals computer results and hiding it clears them', async ({page}) => {
+  await ready(page);
+  await page.locator('.game-options > summary').click();
+  await page.locator('#human-side').selectOption('1');
+  await page.locator('#first-player').selectOption('0');
+  await page.locator('#start-game').click();
+  await expect(page.locator('#status')).toHaveText('Simulating…',{timeout:30000});
+  await expect(page.locator('#results tbody tr')).toHaveCount(0);
+  await page.locator('#show-live-analysis').check();
+  await expect(page.locator('#results tbody tr').first()).toBeVisible();
+  await page.locator('#show-live-analysis').uncheck();
+  await expect(page.locator('#results tbody tr')).toHaveCount(0);
+  await page.locator('#pause-game').click();
+});
+
+test('computer word-map preparation cannot be stopped through the settings button', async ({page}) => {
+  await page.addInitScript(() => {localStorage.setItem('magpie-wmp-source','build');});
+  await page.route('**/wasm-worker.js', async route => {
+    const response = await route.fetch();
+    await route.fulfill({response,body:(await response.text()).replace('if (!bytes) send("wmp_build_started", {lexicon});', 'if (!bytes) { send("wmp_build_started", {lexicon}); progress("Building WMP…"); await pause(3000); }')});
+  });
+  await ready(page);
+  await page.locator('[data-game-kind=watch]').click();
+  await page.locator('#start-game').click();
+  await expect(page.locator('#status')).toHaveText('Building WMP…',{timeout:30000});
+  await page.locator('#open-settings').click();
+  await page.locator('[data-settings-section=analysis]').click();
+  await expect(page.locator('#stop-wmp')).toBeHidden();
+  await page.locator('#back-to-game').click();
+  await page.locator('#pause-game').click();
+  await expect(page.locator('#step-game')).toBeEnabled({timeout:15000});
+  await expect(page.locator('#error')).toBeEmpty();
 });

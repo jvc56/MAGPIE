@@ -609,7 +609,7 @@ test("phony confirmation, challenge removal and candidate commit use native hist
   await expect(page.locator("#status")).toHaveText("Move recorded");
   await expect(page.locator(".square.played")).toHaveCount(7);
 });
-test("mobile taps and touch drag place tiles, and a pending tile can return to the rack", async ({
+test("mobile tile selection places tiles and recall returns them to the rack", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 375, height: 844 });
@@ -620,6 +620,13 @@ test("mobile taps and touch drag place tiles, and a pending tile can return to t
   await expect(page.locator(".square.pending")).toHaveCount(1);
   await expect(page.locator('#rack-tiles [data-letter="A"]')).toHaveCount(0);
   await page.locator("#recall-tiles").click();
+  await expect(page.locator(".square.pending")).toHaveCount(0);
+});
+test("mobile touch drag places tiles and returns them to the rack", async ({ page, browserName }) => {
+  test.skip(browserName !== "chromium", "Real touch injection requires Chromium CDP; physical Safari/Firefox touch needs device testing.");
+  await page.setViewportSize({ width: 375, height: 844 });
+  await ready(page);
+  await newGame(page, "AEINRST");
   // Use real touch events through Chromium's device input, not synthetic DOM
   // handlers, to exercise pointer capture and touch-action behavior.
   const client = await page.context().newCDPSession(page);

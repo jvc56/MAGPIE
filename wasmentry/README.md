@@ -277,8 +277,8 @@ server without isolation headers, checks the single startup reload and real
 WASM calculations, and uses no browser flags that relax SharedArrayBuffer
 requirements. Diagnostic-page simulation tests remain in the suite.
 
-The full UI suite runs in Chromium. A focused engine suite also runs in Firefox
-and Playwright WebKit: startup, move generation, constrained heap reservations,
+The full UI suite runs in Chromium, Firefox, Playwright WebKit and branded Edge,
+including startup, move generation, constrained heap reservations,
 WMP cancellation, and cached WMP/WIT allocation failure followed by baseline
 move generation and simulation. These tests use real WASM with injected failures;
 a mobile viewport and user-agent override do not reproduce a phone's RAM pressure.
@@ -289,7 +289,7 @@ squares, history replacement, editor undo and busy-state changes. Real touch
 movement and edge scrolling are tested via CDP in Chromium and Edge; shipping
 iOS Safari still needs physical-device touch testing.
 
-CI also installs Microsoft Edge and runs that engine suite with its `msedge`
+CI installs Microsoft Edge and runs the full suite with its `msedge`
 channel. To include branded Edge locally, install it with
 `npx playwright install msedge`, then run
 `MAGPIE_TEST_EDGE=1 npx playwright test --project=edge`. A temporary Edge copy

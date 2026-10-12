@@ -136,6 +136,7 @@ export class EngineClient extends EventTarget {
     if (disabled.stopped) return;
     this.wmpCacheAttempted = false;
     if (source !== "off") {
+      this.dispatchEvent(new CustomEvent("message", {detail: {type:"wmp_prepare_started"}}));
       const result = await this.request("prepare_wmp", {
         lexicon, source, threads, cache,
         manifestURL: new URL("../data/wmp-manifest.json", import.meta.url).href,

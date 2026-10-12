@@ -160,9 +160,14 @@ void test_browser_game(void) {
                                    "", 0, 0, 0);
   assert(has_substring(note, "quote \\\""));
   assert_success(note);
-  const char *bad_notes[] = {"\nsecond line", "Plan:\n#identify trouble",
+  assert_success(browser_game_action(opening_game, "CSW24", 1, "", "",
+                                     "\npara one\n\npara two",
+                                     BROWSER_GAME_NOTE, "", 0, 0, 0));
+  assert_success(browser_game_action(opening_game, "CSW24", 1, "", "", "  \n  ",
+                                     BROWSER_GAME_NOTE, "", 0, 0, 0));
+  const char *bad_notes[] = {"Plan:\n#identify trouble",
                              "a\n>B: BCDFGHJ - +0 0", "a\n#rack2 BCDFGHJ"};
-  for (int index = 0; index < 4; index++) {
+  for (int index = 0; index < 3; index++) {
     char *rejected =
         browser_game_action(opening_game, "CSW24", 1, "", "", bad_notes[index],
                             BROWSER_GAME_NOTE, "", 0, 0, 0);

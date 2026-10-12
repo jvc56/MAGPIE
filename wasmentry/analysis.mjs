@@ -273,9 +273,9 @@ function selectSettingsSection(section) {
     $(`${button.dataset.settingsSection}-settings`).hidden = !selected;
   }
 }
-function openSettings(section = "appearance") {
+function openSettings(section = "appearance", opener = document.activeElement) {
   if (!$("settings-view")) return;
-  settingsReturnFocus = document.activeElement;
+  settingsReturnFocus = opener;
   gameScrollY = window.scrollY;
   settingsOpen = true;
   $("game-view").hidden = true;
@@ -295,12 +295,12 @@ function closeSettings() {
   settingsReturnFocus?.focus({ preventScroll: true });
   window.scrollTo(0, gameScrollY);
 }
-$("open-settings")?.addEventListener("click", () => openSettings());
-$("open-lexicon-settings")?.addEventListener("click", () =>
-  openSettings("lexicon"),
+$("open-settings")?.addEventListener("click", (event) => openSettings("appearance", event.currentTarget));
+$("open-lexicon-settings")?.addEventListener("click", (event) =>
+  openSettings("lexicon", event.currentTarget),
 );
-$("open-analysis-settings")?.addEventListener("click", () =>
-  openSettings("analysis"),
+$("open-analysis-settings")?.addEventListener("click", (event) =>
+  openSettings("analysis", event.currentTarget),
 );
 $("back-to-game")?.addEventListener("click", closeSettings);
 for (const button of document.querySelectorAll("[data-settings-section]")) {
@@ -2427,6 +2427,7 @@ function formatClock(seconds) {
 }
 function renderSession() {
   renderSettingsAvailability();
+  $("show-live-analysis").disabled = false;
   const live = isLive();
   for (const id of [
     "rack", "opponent-rack", "score", "opponent-score", "edit", "clear",
@@ -3351,7 +3352,7 @@ async function startEngine() {
         $("stop-wmp").hidden = botRunning;
         $("stop-wmp").disabled = canceled || botRunning;
       }
-      if (detail.type === "wmp_build_started") wmpWarning = "";
+      if (detail.type === "wmp_prepare_started") wmpWarning = "";
       if (detail.type === "wmp_ready") {
         $("stop-wmp").hidden = true;
         $("wmp-cache-status").textContent = wmpWarning || (detail.stopped ? "Stopped" : detail.unavailable ? "Word maps unavailable" : detail.cached ? "Word maps cached" : "Word maps ready for this session");
@@ -3429,6 +3430,9 @@ async function refreshWMPCache() {
     renderWMPCache();
   } catch (failure) { $("wmp-cache-status").textContent = `WMP cache unavailable: ${failure.message}`; }
 }
-$("wmp-source").addEventListener("change", renderWMPCache);
+$("wmp-source").addEventListener("change", () => {
+  $("wmp-recovery-notice").hidden = true;
+  renderWMPCache();
+});
 
 $("stop-wmp").addEventListener("click", () => { if (!botRunning) stop(); });

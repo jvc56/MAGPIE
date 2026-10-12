@@ -997,6 +997,7 @@ body.busy #status:before {
   margin-top: 10px;
 }
 .history-navigation select {
+  overflow: hidden;
   flex: 1;
   min-width: 0;
   width: 0;
