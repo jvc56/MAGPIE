@@ -37,6 +37,30 @@ test('computer exchange letters and analysis stay private during a live game', a
   expect(await page.evaluate(() => localStorage.getItem('magpie-preview-recent') || '')).not.toContain('UUUVVWQ');
 });
 
+for (const rack of ['AEINRST', 'AEINRS?']) test(`a computer bingo reveals its historical rack (${rack}) but not its new rack`, async ({page}) => {
+  await ready(page);
+  await page.locator('.game-options > summary').click();
+  await page.locator('#human-side').selectOption('1');
+  await page.locator('#bot-analysis').selectOption('kibitz');
+  await page.locator('#game-time').selectOption('0');
+  await page.locator('#new-game-position > summary').click();
+  await page.locator('#new-game-cgp').fill(`${Array(15).fill('15').join('/')} ${rack}/ 0/0 0`);
+  await page.locator('#start-game').click();
+  await expect(page.locator('#history-position option')).toHaveCount(2, {timeout:30000});
+  await expect(page.locator('#board .played')).toHaveCount(7);
+  await expect(page.locator('#history-table .history-rack').first()).toHaveText(rack);
+  await expect(page.locator('#history-position option').first()).toHaveText(`1. Magpie · ${rack}`);
+  await expect(page.locator('#opponent-rack')).toHaveValue('');
+  await page.locator('#history-first').click();
+  // This preference can carry over from review, though its control is hidden during play.
+  await page.locator('#hide-spoilers').evaluate(input => { input.checked = true; input.dispatchEvent(new Event('change')); });
+  await expect(page.locator('#history-table .history-rack').first()).toHaveText('Rack hidden');
+  await expect(page.locator('#history-position option').first()).toHaveText('1. Magpie · Rack hidden');
+  await page.locator('#history-next').click();
+  await expect(page.locator('#history-table .history-rack').first()).toHaveText(rack);
+  await expect(page.locator('#opponent-rack')).toHaveValue('');
+});
+
 test('CGP unknown endgame rack is inferred and a new dialog clears the old start', async ({page}) => {
   await ready(page);
   await page.locator('[data-game-kind=record]').click();

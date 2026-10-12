@@ -1624,9 +1624,11 @@ function privateHistoryLine(line) {
   if (!line.startsWith(`>${nick}:`)) return line;
   return line.replace(/(\s)-([A-Z?]+)(?=\s)/, (_, space, tiles) => `${space}-${tiles.length}`);
 }
-function historyRackLabel(player, rack, index) {
-  if ((hiddenLiveGame() && player !== session.human) ||
-      ($("hide-spoilers").checked && index > historyIndex)) return "Rack hidden";
+function historyRackLabel(player, rack, index, bingo = false) {
+  const hideUpcoming = $("hide-spoilers").checked;
+  const publicRack = bingo && (!hideUpcoming || index < historyIndex);
+  if ((hiddenLiveGame() && player !== session.human && !publicRack) ||
+      (hideUpcoming && index > historyIndex)) return "Rack hidden";
   return rack ? displayTiles(rack) : "Rack unknown";
 }
 function renderHistoryOptions() {
@@ -1639,7 +1641,7 @@ function renderHistoryOptions() {
       const finished = last && (recordedGame.ended || session?.finished) &&
         !($("hide-spoilers").checked && index > historyIndex);
       const turn = entries[index]?.turn ?? (entries.at(-1)?.turn ?? 0) + 1;
-      const rack = historyRackLabel(next.onTurn, next.racks[0], index);
+      const rack = historyRackLabel(next.onTurn, next.racks[0], index, entries[index]?.bingo);
       const prefix = entries[index]?.parts.adjustment ? "Final scoring" : `${turn}.`;
       const label = finished ? "Game over" : `${prefix} ${recordedGame.players[next.onTurn]} · ${rack}`;
       return new Option(label, String(index));
@@ -2942,12 +2944,14 @@ function historyEntries() {
   return gameEvents().map((line, index) => {
     const nick = line.slice(1, line.indexOf(":"));
     const player = nick === secondPlayer ? 1 : 0;
-    const parts = historyPlayParts(privateHistoryLine(line), restorePosition(recordedGame.positions[index]));
+    const before = restorePosition(recordedGame.positions[index]);
+    const parts = historyPlayParts(privateHistoryLine(line), before);
+    const bingo = previewMove(before, parts.move).length === 7;
     if (!rowNumber || (!parts.adjustment && player <= previousPlayer)) rowNumber++;
     if (!turn || !parts.adjustment) turn++;
     if (!parts.adjustment) previousPlayer = player;
     const rack = line.match(/^>[^:]+:\s+([A-Z?]+)\s/)?.[1] || "";
-    return {index, nick, player, turn, rowNumber, parts, rack};
+    return {index, nick, player, turn, rowNumber, parts, rack, bingo};
   });
 }
 function renderReviewTable() {
@@ -2963,7 +2967,7 @@ function renderReviewTable() {
   $("history-table").tHead.replaceChildren(header);
   const rows = [];
   let cells;
-  for (const {index, player, turn, rowNumber, parts, rack} of historyEntries()) {
+  for (const {index, player, turn, rowNumber, parts, rack, bingo} of historyEntries()) {
     if (rowNumber > rows.length) {
       const row = document.createElement("tr");
       cells = [document.createElement("td"), document.createElement("td")];
@@ -2988,7 +2992,7 @@ function renderReviewTable() {
     if (!parts.adjustment && !(hidden && index > historyIndex)) {
       const rackLine = document.createElement("span");
       rackLine.className = "history-rack";
-      rackLine.textContent = historyRackLabel(player, rack, index);
+      rackLine.textContent = historyRackLabel(player, rack, index, bingo);
       rackLine.setAttribute("aria-label", `Rack: ${rackLine.textContent}`);
       button.append(rackLine);
     }
