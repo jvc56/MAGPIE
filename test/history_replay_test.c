@@ -263,6 +263,19 @@ static void test_initial_endgame_racks(void) {
          int_to_equity(434));
   assert(player_get_score(game_get_player(config_get_game(config), 1)) ==
          int_to_equity(373));
+  const char *conflicts[] = {"#rack2 AADI\n", ">A: F 6B .F +10 452\n"};
+  for (int conflict_idx = 0; conflict_idx < 2; conflict_idx++) {
+    char *invalid =
+        get_formatted_string("%.*s 0\n%s", (int)(zero_count - record), record,
+                             conflicts[conflict_idx]);
+    config_parse_gcg_string(config, invalid, config_get_game_history(config),
+                            errors);
+    assert(!error_stack_is_empty(errors));
+    char *message = error_stack_get_string_and_reset(errors);
+    assert(has_substring(message, "conflicts with the starting CGP rack"));
+    free(message);
+    free(invalid);
+  }
   free(pass_record);
   game_destroy(game);
   error_stack_destroy(errors);

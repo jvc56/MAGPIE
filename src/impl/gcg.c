@@ -1219,6 +1219,38 @@ void parse_gcg_settings(GCGParser *gcg_parser, ErrorStack *error_stack) {
   }
 }
 
+static void validate_initial_racks(const GameHistory *history,
+                                   ErrorStack *errors) {
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const Rack *initial =
+        game_history_get_unplayed_initial_rack(history, player_idx, 0);
+    if (!initial) {
+      continue;
+    }
+    const Rack *recorded =
+        game_history_player_get_last_rack_const(history, player_idx);
+    for (int event_idx = 0; event_idx < game_history_get_num_events(history);
+         event_idx++) {
+      const GameEvent *event = game_history_get_event(history, event_idx);
+      const game_event_t type = game_event_get_type(event);
+      if (game_event_get_player_index(event) == player_idx &&
+          (type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+           type == GAME_EVENT_EXCHANGE || type == GAME_EVENT_PASS)) {
+        recorded = game_event_get_const_rack(event);
+        break;
+      }
+    }
+    if (!rack_is_empty(recorded) && !racks_are_equal(initial, recorded)) {
+      error_stack_push(
+          errors, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
+          get_formatted_string("The first recorded rack for player %d "
+                               "conflicts with the starting CGP rack.",
+                               player_idx + 1));
+      return;
+    }
+  }
+}
+
 void parse_gcg_events(GCGParser *gcg_parser, Game *game,
                       ErrorStack *error_stack) {
   gcg_parser->ld = game_get_ld(game);
@@ -1256,6 +1288,10 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
                                    player_get_rack(game_get_player(game, 0)),
                                    player_get_rack(game_get_player(game, 1)),
                                    bag_is_empty(game_get_bag(game)));
+    validate_initial_racks(gcg_parser->game_history, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
   }
 
   // Play through the game to detected errors
